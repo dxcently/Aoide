@@ -5,20 +5,20 @@
 #           default.nix (example-default-provider-registry.nix). Nothing goes in
 #           the catalogue: the catalogue names the capability, the registry
 #           names its providers.
-# Replace:  <provider> and both lanes.
+# Replace:  <provider> and the settings.
 #
-# A provider file has exactly the shape of a dendrite: the lanes it supports and
-# no others. Providers of one capability may support DIFFERENT lanes — one that
-# is home-only simply omits `nixos`, and a host that selects it for the system
-# is told so by name rather than quietly getting nothing.
+# A provider file has exactly the shape of a dendrite: a plain module, whose
+# `habit.home` is its home half. Providers of one capability may differ in what
+# they set — one that is home-only simply writes no system settings, and one
+# that is system-only writes no `habit.home`.
 #
 # A provider is exclusive within a scope: one implementation answers for the
 # host, one answers for each user. Two aggregations that want the same
 # capability on the same terms merge into one selection; two that name different
-# providers for it collide on `dendrites.<capability>.provider` with both values
-# in the error.
+# providers for it collide on `habit.dendrites.<capability>.provider` with both
+# values in the error.
 {
-  homeManager =
+  habit.home =
     { pkgs, ... }:
     {
       services.mako = {

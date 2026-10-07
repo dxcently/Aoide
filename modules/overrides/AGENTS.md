@@ -6,7 +6,7 @@ the capability was selected).
 
 ## A record's fields are closed
 
-`dendrites`, `hosts`, `overlay`, `nixos`, `homeManager` — that is the whole set
+`dendrites`, `hosts`, `overlay`, `system`, `home` — that is the whole set
 (`overrideFields` in habit's composition). An unknown field is an error, not
 an extension point: adding a field means amending habit's constructor, then this
 list in the commit that takes the new habit, and saying why in the record's own
@@ -18,7 +18,7 @@ nothing looks exactly like a fix that works.
 
 ## Keep the work inside the functions
 
-`overlay` and the lane modules are functions; an unmatched record's functions are
+`overlay`, `system` and `home` are functions; an unmatched record's functions are
 never called, and that is the only boundary this directory has. Anything that
 must not be evaluated for a host that did not match belongs INSIDE one of those
 functions. A record-level binding that computes a package set is evaluated on

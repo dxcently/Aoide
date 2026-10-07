@@ -10,7 +10,7 @@ with the capability instead of being copied into each host file.
 `modules/overrides/default.nix` discovers every `*.nix` file beside it; the file
 name (minus `.nix`) is the record's name, and it is the only place the file is
 named. A record says which dendrites it is about, optionally which hosts it is
-confined to, and carries one or more of `overlay`, `nixos`, `homeManager`:
+confined to, and carries one or more of `overlay`, `system`, `home`:
 
 ```nix
 {
@@ -27,9 +27,9 @@ never applies.
 
 - **Matching** — the constructor applies a record to the hosts that (a) its host
   filter admits and (b) selected a dendrite it targets, for the system OR by one
-  of its users (with `useGlobalPkgs` a home lane draws from the host's own
-  package set, so there is no separate home one to fix). `homeManager` rides a
-  USER's lane only when that user's own home selection hits a target.
+  of its users (with `useGlobalPkgs` a home draws from the host's own
+  package set, so there is no separate home one to fix). `home` rides a
+  USER only when that user's own home selection hits a target.
 - **Order** — record name, so the list does not depend on the filesystem.
   Overlays then compose the ordinary Nix way, each seeing the previous one as
   `prev`.
@@ -37,7 +37,7 @@ never applies.
   behalf; the host's own module still outranks the record.
 - **The boundary is weaker than selection's, and this is the honest statement of
   it:** every host READS every record, because matching means reading what it
-  targets. What stays unevaluated is the work — `overlay` and the lane modules
+  targets. What stays unevaluated is the work — `overlay`, `system` and `home`
   are functions, and an unmatched record's functions are never called. Keep
   imports and package computation inside those functions; metadata that computes
   defeats the boundary.

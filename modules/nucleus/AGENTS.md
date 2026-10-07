@@ -16,7 +16,7 @@ covers only what's specific to nucleus.
 - **Core options live in the core flake; nucleus declares only the paint
   half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user`/
   `sessionTarget` are
-  `pkgs/aoide/module/options.nix`'s contract now, pulled in by the nucleus LANE
+  `pkgs/aoide/module/options.nix`'s contract now, pulled in by the nucleus module
   (`lib/aoideos.nix`'s `nucleusModule`) — the one place that closes over Aoide's
   own flake inputs, since neither a file here nor an `imports` list can read a
   module argument that `_module.args` supplies. A new CORE

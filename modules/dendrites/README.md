@@ -14,33 +14,36 @@ audio), and **the paint lanes** — what makes a machine paint at all:
 `wallpaper` (the capability that owns who paints a song's wallpaper, with the
 shell's own layer and the external engine as its two providers). A paint lane
 reads only what root `AGENTS.md` house rule 5 lists; its
-`body` is guarded on a FACT that nucleus declares rather than on an option it
+config is guarded on a FACT that nucleus declares rather than on an option it
 declares itself, so a consumer can ask "is there a shell here?" without reading
 the lane that made one.
 
-## The shape (CONTRACTS.md §2, v1)
+## The shape (CONTRACTS.md §2)
 
-Each file evaluates to a lane record — `body` (the module itself) plus the
-lanes it answers for:
+Each file is a plain module. Its own settings are its system half; what it sets
+under `habit.home` is its home half, a Home Manager module for each user it
+reaches:
 
 ```
 modules/dendrites/kitty.nix
-├── body   : { config, lib, ... }: { options.aoide.kitty.enable = …; config = mkIf …; }
-└── nixos  : { imports = [ body ]; config.aoide.kitty.enable = mkDefault true; }
+└── { config, lib, ... }: {
+      options.aoide.kitty.enable = …;
+      config = mkMerge [
+        { aoide.kitty.enable = mkDefault true; }       # selecting it turns it on
+        (mkIf config.aoide.kitty.enable {
+          habit.home = { … };                           # the user's kitty
+        })
+      ];
+    }
 ```
 
-Why both: a host that takes the whole tree merges every `body` (through
-`modules/dendrites/default.nix`), and a host the constructor assembles
-(habit's composition) imports only the `nixos` lane of what it selected.
-The two are MUTUALLY EXCLUSIVE in one module list — both import the same
-`body`, so `aoide.<name>.enable` would be declared twice and nixpkgs throws
-`already declared` rather than merging. Take the aggregate and select
-nothing, or select through the catalogue and leave the aggregate out;
-`mkNixosModules` refuses the pair by name.
-Every dendrite's lane is `nixos`, because each writes its Home Manager
-configuration from the NixOS side. A dendrite carries its OWN dependencies in
-the lane that needs them: the `stylix` lane imports the Stylix NixOS module,
-so no other file has to know the lane exists.
+Selecting a dendrite imports its file; an unselected one is never read. A
+dendrite carries its OWN dependencies under its guard: `stylix` imports the
+Stylix NixOS module only when it is present, so no other file has to know the
+dendrite exists. A condition does not cover a home half's `imports` or
+`options` (habit refuses one that does): `neovim.nix` states its `imports` in an
+unconditional `habit.home`, and `lyra/default.nix` writes its home half as
+`config`.
 
 ## The shell lane (`quickshell.nix`) and the seam with `lyra`
 
@@ -116,18 +119,10 @@ compositor's, not an `aoide-<slot>`.
   instead guards on the fact of the same name, declared once in
   `modules/nucleus/options.nix`.
 - A capability with ALTERNATIVES is a provider registry: a directory whose
-  `default.nix` is `{ providers.<p> = <path>; }`, each provider a lane record
-  of its own (see `compositor/README.md`). The catalogue names the directory.
-- `default.nix` — this directory's whole-tree aggregate. It names no dendrite:
-  its imports are DERIVED from the catalogue
-  (`builtins.attrValues (import ../default.nix).catalogue`) in attribute-name
-  order — the `LC_ALL=C` order the catalogue is written in — so a dendrite added
-  or shelved by its catalogue line needs no edit here. A provider registry
-  contributes EVERY alternative's `body`: taking the whole tree means taking
-  every alternative, and the constructor is the one place exactly one is
-  chosen.
+  `default.nix` is `{ providers.<p> = <path>; }`, each provider a plain
+  module of its own (see `compositor/README.md`). The catalogue names the directory.
 - `_example.nix` — the checked-in template: shelved by its `_` prefix
-  (uncatalogued, so nothing imports it), showing the v1 lane record and the
+  (uncatalogued, so nothing imports it), showing the plain-module shape and the
   enable-with-one-line convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
   to a render surface via a bridge (a CLI command, a stage file) rather

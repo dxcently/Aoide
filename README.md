@@ -21,7 +21,7 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 
 ## 1. Architecture
 
-The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, a core module by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its record and habit's composition (`inputs.habit`, re-exported as `lib.composition`) resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
+The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, a core module by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its host module and habit's composition (`inputs.habit`, re-exported as `lib.composition`) resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
 
 ```
 ~/Aoide/
@@ -126,8 +126,8 @@ cd ~/Aoide
 #    never names a machine. Start from a shelved skeleton (hosts/_desktop,
 #    _laptop, _server; _mac is the forward-looking darwin one, pending the
 #    darwin seam) or copy hosts/yomi-strix/, the living reference. The
-#    record selects aggregations, lone dendrites and its song
-#    (`song.declared`), then carries the machine's own platform settings.
+#    host module selects aggregations, lone dendrites and its song
+#    (`habit.song.declared`), then carries the machine's own platform settings.
 #    A committed hardware.nix is imported guardedly if present.
 
 # 3. Build + switch

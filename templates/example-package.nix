@@ -2,7 +2,7 @@
 #
 # Copy to:  pkgs/<name>/default.nix
 # Then:     nothing. Every `pkgs/<name>/default.nix` is discovered and injected
-#           into the host overlay, so a lane reaches it as `pkgs.<name>` — by
+#           into the host overlay, so a module reaches it as `pkgs.<name>` — by
 #           name, never by path. pkgs/ is for builds nixpkgs does not have —
 #           not a second copy of nixpkgs; a name that shadows a stock attribute
 #           is an error, so if `pkgs.<name>` already exists, use it and delete

@@ -1,12 +1,11 @@
 # Selective Nix composition
 
-This is the architecture for dxflake and, after external-consumer proof,
-AoideOS. It specifies the agreed configuration interface and the implementation
-plan. dxflake implements the interface below: `lib/composition.nix` of habit
-(`github:dxcently/habit`, consumed here as `inputs.habit`) is the constructor,
-its four hosts select through it, and habit's selection suite and this tree's
-selection and template suites test it. AoideOS has not migrated; for that tree the examples here are
-still target contracts, not drop-in modules.
+This is the architecture for dxflake and AoideOS. It specifies the configuration
+interface and the implementation plan. Both implement the interface below:
+`lib/composition.nix` of habit (`github:dxcently/habit`, pinned at its `v2`
+branch and consumed here as `inputs.habit`) is the constructor, their hosts
+select through it, and habit's selection suite and this tree's selection and
+template suites test it.
 
 ## Scope and rollout
 
@@ -25,20 +24,20 @@ deployment and composition interface, not a new dependency of the core binary.
 |---|---|
 | Package | A built program or other store artifact; installing one does not necessarily configure a service |
 | Module | Configuration evaluated by a particular module system, such as NixOS, nix-darwin, or Home Manager |
-| Dendrite | An independently selectable capability and its supported platform/user lanes |
+| Dendrite | An independently selectable capability: one plain module, with a system half and, under `habit.home`, a home half |
 | Provider | A selectable implementation of a capability, such as Mako for notifications |
-| Lane | A module for a particular evaluator: `nixos`, `darwin`, or `homeManager` |
+| Half | One side of a selected module. The system half is the module as written, minus `habit`, applied in the host's evaluation; the home half is the value of `habit.home`, a Home Manager module handed to the users it reaches |
 | Aggregation | A named group owning its own directory under `modules/aggregations/`: a data body naming, per scope, its dendrite members, its provider choices, and the preferences that ride with them |
-| Provider selector | `aggregation.<name>.<dendrite>.provider`: the choice an aggregation exposes on its own interface for a provider-bearing member it groups |
+| Provider selector | `habit.aggregation.<name>.<dendrite>.provider`: the choice an aggregation exposes on its own interface for a provider-bearing member it groups |
 | Scope | Which half of a group's membership is being resolved: `"system"` for the host, `"home"` for one user |
-| Override record | `modules/overrides/<name>.nix`: a fix scoped to a capability rather than to a host. Names its target dendrites, optionally the hosts it is confined to, and carries an overlay and/or deferred lane modules |
+| Override record | `modules/overrides/<name>.nix`: a fix scoped to a capability rather than to a host. Names its target dendrites, optionally the hosts it is confined to, and carries an overlay and/or a `system` and a `home` module |
 | Registry | `modules/default.nix`: plain data, the catalogue plus the discovered aggregations and override records. Not a module, and it declares no options |
 | Catalogue | The named capability paths in the registry, one line per dendrite |
 | Nucleus | Only the minimal common foundation for the selected platform |
 | Song | A rice composition: palette, widgets/assets, layout, and supported configuration/dependency references |
 
-Use **aggregation** — singular, one namespace for both scopes: `aggregation.<name>.enable`
-on a host and `users.<u>.aggregation.<name>.enable` on a person. Not `aggregations`,
+Use **aggregation** — singular, one namespace for both scopes: `habit.aggregation.<name>.enable`
+on a host and `habit.users.<u>.aggregation.<name>.enable` on a person. Not `aggregations`,
 and not an interchangeable second namespace called profiles.
 Use **provider**, not implementation, in configuration. Nix modules still use
 their ordinary `programs.*`, `services.*`, and package options internally.
@@ -68,7 +67,7 @@ modules/
   dendrites/
     notifications/
       default.nix             provider paths
-      mako.nix                supported lanes
+      mako.nix                one provider, a plain module
       dunst.nix
     compositor/
       default.nix
@@ -106,9 +105,8 @@ nothing happens until a host or one of its users selects it by name.
 
 Capability and provider registries stay under `modules/dendrites/`. Every
 `default.nix` there is a capability implementation or a provider registry, and
-there is no `modules/dendrites/default.nix` collector at all. The earlier rule
-telling two kinds of `default.nix` apart under that tree is obsolete: the groups
-moved out, and nothing under `modules/dendrites/` is a selection declaration.
+there is no `modules/dendrites/default.nix` collector at all: nothing under
+`modules/dendrites/` is a selection declaration.
 
 The dendrite root is flat. A single-implementation capability is one file at
 the root and the catalogue name is the file name, so `desktop-hardware` is
@@ -131,8 +129,8 @@ inert key.
 The same composition shape applies to AoideOS when it migrates. Public Lyra
 runtime QML/bridges belong to its package; consumer-owned widget source belongs
 with the songbook. A consumer does not recreate AoideOS's private module tree.
-Large lane implementations may be extracted to `home.nix`, `nixos.nix`, or
-`darwin.nix` within their dendrite. Empty lane files are unnecessary.
+A large home half may be extracted to a `home.nix` within its dendrite and
+assigned to `habit.home`.
 
 ## Selection before platform evaluation
 
@@ -161,7 +159,7 @@ aggregation: the gate step's answer is the select step's answer, and no
 recursive-dependency machinery is needed or wanted.
 
 ```text
-registry (catalogue + discovered aggregations) + host selection modules
+registry (catalogue + discovered aggregations) + the host module's habit.* keys
                               |
       gate step: every aggregation declares only `enable`, nothing more
                               |
@@ -176,7 +174,7 @@ registry (catalogue + discovered aggregations) + host selection modules
                               |
      match override records against what this host resolved
                               |
-           NixOS / Darwin modules       per-user HM modules
+           system halves, group modules  home halves, per user
                               |
                   ordinary platform evaluation
                               |
@@ -192,10 +190,10 @@ The constructor is habit's `lib/composition.nix`, a function of `{ lib }`,
 consumed here as `inputs.habit` and re-exported by the flake as
 `lib.composition` — a consumer assembles hosts through it by name instead of
 reaching into this tree for a file. It knows no vocabulary of its
-own: a host record's fields ride in through two hooks, both identity by default.
+own: a consumer's `habit` keys ride in through two hooks, both identity by default.
 `selectionModules` are extra modules for the selection passes, which is how a
 field the constructor has never heard of — a song selection is the first — is
-declared once and read by the gate step. `extraModulesFor` is a function of the
+declared once, as modules of the `habit` submodule, and read by the gate step. `extraModulesFor` is a function of the
 resolved selection returning platform modules, which is how a gate-pass answer
 becomes an import without a gate-pass body import. That selection is the whole
 resolved one, catalogue values included, so the hook can reach a body nothing
@@ -241,9 +239,9 @@ per capability:
 
 A catalogue value is a file when the capability has one implementation, and a
 directory whose `default.nix` lists provider paths when it has several. The
-constructor takes `registry` plus `hostModules` and generates the selection
-schema from the registry: `dendrites.<name>.enable` and `.provider` per
-catalogue name, `aggregation.<name>` per discovered group.
+constructor takes `registry` plus `host` and generates the selection
+schema from the registry: `habit.dendrites.<name>.enable` and `.provider` per
+catalogue name, `habit.aggregation.<name>` per discovered group.
 
 The selection schema exposes each name with `enable` (default false) and an
 optional `provider`. Resolve provider validity only for enabled capabilities,
@@ -265,9 +263,9 @@ silently choosing one.
 ```
 
 ```nix
-# notifications/mako.nix: small lanes can remain in one file
+# notifications/mako.nix: a plain module; this one has only a home half
 {
-  homeManager = { ... }: {
+  habit.home = { ... }: {
     services.mako.enable = true;
   };
 }
@@ -277,11 +275,11 @@ A dendrite with one implementation needs no artificial provider layer:
 
 ```nix
 # openai.nix
+{ pkgs, ... }:
 {
-  nixos = { pkgs, ... }: {
-    environment.systemPackages = [ pkgs.codex ];
-  };
-  homeManager = { pkgs, ... }: {
+  environment.systemPackages = [ pkgs.codex ];
+
+  habit.home = { pkgs, ... }: {
     home.packages = [ pkgs.codex ];
   };
 }
@@ -308,7 +306,7 @@ preferences that belong with them, and imports nothing:
 ```nix
 # modules/aggregations/workstation/default.nix
 {
-  # Shown on the generated `aggregation.workstation.enable` option.
+  # Shown on the generated `habit.aggregation.workstation.enable` option.
   description = "A graphical workstation.";
 
   # The half that answers for the host.
@@ -325,7 +323,7 @@ preferences that belong with them, and imports nothing:
 
     # A preference of the group rather than of any one member: an ordinary
     # NixOS module, evaluated only in the platform pass.
-    nixos = {
+    module = {
       boot.kernel.sysctl."vm.max_map_count" = 2147483642;
     };
   };
@@ -340,7 +338,7 @@ preferences that belong with them, and imports nothing:
     # A shared default this group carries; a user may name the other one.
     providers.notifications = "mako";
 
-    homeManager =
+    module =
       { lib, ... }:
       {
         programs.kitty.font.size = lib.mkDefault 12;
@@ -350,8 +348,8 @@ preferences that belong with them, and imports nothing:
 ```
 
 The constructor supplies the gate and the scope split, once, in the only place a
-body is wrapped: `aggregation.<name>.enable` on a host reads the `system` half,
-the same option under `users.<u>` reads the `home` half. One file, one option
+body is wrapped: `habit.aggregation.<name>.enable` in a host reads the `system` half,
+the same option under `habit.users.<u>` reads the `home` half. One file, one option
 name, two answers. Both halves are optional, and an absent half is a real
 answer, not a placeholder. `scope` is no longer part of aggregation authoring;
 it remains an implementation detail of the constructor. There is no collector
@@ -364,13 +362,13 @@ one place:
 
 ```nix
 # on the host: the group owns compositor, so the choice is stated there
-aggregation.workstation = {
+habit.aggregation.workstation = {
   enable = true;
   compositor.provider = "hyprland";
 };
 
 # the same group's home half, for one person, overriding its shared default
-users.khoa.aggregation.workstation = {
+habit.users.khoa.aggregation.workstation = {
   enable = true;
   notifications.provider = "dunst";
 };
@@ -383,9 +381,9 @@ one implementation gets no provider option at all. `null` in a body means no
 shared default and every selecting host must choose — a host that forgets is
 named in the error along with the providers that exist; a string is a shared
 default a host may override. One source of truth: the aggregation's selector is
-what writes the normalized `dendrites.<name>.provider`.
+what writes the normalized `habit.dendrites.<name>.provider`.
 
-The top-level `dendrites.<name>.provider` remains available and outranks the
+The direct `habit.dendrites.<name>.provider` remains available and outranks the
 aggregation. It is the escape hatch — a capability no group speaks for, or one
 answered against its group's choice on a single host — not the ordinary path.
 
@@ -393,17 +391,16 @@ Two aggregations selecting the same dendrite in the same scope do not
 instantiate it twice. Membership and provider are `mkDefault`, so identical
 selections merge into one selection; two groups that name different providers
 for the same dendrite in the same scope collide with an error naming
-`dendrites.<name>.provider` and both values. Import order never decides.
+`habit.dendrites.<name>.provider` and both values. Import order never decides.
 
-Membership is resolved in the two selection steps; deferred platform preferences
-under a half's `nixos` or `homeManager` are evaluated only in the corresponding
-selected lane.
+Membership is resolved in the two selection steps; a half's `module` is evaluated only when its group is selected, in the host's
+evaluation for `system` and in each selecting user's home for `home`.
 
 - Membership and intentional shared preferences use `mkDefault`.
 - Implementation settings use ordinary definitions; preserve upstream defaults
   where they already express the desired behavior.
 - A host's ordinary selection overrides a group default, including
-  `dendrites.<name>.enable = false` against a group that wants the member.
+  `habit.dendrites.<name>.enable = false` against a group that wants the member.
 - Conflicting equal-priority group defaults produce an error; import order does
   not secretly pick a winner.
 - `mkForce` is a deliberate exception, not routine host boilerplate.
@@ -432,17 +429,17 @@ is one, with no catalogue line and no collector:
   dendrites = [ "browser" ];        # catalogue names — required
   hosts = [ "osaka" "sakaki" ];     # optional; omit for every host that selected one
   overlay = _final: prev: { … };    # host package set
-  nixos = { lib, ... }: { … };      # deferred platform module
-  homeManager = { … };              # rides only the users who selected a target
+  system = { lib, ... }: { … };     # deferred platform module
+  home = { … };                     # rides only the users who selected a target
 }
 ```
 
 **Matching.** A record applies to a host when its host filter admits that host
 *and* any dendrite it names was selected there. Selection means the union of the
 host's own selection and its users' home selections, because `useGlobalPkgs`
-means a home lane draws from the host's package set and there is no separate
+means a home draws from the host's package set and there is no separate
 home one to patch — so a capability only a *user* selected is enough to match,
-and that is a deliberate answer, not an oversight. The `homeManager` half is the
+and that is a deliberate answer, not an oversight. The `home` half is the
 exception: it rides only the users whose own home selection hit a target, never
 every user on a matched host.
 
@@ -457,42 +454,44 @@ depend on the filesystem. An `overlay` is an ordinary Nix overlay on the host
 package set — later overlays see earlier ones as `prev` and win on the same
 attribute, which is the whole of the precedence story; there is no overlap
 detection beyond it, and none is claimed. A record outranks everything the
-constructor imported on its behalf, and the host's own platform module still
-outranks the record. Within a lane the ordinary merge rules hold: a plain
+constructor imported on its behalf, and the host module still
+outranks the record. Within a half the ordinary merge rules hold: a plain
 definition that conflicts with a dendrite's own is an error, `mkDefault` marks a
 preference, and `mkForce` is the deliberate exception.
 
 **Diagnostics.** Unknown fields, targets that are not catalogue names, and host
 names that are not in the flake's host list all fail — on *every* host, not only
 where the record would have applied, so a typo cannot hide on the machines it
-would have missed. A record carrying none of `overlay`, `nixos` or `homeManager`
+would have missed. A record carrying none of `overlay`, `system` or `home`
 is an error too: it is a typo, not an intention.
 
 **The evaluation boundary here is weaker than selection's, and the difference is
 the point.** An aggregation body is never imported unless selected; a record
 file *is* imported on every host, because matching means reading which dendrites
-it targets. What an unmatched host never spends is the work: `overlay`, `nixos`
-and `homeManager` are functions and nothing calls them. Authors must therefore
+it targets. What an unmatched host never spends is the work: `overlay`, `system`
+and `home` are functions and nothing calls them. Authors must therefore
 keep imports, fetches and package computation inside those functions — metadata
 that computes defeats this, and the tests prove only the function bodies. Do not
 state or imply that an unmatched record is unread.
 
-`darwin` is deliberately absent from the record schema: there is no darwin
-constructor to apply it, and a field silently dropped is worse than one that
-does not exist. It is added with the constructor, not before it.
+A record's `system` module applies to a NixOS or nix-darwin host alike, and a
+standalone home applies its `overlay` and its `home` module and drops `system`.
+A field outside the five fails by name rather than being silently dropped.
 
 ## Hosts and shared users
 
 System selection and per-user selection are separate. A user selects the same
-interface for its home lane: aggregations, the provider choices those
-aggregations own, and individual dendrites. This replaces the earlier
-illustrative plain list of home dendrite names, which could not express per-user
-providers or default-priority overrides.
+interface for its home: aggregations, the provider choices those aggregations
+own, and individual dendrites.
+
+A host is one module. Its `habit.*` keys are the selection, and everything else
+in it is the machine's own platform settings, evaluated by the platform:
 
 ```nix
 # hosts/osaka/default.nix
+{ pkgs, ... }:
 {
-  aggregation = {
+  habit.aggregation = {
     base.enable = true;
     desktop.enable = true;
     gaming.enable = true;
@@ -503,7 +502,7 @@ providers or default-priority overrides.
   };
 
   # What no group speaks for, and this machine's exceptions.
-  dendrites = {
+  habit.dendrites = {
     openai.enable = true;
     gpu = {
       enable = true;
@@ -511,62 +510,60 @@ providers or default-priority overrides.
     };
   };
 
-  users.khoa = {
+  habit.users.khoa = {
     definition = ../../users/khoa.nix;
-    homeManager.enable = true;
-    # The person, not the machine: these groups contribute home lanes.
+    home.enable = true;
+    # The person, not the machine: these groups contribute home halves.
     aggregation = {
       base.enable = true;
       desktop.enable = true;
       shell.enable = true;
     };
     dendrites.pi-coding-agent.enable = true;
-    homeManager.config = { pkgs, ... }: {
+    home.config = { pkgs, ... }: {
       home.packages = [ pkgs.ripgrep ];
     };
   };
-  users.guest = {
+  habit.users.guest = {
     definition = ../../users/guest.nix;
-    homeManager.enable = false;
+    home.enable = false;
   };
 
-  nixos = { pkgs, ... }: {
-    imports = [ ./hardware.nix ];
-    networking.hostName = "osaka";
-    environment.systemPackages = [ pkgs.filezilla ];
-  };
+  imports = [ ./hardware.nix ];
+  networking.hostName = "osaka";
+  environment.systemPackages = [ pkgs.filezilla ];
 }
 ```
 
-Shared user definitions carry account lanes (`nixos`/`darwin`) and optional
-`homeManager` preferences. Hosts attach those definitions; there are no copied
+Shared user definitions are plain modules too: their own settings are the
+account, applied in the host's evaluation, and an optional `habit.home` is the
+home floor. Hosts attach those definitions; there are no copied
 `hosts/<host>/users/khoa.nix` identities. A shared aggregation can attach a user
 to several hosts when that membership is intentional. Adding another user is
 one shared definition plus attachment to the relevant hosts or aggregation.
 
-Selecting a system dendrite imports its system lane; selecting it under a user
-imports its home lane. Neither automatically installs the other. Components
-requiring both declare that relationship through aggregation selections, with
+Selecting a dendrite for the host applies its system half and hands its home
+half to every user with Home Manager; selecting it under a user applies the
+system half as well and hands the home half to that user alone. Components
+requiring more declare that relationship through aggregation selections, with
 platform assertions for actual prerequisites. No hidden dependency walk.
-The implementation must not automatically install both package lanes for the
-same selection; explicitly selecting both remains possible and visible.
 
 Host files show roles and exceptions; a derived inventory can expand the
-resolved dendrites, providers, users, lanes, and source definitions for review.
+resolved dendrites, providers, users, and source definitions for review.
 It is generated from selection, never another manually maintained registry.
 
 ## Platform and package boundaries
 
 | Consumer | Evaluated configuration |
 |---|---|
-| NixOS without HM | Nucleus NixOS lane, selected system lanes, account lanes, host NixOS settings |
-| NixOS with HM | Above plus explicitly attached users' home lanes |
-| nix-darwin | Darwin lanes and account configuration; optional compatible HM lanes |
-| Standalone HM | Shared home preferences and selected home lanes; no system account creation |
+| NixOS without HM | The nucleus, selected system halves, accounts, host NixOS settings |
+| NixOS with HM | Above plus explicitly attached users' home halves |
+| nix-darwin | Selected system halves and account configuration under nix-darwin; optional compatible HM halves |
+| Standalone HM | Shared home preferences and selected home halves; no system account creation |
 | Plain nixpkgs/package consumer | Exported packages; no deployment module or service configuration |
 
-An explicitly selected unsupported lane fails with a useful error. Missing
-lanes are not filled with empty modules or silently skipped. HM-disabled hosts
+A module written for one platform and selected on another fails as that module
+system's own error, naming the file; it is not skipped. HM-disabled hosts
 do not import HM modules; requesting a home selection while HM is disabled is
 a configuration error. A standalone HM constructor supplies its system/package
 set and username/home-directory details explicitly.
@@ -587,7 +584,7 @@ package override. These are distinct operations.
 Selective evaluation does not guarantee independent locking: unrelated root
 inputs can still fail during lock/fetch operations. Separate flake roots are
 needed only when independent lock failure domains are required. Darwin package
-and runtime support must be proved separately from exporting a Darwin lane.
+and runtime support must be proved separately from a darwin host evaluating.
 
 ## Lyra and songbook
 
@@ -611,7 +608,7 @@ songbook, not inside a rice: an image is not a look, and any rice may wear any
 cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
 committed half, and two of its runtime subdirectories exist only there,
 gitignored: `song/stage/`, where lyra renders what programs watch and
-hot-reload, and `song/declared/`, the lyra lane's activation seed of
+hot-reload, and `song/declared/`, the lyra dendrite's activation seed of
 the declared song's notes with the venue override applied (which `rice mode
 declarative` re-pins from) and the venue's slots and the host's geometry as `venue.json` (which staging
 lays over the runtime copy of that song) — CONTRACTS.md §4. The wallpaper
@@ -625,8 +622,8 @@ Several compatible bundles may be installed for immediate staging. Returning
 to declared restores the declared bundle without deleting draft source.
 Declaring promotes authored source to a songbook entry, not generated runtime
 files. Host selection of that default is NOT a separate source change any more:
-a host names the songs it builds in on its own record (`song.declared` /
-`song.available`), the constructor imports exactly those `rice.nix` files, and
+a host names the songs it builds in in its own module (`habit.song.declared` /
+`habit.song.available`), the constructor imports exactly those `rice.nix` files, and
 `declared ∪ available` — the built-in set, published as
 `aoide.songbook.builtIn` — decides the widgets copied into the deployed tree,
 the packages installed, the folders `pkgs/lyra-songbook` ships for that host,
@@ -651,7 +648,7 @@ implementation proof, not just this Nix layout.
 | New dendrite | Its file or directory, one catalogue entry, selecting host, user, or group |
 | New provider | Provider file and that dendrite's provider registry; selection where wanted |
 | New group | Its directory `default.nix` — description, membership halves, provider choices. Discovery finds it; there is no import line anywhere |
-| New supported lane | Dendrite/provider and consumers selecting that lane |
+| New home half | `habit.home` in the dendrite or provider, and consumers selecting it |
 | Shared preference or package fix | Owning group's `default.nix`, in the matching half (`system` or `home`) |
 | Capability-wide fix | One record under `modules/overrides/`. Discovery finds it; it applies to the hosts that selected a target |
 | Host exception | Host selection or ordinary platform setting |
@@ -663,9 +660,9 @@ implementation proof, not just this Nix layout.
 
 | Phase | Work | Required evidence |
 |---|---|---|
-| 1. Selection prototype | Catalogue, enable/provider options, aggregation bodies, deferred lanes, constructor | Disabled throwing implementation is never evaluated; unknown/missing provider and wrong lane have clear errors |
+| 1. Selection prototype | Catalogue, enable/provider options, aggregation bodies, deferred halves, constructor | Disabled throwing implementation is never evaluated; unknown/missing provider and a wrong-platform module have clear errors |
 | 2. Vertical consumer slice | One local app dendrite, notification providers, one shared user; public Aoide/Lyra consumption | Host overrides group provider; system-only and HM variants evaluate; no private upstream paths |
-| 2b. Override records | Capability-scoped records: discovery, matching, overlay and deferred lane application | Targeted and omitted host filters; unmatched throwing overlay and module uncalled; duplicate targets apply once; record schema typos fail on every host |
+| 2b. Override records | Capability-scoped records: discovery, matching, overlay and deferred module application | Targeted and omitted host filters; unmatched throwing overlay and module uncalled; duplicate targets apply once; record schema typos fail on every host |
 | 3. dxflake reconciliation | Move existing configuration without losing membership; restore agreed enable interface and shared users | Before/after package/service/user inventory; Osaka and Sakaki builds; existing pin failures resolved explicitly |
 | 4. Live portability | User-admitted deployments and cross-host operation | Aoide tracking/conduct/mail and Lyra selected-song/runtime behavior on dxflake, with failures recorded |
 | 5. AoideOS migration | Replace walkers, move source paths and docs together | Yomi build and user-admitted runtime proof; no accidental all-song/all-module loading |
@@ -682,7 +679,7 @@ complement, a matched record whose overlay really is the throwing one, so the
 first is not passing vacuously. `tests/templates/run.sh` passes 28 of 28: it
 assembles a whole tree out of `templates/`, resolves two hosts against the real
 constructor, checks that the files nobody selected stayed unread, and runs the
-override template's `nixos` half through the real NixOS module system so "real
+override template's `system` module through the real NixOS module system so "real
 options" is checked rather than claimed. The override mechanism costs nothing
 where no record exists: all four hosts stay byte-identical with it in place.
 This is evaluation evidence, not runtime activation proof; phases 4 and 5 still

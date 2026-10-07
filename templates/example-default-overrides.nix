@@ -8,7 +8,7 @@
 # Every `*.nix` file beside it is a record. Names and paths only here — but a
 # record IS imported by the constructor on every host, because matching means
 # reading which dendrites it targets. What an unmatched record never costs is
-# its work: `overlay` and the lane modules are functions, and nothing calls
+# its work: `overlay`, `system` and `home` are functions, and nothing calls
 # them. See example-override.nix.
 #
 # Empty is a real answer: the directory can hold nothing but this file.

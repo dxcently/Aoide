@@ -17,19 +17,14 @@ named. `aggregations` and `overrides` are the records read one level deep beside
 it — by their own directories' discovery files, names and paths only, never a
 body at catalogue time. A
 dendrite is added as a new file plus ONE line — the catalogue line — and removed
-by deleting both, with no other file in the tree aware it existed:
-`modules/dendrites/default.nix` derives its imports from the catalogue
-(`builtins.attrValues (import ../default.nix).catalogue`) instead of naming a
-file itself.
+by deleting both, with no other file in the tree aware it existed.
 
-## A dendrite is a lane record
+## A dendrite is a plain module
 
-A dendrite file evaluates to `{ body; nixos; }` (CONTRACTS.md §2). `body`
-declares `aoide.<name>.*` and guards its config with `aoide.<name>.enable`;
-`nixos` imports `body` and sets that flag `lib.mkDefault true`. The tree
-imports bodies; the constructor imports the `nixos` lane of what a host
-selected. Nothing else reads a lane, and a lane is never imported by
-`modules/dendrites/default.nix`.
+A dendrite file is an ordinary NixOS module (CONTRACTS.md §2). It declares
+`aoide.<name>.*`, sets that flag `lib.mkDefault true` and guards its config with
+`aoide.<name>.enable`; what it sets under `habit.home` is its home half. The
+constructor imports the files of what a host selected, and only those.
 
 ## Flags default off
 
@@ -52,11 +47,10 @@ for this reason, so the linter does not fight the style.
 `modules/nucleus/default.nix` names every
 file in its own directory, one line per file, in `LC_ALL=C` order, and nothing
 from outside it — the core is nothing selectable, so its own
-directory is what names it. `modules/dendrites/default.nix` is the other half of
-the rule: it names no dendrite at all and derives its imports from the
-catalogue, in attribute-name order — the `LC_ALL=C` order the catalogue itself
-is written in. Nothing walks the dendrite tree: a name with no catalogue line is
-unreachable, which is what shelving means.
+directory is what names it. The dendrites have no such file: the catalogue is
+the only list of them, in the `LC_ALL=C` order it is written in. Nothing walks
+the dendrite tree: a name with no catalogue line is unreachable, which is what
+shelving means.
 
 ## `_`-prefix shelving
 
@@ -76,7 +70,7 @@ this is a code-review discipline, not a build failure.
 ## What needs a docs update in the same commit
 
 - The owning directory's `README.md`/`AGENTS.md` when a new dendrite
-  lands, a toggle's default changes, a lane's shape changes, or a
+  lands, a toggle's default changes, a dendrite's shape changes, or a
   read-whitelist entry is added.
 - `CONTRACTS.md` §2 when the dendrite shape itself moves.
 - Root `AGENTS.md` house rule 5 if the whitelist itself grows — that's the

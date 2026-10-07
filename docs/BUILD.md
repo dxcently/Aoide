@@ -23,10 +23,8 @@ nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 ## The module aggregates (how discovery works)
 
 `modules/default.nix` is the catalogue: plain data, never a module, naming
-every dendrite once by the name a host selects it with. `modules/dendrites/
-default.nix` derives its imports from those names (and contributes every
-alternative a provider registry names); `modules/nucleus/default.nix` names its
-own files, one line per file, in `LC_ALL=C` order. To add a capability, drop a
+every dendrite once by the name a host selects it with. `modules/nucleus/default.nix`
+names its own files, one line per file, in `LC_ALL=C` order. To add a capability, drop a
 file in the right layer and add its one line — the catalogue for a dendrite, that
 layer's own `default.nix` for a nucleus module:
 
@@ -47,7 +45,7 @@ only, by their own directories' discovery files:
 
 - `modules/aggregations/` — memberships. `modules/aggregations/default.nix`
   discovers every child directory holding a `default.nix`; a body is inert data
-  (`system.members`, `system.providers`, `system.nixos`). The constructor imports
+  (`system.members`, `system.providers`, `system.module`). The constructor imports
   only the bodies a host or one of its users selected, so an unselected group is
   never read. See `modules/aggregations/README.md`.
 - `modules/overrides/` — capability-scoped fixes.
@@ -60,7 +58,7 @@ only, by their own directories' discovery files:
 `flake.nix` reads `hosts/` one level deep — every immediate child holding a
 `default.nix`, minus the `_`-prefixed shelved ones — and builds
 `nixosConfigurations.<name>` and `inventory.<name>` from that same list. Adding a
-machine is a new directory; no file is edited to add one. A host record's shape is
+machine is a new directory; no file is edited to add one. A host module's shape is
 `hosts/README.md`; the constructor that assembles it is `lib/aoideos.nix`, over
 habit's composition (`inputs.habit`). `nix eval --json .#inventory.<host>` is the review surface
 for what a host selected.
@@ -145,34 +143,24 @@ else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
 fallbacks yourself.
 
 ```nix
-# modules/dendrites/lyra/default.nix — a paint lane is a lane record: `body`
-# declares and guards, `nixos` imports `body` and sets the fact.
+# modules/dendrites/lyra/default.nix — a paint lane is a plain module: it
+# declares, sets the fact on selection, and guards the rest.
+{ config, lib, ... }:
 let
-  body =
-    { config, lib, ... }:
-    let
-      t = config.aoide.livery;
-      # component-tier fallback: null → palette (see CONTRACTS.md §1)
-      barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
-    in
-    {
-      config = lib.mkIf config.aoide.lyra.enable {
-        # Declare surface ownership — the stylix lane reads this and stands
-        # down for `bar`.
-        aoide.surfaces.bar.owner = "quickshell";
-        # … render the bar using barBg / t.palette.* …
-      };
-    };
+  t = config.aoide.livery;
+  # component-tier fallback: null → palette (see CONTRACTS.md §1)
+  barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
 {
-  inherit body;
-
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.lyra.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.lyra.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.lyra.enable {
+      # Declare surface ownership — the stylix lane reads this and stands
+      # down for `bar`.
+      aoide.surfaces.bar.owner = "quickshell";
+      # … render the bar using barBg / t.palette.* …
+    })
+  ];
 }
 ```
 
@@ -195,8 +183,8 @@ by naming it — the score adapts to that host's specifics and its enabled
 dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
-Drop a folder under `song/songbook/<name>/` and select it in a host record
-(`song.declared`, or `song.available` to keep it built in to stage): one typed
+Drop a folder under `song/songbook/<name>/` and select it in the host module
+(`habit.song.declared`, or `habit.song.available` to keep it built in to stage): one typed
 scan finds `song/songbook/<name>/rice.nix` and the constructor wires the selected
 songs in, so there is no import
 list to edit. The song's `rice.nix` self-gates on `aoide.song`:

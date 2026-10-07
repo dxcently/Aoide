@@ -29,7 +29,7 @@ module builds against what nucleus declares.
   CORE half (`enable`, `root`, `checkout`, `auditLog`, `terminal`, `user`,
   `sessionTarget`) arrives by import from `pkgs/aoide/module/options.nix` — the
   core flake's own option contract, nixpkgs-only and portable to any consumer.
-  The import is written by the LANE that closes over Aoide's own inputs
+  The import is written by the module that closes over Aoide's own inputs
   (`lib/aoideos.nix`'s `nucleusModule`, exported as `nixosModules.nucleus`), not
   by a file here: a file in this directory cannot see the flake's inputs, and an
   `imports` list cannot read a value that `_module.args` supplies. `aoide.config` is the one

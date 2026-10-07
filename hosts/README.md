@@ -1,7 +1,7 @@
 # hosts
 
-The machines. A host is a RECORD: what this machine selects, then this machine's
-own platform settings. `hosts/<name>/default.nix` names no module file — nothing
+The machines. A host is ONE module: the `habit.*` keys are what this machine
+selects, and everything else in it is this machine's own platform settings. `hosts/<name>/default.nix` names no module file — nothing
 outside `modules/default.nix` does — and carries a `hardware.nix` beside it when
 a scan has been committed.
 
@@ -16,36 +16,39 @@ A name with no directory is unreachable, which is what shelving means here.
 hosts/<name>`); `_mac` is the darwin-shaped skeleton, shelved until there is a
 darwin constructor to answer it.
 
-## The record
+## The module
 
 ```nix
+{ pkgs, ... }:
 {
-  aggregation.base.enable = true;      # groups, one line each
-  dendrites.obsidian.enable = true;    # lone capabilities
-  users.khoa = {
-    definition = ../../users/khoa.nix; # shared, never copied
-    homeManager.enable = true;
+  habit.aggregation.base.enable = true;      # groups, one line each
+  habit.dendrites.obsidian.enable = true;    # lone capabilities
+  habit.users.khoa = {
+    definition = ../../users/khoa.nix;       # shared, never copied
+    home.enable = true;
   };
-  nixos = { pkgs, ... }: { … };        # this machine, deferred
+  networking.hostName = "…";                 # this machine
 }
 ```
 
-- **Selection first.** `aggregation.*`, `dendrites.*` and each user's own
+- **Selection first.** `habit.aggregation.*`, `habit.dendrites.*` and each user's own
   selection are resolved by habit's composition in an ordinary `evalModules`
   pass that knows nothing about NixOS; the platform import list is assembled from
   the result. A capability the host did not select is never imported.
-- **`nixos` is deferred**, and nothing in it can influence selection — that is
-  what keeps the two passes from chasing each other. It carries the platform
+- **Everything outside `habit` is read by the platform alone**, and nothing in
+  it can influence selection — the selection pass applies the module with
+  `config` and `pkgs` poisoned and reads only the literal `habit.*` keys, which
+  is what keeps the two passes from chasing each other. It carries the platform
   (`nixpkgs.hostPlatform`: the constructor assembles the module list and lets the
   modules name the platform, rather than handing `nixosSystem` a `system`), the
   hardware import, the `aoide.*` knobs that genuinely vary per machine, and any
   host-only overlay.
 - **A group's member is turned off the ordinary way** —
-  `dendrites.kitty.enable = false` outranks the group's `mkDefault`.
-- **The song** is named here, in `nixos` (`aoide.song = "sonata";`), because the
-  fact is what an imported song guards on. Song SELECTION per host is S8's field
-  (`song.declared` / `song.available`), which is why the record does not hold one
-  yet.
+  `habit.dendrites.kitty.enable = false` outranks the group's `mkDefault`.
+- **The song** is named here (`habit.song.declared = "sonata";`), and the songs
+  a host may switch to are `habit.song.available`. Both are keys of the
+  `habit` submodule, which `lib/aoideos.nix` adds through `selectionModules`
+  (`lib/songbook.nix`), so selection resolves them with everything else.
 
 ## What a host may read
 

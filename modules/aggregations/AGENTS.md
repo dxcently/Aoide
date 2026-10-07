@@ -1,6 +1,6 @@
 # AGENTS.md — invariants for `modules/aggregations/`
 
-Points up to `modules/AGENTS.md` (catalogue, lane record, flat option style) and
+Points up to `modules/AGENTS.md` (catalogue, dendrite shape, flat option style) and
 root `AGENTS.md` (house rules 1, 5, 7). This file holds only what is local to a
 grouping body.
 
@@ -8,9 +8,9 @@ grouping body.
 
 An aggregation body declares **no options** and carries **no gate**. It has no
 `config`, no `lib.mkIf`, no way to enable another aggregation: its whole effect
-is the membership the constructor reads. `members`, `providers`, `nixos` and
-`homeManager` are the four keys the constructor understands; anything else is
-ignored, which is why nothing else belongs here.
+is the membership the constructor reads. `description` at the top, and `members`, `providers` and `module` in each of
+`system` and `home`, are the keys the constructor understands; anything else is
+refused by name, which is why nothing else belongs here.
 
 ## Members are catalogue names, and only catalogue names
 

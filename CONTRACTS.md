@@ -21,8 +21,8 @@ in the tree knows it was there. That line — in `modules/default.nix`'s
 catalogue — is the only place a module file is named.
 
 The repo already runs this way and did before it had a name for it. A dendrite
-is one file (or one directory) plus **one catalogue line** — the whole-tree
-aggregate derives its imports from that catalogue, so no second list follows it.
+is one file (or one directory) plus **one catalogue line**, and no second
+list follows it.
 `lib/pkgs.nix` discovers `pkgs/*`, and `lib/songbook.nix`'s `discover` finds
 `song/songbook/<song>/` — each a directory's one typed scan (§2, §5) — the same
 way. `lib/walk.nix` is gone: a host imports what it selected, and the check that
@@ -407,74 +407,64 @@ and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
 
-## 2. Dendrite shape — **v1**
+## 2. Dendrite shape — **v2**
 
 A dendrite is one file (or a directory with `default.nix`) at
 `modules/dendrites/<name>`, named once in `modules/default.nix`'s catalogue.
-**v1 is the lane record**: the file evaluates to a plain attribute set naming the
-module that declares the capability (`body`) and the lanes it answers for
-(`nixos`, `homeManager`, `darwin`). v1 carries no migration note — this repo is
-the shape's only consumer, and dxflake pins its own revision rather than
-following this one.
+**v2 is a plain module**: the file is an ordinary NixOS module, and habit's
+composition splits a selected one into two halves when it wraps it. The
+module's own settings are its system half; what it sets under `habit.home` is
+its home half, a Home Manager module handed to each user the dendrite reaches.
+This repo is the shape's only consumer, and dxflake pins its own revision
+rather than following this one.
 
 ```nix
 # modules/dendrites/<name>.nix
-let
-  body =
-    { config, lib, ... }:
-    {
-      options.aoide.<name>.enable = lib.mkEnableOption "<name>";
-      config = lib.mkIf config.aoide.<name>.enable {
-        # a dendrite carries its own dependencies (narrowest scope wins)
-      };
-    };
-in
+{ config, lib, ... }:
 {
-  inherit body;
+  options.aoide.<name>.enable = lib.mkEnableOption "<name>";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.<name>.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.<name>.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.<name>.enable {
+      # a dendrite carries its own dependencies (narrowest scope wins)
+
+      habit.home = { pkgs, ... }: {
+        # the user's half, if it has one
+      };
+    })
+  ];
 }
 ```
 
-`body` is the module: it declares the options and guards the config. The
-`nixos` lane imports `body` and sets the flag `mkDefault true`, so selecting
-the dendrite for the system is what turns the capability on. The constructor
-(habit's composition) imports the lane of what a host selected and nothing
-else; `modules/dendrites/default.nix` imports every `body`, which is how a
-host taking the whole tree still sees each `aoide.<name>.*` option.
-
-Those two are **mutually exclusive in one module list**. An aggregate `body` and
-a selected lane's `body` are the same declarations arriving twice, which nixpkgs
-throws on (`already declared`) rather than merging; `mkNixosModules` refuses the
-pair by name before the platform pass runs. Take the whole tree and select
-nothing, or select through the catalogue and leave the aggregate out.
+The module declares the options, sets the flag `mkDefault true` and guards the
+rest, so selecting the dendrite is what turns the capability on. The
+constructor (habit's composition) imports the file of what a host selected and
+nothing else. A condition around `habit.home` carries down to what the half
+sets, but not to its `imports` or `options`, which habit reads before any
+condition is forced and refuses under one: such a half states them in a
+`habit.home` of its own outside the guard.
 
 Rules:
 
 - **Guard on `aoide.<name>.enable`** (per-feature) or an aggregation/role flag,
-  in `body`.
+  in the module itself.
 - **A capability with alternatives is a provider registry** — a directory
   whose file is `{ providers.<p> = <path>; }` — and its catalogue entry is the
   directory, not a provider file.
 - **A dendrite never reads another module** — only `config.aoide.*` options it
   declares itself, plus stock NixOS options.
 - **Growth is additive**: a new dendrite is a new file plus one catalogue line,
-  and that line is the only place the file is named — the whole-tree aggregate
-  derives its imports from it. Upstream merges stay conflict-free by
-  construction.
+  and that line is the only place the file is named. Upstream merges stay
+  conflict-free by construction.
 - **Shelving opt-out**: prefix a filename with `_` (`_wip.nix`) — a
   `_`-prefixed file is not catalogued and so is not a module, shelved without
   being deleted. Any path containing `/_` is skipped.
 - Subfolders under `modules/dendrites/` are grouping only; a file inside one
   still needs its own catalogue line to be selectable.
 
-A paint dendrite is a lane record like any other, and its `nixos` half is what
-sets its fact `mkDefault true`. Its guard is the FACT `modules/nucleus`
+A paint dendrite is a plain module like any other, and it is what sets its fact
+`mkDefault true`. Its guard is the FACT `modules/nucleus`
 declares (`aoide.<name>.enable`), not an option it declares itself: the
 cross-lane seam exists so that a consumer can ask "is there a shell here?"
 without reading the lane that made one. What it may read is exactly what root
@@ -562,7 +552,7 @@ untracked both).
 
 `pkgs/` self-registers by the same walk `song/songbook/` still uses
 (`modules/` self-registers through the catalogue instead — one line per
-dendrite, which the whole-tree aggregate derives over — and
+dendrite — and
 `modules/nucleus/` through its own `default.nix`). Drop
 `pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
 nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
@@ -5612,16 +5602,17 @@ the performance adapts to that host's specifics and its enabled dendrite
 set. The **venue (host) decides its instruments; the song carries only the
 notes.**
 
-### Selection — the host record
+### Selection — the host module
 
-A host names its songs on its own RECORD, in two fields
-(`lib/songbook.nix`'s `selectionModule`, read in the constructor's gate pass —
-before any module graph exists, so a bad name fails before anything is built):
+A host names its songs in its own module, under two `habit` keys
+(`lib/songbook.nix`'s `selectionModule`, handed to the constructor as
+`selectionModules` and read in the gate pass — before any module graph exists,
+so a bad name fails before anything is built):
 
 ```nix
 # hosts/<host>/default.nix
-song.declared = "sonata";   # the song this host performs
-song.available = [ ];       # built in, stageable live, not performed
+habit.song.declared = "sonata";   # the song this host performs
+habit.song.available = [ ];       # built in, stageable live, not performed
 ```
 
 `declared` becomes the platform fact `aoide.song`; `declared ∪ available` is
@@ -5778,7 +5769,7 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
   templates, the packages installed, the machine songbook seed and
   `builtin.json` all carry the lenders, and a lender becomes stageable on that
   host. There is no separate field for it: the closure is what
-  `song.declared ∪ song.available` would have said if the host had written the
+  `habit.song.declared ∪ habit.song.available` would have said if the host had written the
   lenders out by hand.
 - **A `.nix` under a song folder carries no `../` path literal.** The rule is  about the TEXT, and that is what `checks.song-shape` scans
   (`escapingNixFiles`): the escape SHAPE the injected arguments replaced, caught

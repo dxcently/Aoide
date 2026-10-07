@@ -3,8 +3,8 @@
 #
 # Copy to:  modules/dendrites/<capability>/default.nix
 # Then:     add `<capability> = ./dendrites/<capability>;` to the catalogue in
-#           modules/default.nix — the catalogue names the DIRECTORY, not a lane
-#           file — and write one file per provider (example-provider.nix).
+#           modules/default.nix — the catalogue names the DIRECTORY, not one
+#           provider file — and write one file per provider (example-provider.nix).
 # Replace:  <capability> and the provider names.
 #
 # This file names paths and imports NONE of them. The chosen provider is the
@@ -18,8 +18,8 @@
 # `provider` option appears on its own.
 #
 # Which provider answers is chosen by whatever selected the capability:
-#   aggregation.<group>.<capability>.provider = "mako";   # under the group
-#   dendrites.<capability>.provider = "mako";             # direct, outranks it
+#   habit.aggregation.<group>.<capability>.provider = "mako";   # under the group
+#   habit.dendrites.<capability>.provider = "mako";             # direct, outranks it
 {
   providers = {
     mako = ./mako.nix;

@@ -431,7 +431,7 @@ surface: everything that paints, or that only a desktop needs.
   arguments: `songs` (which folders ship) and `builtin` (the selection, written to
   `builtin.json`), both defaulted for this flake's own
   `packages.<system>.lyra-songbook` (every discovered song) and both overridden
-  per host by the `lyra` lane, plus `aoideOptions` (the option doc list, which
+  per host by the `lyra` dendrite, plus `aoideOptions` (the option doc list, which
   `callPackage` cannot derive — each build context names it through
   `lib/pkgs.nix`'s `extra`). **What it copies is a host contract,**
   not tidiness: each shipped song enters the derivation as its OWN store path
@@ -480,14 +480,14 @@ The stability contract — what a consumer may rely on staying true:
   variables (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`) — one
   import carries all three. `sessionTarget` (default `default.target`)
   is the seam a paint-dependent anchor enters through: the unit's own
-  `wantedBy`/`after` read it, never a lane's option directly, and the
+  `wantedBy`/`after` read it, never a dendrite's option directly, and the
   anchor decides only when the unit starts — no `partOf`, so a desktop
   that dies leaves the daemon and its doors running.
   `modules/nucleus/options.nix` is this repo's own consumer of the CORE option
   contract (it declares none of `enable`/`root`/`checkout`/`auditLog`/
   `terminal`/`user`/`sessionTarget` itself): the module that carries
   `overlays.default` is the core one (`pkgs/aoide/module`'s
-  `nixosModules.default`), and it is imported by the nucleus lane
+  `nixosModules.default`), and it is imported by the nucleus module
   (`lib/aoideos.nix`'s `nucleusModule`), which is also what `tests/vm-boot.nix`
   takes — so the constructor and the VM read one import site rather than each
   carrying their own copy of the injection lambda. And
@@ -532,19 +532,21 @@ assumption:
 `flake.nix` (this repo) is the seam a consumer builds AoideOS against, and it is
 consumed ONLY through these outputs — never through a path into this tree, which
 is the reach-in the table below retires. `tests/consumer/` is the fixture that
-proves it: a stranger's flake selecting the nucleus lane, the shell, the songs and
+proves it: a stranger's flake handing over the nucleus module, selecting the shell, the songs and
 the theme, whose only inputs besides nixpkgs are home-manager and Aoide, with one
 host performing from its own songbook and one performing Aoide's `sonata`.
 
 ```
 flake.nix
-├── nixosModules.nucleus      the nucleus lane: the ONE module that closes over
+├── nixosModules.nucleus      the nucleus module: the ONE module that closes over
 │                             Aoide's own flake inputs and hands them to every
-│                             lane as `aoideInputs`
+│                             dendrite as `aoideInputs`; a consumer passes it
+│                             in `extraModules`
 ├── nixosModules.<name>       ONE per catalogue name (`modules/default.nix`),
 │                             each that capability's PATH — `import`ing it
-│                             yields the lane record `{ body; nixos; }`, which
-│                             is exactly what a catalogue value is
+│                             yields the dendrite's plain module (or, for a
+│                             provider registry, its `{ providers; }`),
+│                             which is exactly what a catalogue value is
 ├── lib.composition           the constructor, a function of `{ lib }`
 ├── lib.livery                the venue-recolour resolver, a function of `{ lib }`
 ├── lib.songbook              discovery, selection and the songs' module list,
@@ -582,15 +584,15 @@ The stability contract:
 - `songbookRoot` is a PATH, the same value this flake's own hosts are built
   from, a top-level output beside `songbookManifest`. `lib.songbook`'s own
   default is not a substitute: a consumer needs the directory itself to hand the
-  lyra lane.
-- `overlays.default` is the base package set. A lane's replacement of a name the
+  lyra dendrite.
+- `overlays.default` is the base package set. A dendrite's replacement of a name the
   walker also supplies stands only for a name listed in `lib/pkgs.nix`'s
   `intentionalOverrides`; any other replacement is an evaluation error naming
   the package.
 
 ### `aoideInputs` — the three doors, and which moment each answers
 
-A lane reads Aoide's own flake inputs (quickshell, nvf, stylix, hyprland, the
+A dendrite reads Aoide's own flake inputs (quickshell, nvf, stylix, hyprland, the
 core) as the module argument `aoideInputs`, and a consumer threads nothing. The
 value is closed over in `nixosModules.nucleus` (`lib/aoideos.nix`). It arrives
 through three doors because the module system asks for an argument in three
@@ -601,9 +603,9 @@ evaluation, not a style choice:
   `_module.args` is `raw`, so a second definition is a conflict: nucleus is the
   only site.
 - **while an `imports` LIST is resolved** — by nucleus importing, BY VALUE, the
-  two upstream modules whose lanes used to name them (the core's module, which
+  two upstream modules that dendrites would otherwise name (the core's module, which
   was `modules/nucleus/options.nix`'s import, and stylix's, which was the stylix
-  lane's) and by `lib/options.nix` importing the core's for its bare doc-list
+  dendrite's) and by `lib/options.nix` importing the core's for its bare doc-list
   evaluation. An `imports` list is what the module list is built from, and a
   `_module.args` value is read out of `config`, which is computed FROM that
   list — reading one there is an infinite recursion, which nixpkgs reports as
@@ -614,8 +616,8 @@ evaluation, not a style choice:
   guarded on `options ? home-manager` (asked inside `config`, for the reason
   above). Home Manager runs its own module system, where `extraSpecialArgs` IS
   its specialArgs — external, therefore available while its own module
-  collection runs, which is what the neovim lane's
-  `imports = [ aoideInputs.nvf… ]` needs. An outer `_module.args` does not cross
+  collection runs, which is what the neovim dendrite's
+  home half `imports = [ aoideInputs.nvf… ]` needs. An outer `_module.args` does not cross
   into that evaluation; `home-manager.sharedModules` puts the name back into
   `config` and meets the same wall as the `imports` door.
 
@@ -625,12 +627,12 @@ A consumer performs from one songbook DIRECTORY per host: Aoide's own, exported
 as `songbookRoot`, or one in the CONSUMER's tree. `lib.songbook` takes the
 directory (`songbook ? …`); the consumer passes the same value, once, into the
 songs hook it writes for `extraModulesFor` (`_module.args.songbook`, beside
-`song` and `borrow`); and the lane that paints the built-in songs and
+`song` and `borrow`); and the dendrite that paints the built-in songs and
 `pkgs/lyra-songbook` take it as an argument instead of naming a path in this
 repo. A host that performs Aoide's `sonata` therefore writes
-`songbook = aoide.songbookRoot` in both places and `song.declared = "sonata"` on
-its record — never `inputs.aoide + "/song/songbook/…"`. A host says what it
-performs (`song.declared`) and what it merely builds in (`song.available`), with
+`songbook = aoide.songbookRoot` in both places and `habit.song.declared = "sonata"` in
+its module — never `inputs.aoide + "/song/songbook/…"`. A host says what it
+performs (`habit.song.declared`) and what it merely builds in (`habit.song.available`), with
 the borrow closure and the machine-owned songbook unchanged from §5.
 
 Discovery, selection and `borrow` all read that one directory, so a host's songs
@@ -638,7 +640,7 @@ come from Aoide's songbook or from the consumer's, not from both: there is no
 union of two songbooks, and a `borrow` across them has nothing to resolve.
 
 **Stylix.** A consumer must NOT import the stylix module itself once it selects
-the `stylix` lane: the lane's module comes from Aoide's own inputs, and two
+the `stylix` dendrite: the dendrite's module comes from Aoide's own inputs, and two
 copies through different input values do not deduplicate.
 
 **Deliberately not exported:** `lib/options.nix` (it reads this tree's

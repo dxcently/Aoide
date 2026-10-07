@@ -6,32 +6,34 @@ covers only what's specific to dendrites.
 
 ## Invariants
 
-- **One file, two lanes' worth of structure.** A dendrite file evaluates to
-  `{ body; nixos; }` (CONTRACTS.md §2). `body` is today's module: it declares
-  `aoide.<name>.*` and guards its config with `aoide.<name>.enable`. `nixos`
-  imports `body` and sets the flag `lib.mkDefault true`. Keep the options, the
-  guard and the config on `body` — moving any of them into the lane makes the
-  full tree and the constructor disagree about the same capability.
+- **One file, one plain module.** A dendrite file is an ordinary NixOS module
+  (CONTRACTS.md §2). It declares `aoide.<name>.*`, sets the flag
+  `lib.mkDefault true` and guards the rest of its config with
+  `aoide.<name>.enable`, all in the same file. What it sets under
+  `habit.home` is its home half; everything else is its system half.
+  The constructor splits the two when it wraps the module.
 - **A paint dendrite guards on a FACT, not on an option of its own.** The paint
   lanes (`compositor`, `greeter`, `stylix`, `quickshell`, `lyra`, `wallpaper`)
   read the fact `modules/nucleus/options.nix` declares; the lane sets it
   `mkDefault true` — or, for a capability whose alternatives are named rather
   than enabled (`wallpaper`), `mkDefault "<its own name>"`. Never declare
   `aoide.<that name>.enable` a second time.
-- **A dependency rides the lane that needs it, never `body`.** `lib/options.nix`
-  imports every `body` into a bare `evalModules` to render `aoideOptions`, so a
-  body that pulls in a third-party NixOS module forces option trees a bare eval
-  has not declared (the `stylix` lane is the worked example). `body` declares
-  and guards; the lane carries what it needs to run.
-- **The aggregate and a lane never share a module list.** Both import the same
-  `body`, so one of them is a second copy of the same declarations and nixpkgs
-  throws `already declared` rather than merging. Taking the whole tree means
-  selecting nothing; selecting through the catalogue means not importing the
-  aggregate. Habit's composition `mkNixosModules` refuses the pair by name.
+- **A dependency rides the guard that needs it, never an unconditional
+  `imports`.** `lib/options.nix` evaluates every dendrite in a bare
+  `evalModules` to render `aoideOptions`, so a module that pulls in a
+  third-party NixOS module unconditionally forces option trees a bare eval has
+  not declared (the `stylix` dendrite is the worked example: its `imports`
+  sit behind the presence check). The module declares and guards; what it
+  needs to run stays under the guard.
+- **A condition does not cover a home half's `imports` or `options`.** habit
+  reads those before any condition is forced, and refuses a condition over a
+  `habit.home` that carries either. Put a home half's `imports` in a
+  `habit.home` of its own beside the guarded one (`neovim.nix`), or write them
+  as `config` (`lyra/default.nix`).
 - **One enable toggle, default off.** `aoide.<name>.enable = false` is the
   shape every dendrite follows — shipped but inert until a host opts in.
 - **Carries its own dependencies; reads no other module.** Not another
-  dendrite, not another lane's internals — only `config.aoide.<name>.*` the file
+  dendrite, not another half's internals — only `config.aoide.<name>.*` the file
   declares itself, plus stock options.
 - **Draws through a bridge, never directly.** A dendrite that produces
   something visible (a notification, a status line) hands data to a
@@ -41,8 +43,8 @@ covers only what's specific to dendrites.
 - **The paint test decides QML placement, not convenience.** A file stays in
   `pkgs/lyra-shell/qml/` only if it's song-blind, song-plural, and a
   bridge/mechanism (CONTRACTS.md §0, "The paint test"). A shared visual
-  component that fails any leg belongs in a song's `widgets/` instead — a lane
-  is not a component library.
+  component that fails any leg belongs in a song's `widgets/` instead — a paint
+  lane is not a component library.
 - **Nothing in a paint lane reads a `song/` RUNTIME path at build time** —
   `checks.song-shape` and `checks.song-runtime-untracked` enforce this
   structurally, not just by convention.
@@ -90,14 +92,13 @@ covers only what's specific to dendrites.
 
 ## Extension points
 
-- **A new dendrite**: a new file here following the lane-record shape, and one
-  line in `modules/default.nix`'s catalogue — the only place its file is named.
-  `modules/dendrites/default.nix` derives its imports from that catalogue, so
-  nothing else changes. Author it as `_name.nix` while work-in-progress — see
+- **A new dendrite**: a new plain-module file here, and one line in
+  `modules/default.nix`'s catalogue — the only place its file is named. Nothing
+  else changes. Author it as `_name.nix` while work-in-progress — see
   `_example.nix`, the checked-in template.
 - **A capability with alternatives**: a directory here whose `default.nix` is
   `{ providers.<p> = <path>; }`; the catalogue entry is the DIRECTORY, and each
-  provider file is a lane record of its own.
+  provider file is a plain module of its own.
 - **Splitting a tool out of a bundled dendrite** (e.g. `devtools.nix`) is
   warranted the moment a host needs to toggle it independently — see
   `claude-code.nix`'s header for the precedent.
@@ -108,7 +109,7 @@ covers only what's specific to dendrites.
   category of capability, not every single addition).
 - A paint lane's own `README.md` when its scope, surfaces owned, or read set
   changes.
-- `CONTRACTS.md` §2 when the lane-record shape itself moves; `CONTRACTS.md §0`
+- `CONTRACTS.md` §2 when the dendrite shape itself moves; `CONTRACTS.md §0`
   when the read whitelist itself changes.
 - `modules/AGENTS.md` is the layer above for the aggregate/shelving
   mechanics themselves — not restated here.
