@@ -281,25 +281,36 @@ or whose presence names none, is a taught error naming which of the two it
 is, never an empty listing.
 
 **And the parent hears it.** The same tick that folds the state also reads
-the child's new records and, under the resident daemon alone, delivers ONE
-line about the child to the parent that spawned it — `[eidolon <petname>]
+what each child just did and, under the resident daemon alone, delivers ONE
+line about the child to the parent that spawned it. Two sources feed it, one
+delivery. An eidolon child is read off its trace — `[eidolon <petname>]
 settled end_turn · 90 calls · 31 min · last: "…"`, `… cancelled …`, `… died
 mid-turn …` (its eidolon record was just dropped with the turn still open),
 `… asking: "…"`, `… wrapping up · 8 calls left`, `… failing · 3 tool errors
-in a row · last: <tool label>`, `… silent 12 min · last: …`. It is not a
-send and never becomes one: the send door attests the sender from the running
+in a row · last: <tool label>`, `… silent 12 min · last: …`. Every other
+child whose harness reports through hooks (claude, kimi, pi — any agent whose
+hook writes `hooks.json`) is read off its hook phase and the stamp of its last
+hook event, which is all that file carries — `[claude <petname>] awaiting ·
+<the tool in flight>` on entering a permission prompt or question (bare
+`awaiting` when no tool is in flight), `[claude <petname>] silent 12 min ·
+last: <the tool in flight, else "working">` when a `working` phase has had no
+hook event for 12 minutes (once per silence; any new hook event re-arms it),
+and `[claude <petname>] settled` when a child last seen `working` or
+`awaiting` stops. A child first found already stopped says nothing, and a
+turn that begins and ends between two ticks is not heard. It is not a send
+and never becomes one: the send door attests the sender from the running
 process's `/proc` ancestry, so inside the daemon the sender is the daemon and
 never the child — the line is raw-injected the doorbell's way (a live channel
 socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
-`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`),
-claimed inside one short stage-lock section before the write, so each event
-is delivered at most once. A parent that is a shell is skipped — a line
-typed into a shell would run, and the WRAP decides that (its wrapped
-program's own basename, not the `agent` label a caller chose) — as is one
-whose record is gone, not conductable, or already `done`. The ruling is the
-User's (2026-09-17): a
-parent hears the children it spawned, and nothing wider.
+`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
+for a trace; `hook` for a hook phase), claimed inside one short stage-lock
+section before the write, so each event is delivered at most once. A parent
+that is a shell is skipped — a line typed into a shell would run, and the WRAP
+decides that (its wrapped program's own basename, not the `agent` label a
+caller chose) — as is one whose record is gone, not conductable, or already
+`done`. The ruling is the User's (2026-09-17): a parent hears the children it
+spawned, and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**
 (`graph/codex_app.rs`): `kind:"app"`, because it is a task inside an app

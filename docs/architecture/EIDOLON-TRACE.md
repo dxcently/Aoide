@@ -287,6 +287,12 @@ carries whatever the journal carries; that fix is harnox's.
   like any other shell. As is one whose record is gone, not
   conductable, or already `done`.
 
+  **Eidolon is one source of the ping-back, not the whole of it.** A child of
+  any other registered harness that reports through hooks is read by
+  `conduct/src/graph/pingback/hook.rs` off its `hooks.json` phase instead of a
+  trace, with the same delivery and cursor file (`Session-Graph.md`, "And the
+  parent hears it"); nothing in this section's table applies to it.
+
   **At-most-once by a claimed cursor.** `state/stage/pingback.json`
   (`{ "<child id>": { "seen": "<id>", "silentAt": "<id>" } }`) is read,
   decided over and rewritten (atomically) inside one short `.stage.lock`
