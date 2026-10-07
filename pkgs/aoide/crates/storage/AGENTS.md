@@ -48,6 +48,11 @@
   its own.** `charter_sig_input`, `charter_sig_frame` and `charter_payload` are
   where the label table is; `charter` calls them. A new charter frame adds a
   label in `seal.rs` and nothing else changes.
+- **`charter::spool` routes like any letter, and holds only a `poll` address.**
+  Each copy goes toward `routing::Letter::route`'s hop, so a `poll` node's copy
+  lands in its relay's outbox, never in one nothing drains; a `[status]` hold is
+  bypassed (`Hop::poll`, not `Hop::held`), here and in `seal::hop_here`. A hop
+  that cannot be picked leaves the copy in the node's own outbox.
 - **`accept` checks the digest BEFORE the signature and BEFORE the parse, and
   writes nothing until every step has passed.** The order is the point: a
   touched file (a trailing newline, a formatter, a line-ending change) must

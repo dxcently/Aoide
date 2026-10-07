@@ -752,7 +752,7 @@ fn handle_charter_sign(inv: &Invocation) -> Outcome {
                 "fingerprint": signed.fingerprint,
                 "file": signed.path.to_string_lossy(),
                 "sig": signed.sig_path.to_string_lossy(),
-                "spooled": signed.spooled,
+                "spooled": signed.spooled.iter().map(|s| s.node.as_str()).collect::<Vec<_>>(),
                 "delivery": delivery,
                 "rekeyed": signed.rekeyed,
             }))
@@ -887,7 +887,7 @@ fn handle_charter_reroot(inv: &Invocation) -> Outcome {
                 "version": signed.version,
                 "operator": signed.operator,
                 "fingerprint": signed.fingerprint,
-                "spooled": signed.spooled,
+                "spooled": signed.spooled.iter().map(|s| s.node.as_str()).collect::<Vec<_>>(),
                 "delivery": delivery,
             }))
         }
@@ -922,14 +922,19 @@ fn handle_charter_reroot(inv: &Invocation) -> Outcome {
 /// before any record is consulted ([`declaration_forbids_dial`]): never dialled,
 /// and the
 /// entry KEPT in the spool, since `down` stops SENDING and never confiscates.
-fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
+fn drain_spooled(mesh: &str, spooled: &[charter::Spooled]) -> Vec<serde_json::Value> {
     let known: std::collections::BTreeMap<String, bool> = aoide_storage::node_store::load_nodes()
         .into_iter()
         .map(|node| (node.name.clone(), node.never_dialled()))
         .collect();
     spooled
         .iter()
-        .map(|node| {
+        .map(|spooled| {
+            let node = &spooled.node;
+            // The entry is in `next`'s outbox: the node itself where this box
+            // hands it over directly, else the relay that carries it on.
+            let next = &spooled.next;
+            let relayed = next != node;
             // **A mesh whose declaration cannot be read is never dialled, and
             // that is its own answer** — a `down` node is a node the mesh DID
             // declare, and saying so about a mesh nobody can read would be a
@@ -945,7 +950,7 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
             // **A `down` node is never dialled, and the entry stays.** Asked
             // before the record half below: `down` is a fact about the mesh's
             // declaration, and a node with no record is still `down`.
-            if crate::mail_wire::declaration_forbids_dial(mesh, node) {
+            if crate::mail_wire::declaration_forbids_dial(mesh, next) {
                 return json!({
                     "node": node,
                     "drained": false,
@@ -953,20 +958,22 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
                     "detail": "not dialled: down — the declaration says this box stops sending to it, so nothing was dialled and the entry is kept in the spool until that changes",
                 });
             }
-            let Some(poll_only) = known.get(node) else {
+            // A relay is dialled off its declared address, record or none; only a
+            // direct hop is a name nothing here may know.
+            if !relayed && !known.contains_key(next) {
                 return json!({
                     "node": node,
                     "drained": false,
                     "reason": "no-record",
                     "detail": "this box holds no node record for it, so nothing was dialled — the entry waits in the spool until it is paired (giving it a record) or a declaration addresses it",
                 });
-            };
+            }
             // **A `poll` node is never dialled either** (confirm finding 6):
             // `drain_node` returns `Ok(())` for it exactly as it does for an
             // unknown name, so mapping that to `drained: true` told the same
             // lie one arm over. Its held entry leaves through the FAR end's own
             // `aoide mail poll`, which is worth saying out loud.
-            if *poll_only {
+            if !relayed && known.get(next).copied().unwrap_or(false) {
                 return json!({
                     "node": node,
                     "drained": false,
@@ -974,9 +981,34 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
                     "detail": "this node's address is `poll`, so this box never dials it — the entry waits for the far end's own `aoide mail poll`",
                 });
             }
-            match crate::mail_wire::drain_node(node) {
-                Ok(()) => json!({ "node": node, "drained": true }),
-                Err(e) => json!({ "node": node, "drained": false, "error": e }),
+            if let Err(e) = crate::mail_wire::drain_node(next) {
+                return json!({ "node": node, "drained": false, "error": e });
+            }
+            // **A drain that returned is not a delivery.** A charter letter
+            // leaves the spool the moment the far end accepts it, so an entry
+            // still there was skipped (link backing off, drain busy), refused or
+            // failed — and the row says which, from the entry itself.
+            let waiting = aoide_storage::outbox::list_entries(next)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|entry| entry.envelope.msgid == spooled.msgid);
+            match waiting {
+                Some(entry) => json!({
+                    "node": node,
+                    "drained": false,
+                    "error": if entry.last_outcome.is_empty() {
+                        "the drain did not complete".to_string()
+                    } else {
+                        entry.last_outcome
+                    },
+                }),
+                None if relayed => json!({
+                    "node": node,
+                    "drained": true,
+                    "via": next,
+                    "held": crate::mail_wire::declared_never_dialled(mesh, node),
+                }),
+                None => json!({ "node": node, "drained": true }),
             }
         })
         .collect()
@@ -993,7 +1025,14 @@ fn render_spooled(rows: &[serde_json::Value]) -> String {
     for row in rows {
         let node = row["node"].as_str().unwrap_or("");
         if row["drained"].as_bool() == Some(true) {
-            lines.push(format!("  {node}: drained now"));
+            let via = row["via"].as_str().unwrap_or("");
+            if via.is_empty() {
+                lines.push(format!("  {node}: drained now"));
+            } else if row["held"].as_bool() == Some(true) {
+                lines.push(format!("  {node}: held at {via} for {node}'s ask"));
+            } else {
+                lines.push(format!("  {node}: handed to {via}, which carries it on"));
+            }
         } else if row["reason"].as_str() == Some("no-record") {
             lines.push(format!(
                 "  {node}: NOT DIALLED — no node record here (the entry waits in the spool until a pairing or a declaration addresses it)"
@@ -1034,6 +1073,22 @@ fn rekey_note(rekeyed: &[charter::Rekeyed]) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn direct(node: &str) -> charter::Spooled {
+        charter::Spooled { node: node.to_string(), next: node.to_string(), msgid: String::new() }
+    }
+
+    /// A charter letter handed to a relay says where it is and whose ask moves
+    /// it on, never "drained now" for a node this box did not dial.
+    #[test]
+    fn a_relayed_charter_letter_reports_where_it_is_held() {
+        let held = json!({ "node": "yomi-strix", "drained": true, "via": "sakaki", "held": true });
+        let carried = json!({ "node": "evo", "drained": true, "via": "sakaki", "held": false });
+        let text = render_spooled(&[held, carried]);
+        assert!(text.contains("yomi-strix: held at sakaki for yomi-strix's ask"), "{text}");
+        assert!(text.contains("evo: handed to sakaki, which carries it on"), "{text}");
+        assert!(!text.contains("drained now"), "{text}");
+    }
+
     use super::*;
     use aoide_protocol::Door;
 
@@ -1190,7 +1245,7 @@ mod tests {
             std::fs::write(charter::source_path("home"), &src).unwrap();
             charter::sign("home", None).unwrap();
 
-            let rows = drain_spooled("home", &[me.clone()]);
+            let rows = drain_spooled("home", &[direct(&me)]);
             assert_eq!(rows[0]["node"], me);
             assert_eq!(rows[0]["drained"], false, "nothing was dialled: {rows:?}");
             assert_eq!(rows[0]["reason"], "down", "{rows:?}");
@@ -1225,7 +1280,7 @@ mod tests {
             // there is none here, so drive the reporter directly with a name
             // this box holds no record for (the LAN/`--operator` join case).
             let _ = init;
-            let rows = drain_spooled("home", &["laptop".to_string()]);
+            let rows = drain_spooled("home", &[direct("laptop")]);
             assert_eq!(rows[0]["node"], "laptop");
             assert_eq!(
                 rows[0]["drained"],
@@ -1255,7 +1310,7 @@ mod tests {
                 "home",
             );
             aoide_storage::node_store::save_nodes(&nodes).unwrap();
-            let rows = drain_spooled("home", &["peerbox".to_string()]);
+            let rows = drain_spooled("home", &[direct("peerbox")]);
             assert_eq!(rows[0]["drained"], true, "a dialled node still answers for itself: {rows:?}");
 
             // And a node WITH a record whose address is `poll` is its own
@@ -1283,7 +1338,7 @@ mod tests {
             poll_only.grants = aoide_storage::node_store::grants_in("home", &["message"]);
             nodes.push(poll_only);
             aoide_storage::node_store::save_nodes(&nodes).unwrap();
-            let rows = drain_spooled("home", &["laptop".to_string()]);
+            let rows = drain_spooled("home", &[direct("laptop")]);
             assert_eq!(rows[0]["drained"], false, "{rows:?}");
             assert_eq!(rows[0]["reason"], "poll-only");
             assert!(

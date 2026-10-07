@@ -1089,6 +1089,7 @@ pub fn seal_charter(
     mesh: &str,
     version: u64,
     to_node: &str,
+    next: &str,
     at: &str,
 ) -> Result<Container, String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
@@ -1136,10 +1137,10 @@ pub fn seal_charter(
     container.sig = wire_auth::sign_hex(&kp, &outer_bytes(&ctx, &ct));
     container.transit.push(TransitEntry {
         node: origin_node,
-        next: to_node.to_string(),
+        next: next.to_string(),
         at: at.to_string(),
         mesh: mesh.to_string(),
-        sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &msgid, &ctx.origin_node, to_node, at, mesh)),
+        sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &msgid, &ctx.origin_node, next, at, mesh)),
     });
     Ok(container)
 }
@@ -1489,7 +1490,13 @@ pub fn deposit_container_over(
     // origin it has not learned yet. `purpose` alone selects the branch: a
     // charter container names no board, and `check_purpose_board` above has
     // already refused one that does.
-    if container.purpose == PURPOSE_CHARTER {
+    //
+    // Only one ADDRESSED HERE takes that branch. A charter letter for another
+    // node is a letter in transit like any other: this box carries it on below,
+    // which is how a `poll` node's charter reaches it through its relay.
+    let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);
+    let for_here = container.to.node == local || declared.as_deref() == Some(container.to.node.as_str());
+    if container.purpose == PURPOSE_CHARTER && for_here {
         return deposit_charter(container, &ctx, &ct, &sig, request_mesh, &own_key);
     }
 
@@ -1545,8 +1552,7 @@ pub fn deposit_container_over(
     // 5. Whose letter is this? This box's own names in that zone are the charter
     //    line's name for its identity key (`routing::own_name_in` — the policy
     //    name) and the address form the origin wrote into `to.node`.
-    let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);
-    if container.to.node != local && declared.as_deref() != Some(container.to.node.as_str()) {
+    if !for_here {
         // This box carries a letter AS a mesh's member: a charter mesh that does
         // not carry its key has no name to carry it as — NOT the hostname, which
         // is not a name any mesh gave anyone — and there is nothing to check the
@@ -1744,7 +1750,10 @@ fn hop_here(
         container: Box::new(forwarded),
         next: hop.next,
         mesh: hop.mesh,
-        held: hop.held,
+        // A charter letter bypasses a `[status]` hold: the node a hold names
+        // must still receive the charter that holds it or lifts it. Only a
+        // `poll` address, which cannot be dialled at all, holds one.
+        held: if container.purpose == PURPOSE_CHARTER { hop.poll } else { hop.held },
         digest,
     }))
 }

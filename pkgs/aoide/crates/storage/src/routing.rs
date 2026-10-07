@@ -614,11 +614,17 @@ pub struct Letter<'a> {
 /// force when it arrives there, and whether that hop HOLDS it rather than
 /// dialling — a `poll` address, or a node declared `hold`, leaves only when
 /// the far end asks for it.
+///
+/// `poll` is the part of `held` no declaration can lift: the hop's address IS
+/// `poll`, so it owns no inbound transport at all. A `[status]` hold alone
+/// ("which side initiates", MAIL.md Status) is bypassed by a charter letter,
+/// which is delivered to the hop whatever the declaration says about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hop {
     pub next: String,
     pub mesh: String,
     pub held: bool,
+    pub poll: bool,
 }
 
 /// One dry run: the hop, or the refusal that stands in for it, and every step
@@ -691,7 +697,7 @@ impl<'a> Letter<'a> {
         // about trust or reachability: there is nothing to hand on.
         if self.to == self.from {
             trail.push(format!("step 1: `{}` is this box — file it here", self.to));
-            return Ok(Hop { next: self.to.to_string(), mesh: mesh.to_string(), held: false });
+            return Ok(Hop { next: self.to.to_string(), mesh: mesh.to_string(), held: false, poll: false });
         }
 
         // Steps 1 and 2: the destination in the mesh the letter rides, first;
@@ -917,6 +923,7 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
             next: node.to_string(),
             mesh: declaration.mesh().to_string(),
             held: record.never_dialled(),
+            poll: record.never_dialled(),
         });
     };
     if declaration.key_of(node).is_none() {
@@ -928,8 +935,8 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
     let dial = charter::dial_of(address).map_err(|e| {
         format!("`{node}`'s address in mesh `{}` is not a transport: {e}", declaration.mesh())
     })?;
-    let held =
-        declaration.status_of(node) == Some(charter::STATUS_HOLD) || matches!(dial, Dial::Poll);
+    let poll = matches!(dial, Dial::Poll);
+    let held = declaration.status_of(node) == Some(charter::STATUS_HOLD) || poll;
     if matches!(dial, Dial::Poll) && !declaration.relays().iter().any(|relay| relay == from) {
         return Err(format!(
             "`{node}` is a `poll` node of mesh `{}` and asks its relay, not `{from}` — the letter has \
@@ -937,7 +944,7 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
             declaration.mesh()
         ));
     }
-    Ok(Hop { next: node.to_string(), mesh: declaration.mesh().to_string(), held })
+    Ok(Hop { next: node.to_string(), mesh: declaration.mesh().to_string(), held, poll })
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────

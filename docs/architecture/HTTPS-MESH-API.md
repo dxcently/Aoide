@@ -406,6 +406,13 @@ node and origin-signed by the operator's machine, through the ordinary outbox,
 relays and poll. Its authority is the operator signature, never the carrier. A relay
 can drop or delay a charter; it can never alter or forge one.
 
+Each copy is spooled toward the hop the four steps pick (MAIL.md, "Transit"), like any
+letter: a `poll` node's copy goes to the relay that holds it for the node's own ask, and
+the relay carries it on as a hop it verifies by the origin's key in the charter it holds
+(so the signing machine is a node of the mesh it signs). `aoide mesh charter sign`
+reports each node truthfully: handed to the relay, held there for the node's ask, or not
+dialled and why. A `[status]` hold does not hold a charter letter (MAIL.md, "Status").
+
 The letter carries no envelope: its sealed payload is
 `frame("aoide/charter-payload", [file bytes, .sig bytes])` ("Encodings"), its
 `msgid` is `sha256` of the signature input, so one charter version has ONE identity
@@ -1158,7 +1165,9 @@ convenience: it is never compared across machines and never a trust input.
   VERIFIED SIGNATURE and no `message` grant: gating it on the grant would make this
   section's own bootstrap unreachable — a machine accepting its first charter by letter
   from an origin it did not yet know — while the container is still only honoured if
-  the operator signed what it carries. For every LATER version the signer is a node the
+  the operator signed what it carries. A charter container for ANOTHER node is carried
+  on as transit like a letter (a relay admits that one on the depositor's `message`
+  grant); a `[status]` hold never holds it, only a `poll` address does. For every LATER version the signer is a node the
   charter in force names, and `verify_signed_request` resolves it from the charter's own
   node list (identity only; the grant is still the line's), so a box with no
   `nodes.json` record for the operator still receives revocation.

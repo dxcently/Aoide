@@ -743,6 +743,13 @@ retrying it; the origin learns through `aoide mail outbox`. **Two other refused 
 the far end's own state, so the entry stays live, the LINK's ordinary back-off
 carries it back, and it is never parked (§Status).
 
+A `charter` letter for another node is a letter in transit like any other: the
+signing machine spools it toward the hop the four steps pick, so a `poll`
+node's copy waits at its relay for its own ask, and a relay carries it on after
+the same keyless checks and the origin's key in the charter it holds. A relay
+admits it on the depositor's `message` grant, since only the destination can
+open it to verify the operator signature.
+
 `not-correspondence` is the plaintext lane's own: an envelope whose `type`
 is `charter` carries no charter — a charter letter is applied from the
 container's `aoide/charter-payload`, never filed — so it is refused rather
@@ -1198,7 +1205,11 @@ retries on the link's own back-off, so it flows by itself once the node is no
 longer `down` or the declaration loads again — `aoide mail outbox retry
 --refused` is for the words that ARE verdicts (`zone-violation`,
 `broken-chain`, …). `hold` is ergonomics, not a security
-control: it only changes which side initiates.
+control: it only changes which side initiates. **A `charter` letter bypasses a
+`hold`**: the node a hold names must still receive the charter that holds it or
+lifts it, and a relay never asks the operator, so a charter letter is spooled
+to be dialled and carried on without being held. Only a `poll` address holds
+one, because that node cannot be dialled at all.
 
 Two speeds of quarantine, because `down` lives in the declaration and
 the declaration is signed by an operator or managed on a NixOS box

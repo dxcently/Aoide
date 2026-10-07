@@ -542,7 +542,7 @@ fn dest_is_never_dialled(node_name: &str) -> bool {
 /// `poll`" and send the letter out in the clear to a node that never listens —
 /// a refused mesh is treated as never-dialled (parked), the fail-closed
 /// direction.
-fn declared_never_dialled(mesh: &str, node: &str) -> bool {
+pub(crate) fn declared_never_dialled(mesh: &str, node: &str) -> bool {
     let Ok(set) = aoide_storage::routing::declarations() else {
         return true;
     };
@@ -692,6 +692,7 @@ fn direct_edge(dest: &str, mesh: &str) -> Result<aoide_storage::routing::Hop, ao
         next: dest.to_string(),
         mesh: mesh.to_string(),
         held: record.never_dialled(),
+        poll: record.never_dialled(),
     })
 }
 
@@ -1074,6 +1075,9 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
                         }
                     ),
                 );
+                // The hub's custody of a charter letter it carried ends when it
+                // is told this box has it, exactly as for a filed letter.
+                let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
             }
             // A container whose chain does not end at this box: this hand-over
             // is one hop of it, and the step is the door's own

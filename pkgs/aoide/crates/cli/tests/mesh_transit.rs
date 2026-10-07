@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::{fixture, env_lock, door_post, door_post_tampered, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
+use common::{fixture, env_lock, door_post, door_post_tampered, AWAY, HOME, ONE_SIDED_GATE, OPERATOR, TWO_KEYS};
 
 use aoide::dispatch::{dispatch, Invocation};
 use aoide_protocol::output::Status;
@@ -1950,4 +1950,81 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
         aoide_client::mail_wire::declaration_forbids_dial(HOME, "yomi")
     );
     assert_eq!(spooled.len(), 3, "and nothing was dropped");
+}
+
+/// **A charter letter for a `poll` node is handed to the relay that holds it.**
+/// `chiyo` owns no inbound transport and asks `sakaki`: the signed charter is
+/// spooled toward `sakaki` (never into an outbox nothing drains), the relay
+/// carries it on as a hop held for `chiyo`'s own ask, and `chiyo` applies it
+/// when it takes the hand-over.
+#[test]
+fn a_charter_signed_with_a_poll_node_lands_in_the_relays_hold_for_that_node() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("charter-poll");
+
+    // The operator's box is no node of the charter, so the relay has no key to
+    // verify it by: the letters are spooled by a member that took the new
+    // version, which is the real shape (the operator's machine is a node).
+    fx.enter(OPERATOR);
+    let signed = aoide_storage::charter::sign(HOME, None).unwrap();
+    let source = std::fs::read(aoide_storage::charter::source_path(HOME)).unwrap();
+    let sig = std::fs::read(aoide_storage::charter::source_sig_path(HOME)).unwrap();
+    fx.enter("osaka");
+    let accepted = aoide_storage::charter::accept(&source, &sig).unwrap();
+    let spooled = aoide_storage::charter::spool(&accepted.charter, &source, &sig).unwrap();
+    let chiyo = spooled.iter().find(|s| s.node == "chiyo").expect("a letter for chiyo");
+    assert_eq!(chiyo.next, "sakaki", "a poll node is reached through its mesh's relay");
+    assert!(
+        aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(),
+        "nothing is left in the outbox of a node that is never dialled"
+    );
+    let entries = aoide_storage::outbox::list_entries("sakaki").unwrap();
+    let entry = entries.iter().find(|e| e.envelope.msgid == chiyo.msgid).expect("spooled toward the relay");
+    assert!(!entry.is_held(), "the relay is dialled for it: a drain deposits it");
+    let container = entry.container.clone().unwrap();
+    assert_eq!(container.purpose, aoide_storage::seal::PURPOSE_CHARTER);
+    assert_eq!(container.to.node, "chiyo");
+    assert_eq!(container.transit[0].next, "sakaki");
+
+    fx.enter("sakaki");
+    let hop = match aoide_storage::seal::deposit_container(&container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Hopped(hop) => hop,
+        other => panic!("the relay carries a charter letter on rather than refusing it: {other:?}"),
+    };
+    assert_eq!(hop.next, "chiyo");
+    assert!(hop.held, "held for chiyo's own ask");
+    aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
+    let held = aoide_storage::outbox::list_entries("chiyo").unwrap();
+    assert_eq!(held.len(), 1, "in the relay's hold for chiyo");
+    assert!(held[0].is_held());
+
+    fx.enter("chiyo");
+    match aoide_storage::seal::deposit_container(&hop.container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Applied { version, .. } => assert_eq!(version, signed.version),
+        other => panic!("chiyo applies the charter it asked for: {other:?}"),
+    }
+}
+
+/// **A `[status]` hold does not hold a charter letter.** The node a hold names
+/// must still receive the charter that holds it or lifts it, so the letters
+/// signed under `sakaki = "hold"` are spooled to be dialled, where an ordinary
+/// letter toward the same hop is held.
+#[test]
+fn a_charter_letter_bypasses_a_status_hold() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("charter-hold");
+    fx.set_home_status("osaka", &[("sakaki", "hold")]);
+
+    fx.enter(OPERATOR);
+    let entries = aoide_storage::outbox::list_entries("sakaki").unwrap();
+    assert!(!entries.is_empty(), "the signed charters were spooled toward the held relay");
+    assert!(entries.iter().all(|e| !e.is_held()), "never held by a status hold: {entries:?}");
+
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(&["mail", "send"], &["an ordinary letter"], &[("to", "chiyo/conductor"), ("json", "true")]));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    assert!(
+        aoide_storage::outbox::list_entries("sakaki").unwrap().iter().all(|e| e.is_held()),
+        "an ordinary letter toward the held hop is held"
+    );
 }

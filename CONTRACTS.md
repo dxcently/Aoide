@@ -8326,7 +8326,10 @@ two triggers, and they are the same call:
   record for is dialled at the address its mesh gives it — and a caller that
   reports the attempt
   (`client::charter::drain_spooled`) must say `no-record` rather than claim a
-  drain.
+  drain. `mesh charter sign` spools each charter letter toward the hop the four
+  steps pick (a `poll` node's copy toward its relay), and that report says
+  `held at <relay> for <node>'s ask` or `handed to <relay>`, never `drained now`
+  for a node it did not dial.
 - **poll-on-contact** — the end of any drain pass that actually reached a
   node (see MAIL.md §Outbox). The drain's dial policy is unchanged by the
   command above: a pass with nothing attemptable still dials nothing.

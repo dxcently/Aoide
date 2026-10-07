@@ -4149,6 +4149,14 @@ fn deposit_sealed(
         // hop taking custody, which is exactly what `accepted` means to a drain
         // (the entry stays spooled until a real receipt retires it).
         aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
+            // A charter letter for THIS box is admitted on its enclosed charter
+            // alone (above); one for another node is this box's custody, and
+            // a relay carries on what its grants admit and nothing else.
+            if container.purpose == aoide_storage::seal::PURPOSE_CHARTER && !deposit_admitted(&caller_grant(ctx.signed_caller)) {
+                let (code, msg) = deposit_refusal(ctx.signed_caller, request_mesh, ctx.audit_log);
+                let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
+                return Err((code, msg));
+            }
             // The write comes FIRST, and the audit line follows it: a `transit`
             // entry the hub could not write is not a hop, and an audit that said
             // "next `chiyo`" about it would be the one record of a letter that is
@@ -15948,6 +15956,7 @@ mod tests {
             &binding,
             "home",
             1,
+            "receiverbox",
             "receiverbox",
             &aoide_storage::time::now_iso_utc(),
         )

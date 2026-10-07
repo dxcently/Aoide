@@ -47,6 +47,7 @@ use crate::identity;
 use crate::mail;
 use crate::node_store;
 use crate::outbox;
+use crate::routing;
 use crate::seal;
 use crate::time::now_iso_utc;
 use crate::wire_auth;
@@ -1220,9 +1221,18 @@ pub struct Signed {
     pub sig_path: PathBuf,
     /// The nodes this version re-keyed, if it changed any.
     pub rekeyed: Vec<Rekeyed>,
-    /// The nodes the signed pair was spooled to (every node on the charter
-    /// but this one).
-    pub spooled: Vec<String>,
+    /// The letters spooled, one per node on the charter but this one.
+    pub spooled: Vec<Spooled>,
+}
+
+/// One charter letter in the spool: the node it is for, and the node whose
+/// outbox holds it — the node itself where this box can hand it over directly,
+/// else the relay that holds it for the node's own ask.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spooled {
+    pub node: String,
+    pub next: String,
+    pub msgid: String,
 }
 
 /// The empty source `init` writes: a mesh name, version zero, no relays, no
@@ -1443,16 +1453,27 @@ fn bump_version(text: &str, version: u64) -> Result<String, String> {
 /// binding each copy is sealed to comes from that node's OWN line on the
 /// charter — which is the whole reason a charter can be delivered to a machine
 /// this one has never exchanged a binding with — and each copy is a `charter`
-/// letter like any other letter: ordinary outbox, ordinary drain, ordinary
-/// poll.
-pub fn spool(charter: &Charter, file_bytes: &[u8], sig_bytes: &[u8]) -> Result<Vec<String>, String> {
+/// letter like any other letter: it is spooled toward the hop the four steps
+/// pick (`routing::Letter::route`), so a `poll` node's copy goes to the relay
+/// that holds it for the node's ask, never to an outbox nothing drains. A
+/// `[status]` hold does not hold a charter letter (only a `poll` address does):
+/// the node a hold names must still receive the charter that holds or lifts it.
+/// Where no hop can be picked (a node declared `down`, a mesh with no relay for
+/// a `poll` node) the copy waits in that node's own outbox, which is where the
+/// drain reports why it is not dialled.
+pub fn spool(charter: &Charter, file_bytes: &[u8], sig_bytes: &[u8]) -> Result<Vec<Spooled>, String> {
     let local = display::local_node_name();
     let now = now_iso_utc();
+    let set = routing::declarations().map_err(|r| r.detail)?;
+    let own = identity::load_or_mint().map_err(|e| e.to_string())?.0.info().pubkey_hex;
+    let from = routing::own_name_in(&set, &charter.mesh, &own).unwrap_or_else(|| local.clone());
     let mut spooled = Vec::new();
     for (name, line) in &charter.nodes {
         if *name == local {
             continue;
         }
+        let hop = routing::Letter { from: &from, to: name, mesh: &charter.mesh }.route(&set).outcome.ok();
+        let next = hop.as_ref().map_or(name.as_str(), |hop| hop.next.as_str());
         let text = format!("charter {} v{}", charter.mesh, charter.version);
         let envelope = mail::mint_charter_letter(name, &text, &charter.mesh)?;
         let container = seal::seal_charter(
@@ -1462,10 +1483,16 @@ pub fn spool(charter: &Charter, file_bytes: &[u8], sig_bytes: &[u8]) -> Result<V
             &charter.mesh,
             charter.version,
             name,
+            next,
             &now,
         )?;
-        outbox::write_entry(name, &outbox::OutboxEntry::sealed(envelope, container))?;
-        spooled.push(name.clone());
+        let entry = if hop.as_ref().is_some_and(|hop| hop.poll && hop.next == *name) {
+            outbox::OutboxEntry::sealed_held(envelope, container)
+        } else {
+            outbox::OutboxEntry::sealed(envelope, container)
+        };
+        outbox::write_entry(next, &entry)?;
+        spooled.push(Spooled { node: name.clone(), next: next.to_string(), msgid: entry.envelope.msgid.clone() });
     }
     Ok(spooled)
 }
@@ -1777,7 +1804,11 @@ mod tests {
         let signed = sign("home", None).unwrap();
         assert_eq!(signed.version, 1);
         assert_eq!(signed.operator, operator);
-        assert_eq!(signed.spooled, vec!["peerbox".to_string()], "spooled to the other node only");
+        assert_eq!(
+            signed.spooled,
+            vec![Spooled { node: "peerbox".to_string(), next: "peerbox".to_string(), msgid: signed.spooled[0].msgid.clone() }],
+            "spooled to the other node only"
+        );
         assert_eq!(in_force_charter("home").unwrap().version, 1, "and applied here");
 
         let (v1, v1_sig) = read_pair(&op, "home");
@@ -2166,7 +2197,7 @@ mod tests {
         let peer_binding = charter.nodes["peerbox"].age.clone();
         let now = now_iso_utc();
         let container =
-            seal::seal_charter(&v1, &v1_sig, &peer_binding, "home", 1, "peerbox", &now).unwrap();
+            seal::seal_charter(&v1, &v1_sig, &peer_binding, "home", 1, "peerbox", "peerbox", &now).unwrap();
 
         // The peer trusts ONLY the operator key — no pairing, no nodes.json
         // entry for `opbox`, which is exactly the bootstrap case.
@@ -2237,7 +2268,7 @@ mod tests {
         let peer_binding = charter.nodes["peerbox"].age.clone();
         let now = now_iso_utc();
         let container =
-            seal::seal_charter(&v1, &v1_sig, &peer_binding, "home", 1, "peerbox", &now).unwrap();
+            seal::seal_charter(&v1, &v1_sig, &peer_binding, "home", 1, "peerbox", "peerbox", &now).unwrap();
 
         // This machine is rooted in the SAME mesh name with its OWN key: it
         // trusts an operator key, just not the one that signed this charter.
@@ -2386,7 +2417,7 @@ mod tests {
         sign("home", None).unwrap();
         let (v1, v1_sig) = read_pair(&op, "home");
         let binding = parse(&src).unwrap().nodes["peerbox"].age.clone();
-        let mut container = seal::seal_charter(&v1, &v1_sig, &binding, "home", 1, "peerbox", &now_iso_utc()).unwrap();
+        let mut container = seal::seal_charter(&v1, &v1_sig, &binding, "home", 1, "peerbox", "peerbox", &now_iso_utc()).unwrap();
 
         // A carrier relabels the hop-mutable, UNSIGNED `mesh` — a byte outside
         // everything the origin signed.
@@ -2420,7 +2451,7 @@ mod tests {
         sign("home", None).unwrap();
         let (v2, v2_sig) = read_pair(&op, "home");
         let binding2 = parse(&src2).unwrap().nodes["peerbox"].age.clone();
-        let mislabelled = seal::seal_charter(&v2, &v2_sig, &binding2, "away", 2, "peerbox", &now_iso_utc()).unwrap();
+        let mislabelled = seal::seal_charter(&v2, &v2_sig, &binding2, "away", 2, "peerbox", "peerbox", &now_iso_utc()).unwrap();
         assert_eq!(mislabelled.origin_mesh, "away", "the SIGNED zone names `away`");
         assert_eq!(mislabelled.mesh, "away");
 
