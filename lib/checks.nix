@@ -64,8 +64,9 @@
 #       livery.json` seed) resolve an `aoide.livery.override` identically.
 #       Proves the general law against a fixed in-file fixture (never a real
 #       host or committed song): `lib/livery.nix`'s `stagePatch`'s palette
-#       output matches `resolve`'s under a one-anchor override, and
-#       `stagePatch` is the identity with no override set.
+#       output matches `resolve`'s under a one-anchor override,
+#       `stagePatch` is the identity with no override set, and `venueDelta`
+#       is exactly the one recoloured slot (`{ }` with no override).
 #
 #   11, 12. generator-offline, generator-relocatable — the shipped songbook
 #       generator reproduces `songbookManifest` offline, and from a relocated
@@ -603,7 +604,10 @@ let
   # never a real host's `aoide.livery` or a committed songbook file, so this
   # check never depends on which songs or hosts are in the tree. One case (a
   # single overridden anchor recolours a matching palette slot) plus the
-  # no-override identity `stagePatch` promises callers.
+  # no-override identity `stagePatch` promises callers. `venueDelta` (the
+  # `song/declared/venue.json` the runtime stage overlays) is proved on the
+  # same fixture: the one recoloured slot and nothing else, `{ }` without an
+  # override.
   liveryFanout =
     let
       livery = import ./livery.nix { inherit lib; };
@@ -647,9 +651,16 @@ let
       resolvedPalette = (livery.resolve fixtureLivery).palette;
       stagedPalette = (livery.stagePatch fixtureLivery fixtureDoc).palette;
       identity = livery.stagePatch fixtureBare fixtureDoc == fixtureDoc;
+      deltaOne =
+        livery.venueDelta fixtureLivery fixtureDoc == {
+          palette = {
+            bg = "#ff0000";
+          };
+        };
+      deltaBare = livery.venueDelta fixtureBare fixtureDoc == { };
     in
-    assertCheck "livery-fanout" (stagedPalette == resolvedPalette && identity)
-      "stagePatch and resolve disagree on the override recolour, or stagePatch is not the identity with no override set";
+    assertCheck "livery-fanout" (stagedPalette == resolvedPalette && identity && deltaOne && deltaBare)
+      "stagePatch and resolve disagree on the override recolour, stagePatch is not the identity with no override set, or venueDelta is not exactly the recoloured slots";
   # ── Checks 11 and 12: the shipped songbook generator is offline ───────────
   # §9's claim, as a build: `share/lyra/nix/manifest.nix` (shipped by
   # `pkgs/lyra-songbook`) is the runtime's generator, and a plain

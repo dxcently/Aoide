@@ -612,8 +612,9 @@ cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
 committed half, and two of its runtime subdirectories exist only there,
 gitignored: `song/stage/`, where lyra renders what programs watch and
 hot-reload, and `song/declared/`, the lyra lane's activation seed of
-the declared song's notes with the venue override applied, which the runtime
-writers re-derive the declared song from (CONTRACTS.md §4). The wallpaper
+the declared song's notes with the venue override applied (which `rice mode
+declarative` re-pins from) and the venue's slots as `venue.json` (which staging
+lays over the runtime copy of that song) — CONTRACTS.md §4. The wallpaper
 manager is independent of individual rices. Each user has independent state.
 Lyra ships reusable QML components and named bridges (including optional Aoide
 integration); consumers customize widgets in their songbook without copying the

@@ -361,13 +361,18 @@ against the committed document — same two passes, same order, same
 precedence, so the fan-outs cannot disagree. Read-side only: the option
 system keeps storing the song's authored values inert; no config-side
 `mkForce`, so no option-system recursion. The RUNTIME writers of
-`song/stage/livery.json` (`lyra rice stage`, `rice mode stage`/`declarative`,
-`reload`'s staging arm — §4) derive the DECLARED song's notes from the declared
-twin the activation seed publishes (`song/declared/livery.json`, §4) instead of
-the raw committed file, so re-staging the declared song reproduces the venue
-recolour rather than reverting it. Staging any OTHER song still re-derives from
-that song's own committed notes: the rule is the VENUE recolouring the song it
-declares, and the twin names exactly that song.
+`song/stage/livery.json` (`lyra rice stage`, `rice mode stage`, `reload`'s
+staging arm — §4) derive every song from the runtime songbook, the place a
+song is edited. For the DECLARED song they then lay the venue's slots over it
+(`song/declared/venue.json`, §4 — `lib/livery.nix`'s `venueDelta`, the slots
+the recolour changes in the committed document), so the venue wins on the
+slots it recolours and an edit to the song shows everywhere else, while the
+rule itself stays in nix and Rust overlays only the data it is handed. Staging
+any OTHER song applies no venue: the rule is the VENUE recolouring the song it
+declares. `rice mode declarative` is the one writer that restores declared
+truth instead: its re-pin reads the declared twin
+(`song/declared/livery.json`, §4), recolour included, and an edit to the
+runtime song stays out of it.
 
 | Key                | Type          | Default | Recolours       |
 | ------------------ | ------------- | ------- | ---------------- |
@@ -1270,7 +1275,7 @@ directory in the host songbook are overlaid on top of it (a song whose
 directory is gone is pruned, never kept immortal), then the
 currently-staged song's own freshly-scanned entry is patched in last,
 winning over both — only when that song HAS a host-songbook directory to
-scan; a shipped song staged from the declared twin before any seed keeps
+scan; a shipped song re-pinned from the declared twin before any seed keeps
 its baked entry, since an empty patch would delete it. Without the overlay layer, composing and staging a
 second song on a repo-less host would silently drop the first song's
 entry — it lives in neither the frozen baseline (a runtime composition) nor
@@ -1698,10 +1703,12 @@ running `rice stage` still has a correct, recoloured live stage twin from
 boot. The seed is declared truth, written whatever the mode: when
 `stage/mode.json` names a staged or drafted song, `lyra reload` (the lyra lane's
 `aoide-rice-reload` user unit, run Before the shell at login and restarted with
-it on every switch) re-stages it over the seed. The same jq run publishes the
-declared twin below, which is what the runtime writers re-derive the DECLARED
-song from — so their next re-stage reproduces the venue recolour rather than
-reverting the stage twin to the song's own colours.
+it on every switch) re-stages it over the seed. The same script publishes the
+declared twin below, which `rice mode declarative` re-pins from, and the
+venue's slots (`song/declared/venue.json`, below), which the staging writers
+lay over the declared song's runtime copy — so their next re-stage reproduces
+the venue recolour rather than reverting the stage twin to the song's own
+colours.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
@@ -1904,22 +1911,53 @@ it.
 
 Why it exists: `stage/livery.json` is the LIVE stage, rewritten by runtime
 writers, so it cannot itself say what the venue declared. This file is the
-venue's read-only statement of that, and the runtime writers reach for it when
-they need to re-derive the DECLARED song's notes rather than the committed
-ones. A plain file, never a symlink (nothing routes it — the draft routing
-above applies to `stage/livery.json` alone). **Absent** means the lane has
-never activated on this host; readers then fall back to the committed
-`song/songbook/<name>/livery.json` unchanged, which is the ordinary
-behaviour on a host with no venue override anyway.
+venue's read-only statement of that: declarative mode is declared truth, so
+`rice mode declarative`'s re-pin restores the declared song from it, venue
+recolour included, whatever the runtime songbook now holds. It also names WHICH
+song is declared, in its own `"song"` field. The staging writers do not read it
+for notes: they derive from the runtime songbook, where a song is edited, and
+lay `song/declared/venue.json` (below) over the declared song. A plain file,
+never a symlink (nothing routes it — the draft routing above applies to
+`stage/livery.json` alone). **Absent** means the lane has never activated on
+this host; the re-pin then falls back to the runtime
+`song/songbook/<name>/livery.json` unchanged, which is the ordinary behaviour
+on a host with no venue override anyway.
 
-Readers: `lyra rice stage <name>`, `rice mode stage <name>`, and
-`rice mode declarative` — for the declared song ONLY. The scoping test is the
-file's own `"song"` field compared against the name being staged: staging any
-other song derives from that song's own committed notes. `rice mode
-declarative`'s no-`<name>` form also resolves its song off this same field
-(falling back to `stage/livery.json`'s own `"song"` breadcrumb when the file is
-absent). Nothing else reads it, and nothing in the Rust crates writes it —
-`handle_rice_stage` only reads.
+Readers: `rice mode declarative`'s re-pin, for the declared song ONLY — the
+scoping test is the file's own `"song"` field compared against the name being
+re-pinned, and any other song re-pins from its own runtime notes. The same
+field is how the runtime learns which song is declared: `rice mode
+declarative`'s no-`<name>` form resolves its song off it (falling back to
+`stage/livery.json`'s own `"song"` breadcrumb when the file is absent), and the
+staging writers ask it whether the venue applies to the song they stage.
+Nothing in the Rust crates writes it — `handle_rice_stage` only reads.
+
+### `song/declared/venue.json` — **v0**
+
+The venue's recolour of the DECLARED song, as data: a JSON object keyed by
+livery tier (`palette`, `base16`, `bar`, `notif`, `window`), each value the
+slots the host's `aoide.livery.override` changes in the active song's committed
+`livery.json`, such as `{"palette":{"bg":"#191724"}}`. It is
+`lib/livery.nix`'s `venueDelta` — `stagePatch`'s result minus the committed
+document — so a slot the recolour leaves alone is not in it, and the file is
+`{}` when the host sets no override. Written by the SAME activation seed as the
+twin above (`home.activation.aoideSeedStage`,
+`modules/dendrites/lyra/default.nix`): a temp file made in `song/declared/` and
+renamed over the target, so a reader never sees a torn file. The recolour rule
+stays in nix (§1's override tier, guarded by `checks.livery-fanout`); no Rust
+crate computes it or writes this file.
+
+Readers: the staging writers — `lyra rice stage <name>`, `rice mode stage`,
+`reload`'s staging arm — when the song they stage is the declared one. They lay
+it over the runtime song's parsed notes: each tier object in the file sets its
+keys on the same tier of the notes, and a tier the notes do not hold as an
+object is skipped. The venue therefore wins on the slots it recolours, and an
+edit to the runtime song shows everywhere else. Staging any other song applies
+no venue, and `rice mode declarative`'s re-pin reads the twin above, which
+already carries it. **Absent** is the identity: a host that never activated the
+lane stages the runtime song as it is. A file that cannot be read or parsed is
+a taught refusal (`rice.stage`, `Kind::Failed`, fix `lyra rice mode
+declarative`), raised before anything is written; a rebuild republishes it.
 
 ### `song/declared/terminal-opacity.conf` — **v0**
 

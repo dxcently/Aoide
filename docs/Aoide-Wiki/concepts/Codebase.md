@@ -286,8 +286,11 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   committed notes with the venue recolour applied, one `jq` run to two
   destinations (`CONTRACTS.md §4`). It exists because the live stage is
   rewritten by the runtime writers and so cannot itself state what the venue
-  declared; those writers read the twin for the song its own `"song"` field
-  names, and the committed songbook for every other. `state/stage/` holds
+  declared: `rice mode declarative` re-pins from it, and its `"song"` field
+  names the declared song. The staging writers derive every song from the
+  runtime songbook and, for the declared one, lay the seed's
+  `song/declared/venue.json` (the slots the venue recolours, `{}` with no
+  override) over it. `state/stage/` holds
   CONDUCTING
   state — `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),

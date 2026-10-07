@@ -59,9 +59,13 @@ covers only what's specific to dendrites.
   `stage/mode.json` names. Nix never reads the mode, so the seed stays one
   unconditional write. The one run
   writes the same bytes to `song/declared/livery.json` too (CONTRACTS.md §4):
-  the declared twin, and the `lyra` lane is its ONLY writer — `rice stage` and
-  the other runtime writers read it and must never write it, since only the nix
-  evaluator can compute the override tier.
+  the declared twin that `rice mode declarative` re-pins from. It also publishes
+  `song/declared/venue.json` — `venueDelta`, the slots the same `stagePatch`
+  rule changes, `{}` with no override — which staging lays over the runtime
+  copy of the declared song, and `checks.livery-fanout` guards it. The `lyra`
+  lane is the ONLY writer of both: `rice stage` and the other runtime writers
+  read them and must never write them, since only the nix evaluator can
+  compute the override tier.
 - **A surface takes its size from its CONTENT; content never sizes itself
   from the SCREEN.** A layer anchors only the edges it genuinely occupies
   and lets `implicitWidth`/`implicitHeight` follow what it draws (the

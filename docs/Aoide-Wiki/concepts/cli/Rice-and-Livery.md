@@ -74,9 +74,11 @@ lyra rice stage [<name>] [--json]
 
 - **Reads:** `song/stage/mode.json` (entrypoint guard), then the notes for
   `<name>` (must parse as JSON; full schema validation is `rice lint`'s job)
-  — the DECLARED twin `song/declared/livery.json` when its own `"song"` field
-  equals `<name>`, else that song's committed
-  `song/songbook/<name>/livery.json` (CONTRACTS.md §4). No `<name>`:
+  — the runtime `song/songbook/<name>/livery.json`, with the venue's
+  `song/declared/venue.json` laid over it when `<name>` is the declared song
+  (the twin `song/declared/livery.json`'s own `"song"` field names it;
+  CONTRACTS.md §4). A `venue.json` that cannot be parsed refuses before
+  anything is written. No `<name>`:
   re-resolves the current song from the staged livery's own `"song"` field
   (`song/stage/livery.json`).
   Env: `$HYPRLAND_INSTANCE_SIGNATURE` (guards the compositor apply),

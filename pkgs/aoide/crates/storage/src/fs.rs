@@ -767,12 +767,25 @@ pub fn songbook_notes(name: &str) -> std::path::PathBuf {
 /// Same content as the active song's committed `livery.json` with the venue's
 /// `aoide.livery.override` applied (a plain file, never a symlink), published
 /// by the lyra lane's activation seed — the file's own `"song"` field
-/// says WHICH song that was. Absent on a host that never activated the lane
-/// (or before its first activation); readers then fall back to the committed
-/// songbook for that song. Shares [`song_dir`]'s `AOIDE_STAGE_DIR`-relative
-/// resolution like every other song-tree path.
+/// says WHICH song that was. Read for the declarative re-pin
+/// (`rice mode declarative`), which restores declared truth, and by
+/// `declared_song()` to learn WHICH song is declared; staging derives from the
+/// runtime songbook instead ([`declared_venue`]). Absent on a host that never
+/// activated the lane (or before its first activation); readers then fall back
+/// to the committed songbook for that song. Shares [`song_dir`]'s
+/// `AOIDE_STAGE_DIR`-relative resolution like every other song-tree path.
 pub fn declared_notes() -> std::path::PathBuf {
     song_dir().join("declared").join("livery.json")
+}
+
+/// The venue's recolour of the declared song — `<song>/declared/venue.json`
+/// (CONTRACTS.md §4): the slots `aoide.livery.override` changes, tier by tier,
+/// published by the lyra lane's activation seed (`{}` when the host sets no
+/// override). Staging the declared song overlays it on the runtime songbook's
+/// copy. Absent on a host that never activated the lane; readers then overlay
+/// nothing.
+pub fn declared_venue() -> std::path::PathBuf {
+    song_dir().join("declared").join("venue.json")
 }
 
 /// A committed song's drafts root: `<song>/songbook/<name>/drafts/` —

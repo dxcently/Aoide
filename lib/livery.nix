@@ -24,6 +24,12 @@
 # phases — Phase 1's consumers (the stylix and compositor paint lanes) change
 # zero lines.
 #
+# The runtime stage re-derives the declared song from the runtime songbook, not
+# from this file's output, so the recolour reaches it as DATA: `venueDelta`
+# is `stagePatch` minus the document, the slots the venue changes and nothing
+# else, published beside the declared twin as `song/declared/venue.json`. The
+# law stays here, in nix alone; the runtime only overlays what it is handed.
+#
 # Usage: (import ./lib/livery.nix { inherit lib; }).resolve config.aoide.livery
 { lib }:
 rec {
@@ -141,4 +147,30 @@ rec {
     // patch "bar" { }
     // patch "notif" { }
     // patch "window" { };
+
+  # What the venue changes in a committed `livery.json` DOCUMENT: per tier,
+  # the attrs `stagePatch` leaves unequal to the document's own (a key the
+  # document lacks, or holds null, counts as changed). A tier with nothing
+  # changed is omitted, so `{}` is "no venue override" — the identity the
+  # runtime overlays without a branch.
+  venueDelta =
+    livery: doc:
+    let
+      patched = stagePatch livery doc;
+      changed =
+        tier:
+        let
+          t = patched.${tier} or null;
+        in
+        lib.optionalAttrs (t != null) (lib.filterAttrs (k: v: (doc.${tier}.${k} or null) != v) t);
+    in
+    lib.filterAttrs (_: v: v != { }) (
+      lib.genAttrs [
+        "palette"
+        "base16"
+        "bar"
+        "notif"
+        "window"
+      ] changed
+    );
 }

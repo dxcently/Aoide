@@ -133,19 +133,23 @@ a config file). Paint-side — ships in `lyra`, not core.
 
 `aoide-protocol`, `aoide-storage` (`aoide_storage::fs::song_dir`/
 `flake_root`/`song_templates_dir`/`songbook_dir`/`songbook_notes`/
-`declared_notes`/`run_elements_dir`), plus `aoide-test-support` as a
+`declared_notes`/`declared_venue`/`run_elements_dir`), plus `aoide-test-support` as a
 dev-dependency.
 `livery`/`live` are otherwise dependency-free leaves.
 
 `declared_notes` (`song/declared/livery.json`, CONTRACTS.md §4) is the
 DECLARED song's own notes, venue override applied — published by the
 lyra lane's activation seed, read-only here.
-`commands::rice::notes_source` reads it whenever its `"song"` field equals the
-name being staged (never otherwise), so a runtime re-stage of the declared song
-reproduces the venue recolour instead of reverting it;
+`commands::rice::notes_source` reads it for `rice mode declarative`'s re-pin
+whenever its `"song"` field equals the name being re-pinned (never otherwise),
+because declarative mode is declared truth;
 `commands::rice::declared_song` is the same field exposed to `rice mode
-declarative`'s no-`<name>` resolve. A host with no such file falls back to
-`songbook_notes` unchanged.
+declarative`'s no-`<name>` resolve and to the staging writers, which derive
+every song from `songbook_notes` (the runtime songbook, where a song is edited)
+and, for the declared song, lay `declared_venue` over it
+(`commands::rice::overlay_venue`: `song/declared/venue.json`, the slots the
+venue recolours; absent is the identity, unparseable is a taught refusal). A
+host with no twin falls back to `songbook_notes` unchanged.
 
 ## How it composes
 

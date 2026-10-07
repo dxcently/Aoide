@@ -65,14 +65,18 @@ freshly booted host carries a correctly recoloured stage twin even before
 `rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
 names a staged or drafted song, `lyra reload` — run by the lane's
 `aoide-rice-reload` unit at every login and after every switch — re-stages it
-over the seed. The same run also publishes the DECLARED twin,
+over the seed. The same script also publishes the DECLARED twin,
 `song/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
-own name, its `"song"` field naming the song the venue declared. That field
-is the whole scope: the runtime writers (`rice stage`, `rice mode
-stage`/`declarative`, `reload`'s staging arm) derive the DECLARED song's
-notes from the twin, so re-staging it reproduces the venue recolour, while a
-song the twin does not name still re-derives from that song's own committed
-notes.
+own name, its `"song"` field naming the song the venue declared — and the
+venue's own part as data, `song/declared/venue.json`: `lib/livery.nix`'s
+`venueDelta`, the slots `stagePatch` changes in the committed document, `{}`
+with no override (`checks.livery-fanout` guards it beside the other two). The
+runtime writers (`rice stage`, `rice mode stage`, `reload`'s staging arm)
+derive every song from the runtime songbook, where a song is edited; for the
+declared song — the twin's `"song"` field is the whole scope — they lay
+`venue.json` over it, so the venue wins on the slots it recolours and an edit
+shows everywhere else, while the recolour law stays in nix. `rice mode
+declarative`'s re-pin restores declared truth instead, and reads the twin.
 `stage/livery.json` is canonical; the legacy-mirror write and the fallback
 reads were dropped when Phase 4 closed the transition window
 (LIVERY-MERGE.md).

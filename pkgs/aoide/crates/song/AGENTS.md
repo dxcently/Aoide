@@ -189,24 +189,32 @@
   and with a batch in every stage, such a handler test run from a Hyprland
   terminal would flip the operator's live glass and borders, and a reload
   rebuilds the whole running scene.
-- **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
-  READ-ONLY for this crate — only the nix side writes it.** The lyra
-  lane's activation seed (`home.activation.aoideSeedStage`) publishes it: the
-  declared song's committed notes with the venue's `aoide.livery.override`
-  applied, `"song"` injected, keys sorted.
-  `commands::rice::notes_source` reads it for `handle_rice_stage`, and
-  `commands::rice::declared_song` exposes its
-  `"song"` field (`rice mode declarative`'s no-`<name>` resolve uses it,
-  ahead of `current_staged_song`). **The declared-song test is `"song"`
+- **`song/declared/livery.json` (the declared twin) and
+  `song/declared/venue.json` (the venue's slots), CONTRACTS.md §4, are
+  READ-ONLY for this crate — only the nix side writes them.** The lyra
+  lane's activation seed (`home.activation.aoideSeedStage`) publishes them: the
+  twin is the declared song's committed notes with the venue's
+  `aoide.livery.override` applied, `"song"` injected, keys sorted; `venue.json`
+  is `venueDelta`, only the slots that override changes, `{}` with no override.
+  `commands::rice::notes_source` reads the twin for the re-pin
+  (`handle_rice_stage_without_cover`, `rice mode declarative` alone), and
+  `commands::rice::declared_song` exposes its `"song"` field
+  (`rice mode declarative`'s no-`<name>` resolve uses it, ahead of
+  `current_staged_song`). `handle_rice_stage` reads the RUNTIME songbook for
+  every song and, for the declared one, `commands::rice::overlay_venue` lays
+  `venue.json` over the parsed notes. **The declared-song test is `"song"`
   EQUALITY against the name being staged — never a mode, never a mtime,
   never "the twin exists so use it".** The twin describes exactly one song;
-  staging any other must derive from that song's own committed notes. A host
-  that never activated the lane has no twin at all, and every reader falls
-  back to the committed songbook — absent is the ordinary no-venue-override
-  case, never an error. Never write this path from Rust: `rice stage` is a
-  runtime writer of the STAGE, and a second Rust writer of the declared twin
-  would race the lane's seed and could never compute the override tier the
-  nix evaluator owns.
+  staging any other applies no venue, and re-pinning any other derives from
+  that song's own runtime notes. A host that never activated the lane has no
+  twin and no `venue.json`, and every reader falls back to the runtime
+  songbook — absent is the ordinary no-venue-override case, never an error;
+  an unparseable `venue.json` is the one taught refusal, raised before any
+  write. Never write these paths from Rust: `rice stage` is a runtime writer
+  of the STAGE, and a second Rust writer would race the lane's seed and could
+  never compute the override tier the nix evaluator owns — the overlay is a
+  merge of data the evaluator handed over, never a second copy of the
+  recolour rule.
 - **`commands::rice::seed_songbook_from_templates` (task #41) is called
   from the STAGING ENTRY POINTS, never from inside `handle_rice_stage`
   itself.** `handle_rice_stage_entry` (`rice stage <name>`) and

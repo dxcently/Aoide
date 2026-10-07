@@ -104,6 +104,8 @@ let
 
       livery = import ../../../lib/livery.nix { inherit lib; };
 
+      committedLivery = builtins.fromJSON (builtins.readFile activeSongLivery);
+
       # The stage twin is the committed livery with the VENUE applied — the same
       # `aoide.livery.override` recolour the Stylix and compositor fan-outs get
       # (CONTRACTS.md §1, override tier), through the same `lib/livery.nix`. Not
@@ -111,9 +113,17 @@ let
       # own shape. Identity when the host sets no override, so a host without a
       # venue stages exactly the committed bytes it staged before.
       stageLivery = pkgs.writeText "aoide-stage-livery.json" (
-        builtins.toJSON (
-          livery.stagePatch config.aoide.livery (builtins.fromJSON (builtins.readFile activeSongLivery))
-        )
+        builtins.toJSON (livery.stagePatch config.aoide.livery committedLivery)
+      );
+
+      # The venue's recolour as DATA — only the slots it changes in the
+      # committed livery, `{}` when the host sets no override
+      # (`lib/livery.nix`'s `venueDelta`). Published beside the declared twin
+      # as `song/declared/venue.json`: the runtime stage reads the declared
+      # song from the runtime songbook and overlays this, so the recolour law
+      # stays in nix alone.
+      venueFile = pkgs.writeText "aoide-declared-venue.json" (
+        builtins.toJSON (livery.venueDelta config.aoide.livery committedLivery)
       );
 
       # The active song's terminal opacity (`aoide.livery.geometry.terminalOpacity`,
@@ -187,11 +197,12 @@ let
       # its declared twin (`song/declared/livery.json`), injecting the same
       # `"song"` field `lyra rice stage` injects (jq's `. + {song: …}`; `-S` sorts
       # keys to match serde_json::Value's BTreeMap ordering). The declared twin is
-      # what the runtime writers (`rice stage`, `rice mode stage`/`declarative`)
-      # read back for the declared song — that song's notes with the venue
-      # recolour already applied — so `lyra rice stage ${config.aoide.song}`
-      # stages these same notes, and a re-stage after activation reproduces the
-      # venue rather than reverting to the song's own colours.
+      # what `rice mode declarative` re-pins the declared song from — that song's
+      # notes with the venue recolour already applied. The staging writers (`rice
+      # stage`, `rice mode stage`, `lyra reload`) derive the declared song from
+      # the runtime songbook instead, with the venue's slots
+      # (`song/declared/venue.json`, `venueFile` above) laid over it, so an edit
+      # to the song shows and the recolour still stands.
       # The seed is declared truth and nothing else: when `stage/mode.json` names
       # a staged or drafted song, `aoide-rice-reload` (below) puts that one back
       # once the session is up.
@@ -216,6 +227,9 @@ let
         cp "$tmp" "$declared"
         mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
         mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
+        venue=$(mktemp "${config.aoide.root}/song/declared/.venue.json.XXXXXX")
+        cp "${venueFile}" "$venue"
+        mv -f "$venue" "${config.aoide.root}/song/declared/venue.json"
         # The active wallpaper setter's name — ONE word the CLI and the QML both
         # read (CONTRACTS.md §4), published here because this is the seed that
         # hands the runtime its facts and because choosing a provider is a
