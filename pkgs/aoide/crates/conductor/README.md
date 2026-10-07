@@ -8,10 +8,16 @@ existing dispatcher and stores, usable without a desktop session.
 
 Home opens as a full page with Aoide's logo outside a continuous light
 livery surface containing the central actions and recent projects, including
-the gaps between them. The surface has three columns of side padding and
-vertical padding around its controls, with darker outer margins. The logo
-is centered as one preformatted block, preserving its internal alignment. Arrows or `h` / `j` / `k` / `l` select an action or
-recent project; Enter opens it. `H` opens connected hosts and `L` opens Activity. Shared surfaces use even shading and single separator
+the gaps between them. The whole block — logo, the two groups, the recent
+projects — is laid out for the terminal it is in: a column of at most 62
+cells centred across the body, the block centred down it
+(`board::home_layout`), at any size. When the height runs short the logo is
+the first thing to go, so the boxes stay whole rather than clipping; a block
+that still does not fit sits at the top. The surface has three columns of
+side padding and vertical padding around its controls, with darker outer
+margins. The logo is one preformatted block, preserving its internal
+alignment. Arrows or `h` / `j` / `k` / `l` select an action or recent
+project; Enter opens it. `H` opens connected hosts and `L` opens Activity. Shared surfaces use even shading and single separator
 lines; bright selection highlights identify only the keyboard-focused region,
 while other selections retain subdued shading. Workspace views expose a project sidebar whose Agents,
 Terminals and Past groups fold independently. Past includes durable session
