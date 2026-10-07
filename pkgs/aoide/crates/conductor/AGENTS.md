@@ -20,7 +20,9 @@
   (`j`/`k`/`h`/`l`) resolves against the whole forest — a root's siblings
   are the other roots — and the view follows the selection; never gate a
   step on what the current view draws, or a Focus view strands the cursor
-  one `j` below its root.
+  one `j` below its root. A parent lookup takes the first DRAWN parent
+  inside the search: a resurrected session also sits under its `resumed`
+  ghost, which is not a node, and map order must not let it win.
 - Registered nodes enter the graph from the roster outcome (`App::roster_nodes`),
   never from the document's `node:*` fold (fresh only inside the cache TTL,
   written only by `node pull`). A remote card's id is prefixed with its node's
@@ -94,10 +96,18 @@
   use `App::stage`; palette notes use `App::rice_stage`. Historical ledger,
   mail and audit paths use their existing owning APIs.
 - Roster probes remain bounded and asynchronous; refresh throttling must
-  not freeze input. A cached session row (`presence` of `last-seen` or
-  `unknown`, `RosterSession::is_cached`) renders the cache's word and the
-  node header's age, never the live state glyph or colour; the backend's
-  `presence` is the only source of that fact.
+  not freeze input. The probe is the one read that bypasses `DispatchFn`:
+  it calls `aoide_conduct::graph::session_roster` through `App::roster_fn`
+  (tests inject `for_test_with_roster`), because a tick-driven read must
+  not write an audit record every fifteen seconds. A cached session row
+  (`presence` of `last-seen` or `unknown`, `RosterSession::is_cached`)
+  renders the cache's word and the node header's age, never the live state
+  glyph or colour; the backend's `presence` is the only source of that
+  fact. A failed probe after a good one keeps the rows
+  (`RosterCache::failed`) and every surface that paints them says the probe
+  failed and how long ago; rows never vanish in silence. The presence
+  phrase and every age come from `theme::presence_phrase`/`age_words`;
+  never spell a second one.
 - Pending IDs are array positions. Relist after every approve/deny before
   using another selection; never recycle those indices as durable mail
   proposal identifiers.

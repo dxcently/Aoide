@@ -100,15 +100,18 @@ a session attached to nothing shows itself alone under Focus rather than
 borrowing a forest of strangers.
 
 Every registered node stands after this box's forest as a host card (`🖧
-NODE · online|unreachable|never-pulled`, its name, and `n session(s) · live`,
-`unreachable · last seen <age> ago` or `never pulled`), with the sessions the
-roster reports for it hanging flat beneath — the roster carries no spawned
-edges across the wire. The rows are the same `session --hosts` probe Mesh
-paints, refreshed on the same ~15 s throttle while Graph is open; a cached
-row under an unreachable node wears the cache's word (`last-seen`) as its
-state and `was <state>` as its activity, never a live glyph. A remote card
-carries no local session id, so Enter, `s` and the menu act on nothing: a
-far session is looked at here, and conducted from Mesh or the shell.
+NODE · online|unreachable|never-pulled`, its name, and `online · n
+session(s)`, `unreachable (last seen <age>)` or `never pulled`), with the
+sessions the roster reports for it hanging flat beneath — the roster carries
+no spawned edges across the wire. The rows are the same `session --hosts`
+probe Mesh paints, refreshed on the same ~15 s throttle while Graph is open;
+a cached row under an unreachable node wears the cache's word (`last-seen`)
+as its state and `was <state>` as its activity, never a live glyph, and is
+drawn dimmed like its Mesh row. A probe that fails after a good one keeps the
+last rows on the canvas, dimmed, every host card ending `· probe failed <age>`
+— the forest never empties in silence. A remote card carries no local session
+id, so Enter, `s` and the menu act on nothing: a far session is looked at
+here, and conducted from Mesh or the shell.
 
 Space + left drag or middle drag pans the canvas; the wheel pans vertically and
 Shift + wheel pans horizontally. Ctrl + wheel zooms the camera through 50%,
@@ -156,11 +159,16 @@ Removing a project from Projects or a session group opens a confirmation.
 Type the exact project name and press Enter to unregister it; Escape cancels.
 This removes the registration, not project files.
 Mesh reuses bounded asynchronous `session --hosts` probes with cached
-fallback. A node the probe could not reach heads its rows with
-`unreachable (last seen <age> ago)`, and every session beneath it wears the
-roster core's own cache word — `· <label>  last-seen · was <state>`, dimmed,
-no live glyph — so a row the far node may have long since lost is never
-painted as working.
+fallback, calling the roster handler (`aoide_conduct::graph::session_roster`)
+as a library function: a read repeated every fifteen seconds while a pane is
+open is not an act and writes no audit record. A node the probe could not
+reach heads its rows with `unreachable (last seen <age>)`, and every session
+beneath it wears the roster core's own cache word — `· <label>  last-seen ·
+was <state>`, dimmed, no live glyph — so a row the far node may have long
+since lost is never painted as working. A probe that fails after a good one
+keeps the last rows and says so on the fetch line: `[err] session: <why> ·
+showing rows from before (probe failed <age>)`. Ages are words — `5m ago`,
+`2h21m ago`, `3d ago` — never a clock reading.
 Session steering dispatches `send`; Mail dispatches signed correspondence.
 Review's first queue remains the conductor-input/A2A approval queue, not mail
 editing.

@@ -104,7 +104,7 @@ never reconstructs what the last one decided.
 
 ```text
 stage refresh ─── nodes and edges ───┐
-roster probe ──── host cards + rows ─┤
+roster probe ──── host cards + rows ─┤  (library call, unaudited; a failed probe keeps the last rows, dimmed)
                                      ▼
                               tree layout ── proposed world cells
                                      │

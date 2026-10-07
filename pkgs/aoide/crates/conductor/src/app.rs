@@ -518,6 +518,12 @@ pub struct RosterNode {
 pub struct RosterCache {
     pub outcome: Option<Outcome>,
     fetched_at: Option<Instant>,
+    /// A probe that came back non-`Ok` AFTER a good one: its message and
+    /// when it landed. The rows stay (they are the last thing the wire
+    /// said) and every surface that paints them says the probe failed and
+    /// how long ago — honest absence, never a canvas that empties in
+    /// silence.
+    pub failed: Option<(String, Instant)>,
 }
 
 /// One flattened, selectable ROSTER row (P-C5 adds selection to C4's
@@ -949,6 +955,7 @@ pub struct App {
     /// real one in — see [`DispatchFn`]'s doc comment for why this is
     /// injected rather than reached for as a trunk global.
     dispatch_fn: DispatchFn,
+    roster_fn: RosterFn,
     /// The ROSTER panel's cache — last `session --hosts` fetch + when.
     pub roster: RosterCache,
     /// `Some` while a background `session --hosts` dispatch is in flight — set by
@@ -1029,6 +1036,12 @@ pub const LOG_CAP: usize = 500;
 /// trunk's `dispatch::dispatch` / `dispatch::registry()` globals directly.
 pub type DispatchFn = fn(&Invocation) -> Outcome;
 
+/// The roster read: `session --hosts --json`'s own handler, called as a
+/// library function rather than dispatched. Dispatch audits every call, and a
+/// probe this frontend repeats every fifteen seconds while Mesh or Graph is
+/// open is a read, not an act — it earns no record in `$AOIDE_ROOT/log`.
+pub type RosterFn = fn(&Invocation) -> Outcome;
+
 /// The `dispatch_fn` fallback for an [`App`] that was never wired to a real
 /// dispatcher ([`App::empty`], the `#[cfg(test)]` [`App::for_test`]): none of
 /// the in-crate unit tests actually dispatch (they only render/select/
@@ -1094,6 +1107,7 @@ impl App {
             initialized: false,
             mtimes: StageMtimes::default(),
             dispatch_fn: no_dispatch,
+            roster_fn: aoide_conduct::graph::session_roster,
             roster: RosterCache::default(),
             roster_rx: None,
             roster_sel: 0,
@@ -1141,6 +1155,14 @@ impl App {
     pub fn for_test_with_dispatch(dispatch: DispatchFn) -> Self {
         let mut app = App::empty();
         app.dispatch_fn = dispatch;
+        app
+    }
+
+    /// Test-only constructor wiring the roster read seam.
+    #[cfg(test)]
+    pub fn for_test_with_roster(roster: RosterFn) -> Self {
+        let mut app = App::empty();
+        app.roster_fn = roster;
         app
     }
 
@@ -1475,8 +1497,7 @@ impl App {
         };
         match rx.try_recv() {
             Ok(outcome) => {
-                self.roster.outcome = Some(outcome);
-                self.roster.fetched_at = Some(Instant::now());
+                self.absorb_roster_outcome(outcome);
                 self.roster_rx = None;
                 true
             }
@@ -1499,7 +1520,7 @@ impl App {
             return;
         }
         let (tx, rx) = mpsc::channel();
-        let dispatch_fn = self.dispatch_fn;
+        let roster_fn = self.roster_fn;
         std::thread::spawn(move || {
             let inv = Invocation {
                 path: vec!["session".to_string()],
@@ -1510,7 +1531,7 @@ impl App {
                 ]),
                 door: Door::Cli,
             };
-            let outcome = dispatch_fn(&inv);
+            let outcome = roster_fn(&inv);
             // The receiver may already be gone (App dropped mid-fetch, e.g.
             // conductor quit); nothing to do about that.
             let _ = tx.send(outcome);
@@ -1636,6 +1657,28 @@ impl App {
         rows
     }
 
+    /// Take a landed probe into the cache. A good outcome replaces the rows
+    /// and clears any failure; a failure after a good outcome keeps the rows
+    /// and records itself beside them; a failure with nothing to keep is the
+    /// outcome itself, so the status line carries its refusal.
+    pub(crate) fn absorb_roster_outcome(&mut self, outcome: Outcome) {
+        let now = Instant::now();
+        if outcome.status == Status::Ok || self.roster.outcome.is_none() {
+            self.roster.outcome = Some(outcome);
+            self.roster.failed = None;
+        } else {
+            let first = outcome.message.lines().next().unwrap_or("").to_string();
+            self.roster.failed = Some((first, now));
+        }
+        self.roster.fetched_at = Some(now);
+    }
+
+    /// How long ago the last probe failed while older rows are still shown,
+    /// in words — `None` while the rows are the last probe's own.
+    pub fn roster_probe_failed(&self) -> Option<String> {
+        self.roster.failed.as_ref().map(|(_, at)| crate::theme::age_since(*at))
+    }
+
     /// A one-line fetch status for the pane header: probing, freshly
     /// fetched, never fetched yet, or — when the roster fetch itself came
     /// back non-`Ok` — that error, in the same `[tag] command: message` shape
@@ -1655,6 +1698,13 @@ impl App {
             let first = o.message.lines().next().unwrap_or("");
             let suffix = if probing { " · probing…" } else { "" };
             return format!("[{}] {}: {first}{suffix}", status_tag(o.status), o.command);
+        }
+        if let Some((message, at)) = &self.roster.failed {
+            let suffix = if probing { " · probing…" } else { "" };
+            return format!(
+                "[err] session: {message} · showing rows from before (probe failed {}){suffix}",
+                crate::theme::age_since(*at)
+            );
         }
         match (self.roster.fetched_at, probing) {
             (None, true) => "probing…".to_string(),
@@ -5782,7 +5832,7 @@ mod tests {
             let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-            let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+            let mut app = App::for_test_with_roster(counting_roster_dispatch);
             app.panel = Panel::Roster;
             app.roster.fetched_at = Some(Instant::now()); // just fetched — well inside the window
 
@@ -5802,7 +5852,7 @@ mod tests {
             let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-            let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+            let mut app = App::for_test_with_roster(counting_roster_dispatch);
             app.panel = Panel::Roster; // visible, `fetched_at: None` — always stale
 
             app.poll_refresh();
@@ -5825,7 +5875,7 @@ mod tests {
             let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-            let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+            let mut app = App::for_test_with_roster(counting_roster_dispatch);
             app.panel = Panel::Session; // NOT the roster pane
 
             app.poll_refresh();
@@ -5846,7 +5896,7 @@ mod tests {
 
             // The graph paints registered nodes off the roster, so it keeps
             // the probe on the same throttle Mesh does.
-            let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+            let mut app = App::for_test_with_roster(counting_roster_dispatch);
             app.panel = Panel::Graph;
 
             app.poll_refresh();
@@ -5868,7 +5918,7 @@ mod tests {
         let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-        let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+        let mut app = App::for_test_with_roster(counting_roster_dispatch);
         assert_eq!(app.panel, Panel::Home, "starts elsewhere");
 
         app.select_panel(Panel::Roster); // no tick involved at all
@@ -5887,7 +5937,7 @@ mod tests {
         let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-        let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+        let mut app = App::for_test_with_roster(counting_roster_dispatch);
         app.roster.fetched_at = Some(Instant::now());
 
         app.select_panel(Panel::Roster);
@@ -5904,7 +5954,7 @@ mod tests {
         let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-        let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+        let mut app = App::for_test_with_roster(counting_roster_dispatch);
         app.panel = Panel::Roster;
         app.roster.fetched_at = Some(Instant::now()); // fresh — a tick would skip it
 
@@ -5924,7 +5974,7 @@ mod tests {
         let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-        let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+        let mut app = App::for_test_with_roster(counting_roster_dispatch);
         app.panel = Panel::Roster;
         app.spawn_roster_fetch();
         assert!(app.roster_rx.is_some());
@@ -6001,6 +6051,39 @@ mod tests {
             "{}",
             app.roster_status()
         );
+    }
+
+    #[test]
+    fn a_failed_probe_keeps_the_last_good_rows_and_says_so() {
+        let mut app = App::for_test(Vec::new(), Vec::new(), Vec::new());
+        let good = Outcome::ok("session", "2 node(s)").with_data(json!({
+            "host": "h", "generatedAt": "t",
+            "nodes": [
+                { "name": "h", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null,
+                  "sessions": [ { "sessionId": "x", "label": "far/root/x (…x)", "petname": "x",
+                                  "agent": "claude", "state": "idle", "presence": "online", "cwd": "/" } ] },
+            ],
+        }));
+        app.absorb_roster_outcome(good);
+        assert_eq!(app.roster_nodes().len(), 2);
+        assert!(app.roster_probe_failed().is_none());
+
+        app.absorb_roster_outcome(Outcome::error("session", "stage read failed: permission denied"));
+        assert_eq!(app.roster_nodes().len(), 2, "the rows the wire last gave stay on screen");
+        let age = app.roster_probe_failed().expect("the failure is on record");
+        assert!(age.ends_with(" ago"), "{age}");
+        let status = app.roster_status();
+        assert!(
+            status.starts_with("[err] session: stage read failed")
+                && status.contains("showing rows from before (probe failed "),
+            "{status}"
+        );
+
+        app.absorb_roster_outcome(Outcome::ok("session", "1 node(s)").with_data(json!({
+            "host": "h", "generatedAt": "t", "nodes": [] })));
+        assert!(app.roster_probe_failed().is_none(), "a good probe clears the failure");
+        assert!(app.roster_nodes().is_empty());
     }
 
     #[test]

@@ -923,12 +923,11 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
         } => {
             let glyph = graph::glyph(presence);
             let head = match presence.as_str() {
-                "unreachable" => format!(
-                    "{glyph} {} — unreachable (last seen {})",
+                "unreachable" | "never-pulled" => format!(
+                    "{glyph} {} — {}",
                     name,
-                    fetched_at.as_deref().map(theme::age_label).unwrap_or("unknown".into())
+                    theme::presence_phrase(presence, fetched_at.as_deref())
                 ),
-                "never-pulled" => format!("{glyph} {} — never pulled", name),
                 _ if *is_local => format!("{glyph} {} (this host)", name),
                 _ => format!("{glyph} {}", name),
             };

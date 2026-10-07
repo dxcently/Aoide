@@ -39,8 +39,10 @@ aoide conductor [--json]
 - **Reads:** `state/stage/{projects,sessions,hooks}.json`, mtime-polled every
   ~500 ms (the crossterm poll timeout doubling as the tick);
   `state/session-ledger.jsonl` (past sessions); the mail base and the audit
-  log, each as a bounded tail; `session --hosts --json` (the roster probe,
-  on a worker thread, at most every ~15 s while Mesh or Graph is open);
+  log, each as a bounded tail; the roster probe (`aoide_conduct::graph::
+  session_roster`, the `session --hosts --json` handler called as a library
+  function so the tick writes no audit record, on a worker thread, at most
+  every ~15 s while Mesh or Graph is open);
   `node status --json`, `mesh --json`, `pair --json`, `session pending list
   --json`, `config --json`, `secrets pending --json` and `secrets status
   --json` through the injected dispatcher; `song/stage/livery.json`
@@ -152,11 +154,13 @@ centred over its children), under a camera that pans and zooms. The forest
 is `build_graph` over the local stage — projects, their sessions, spawned
 children, and one synthetic `Active sessions` root for the projectless —
 followed by one **host card per registered node** off the roster probe
-(`🖧 NODE · online|unreachable|never-pulled`, the node's name, `n session(s)
-· live` / `unreachable · last seen <age> ago` / `never pulled`), its
+(`🖧 NODE · online|unreachable|never-pulled`, the node's name, `online · n
+session(s)` / `unreachable (last seen <age>)` / `never pulled`), its
 reported sessions flat beneath. A remote card carries no local session id,
 so the local actions pass over it; a cached row wears `last-seen` as its
-state and `was <state>` as its activity.
+state and `was <state>` as its activity, dimmed. A probe that fails after a
+good one keeps the last rows, dimmed, each host card ending `probe failed
+<age>`.
 
 | Key | Effect |
 |---|---|
@@ -200,10 +204,11 @@ log invariant holds.
 
 ## Three behaviours a reader will hit
 
-- **The roster probe throttles.** A stale cache fetches immediately on
-  entering Mesh or Graph; otherwise a fetch fires at most every ~15 s while
-  either is visible. `r` in Mesh overrides the window. A landed probe is
-  folded into the retained graph scene like a stage refresh.
+- **The roster probe throttles, and is not audited.** A stale cache fetches
+  immediately on entering Mesh or Graph; otherwise a fetch fires at most
+  every ~15 s while either is visible. `r` in Mesh overrides the window. A
+  landed probe is folded into the retained graph scene like a stage
+  refresh; a failed one keeps the previous rows and says so.
 - **`session pending list`'s `id` is an array position, not a stable id** —
   resolving one entry shifts every id after it. `App::dispatch` re-lists
   synchronously before the next paint, so a second `a`/`d` in the same visit

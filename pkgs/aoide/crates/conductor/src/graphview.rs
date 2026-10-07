@@ -96,6 +96,9 @@ pub struct Node {
     /// cards. A remote session id never resolves against the local roster,
     /// so no local action (focus, letter, prune) can reach one by mistake.
     pub host: Option<String>,
+    /// The card's facts are a cache, not a live reply: a `last-seen` row, or
+    /// any remote card while the last probe failed. Drawn dimmed.
+    pub cached: bool,
     pub depth: usize,
     pub row: usize,
     /// The card's retained rectangle in world cells.
@@ -116,6 +119,7 @@ struct Meta {
     host: Option<String>,
     petname: Option<String>,
     activity: String,
+    cached: bool,
 }
 
 /// The parsed, world-placed forest and the camera over it.
@@ -189,10 +193,14 @@ pub fn select_sibling(app: &mut App, forward: bool) {
         .filter(|n| n.depth == 0)
         .map(|n| n.id.clone())
         .collect();
+    // The first DRAWN parent whose children hold this id: a resurrected
+    // session also sits under its `resumed` source, a ghost no longer in the
+    // roster, and map order must not let that ghost win and strand the key.
     let siblings = model
         .children
-        .values()
-        .find(|kids| kids.contains(&id))
+        .iter()
+        .find(|(p, kids)| kids.contains(&id) && model.nodes.iter().any(|n| &n.id == *p))
+        .map(|(_, kids)| kids)
         .unwrap_or(&roots);
     let Some(pos) = siblings.iter().position(|s| s == &id) else {
         return;
@@ -216,12 +224,12 @@ pub fn select_parent(app: &mut App) {
     let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
         return;
     };
+    // The first DRAWN parent (see `select_sibling` on the `resumed` ghost).
     let parent = model
         .children
         .iter()
-        .find(|(_, kids)| kids.contains(&id))
-        .map(|(p, _)| p.clone())
-        .filter(|p| model.nodes.iter().any(|n| &n.id == p));
+        .find(|(p, kids)| kids.contains(&id) && model.nodes.iter().any(|n| &n.id == *p))
+        .map(|(p, _)| p.clone());
     if let Some(parent) = parent {
         app.graph.selected = parent;
         app.graph.camera.pan = None;
@@ -301,7 +309,7 @@ pub fn build_model(app: &App) -> Model {
 /// than read from this box.
 fn build_model_on(app: &App, host: &str) -> Model {
     let doc = graph::build_graph(&app.projects, &app.sessions, &app.hooks);
-    build_model_from(app, &doc, &app.roster_nodes())
+    build_model_from(app, &doc, &app.roster_nodes(), host)
 }
 
 /// The model over an explicit document and roster — what [`build_model`]
@@ -314,7 +322,12 @@ fn build_model_on(app: &App, host: &str) -> Model {
 /// Mesh paints. A node the probe could not reach keeps its cached sessions,
 /// each wearing the cache's word (`last-seen`/`unknown`) in place of a live
 /// state, so a remote card never claims more than the roster did.
-pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app::RosterNode]) -> Model {
+pub fn build_model_from(
+    app: &App,
+    doc: &serde_json::Value,
+    roster: &[crate::app::RosterNode],
+    host: &str,
+) -> Model {
     let merged = app.merged();
     let tag_by_id: HashMap<String, Vec<String>> = merged
         .iter()
@@ -336,9 +349,6 @@ pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app
         .filter(|e| e.get("kind").and_then(|v| v.as_str()) == Some("spawned"))
         .filter_map(|e| e.get("to").and_then(|v| v.as_str()))
         .collect();
-    // One host for this whole build — every session label in the panel
-    // shares it (mirrors the `graph view` tree render's rule).
-
     // Metadata per node id, and the project ids in doc order (sorted by name).
     let mut meta: HashMap<String, Meta> = HashMap::new();
     let mut project_ids: Vec<String> = Vec::new();
@@ -370,6 +380,7 @@ pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app
                         host: None,
                         petname: None,
                         activity: String::new(),
+                        cached: false,
                     },
                 );
             }
@@ -416,6 +427,7 @@ pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app
                         host: None,
                         petname: None,
                         activity: String::new(),
+                        cached: false,
                     },
                 );
             }
@@ -467,6 +479,7 @@ pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app
                 host: None,
                 petname: None,
                 activity: String::new(),
+                cached: false,
             },
         );
         children.insert(uid.clone(), unanchored);
@@ -477,17 +490,16 @@ pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app
     // their sessions hanging flat beneath (the roster carries no spawned
     // edges across the wire). Ids are prefixed with the node's own root id,
     // so a far session id can never collide with a local one.
+    let probe_failed = app.roster_probe_failed();
     for node in roster.iter().filter(|n| !n.is_local) {
         let nid = format!("node:{}", node.name);
-        let title = match node.presence.as_str() {
-            "online" => format!("{} session(s) · live", node.sessions.len()),
-            "unreachable" => format!(
-                "unreachable · last seen {}",
-                node.fetched_at.as_deref().map(theme::age_label).unwrap_or("unknown".into())
-            ),
-            "never-pulled" => "never pulled".to_string(),
-            other => other.to_string(),
-        };
+        let mut title = theme::presence_phrase(&node.presence, node.fetched_at.as_deref());
+        if node.presence == "online" {
+            title = format!("{title} · {} session(s)", node.sessions.len());
+        }
+        if let Some(age) = &probe_failed {
+            title = format!("{title} · probe failed {age}");
+        }
         meta.insert(
             nid.clone(),
             Meta {
@@ -503,6 +515,7 @@ pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app
                 host: None,
                 petname: None,
                 activity: String::new(),
+                cached: probe_failed.is_some(),
             },
         );
         let mut kids = Vec::with_capacity(node.sessions.len());
@@ -535,6 +548,7 @@ pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app
                     host: Some(node.name.clone()),
                     petname: s.petname.clone(),
                     activity,
+                    cached: s.is_cached() || probe_failed.is_some(),
                 },
             );
             kids.push(sid);
@@ -627,6 +641,7 @@ fn walk(
             tags: m.tags.clone(),
             model: m.model.clone(),
             host: m.host.clone(),
+            cached: m.cached,
             depth,
             row: out.len(),
             world: WorldRect::new(0, 0, CARD_W, CARD_H),
@@ -1142,6 +1157,9 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     } else {
         surface.patch(theme::state_style(n.state.as_deref().unwrap_or(""), pal))
     };
+    // A cached card is dimmed whole, like the Mesh row it mirrors.
+    let surface = if n.cached { surface.patch(theme::dim()) } else { surface };
+    let border = if n.cached { border.patch(theme::dim()) } else { border };
     let block = Block::bordered()
         .border_type(if selected {
             BorderType::Thick
@@ -1883,7 +1901,7 @@ mod tests {
         assert_eq!(yomi.kind, NodeKind::Host);
         assert_eq!(yomi.depth, 0, "a node is a root of its own");
         assert!(
-            yomi.title.starts_with("unreachable · last seen ") && yomi.title.ends_with(" ago"),
+            yomi.title.starts_with("unreachable (last seen ") && yomi.title.ends_with(" ago)"),
             "the host card says it is cache, and how old: {}",
             yomi.title
         );
@@ -1895,7 +1913,7 @@ mod tests {
         assert_eq!(far1.petname.as_deref(), Some("misty-comet"));
 
         let sakaki = node(&m, "node:sakaki");
-        assert_eq!(sakaki.title, "1 session(s) · live");
+        assert_eq!(sakaki.title, "online · 1 session(s)");
         let far2 = node(&m, "node:sakaki/session:far2");
         assert_eq!(far2.state.as_deref(), Some("idle"), "a live row keeps its state");
         assert_eq!(far2.activity, "/z");
@@ -1918,6 +1936,82 @@ mod tests {
         assert!(out.contains("AGENT · last-seen"), "{out}");
         assert!(out.contains("was working"), "{out}");
         assert!(out.contains("🖧 NODE · never-pulled"), "{out}");
+    }
+
+    #[test]
+    fn a_ghost_resumed_edge_never_strands_the_keys() {
+        // A resurrected session carries a `resumed` edge from the ledger
+        // entry it was built from — a source that has, by construction, left
+        // the roster. That ghost parent must never win the parent lookup.
+        let app = App::for_test(vec![], vec![], Vec::new());
+        let doc = serde_json::json!({
+            "schemaVersion": "0",
+            "nodes": [
+                { "id": "session:root", "kind": "session", "state": "working", "agent": "claude" },
+                { "id": "session:kid", "kind": "session", "state": "idle", "agent": "claude" },
+                { "id": "session:sib", "kind": "session", "state": "idle", "agent": "claude" },
+            ],
+            "edges": [
+                { "from": "session:ghost", "to": "session:kid", "kind": "resumed" },
+                { "from": "session:root", "to": "session:kid", "kind": "spawned" },
+                { "from": "session:root", "to": "session:sib", "kind": "spawned" },
+                { "from": "session:ghost", "to": "session:sib", "kind": "resumed" },
+            ],
+        });
+        let mut app = app;
+        app.graph.view = View::All;
+        let m = build_model_from(&app, &doc, &[], "h");
+        assert!(m.nodes.iter().all(|n| n.id != "session:ghost"), "the ghost is not drawn");
+        // Drive the real key paths over this document by pinning it as the
+        // model's source: the helpers rebuild from the app, so the same edges
+        // must come from the stage. Session records with parents reproduce
+        // the spawned half; the resumed half rides `resumed_from`.
+        let mut root = session("root", "/x", "working", None);
+        root.resumed_from = None;
+        let mut kid = session("kid", "/x", "idle", Some("root"));
+        kid.resumed_from = Some("ghost".into());
+        let mut sib = session("sib", "/x", "idle", Some("root"));
+        sib.resumed_from = Some("ghost".into());
+        let mut app = App::for_test(vec![], vec![root, kid, sib], Vec::new());
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let m = build_model(&app);
+        assert!(
+            m.children.get("session:ghost").is_some(),
+            "the fixture really carries the ghost edge: {:?}",
+            m.children.keys().collect::<Vec<_>>()
+        );
+        for _ in 0..8 {
+            app.graph.selected = "session:kid".into();
+            select_parent(&mut app);
+            assert_eq!(selected_session_id(&app).as_deref(), Some("root"), "k climbs to the drawn parent");
+            app.graph.selected = "session:kid".into();
+            select_sibling(&mut app, true);
+            assert_eq!(selected_session_id(&app).as_deref(), Some("sib"), "l reaches the drawn sibling");
+        }
+    }
+
+    #[test]
+    fn a_failed_probe_keeps_the_host_cards_dimmed_and_says_so() {
+        let mut app = App::for_test(vec![], vec![session("local", "/x", "working", None)], Vec::new());
+        app.absorb_roster_outcome(roster_fixture());
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        assert!(!node(&build_model(&app), "node:sakaki").cached);
+
+        app.absorb_roster_outcome(aoide_protocol::output::Outcome::error("session", "HTTP 000"));
+        app.sync_graph_scene();
+        let m = build_model(&app);
+        let sakaki = node(&m, "node:sakaki");
+        assert!(sakaki.cached, "every remote card is a cache once the probe fails");
+        assert!(
+            sakaki.title.starts_with("online · 1 session(s) · probe failed ") && sakaki.title.ends_with(" ago"),
+            "{}",
+            sakaki.title
+        );
+        assert!(node(&m, "node:sakaki/session:far2").cached);
+        let out = dump(&paint(&app, Rect::new(0, 0, 320, 40)));
+        assert!(out.contains("probe failed"), "{out}");
     }
 
     #[test]

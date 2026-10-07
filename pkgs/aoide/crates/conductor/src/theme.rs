@@ -363,13 +363,51 @@ pub fn shorten_cwd(cwd: &str) -> String {
     }
 }
 
-/// How long ago an ISO-8601 stamp was, as [`elapsed_str`] spells it, with
-/// `ago` appended — or the stamp itself when it does not parse, so a cache
-/// whose `fetchedAt` is malformed still says something true.
+/// An age in words — `40s ago`, `5m ago`, `2h21m ago`, `3d ago` — never a
+/// clock reading, which `mm:ss` would look like beside "last seen".
+pub fn age_words(secs: i64) -> String {
+    let secs = secs.max(0);
+    if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h{:02}m ago", secs / 3600, (secs % 3600) / 60)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
+/// How long ago an ISO-8601 stamp was, in [`age_words`] — or the stamp itself
+/// when it does not parse, so a cache whose `fetchedAt` is malformed still
+/// says something true.
 pub fn age_label(stamp: &str) -> String {
-    match elapsed_str(stamp) {
-        s if s.is_empty() => stamp.to_string(),
-        s => format!("{s} ago"),
+    let Some(epoch) = parse_iso_utc(stamp) else {
+        return stamp.to_string();
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    age_words(now - epoch)
+}
+
+/// How long ago an [`Instant`](std::time::Instant) was, in [`age_words`].
+pub fn age_since(at: std::time::Instant) -> String {
+    age_words(at.elapsed().as_secs() as i32 as i64)
+}
+
+/// The roster's word for a node, in one phrase every surface shares: `online`,
+/// `unreachable (last seen <age>)`, `never pulled` — or the presence verbatim
+/// for a word this frontend does not know.
+pub fn presence_phrase(presence: &str, fetched_at: Option<&str>) -> String {
+    match presence {
+        "unreachable" => format!(
+            "unreachable (last seen {})",
+            fetched_at.map(age_label).unwrap_or_else(|| "unknown".into())
+        ),
+        "never-pulled" => "never pulled".to_string(),
+        other => other.to_string(),
     }
 }
 
