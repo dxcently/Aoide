@@ -1443,9 +1443,13 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // a detached spawn loses it the moment its spawner returns. Set or
     // cleared on every registration, so a re-registration under an
     // unconfirmed parent drops it.
+    let seal_key = parent.as_deref().and_then(|_| aoide_storage::attest::daemon_seal_pubkey_hex());
+    let sealed = |rec: &SessionRecord| {
+        seal_key.as_deref().is_some_and(|key| super::identity::verify_seal_over(rec, key))
+    };
     stamp_attested_spawner(
         &id,
-        parent.as_deref().filter(|p| spawner_is_attested(p, &id, &sessions_snapshot)),
+        parent.as_deref().filter(|p| spawner_is_attested(p, &id, &sessions_snapshot, &sealed)),
     );
     // `shell`, on the same footing: a registration fact about THIS record,
     // stamped from the argv this process is actually conducting (launchers
@@ -2688,8 +2692,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn conduct_stamps_attested_spawner_only_for_a_parent_the_kernel_backs() {
+        use crate::graph::testutil::{fake_seal_daemon, seal_record};
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_SESSION_ID"]);
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
 
         let root = unique_stage("conduct-attested-spawner");
         let stage = root.join("stage");
@@ -2697,23 +2707,38 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("XDG_RUNTIME_DIR", &root);
         std::env::remove_var("AOIDE_SESSION_ID");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
 
-        // A conducted wrap running above this very process, and one that is not.
+        // A conducted wrap running above this very process, one that is not,
+        // and one whose pid was REWRITTEN to ours after the daemon sealed it
+        // over another process (the hook door rewrites any record's pid from
+        // an unauthenticated payload field).
         let mut above = crate::graph::testutil::session("above", "/w", "working", "1", None);
         above.conductable = Some(true);
         above.pid = Some(std::process::id());
         let mut elsewhere = above.clone();
         elsewhere.session_id = "elsewhere".into();
         elsewhere.pid = Some(i32::MAX as u32);
+        let mut moved = above.clone();
+        moved.session_id = "moved".into();
+        moved.pid = Some(std::os::unix::process::parent_id());
         write_stage(
             &sessions_path(),
-            &SessionsFile { sessions: vec![above, elsewhere], ..Default::default() },
+            &SessionsFile { sessions: vec![above, elsewhere, moved], ..Default::default() },
         )
         .unwrap();
+        seal_record("above", &kp);
+        seal_record("moved", &kp);
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|r| r.session_id == "moved").unwrap().pid = Some(std::process::id());
+        write_stage(&sessions_path(), &file).unwrap();
 
-        for (id, parent, want) in
-            [("kid-ok", "above", Some("above")), ("kid-claimed", "elsewhere", None)]
-        {
+        for (id, parent, want) in [
+            ("kid-ok", "above", Some("above")),
+            ("kid-claimed", "elsewhere", None),
+            ("kid-rewritten", "moved", None),
+        ] {
             let out = session_conduct(&conduct_invocation(
                 &["sh", "-c", "exit 0"],
                 &[("id", id), ("parent", parent)],
@@ -2724,6 +2749,18 @@ mod tests {
             assert_eq!(rec.parent_session_id.as_deref(), Some(parent));
             assert_eq!(rec.attested_spawner.as_deref(), want, "{id}");
         }
+
+        // No daemon answering: nothing can be sealed-checked, so nothing is
+        // attested (fail-closed), however true the pid.
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("no-daemon.sock"));
+        let out = session_conduct(&conduct_invocation(
+            &["sh", "-c", "exit 0"],
+            &[("id", "kid-no-daemon"), ("parent", "above")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = s.sessions.iter().find(|r| r.session_id == "kid-no-daemon").unwrap();
+        assert_eq!(rec.attested_spawner, None);
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -30,13 +30,19 @@
 //! 1. the child's host wrap is its `parentSessionId` record, a conducted wrap
 //!    whose pid is in the child's `hookAncestry` (stamped by the hook door
 //!    from the hook process's own peer credentials — `session start` cannot
-//!    write it, so a forged `--parent` edge has none);
+//!    write it, so a forged `--parent` edge has none) AND whose daemon seal
+//!    verifies. The seal is what makes the pid a fact: the hook door rewrites
+//!    the `pid` of an existing record from an unauthenticated payload field,
+//!    and a seal re-derives the pid's `/proc` start time, so a rewritten pid
+//!    names a process the seal was never minted over;
 //! 2. the spawner is that wrap's `parentSessionId`, honoured only while it
 //!    equals the wrap's `attestedSpawner` — the parent `conduct` registration
-//!    saw in its own `/proc` ancestry (`window::spawner_is_attested`);
-//! 3. a spawner that is itself a conducted wrap hears it directly; a
+//!    saw in its own `/proc` ancestry (`window::spawner_is_attested`). A
+//!    detached spawn that registers only after its spawner returned has lost
+//!    that ancestry and gets no stamp: it is silent, never guessed;
+//! 3. a spawner that is itself a conducted wrap (sealed) hears it directly; a
 //!    hook-registered spawner (the usual case: an agent that ran `aoide
-//!    spawn`) is resolved to its own attested host wrap by step 1.
+//!    spawn`) is resolved to its own sealed host wrap by step 1.
 //!
 //! Anything else — an unattested edge, a spawner that resolves back to the
 //! child or its host — has no recipient and the child is not tracked.
@@ -105,25 +111,39 @@ pub(super) fn tracked(rec: &SessionRecord) -> bool {
 
 /// The conducted wrap `rec` runs under: its `parentSessionId` record, when
 /// that is a conducted wrap with a pid the hook door saw in `rec`'s own
-/// ancestry. The kernel's word, not the record's.
-fn host_wrap<'a>(rec: &SessionRecord, roster: &'a [SessionRecord]) -> Option<&'a SessionRecord> {
+/// ancestry and a daemon seal over that pid (`sealed`: `verify_seal_over`
+/// against the live daemon key, fail-closed). The kernel's and the daemon's
+/// word, not the record's.
+fn host_wrap<'a>(
+    rec: &SessionRecord,
+    roster: &'a [SessionRecord],
+    sealed: &impl Fn(&SessionRecord) -> bool,
+) -> Option<&'a SessionRecord> {
     let parent = rec.parent_session_id.as_deref()?;
     let wrap = roster.iter().find(|r| r.session_id == parent)?;
     let pid = i32::try_from(wrap.pid?).ok()?;
-    (wrap.conductable == Some(true) && rec.hook_ancestry.contains(&pid)).then_some(wrap)
+    (wrap.conductable == Some(true) && rec.hook_ancestry.contains(&pid) && sealed(wrap)).then_some(wrap)
 }
 
 /// Who hears `kid`: the conducted session that SPAWNED it, over an edge the
 /// kernel attested (the module doc's three steps). Never the child, never its
 /// own host wrap.
-fn recipient(kid: &SessionRecord, roster: &[SessionRecord]) -> Option<String> {
-    let host = host_wrap(kid, roster)?;
+fn recipient(
+    kid: &SessionRecord,
+    roster: &[SessionRecord],
+    sealed: &impl Fn(&SessionRecord) -> bool,
+) -> Option<String> {
+    let host = host_wrap(kid, roster, sealed)?;
     let spawner_id = host.parent_session_id.as_deref()?;
     if host.attested_spawner.as_deref() != Some(spawner_id) {
         return None;
     }
     let spawner = roster.iter().find(|r| r.session_id == spawner_id)?;
-    let target = if spawner.conductable == Some(true) { spawner } else { host_wrap(spawner, roster)? };
+    let target = if spawner.conductable == Some(true) && sealed(spawner) {
+        spawner
+    } else {
+        host_wrap(spawner, roster, sealed)?
+    };
     (target.session_id != kid.session_id && target.session_id != host.session_id)
         .then(|| target.session_id.clone())
 }
@@ -131,7 +151,11 @@ fn recipient(kid: &SessionRecord, roster: &[SessionRecord]) -> Option<String> {
 /// The tracked children that have a hook record and a recipient. A child with
 /// either missing has nothing to say or nobody to say it to, and keeps
 /// whatever cursor it had.
-pub(super) fn gather(roster: &[SessionRecord], hooks: &[HookRecord]) -> Vec<HookChild> {
+pub(super) fn gather(
+    roster: &[SessionRecord],
+    hooks: &[HookRecord],
+    sealed: &impl Fn(&SessionRecord) -> bool,
+) -> Vec<HookChild> {
     roster
         .iter()
         .filter(|rec| tracked(rec))
@@ -141,7 +165,7 @@ pub(super) fn gather(roster: &[SessionRecord], hooks: &[HookRecord]) -> Vec<Hook
             Some(HookChild {
                 id: rec.session_id.clone(),
                 tag: format!("[{} {}]", rec.agent, clean(name)),
-                recipient: recipient(rec, roster)?,
+                recipient: recipient(rec, roster, sealed)?,
                 phase: canonical_state(&hook.phase).to_string(),
                 at: hook.updated_at.clone(),
                 at_secs: parse_iso_utc(&hook.updated_at),
@@ -353,7 +377,15 @@ mod tests {
     }
 
     fn who(roster: &[SessionRecord], id: &str) -> Option<String> {
-        recipient(roster.iter().find(|r| r.session_id == id).unwrap(), roster)
+        who_sealed(roster, id, &|_| true)
+    }
+
+    fn who_sealed(
+        roster: &[SessionRecord],
+        id: &str,
+        sealed: &impl Fn(&SessionRecord) -> bool,
+    ) -> Option<String> {
+        recipient(roster.iter().find(|r| r.session_id == id).unwrap(), roster, sealed)
     }
 
     #[test]
@@ -442,6 +474,36 @@ mod tests {
     }
 
     #[test]
+    fn a_wrap_whose_pid_was_rewritten_or_whose_seal_fails_yields_no_recipient() {
+        // The hook door rewrites an existing record's `pid` from an
+        // unauthenticated payload field; the seal re-derives the pid's start
+        // time, so a rewritten pid fails it. Modelled as a verifier that
+        // refuses the one record whose pid moved.
+        let mut roster = spawned_shape();
+        roster[1].pid = Some(777);
+        roster[2].hook_ancestry = vec![999, 777, 1];
+        let honest = |r: &SessionRecord| r.pid != Some(777);
+        assert_eq!(who_sealed(&roster, "K", &honest), None, "the host wrap fails its seal");
+        assert_eq!(who_sealed(&roster, "K", &|_| true).as_deref(), Some("P"), "…and only the seal stops it");
+
+        // An unsealed host, an unsealed conducted spawner, each on their own.
+        let roster = spawned_shape();
+        assert_eq!(who_sealed(&roster, "K", &|r: &SessionRecord| r.session_id != "W"), None);
+        assert_eq!(who_sealed(&roster, "K", &|r: &SessionRecord| r.session_id != "P"), None);
+
+        // A hook-registered spawner is only as good as ITS host wrap's seal.
+        let mut roster = spawned_shape();
+        let mut pk = session("PK", "/w", "working", AT, Some("P"));
+        pk.kind = Some("agent".into());
+        pk.hook_ancestry = vec![60, 50];
+        roster[1].parent_session_id = Some("PK".into());
+        roster[1].attested_spawner = Some("PK".into());
+        roster.push(pk);
+        assert_eq!(who_sealed(&roster, "K", &|_| true).as_deref(), Some("P"));
+        assert_eq!(who_sealed(&roster, "K", &|r: &SessionRecord| r.session_id != "P"), None);
+    }
+
+    #[test]
     fn gather_keeps_only_children_with_a_hook_record_and_a_recipient() {
         let roster = spawned_shape();
         let hook = |phase: &str| HookRecord {
@@ -450,14 +512,14 @@ mod tests {
             updated_at: AT.into(),
             ..Default::default()
         };
-        let kids = gather(&roster, &[hook("running")]);
+        let kids = gather(&roster, &[hook("running")], &|_| true);
         assert_eq!(kids.len(), 1, "W and P are not hook children");
         assert_eq!((kids[0].phase.as_str(), kids[0].tag.as_str()), ("working", "[claude fond-aspen]"));
         assert_eq!(kids[0].recipient, "P");
-        assert!(gather(&roster, &[]).is_empty(), "no hook record, nothing to say");
+        assert!(gather(&roster, &[], &|_| true).is_empty(), "no hook record, nothing to say");
         let mut orphan = roster.clone();
         orphan[1].attested_spawner = None;
-        assert!(gather(&orphan, &[hook("working")]).is_empty(), "no attested recipient, nothing to claim");
+        assert!(gather(&orphan, &[hook("working")], &|_| true).is_empty(), "no attested recipient, nothing to claim");
     }
 
     #[test]

@@ -305,10 +305,20 @@ it, so this source does not write to that edge: it climbs to the wrap's own
 `parentSessionId` and speaks only when `attestedSpawner` — the parent the
 registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
 and the child's `hookAncestry` (stamped by the hook door from the hook
-process's own credentials) holds the wrap's pid. A spawner that is itself an
-agent is resolved to the wrap hosting it by the same test. A forged `session
-start --parent` carries neither and is ignored, and a child is never its own
-recipient nor its host wrap's. It is not a send
+process's own credentials) holds the wrap's pid. Both wraps' pids must also
+carry a verifying daemon seal, because the hook door stores an unauthenticated
+payload `pid` onto an existing record and a seal re-derives the pid's start
+time: a rewritten pid fails it, and so does a daemon that cannot be asked
+(nothing is attested, nothing is said). A spawner that is itself an agent is
+resolved to the wrap hosting it by the same test. A forged `session start
+--parent` carries none of this and is ignored, and a child is never its own
+recipient nor its host wrap's. Two limits are known and deliberate. A detached
+`aoide spawn` that only registers after its spawner has returned has lost the
+`/proc` ancestry the stamp is read from, so it gets no stamp and its child is
+silent — never guessed. And a claude launched through another claude's Bash
+tool, with no wrap of its own in between, shares that claude's host wrap: its
+line reaches that wrap's attested spawner, an ancestor of the real launcher,
+not the launcher itself. It is not a send
 and never becomes one: the send door attests the sender from the running
 process's `/proc` ancestry, so inside the daemon the sender is the daemon and
 never the child — the line is raw-injected the doorbell's way (a live channel
