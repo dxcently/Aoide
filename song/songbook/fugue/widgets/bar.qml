@@ -11,7 +11,9 @@
 //
 // Same KINDS of information sonata's bar carries, a minimal set:
 //   workspaces (Quickshell.Hyprland, no shell-out) -- live activate()
-//   mode       (livery.riceMode, toggled via bridge.toggleRiceMode())
+//   mode       (the shared `ricemode` slot, embedded below; fugue's own
+//               ricemode.qml dresses it -- a left click toggles, a right or
+//               middle click opens the draft picker)
 //   net        (a readout: /proc/net/route via FileView, no backing
 //               action exists to toggle a NIC from here, so no button)
 //   sessions   (state/stage/sessions.json + hooks.json via FileView --
@@ -29,6 +31,10 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+// The shell's WidgetSlot, for the embedded `ricemode` slot. This file lands at
+// $out/qml/songs/fugue/bar.qml, so two levels up is the shell's own qml/ root
+// (sonata's bar.qml reaches it the same way).
+import "../.."
 
 Item {
     id: root
@@ -36,9 +42,10 @@ Item {
     // -- Injected props -- exactly what shell.qml's barSlot hands over ------
     // (shell.qml lines ~122-143: WidgetSlot { slot: "bar" } always carries
     // livery + bridge, plus extraProps { shared, powermenu, dock,
-    // stagingEngine }). shared/stagingEngine are declared because they are
-    // unconditionally injected -- unused here, same precedent WidgetSlot.qml
-    // itself documents for bridge on its own fallback path.
+    // stagingEngine }). stagingEngine is handed on to the embedded `ricemode`
+    // slot; shared is declared because it is unconditionally injected --
+    // unused here, same precedent WidgetSlot.qml itself documents for bridge
+    // on its own fallback path.
     required property var livery
     required property var bridge
     required property var shared
@@ -97,13 +104,6 @@ Item {
                                  wsCell.modelData.activate()
             }
         }
-    }
-
-    // -- Rice mode -- livery.riceMode, toggled through the bridge -----------
-    function modeWord(m) {
-        if (m === "staging") return "stage"
-        if (m === "draft") return "draft"
-        return "decl"
     }
 
     // -- Network -- /proc/net/route via FileView (files, not processes) -----
@@ -185,15 +185,14 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 0
 
-        Cell {
+        // Rice mode -- the shared `ricemode` slot; fugue's ricemode.qml carries
+        // the cell, the gestures and the draft picker.
+        WidgetSlot {
             livery: root.livery
-            paper: root.livery.barBg
-            ink: root.livery.barFg
-            label: "mode"
-            value: root.modeWord(root.livery.riceMode)
-            active: root.livery.riceMode === "staging"
-            interactive: true
-            onActivated: root.bridge.toggleRiceMode()
+            bridge: root.bridge
+            stagingEngine: root.stagingEngine
+            slot: "ricemode"
+            anchors.verticalCenter: parent.verticalCenter
         }
         Cell {
             livery: root.livery

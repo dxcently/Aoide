@@ -27,7 +27,6 @@
 //                           core-seams §C; absent today → "no usage data"
 //   state/stage/herald.json the NOTIF cell count
 //   state/stage/projects.json  the registered names → the jack pane's PROJECT chips
-//   livery.riceMode         the RICE cell
 //   /proc/meminfo, /proc/net/route   mem total (insight gauge), NET kind
 //                           (kernel files, sonata meters/bar precedent)
 //   Pipewire · Bluetooth · Networking · UPower · SystemTray  (sonata's services)
@@ -37,8 +36,9 @@
 //   [⏻] → powermenu.toggle()          jack click → workspace.activate()
 //   AGT / NOTIF → dock.openTab("overview"|"notif"), falling back to
 //        dock.toggle() when the dock has no openTab
-//   RICE → bridge.toggleRiceMode() ONCE, then a dim `…` and no more clicks
-//        until livery.riceMode changes (or 10s)
+//   RICE → the `ricemode` slot (ricemode.qml, cadenza's own body): a click
+//        toggles staging and declarative, a right or middle click opens the
+//        draft picker
 //   session row → bridge.focusSession(id)
 //   SOUND+BT/NET/BAT/TRAY/clock → their own pane (one open at a time, click
 //        the cell again to close; wheel on the sound cell steps the volume);
@@ -119,7 +119,7 @@ import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.SystemTray
 import Quickshell.Networking
-// the shell's WidgetSlot, for the embedded calendar (sonata's bar does the same)
+// the shell's WidgetSlot, for the embedded calendar and ricemode (sonata's bar does the same)
 import "../.."
 import "Kit.js" as Kit
 import "Trace.js" as Trace
@@ -1235,26 +1235,6 @@ Item {
         if (b >= 1073741824) return (b / 1073741824).toFixed(1) + "G"
         return Math.round(b / 1048576) + "M"
     }
-    function modeWord(m) { return m === "staging" ? "stg" : (m === "draft" ? "drft" : "decl") }
-    function modeColor(m) { return m === "staging" ? root.kit.title : (m === "draft" ? root.kit.path : root.kit.dim) }
-    // The RICE toggle in flight. A click sends the toggle once and the cell
-    // reads a dim `…` at once; every further click is ignored until
-    // livery.riceMode (the shell's watch of song/stage/mode.json `mode`)
-    // actually changes, or 10s pass with it unchanged — then the cell is
-    // itself again and says nothing more. A switch reloads the whole shell,
-    // so the mark only has to hold until then; its job is to swallow the
-    // double click that sent two toggles.
-    property bool ricePending: false
-    readonly property string riceModeNow: root.livery.riceMode || "declarative"
-    onRiceModeNowChanged: { root.ricePending = false; ricePendingTimer.stop() }
-    function toggleRice() {
-        if (root.ricePending) return
-        root.ricePending = true
-        ricePendingTimer.restart()
-        if (root.bridge && root.bridge.toggleRiceMode) root.bridge.toggleRiceMode()
-    }
-    Timer { id: ricePendingTimer; interval: 10000; onTriggered: root.ricePending = false }
-
     // ── actions ─────────────────────────────────────────────────────────────
     function openBoard(tab) {
         if (root.dock && root.dock.openTab) root.dock.openTab(tab)
@@ -1856,15 +1836,17 @@ Item {
             lit: root.openPane === "tray"
             onActivated: root.togglePane("tray", trayCell, true)
         }
-        Cell {
-            kit: root.kit
-            glyph: root.kit.glyph.rice
-            // pending: `…` padded to the word it replaces, so the clock never moves
-            value: root.ricePending
-                   ? "…" + root.kit.rep(" ", root.modeWord(root.livery.riceMode).length - 1)
-                   : root.modeWord(root.livery.riceMode)
-            valueColor: root.ricePending ? root.kit.dim : root.modeColor(root.livery.riceMode)
-            onActivated: root.toggleRice()
+        Loader {
+            active: !!root.stagingEngine
+            visible: active
+            sourceComponent: Component {
+                WidgetSlot {
+                    livery: root.livery
+                    bridge: root.bridge
+                    stagingEngine: root.stagingEngine
+                    slot: "ricemode"
+                }
+            }
         }
         Sep { kit: root.kit }
         Cell {

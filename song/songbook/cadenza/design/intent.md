@@ -246,15 +246,21 @@ One 28px line in the tmux/termui idiom, left to right:
 - right cells on the grid, glyphed per §2 Glyphs: `󰚩 3/5` and `󰂚 2`,
   each opening the board on its tab (OVERVIEW, NOTIF); then `󰕾 62% 󰂯`
   (one cell, one pane: sound and bluetooth), `󰈀` (the network pane),
-  `󰁹 88%`, the tray, `󰏘 stg` (the rice-mode toggle), and the clock
+  `󰁹 88%`, the tray, `󰏘 stg 󰅀` (the rice-mode cell), and the clock
   `14:02:31` (the calendar pane). CPU and spend are not on the bar; they
   live on the board's SYS tab.
-- **The rice-mode toggle is one click.** A click sends the toggle once and
-  the cell reads a dim `󰏘 …` (padded to the word, so nothing moves) at
-  once; further clicks do nothing until the mode (`song/stage/mode.json`
-  `mode`, through `livery.riceMode`) actually changes, or 10s pass. A
-  switch reloads the shell; a toggle that changed nothing in 10s simply
-  returns the cell to its word and says no more.
+- **The rice-mode cell is the `ricemode` slot** (`widgets/ricemode.qml`,
+  cadenza's own body; every bar embeds the slot). A left click sends the
+  toggle once and the cell reads a dim `󰏘 …` (padded to the word, so nothing
+  moves) at once; further clicks do nothing until the mode
+  (`song/stage/mode.json` `mode`, through `livery.riceMode`) actually
+  changes, or 10s pass. A switch reloads the shell; a toggle that changed
+  nothing in 10s simply returns the cell to its word and says no more. A
+  right or middle click opens the draft picker, marked by the `󰅀` after the
+  word: a kit Pane titled RICE listing the staged song's saved drafts (the
+  current one lit), `[+ new draft]`, and, in staging only, `[save as draft]`.
+  It has no inner glow, takes no keyboard, and closes on a row, a click on
+  the cell, or 600ms after the pointer leaves both.
 - **The sound + bluetooth pane.** One pane, two sections. SOUND: the output
   and input with volume and mute (click toggles mute, wheel steps volume),
   and the default device picker. BLUETOOTH: a power toggle `[on]`/`[off]`,

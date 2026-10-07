@@ -141,8 +141,9 @@ var glyph = {
     wifi:     cp(0xF05A9),   // nf-md-wifi
     netNone:  cp(0xF05AA),   // nf-md-wifi_off
     battery:  batteryGlyph,  // function (level 0..1, charging?) → one glyph
-    // the rice-mode toggle
-    rice:     cp(0xF03D8)    // nf-md-palette        RICE
+    // the rice-mode cell: its icon, and the mark of its second gesture
+    rice:     cp(0xF03D8),   // nf-md-palette        RICE
+    ricePick: cp(0xF0140)    // nf-md-chevron_down   RICE's draft picker
 }
 
 // ══ GLYPH BUILDERS — numbers in, strings out ═══════════════════════════════

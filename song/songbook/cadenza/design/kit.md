@@ -200,7 +200,8 @@ the clock, `$`, the tray, `⏻` and every list row stay bare text.
 | `bt` / `btOff` | U+F00AF / U+F00B2 | nf-md-bluetooth / bluetooth_off | Bluetooth (icon only) |
 | `wired` / `wifi` / `netNone` | U+F0200 / U+F05A9 / U+F05AA | nf-md-ethernet / wifi / wifi_off | network (icon only) |
 | `battery(level, charging?)` | U+F008E, U+F007A–F0082, U+F0079; U+F0084 | nf-md-battery_outline, battery_10…90, battery; battery_charging | battery: `level` 0..1 picks the tenth |
-| `rice` | U+F03D8 | nf-md-palette | RICE (the rice-mode toggle) |
+| `rice` | U+F03D8 | nf-md-palette | RICE (the rice-mode cell) |
+| `ricePick` | U+F0140 | nf-md-chevron_down | RICE's draft picker (the mark of its second gesture) |
 
 - **Colour.** An icon has no colour job of its own: it takes its value's
   colour (`number`, `warn`, `urgent`, `ink`, or `dim` when the value is

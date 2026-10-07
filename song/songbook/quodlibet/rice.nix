@@ -2,9 +2,9 @@
 #
 # A quodlibet is the musical form defined by borrowing: a piece assembled
 # from other people's existing tunes sounded together (Bach, Goldberg
-# var. 30). This song owns no widget bodies at all — it composes 12 slots
-# from sonata and 2 (`bar`, `herald`) from fugue, and contributes only a
-# palette and this file. See design/intent.md for the full rationale.
+# var. 30). This song owns no widget bodies at all — it composes 11 slots
+# from sonata and 3 (`bar`, `herald`, `ricemode`) from fugue, and contributes
+# only a palette and this file. See design/intent.md for the full rationale.
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
 # All livery values are literal nix expressions (no song/ runtime reads).
@@ -18,12 +18,13 @@
 let
   # `_widgets/default.nix` here is NOT a shelf roll-up (contrast sonata's and
   # fugue's, which `readDir` their own sibling `<slot>.nix` files) — it is the
-  # composition itself: `sonataWidgets // { inherit (fugueWidgets) bar herald; }`,
+  # composition itself:
+  # `sonataWidgets // { inherit (fugueWidgets) bar herald ricemode; }`,
   # the documented borrow idiom from `lib/song.nix`'s header. `composeSong`
   # validates the result exactly as it would a self-owned shelf; every record
   # it returns keeps whichever `owner` its authoring song's roll-up bound
-  # (`fugue` for `bar`/`herald`, `sonata` for the rest) — quodlibet mints no
-  # `owner = "quodlibet"` record anywhere.
+  # (`fugue` for `bar`/`herald`/`ricemode`, `sonata` for the rest) — quodlibet
+  # mints no `owner = "quodlibet"` record anywhere.
   # Its OWN composition, through the name-keyed door — which is also how it
   # reaches the two parents it composes: `borrow "sonata"` and `borrow "fugue"`,
   # never a path to their folders (CONTRACTS.md §5).

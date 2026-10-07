@@ -3,10 +3,17 @@
 # slot (`WidgetSlot { slot: "bar" }`, slots.md's own wired-slot table), never
 # a declared `arrangement.widgets` entry.
 #
-# `dependsOn`: EMPTY, despite a real runtime dependency — read this before
-# adding one back.
+# `dependsOn`: `ricemode` ONLY, despite two more real runtime dependencies —
+# read this before adding either.
 #
-# widgets/bar.qml declares `required property var powermenu` and calls
+# widgets/bar.qml embeds `WidgetSlot { slot: "ricemode" }` (the rice-mode
+# control, first cell of the right row). fugue authors that slot itself
+# (`ricemode.nix`), so it is a key of this composition and `composeSong`'s
+# closure holds. At runtime the slot still resolves through `StagingEngine`,
+# which is how quodlibet's borrowed bar reaches fugue's body.
+#
+# `powermenu` is the dependency the closure cannot hold. widgets/bar.qml
+# declares `required property var powermenu` and calls
 # `.toggle()` on it (bar.qml:228) — shell.qml:139 injects
 # `powermenuSlot.item`, the live item of the real `SurfaceSlot { slot:
 # "powermenu" }` anchor. By the rule this shelf's sibling songs use (a real
@@ -15,7 +22,7 @@
 # `lib/song.nix`'s `composeSong` closure checks a dependency against
 # `present = builtins.attrNames widgets`, i.e. the KEYS OF THIS SAME
 # COMPOSITION CALL, not the full songbook. fugue's own `rice.nix` composes
-# only `{ bar, herald }` (this shelf's two records) — fugue does not, and
+# only this shelf's records `{ bar, herald, ricemode }` — fugue does not, and
 # should not, own a `powermenu` record of its own — so `present` never
 # contains `powermenu` and the closure throws unconditionally:
 # `aoide composition: slot dependency not satisfied — \`bar\` (owner fugue)
@@ -30,7 +37,7 @@
 # fallback at runtime (`resolveSong`) — a mechanism `composeSong`'s
 # eval-time closure has no visibility into and was never designed to
 # express. Widening that contract is a `lib/song.nix` design change, out of
-# scope for a prerequisite commit. Left empty here rather than invented
+# scope for a prerequisite commit. Left out here rather than invented
 # around; the runtime dependency is real and stays true — it is
 # `powermenuSlot.item`'s shell-level fallback that already makes it safe,
 # same as it does today before this shelf existed.
@@ -47,13 +54,15 @@
 #
 # `shared`, `stagingEngine`: declared, unused (bar.qml's own comments say so).
 #
-# No `WidgetSlot` embedded — fugue's bar has no popout of its own, so no
-# `calendar` dependency either.
+# The one `WidgetSlot` it embeds is `ricemode` — fugue's bar has no popout of
+# its own, so no `calendar` dependency either.
 #
 # `helpers`: bar.qml instantiates `Cell` (fugue's own uppercase helper, this
 # song's `qmldir` proof — `Cell.qml`).
 _: {
   file = "bar.qml";
+
+  dependsOn = [ "ricemode" ];
 
   helpers = [ "Cell.qml" ];
 }

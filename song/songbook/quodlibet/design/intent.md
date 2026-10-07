@@ -14,13 +14,14 @@ song owns no widget bodies at all. Its composition is plain attrset update
 over its two parents' already-resolved widget maps:
 
 ```nix
-sonataWidgets // { inherit (fugueWidgets) bar herald; }
+sonataWidgets // { inherit (fugueWidgets) bar herald ricemode; }
 ```
 
-14 slots. `bar` and `herald` are fugue's (the two slots fugue authors, kept
-whole rather than split). The other twelve — `calendar`, `conductor`, `dock`,
-`herald-center`, `launcher`, `meters`, `power`, `powermenu`, `terminals`,
-`usage`, `wallpaper`, `wallpaper-picker` — are sonata's. quodlibet contributes
+14 slots. `bar`, `herald` and `ricemode` are fugue's (the slots fugue authors,
+kept whole rather than split: the bar embeds the rice-mode control, so the
+control that fits the lattice comes with it). The other eleven — `calendar`,
+`conductor`, `dock`, `herald-center`, `launcher`, `meters`, `power`,
+`powermenu`, `terminals`, `usage`, `wallpaper-picker` — are sonata's. quodlibet contributes
 no new QML anywhere; only this file, `rice.nix`, and `livery.json`.
 
 ## The honest consequence
@@ -68,7 +69,7 @@ ramp (each stepping away from an extreme) needed to do.
 ## Slots dressed
 
 None, in the QML sense — quodlibet ships no `widgets/` directory. All 14
-slots resolve through the owner map to a foreign song: 12 to sonata, 2 to
+slots resolve through the owner map to a foreign song: 11 to sonata, 3 to
 fugue. `packages` is empty (`[]`): fugue's borrowed `bar` shells out to
 nothing, and sonata's own `bar` record is entirely superseded, packages and
 all, by the `//` override rather than merged into.

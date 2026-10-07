@@ -11,9 +11,9 @@
 #
 # `sonataWidgets` and `fugueWidgets` are each a fully resolved `slot -> record`
 # attrset (owner already bound by their OWN roll-ups). `//` picks a winner per
-# key: both parents author `bar` and `herald`, so the right-hand side
-# (fugue's) wins those two, and every other key falls through from sonata
-# unchanged, `owner` field and all. quodlibet therefore contributes zero
+# key: both parents author `bar`, `herald` and `ricemode`, so the right-hand
+# side (fugue's) wins those three, and every other key falls through from
+# sonata unchanged, `owner` field and all. quodlibet therefore contributes zero
 # widget records of its own — this file never types `owner = "quodlibet"`
 # anywhere, which is the point.
 { borrow, ... }:
@@ -21,4 +21,4 @@ let
   sonataWidgets = borrow "sonata";
   fugueWidgets = borrow "fugue";
 in
-sonataWidgets // { inherit (fugueWidgets) bar herald; }
+sonataWidgets // { inherit (fugueWidgets) bar herald ricemode; }
