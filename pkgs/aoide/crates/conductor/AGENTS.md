@@ -26,9 +26,12 @@
 - Registered nodes enter the graph from the roster outcome (`App::roster_nodes`),
   never from the document's `node:*` fold (fresh only inside the cache TTL,
   written only by `node pull`). A remote card's id is prefixed with its node's
-  root id and its `session_id` is `None`, so no local action — focus, letter,
-  menu, prune — can resolve it against this box's roster; a cached row's
-  state slot carries the roster's `presence` word, never its last live state.
+  root id and its `session_id` is `None`, so no local action — focus,
+  prune, project — can resolve it against this box's roster; its far id
+  rides `remote_id` for the Mesh row and its letter goes to `node/petname`
+  (`ContextTarget::Remote`), and nothing else crosses the node line. A
+  cached row's state slot carries the roster's `presence` word, never its
+  last live state.
 - `graphview::build_model` is memoised on `App::graph_cache`, keyed by
   `ModelKey` (view, selection, folds, camera, the retained world's
   generation, the failed-probe age). Every path that changes the forest's

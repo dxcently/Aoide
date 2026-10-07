@@ -225,6 +225,15 @@ pub enum InputKind {
 #[derive(Debug, Clone)]
 pub enum ContextTarget {
     Session(SessionRecord),
+    /// A session on another node, as a Graph host card's row names it: its
+    /// node, far session id and mailbox petname. Details goes to its Mesh
+    /// row and Write letter addresses `node/petname`; nothing else — no
+    /// focus, no prune, no project — crosses the node line.
+    Remote {
+        node: String,
+        session_id: String,
+        petname: Option<String>,
+    },
     Project(String),
     History(aoide_storage::ledger::LedgerEntry),
     /// A registered node in the Mesh pane: its name plus the `allows` set the
@@ -3635,6 +3644,45 @@ impl App {
         }
     }
 
+    pub fn open_context_for_remote(
+        &mut self,
+        node: String,
+        session_id: String,
+        petname: Option<String>,
+        terminal: bool,
+        title: String,
+        x: u16,
+        y: u16,
+    ) {
+        let mut actions = vec![ContextAction::Details];
+        if petname.as_ref().is_some_and(|p| !p.is_empty()) && !terminal {
+            actions.push(ContextAction::WriteLetter);
+        }
+        self.context_menu = Some(ContextMenu {
+            x,
+            y,
+            title,
+            target: ContextTarget::Remote {
+                node,
+                session_id,
+                petname,
+            },
+            actions,
+            selected: 0,
+        });
+    }
+
+    /// Put the Mesh cursor on a far session's row and show the pane.
+    pub fn show_remote_in_mesh(&mut self, session_id: &str) {
+        self.select_panel(Panel::Roster);
+        self.sidebar_focused = false;
+        if let Some(i) = self.roster_flat_rows().iter().position(
+            |r| matches!(r, RosterRow::Session { session, .. } if session.session_id == session_id),
+        ) {
+            self.roster_sel = i;
+        }
+    }
+
     pub fn open_context_for_session(&mut self, rec: SessionRecord, x: u16, y: u16) {
         let mut actions = vec![ContextAction::Details];
         if !is_done(&rec.state) && self.merged().iter().any(|s| s.session_id == rec.session_id) {
@@ -3736,6 +3784,14 @@ impl App {
                 ) {
                     self.dag_sel = i;
                     self.sidebar_focused = false;
+                }
+            }
+            (ContextTarget::Remote { session_id, .. }, ContextAction::Details) => {
+                self.show_remote_in_mesh(&session_id);
+            }
+            (ContextTarget::Remote { node, petname, .. }, ContextAction::WriteLetter) => {
+                if let Some(p) = petname {
+                    self.open_mail_to(format!("{node}/{p}"));
                 }
             }
             (ContextTarget::History(entry), ContextAction::Details) => {

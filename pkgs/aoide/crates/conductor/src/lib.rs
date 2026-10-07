@@ -438,8 +438,26 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
     }
 
     if app.panel == Panel::Graph && key.code == KeyCode::Char('s') {
-        if let Some(id) = graphview::selected_session_id(app) {
-            open_graph_letter(app, &id);
+        match graphview::selected_node(app) {
+            // A far agent's mailbox is `node/petname`, the same address the
+            // Mesh row's compose uses; a far terminal has none.
+            Some(node) if node.host.is_some() => match (&node.host, &node.petname) {
+                (Some(host), Some(p)) if !p.is_empty() && node.harness != "shell" => {
+                    app.open_mail_to(format!("{host}/{p}"));
+                }
+                _ => {
+                    app.last_outcome = Some(aoide_protocol::output::Outcome::usage(
+                        "mail.compose",
+                        "Select a live agent card with a mailbox.",
+                    ));
+                }
+            },
+            Some(node) => {
+                if let Some(id) = node.session_id {
+                    open_graph_letter(app, &id);
+                }
+            }
+            None => {}
         }
         return false;
     }
@@ -949,7 +967,17 @@ fn open_context_hit(app: &mut App, hit: board::Hit, x: u16, y: u16) {
             graphview::select_index(app, i);
             app.sidebar_focused = false;
             if let Some(node) = node {
-                if let Some(id) = &node.session_id {
+                if let (Some(host), Some(remote_id)) = (&node.host, &node.remote_id) {
+                    app.open_context_for_remote(
+                        host.clone(),
+                        remote_id.clone(),
+                        node.petname.clone(),
+                        node.harness == "shell",
+                        node.label.clone(),
+                        x,
+                        y,
+                    );
+                } else if let Some(id) = &node.session_id {
                     if let Some(rec) = app.merged().into_iter().find(|r| &r.session_id == id) {
                         app.open_context_for_session(rec, x, y);
                     }

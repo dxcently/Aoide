@@ -97,6 +97,9 @@ pub struct Node {
     /// cards. A remote session id never resolves against the local roster,
     /// so no local action (focus, letter, prune) can reach one by mistake.
     pub host: Option<String>,
+    /// The far session's own id on a remote card — the handle the Mesh row
+    /// is found by. Never `session_id`, which local actions resolve.
+    pub remote_id: Option<String>,
     /// The card's facts are a cache, not a live reply: a `last-seen` row, or
     /// any remote card while the last probe failed. Drawn dimmed.
     pub cached: bool,
@@ -144,6 +147,7 @@ struct Meta {
     tags: Vec<String>,
     model: Option<String>,
     host: Option<String>,
+    remote_id: Option<String>,
     petname: Option<String>,
     activity: String,
     cached: bool,
@@ -458,6 +462,7 @@ pub fn build_model_from(
                         tags: Vec::new(),
                         model: None,
                         host: None,
+                        remote_id: None,
                         petname: None,
                         activity: String::new(),
                         cached: false,
@@ -505,6 +510,7 @@ pub fn build_model_from(
                         tags,
                         model,
                         host: None,
+                        remote_id: None,
                         petname: None,
                         activity: String::new(),
                         cached: false,
@@ -557,6 +563,7 @@ pub fn build_model_from(
                 tags: Vec::new(),
                 model: None,
                 host: None,
+                remote_id: None,
                 petname: None,
                 activity: String::new(),
                 cached: false,
@@ -600,6 +607,7 @@ pub fn build_model_from(
                 tags: Vec::new(),
                 model: None,
                 host: None,
+                remote_id: None,
                 petname: None,
                 activity: String::new(),
                 cached: probe_failed.is_some(),
@@ -633,6 +641,7 @@ pub fn build_model_from(
                     tags: Vec::new(),
                     model: None,
                     host: Some(node.name.clone()),
+                    remote_id: Some(s.session_id.clone()),
                     petname: s.petname.clone(),
                     activity,
                     cached: s.is_cached() || probe_failed.is_some(),
@@ -738,6 +747,7 @@ fn walk(
             tags: m.tags.clone(),
             model: m.model.clone(),
             host: m.host.clone(),
+            remote_id: m.remote_id.clone(),
             cached: m.cached,
             folded: None,
             depth,
@@ -2263,6 +2273,48 @@ mod tests {
         assert!(node(&m, "node:sakaki/session:far2").cached);
         let out = dump(&paint(&app, Rect::new(0, 0, 320, 40)));
         assert!(out.contains("probe failed"), "{out}");
+    }
+
+    #[test]
+    fn a_remote_card_writes_to_its_node_mailbox_and_shows_details_in_mesh() {
+        let mut app = App::for_test(vec![], vec![], Vec::new());
+        app.roster.outcome = Some(roster_fixture());
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        app.panel = crate::app::Panel::Graph;
+        app.sidebar_focused = false;
+        app.graph.selected = "node:yomi-strix/session:far1".into();
+        let card = selected_node(&app).unwrap();
+        assert_eq!(card.remote_id.as_deref(), Some("far1"));
+
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('s')));
+        assert_eq!(
+            app.mail_draft.as_ref().map(|d| d.to.clone()).as_deref(),
+            Some("yomi-strix/misty-comet"),
+            "s addresses the far agent's own mailbox"
+        );
+        app.mail_draft = None;
+
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('e')));
+        let menu = app.context_menu.as_ref().expect("the card has a menu");
+        assert_eq!(
+            menu.actions,
+            vec![crate::app::ContextAction::Details, crate::app::ContextAction::WriteLetter]
+        );
+        app.run_context_action(0);
+        assert_eq!(app.panel, crate::app::Panel::Roster, "Details is the Mesh row");
+        assert!(matches!(
+            app.roster_flat_rows().get(app.roster_sel),
+            Some(crate::app::RosterRow::Session { session, .. }) if session.session_id == "far1"
+        ));
+
+        // A far terminal has no mailbox: only Details, and s refuses.
+        app.panel = crate::app::Panel::Graph;
+        app.graph.selected = "node:sakaki/session:far2".into();
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('s')));
+        assert!(app.mail_draft.is_none());
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('e')));
+        assert_eq!(app.context_menu.as_ref().unwrap().actions, vec![crate::app::ContextAction::Details]);
     }
 
     #[test]

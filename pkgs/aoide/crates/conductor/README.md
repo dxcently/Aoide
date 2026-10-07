@@ -135,9 +135,12 @@ a cached row under an unreachable node wears the cache's word (`last-seen`)
 as its state and `was <state>` as its activity, never a live glyph, and is
 drawn dimmed like its Mesh row. A probe that fails after a good one keeps the
 last rows on the canvas, dimmed, every host card's last row reading `probe
-failed <age>` — the forest never empties in silence. A remote card carries no local session
-id, so Enter, `s` and the menu act on nothing: a far session is looked at
-here, and conducted from Mesh or the shell.
+failed <age>` — the forest never empties in silence. A remote card carries
+no local session id, so Enter and the local actions pass over it; `s` on a
+far agent writes to its own mailbox, `node/petname`, exactly the address the
+Mesh row's compose uses, and its menu offers Details — the card's Mesh row —
+and Write letter. Nothing else crosses the node line: no focus, no prune,
+no project.
 
 Space + left drag or middle drag pans the canvas; the wheel pans vertically and
 Shift + wheel pans horizontally. Ctrl + wheel zooms the camera through 50%,
@@ -165,6 +168,7 @@ Enter applies it and Escape closes the menu.
 | Every target | Details |
 | Live local session | Open / focus; Set project (blank restores automatic attribution); Lead project (its effective project, so that project's other roots nest beneath it) |
 | Live local agent with a mailbox petname | Write letter |
+| Remote session (a host card's row) | Details (its Mesh row); Write letter for an agent with a petname, to `node/petname` |
 | Project | Write letter recipient chooser; Add folder; Resurrect its existing undying set |
 | Historical session with a registered project and native session ID or restore snapshot | Resurrect that exact session |
 | Registered node (Mesh) | Pair / re-pair; toggle read, spawn, message; Unregister node (exact name) |

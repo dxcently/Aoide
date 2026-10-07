@@ -159,7 +159,9 @@ followed by one **host card per registered node** off the roster probe
 (border `🖧 NODE · online|unreachable|never-pulled`, then the node's name and
 `n session(s)` or `last seen <age>`), its
 reported sessions flat beneath. A remote card carries no local session id,
-so the local actions pass over it; a cached row wears `last-seen` as its
+so the local actions pass over it — `s` writes to the far agent's
+`node/petname` mailbox and `e` offers Details (its Mesh row) and Write
+letter; a cached row wears `last-seen` as its
 state and `was <state>` as its activity, dimmed. A probe that fails after a
 good one keeps the last rows, dimmed, each host card's last row reading
 `probe failed <age>`.
@@ -172,7 +174,7 @@ good one keeps the last rows, dimmed, each host card's last row reading
 | `a` | Focus (the selected card's connected component; the gathering root is not a connection) ↔ All |
 | `f` | fold / unfold the selected card's children; the bottom border reads `▸ n · k awaiting` |
 | `Enter` | cue the selected local session |
-| `s` | write a letter to the selected local agent |
+| `s` | write a letter to the selected agent — local, or a far one at `node/petname` |
 | `e` / right-click | the card's context menu |
 | `p` | `session prune` |
 | Space + drag, middle drag, wheel, Shift + wheel | pan |
