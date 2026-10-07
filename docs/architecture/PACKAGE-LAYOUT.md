@@ -247,10 +247,9 @@ this is structure, not features.
   explicitly user-triggered, never autonomous: `shellbridge`'s power actions
   (`systemctl suspend`/`hibernate`/`reboot`/`poweroff`, `hyprctl dispatch
   exit`, fired only by a UI button press) and, inside the ricing surface
-  itself, one env-guarded `hyprctl` call in `song::live` plus `song::reap`'s
-  `kill` of a stale quickshell pid — none of it reaches `nixos-rebuild`,
-  `switch`, or service *installation*, the shape `management`'s charter
-  actually names. The env-guarded `hyprctl` call stayed a function separate
+  itself, one env-guarded `hyprctl` call in `song::live` — none of it reaches
+  `nixos-rebuild`, `switch`, or service *installation*, the shape
+  `management`'s charter actually names. The env-guarded `hyprctl` call stayed a function separate
   from `song::live::geometry_keywords` so a future `management` crate could
   lift just the host-effect half out later without touching the pure
   computation. `management` is deferred indefinitely until real host-ops

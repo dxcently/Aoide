@@ -1447,14 +1447,6 @@ project/parent inheritance across local/remote/app/subagents;
   INTO the checkout — nobody runs it while other writers have tree edits.
   Placement into `~/.aoide` is the User's gate.
 - AoideOS/Lyra portability: unverified; folds into 4(e).
-- Preview-harness reaping is filename-scoped (root ricing audit, seq 339):
-  `song/src/reap.rs` classifies every `*Preview.qml` launched by `qs`/
-  `quickshell` as stray on `rice mode stage`, hyprlock likewise — the new
-  `WidgetPreview.qml` canvas included. A filename never establishes an owned
-  stale process; the sweep must be ownership-scoped (the preview's own
-  isolated root / pid ancestry). Slice on the song crate, reviewed, before
-  any stage or preview acceptance; the designer runs no blanket sweep to
-  validate. Owner: integrator dispatch after the preview stack lands.
 - Desktop Codex detection off Linux: UNRESOLVED (seq 190); fd evidence is
   the only positive ownership signal and it is `/proc`-shaped. Owner: 2.
 - Osaka/Sakaki deployment: sakaki re-paired 2026-09-10; no deploy.

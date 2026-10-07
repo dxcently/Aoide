@@ -103,9 +103,9 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
     #                under this unit's NoNewPrivileges cannot run the setuid
     #                unix_chkpwd and refuses every password.
     #   libnotify  — `notify-send`: the rice-mode toggle's success toast.
-    #   procps     — `kill`: the stray-process sweep `rice mode stage` opens
-    #                with (reap_stray_processes); systemctl is already covered
-    #                by the default PATH's systemd package.
+    #   procps     — `ps`: the desktop-Codex process-table scan the window
+    #                listener's ticks run (`conduct::graph::codex_app::
+    #                process_table`).
     #   quickshell — `quickshell ipc call shell reload` when a daemon-routed
     #                `rice mode stage` syncs changed widget bodies.
     #   nix        — `nix eval <checkout>#songbookManifest`: the widget-body

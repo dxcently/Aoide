@@ -203,16 +203,7 @@ fn teardown_draft_symlink() -> std::io::Result<()> {
 /// declared-content write below, so that write lands in a real file rather
 /// than transparently through into whatever draft the symlink still pointed
 /// at.
-///
-/// Also sweeps stray processes first ([`crate::reap::reap_stray_processes`])
-/// — a leftover `qs -p *Preview.qml` harness, a duplicate `shell.qml`
-/// process outside `aoide-quickshell.service`, or a stale `hyprlock` — so
-/// unlocking staging always starts from a known-clean slate. Best-effort and
-/// never fatal to this command: a sweep that reaps nothing, or fails to
-/// enumerate `/proc` at all, still proceeds to stage/unlock normally.
 fn handle_mode_stage(inv: &Invocation) -> Outcome {
-    let reaped = crate::reap::reap_stray_processes();
-
     let explicit_name = inv.args.first().cloned();
     let existing = load_mode_marker();
     // Resolution order for a bare (no-arg) call: an explicit name always
@@ -294,12 +285,7 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
     }
     changed.push(mode_marker_path().to_string_lossy().into_owned());
 
-    let reap_note = if reaped.is_empty() {
-        String::new()
-    } else {
-        format!(" — reaped {} stray process(es)", reaped.len())
-    };
-    // Never silent (task #41's outcome contract) — same tier as `reap_note`.
+    // Never silent (task #41's outcome contract).
     let seed_note = match &seeded_from {
         Some(source) => format!(" — seeded songbook from shipped template at {}", source.display()),
         None => String::new(),
@@ -309,12 +295,12 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
         "rice.mode.stage",
         match &resolved_name {
             Some(n) if explicit_name.is_some() => {
-                format!("staging mode unlocked — staged `{n}` live{seed_note}{reap_note}")
+                format!("staging mode unlocked — staged `{n}` live{seed_note}")
             }
             Some(n) => format!(
-                "staging mode unlocked — re-staged the current rice `{n}` live{seed_note}{reap_note}"
+                "staging mode unlocked — re-staged the current rice `{n}` live{seed_note}"
             ),
-            None => format!("staging mode unlocked — no current rice to stage (no stage/livery.json yet){reap_note}"),
+            None => "staging mode unlocked — no current rice to stage (no stage/livery.json yet)".to_string(),
         },
     )
     .changed(changed)
@@ -322,9 +308,6 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
         "mode": "staging",
         "song": marker.song,
         "seeded": seeded_from.as_ref().map(|p| p.to_string_lossy().into_owned()),
-        "reaped": reaped.iter().map(|p| json!({
-            "pid": p.pid, "reason": p.reason, "cmdline": p.cmdline,
-        })).collect::<Vec<_>>(),
     }))
 }
 

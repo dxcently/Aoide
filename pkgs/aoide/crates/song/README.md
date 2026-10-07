@@ -83,8 +83,9 @@ a config file). Paint-side — ships in `lyra`, not core.
   `run/qml`'s deployed copy — as the take store's own widget-body payload;
   read-only, no restore counterpart (`rice back` still never touches widget
   bodies — they stay git's substrate).
-- `ipc`, `lint`, `reap` — the song IPC surface, `rice lint`, and stale-song
-  reaping.
+- `ipc`, `lint` — the song IPC surface (the Quickshell reload trigger and the
+  `aoide-quickshell.service` MainPID probe the healthcheck shares) and
+  `rice lint`.
 - `health` — the `quickshell healthcheck` watchdog (`src/health.rs`, whose
   module header is the argument). It first reads the unit's state through
   `not_running_state`: an installed unit that is `inactive` or `failed`,

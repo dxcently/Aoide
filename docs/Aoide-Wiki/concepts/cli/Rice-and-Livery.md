@@ -232,20 +232,17 @@ lyra rice mode stage [<name>] [--json]
 
 - **Reads:** `song/stage/mode.json`; for a bare call, resolves the song from
   the marker's `stagingSong` first, then `song/stage/livery.json`'s `"song"`
-  field. Also enumerates `/proc` for the stray-process sweep.
+  field.
 - **Writes:** tears down any Draft-mode routing symlink at
   `song/stage/livery.json` first, then — when a song resolves — everything
   `rice stage` writes (stage livery/cover, widget sync, registry sync, live
   `hyprctl`/Quickshell IPC); finally `song/stage/mode.json`
   (`mode: "staging"`, `song`, `stagingSong`, `since`).
-- **Output:** data `{mode: "staging", song, reaped: [{pid, reason,
-  cmdline}]}`.
+- **Output:** data `{mode: "staging", song, seeded}`.
 - **Notes:** unlocks staging writers AND hot-loads immediately — never a
   bare flag-flip except on a genuinely fresh box with no resolvable song.
   This is also how you leave Draft mode. A failed stage (unknown song) does
-  not flip the marker. The stray-process sweep (leftover preview harnesses,
-  duplicate `shell.qml`, stale `hyprlock` — `pkgs/aoide/crates/song/src/reap.rs`)
-  is best-effort, never fatal.
+  not flip the marker.
 
 ### lyra rice mode declarative
 

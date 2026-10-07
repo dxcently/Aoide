@@ -20,7 +20,6 @@ pub mod ipc;
 pub mod live;
 pub mod livery;
 pub mod lint;
-pub mod reap;
 pub mod wallpaper_provider;
 pub mod widgets;
 

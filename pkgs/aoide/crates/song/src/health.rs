@@ -706,7 +706,7 @@ pub fn run_healthcheck() -> HealthOutcome {
     if let Some(state) = not_running_state(&show) {
         return HealthOutcome::NotRunning { state };
     }
-    if crate::reap::quickshell_service_main_pid().is_none() {
+    if crate::ipc::quickshell_service_main_pid().is_none() {
         return HealthOutcome::Healthy;
     }
     let Some(since) = active_enter_timestamp() else {
@@ -1527,7 +1527,7 @@ mod tests {
 
     // `run_healthcheck()` itself isn't unit-tested here: it reads the REAL
     // `aoide-quickshell.service` state via `systemctl`/`journalctl`/
-    // `hyprctl`, environment-dependent the same way `reap.rs`'s
-    // `quickshell_service_main_pid()` and `ipc.rs`'s `quickshell_ipc_reload()`
-    // are — only their pure halves get unit tests, for the same reason.
+    // `hyprctl`, environment-dependent the same way `ipc.rs`'s
+    // `quickshell_service_main_pid()` and `quickshell_ipc_reload()` are —
+    // only their pure halves get unit tests, for the same reason.
 }

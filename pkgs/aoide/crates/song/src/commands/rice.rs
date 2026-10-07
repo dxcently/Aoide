@@ -202,9 +202,8 @@ fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     let mut out = handle_rice_stage(inv);
 
     // Never silent (task #41's outcome contract): a successful seed gets
-    // folded into the message and `changed` list, same tier as the
-    // reap-note pattern `rice mode stage` uses for its own best-effort
-    // side note below.
+    // folded into the message and `changed` list, same as `rice mode stage`
+    // does for its own seed note.
     if out.status == aoide_protocol::output::Status::Ok {
         if let (Some(source), Some(name)) = (&seeded_from, &name) {
             out.message = format!(

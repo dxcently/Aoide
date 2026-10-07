@@ -96,11 +96,11 @@ impl ReloadStatus {
 /// (mirrors `live::apply_live`'s guarded, non-fatal posture).
 ///
 /// No-ops to [`ReloadStatus::NotRunning`] when
-/// `aoide-quickshell.service` isn't up (`reap::quickshell_service_main_pid`
+/// `aoide-quickshell.service` isn't up ([`quickshell_service_main_pid`]
 /// returns `None`) — the common case in this sandboxed environment, and any
 /// time a rebuild/rice change lands with no live shell to show it in.
 pub fn quickshell_ipc_reload() -> ReloadStatus {
-    if crate::reap::quickshell_service_main_pid().is_none() {
+    if quickshell_service_main_pid().is_none() {
         return ReloadStatus::NotRunning;
     }
     let shell_qml = aoide_storage::fs::run_qml_dir().join("shell.qml");
@@ -119,11 +119,30 @@ pub fn quickshell_ipc_reload() -> ReloadStatus {
     }
 }
 
+/// The pid `aoide-quickshell.service` is currently tracking, if active.
+/// `None` off Hyprland/systemd, or when the unit isn't running — callers read
+/// that as "no live shell", never as a failure (the guarded-optional posture
+/// this codebase takes toward system services it doesn't own). Shared with
+/// [`crate::health::run_healthcheck`].
+pub(crate) fn quickshell_service_main_pid() -> Option<u32> {
+    let out = std::process::Command::new("systemctl")
+        .args(["--user", "show", "aoide-quickshell.service", "--property=MainPID", "--value"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|&p| p != 0)
+}
+
 /// Judge one finished `quickshell ipc call` from its exit status and output,
 /// per the matrix in the module header. Split out as a pure function so that
 /// matrix is actually unit-tested — [`quickshell_ipc_reload`] itself can't be,
-/// since it reads the real `aoide-quickshell.service` (the same reason
-/// `reap.rs` only tests its pure `classify()`).
+/// since it reads the real `aoide-quickshell.service`.
 ///
 /// Reads stdout FIRST because that is where quickshell puts every one of
 /// these messages, with stderr as a fallback so a future version that moves
@@ -214,6 +233,6 @@ mod tests {
     // `quickshell_ipc_reload()` itself isn't unit-tested here: it reads the
     // REAL `aoide-quickshell.service` state via `systemctl --user`, which is
     // environment-dependent (absent in this sandbox, but legitimately live
-    // on a real desktop) — same reason `reap.rs`'s tests only exercise its
-    // pure `classify()`, never the real `quickshell_service_main_pid()`.
+    // on a real desktop) — only `classify_call`, its pure half, is tested;
+    // `quickshell_service_main_pid()` is never called from a test.
 }
