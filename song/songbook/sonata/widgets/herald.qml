@@ -45,8 +45,8 @@
 // (0 = never — critical and every summons). Expiry is LOCAL: a lapsed card
 // leaves this popup but stays in the file for the dock's herald-center
 // ledger; nothing daemon-side ever expires a record. Deadlines are pinned
-// per id at first sight, so a file rewrite (another arrival) never restarts
-// a card's clock.
+// per arrival (id + receivedAt) at first sight, so a file rewrite (another
+// arrival) never restarts a card's clock.
 //
 // Write-side, socket only (ShellBridge, the powermenu idiom — QML never
 // touches the file):
