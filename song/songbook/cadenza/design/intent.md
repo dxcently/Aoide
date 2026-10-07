@@ -523,7 +523,9 @@ fires); the chosen row goes amber; a destructive row asks `y/N` inline.
 
 ### 3.7 Herald toast (`herald`)
 A borderless block top-right under the bar: `herald ▸ <app>` dim, then the
-quoted body; a summons carries `[y] approve [n] deny`.
+quoted body; a summons carries `[y] approve [n] deny`. Its clock counts from
+each record's `receivedAt`, so a herald fixture's toasts carry `timeoutMs: 0`:
+their fixed dates are long past and a toast with a timeout lapses at ingest.
 
 ### 3.8 Calendar (`calendar`)
 A `cal`-style month grid in a pane from the clock cell, today in accent.
