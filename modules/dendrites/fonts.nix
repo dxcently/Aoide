@@ -1,6 +1,6 @@
 # modules/dendrites/fonts.nix — the system font set (glyph coverage).
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.fonts.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
 #   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
@@ -27,49 +27,39 @@
 # are mkIf-scoped to the same value (true), which the module system merges
 # cleanly (agreeing definitions never conflict) — verified by eval.
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.fonts.enable = lib.mkEnableOption "the system font set (broad glyph coverage: musical notation, CJK, emoji, nerd fonts)";
-
-      config = lib.mkIf config.aoide.fonts.enable {
-        # corefonts is unfree. Scoped here so a host can enable fonts without also
-        # pulling the devtools dendrite (which sets the same switch for its own
-        # unfree packages). Agreeing mkIf definitions merge cleanly.
-        nixpkgs.config.allowUnfree = true;
-
-        fonts.packages = with pkgs; [
-          corefonts # Microsoft core web fonts (unfree)
-          noto-fonts # broad Unicode coverage incl. Musical Symbols
-          noto-fonts-cjk-sans # CJK sans coverage
-          noto-fonts-color-emoji # colour emoji
-          material-icons # Material Design UI glyphs
-          font-awesome # Font Awesome UI glyphs
-          fira-code-symbols # programming-ligature symbols
-          symbola # symbol coverage incl. musical notation (U+1D100…)
-          nerd-fonts.jetbrains-mono # nerd-patched JetBrains Mono
-          nerd-fonts.comic-shanns-mono # nerd-patched Comic Shanns Mono
-          nerd-fonts.shure-tech-mono # nerd-patched Share Tech Mono
-          libertine # PRIMARY desktop face — Linux Libertine/Biolinum (stylix points here)
-          nerd-fonts.lekton # nerd-patched alternate face (glyph-complete)
-          nerd-fonts.tinos # alternate face
-        ];
-      };
-    };
-in
 {
-  inherit body;
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.fonts.enable = lib.mkEnableOption "the system font set (broad glyph coverage: musical notation, CJK, emoji, nerd fonts)";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.fonts.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.fonts.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.fonts.enable {
+      # corefonts is unfree. Scoped here so a host can enable fonts without also
+      # pulling the devtools dendrite (which sets the same switch for its own
+      # unfree packages). Agreeing mkIf definitions merge cleanly.
+      nixpkgs.config.allowUnfree = true;
+
+      fonts.packages = with pkgs; [
+        corefonts # Microsoft core web fonts (unfree)
+        noto-fonts # broad Unicode coverage incl. Musical Symbols
+        noto-fonts-cjk-sans # CJK sans coverage
+        noto-fonts-color-emoji # colour emoji
+        material-icons # Material Design UI glyphs
+        font-awesome # Font Awesome UI glyphs
+        fira-code-symbols # programming-ligature symbols
+        symbola # symbol coverage incl. musical notation (U+1D100…)
+        nerd-fonts.jetbrains-mono # nerd-patched JetBrains Mono
+        nerd-fonts.comic-shanns-mono # nerd-patched Comic Shanns Mono
+        nerd-fonts.shure-tech-mono # nerd-patched Share Tech Mono
+        libertine # PRIMARY desktop face — Linux Libertine/Biolinum (stylix points here)
+        nerd-fonts.lekton # nerd-patched alternate face (glyph-complete)
+        nerd-fonts.tinos # alternate face
+      ];
+    })
+  ];
 }

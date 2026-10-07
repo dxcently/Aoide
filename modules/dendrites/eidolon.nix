@@ -1,7 +1,7 @@
 # modules/dendrites/eidolon.nix — the Eidolon coding harness (~/eidolon, a
 # Rust interactive coding harness built to replace pi for daily use).
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.eidolon.enable (default false — shipped but off).
 #   - Carries its own dependencies (pkgs/eidolon, a launcher — see its header
 #     for why); reads only config.aoide.user plus its own options.
@@ -45,43 +45,33 @@
 #     wired, personas come alive — Rook is wiki/personalities/Rook ♜.md, worn
 #     per session with `eidolon tui --persona Rook` or `:persona Rook`.
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.eidolon.enable = lib.mkEnableOption "the Eidolon coding harness";
-
-      config = lib.mkIf config.aoide.eidolon.enable {
-        environment.systemPackages = [ pkgs.eidolon ];
-
-        home-manager.users.${config.aoide.user}.home.file.".config/eidolon/config.toml".text = ''
-          default_model = "ollama:deepseek-v4.1-flash"
-          fallback_model = "sonnet"
-          persona = "Rook"
-
-          [claude_cli]
-
-          # The vault (Mneme). Personas and notes are read from here; the
-          # passphrase is the operator's out-of-band file, not a Nix value.
-          [mneme]
-          mcp_url = "https://mneme.necoconeco.net/mcp"
-          passphrase_file = "~/.config/eidolon/mneme.pass"
-        '';
-      };
-    };
-in
 {
-  inherit body;
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.eidolon.enable = lib.mkEnableOption "the Eidolon coding harness";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.eidolon.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.eidolon.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.eidolon.enable {
+      environment.systemPackages = [ pkgs.eidolon ];
+
+      habit.home.home.file.".config/eidolon/config.toml".text = ''
+        default_model = "ollama:deepseek-v4.1-flash"
+        fallback_model = "sonnet"
+        persona = "Rook"
+
+        [claude_cli]
+
+        # The vault (Mneme). Personas and notes are read from here; the
+        # passphrase is the operator's out-of-band file, not a Nix value.
+        [mneme]
+        mcp_url = "https://mneme.necoconeco.net/mcp"
+        passphrase_file = "~/.config/eidolon/mneme.pass"
+      '';
+    })
+  ];
 }

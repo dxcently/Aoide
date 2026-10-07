@@ -5,16 +5,8 @@
 # the song's own `wallpaper` board over it when no pick applies — the layer and
 # its config are the `lyra` lane's, so this provider has nothing to configure and
 # no unit to start: it NAMES the arrangement.
-let
-  body = { ... }: { };
-in
-{
-  inherit body;
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.wallpaper.provider = lib.mkDefault "quickshell";
-    };
+{ lib, ... }:
+{
+  aoide.wallpaper.provider = lib.mkDefault "quickshell";
 }

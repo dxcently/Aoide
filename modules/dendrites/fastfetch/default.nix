@@ -4,11 +4,10 @@
 # Aoide's lyre in compact form — three strings, curved arms, a soundbox, the
 # A·O·I·D·E ground and a "the song" tag). Redrawn small (13×7) so the info
 # column sits flush beside it and never wraps in a tiled/narrow terminal.
-# The catalogue names this file — modules/dendrites/default.nix derives its
-# imports from it — so this default.nix registers exactly like a flat dendrite
-# (CONTRACTS.md §2).
+# The catalogue names this directory, so its default.nix registers exactly like
+# a flat dendrite (CONTRACTS.md §2).
 #
-# Dendrite shape v1:
+# Dendrite shape:
 #   - Guarded on aoide.fastfetch.enable (default false — shipped but off).
 #   - Carries its own dependencies (including the bundled logo); reads no other
 #     module.
@@ -20,121 +19,111 @@
 # The bash dendrite calls `fastfetch` on every interactive shell (initExtra),
 # so enabling both gives the login greeting.
 
-let
-  body =
-    { config, lib, ... }:
-    {
-      options.aoide.fastfetch.enable = lib.mkEnableOption "the fastfetch greeting (compact Aoide lyre)";
+{ config, lib, ... }:
+{
+  options.aoide.fastfetch.enable = lib.mkEnableOption "the fastfetch greeting (compact Aoide lyre)";
 
-      config = lib.mkIf config.aoide.fastfetch.enable {
-        home-manager.users.${config.aoide.user} =
-          { pkgs, ... }:
-          {
-            programs.fastfetch = {
-              enable = true;
-              package = pkgs.fastfetch;
-              settings = {
-                logo = {
-                  type = "file";
-                  source = ./ascii-fetch;
-                  width = 14;
-                  height = 7;
-                  padding = {
-                    top = 1;
-                    left = 2;
-                    right = 3;
-                  };
+  config = lib.mkMerge [
+    { aoide.fastfetch.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.fastfetch.enable {
+      habit.home =
+        { pkgs, ... }:
+        {
+          programs.fastfetch = {
+            enable = true;
+            package = pkgs.fastfetch;
+            settings = {
+              logo = {
+                type = "file";
+                source = ./ascii-fetch;
+                width = 14;
+                height = 7;
+                padding = {
+                  top = 1;
+                  left = 2;
+                  right = 3;
                 };
-                display = {
-                  separator = "  ";
-                };
-                modules = [
-                  {
-                    type = "title";
-                    key = "♪ ";
-                    format = "{user-name}@{host-name}";
-                  }
-                  {
-                    type = "custom";
-                    format = "╶─────────────────────────╴";
-                  }
-                  {
-                    type = "os";
-                    key = "os    ";
-                  }
-                  {
-                    type = "kernel";
-                    key = "kernel";
-                  }
-                  {
-                    type = "uptime";
-                    key = "uptime";
-                  }
-                  { type = "break"; }
-                  {
-                    type = "custom";
-                    # Section rule with a subtle music mark (kept short so it never
-                    # runs past a tiled terminal's edge).
-                    format = "♪ hardware ╶──────────────╴";
-                  }
-                  {
-                    type = "host";
-                    key = "host  ";
-                  }
-                  {
-                    type = "cpu";
-                    key = "cpu   ";
-                    format = "{name}";
-                  }
-                  {
-                    type = "gpu";
-                    key = "gpu   ";
-                    format = "{name}";
-                  }
-                  {
-                    type = "memory";
-                    key = "ram   ";
-                  }
-                  { type = "break"; }
-                  {
-                    type = "custom";
-                    format = "♪ software ╶──────────────╴";
-                  }
-                  {
-                    type = "wm";
-                    key = "wm    ";
-                  }
-                  {
-                    type = "shell";
-                    key = "shell ";
-                  }
-                  {
-                    type = "terminal";
-                    key = "term  ";
-                  }
-                  {
-                    type = "theme";
-                    key = "theme ";
-                  }
-                  { type = "break"; }
-                  {
-                    type = "colors";
-                    symbol = "circle";
-                  }
-                ];
               };
+              display = {
+                separator = "  ";
+              };
+              modules = [
+                {
+                  type = "title";
+                  key = "♪ ";
+                  format = "{user-name}@{host-name}";
+                }
+                {
+                  type = "custom";
+                  format = "╶─────────────────────────╴";
+                }
+                {
+                  type = "os";
+                  key = "os    ";
+                }
+                {
+                  type = "kernel";
+                  key = "kernel";
+                }
+                {
+                  type = "uptime";
+                  key = "uptime";
+                }
+                { type = "break"; }
+                {
+                  type = "custom";
+                  # Section rule with a subtle music mark (kept short so it never
+                  # runs past a tiled terminal's edge).
+                  format = "♪ hardware ╶──────────────╴";
+                }
+                {
+                  type = "host";
+                  key = "host  ";
+                }
+                {
+                  type = "cpu";
+                  key = "cpu   ";
+                  format = "{name}";
+                }
+                {
+                  type = "gpu";
+                  key = "gpu   ";
+                  format = "{name}";
+                }
+                {
+                  type = "memory";
+                  key = "ram   ";
+                }
+                { type = "break"; }
+                {
+                  type = "custom";
+                  format = "♪ software ╶──────────────╴";
+                }
+                {
+                  type = "wm";
+                  key = "wm    ";
+                }
+                {
+                  type = "shell";
+                  key = "shell ";
+                }
+                {
+                  type = "terminal";
+                  key = "term  ";
+                }
+                {
+                  type = "theme";
+                  key = "theme ";
+                }
+                { type = "break"; }
+                {
+                  type = "colors";
+                  symbol = "circle";
+                }
+              ];
             };
           };
-      };
-    };
-in
-{
-  inherit body;
-
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.fastfetch.enable = lib.mkDefault true;
-    };
+        };
+    })
+  ];
 }

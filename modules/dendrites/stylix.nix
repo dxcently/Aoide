@@ -18,314 +18,304 @@
 #     resolution). Tolerates the registry being empty.
 #   * Never reads a `song/` runtime path at build time — a `song/` tree has no
 #     runtime dirs at all (`checks.song-runtime-untracked`).
-#   * It carries its OWN dependency: the Stylix NixOS module, imported below
-#     when the `stylix` input is present. One import site for the whole tree.
+#   * It carries its OWN dependency: the Stylix NixOS module, imported by the
+#     nucleus module when the `stylix` input is present (below).
 #
 # Guarded on the FACT `aoide.stylix.enable` (declared once in
-# modules/nucleus/options.nix); the `nixos` half below sets it `mkDefault true`.
+# modules/nucleus/options.nix); the module sets it `mkDefault true`.
+#
+# The Stylix NixOS module is this dendrite's own dependency, and it is imported
+# by the nucleus module (`lib/aoideos.nix`'s `nucleusModule`), not here — the one
+# place that closes over Aoide's own inputs lexically. An `imports` list is
+# resolved while the module list is still being built, and a name provided
+# through `_module.args` is read from `config`, which is computed FROM that
+# list: `imports = [ … aoideInputs.stylix.nixosModules.stylix ]` is an
+# infinite recursion, not a style question. Gated there on the input being
+# present, so an input set without `stylix` still evaluates.
+#
+# It must NOT ride this module either: `lib/options.nix` evaluates every
+# dendrite in a bare `evalModules` to render `aoideOptions`, and Stylix's
+# home-manager half reads NixOS options (`options.programs`) that a bare eval
+# has not declared.
+{
+  config,
+  options,
+  lib,
+  pkgs,
+  ...
+}:
 let
-  body =
-    {
-      config,
-      options,
-      lib,
-      pkgs,
-      ...
-    }:
-    let
-      # Read-side venue recolour (CONTRACTS.md §1, override tier): resolve rewrites
-      # colours equal to an overridden anchor's authored value, in one pass, with
-      # no option-system recursion — the option itself stays inert either way.
-      t = (import ../../lib/livery.nix { inherit lib; }).resolve config.aoide.livery;
+  # Read-side venue recolour (CONTRACTS.md §1, override tier): resolve rewrites
+  # colours equal to an overridden anchor's authored value, in one pass, with
+  # no option-system recursion — the option itself stays inert either way.
+  t = (import ../../lib/livery.nix { inherit lib; }).resolve config.aoide.livery;
 
-      # The stylix module is imported by this lane (see `nixos` below) only when
-      # the input is present. Gate on the OPTION being declared — reading `options`
-      # (not `config`) avoids the config→config infinite recursion, so a minimal eval
-      # without the stylix module stays clean.
-      stylixPresent = options ? stylix;
+  # The stylix module is imported by the nucleus module (see the header) only when
+  # the input is present. Gate on the OPTION being declared — reading `options`
+  # (not `config`) avoids the config→config infinite recursion, so a minimal eval
+  # without the stylix module stays clean.
+  stylixPresent = options ? stylix;
 
-      # ── hex helpers ───────────────────────────────────────────────────────────
-      # Stylix's base16Scheme attrset wants bare hex (no leading '#'); the note
-      # option type is permissive (`#?[0-9a-fA-F]{6}`), so normalise.
-      stripHash = c: lib.removePrefix "#" c;
+  # ── hex helpers ───────────────────────────────────────────────────────────
+  # Stylix's base16Scheme attrset wants bare hex (no leading '#'); the note
+  # option type is permissive (`#?[0-9a-fA-F]{6}`), so normalise.
+  stripHash = c: lib.removePrefix "#" c;
 
-      # ── palette ───────────────────────────────────────────────────────────────
-      p = t.palette;
+  # ── palette ───────────────────────────────────────────────────────────────
+  p = t.palette;
 
-      # ── component-tier null→palette fallback (CONTRACTS.md §1) ─────────────────
-      # Applied HERE by this lane, exactly as the notes package's resolver applies
-      # it for the live side — identical rules, so both fan-outs agree.
-      fb = value: fallback: if value != null then value else fallback;
+  # ── component-tier null→palette fallback (CONTRACTS.md §1) ─────────────────
+  # Applied HERE by this lane, exactly as the notes package's resolver applies
+  # it for the live side — identical rules, so both fan-outs agree.
+  fb = value: fallback: if value != null then value else fallback;
 
-      # Resolved component-tier values (null → palette). Applied HERE by this lane,
-      # exactly as the notes package's resolver applies it for the live side —
-      # identical rules, so both fan-outs agree. These feed the base16 anchoring
-      # below, so the component overrides genuinely reach the baked theme (not just
-      # the palette): e.g. `bar.bg` drives the "lighter background" slot Stylix uses
-      # for status surfaces, and `window.border` drives the accent slot.
-      resolved = {
-        bar = {
-          bg = fb t.bar.bg p.bg;
-          fg = fb t.bar.fg p.fg;
-          accent = fb t.bar.accent p.accent;
-        };
-        notif = {
-          bg = fb t.notif.bg p.bg;
-          fg = fb t.notif.fg p.fg;
-          urgent = fb t.notif.urgent p.urgent;
-        };
-        window = {
-          border = fb t.window.border p.accent;
-          borderInactive = fb t.window.borderInactive p.bg;
-        };
-      };
-
-      # ── base16 scheme ─────────────────────────────────────────────────────────
-      # Preferred source: the song's full base16 note tier (`aoide.livery.base16`,
-      # all 16 slots, base16-standard semantics) — the real scheme, baked verbatim.
-      # Fallback: synthesise from the 4-anchor palette (v0 behaviour) so songs
-      # that carry no scheme still theme coherently.
-      scheme = if t.base16 != null then lib.mapAttrs (_: stripHash) t.base16 else synthesisedScheme;
-
-      # v0 palette is base16-closed (options.nix): bg=base00, fg=base05,
-      # accent=base0D, urgent=base08. The four authored anchors drive the salient
-      # slots and the resolved component tier informs the surface-adjacent slots.
-      synthesisedScheme = {
-        base00 = stripHash p.bg; # background
-        base01 = stripHash resolved.bar.bg; # lighter bg (status surfaces) ← bar.bg
-        base02 = stripHash resolved.window.borderInactive; # selection bg ← window.borderInactive
-        base03 = stripHash p.fg; # comments
-        base04 = stripHash p.fg; # dark fg
-        base05 = stripHash p.fg; # default fg
-        base06 = stripHash p.fg; # light fg
-        base07 = stripHash p.fg; # lightest fg
-        base08 = stripHash resolved.notif.urgent; # red / urgent ← notif.urgent
-        base09 = stripHash p.accent; # orange
-        base0A = stripHash p.accent; # yellow
-        base0B = stripHash p.accent; # green
-        base0C = stripHash p.accent; # cyan
-        base0D = stripHash resolved.window.border; # blue / accent ← window.border
-        base0E = stripHash resolved.bar.accent; # magenta ← bar.accent
-        base0F = stripHash p.urgent; # brown
-      };
-
-      # ── the song's face (CONTRACTS.md §1, font tier) ────────────────────────
-      # Additive-optional: the song's `aoide.livery.fonts.monospace` when it
-      # carries one, else this lane's own default. Read straight off the option,
-      # not through `resolve` — the venue recolour is a colour pass, and a face
-      # is not a colour. The role shape is Stylix's own ({ package, name }), so
-      # the value passes through untouched.
-      monospace =
-        if config.aoide.livery.fonts.monospace != null then
-          config.aoide.livery.fonts.monospace
-        else
-          {
-            package = pkgs.libertine;
-            name = "Linux Libertine Mono O";
-          };
-
-      # Deterministic solid-colour fallback wallpaper: a PNG from palette.bg. This
-      # is the cover this lane bakes when the song carries no `notes.wallpaper` —
-      # it keeps the baked path buildable without shipping a binary asset and with
-      # NO song/ read. ImageMagick is a pure build-time input.
-      solidWallpaper = pkgs.runCommand "aoide-wallpaper.png" { } ''
-        ${pkgs.imagemagick}/bin/magick -size 1920x1080 "xc:#${stripHash p.bg}" "$out"
-      '';
-
-      # The cover-art note (CONTRACTS.md §1): a song MAY carry a real wallpaper as a
-      # literal nix path (`aoide.livery.wallpaper`), which the option system copies to
-      # the store — this is note data, not a song/ runtime read. When the note is
-      # null this lane bakes the deterministic solid-colour fallback above, so the
-      # path stays buildable and drift-free either way.
-      wallpaper = if t.wallpaper != null then t.wallpaper else solidWallpaper;
-
-      # ── surface-ownership overlap resolution ──────────────────────────────────
-      # Read the registry (tolerate it empty). Any surface owned by a NON-stylix
-      # owner (the shell lane) is one Stylix must not also drive:
-      # for each such surface Stylix stands down for the target(s) that would
-      # collide (concepts/Notes, "Stylix Overlap Resolution").
-      #
-      # Agent C's registry (confirmed) owns these surfaces under "quickshell":
-      #   bar · notifications · launcher · osd · lockscreen · greeter · wallpaper ·
-      #   agentWidgets
-      # We map each onto the concrete Stylix target(s) it displaces. Quickshell
-      # renders bar/launcher/osd/agentWidgets in its own QML — Stylix has no target
-      # for those, so they contribute nothing (empty lists). The ones with a real
-      # Stylix target are notifications / lockscreen / greeter.
-      surfaces = config.aoide.surfaces or { };
-      ownedByOthers = lib.filterAttrs (_: s: (s.owner or "") != "stylix") surfaces;
-      ownedSurfaceNames = lib.attrNames ownedByOthers;
-
-      # Surface → the Stylix targets Aoide would otherwise theme for it. Only names
-      # that exist as real `stylix.targets.<name>` on this Stylix version are kept
-      # (guarded below), so an unknown/renamed target can never break eval.
-      surfaceToStylixTargets = {
-        notifications = [
-          "mako"
-          "dunst"
-        ];
-        lockscreen = [
-          "gtklock"
-          "hyprlock"
-        ];
-        greeter = [ "gnome" ];
-        # Stylix on this pin auto-enables hyprpaper as the wallpaper DAEMON — a
-        # second painter fighting the quickshell wallpaper layer. Stand the daemon
-        # down when quickshell owns the surface; `stylix.image` itself stays set
-        # (mkDefault, below) as the base-context source either way.
-        wallpaper = [ "hyprpaper" ];
-        # bar / launcher / osd / agentWidgets: no colliding Stylix target
-        # (quickshell owns these purely in QML).
-      };
-
-      # Stylix splits its targets across the NixOS module and the home-manager
-      # module (mako/dunst/gtklock/hyprlock are HM-side; the NixOS side has a
-      # different, smaller set). So the stand-down must be applied on EACH side,
-      # filtered by which `stylix.targets.<name>` options actually exist there —
-      # probing the given side's option tree keeps eval safe across Stylix
-      # versions and module layers.
-      collidingTargets = lib.unique (
-        lib.flatten (map (n: surfaceToStylixTargets.${n} or [ ]) ownedSurfaceNames)
-      );
-      # Given a side's option tree, disable every colliding target that exists there.
-      presentDisables =
-        opts:
-        lib.genAttrs (lib.filter (tn: (opts.stylix.targets or { }) ? ${tn}) collidingTargets) (_: {
-          enable = lib.mkForce false;
-        });
-      targetDisableAttrs = presentDisables options;
-      disabledTargets = lib.attrNames targetDisableAttrs;
-
-      # Stylix's hyprland target carries a NESTED daemon knob —
-      # `targets.hyprland.hyprpaper.enable` — that turns on services.hyprpaper
-      # independently of the flat `targets.hyprpaper` name presentDisables covers.
-      # When quickshell owns the wallpaper surface, stand the daemon down through
-      # this knob too (same option-tree probing, so absent/renamed stays eval-safe).
-      hyprpaperDaemonDisable =
-        opts:
-        lib.optionalAttrs
-          (
-            wallpaperOwnedElsewhere
-            && (opts.stylix.targets or { }) ? hyprland
-            && opts.stylix.targets.hyprland ? hyprpaper
-          )
-          {
-            hyprland.hyprpaper.enable = lib.mkForce false;
-          };
-
-      # `wallpaper` surface policy (deterministic, documented): the quickshell
-      # wallpaper LAYER supersedes at render time, but Stylix's `image` remains the
-      # single source the base16 context is derived from and the fallback when the
-      # quickshell layer is absent. So we ALWAYS set `stylix.image` (as mkDefault);
-      # ownership of the `wallpaper` surface does NOT suppress it. This keeps the
-      # baked scheme coherent and lets quickshell paint over it live.
-      wallpaperOwnedElsewhere = builtins.elem "wallpaper" ownedSurfaceNames;
-    in
-    {
-      # The baked Stylix settings. Only emitted when the stylix module is present:
-      # `lib.optionalAttrs stylixPresent` keeps the `stylix` KEY out of `config`
-      # entirely on a minimal eval where the option is undeclared, so this lane
-      # evals clean whether stylix rides or not (mkIf alone still leaves a
-      # definition on the undeclared path).
-      config = lib.mkIf config.aoide.stylix.enable (
-        lib.optionalAttrs stylixPresent {
-          stylix = {
-            enable = true;
-            # The song's ground (CONTRACTS.md §1, polarity): the register the
-            # base16 ramp reads as, read straight off the option — the venue
-            # recolour `resolve` applies is a colour pass, and a register is not
-            # a colour. mkDefault, unchanged from before the field existed, so
-            # a venue or host can still name its own polarity and win.
-            polarity = lib.mkDefault config.aoide.livery.polarity;
-
-            # The ONE base16 scheme — the baked fan-out's single source.
-            base16Scheme = scheme;
-
-            # Wallpaper: the song's cover-art note (`aoide.livery.wallpaper`) when it
-            # carries one, else a deterministic solid-colour fallback (from
-            # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
-            # WHEN quickshell owns the `wallpaper` surface
-            # (`wallpaperOwnedElsewhere` = ${lib.boolToString wallpaperOwnedElsewhere}):
-            # Stylix's image stays the base-context source and the fallback; the
-            # quickshell wallpaper layer supersedes it live at render time.
-            image = lib.mkDefault wallpaper;
-
-            # Maple is the shared cursor default; hosts can override it.
-            cursor = lib.mkDefault {
-              package = pkgs.maplestory-cursor;
-              name = "Maple";
-              size = 40;
-            };
-
-            # Fonts: the song's face tier (`aoide.livery.fonts`) when it carries
-            # one, else this lane's default. `monospace` is the tier's only
-            # role today — the terminal, where agents live. The remaining roles
-            # stay Linux Libertine: Aoide's primary face is a humanist serif,
-            # with sansSerif its companion "Linux Biolinum O" and serif the base
-            # "Linux Libertine O". NOT a nerd font — icon glyphs and musical
-            # notation fall back to the glyph-coverage set (symbola/noto) the
-            # fonts dendrite installs. `emoji` is left at its own default
-            # (noto-fonts-color-emoji).
-            fonts = lib.mkDefault {
-              inherit monospace;
-              sansSerif = {
-                package = pkgs.libertine;
-                name = "Linux Biolinum O";
-              };
-              serif = {
-                package = pkgs.libertine;
-                name = "Linux Libertine O";
-              };
-              sizes = {
-                applications = 14;
-                terminal = 14;
-                desktop = 14;
-                popups = 12;
-              };
-            };
-          }
-          # Stand down for surfaces another paint lane owns — NixOS side.
-          // lib.optionalAttrs (disabledTargets != [ ]) {
-            targets = targetDisableAttrs;
-          };
-
-          # Stand down on the home-manager side too: Stylix's HM module carries the
-          # targets that collide with shell-owned surfaces (mako, dunst,
-          # gtklock, hyprlock, …). The submodule probes ITS OWN option tree, so this
-          # stays eval-safe whether or not the HM stylix module is imported for the
-          # user (stylix homeManagerIntegration autoImport).
-          home-manager.users.${config.aoide.user} =
-            { options, ... }:
-            {
-              config = lib.optionalAttrs (options ? stylix) {
-                stylix.targets = presentDisables options // hyprpaperDaemonDisable options;
-              };
-            };
-        }
-      );
+  # Resolved component-tier values (null → palette). Applied HERE by this lane,
+  # exactly as the notes package's resolver applies it for the live side —
+  # identical rules, so both fan-outs agree. These feed the base16 anchoring
+  # below, so the component overrides genuinely reach the baked theme (not just
+  # the palette): e.g. `bar.bg` drives the "lighter background" slot Stylix uses
+  # for status surfaces, and `window.border` drives the accent slot.
+  resolved = {
+    bar = {
+      bg = fb t.bar.bg p.bg;
+      fg = fb t.bar.fg p.fg;
+      accent = fb t.bar.accent p.accent;
     };
+    notif = {
+      bg = fb t.notif.bg p.bg;
+      fg = fb t.notif.fg p.fg;
+      urgent = fb t.notif.urgent p.urgent;
+    };
+    window = {
+      border = fb t.window.border p.accent;
+      borderInactive = fb t.window.borderInactive p.bg;
+    };
+  };
+
+  # ── base16 scheme ─────────────────────────────────────────────────────────
+  # Preferred source: the song's full base16 note tier (`aoide.livery.base16`,
+  # all 16 slots, base16-standard semantics) — the real scheme, baked verbatim.
+  # Fallback: synthesise from the 4-anchor palette (v0 behaviour) so songs
+  # that carry no scheme still theme coherently.
+  scheme = if t.base16 != null then lib.mapAttrs (_: stripHash) t.base16 else synthesisedScheme;
+
+  # v0 palette is base16-closed (options.nix): bg=base00, fg=base05,
+  # accent=base0D, urgent=base08. The four authored anchors drive the salient
+  # slots and the resolved component tier informs the surface-adjacent slots.
+  synthesisedScheme = {
+    base00 = stripHash p.bg; # background
+    base01 = stripHash resolved.bar.bg; # lighter bg (status surfaces) ← bar.bg
+    base02 = stripHash resolved.window.borderInactive; # selection bg ← window.borderInactive
+    base03 = stripHash p.fg; # comments
+    base04 = stripHash p.fg; # dark fg
+    base05 = stripHash p.fg; # default fg
+    base06 = stripHash p.fg; # light fg
+    base07 = stripHash p.fg; # lightest fg
+    base08 = stripHash resolved.notif.urgent; # red / urgent ← notif.urgent
+    base09 = stripHash p.accent; # orange
+    base0A = stripHash p.accent; # yellow
+    base0B = stripHash p.accent; # green
+    base0C = stripHash p.accent; # cyan
+    base0D = stripHash resolved.window.border; # blue / accent ← window.border
+    base0E = stripHash resolved.bar.accent; # magenta ← bar.accent
+    base0F = stripHash p.urgent; # brown
+  };
+
+  # ── the song's face (CONTRACTS.md §1, font tier) ────────────────────────
+  # Additive-optional: the song's `aoide.livery.fonts.monospace` when it
+  # carries one, else this lane's own default. Read straight off the option,
+  # not through `resolve` — the venue recolour is a colour pass, and a face
+  # is not a colour. The role shape is Stylix's own ({ package, name }), so
+  # the value passes through untouched.
+  monospace =
+    if config.aoide.livery.fonts.monospace != null then
+      config.aoide.livery.fonts.monospace
+    else
+      {
+        package = pkgs.libertine;
+        name = "Linux Libertine Mono O";
+      };
+
+  # Deterministic solid-colour fallback wallpaper: a PNG from palette.bg. This
+  # is the cover this lane bakes when the song carries no `notes.wallpaper` —
+  # it keeps the baked path buildable without shipping a binary asset and with
+  # NO song/ read. ImageMagick is a pure build-time input.
+  solidWallpaper = pkgs.runCommand "aoide-wallpaper.png" { } ''
+    ${pkgs.imagemagick}/bin/magick -size 1920x1080 "xc:#${stripHash p.bg}" "$out"
+  '';
+
+  # The cover-art note (CONTRACTS.md §1): a song MAY carry a real wallpaper as a
+  # literal nix path (`aoide.livery.wallpaper`), which the option system copies to
+  # the store — this is note data, not a song/ runtime read. When the note is
+  # null this lane bakes the deterministic solid-colour fallback above, so the
+  # path stays buildable and drift-free either way.
+  wallpaper = if t.wallpaper != null then t.wallpaper else solidWallpaper;
+
+  # ── surface-ownership overlap resolution ──────────────────────────────────
+  # Read the registry (tolerate it empty). Any surface owned by a NON-stylix
+  # owner (the shell lane) is one Stylix must not also drive:
+  # for each such surface Stylix stands down for the target(s) that would
+  # collide (concepts/Notes, "Stylix Overlap Resolution").
+  #
+  # Agent C's registry (confirmed) owns these surfaces under "quickshell":
+  #   bar · notifications · launcher · osd · lockscreen · greeter · wallpaper ·
+  #   agentWidgets
+  # We map each onto the concrete Stylix target(s) it displaces. Quickshell
+  # renders bar/launcher/osd/agentWidgets in its own QML — Stylix has no target
+  # for those, so they contribute nothing (empty lists). The ones with a real
+  # Stylix target are notifications / lockscreen / greeter.
+  surfaces = config.aoide.surfaces or { };
+  ownedByOthers = lib.filterAttrs (_: s: (s.owner or "") != "stylix") surfaces;
+  ownedSurfaceNames = lib.attrNames ownedByOthers;
+
+  # Surface → the Stylix targets Aoide would otherwise theme for it. Only names
+  # that exist as real `stylix.targets.<name>` on this Stylix version are kept
+  # (guarded below), so an unknown/renamed target can never break eval.
+  surfaceToStylixTargets = {
+    notifications = [
+      "mako"
+      "dunst"
+    ];
+    lockscreen = [
+      "gtklock"
+      "hyprlock"
+    ];
+    greeter = [ "gnome" ];
+    # Stylix on this pin auto-enables hyprpaper as the wallpaper DAEMON — a
+    # second painter fighting the quickshell wallpaper layer. Stand the daemon
+    # down when quickshell owns the surface; `stylix.image` itself stays set
+    # (mkDefault, below) as the base-context source either way.
+    wallpaper = [ "hyprpaper" ];
+    # bar / launcher / osd / agentWidgets: no colliding Stylix target
+    # (quickshell owns these purely in QML).
+  };
+
+  # Stylix splits its targets across the NixOS module and the home-manager
+  # module (mako/dunst/gtklock/hyprlock are HM-side; the NixOS side has a
+  # different, smaller set). So the stand-down must be applied on EACH side,
+  # filtered by which `stylix.targets.<name>` options actually exist there —
+  # probing the given side's option tree keeps eval safe across Stylix
+  # versions and module layers.
+  collidingTargets = lib.unique (
+    lib.flatten (map (n: surfaceToStylixTargets.${n} or [ ]) ownedSurfaceNames)
+  );
+  # Given a side's option tree, disable every colliding target that exists there.
+  presentDisables =
+    opts:
+    lib.genAttrs (lib.filter (tn: (opts.stylix.targets or { }) ? ${tn}) collidingTargets) (_: {
+      enable = lib.mkForce false;
+    });
+  targetDisableAttrs = presentDisables options;
+  disabledTargets = lib.attrNames targetDisableAttrs;
+
+  # Stylix's hyprland target carries a NESTED daemon knob —
+  # `targets.hyprland.hyprpaper.enable` — that turns on services.hyprpaper
+  # independently of the flat `targets.hyprpaper` name presentDisables covers.
+  # When quickshell owns the wallpaper surface, stand the daemon down through
+  # this knob too (same option-tree probing, so absent/renamed stays eval-safe).
+  hyprpaperDaemonDisable =
+    opts:
+    lib.optionalAttrs
+      (
+        wallpaperOwnedElsewhere
+        && (opts.stylix.targets or { }) ? hyprland
+        && opts.stylix.targets.hyprland ? hyprpaper
+      )
+      {
+        hyprland.hyprpaper.enable = lib.mkForce false;
+      };
+
+  # `wallpaper` surface policy (deterministic, documented): the quickshell
+  # wallpaper LAYER supersedes at render time, but Stylix's `image` remains the
+  # single source the base16 context is derived from and the fallback when the
+  # quickshell layer is absent. So we ALWAYS set `stylix.image` (as mkDefault);
+  # ownership of the `wallpaper` surface does NOT suppress it. This keeps the
+  # baked scheme coherent and lets quickshell paint over it live.
+  wallpaperOwnedElsewhere = builtins.elem "wallpaper" ownedSurfaceNames;
 in
 {
-  inherit body;
+  # The baked Stylix settings. Only emitted when the stylix module is present:
+  # `lib.optionalAttrs stylixPresent` keeps the `stylix` KEY out of `config`
+  # entirely on a minimal eval where the option is undeclared, so this lane
+  # evals clean whether stylix rides or not (mkIf alone still leaves a
+  # definition on the undeclared path).
+  config = lib.mkMerge [
+    { aoide.stylix.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.stylix.enable (
+      lib.optionalAttrs stylixPresent {
+        stylix = {
+          enable = true;
+          # The song's ground (CONTRACTS.md §1, polarity): the register the
+          # base16 ramp reads as, read straight off the option — the venue
+          # recolour `resolve` applies is a colour pass, and a register is not
+          # a colour. mkDefault, unchanged from before the field existed, so
+          # a venue or host can still name its own polarity and win.
+          polarity = lib.mkDefault config.aoide.livery.polarity;
 
-  # The Stylix NixOS module is this lane's own dependency, and it is imported by
-  # the NUCLEUS lane (`lib/aoideos.nix`'s `nucleusModule`), not here — the one
-  # place that closes over Aoide's own inputs lexically. An `imports` list is
-  # resolved while the module list is still being built, and a name provided
-  # through `_module.args` is read from `config`, which is computed FROM that
-  # list: `imports = [ … aoideInputs.stylix.nixosModules.stylix ]` is an
-  # infinite recursion, not a style question. Gated there on the input being
-  # present, so an input set without `stylix` still evaluates.
-  #
-  # It must NOT ride `body` either: `lib/options.nix` imports every body into a
-  # bare `evalModules` to render `aoideOptions`, and Stylix's home-manager half
-  # reads NixOS options (`options.programs`) that a bare eval has not declared.
-  # So the lane below carries only what SELECTING stylix means: the fact, and
-  # the livery-driven configuration the rest of this file writes.
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.stylix.enable = lib.mkDefault true;
-    };
+          # The ONE base16 scheme — the baked fan-out's single source.
+          base16Scheme = scheme;
+
+          # Wallpaper: the song's cover-art note (`aoide.livery.wallpaper`) when it
+          # carries one, else a deterministic solid-colour fallback (from
+          # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
+          # WHEN quickshell owns the `wallpaper` surface
+          # (`wallpaperOwnedElsewhere` = ${lib.boolToString wallpaperOwnedElsewhere}):
+          # Stylix's image stays the base-context source and the fallback; the
+          # quickshell wallpaper layer supersedes it live at render time.
+          image = lib.mkDefault wallpaper;
+
+          # Maple is the shared cursor default; hosts can override it.
+          cursor = lib.mkDefault {
+            package = pkgs.maplestory-cursor;
+            name = "Maple";
+            size = 40;
+          };
+
+          # Fonts: the song's face tier (`aoide.livery.fonts`) when it carries
+          # one, else this lane's default. `monospace` is the tier's only
+          # role today — the terminal, where agents live. The remaining roles
+          # stay Linux Libertine: Aoide's primary face is a humanist serif,
+          # with sansSerif its companion "Linux Biolinum O" and serif the base
+          # "Linux Libertine O". NOT a nerd font — icon glyphs and musical
+          # notation fall back to the glyph-coverage set (symbola/noto) the
+          # fonts dendrite installs. `emoji` is left at its own default
+          # (noto-fonts-color-emoji).
+          fonts = lib.mkDefault {
+            inherit monospace;
+            sansSerif = {
+              package = pkgs.libertine;
+              name = "Linux Biolinum O";
+            };
+            serif = {
+              package = pkgs.libertine;
+              name = "Linux Libertine O";
+            };
+            sizes = {
+              applications = 14;
+              terminal = 14;
+              desktop = 14;
+              popups = 12;
+            };
+          };
+        }
+        # Stand down for surfaces another paint lane owns — NixOS side.
+        // lib.optionalAttrs (disabledTargets != [ ]) {
+          targets = targetDisableAttrs;
+        };
+
+        # Stand down on the home-manager side too: Stylix's HM module carries the
+        # targets that collide with shell-owned surfaces (mako, dunst,
+        # gtklock, hyprlock, …). The submodule probes ITS OWN option tree, so this
+        # stays eval-safe whether or not the HM stylix module is imported for the
+        # user (stylix homeManagerIntegration autoImport).
+        habit.home =
+          { options, ... }:
+          {
+            config = lib.optionalAttrs (options ? stylix) {
+              stylix.targets = presentDisables options // hyprpaperDaemonDisable options;
+            };
+          };
+      }
+    ))
+  ];
 }

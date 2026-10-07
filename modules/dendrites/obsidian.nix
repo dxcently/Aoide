@@ -1,6 +1,6 @@
 # modules/dendrites/obsidian.nix — Obsidian knowledge-base integration.
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.obsidian.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
 #   - Growth is additive: enable with one line in hosts/yomi-strix/default.nix.
@@ -17,69 +17,59 @@
 # To enable on yomi-strix, add to hosts/yomi-strix/default.nix:
 #   aoide.obsidian.enable = true;
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.obsidian.enable = lib.mkEnableOption "Obsidian knowledge-base integration (vault watcher + bar widget)";
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.obsidian.enable = lib.mkEnableOption "Obsidian knowledge-base integration (vault watcher + bar widget)";
 
-      config = lib.mkIf config.aoide.obsidian.enable {
+  config = lib.mkMerge [
+    { aoide.obsidian.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.obsidian.enable {
 
-        # ── Package ───────────────────────────────────────────────────────────
-        environment.systemPackages = [ pkgs.obsidian ];
+      # ── Package ───────────────────────────────────────────────────────────
+      environment.systemPackages = [ pkgs.obsidian ];
 
-        # ── Desktop entry / window-class registration ─────────────────────────
-        # Obsidian uses the window class "obsidian". We wire this into shellbridge
-        # so that Terminal Commander can show vault windows alongside agent windows.
-        # The registration is a one-shot service that writes the fragment and exits.
-        systemd.user.services.aoide-obsidian-register = {
-          description = "Register Obsidian window class with shellbridge";
+      # ── Desktop entry / window-class registration ─────────────────────────
+      # Obsidian uses the window class "obsidian". We wire this into shellbridge
+      # so that Terminal Commander can show vault windows alongside agent windows.
+      # The registration is a one-shot service that writes the fragment and exits.
+      systemd.user.services.aoide-obsidian-register = {
+        description = "Register Obsidian window class with shellbridge";
 
-          wantedBy = [ "shellbridge.service" ];
-          after = [ "shellbridge.service" ];
+        wantedBy = [ "shellbridge.service" ];
+        after = [ "shellbridge.service" ];
 
-          serviceConfig = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-            # STUB, neutralized (2026-08-01). The registration command
-            # `aoide bridge register-window-class obsidian` was never implemented,
-            # so running it exited 2 on EVERY activation → a degraded home-manager
-            # session → `nh` reporting the whole switch as failed (exit 4). This
-            # oneshot is a no-op success until the real registration lands: replace
-            # `true` with the fragment-write to song/stage/obsidian-sub.json (the
-            # behavior the header comment describes) or a real
-            # `aoide bridge register-window-class` command.
-            ExecStart = "${pkgs.coreutils}/bin/true";
-            Environment = [
-              "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
-            ];
-            NoNewPrivileges = true;
-          };
-        };
-
-        # ── XDG MIME association ───────────────────────────────────────────────
-        # Register Obsidian as the handler for obsidian:// URIs so aoided can
-        # deep-link into a vault note from a structured notification-action.
-        # xdg.mime.defaultApplications is the NixOS system-level MIME registry;
-        # for per-user overrides the lyra lane or home-manager can extend.
-        xdg.mime.defaultApplications = {
-          "x-scheme-handler/obsidian" = "obsidian.desktop";
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          # STUB, neutralized (2026-08-01). The registration command
+          # `aoide bridge register-window-class obsidian` was never implemented,
+          # so running it exited 2 on EVERY activation → a degraded home-manager
+          # session → `nh` reporting the whole switch as failed (exit 4). This
+          # oneshot is a no-op success until the real registration lands: replace
+          # `true` with the fragment-write to song/stage/obsidian-sub.json (the
+          # behavior the header comment describes) or a real
+          # `aoide bridge register-window-class` command.
+          ExecStart = "${pkgs.coreutils}/bin/true";
+          Environment = [
+            "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
+          ];
+          NoNewPrivileges = true;
         };
       };
-    };
-in
-{
-  inherit body;
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.obsidian.enable = lib.mkDefault true;
-    };
+      # ── XDG MIME association ───────────────────────────────────────────────
+      # Register Obsidian as the handler for obsidian:// URIs so aoided can
+      # deep-link into a vault note from a structured notification-action.
+      # xdg.mime.defaultApplications is the NixOS system-level MIME registry;
+      # for per-user overrides the lyra lane or home-manager can extend.
+      xdg.mime.defaultApplications = {
+        "x-scheme-handler/obsidian" = "obsidian.desktop";
+      };
+    })
+  ];
 }

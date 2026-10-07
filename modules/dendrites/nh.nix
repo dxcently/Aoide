@@ -1,6 +1,6 @@
 # modules/dendrites/nh.nix — nh (nix-helper) rebuild wrapper.
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.nh.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
 #   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
@@ -15,36 +15,26 @@
 # /home/khoa/dxflake/ to /home/khoa/Aoide/ (the `ad*` alias family in bash.nix
 # drives the same target).
 
+{ config, lib, ... }:
 let
-  body =
-    { config, lib, ... }:
-    let
-      flakeDir = "/home/khoa/Aoide/";
-    in
-    {
-      options.aoide.nh.enable = lib.mkEnableOption "nh (nix-helper) rebuild wrapper pointed at the Aoide flake";
-
-      config = lib.mkIf config.aoide.nh.enable {
-        home-manager.users.${config.aoide.user} = _: {
-          programs.nh = {
-            enable = true;
-            clean = {
-              enable = true;
-              extraArgs = "--keep-since 1w --keep 10";
-            };
-            flake = flakeDir;
-          };
-        };
-      };
-    };
+  flakeDir = "/home/khoa/Aoide/";
 in
 {
-  inherit body;
+  options.aoide.nh.enable = lib.mkEnableOption "nh (nix-helper) rebuild wrapper pointed at the Aoide flake";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.nh.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.nh.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.nh.enable {
+      habit.home = _: {
+        programs.nh = {
+          enable = true;
+          clean = {
+            enable = true;
+            extraArgs = "--keep-since 1w --keep 10";
+          };
+          flake = flakeDir;
+        };
+      };
+    })
+  ];
 }

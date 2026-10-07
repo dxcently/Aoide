@@ -1,6 +1,6 @@
 # modules/dendrites/cli.nix — general command-line utilities.
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.cli.enable (default false — shipped but off; defaulted
 #     ON fleet-wide in modules/aggregations/base/default.nix).
 #   - Carries its own dependencies; reads no other module.
@@ -19,57 +19,47 @@
 # utilities live here. With both defaulted-on in common, the aggregate is
 # unchanged from the old single devtools set.
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.cli.enable = lib.mkEnableOption "general CLI utilities (fzf, fd, ripgrep, jq, ffmpeg, …)";
-
-      config = lib.mkIf config.aoide.cli.enable {
-        # unrar is unfree. Scoped here: the dendrite that needs unfree carries the
-        # switch (narrowest scope wins).
-        nixpkgs.config.allowUnfree = true;
-
-        environment.systemPackages = with pkgs; [
-          # ── Shell & Terminal ──
-          fzf # command-line fuzzy finder
-          htop # interactive process viewer
-
-          # ── File System & Archives ──
-          unrar # extract RAR archives
-          unzip # extract ZIP archives
-          unar # universal unarchiver
-          fd # fast, user-friendly find alternative
-          file # determine file type via magic bytes
-          xdg-utils # XDG MIME and desktop integration tools
-
-          # ── Media CLI ──
-          ffmpeg # audio/video encoding framework
-
-          # ── Search & Text ──
-          ripgrep # recursive regex search (rg)
-          jq # command-line JSON processor
-          vim # vi-compatible modal text editor
-
-          # ── Network ──
-          curl # transfer data with URLs
-          wget # non-interactive network downloader
-        ];
-      };
-    };
-in
 {
-  inherit body;
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.cli.enable = lib.mkEnableOption "general CLI utilities (fzf, fd, ripgrep, jq, ffmpeg, …)";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.cli.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.cli.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.cli.enable {
+      # unrar is unfree. Scoped here: the dendrite that needs unfree carries the
+      # switch (narrowest scope wins).
+      nixpkgs.config.allowUnfree = true;
+
+      environment.systemPackages = with pkgs; [
+        # ── Shell & Terminal ──
+        fzf # command-line fuzzy finder
+        htop # interactive process viewer
+
+        # ── File System & Archives ──
+        unrar # extract RAR archives
+        unzip # extract ZIP archives
+        unar # universal unarchiver
+        fd # fast, user-friendly find alternative
+        file # determine file type via magic bytes
+        xdg-utils # XDG MIME and desktop integration tools
+
+        # ── Media CLI ──
+        ffmpeg # audio/video encoding framework
+
+        # ── Search & Text ──
+        ripgrep # recursive regex search (rg)
+        jq # command-line JSON processor
+        vim # vi-compatible modal text editor
+
+        # ── Network ──
+        curl # transfer data with URLs
+        wget # non-interactive network downloader
+      ];
+    })
+  ];
 }

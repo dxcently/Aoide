@@ -1,6 +1,6 @@
 # modules/dendrites/starship.nix — the Starship prompt.
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.starship.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
 #   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
@@ -11,71 +11,61 @@
 # format, git branch/status with staff glyphs, ♪/𝄽 success/error character.
 # Bash integration on (pairs with the bash dendrite).
 
-let
-  body =
-    { config, lib, ... }:
-    {
-      options.aoide.starship.enable = lib.mkEnableOption "the Starship prompt (musical-notation theme)";
+{ config, lib, ... }:
+{
+  options.aoide.starship.enable = lib.mkEnableOption "the Starship prompt (musical-notation theme)";
 
-      config = lib.mkIf config.aoide.starship.enable {
-        home-manager.users.${config.aoide.user} = _: {
-          programs.starship = {
-            enable = true;
-            enableBashIntegration = true;
-            settings = {
-              add_newline = true;
+  config = lib.mkMerge [
+    { aoide.starship.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.starship.enable {
+      habit.home = _: {
+        programs.starship = {
+          enable = true;
+          enableBashIntegration = true;
+          settings = {
+            add_newline = true;
 
-              format = ''
-                ═𝄞═══ $directory𝅘𝅥𝅮 $git_branch$git_status
-                ═𓏲𝄢═══ $username@$hostname$character'';
+            format = ''
+              ═𝄞═══ $directory𝅘𝅥𝅮 $git_branch$git_status
+              ═𓏲𝄢═══ $username@$hostname$character'';
 
-              directory = {
-                truncation_length = 3;
-                truncate_to_repo = false;
-                read_only = " ♯";
-              };
+            directory = {
+              truncation_length = 3;
+              truncate_to_repo = false;
+              read_only = " ♯";
+            };
 
-              username = {
-                show_always = true;
-                format = "[$user]($style)";
-              };
+            username = {
+              show_always = true;
+              format = "[$user]($style)";
+            };
 
-              hostname = {
-                ssh_only = false;
-                format = "[$hostname]($style) ";
-              };
+            hostname = {
+              ssh_only = false;
+              format = "[$hostname]($style) ";
+            };
 
-              git_branch = {
-                symbol = "♬ ";
-              };
+            git_branch = {
+              symbol = "♬ ";
+            };
 
-              git_status = {
-                format = "[♭$all_status$ahead_behind]($style) ";
-                ahead = "𝄪\${count}";
-                behind = "𝄫\${count}";
-                modified = "𝅗𝅥";
-                staged = "𝅘𝅥";
-                untracked = "𝅝";
-                conflicted = "𝄢";
-              };
+            git_status = {
+              format = "[♭$all_status$ahead_behind]($style) ";
+              ahead = "𝄪\${count}";
+              behind = "𝄫\${count}";
+              modified = "𝅗𝅥";
+              staged = "𝅘𝅥";
+              untracked = "𝅝";
+              conflicted = "𝄢";
+            };
 
-              character = {
-                success_symbol = "♪";
-                error_symbol = "𝄽";
-              };
+            character = {
+              success_symbol = "♪";
+              error_symbol = "𝄽";
             };
           };
         };
       };
-    };
-in
-{
-  inherit body;
-
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.starship.enable = lib.mkDefault true;
-    };
+    })
+  ];
 }

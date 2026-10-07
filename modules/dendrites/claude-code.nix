@@ -1,7 +1,7 @@
 # modules/dendrites/claude-code.nix — the Claude Code CLI (agentic AI coding
 # assistant, pkgs/claude-code: nixpkgs' recipe pinned ahead).
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.claude-code.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
 #   - Enable with one line in hosts/ (see hosts/yomi-strix/default.nix).
@@ -19,30 +19,20 @@
 #   - Nothing else: `crc` (claude --rc) stays an alias in bash.nix, which
 #     doesn't care where the binary comes from.
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.claude-code.enable = lib.mkEnableOption "the Claude Code CLI (agentic AI coding assistant)";
-
-      config = lib.mkIf config.aoide.claude-code.enable {
-        nixpkgs.config.allowUnfree = true;
-        environment.systemPackages = [ pkgs.claude-code ];
-      };
-    };
-in
 {
-  inherit body;
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.claude-code.enable = lib.mkEnableOption "the Claude Code CLI (agentic AI coding assistant)";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.claude-code.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.claude-code.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.claude-code.enable {
+      nixpkgs.config.allowUnfree = true;
+      environment.systemPackages = [ pkgs.claude-code ];
+    })
+  ];
 }

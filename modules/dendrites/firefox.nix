@@ -1,6 +1,6 @@
 # modules/dendrites/firefox.nix — the Firefox browser.
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.firefox.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
 #   - Enable with one line in hosts/ (see hosts/yomi-strix/default.nix).
@@ -11,26 +11,16 @@
 #   - Theming (GTK/colours) is left to the stylix lane (aoide.stylix.enable),
 #     same posture as kitty.nix — no colours hard-coded here.
 
-let
-  body =
-    { config, lib, ... }:
-    {
-      options.aoide.firefox.enable = lib.mkEnableOption "the Firefox browser (colours/theme deferred to the stylix lane)";
-
-      config = lib.mkIf config.aoide.firefox.enable {
-        home-manager.users.${config.aoide.user} = {
-          programs.firefox.enable = true;
-        };
-      };
-    };
-in
+{ config, lib, ... }:
 {
-  inherit body;
+  options.aoide.firefox.enable = lib.mkEnableOption "the Firefox browser (colours/theme deferred to the stylix lane)";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.firefox.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.firefox.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.firefox.enable {
+      habit.home = {
+        programs.firefox.enable = true;
+      };
+    })
+  ];
 }

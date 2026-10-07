@@ -1,6 +1,6 @@
 # modules/dendrites/vision.nix — AGENT screen capture primitives (grim/slurp).
 #
-# Dendrite shape v1 (CONTRACTS.md §2): guarded on aoide.vision.enable,
+# Dendrite shape (CONTRACTS.md §2): guarded on aoide.vision.enable,
 # carries its own dependencies, reads no other module.
 #
 # "Vision" for agents working the rice: grim captures a Wayland screenshot
@@ -20,51 +20,41 @@
 # satty + binds). hyprshot wraps grim internally, but the two callers ship as
 # two modules so either can be enabled alone.
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.vision.enable = lib.mkEnableOption "agent screen-capture primitives (grim + slurp on PATH)";
-
-      config = lib.mkIf config.aoide.vision.enable {
-        environment.systemPackages = with pkgs; [
-          grim # non-interactive capture: full screen or exact geometry
-          slurp # region-select primitive (emits geometry on stdout)
-          # Pointer synthesis for `aoide screen point` ships no package here:
-          # `screen::synth` speaks zwlr_virtual_pointer_manager_v1 in-process
-          # (CONTRACTS.md §8) — real wl_pointer.motion/button/axis events,
-          # never a cursor warp (hyprctl dispatch movecursor warps — no hover
-          # states fire, an agent could never verify one). Live-verified
-          # against Hyprland 2026-08-17 (exact landing, click/double-click,
-          # one detent per notch, atomic drag, hover delivery); the wlrctl
-          # fallback that waited on that proof is retired.
-          # OCR engine for `aoide screen ocr` (screen phase 3), eng-only
-          # trained data: `pkgs.tesseract` unwrapped pulls EVERY language's
-          # tessdata (nixpkgs' own `languages.all`, ~1GB unpacked, measured
-          # 2026-08-16); `enableLanguages` is the wrapper's own override point
-          # (pkgs/applications/graphics/tesseract/wrapper.nix, confirmed against
-          # this flake's pinned nixpkgs rev 279b4a8275f032c566576b3f181fa0f27197f588)
-          # for cutting that down to one language's data — the exact pattern
-          # nixpkgs itself already uses for its nixos-test-driver
-          # (`tesseract4.override { enableLanguages = [ "eng" ]; }`,
-          # pkgs/top-level/all-packages.nix). Measured eng-only closure: ~117MB.
-          (tesseract.override { enableLanguages = [ "eng" ]; })
-        ];
-      };
-    };
-in
 {
-  inherit body;
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.vision.enable = lib.mkEnableOption "agent screen-capture primitives (grim + slurp on PATH)";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.vision.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.vision.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.vision.enable {
+      environment.systemPackages = with pkgs; [
+        grim # non-interactive capture: full screen or exact geometry
+        slurp # region-select primitive (emits geometry on stdout)
+        # Pointer synthesis for `aoide screen point` ships no package here:
+        # `screen::synth` speaks zwlr_virtual_pointer_manager_v1 in-process
+        # (CONTRACTS.md §8) — real wl_pointer.motion/button/axis events,
+        # never a cursor warp (hyprctl dispatch movecursor warps — no hover
+        # states fire, an agent could never verify one). Live-verified
+        # against Hyprland 2026-08-17 (exact landing, click/double-click,
+        # one detent per notch, atomic drag, hover delivery); the wlrctl
+        # fallback that waited on that proof is retired.
+        # OCR engine for `aoide screen ocr` (screen phase 3), eng-only
+        # trained data: `pkgs.tesseract` unwrapped pulls EVERY language's
+        # tessdata (nixpkgs' own `languages.all`, ~1GB unpacked, measured
+        # 2026-08-16); `enableLanguages` is the wrapper's own override point
+        # (pkgs/applications/graphics/tesseract/wrapper.nix, confirmed against
+        # this flake's pinned nixpkgs rev 279b4a8275f032c566576b3f181fa0f27197f588)
+        # for cutting that down to one language's data — the exact pattern
+        # nixpkgs itself already uses for its nixos-test-driver
+        # (`tesseract4.override { enableLanguages = [ "eng" ]; }`,
+        # pkgs/top-level/all-packages.nix). Measured eng-only closure: ~117MB.
+        (tesseract.override { enableLanguages = [ "eng" ]; })
+      ];
+    })
+  ];
 }

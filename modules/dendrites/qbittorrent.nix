@@ -1,6 +1,6 @@
 # modules/dendrites/qbittorrent.nix — qBittorrent desktop client.
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.qbittorrent.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
 #
@@ -9,34 +9,24 @@
 #     no firewall port — the app's own settings own downloads and ports).
 #   - Registers it as the handler for magnet: links and .torrent files.
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.qbittorrent.enable = lib.mkEnableOption "the qBittorrent desktop client";
-
-      config = lib.mkIf config.aoide.qbittorrent.enable {
-        environment.systemPackages = [ pkgs.qbittorrent ];
-
-        xdg.mime.defaultApplications = {
-          "x-scheme-handler/magnet" = "org.qbittorrent.qBittorrent.desktop";
-          "application/x-bittorrent" = "org.qbittorrent.qBittorrent.desktop";
-        };
-      };
-    };
-in
 {
-  inherit body;
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.qbittorrent.enable = lib.mkEnableOption "the qBittorrent desktop client";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.qbittorrent.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.qbittorrent.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.qbittorrent.enable {
+      environment.systemPackages = [ pkgs.qbittorrent ];
+
+      xdg.mime.defaultApplications = {
+        "x-scheme-handler/magnet" = "org.qbittorrent.qBittorrent.desktop";
+        "application/x-bittorrent" = "org.qbittorrent.qBittorrent.desktop";
+      };
+    })
+  ];
 }

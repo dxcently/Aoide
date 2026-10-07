@@ -1,9 +1,9 @@
 # modules/dendrites/compositor/default.nix — the compositor capability's
-# provider registry (CONTRACTS.md §2 v1).
+# provider registry (CONTRACTS.md §2).
 #
 # A capability with alternatives is a registry of provider NAMES to provider
 # FILES and nothing else: the constructor (habit's composition) reads this
-# record before any module graph exists and imports exactly the provider the
+# entry when the capability is enabled and imports exactly the provider the
 # selecting host asked for, so an unselected alternative is never read. The
 # catalogue names THIS directory (`compositor = ./dendrites/compositor;`) and
 # nothing names a provider file but this line — one place each.

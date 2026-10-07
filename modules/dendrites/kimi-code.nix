@@ -1,7 +1,7 @@
 # modules/dendrites/kimi-code.nix — Kimi Code CLI (Moonshot AI's terminal
 # coding agent, github.com/MoonshotAI/kimi-code).
 #
-# Dendrite shape v1 (CONTRACTS.md §2):
+# Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.kimi-code.enable (default false — shipped but off).
 #   - Carries its own dependencies (pkgs/kimi-code); reads no other module.
 #   - Enable with one line in hosts/ (see hosts/yomi-strix/default.nix).
@@ -15,29 +15,19 @@
 #     Auth is interactive (`kimi` → `/login`) or via its own env/config, both
 #     out of this module's scope.
 
-let
-  body =
-    {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-    {
-      options.aoide.kimi-code.enable = lib.mkEnableOption "the Kimi Code CLI (Moonshot AI's terminal coding agent)";
-
-      config = lib.mkIf config.aoide.kimi-code.enable {
-        environment.systemPackages = [ pkgs.kimi-code ];
-      };
-    };
-in
 {
-  inherit body;
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+{
+  options.aoide.kimi-code.enable = lib.mkEnableOption "the Kimi Code CLI (Moonshot AI's terminal coding agent)";
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = [ body ];
-      config.aoide.kimi-code.enable = lib.mkDefault true;
-    };
+  config = lib.mkMerge [
+    { aoide.kimi-code.enable = lib.mkDefault true; }
+    (lib.mkIf config.aoide.kimi-code.enable {
+      environment.systemPackages = [ pkgs.kimi-code ];
+    })
+  ];
 }
