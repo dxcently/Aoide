@@ -81,3 +81,42 @@ in git; `git log --follow -- song/songbook/default/` finds it.
 - **Check before toggling a surface to screenshot it.** `aoide:dock` is a
   toggle; firing it to "open" the board closed the one the user already had
   open. Read the state (or ask) first.
+
+## Song widget costs: Canvas threads and the herald clock (2026-10-07)
+
+- **Heavy Canvas work never runs on the GUI thread.** A Context2D
+  `shadowBlur` of 34 costs 3.9 s per paint at 330x200 and 12 s at the dock's
+  562x1043 frame (12 ms with no blur), and a default Canvas paints on the GUI
+  thread. Cadenza's Pane glows froze the whole shell for tens of seconds per
+  scene build: the bar clock, the herald sweep, queued shortcuts and the
+  `rice stage` reload IPC all waited. `renderStrategy: Canvas.Threaded` gives
+  byte-identical pixels; the CPU moves to a worker, so the result lands late.
+- **A hidden Canvas still paints.** `visible: false` (cadenza's
+  `innerGlow: false`) cost the same CPU as a visible one: 4.0 s of user time
+  at 330x200 either way.
+- **Seconds of JS belong in a WorkerScript, and so does the canvas that
+  strokes the result.** CoverPcb generated its board in `onPaint`: 3.3 s per
+  output. It now answers from `CoverPcbWorker.mjs` with an identical board;
+  stroking the board is another ~110-150 ms, so that canvas is Threaded too.
+  Measuring only the generator (17 ms) hides that second cost. A WorkerScript
+  prints one `QObject::connect(QJSEngine, QtObject): invalid nullptr
+  parameter` warning; it is Qt's own and harmless.
+- **A transient toast's clock anchors to its own arrival.** `now + timeoutMs`
+  at first sight replays the stored ledger as fresh toasts on every QML
+  reload, which is every song switch that writes bodies. The deadline is
+  `Date.parse(receivedAt) + timeoutMs` (first sight only when it does not
+  parse), and a record already past it lapses inside `ingest`, because the
+  500 ms sweep starts only after something shows. Sonata, fugue (quodlibet
+  borrows it) and cadenza carry the same clock.
+- **Measure GUI-thread stalls offscreen, with the shell's own binary.**
+  quickshell with `QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software`, a
+  scratch `XDG_RUNTIME_DIR` and `AOIDE_ROOT`, `WAYLAND_DISPLAY` unset, and a
+  10 ms Timer logging every gap over 60 ms. The floor of a bare window is
+  15 ms. A `PanelWindow` root cannot load there (no layer-shell backend):
+  swap it for a `FloatingWindow` in a scratch copy and the clock logic runs
+  unchanged. The software backend says nothing about the GPU path, so
+  `Canvas.Threaded` on the live shell stays unmeasured until a live pass.
+- **A built-in song's runtime copy is read-only.** `~/.aoide/song/songbook/
+  sonata` is seeded from the nix store at 0444/0555. `chmod u+w` the one file
+  and write it in place (a temp-and-rename needs the directory); `lyra rice
+  declare` then carried it into the checkout like any other song.
