@@ -1,19 +1,21 @@
 ---
 type: concept
 created: 2026-08-25
-updated: 2026-08-27
+updated: 2026-10-07
 tags: [aoide, cli, conductor, tui]
 ---
 
 # Conductor TUI — the `aoide conductor` Terminal Frontend
 
 The dev-facing reference for the `aoide conductor` interactive terminal UI:
-its panes, its keys, what each key dispatches, what each pane reads. One
+its panels, its keys, what each key dispatches, what each panel reads. One
 command backs this page, so it is organized by *panel* rather than by command —
 the one deliberate departure from the per-command register the other
 `concepts/cli/` pages use. Implementation: `pkgs/aoide/crates/conductor/`
-(`app.rs`, `ui.rs`, `graphview.rs`, `theme.rs`, `logtail.rs`,
-`commands.rs`).
+(`app.rs` state and keys, `board.rs` page composition and the project tree,
+`ui.rs` panels, `graphview.rs` and `scene.rs` the Graph, `mailview.rs`,
+`eventview.rs`, `logtail.rs`, `theme.rs`, `commands.rs`); the crate's own
+`README.md` is the full operator manual and `AGENTS.md` its invariants.
 
 The conductor is a frontend only: every keypress that mutates state
 dispatches through the same `dispatch::dispatch(Invocation { door: Door::Cli,
@@ -25,7 +27,8 @@ re-documented: the PTY control socket and the injection door's mechanics
 ([[Session-Graph]]), the 3D-wireframe view ([[Conductor-3D-DAG]], specified
 not implemented), the Quickshell terminal widget ([[Terminal-Commander]]),
 and the full per-command I/O of `session prune`/`send`/`pending *` and
-`focus_session` ([[Graph-and-Conduct]]).
+`focus_session` ([[Graph-and-Conduct]]). The review that measures this
+frontend against the conducting job is `docs/architecture/CONDUCTOR-REVIEW.md`.
 
 ### aoide conductor
 
@@ -34,11 +37,16 @@ aoide conductor [--json]
 ```
 
 - **Reads:** `state/stage/{projects,sessions,hooks}.json`, mtime-polled every
-  ~500 ms (the crossterm poll timeout doubling as the tick); `song/stage/
-  livery.json` (palette → ANSI-256 theme — rice staging, so it reads the
-  other tree); the audit log (the LOG panel
-  tails it). `$AOIDE_STAGE_DIR` / `$AOIDE_AUDIT_LOG` are both honoured, so a
-  tempdir plus the seed fixture is a full offline rig:
+  ~500 ms (the crossterm poll timeout doubling as the tick);
+  `state/session-ledger.jsonl` (past sessions); the mail base and the audit
+  log, each as a bounded tail; `session --hosts --json` (the roster probe,
+  on a worker thread, at most every ~15 s while Mesh or Graph is open);
+  `node status --json`, `mesh --json`, `pair --json`, `session pending list
+  --json`, `config --json`, `secrets pending --json` and `secrets status
+  --json` through the injected dispatcher; `song/stage/livery.json`
+  (palette — rice staging, so it reads the other tree). `$AOIDE_STAGE_DIR` /
+  `$AOIDE_AUDIT_LOG` are both honoured, so a tempdir plus the seed fixture is
+  a full offline rig:
 
   ```sh
   export AOIDE_STAGE_DIR=$(mktemp -d) AOIDE_AUDIT_LOG=$AOIDE_STAGE_DIR/log
@@ -48,130 +56,177 @@ aoide conductor [--json]
 
 - **Output:** on the CLI door, `run_cli` dispatches the launch first (one
   audit record, `data: {interactive: true, stageDir}`), then hands the tty
-  to a ratatui/crossterm loop: alternate screen + raw mode, seven panels,
-  keys `1`–`7`/`Tab`/`BackTab` to switch, `?` help, `q`/`Ctrl-C` quit. On a
-  non-CLI door (an MCP `tools/call`, say) the handler returns a "run it from
-  a terminal" outcome instead of blocking that door — `interactive: true,
-  door: "non-cli"`.
+  to a ratatui/crossterm loop: alternate screen + raw mode, mouse capture,
+  ten panels, keys `1`–`9` then `0`, `Tab`/`BackTab` to switch, `?` help,
+  `q`/`Ctrl-C` quit. On a non-CLI door (an MCP `tools/call`, say) the handler
+  returns a "run it from a terminal" outcome instead of blocking that door —
+  `interactive: true, door: "non-cli"`.
 - **Notes:** not gated. Distinct from `aoide conduct`, which wraps one
   process into the conductor channel rather than raising this UI. Core,
   never `lyra` — the crate carries no wayland/image/song dependency.
 
-## The seven panels
+## The page
 
-`Panel::ALL` (`app.rs`): DAG, SESSION, PROJECTS, LOG, STATUS, ROSTER,
-PENDING, in that order — the order the `1`–`7` keys and `Tab`/`BackTab`
-cycle through. ROSTER and PENDING are later additions, appended last so no
-earlier panel's key ever shifts. The panel titles itself SESSION, singular —
-the underlying `sessions.json` file and data-shape names stay plural; only
-the panel/family name normalizes.
+```
+ 𝄞 CONDUCTOR                     [◆ n Projects] [♜ n Agents] [▣ n Terminals]
+ 1 ⌂ Home 2 ✉ Mail 3 ♜ Agents 4 ▣ Terminals 5 🖧 Mesh 6 ⚑ Review 7 ◆ Projects 8 ∴ Graph 9 ≡ Log 0 ⚙ Status
+ ┌ PROJECTS ───────┬ <panel> ─────────────────────────────────────────────┐
+ │ project tree    │ the selected panel's body                            │
+ │   Agents (n)    │                                                      │
+ │   Terminals (n) │                                                      │
+ │   Past (n)      │ [action controls]            canvas / fetch readout  │
+ └─────────────────┴──────────────────────────────────────────────────────┘
+ hint line
+ status line                                      panel keymap
+```
 
-- **DAG (`1`)** — the visual graph: nodes and edges laid out and drawn by
-  `graphview`. Selection walks the same preorder node list the layout
-  draws. `Enter` on a node with a session cues it (see "Enter's
-  destination" below); `p` dispatches `session prune`, the one graph-wide
-  command left on this key (`e`/`graph emit` is deleted — every stage
-  mutation restages `graph.json` automatically, so there is nothing left
-  for the keybinding to trigger).
-- **SESSION (`2`)** — the collapsible terminal roster: project group
-  headers interleaved with their session subtrees, one flattened selection
-  index over the lot (`App::dag_rows`). `Enter` on a session cues it; on a
-  group header it toggles the fold. `h`/`-` folds the group under the
-  cursor, `l`/`+` unfolds it. `a` opens the inline project-add prompt —
-  naming an existing project adds a root to it rather than creating a
-  second one; `d` on a group header removes that project (`project remove`
-  — the unanchored pseudo-group has nothing to remove). `L` on a session
-  opens a prompt collecting a parent session id and dispatches `graph
-  link`. `p` dispatches `session prune` here too. A project's group header
-  shows only its FIRST root — the rest are the PROJECTS panel's job, so a
-  second root never adds a row to `dag_rows`.
-- **PROJECTS (`3`)** — the flat project registry, sorted by name, one
-  multi-line row per project: the head line as before, then one dim line
-  per EXTRA root, so `proj_sel` still indexes projects, not roots. `a`
-  opens the same project-add-a-root prompt SESSION uses; `d` removes the
-  selected project (`project remove`). `project edit` — the
-  whole-root-list replacement — has no key binding here this slice; reach
-  it from the CLI.
-- **LOG (`4`)** — read-only: tails the audit log.
-- **STATUS (`5`)** — read-only: stage status, both trees (`App::stage` for
-  `state/stage/`, `App::rice_stage` for `song/stage/`).
-- **ROSTER (`6`)** — presence over this box's own sessions plus every
-  registered node. Rows are `session --hosts --json`'s `Outcome.data`, dispatched
-  through the same injected `DispatchFn` and parsed into a flattened row
-  list — never re-derived. `session --hosts` performs a LIVE network probe of every
-  registered node (~2 s/node, parallel) on every invocation, so this pane
-  throttles: it re-dispatches at most every ~15 s (`ROSTER_THROTTLE`) while
-  visible, never on every ~500 ms tick; `r` forces one fetch regardless of
-  the throttle window (a no-op while a fetch is already in flight). The
-  dispatch runs on its own `std::thread`, reporting back over an `mpsc`
-  channel the tick loop polls without blocking — the one dispatch in this
-  crate that skips the synchronous `App::dispatch`, since the roster never
-  mutates anything and its live probes would otherwise freeze the tick
-  loop. `s` on a selected session row opens the compose prompt, pre-labeled
-  with that row's own display-grammar label, and on submit dispatches
-  `send --to <target> --yes -- <text>`.
-- **PENDING (`7`)** — held `send`/A2A entries, approve/deny. Rows are
-  `session pending list --json`'s `Outcome.data`. Unlike ROSTER, this is a
-  local file read (no network), so it refreshes synchronously on the tick
-  while the pane is visible, and again after every dispatch
-  (`reload_all` → `refresh_pending`). `a`/`d` dispatch `session pending
-  approve`/`session pending deny` on the selected row.
+`board::NAV` fixes the tab order the number keys and `Tab` follow. Every
+workspace panel keeps the project tree on the left: a project folds its
+Agents, Terminals and Past groups independently; sessions attached to no
+project gather under `Active sessions` (live only), and their ended records
+form one root-level Past node. `Ctrl-P` moves keyboard focus between the
+tree and the body; only the focused region draws a bright selection.
+`e` or a right-click opens the context menu for the tree row, graph card,
+project or session under the cursor (Details for everything; Open / focus,
+Set project, Lead project, Write letter for a live local session; the
+recipient chooser, Add folder and Resurrect for a project). Every kind of
+thing has one identity mark (`theme::mark`): `⌂` home, `✉` mail, `♜` agent,
+`▣` terminal, `🖧` host, `⚑` review, `◆` project, `◇` folder, `∴` graph, `≡`
+log, `⚙` status, `◌` past session.
 
-## Keys
+## The ten panels
 
-Global, handled before any panel sees the key: `Ctrl-C` quits from
-anywhere, including mid-overlay; `?` opens the help overlay (swallows keys
-until `?`/`Esc`/`q` closes it); the log-tail overlay swallows keys until
-`Esc`/`q`/`Enter` closes it; an open inline input (project-add, link,
-compose) consumes text/`Enter`/`Esc` itself. Otherwise: `q` quits, `Tab`/
-`BackTab` cycle panels, `1`–`7` select a panel directly.
+- **Home (`1`)** — the logo, the action groups (`n` new project, `p` open
+  project, `m` correspondence, `H` connected hosts, `L` activity log) and
+  the recent projects. Navigation only; nothing dispatches.
+- **Mail (`2`)** — the local mail base read non-consumingly: letters grouped
+  by signed `threadId`, legacy pair correspondence labelled as such. `n`
+  new letter, `s`/`a`/`f` reply / reply all / forward into one form (From,
+  To, Cc, Subject, Message, with the recipient tree beside it); `Ctrl-S` or
+  the Send control dispatches `mail send` as `conductor-human`. Browsing
+  advances no agent cursor and emits no receipt.
+- **Agents (`3`) / Terminals (`4`)** — the live roster as an indented list
+  under project groups, agents or terminals respectively, with the selected
+  row's facts beneath. `Enter` cues a session (see "Enter's destination");
+  `h`/`l` fold a group; `L` links the selected session under a typed parent
+  id (`graph link`); `a` adds a project root (`project add`); `d` on a group
+  header removes that project behind an exact-name confirmation (`project
+  remove`); `p` prunes (`session prune`). Opening a Past entry shows ledger
+  facts and never focuses or kills a process.
+- **Mesh (`5`)** — the roster probe: this box, then every registered node
+  with its sessions, headed `● online`, `◐ unreachable (last seen <age>
+  ago)` or `○ never pulled`. A session row under an unreachable node is a
+  cache row and says so — `· <label>  last-seen · was <state>`, dimmed, no
+  live glyph — because the roster core's own `presence` is the only source
+  of that fact. Beneath the roster: the registry's trust rows (`node status
+  --json`) and each declared mesh's drift (`mesh --json`). `r` forces a
+  probe; `s` composes a `send` to the selected session; `e` offers Pair /
+  re-pair, the read/spawn/message grant toggles (`node allow`) and
+  Unregister behind an exact-name confirmation (`node remove`). A pairing
+  code lives only in the ceremony popup, read off a pair outcome's own
+  `sas` fields and never scanned out of text.
+- **Review (`6`)** — three queues under one cursor: session send/A2A
+  approvals (`session pending list`), parked pairing requests (`pair
+  --json`), parked secrets TOTP asks (`secrets pending --json`). `a`
+  approves / resumes, `d` denies / rejects / dismisses, `r` re-lists. A
+  pairing code or a TOTP is typed once into a masked prompt and dropped on
+  submit; nothing is replayed. Each queue's read failure renders as its own
+  refusal line, never as an empty all-clear.
+- **Projects (`7`)** — the registry, one row per project with its extra
+  roots beneath. `a` adds a root, `d` removes the selected project behind
+  the confirmation.
+- **Graph (`8`)** — the retained scene, below.
+- **Log (`9`)** — read-only: the audit JSONL's last 200 complete events, the
+  selected event's full record (`PgUp`/`PgDn` scroll the detail).
+- **Status (`0`)** — the editable config keys (`config --json`, one level
+  deep, with the file's provenance) and the secrets broker's references
+  (`secrets status --json`: metadata only, never a value). `Enter`/`e` edits
+  a key (`config set`) or grants / revokes a secret's consumer (`secrets
+  grant|revoke`); the backend's validation is the only gate.
 
-Per-panel keys (LOG and STATUS take none — read-only):
+## The Graph panel
 
-| Panel | Keys |
+A retained scene: cards are fixed 32×7 rectangles at world coordinates
+`App::graph.positions` keeps across refreshes, wired top-down (a parent
+centred over its children), under a camera that pans and zooms. The forest
+is `build_graph` over the local stage — projects, their sessions, spawned
+children, and one synthetic `Active sessions` root for the projectless —
+followed by one **host card per registered node** off the roster probe
+(`🖧 NODE · online|unreachable|never-pulled`, the node's name, `n session(s)
+· live` / `unreachable · last seen <age> ago` / `never pulled`), its
+reported sessions flat beneath. A remote card carries no local session id,
+so the local actions pass over it; a cached row wears `last-seen` as its
+state and `was <state>` as its activity.
+
+| Key | Effect |
 |---|---|
-| DAG | `j`/`k` (`↓`/`↑`) move; `g`/`Home` jump to the first node, `G`/`End` to the last; `Enter` cue the selected session; `p` `session prune` |
-| SESSION | `j`/`k` move; `Enter` cue a session / toggle a group's fold; `h`/`-` fold, `l`/`+` unfold; `a` add a project; `d` on a group header remove that project; `L` on a session link it under a typed parent id; `p` prune |
-| PROJECTS | `j`/`k` move; `a` add a project; `d` remove the selected project |
-| ROSTER | `j`/`k` move; `r` force a fetch; `s` compose a send to the selected session |
-| PENDING | `j`/`k` move; `a` approve; `d` deny |
+| `j`/`k`, `↓`/`↑` | first child / parent — resolved against the whole forest |
+| `h`/`l`, `←`/`→` | previous / next sibling — likewise, no wrap |
+| `g`/`Home`, `G`/`End` | first / last drawn card |
+| `a` | Focus (the selected card's connected component; the gathering root is not a connection) ↔ All |
+| `Enter` | cue the selected local session |
+| `s` | write a letter to the selected local agent |
+| `e` / right-click | the card's context menu |
+| `p` | `session prune` |
+| Space + drag, middle drag, wheel, Shift + wheel | pan |
+| Ctrl + wheel | zoom 50/75/100/125/150 %, anchored at the pointer |
+
+Navigation never strands the cursor: under Focus the view is derived from
+the selection, so `k` on a loose session climbs to the gathering root and
+reopens the forest, and `l` reaches a sibling the component did not draw.
+Until a drag or a zoom moves it, the camera follows the selection and shows
+the forest, never the pad around it: an axis the forest fits in is held
+whole (top-aligned, centred across), an overflowing axis centres the
+selected card inside the forest's bounds. The readout on the action row —
+`Canvas 100% · FOCUS · card 3/20 · rank 1` — says where the cursor stands
+in what is drawn. Rendering, hit testing, drag and wheel share one camera
+transform; render records nothing for a later event to find.
 
 ## What it dispatches
 
 Every mutating keypress builds an `Invocation` and passes it to the injected
-`DispatchFn`, so it is audited exactly like a typed command: `session prune`,
-`project add`, `project remove`, `graph link`, `send --to
-<target> --yes` (ROSTER compose), `session pending approve`, `session pending
-deny`. Reads (`session --hosts`, `session pending list`, the stage-file loads) never
-dispatch — they call the pure graph functions and stage-file loaders
-directly. Cue-session on a live window is the one exception on the write
-side too: it calls `focus_session` directly rather than dispatching `graph
-focus` (deleted — there is no CLI subcommand left to dispatch), writing its
-own audit line by hand so the one-audit-log invariant still holds.
+`DispatchFn`, so it is audited exactly like a typed command: `session
+prune`, `project add`, `project remove`, `project lead`, `graph link`,
+`send --to <target> --yes`, `session pending approve|deny`, `pair` with its
+flags (never bare, which would raise its own menu) and `pair reject`, `node
+allow|remove`, `config set`, `secrets approve|dismiss|grant|revoke`, `mail
+send`, `resurrect`. Reads never dispatch a mutation:
+the stage-file loads, the ledger, mail and audit tails call their storage
+readers directly, and the roster, trust, pending, config and secrets reads
+are `--json` invocations of their commands. Cue-session on a live window
+calls `focus_session` directly rather than dispatching (there is no CLI
+subcommand left to dispatch), writing its own audit line so the one-audit-
+log invariant holds.
 
-## Two behaviours a reader will hit
+## Three behaviours a reader will hit
 
-- **ROSTER's `session --hosts` throttles.** A stale cache fetches immediately on
-  switching into the pane; otherwise a fetch fires at most every ~15 s
-  while the pane is visible. `r` overrides the window unconditionally.
+- **The roster probe throttles.** A stale cache fetches immediately on
+  entering Mesh or Graph; otherwise a fetch fires at most every ~15 s while
+  either is visible. `r` in Mesh overrides the window. A landed probe is
+  folded into the retained graph scene like a stage refresh.
 - **`session pending list`'s `id` is an array position, not a stable id** —
   resolving one entry shifts every id after it. `App::dispatch` re-lists
-  synchronously (`reload_all` → `refresh_pending`) before the next paint,
-  so a second `a`/`d` in the same visit always resolves the row actually on
-  screen, never a stale index.
+  synchronously before the next paint, so a second `a`/`d` in the same visit
+  always resolves the row actually on screen.
+- **Anything that can cross the broker socket runs on a worker** (`secrets
+  pending`, `secrets status`, every secrets mutation): the last rows stay on
+  screen with "reading…" beside them, exactly one mutation is in flight at a
+  time, and a second is refused with the reason, never queued.
 
 ## Enter's destination
 
 `Enter` on a session (`cue_session`) opens the log-tail overlay when the
 record carries a `log_path` — set only by `conduct --headless` — reading the
 file immediately so content paints on the keypress itself, not the next
-tick. Any other session calls `focus_session` directly instead.
+tick. Any other live local session calls `focus_session` directly instead. A
+Past entry and a remote card take no Enter.
 
 ## Terminal restoration
 
-`TermGuard`'s `Drop` leaves the alternate screen and disables raw mode; a
-panic hook does the same before the default hook prints. Every exit path —
-clean quit, `q`, a panic inside a view — restores the tty.
+`TermGuard`'s `Drop` leaves the alternate screen, releases the mouse and
+disables raw mode; a panic hook does the same before the default hook
+prints. Every exit path — clean quit, `q`, a panic inside a view — restores
+the tty.
 
 ## Related
 
