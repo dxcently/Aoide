@@ -50,8 +50,10 @@ modules/dendrites/lyra/
   re-synced), or, in `declarative`, nothing but the shell's reload. The unit is
   a one-shot ordered Before `aoide-quickshell.service`, so the shell's first
   frame is the staged song, and it runs in the user manager because
-  home-manager's activation has no Hyprland environment. It stays active even
-  when the reload refuses. At login the session starts it; on a switch
+  home-manager's activation has no Hyprland environment. It runs under
+  `timeout 60`, since a oneshot has no start timeout and `lyra reload` spawns
+  children with none, and it stays active even when the reload refuses or is
+  cut off. At login the session starts it; on a switch
   `aoideRestartRice` restarts it together with the shell in ONE `try-restart`,
   after home-manager's file and systemd steps, which is what puts the reload
   between the seed and the shell's restart.

@@ -51,12 +51,14 @@ lib.mkIf config.aoide.enable {
   #
   # Why here and not in the portable core module: the templates path is
   # `pkgs.lyra-songbook` (paint), which core neither knows nor may name. Why
-  # only this unit and `aoide-quickshell`: `fs::song_templates_dir` is read on
-  # the staging path (`rice stage|compose|preview|mode`, `take`, `onboard`),
-  # and those are what a shell born of these two units runs — shellbridge
-  # already spells it for the one process that stages in-process, and a door
-  # that spawns a fixed dialog (`lyra pair ask`, `lyra secrets ask`) never
-  # reaches the staging path at all. The rest of what the staging path reads
+  # only this unit, `aoide-quickshell` and `aoide-rice-reload`:
+  # `fs::song_templates_dir` is read on the staging path (`rice stage|compose|
+  # preview|mode`, `take`, `onboard`), and those are what a shell born of
+  # `aoide-quickshell` runs and what `aoide-rice-reload` re-stages with at
+  # login and after a switch — shellbridge already spells it for the one
+  # process that stages in-process, and a door that spawns a fixed dialog
+  # (`lyra pair ask`, `lyra secrets ask`) never reaches the staging path at
+  # all. The rest of what the staging path reads
   # from session variables was audited with it: `AOIDE_ROOT` and
   # `AOIDE_FLAKE_ROOT` are spelled by every unit that can reach it,
   # `AOIDE_STAGE_DIR` is deliberately unset anywhere (the default layout

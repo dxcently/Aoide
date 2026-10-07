@@ -158,8 +158,9 @@ else
   # The unit that brings a staged or drafted song back after a login or a
   # switch: ordered before the shell (its first frame is the staged song), run in
   # the user manager once the session is up, one shot that stays active even when
-  # `lyra reload` refuses (the `-`), carrying the runtime root and the templates
-  # but no PATH (the manager's own reaches the tools).
+  # `lyra reload` refuses or is cut off (the `-`), bounded by `timeout` because a
+  # oneshot has no start timeout of its own, carrying the runtime root and the
+  # templates but no PATH (the manager's own reaches the tools).
   check "control: the rice reload is before the shell" "1" \
     "$(y '[(.riceReload.Unit.Before // [])[] | select(. == "aoide-quickshell.service")] | length')"
   check "control: the rice reload follows the session" "1" \
@@ -172,6 +173,8 @@ else
   check "control: the rice reload stays active" "true" "$(y '.riceReload.Service.RemainAfterExit')"
   check "control: a refused reload is not a failure" "true" \
     "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | startswith("-") and endswith("/bin/lyra reload")')"
+  check "control: the rice reload is bounded"   "true" \
+    "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | test("^-[^ ]+/bin/timeout [0-9]+ [^ ]+/bin/lyra reload$")')"
   check "control: the rice reload has root, templates" "2" \
     "$(y '[(.riceReload.Service.Environment // [])[] | select(startswith("AOIDE_ROOT=") or startswith("AOIDE_SONG_TEMPLATES="))] | length')"
   check "control: the rice reload names no PATH" "0" \

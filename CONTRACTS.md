@@ -1238,8 +1238,10 @@ where it can be READ: `AOIDE_SONG_TEMPLATES` is paint data (only
 `aoide-song` reads it, only `lyra` links `aoide-song`), so it is wired ONLY
 onto units whose process execs or spawns `lyra` —
 `modules/dendrites/lyra/shellbridge.nix`'s
-main `shellbridge` service and `modules/dendrites/quickshell.nix`'s
-`aoide-quickshell` unit (the QML it starts execs `lyra`) — plus
+main `shellbridge` service, `modules/dendrites/quickshell.nix`'s
+`aoide-quickshell` unit (the QML it starts execs `lyra`) and
+`modules/dendrites/lyra/default.nix`'s `aoide-rice-reload` unit (it runs `lyra
+reload`) — plus
 `modules/nucleus/aoided.nix`'s
 `environment.sessionVariables` (an operator's own interactive `lyra rice
 compose`) and that unit's own `Environment=` (so a restart after a switch

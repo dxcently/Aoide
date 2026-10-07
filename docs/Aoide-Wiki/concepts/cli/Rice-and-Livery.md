@@ -154,7 +154,9 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
   with a `_widgets/` shelf still needs a real checkout: resolving a shelf
   takes `composeSong` in the nix evaluator, which the templates fallback
   cannot run. `$AOIDE_SONG_TEMPLATES` is wired only onto lyra-execing units
-  (`modules/dendrites/lyra/shellbridge.nix`'s shellbridge service) plus
+  (`modules/dendrites/lyra/shellbridge.nix`'s shellbridge service,
+  `modules/dendrites/quickshell.nix`'s `aoide-quickshell` and
+  `modules/dendrites/lyra/default.nix`'s `aoide-rice-reload`) plus
   `modules/nucleus/aoided.nix`'s `environment.sessionVariables` (gated on
   `aoide.lyra.enable`) — core-only units don't carry it.
 

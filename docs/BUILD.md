@@ -94,8 +94,9 @@ staging paths read it and only `lyra` links them, so it rides the units that
 exec or spawn `lyra` —
 `modules/dendrites/lyra/shellbridge.nix`'s main `shellbridge` service,
 `modules/dendrites/quickshell.nix`'s `aoide-quickshell` unit (the QML it
-starts execs `lyra`) — and `modules/nucleus/aoided.nix`'s
-`environment.sessionVariables` plus its own unit `Environment`, all gated on
+starts execs `lyra`), `modules/dendrites/lyra/default.nix`'s
+`aoide-rice-reload` unit (it runs `lyra reload`) — and
+`modules/nucleus/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
 `aoide.lyra.enable`, never the core-only units that exec plain
 `aoide` (a headless core carries no `pkgs.lyra-songbook` closure). Each unit
 spells it in its OWN `Environment=` as well as inheriting the login copy:

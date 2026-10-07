@@ -633,7 +633,9 @@ let
                 # applied live. (The compositor lane sets that package to null, so there
                 # only Hyprland's own file watcher reloads the config.) Both units no-op
                 # when inactive (a boot activation has no session); the session's own
-                # start of them is what restores the song then.
+                # start of them is what restores the song then. The switch waits for both
+                # jobs, and the reload is bounded (below), so a hung child delays it by
+                # that bound and no more.
                 #
                 # This is the REBUILD-side half of the recovery, not the whole of it:
                 # the identical lockup recurring live, mid-session, with no rebuild in
@@ -785,7 +787,7 @@ let
                 # `aoide.lyra.enable` like the healthcheck above, since it execs the
                 # same lyra binary.
                 #
-                # Three constraints are invisible from this file:
+                # Four constraints are invisible from this file:
                 #   - BEFORE the shell, so the shell's first frame is the staged song,
                 #     not the declared one; the activation's try-restart (above) orders
                 #     the same way, the shell being down while the reload writes.
@@ -800,6 +802,15 @@ let
                 #   - The `-` prefix plus RemainAfterExit: a refused or failed reload
                 #     still leaves the unit active, so the activation's try-restart
                 #     reaches it on the next switch (it skips a unit that is not active).
+                #   - BOUNDED by `timeout`: a oneshot has no start timeout
+                #     (`TimeoutStartSec` is infinity), and `lyra reload` runs children
+                #     with no deadline of their own (nix-instantiate, `quickshell ipc
+                #     call`, hyprctl, the wallpaper provider's helper). One hung child
+                #     would hold the shell's start, which waits on this unit, and the
+                #     activation's try-restart, which waits on both jobs. `timeout`
+                #     ends the run with a non-zero exit, which the `-` already
+                #     forgives, so the unit stays active; a `TimeoutStartSec` would
+                #     leave it failed, and a try-restart skips a failed unit.
                 systemd.user.services.aoide-rice-reload = lib.mkIf config.aoide.lyra.enable {
                   Unit = {
                     Description = "Aoide rice reload: bring the staged or drafted song back after a login or a switch";
@@ -810,7 +821,7 @@ let
                   Service = {
                     Type = "oneshot";
                     RemainAfterExit = true;
-                    ExecStart = "-${pkgs.aoide.rice}/bin/lyra reload";
+                    ExecStart = "-${pkgs.coreutils}/bin/timeout 60 ${pkgs.aoide.rice}/bin/lyra reload";
                     Environment = [
                       "AOIDE_ROOT=${config.aoide.root}"
                       # Same declaration as aoide-quickshell's own: the staging path's one
