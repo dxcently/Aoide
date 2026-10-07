@@ -20,18 +20,34 @@ use aoide_protocol::registry::AOIDE_VERSION;
 use aoide_protocol::{door, suggest};
 use std::path::PathBuf;
 
-const USAGE: &str = "aoided — the resident Aoide daemon: one policy surface, one gate, one audit log
-Usage: aoided [--audit-log <path>]
-       aoided --version
-       aoided --help
+const BIN: &str = "aoided";
 
-  --audit-log <path>  write the audit log there instead of $AOIDE_ROOT/log
-  --version           print the version and exit
-  --help              print this page and exit
+struct Flag {
+    name: &'static str,
+    value: Option<&'static str>,
+    help: &'static str,
+}
 
-aoided takes no other arguments; it runs in the foreground until stopped.";
+const AUDIT_LOG: Flag = Flag { name: "--audit-log", value: Some("<path>"), help: "write the audit log there instead of $AOIDE_ROOT/log" };
+const VERSION: Flag = Flag { name: "--version", value: None, help: "print the version and exit" };
+const HELP: Flag = Flag { name: "--help", value: None, help: "print this page and exit" };
+const FLAGS: [Flag; 3] = [AUDIT_LOG, VERSION, HELP];
 
-const FLAGS: [&str; 3] = ["--audit-log", "--version", "--help"];
+impl Flag {
+    fn spelled(&self) -> String {
+        self.value.map_or(self.name.to_string(), |v| format!("{} {v}", self.name))
+    }
+}
+
+fn usage() -> String {
+    let forms: Vec<String> = FLAGS.iter().map(Flag::spelled).collect();
+    let width = forms.iter().map(String::len).max().unwrap_or(0);
+    let rows: Vec<String> = FLAGS.iter().zip(&forms).map(|(f, form)| format!("  {form:<width$}  {}", f.help)).collect();
+    format!(
+        "aoided — the resident Aoide daemon: one policy surface, one gate, one audit log\nusage: {BIN} [flag]\n\n{}\n\n{BIN} takes no other arguments; it runs in the foreground until stopped.",
+        rows.join("\n")
+    )
+}
 
 #[derive(Debug, PartialEq)]
 enum Launch {
@@ -44,34 +60,38 @@ fn parse(argv: &[String]) -> Result<Launch, Outcome> {
     let (mut help, mut version, mut audit_log) = (false, false, None);
     let mut args = argv.iter();
     while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--help" => help = true,
-            "--version" => version = true,
-            "--audit-log" => match args.next().filter(|v| !v.starts_with("--")) {
+        let Some(flag) = FLAGS.iter().find(|f| f.name == arg) else {
+            let near = suggest::closest(arg, FLAGS.iter().map(|f| f.name), 1);
+            let fix = match (arg.strip_prefix(&format!("{}=", AUDIT_LOG.name)), near.first()) {
+                (Some(path), _) => Fix::Run(format!("aoided {} {path}", AUDIT_LOG.name)),
+                (None, Some(near)) => Fix::Run(format!("aoided {near}")),
+                (None, None) => Fix::Run(format!("aoided {}", HELP.name)),
+            };
+            let known: Vec<String> = FLAGS.iter().map(Flag::spelled).collect();
+            return Err(Outcome::refuse(
+                "aoided",
+                Kind::Usage,
+                format!("`{arg}` is not an aoided argument"),
+                format!("aoided takes only {}, and starts nothing on anything else", known.join(", ")),
+                fix,
+            ));
+        };
+        if flag.name == HELP.name {
+            help = true;
+        } else if flag.name == VERSION.name {
+            version = true;
+        } else {
+            match args.next().filter(|v| !v.starts_with("--")) {
                 Some(path) => audit_log = Some(PathBuf::from(path)),
                 None => {
                     return Err(Outcome::refuse(
                         "aoided",
                         Kind::Usage,
-                        "`--audit-log` needs a path",
+                        format!("`{}` needs a path", flag.name),
                         "it names the file the daemon appends its audit log to",
-                        Fix::Run("aoided --audit-log <path>".into()),
+                        Fix::Run(format!("aoided {}", flag.spelled())),
                     ))
                 }
-            },
-            other => {
-                let fix = match (other.strip_prefix("--audit-log="), suggest::closest(other, FLAGS, 1).first()) {
-                    (Some(path), _) => Fix::Run(format!("aoided --audit-log {path}")),
-                    (None, Some(near)) => Fix::Run(format!("aoided {near}")),
-                    (None, None) => Fix::Run("aoided --help".into()),
-                };
-                return Err(Outcome::refuse(
-                    "aoided",
-                    Kind::Usage,
-                    format!("`{other}` is not an aoided argument"),
-                    "aoided takes only --audit-log <path>, --version and --help, and starts nothing on anything else",
-                    fix,
-                ));
             }
         }
     }
@@ -87,7 +107,7 @@ fn parse(argv: &[String]) -> Result<Launch, Outcome> {
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let audit_log = match parse(&argv) {
-        Ok(Launch::Help) => std::process::exit(door::say(USAGE).unwrap_or(0)),
+        Ok(Launch::Help) => std::process::exit(door::say(&usage()).unwrap_or(0)),
         Ok(Launch::Version) => std::process::exit(door::say(&format!("aoided {AOIDE_VERSION}")).unwrap_or(0)),
         Ok(Launch::Run { audit_log }) => audit_log,
         Err(refusal) => std::process::exit(door::emit(&refusal, false)),
