@@ -1702,10 +1702,13 @@ song's own colours.
 saved `song/songbook/<song>/drafts/<name>/livery.json`. A one-shot read
 follows a symlink transparently; a WATCH does not — it stays on the inode it
 loaded and sees no event after the entry is swapped (leaving or rerouting a
-draft). So every successful `rice mode` transition writes `stage/mode.json`
-LAST, and a watching reader re-reads `livery.json` on every `mode.json`
-change (`mode.json` is always a real file, atomically replaced; the shell's
-`LiveryState.qml` is that reader). Writers going through
+draft). So any command that replaces the `stage/livery.json` entry MUST
+write `stage/mode.json` LAST (every successful `rice mode` transition does),
+and a watching reader re-reads `livery.json` on every `mode.json` change
+(`mode.json` is always a real file, atomically replaced; the shell's
+`LiveryState.qml` is that reader). A failed transition and the activation
+reseed sit outside that guarantee: the reader is re-armed by the next
+`mode.json` write or the shell restart. Writers going through
 `aoide_storage::fs::atomic_write` transparently write through the symlink
 too. `rice mode stage`/`rice mode declarative` remove the symlink (leaving
 a plain real file) whenever they run.

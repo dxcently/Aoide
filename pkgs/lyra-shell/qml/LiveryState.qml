@@ -16,9 +16,8 @@
 // declarative, draft) writes stage/mode.json LAST. mode.json is always a real
 // file, atomically replaced, so its watch stays live; on every mode.json
 // change the shell re-reads both files, and reload() re-arms the livery watch
-// on whatever the path resolves to now. The activation seed
-// (`home.activation.aoideSeedStage`) also swaps the entry, writes no
-// mode.json, and restarts the shell instead (`aoideRestartRice`).
+// on whatever the path resolves to now. Any other writer that replaces the
+// entry (an activation reseed) restarts the shell.
 //
 // livery schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*
 // All values are concrete hex strings (fallbacks already applied by the
