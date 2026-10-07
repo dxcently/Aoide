@@ -7805,7 +7805,11 @@ as it is, for the one remaining plaintext path, the direct SSH lane to a
 destination that has published no binding — or a `container`, the outer
 object of `seal::Container`. The two are mutually exclusive and the
 container is preferred when both are present; admission (the `-32010`
-ladder above) is identical for either.
+ladder above) is identical for either, and it runs BEFORE the params are
+parsed: an unauthorized caller gets the one `mail deposit refused` whatever
+its `envelope` or `container` holds, never a parse-level `-32602`. (A
+charter-purpose container is admitted on a verified signature alone, so the
+purpose is read from the raw params for that one decision.)
 
 A container takes a longer path than an envelope, and every step of it is
 still a REFUSED RESULT rather than a JSON-RPC error, because what became of
@@ -8224,9 +8228,9 @@ server, no new port, no new file — a poll is a READ.
   "params": { "node": "yomi-strix" } }
 ```
 
-`node` is required; a missing or empty one is `-32602`, refused BEFORE any
-lookup (the same shape-before-existence precedence `aoide/pairPoll`
-holds). **Admission** resolves the caller exactly as `mailDeposit` does —
+`node` is required; a missing or empty one is `-32602` — for a caller that
+passed admission: **authorization precedes shape**, so an unauthorized caller
+gets the `-32010` refusal below whatever its params say. **Admission** resolves the caller exactly as `mailDeposit` does —
 a verified per-request signature, key-resolved — and then requires BOTH
 `node_may_message` (paired, `verified`, `"message"` in the caller's grant for
 this mesh) AND `params.node` equal to the caller's own resolved name:

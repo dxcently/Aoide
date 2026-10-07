@@ -3633,11 +3633,39 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         Ok(set) => set,
         Err(refused) => return Ok(refused),
     };
+    // **Authorization precedes parsing.** An unauthorized caller gets the one
+    // refusal whatever its params say — never a parse-level answer that tells
+    // an unsigned prober which fields the door reads. A charter letter's gate
+    // is its enclosed charter, not the grant (see [`deposit_sealed`]), so the
+    // purpose is peeked from the raw params here; the container is parsed
+    // only after.
+    let mesh = mesh_or_refusal(
+        "mail deposit refused",
+        ctx.signed_caller.and_then(|c| c.mesh),
+        "a2a.aoide/mailDeposit",
+        ctx.audit_log,
+    )?;
+    // A `down` caller is refused before its grant is even read: `down` is a
+    // statement about the node, and the `node allow` fix the grant refusal
+    // teaches is not one a `down` node should be sent to run.
+    if let Some(caller) = ctx.signed_caller {
+        if let Some(refused) = down_caller_refusal(&declarations, &mesh, caller, "a2a.aoide/mailDeposit", ctx.audit_log)
+        {
+            return Ok(refused);
+        }
+    }
+    let charter_letter = ctx.signed_caller.is_some()
+        && params.pointer("/container/purpose").and_then(Value::as_str) == Some(aoide_storage::seal::PURPOSE_CHARTER);
+    if !deposit_admitted(&caller_grant(ctx.signed_caller)) && !charter_letter {
+        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh, ctx.audit_log);
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
+        return Err((code, msg));
+    }
     // P-SEAL: a sealed container takes the same admission and then the
     // container's own two halves; a plaintext envelope is the direct-lane
     // per-peer upgrade path, unchanged from P-M2.
     if params.get("container").map(|v| !v.is_null()).unwrap_or(false) {
-        return deposit_sealed(params, ctx, &declarations);
+        return deposit_sealed(params, ctx, &declarations, &mesh);
     }
     // H1: the mail ADAPTER never carries plaintext — "no relay, hub or HTTPS
     // hop ever carries plaintext" (HTTPS-MESH-API.md). A plaintext envelope
@@ -3661,28 +3689,6 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
             Err(e) => return Err((-32602, format!("invalid params: envelope: {e}"))),
         };
 
-    let mesh = mesh_or_refusal(
-        "mail deposit refused",
-        ctx.signed_caller.and_then(|c| c.mesh),
-        "a2a.aoide/mailDeposit",
-        ctx.audit_log,
-    )?;
-    // A `down` caller is refused before its grant is even read: `down` is a
-    // statement about the node, and the `node allow` fix the grant refusal
-    // teaches is not one a `down` node should be sent to run.
-    if let Some(caller) = ctx.signed_caller {
-        if let Some(refused) =
-            down_caller_refusal(&declarations, &mesh, caller, "a2a.aoide/mailDeposit", ctx.audit_log)
-        {
-            return Ok(refused);
-        }
-    }
-    let grant = caller_grant(ctx.signed_caller);
-    if !deposit_admitted(&grant) {
-        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh, ctx.audit_log);
-        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
-        return Err((code, msg));
-    }
     let hop_name = ctx
         .signed_caller
         .map(|c| c.name)
@@ -3860,13 +3866,10 @@ fn poll_refusal(caller: Option<SignedCaller<'_>>, mesh: &str, claimed: &str, aud
 /// spooled them.
 fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     let claimed = params.get("node").and_then(Value::as_str).unwrap_or("").trim().to_string();
-    if claimed.is_empty() {
-        return Err((-32602, "invalid params: node is required".to_string()));
-    }
     // MAIL.md §Status: the declarations are read ONCE per request, for the two
     // mail methods only, and an unloadable set refuses both — this one before
-    // anything is retired or handed over. Shape precedes it: a request with no
-    // `node` is malformed whatever this host's config says.
+    // anything is retired or handed over. Authorization precedes shape: an
+    // unauthorized caller gets the one refusal whatever its params say.
     let declarations = match mail_declarations(ctx, "a2a.aoide/mailPoll") {
         Ok(set) => set,
         Err(refused) => return Ok(refused),
@@ -3889,8 +3892,9 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         ctx.audit_log,
     )?;
     let grant = caller_grant(ctx.signed_caller);
-    if !poll_admitted(ctx.signed_caller, &grant, &claimed) {
-        let (code, msg) = poll_refusal(ctx.signed_caller, &mesh, &claimed, ctx.audit_log);
+    let named = if claimed.is_empty() { ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default() } else { claimed.clone() };
+    if !poll_admitted(ctx.signed_caller, &grant, &named) {
+        let (code, msg) = poll_refusal(ctx.signed_caller, &mesh, &named, ctx.audit_log);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailPoll", "unauthorized", &msg);
         return Err((code, msg));
     }
@@ -3902,6 +3906,9 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         {
             return Ok(refused);
         }
+    }
+    if claimed.is_empty() {
+        return Err((-32602, "invalid params: node is required".to_string()));
     }
     let poller = ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default();
 
@@ -4045,6 +4052,7 @@ fn deposit_sealed(
     params: &Value,
     ctx: &RequestCtx,
     declarations: &[aoide_storage::routing::Loaded],
+    request_mesh: &str,
 ) -> Result<Value, (i64, String)> {
     let container: aoide_storage::seal::Container =
         match serde_json::from_value(params.get("container").cloned().unwrap_or(Value::Null)) {
@@ -4061,52 +4069,13 @@ fn deposit_sealed(
     // spooling relay or a TLS edge could turn an accepted deposit into a
     // permanent refusal by flipping one unsigned byte — a cheap mail-delivery
     // DoS. The request's own mesh is what admission reads the grant in.
-    let request_mesh = mesh_or_refusal(
-        "mail deposit refused",
-        ctx.signed_caller.and_then(|c| c.mesh),
-        "a2a.aoide/mailDeposit",
-        ctx.audit_log,
-    )?;
-    // A `down` caller is refused before its grant is read, exactly as on the
-    // plaintext arm: `down` is a statement about the node, and the container's
-    // own chain is never consulted for one.
-    if let Some(caller) = ctx.signed_caller {
-        if let Some(refused) = down_caller_refusal(
-            declarations,
-            &request_mesh,
-            caller,
-            "a2a.aoide/mailDeposit",
-            ctx.audit_log,
-        ) {
-            return Ok(refused);
-        }
-    }
-
-    let grant = caller_grant(ctx.signed_caller);
-    // **A charter letter's gate is not the grant** (P-CHARTER, review F3). Its
-    // authority travels INSIDE it: `seal::deposit_container` verifies the
-    // operator signature over the enclosed charter before the carrier is
-    // judged on anything, and then requires the origin to be a node the
-    // ACCEPTED charter lists (`deposit_charter`'s own "no registry in the
-    // loop" check). Gating it on a `message` grant would make the design's own
-    // bootstrap unreachable — "a machine can accept its first charter by
-    // letter from an origin it did not yet know" — while changing nothing an
-    // attacker can do: the container is only honoured if the OPERATOR signed
-    // what it carries, and the caller still had to sign this request. So a
-    // charter-purpose container needs a VERIFIED SIGNATURE and no grant; every
-    // other purpose needs the grant exactly as before.
-    let charter_letter = container.purpose == aoide_storage::seal::PURPOSE_CHARTER
-        && ctx.signed_caller.is_some();
-    if !deposit_admitted(&grant) && !charter_letter {
-        let (code, msg) = deposit_refusal(ctx.signed_caller, &request_mesh, ctx.audit_log);
-        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
-        return Err((code, msg));
-    }
+    // Admission (mesh, `down`, the grant — or a charter letter's own gate) ran
+    // in [`mail_deposit`] before this container was parsed.
     let hop_name = {
         let caller = ctx
             .signed_caller
             .expect("deposit_admitted only returns true when a signed caller resolved");
-        declared_caller_name(declarations, &request_mesh, caller)
+        declared_caller_name(declarations, request_mesh, caller)
     };
 
     // The chain's last hop is the node that deposited it — the caller this door
@@ -4124,7 +4093,7 @@ fn deposit_sealed(
         return Ok(json!({ "status": "refused", "reason": refusal.reason, "detail": refusal.detail }));
     }
 
-    let outcome = aoide_storage::seal::deposit_container_over(&container, &request_mesh, declarations)
+    let outcome = aoide_storage::seal::deposit_container_over(&container, request_mesh, declarations)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
 
     let (audit_status, audit_detail) = match &outcome {
@@ -17041,6 +17010,37 @@ mod tests {
         let signed = mail_deposit_ctx(&audit_log, Some("box-b"));
         let shape = mail_poll(&json!({}), &signed).expect_err("node is required");
         assert_eq!(shape.0, -32602);
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **Authorization precedes parsing** on both mail methods: an unsigned
+    /// caller, and a signed one with no `message` grant, get the one refusal
+    /// whatever their params say — never `invalid params: container: missing
+    /// field v`, which would tell a prober what the door reads.
+    #[test]
+    fn an_unauthorized_caller_is_refused_whatever_its_params_say() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("auth-before-parse");
+        act_as(&root, "here");
+        setup_signed_node_with_allows("box-b", &[]);
+        let audit_log = root.join("log");
+
+        for who in [None, Some("box-b")] {
+            let ctx = mail_deposit_ctx(&audit_log, who);
+            for params in [json!({}), json!({ "container": {} }), json!({ "envelope": {} }), json!({ "container": { "purpose": "letter" } })] {
+                let err = mail_deposit(&params, &ctx).expect_err("unauthorized");
+                assert_eq!(err.0, -32010, "{who:?} {params}: {}", err.1);
+                assert!(err.1.starts_with("mail deposit refused"), "{who:?} {params}: {}", err.1);
+            }
+            for params in [json!({}), json!({ "node": "" }), json!({ "node": "box-b" })] {
+                let err = mail_poll(&params, &ctx).expect_err("unauthorized");
+                assert_eq!(err.0, -32010, "{who:?} {params}: {}", err.1);
+                assert!(err.1.starts_with("mail poll refused"), "{who:?} {params}: {}", err.1);
+            }
+        }
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
