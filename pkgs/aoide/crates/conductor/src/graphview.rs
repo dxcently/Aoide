@@ -220,6 +220,12 @@ pub fn view_label(app: &App) -> &'static str {
 
 /// Build the layout model from the canonical graph document.
 pub fn build_model(app: &App) -> Model {
+    build_model_on(app, &aoide_storage::display::local_host_name())
+}
+
+/// [`build_model`] with the host every session label carries stated rather
+/// than read from this box.
+fn build_model_on(app: &App, host: &str) -> Model {
     let doc = graph::build_graph(&app.projects, &app.sessions, &app.hooks);
     let merged = app.merged();
     let tag_by_id: HashMap<String, Vec<String>> = merged
@@ -242,9 +248,8 @@ pub fn build_model(app: &App) -> Model {
         .filter(|e| e.get("kind").and_then(|v| v.as_str()) == Some("spawned"))
         .filter_map(|e| e.get("to").and_then(|v| v.as_str()))
         .collect();
-    // Resolved ONCE for this whole build — every session label in the panel
-    // shares the same host (mirrors the `graph view` tree render's rule).
-    let host = aoide_storage::display::local_host_name();
+    // One host for this whole build — every session label in the panel
+    // shares it (mirrors the `graph view` tree render's rule).
 
     // Metadata per node id, and the project ids in doc order (sorted by name).
     let mut meta: HashMap<String, Meta> = HashMap::new();
@@ -304,7 +309,7 @@ pub fn build_model(app: &App) -> Model {
                     petname,
                     ..Default::default()
                 };
-                let label = aoide_storage::display::session_label(&rec, &host, role);
+                let label = aoide_storage::display::session_label(&rec, host, role);
                 meta.insert(
                     id.clone(),
                     Meta {
@@ -2182,7 +2187,7 @@ mod tests {
         root.extra
             .insert("tags".into(), serde_json::json!(["backend"]));
         let app = App::for_test(vec![aoide()], vec![root], Vec::new());
-        let m = build_model(&app);
+        let m = build_model_on(&app, "a-typical-hostname");
         let node = node(&m, "sess-realistically-long-canonical-id-0001");
         assert!(
             node.label.chars().count() as i32 > CARD_W,
