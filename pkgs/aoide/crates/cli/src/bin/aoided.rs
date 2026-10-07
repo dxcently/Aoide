@@ -60,9 +60,10 @@ fn parse(argv: &[String]) -> Result<Launch, Outcome> {
                 }
             },
             other => {
-                let fix = match suggest::closest(other, FLAGS, 1).first() {
-                    Some(near) => Fix::Run(format!("aoided {near}")),
-                    None => Fix::Run("aoided --help".into()),
+                let fix = match (other.strip_prefix("--audit-log="), suggest::closest(other, FLAGS, 1).first()) {
+                    (Some(path), _) => Fix::Run(format!("aoided --audit-log {path}")),
+                    (None, Some(near)) => Fix::Run(format!("aoided {near}")),
+                    (None, None) => Fix::Run("aoided --help".into()),
                 };
                 return Err(Outcome::refuse(
                     "aoided",
@@ -86,8 +87,8 @@ fn parse(argv: &[String]) -> Result<Launch, Outcome> {
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let audit_log = match parse(&argv) {
-        Ok(Launch::Help) => return println!("{USAGE}"),
-        Ok(Launch::Version) => return println!("aoided {AOIDE_VERSION}"),
+        Ok(Launch::Help) => std::process::exit(door::say(USAGE).unwrap_or(0)),
+        Ok(Launch::Version) => std::process::exit(door::say(&format!("aoided {AOIDE_VERSION}")).unwrap_or(0)),
         Ok(Launch::Run { audit_log }) => audit_log,
         Err(refusal) => std::process::exit(door::emit(&refusal, false)),
     };
@@ -138,6 +139,13 @@ mod tests {
         let (text, code) = parse(&argv(&["--verison"])).unwrap_err().render(false);
         assert_eq!(code, 2);
         assert!(text.contains("aoided --version"), "{text}");
+    }
+
+    #[test]
+    fn the_equals_form_is_taught_the_spaced_one() {
+        let (text, code) = parse(&argv(&["--audit-log=/x"])).unwrap_err().render(false);
+        assert_eq!(code, 2);
+        assert!(text.contains("aoided --audit-log /x"), "{text}");
     }
 
     #[test]

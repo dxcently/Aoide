@@ -12,8 +12,10 @@ correspondence").
 
 - `bin/{aoide,aoided}` — the two binary entry points. `aoided` parses its argv
   before it touches the root or binds anything: `--audit-log <path>`,
-  `--version`, `--help`, and a taught exit-2 refusal for the rest. `aoide`
-  restores the default SIGPIPE so `aoide … | head` ends quietly.
+  `--version`, `--help`, and a taught exit-2 refusal for the rest. Both
+  binaries print results through `door::say`, so `aoide … | head` ends quietly
+  (exit 141) with SIGPIPE left ignored; `aoide --version` prints
+  `aoide <version>`.
 - `cli`/`dispatch` — argv parsing and the dispatcher, over
   `aoide_protocol::door::run`'s shared skeleton with core's own `special`
   hook (`mcp serve --stdio`, `a2a serve`, `mail serve` (the mail adapter,

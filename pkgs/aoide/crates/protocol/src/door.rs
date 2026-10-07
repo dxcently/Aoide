@@ -890,6 +890,29 @@ pub fn emit(o: &Outcome, json: bool) -> i32 {
     print(o, json, Style::for_stream(mode, json, stream), false)
 }
 
+/// The exit code of a process whose stdout reader went away (`128 + SIGPIPE`,
+/// what a shell reports for `cmd | head`).
+pub const BROKEN_PIPE: i32 = 141;
+
+/// Print `text` and a newline on stdout. `None` when it was written; a closed
+/// pipe (`aoide … | head`) is `Some(`[`BROKEN_PIPE`]`)`, any other write failure
+/// `Some(1)` — never a panic and never a line on stderr. SIGPIPE stays ignored
+/// in every binary, so the closed pipe arrives here as an error, not a signal.
+pub fn say(text: &str) -> Option<i32> {
+    say_raw(&format!("{text}\n"))
+}
+
+/// [`say`] without the newline.
+pub fn say_raw(text: &str) -> Option<i32> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => None,
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Some(BROKEN_PIPE),
+        Err(_) => Some(exit::ERROR),
+    }
+}
+
 /// Write an outcome where its status says (ok on stdout, the rest on stderr)
 /// and return its exit code. A parse result that is informational (`--help`,
 /// a group's page) prints its message raw in text mode; `--json` always
@@ -897,7 +920,7 @@ pub fn emit(o: &Outcome, json: bool) -> i32 {
 fn print(o: &Outcome, json: bool, st: Style, raw_ok: bool) -> i32 {
     let (body, code) = o.render_styled(json, st);
     if code == exit::OK {
-        println!("{}", if raw_ok && !json { &o.message } else { &body });
+        return say(if raw_ok && !json { &o.message } else { &body }).unwrap_or(code);
     } else {
         eprintln!("{body}");
     }

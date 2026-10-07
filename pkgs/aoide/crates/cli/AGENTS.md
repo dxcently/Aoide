@@ -59,8 +59,11 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
   `migrate_root_once` or any bind; an unknown argument is a refusal, never a
   start (`tests/aoided_argv.rs` asserts nothing is created). A new `aoided`
   flag extends `parse` and the usage page together.
-- **SIGPIPE is default in `aoide`, ignored in `aoided`.** The daemon writes to
-  peers that vanish and must see EPIPE as an `io::Error`, never die of a signal.
+- **SIGPIPE stays ignored in BOTH binaries.** Writes to a child's stdin
+  (`secrets` backends, `curl`, `qrencode`) must return their error, not kill
+  the process. A closed stdout (`aoide … | head`) is handled where the result
+  is printed: `door::say`/`say_raw` map BrokenPipe to a quiet exit 141. Print a
+  result through them, never `println!`.
 
 ## Extension points
 

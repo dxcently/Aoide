@@ -4,7 +4,10 @@
 //! those stay EMPTY — no socket, pid, log or state file means nothing started.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+const DEADLINE: Duration = Duration::from_secs(20);
 
 struct Sandbox {
     dir: PathBuf,
@@ -20,7 +23,7 @@ impl Sandbox {
     }
 
     fn aoided(&self, args: &[&str]) -> (String, String, i32) {
-        let out = Command::new(env!("CARGO_BIN_EXE_aoided"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aoided"))
             .args(args)
             .env("AOIDE_ROOT", self.dir.join("root"))
             .env("XDG_RUNTIME_DIR", self.dir.join("run"))
@@ -29,8 +32,19 @@ impl Sandbox {
             .env("AOIDE_STATE_DIR", self.dir.join("root").join("state"))
             .env("AOIDE_AUDIT_LOG", self.dir.join("root").join("log"))
             .env("NO_COLOR", "1")
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .expect("the aoided binary runs");
+        let start = Instant::now();
+        while child.try_wait().unwrap().is_none() {
+            if start.elapsed() > DEADLINE {
+                let _ = child.kill();
+                panic!("aoided {args:?} did not exit within {DEADLINE:?}: it started a daemon");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let out = child.wait_with_output().unwrap();
         (
             String::from_utf8_lossy(&out.stdout).into_owned(),
             String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -104,4 +118,47 @@ fn audit_log_without_a_path_is_usage() {
     assert_eq!(code, 2, "{err}");
     assert!(err.contains("needs a path"), "{err}");
     assert!(sb.files().is_empty(), "{:?}", sb.files());
+}
+
+#[test]
+fn the_equals_form_is_taught_the_spaced_one() {
+    let sb = Sandbox::new("equals");
+    let (_, err, code) = sb.aoided(&["--audit-log=/x"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("aoided --audit-log /x"), "{err}");
+    assert!(sb.files().is_empty(), "{:?}", sb.files());
+}
+
+/// Run `bin args` with its stdout reader already gone; return (code, stderr).
+fn with_stdout_closed(bin: &str, args: &[&str]) -> (i32, String) {
+    let sb = Sandbox::new("closed");
+    let mut child = Command::new(bin)
+        .args(args)
+        .env("AOIDE_ROOT", sb.dir.join("root"))
+        .env("XDG_RUNTIME_DIR", sb.dir.join("run"))
+        .env("AOIDE_AUDIT_LOG", sb.dir.join("root").join("log"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let start = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        assert!(start.elapsed() < DEADLINE, "{bin} {args:?} hung");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().unwrap();
+    (out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+#[test]
+fn aoide_with_a_closed_stdout_exits_quietly() {
+    let (code, err) = with_stdout_closed(env!("CARGO_BIN_EXE_aoide"), &["schema", "--json"]);
+    assert_eq!((code, err.as_str()), (141, ""));
+}
+
+#[test]
+fn aoided_help_with_a_closed_stdout_exits_quietly() {
+    let (code, err) = with_stdout_closed(env!("CARGO_BIN_EXE_aoided"), &["--help"]);
+    assert_eq!((code, err.as_str()), (141, ""));
 }

@@ -129,7 +129,6 @@ dependencies = [
  "aoide-test-support",
  "aoide-upkeep",
  "crossterm",
- "libc",
  "ratatui",
  "serde",
  "serde_json",

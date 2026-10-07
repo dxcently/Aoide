@@ -185,7 +185,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
             let outcome = dispatch::dispatch(inv);
             let code = outcome.status.exit_code();
             if code == output::exit::OK {
-                println!("{}", outcome.message);
+                return Some(protocol::door::say(&outcome.message).unwrap_or(code));
             } else {
                 eprintln!("{}", outcome.message);
             }
@@ -354,8 +354,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
 
         // `guide` in text mode prints the full onboarding rather than a summary.
         if inv.path == ["guide"] && !json {
-            print!("{}", guide::render(dispatch::registry()));
-            return Some(output::exit::OK);
+            return Some(protocol::door::say_raw(&guide::render(dispatch::registry())).unwrap_or(output::exit::OK));
         }
 
         // `schema --json` emits the raw contract document at top level (CONTRACTS
@@ -373,8 +372,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
             );
             let doc = dispatch::registry().schema("aoide");
             let body = serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into());
-            println!("{body}");
-            return Some(output::exit::OK);
+            return Some(protocol::door::say(&body).unwrap_or(output::exit::OK));
         }
 
         None
