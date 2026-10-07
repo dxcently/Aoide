@@ -74,10 +74,11 @@
   directory is removed is NOT overlaid — that is the prune, not a bug; don't
   add a "keep it anyway" fallback that would leave an immortal stale key.
   The inverse is also fixed: a shipped song with NO host-songbook directory
-  (staged from the declared twin before any seed) keeps its BAKED entry —
-  layer 3 has nothing to scan there, and an empty patch deleted sonata from
-  osaka's manifest and blanked every surface. Directory present → scan
-  wins; directory absent → baseline stands.
+  (re-pinned from the declared twin by `rice mode declarative` before any
+  seed — `rice stage` has no twin fallback and needs the runtime copy) keeps
+  its BAKED entry — layer 3 has nothing to scan there, and an empty patch
+  deleted sonata from osaka's manifest and blanked every surface. Directory
+  present → scan wins; directory absent → baseline stands.
 - **`livery`/`live` stay dependency-free leaves.** `compose`/`cover` are the
   ones allowed to pull in `aoide-storage` (Phase 5b); don't push a storage
   dependency down into `livery`/`live` without re-deriving why that
@@ -111,8 +112,8 @@
   external provider is already showing.
 - **`commands::rice::handle_rice_stage` is Staging's write path, NEVER
   Draft's — don't call it from a Draft-mode code path.** It reads the
-  COMMITTED songbook (or the declared twin, see the bullet below) and writes
-  the result into `stage/livery.json`. In
+  RUNTIME songbook, with `venue.json` laid over the declared song (see the
+  bullet below), and writes the result into `stage/livery.json`. In
   `Staging` mode that file is a plain file, so this is exactly "re-derive
   declared content" — correct by design. While routed into a `Draft`,
   `stage/livery.json` is a SYMLINK into the draft's own file

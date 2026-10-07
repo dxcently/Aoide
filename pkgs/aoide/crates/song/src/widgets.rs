@@ -520,11 +520,12 @@ fn baseline_songbook(name: &str, templates: &Path) -> Result<StageSongbook, Widg
 
     // Layer 3: patch — `name`'s own entry always wins over both the
     // baseline and the overlay — but only when there IS a songbook directory
-    // to scan. A shipped song staged straight from the declared twin
-    // (`song/declared/livery.json`) on a host whose runtime songbook never
-    // seeded it has nothing local to scan, and its baked baseline entry is
-    // the truth; an empty patch here deleted sonata from osaka's manifest
-    // and blanked every surface.
+    // to scan. A shipped song re-pinned from the declared twin
+    // (`song/declared/livery.json`, by `rice mode declarative` — the one door
+    // that still reads it) on a host whose runtime songbook never seeded it
+    // has nothing local to scan, and its baked baseline entry is the truth;
+    // an empty patch here deleted sonata from osaka's manifest and blanked
+    // every surface.
     if aoide_storage::fs::songbook_dir(name).is_dir() && !shelf_dir.is_dir() {
         let (own_manifest, own_registry) = scan_own_entry(name)?;
         let manifest_obj = manifest.as_object_mut().expect("checked is_object above");
