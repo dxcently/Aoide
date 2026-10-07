@@ -17,6 +17,7 @@ lyra preview "$W" --song cadenza --livery cadenza --root "$R" --no-launch
 # set "autoReload": false in $R/preview.json, then:
 setsid -f lyra preview "$W" --song cadenza --livery cadenza --root "$R"
 lyra preview set --root "$R" --viewport 1080x1920 --width 1080 --height 1920 --anchor tl --margin 0
+sleep 10   # a worker generates the board (~3 s a size), and a shot before it lands is bare ground
 lyra preview shot --root "$R" --what widget --out /tmp/pcb.png
 magick /tmp/pcb.png +dither -colors 16 PNG8:cover/pcb-1080x1920.png   # a few AA shades, ~55 KB
 magick identify cover/pcb-1080x1920.png                                # must read 1080x1920

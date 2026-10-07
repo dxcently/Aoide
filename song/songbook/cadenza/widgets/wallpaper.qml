@@ -32,7 +32,9 @@
 // ONE live element, and there are many pulses by design.
 //
 // ── Cost, stated plainly ────────────────────────────────────────────────────
-// The copper is rasterised once (`Canvas.Image`, CoverPcb's own target). The
+// The copper is rasterised once (`Canvas.Image`, CoverPcb's own target), and
+// its board is generated in CoverPcb's WorkerScript (seconds of JS per output,
+// never on the GUI thread), so the light starts when the board arrives. The
 // light costs one small binding pass per frame per pulse (~0.003 ms of engine
 // work for the whole board, measured) and damages only the rectangles it
 // occupies — a few thousand px, not the screen. The one dial left is
@@ -196,7 +198,8 @@ Item {
     // One pulse aimed at a ring, or the idle roam when there is nothing to aim
     // at. Both go through Trace.spawn — the variation is all in the arguments.
     // The roam falls back to no pulse at all when the board has no wired track
-    // yet (the board arrives a frame after the first paint).
+    // yet (the board arrives from CoverPcb's worker, seconds after the first
+    // paint).
     function spawnAt(ring, state, urgent) {
         var r = root.rngState
         if (!root.index || !root.board) return null
