@@ -75,8 +75,14 @@ text into the active field without interpreting it as commands.
 
 Graph is a retained scene, drawn top-down: depth runs downward through ranks
 and siblings spread across a rank, with a parent centred over the horizontal
-span of its own children. Cards are fixed-size rectangles standing at world
-coordinates the scene keeps: a refresh that adds, ends or re-parents sessions
+span of its own children. Cards are one fixed 24×5 preset standing at world
+coordinates the scene keeps — the top border carries a session's title (or,
+untitled, its harness and model), the three rows beneath its identity
+(`petname (…tail)`), its role and state with any tags, and its activity (or
+the harness and model an idle card has room for); a project, group or host
+card's border is its kind and its rows the name, the path or presence
+detail, and the rest. Ranks sit two rows apart. Harness and model otherwise
+live in the tree row and the Details view. Cards stand at coordinates: a refresh that adds, ends or re-parents sessions
 leaves every surviving card where it was, and an arriving card takes the first
 free slot beside its proposed one. A session that changed parent is the one
 exception — it moves to its new rank, because a retained position would draw
@@ -105,17 +111,17 @@ no project gather under one synthetic root, and that root is not a connection:
 a session attached to nothing shows itself alone under Focus rather than
 borrowing a forest of strangers.
 
-Every registered node stands after this box's forest as a host card (`🖧
-NODE · online|unreachable|never-pulled`, its name, and `online · n
-session(s)`, `unreachable (last seen <age>)` or `never pulled`), with the
+Every registered node stands after this box's forest as a host card (border
+`🖧 NODE · online|unreachable|never-pulled`, then its name and `n
+session(s)` or `last seen <age>`), with the
 sessions the roster reports for it hanging flat beneath — the roster carries
 no spawned edges across the wire. The rows are the same `session --hosts`
 probe Mesh paints, refreshed on the same ~15 s throttle while Graph is open;
 a cached row under an unreachable node wears the cache's word (`last-seen`)
 as its state and `was <state>` as its activity, never a live glyph, and is
 drawn dimmed like its Mesh row. A probe that fails after a good one keeps the
-last rows on the canvas, dimmed, every host card ending `· probe failed <age>`
-— the forest never empties in silence. A remote card carries no local session
+last rows on the canvas, dimmed, every host card's last row reading `probe
+failed <age>` — the forest never empties in silence. A remote card carries no local session
 id, so Enter, `s` and the menu act on nothing: a far session is looked at
 here, and conducted from Mesh or the shell.
 

@@ -47,11 +47,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Vertical gap between depth ranks — just enough room for a wire's stem,
 /// spreader and drop, never a wide gutter, since rank stacks eat screen
 /// height fastest.
-const RANK_GAP: i32 = 3;
+const RANK_GAP: i32 = 2;
 /// Fixed card size in world cells; title, identity, and state each have their
 /// own line. Cards never change size — the camera does.
-const CARD_W: i32 = 32;
-const CARD_H: i32 = 7;
+const CARD_W: i32 = 24;
+const CARD_H: i32 = 5;
 /// Horizontal pitch of one leaf slot in the fresh layout — card width plus a
 /// readable gap between siblings.
 const SLOT: i32 = CARD_W + 6;
@@ -493,13 +493,17 @@ pub fn build_model_from(
     let probe_failed = app.roster_probe_failed();
     for node in roster.iter().filter(|n| !n.is_local) {
         let nid = format!("node:{}", node.name);
-        let mut title = theme::presence_phrase(&node.presence, node.fetched_at.as_deref());
-        if node.presence == "online" {
-            title = format!("{title} · {} session(s)", node.sessions.len());
-        }
-        if let Some(age) = &probe_failed {
-            title = format!("{title} · probe failed {age}");
-        }
+        // The border carries the presence word; the rows carry what is
+        // short enough for a 20-cell card: the cache's age, the session
+        // count, and — on its own row — a probe that has since failed.
+        let title = match node.presence.as_str() {
+            "online" => format!("{} session(s)", node.sessions.len()),
+            "unreachable" => format!(
+                "last seen {}",
+                node.fetched_at.as_deref().map(theme::age_label).unwrap_or_else(|| "unknown".into())
+            ),
+            _ => String::new(),
+        };
         meta.insert(
             nid.clone(),
             Meta {
@@ -507,7 +511,10 @@ pub fn build_model_from(
                 label: node.name.clone(),
                 title,
                 role: "node".into(),
-                harness: String::new(),
+                harness: probe_failed
+                    .as_ref()
+                    .map(|age| format!("probe failed {age}"))
+                    .unwrap_or_default(),
                 session_id: None,
                 state: Some(node.presence.clone()),
                 tags: Vec::new(),
@@ -1160,18 +1167,6 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     // A cached card is dimmed whole, like the Mesh row it mirrors.
     let surface = if n.cached { surface.patch(theme::dim()) } else { surface };
     let border = if n.cached { border.patch(theme::dim()) } else { border };
-    let block = Block::bordered()
-        .border_type(if selected {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        })
-        .border_style(border)
-        .style(surface)
-        .padding(Padding::horizontal(1));
-    let inner = block.inner(area);
-    block.render(area, buf);
-    let budget = inner.width as usize;
     let state = n.state.as_deref().unwrap_or("");
     let role = if n.role.is_empty() {
         if n.harness == "shell" {
@@ -1198,19 +1193,12 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     } else {
         format!("{mark} {} · {}", role.to_uppercase(), state)
     };
-    let heading = if n.tags.is_empty() {
-        heading
-    } else {
-        format!(
-            "{} {}",
-            heading,
-            n.tags
-                .iter()
-                .map(|t| format!("[{t}]"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        )
-    };
+    let tags = n
+        .tags
+        .iter()
+        .map(|t| format!("[{t}]"))
+        .collect::<Vec<_>>()
+        .join(" ");
     let detail = match (&n.harness, n.model.as_deref()) {
         (h, Some(m)) if !h.is_empty() => format!("{h} · {m}"),
         (_, Some(m)) => m.into(),
@@ -1230,47 +1218,82 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
         }
         _ => n.label.clone(),
     };
-    // An ordered (text, style) sequence, one entry per would-be row, with
-    // empty entries dropped and the survivors renumbered by `enumerate` --
-    // so a titleless card never leaves a blank row where the title would
-    // have gone, and never repeats the harness name the detail row
-    // (`harness · model`) already carries.
-    let rows: Vec<(String, Style)> = if n.kind == NodeKind::Session {
-        vec![
-            (
-                truncate_end(&n.title, budget),
-                surface.add_modifier(Modifier::BOLD),
-            ),
-            (fit_label(&card_identity, budget), surface),
-            (truncate_end(&detail, budget), surface.fg(accent)),
-            (heading, surface.patch(theme::state_style(state, pal))),
-            (truncate_end(&n.activity, budget), surface),
-        ]
+    // The card is 24×5: the top border carries one line of text and the
+    // three inner rows the rest. A session's border is its title — or, with
+    // no title, its harness and model, so a titleless card still names what
+    // runs there exactly once. Inside: the identity (petname and tail), the
+    // role and state with any tags, and the activity — or, when the card is
+    // idle enough to report none, the harness and model the title row did
+    // not already carry. Harness and model otherwise live in the tree row
+    // and the Details view. A non-session card's border is its kind.
+    let border_budget = area.width.saturating_sub(2) as usize;
+    let (top, rows): (String, Vec<(String, Style)>) = if n.kind == NodeKind::Session {
+        let titled = !n.title.is_empty();
+        let top = if titled { n.title.clone() } else { detail.clone() };
+        let heading = if tags.is_empty() {
+            heading
+        } else {
+            format!("{heading} {tags}")
+        };
+        let third = if !n.activity.is_empty() {
+            n.activity.clone()
+        } else if titled {
+            detail.clone()
+        } else {
+            String::new()
+        };
+        (
+            top,
+            vec![
+                (String::new(), surface),
+                (heading, surface.patch(theme::state_style(state, pal))),
+                (third, surface),
+            ],
+        )
     } else {
-        vec![
-            (heading, surface.fg(accent).add_modifier(Modifier::BOLD)),
-            (
-                truncate_end(&n.label, budget),
-                surface.add_modifier(Modifier::BOLD),
-            ),
-            (truncate_end(&n.title, budget), surface),
-            (detail, surface),
-            (
-                n.tags
-                    .iter()
-                    .map(|tag| format!("[{tag}]"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                surface.fg(accent),
-            ),
-        ]
+        (
+            heading,
+            vec![
+                (n.label.clone(), surface.add_modifier(Modifier::BOLD)),
+                (n.title.clone(), surface),
+                (if detail.is_empty() { tags } else { detail }, surface.fg(accent)),
+            ],
+        )
     };
-    for (idx, (text, style)) in rows
-        .into_iter()
-        .filter(|(text, _)| !text.is_empty())
-        .enumerate()
-        .take(inner.height as usize)
-    {
+    let top_style = if n.kind == NodeKind::Session {
+        border.add_modifier(Modifier::BOLD)
+    } else {
+        border.fg(accent).add_modifier(Modifier::BOLD)
+    };
+    let block = Block::bordered()
+        .border_type(if selected {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
+        .border_style(border)
+        .title(Line::from(Span::styled(
+            if border_budget >= 4 {
+                format!(" {} ", truncate_end(&top, border_budget - 2))
+            } else {
+                String::new()
+            },
+            top_style,
+        )))
+        .style(surface)
+        .padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    block.render(area, buf);
+    let budget = inner.width as usize;
+    let rows = rows.into_iter().enumerate().map(|(i, (text, style))| {
+        let text = if i == 0 && n.kind == NodeKind::Session {
+            fit_label(&card_identity, budget)
+        } else {
+            truncate_end(&text, budget)
+        };
+        (text, style)
+    });
+    for (idx, (text, style)) in rows.enumerate().take(inner.height as usize) {
         buf.set_line(
             inner.x,
             inner.y + idx as u16,
@@ -1901,7 +1924,7 @@ mod tests {
         assert_eq!(yomi.kind, NodeKind::Host);
         assert_eq!(yomi.depth, 0, "a node is a root of its own");
         assert!(
-            yomi.title.starts_with("unreachable (last seen ") && yomi.title.ends_with(" ago)"),
+            yomi.title.starts_with("last seen ") && yomi.title.ends_with(" ago"),
             "the host card says it is cache, and how old: {}",
             yomi.title
         );
@@ -1913,14 +1936,14 @@ mod tests {
         assert_eq!(far1.petname.as_deref(), Some("misty-comet"));
 
         let sakaki = node(&m, "node:sakaki");
-        assert_eq!(sakaki.title, "online · 1 session(s)");
+        assert_eq!(sakaki.title, "1 session(s)");
         let far2 = node(&m, "node:sakaki/session:far2");
         assert_eq!(far2.state.as_deref(), Some("idle"), "a live row keeps its state");
         assert_eq!(far2.activity, "/z");
         assert_eq!(far2.harness, "shell");
 
         let ghost = node(&m, "node:ghost");
-        assert_eq!(ghost.title, "never pulled");
+        assert_eq!(ghost.title, "");
         assert!(m.children.get("node:ghost").is_none(), "nothing hangs off a node never pulled");
 
         // Local forest first, nodes after — the gathering root precedes every host.
@@ -1935,7 +1958,7 @@ mod tests {
         assert!(out.contains("yomi-strix"), "{out}");
         assert!(out.contains("AGENT · last-seen"), "{out}");
         assert!(out.contains("was working"), "{out}");
-        assert!(out.contains("🖧 NODE · never-pulled"), "{out}");
+        assert!(out.contains("🖧 NODE · never-pull"), "{out}");
     }
 
     #[test]
@@ -2005,9 +2028,9 @@ mod tests {
         let sakaki = node(&m, "node:sakaki");
         assert!(sakaki.cached, "every remote card is a cache once the probe fails");
         assert!(
-            sakaki.title.starts_with("online · 1 session(s) · probe failed ") && sakaki.title.ends_with(" ago"),
+            sakaki.harness.starts_with("probe failed ") && sakaki.harness.ends_with(" ago"),
             "{}",
-            sakaki.title
+            sakaki.harness
         );
         assert!(node(&m, "node:sakaki/session:far2").cached);
         let out = dump(&paint(&app, Rect::new(0, 0, 320, 40)));
@@ -2044,7 +2067,7 @@ mod tests {
         app.graph.selected = remote.id.clone();
         assert_eq!(selected_session_id(&app), None);
         let out = dump(&paint(&app, Rect::new(0, 0, 200, 40)));
-        assert!(out.contains("yomi-strix/root/") && out.contains("(…far1)"), "{out}");
+        assert!(out.contains("yomi-strix") && out.contains("(…far1)"), "{out}");
     }
 
     #[test]
@@ -2254,7 +2277,13 @@ mod tests {
         );
         // Releasing the pan hands the camera back to the selection.
         app.graph.camera.pan = None;
-        assert_eq!(hit_node(area, &app, area.x, area.y), Some(0));
+        let model = build_model(&app);
+        let o = origin(&model, area);
+        let r = model.camera.scale_rect(model.visible().next().unwrap().world);
+        assert_eq!(
+            hit_node(area, &app, (area.x as i32 + r.x - o.0) as u16, (area.y as i32 + r.y - o.1) as u16),
+            Some(0)
+        );
     }
 
     #[test]
@@ -2569,8 +2598,9 @@ mod tests {
         assert!(right.world.x >= left.world.x + SLOT);
         assert_eq!(root.world.x, (left.world.x + right.world.x) / 2);
 
-        // At every scale the card border stays whole where a wire arrives —
-        // no port circles punched through it.
+        // At every scale a wire ends ABOVE the card it reaches and the card's
+        // corners stay corners — no port glyph punched through a border
+        // (the top border carries the title, so its centre cell is text).
         for zoom in crate::scene::ZOOM_MIN..=crate::scene::ZOOM_MAX {
             app.graph.camera.zoom = zoom;
             app.graph.camera.pan = Some((0, 0));
@@ -2581,11 +2611,20 @@ mod tests {
             for n in model.visible() {
                 let r = model.camera.scale_rect(n.world);
                 let x = (r.x + r.w / 2) as u16;
-                for y in [r.y as u16, (r.bottom() - 1) as u16] {
+                if n.depth > 0 {
+                    // The drop, or — when the rank gap scales to one row —
+                    // the junction itself, sits right above the top edge.
                     assert!(
-                        matches!(buf[(x, y)].symbol(), "─" | "━"),
-                        "zoom {zoom}: card edge at {x},{y} is {:?}",
-                        buf[(x, y)].symbol()
+                        matches!(buf[(x, (r.y - 1) as u16)].symbol(), "│" | "┌" | "┐" | "┬" | "┼" | "├" | "┤"),
+                        "zoom {zoom}: the wire reaches the card's top edge, got {:?}",
+                        buf[(x, (r.y - 1) as u16)].symbol()
+                    );
+                }
+                for (cx, cy) in [(r.x, r.y), (r.right() - 1, r.y), (r.x, r.bottom() - 1), (r.right() - 1, r.bottom() - 1)] {
+                    assert!(
+                        matches!(buf[(cx as u16, cy as u16)].symbol(), "┌" | "┐" | "└" | "┘" | "┏" | "┓" | "┗" | "┛"),
+                        "zoom {zoom}: corner at {cx},{cy} is {:?}",
+                        buf[(cx as u16, cy as u16)].symbol()
                     );
                 }
             }
@@ -2694,8 +2733,8 @@ mod tests {
             // `surface`'s foreground stays constant across layers -- only the
             // background is layer-mixed -- so layer 0 is as good a probe as
             // the card's real layer for the (layer-independent) fg value.
-            assert_eq!(cells[(2, 2)].fg, theme::surface(&pal, 0).fg.unwrap());
-            assert_ne!(cells[(2, 2)].bg, Color::Reset);
+            assert_eq!(cells[(2, 1)].fg, theme::surface(&pal, 0).fg.unwrap());
+            assert_ne!(cells[(2, 1)].bg, Color::Reset);
         }
         let mut wide = root.clone();
         wide.title = "界".repeat(50);
@@ -2786,11 +2825,13 @@ mod tests {
         let cells = block_cells(model.visible().nth(1).unwrap(), true, &app.palette);
         let rows = buffer_rows(&cells);
         let line = |y: usize| rows[y].clone();
-        assert!(line(1).contains("Review conductor"));
-        assert!(line(2).contains("calm-rook"));
-        assert!(line(3).contains("claude · fable"));
-        assert!(line(4).contains("working"));
-        assert!(line(5).contains("Read · Inspect graph"));
+        // 24×5: the title rides the top border, then identity, state and
+        // activity; harness and model leave a card that has an activity.
+        assert!(line(0).contains("Review conductor"), "{rows:?}");
+        assert!(line(1).contains("calm-rook"), "{rows:?}");
+        assert!(line(2).contains("working"), "{rows:?}");
+        assert!(line(3).contains("Read · Inspect graph"), "{rows:?}");
+        assert!(!rows.concat().contains("claude · fable"), "{rows:?}");
         assert_eq!(selected_session_id(&app).as_deref(), Some("canonical-id"));
 
         let area = Rect::new(0, 0, 60, 20);

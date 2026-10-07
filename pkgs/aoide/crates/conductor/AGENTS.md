@@ -37,7 +37,10 @@
   50/75/100/125/150%. Pointer-anchored zoom, pan limits, render and hit tests
   share one transform; never let render record rectangles for a later hit test.
   Terminal glyphs stay fixed-size and clip inside cards; never relayout
-  entities into alternative card presets when zoom changes.
+  entities into alternative card presets when zoom changes. The one preset
+  is 24×5 with the title in the top border: a wire ends above the card's
+  top edge and never enters it, which is what keeps a text-bearing border
+  honest.
 - The painter clips; the world outside the camera is never drawn. Edges paint
   before cards. Focus draws the selected node's connected component and All
   draws every node, and the synthetic root gathering unattached sessions is not

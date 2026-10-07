@@ -148,19 +148,20 @@ log, `⚙` status, `◌` past session.
 
 ## The Graph panel
 
-A retained scene: cards are fixed 32×7 rectangles at world coordinates
+A retained scene: cards are one fixed 24×5 preset (title in the top border;
+identity, role·state, activity in the rows) at world coordinates
 `App::graph.positions` keeps across refreshes, wired top-down (a parent
 centred over its children), under a camera that pans and zooms. The forest
 is `build_graph` over the local stage — projects, their sessions, spawned
 children, and one synthetic `Active sessions` root for the projectless —
 followed by one **host card per registered node** off the roster probe
-(`🖧 NODE · online|unreachable|never-pulled`, the node's name, `online · n
-session(s)` / `unreachable (last seen <age>)` / `never pulled`), its
+(border `🖧 NODE · online|unreachable|never-pulled`, then the node's name and
+`n session(s)` or `last seen <age>`), its
 reported sessions flat beneath. A remote card carries no local session id,
 so the local actions pass over it; a cached row wears `last-seen` as its
 state and `was <state>` as its activity, dimmed. A probe that fails after a
-good one keeps the last rows, dimmed, each host card ending `probe failed
-<age>`.
+good one keeps the last rows, dimmed, each host card's last row reading
+`probe failed <age>`.
 
 | Key | Effect |
 |---|---|
