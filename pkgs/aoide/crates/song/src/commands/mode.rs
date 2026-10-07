@@ -649,6 +649,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
         std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("lockscreen.png"), b"").unwrap();
         crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -660,6 +661,11 @@ mod tests {
         assert!(out.changed.iter().any(|c| c.ends_with("stage/livery.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("stage/mode.json")));
         assert!(stage.join("livery.json").is_file());
+        // The song ships a lock picture, so staging it dresses the lock.
+        let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
+        let picture = song.join("lockscreen.png");
+        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -857,6 +863,7 @@ mod tests {
         std::fs::create_dir_all(&nocturne).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
         std::fs::write(sonata.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(sonata.join("lockscreen.png"), b"").unwrap();
         std::fs::write(nocturne.join("livery.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -904,6 +911,14 @@ mod tests {
         assert!(terminal.lines().any(|l| l == "color4 #ebbcba"), "{terminal}");
         assert!(terminal.lines().any(|l| l == "background_opacity 0.7"), "{terminal}");
         assert!(out.changed.iter().any(|c| c.ends_with("stage/terminal-colors.conf")));
+        // And the lock the same way: the declared twin's colours, the declared
+        // song's own picture from the runtime songbook.
+        let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
+        let picture = sonata.join("lockscreen.png");
+        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
+        assert!(lock.lines().any(|l| l == "$aoide_lock_color = rgb(0b1021)"), "{lock}");
+        assert!(lock.lines().any(|l| l == "$aoide_lock_field_check = rgb(ebbcba)"), "{lock}");
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Declarative);
         assert_eq!(marker.song, Some("sonata".to_string()));

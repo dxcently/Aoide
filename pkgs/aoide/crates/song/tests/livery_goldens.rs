@@ -13,6 +13,10 @@
 //!   differs from `JSON.stringify`; QML reads by key, so shape is the
 //!   contract, bytes are not).
 //!
+//! `emit hyprlock` has no Node original: its goldens are the native engine's
+//! own, written by hand from each fixture's resolved set and a fixed lock
+//! picture path, and pin the dressed form byte for byte.
+//!
 //! A fourth fixture, `valid-polarity.json`, is NOT part of that parity set:
 //! it pins the NATIVE engine's own posture for a field the Node engine never
 //! had — §1's `polarity`, which lint validates and no backend emits — against
@@ -23,8 +27,18 @@ use aoide_song::livery::emit::{EmitOpts, EmitOutput, emitter};
 use aoide_song::livery::resolve::to_json_string;
 use aoide_song::livery::{lint, resolve};
 use serde_json::Value;
+use std::path::Path;
 
 const FIXTURES: [&str; 3] = ["valid", "valid-hot", "valid-base16"];
+
+const LOCK_PICTURE: &str = "/aoide/song/songbook/fixture/lockscreen.png";
+
+fn with_lock_picture() -> EmitOpts<'static> {
+    EmitOpts {
+        image: Some(Path::new(LOCK_PICTURE)),
+        ..EmitOpts::default()
+    }
+}
 
 fn fixture(name: &str) -> Value {
     let raw = std::fs::read_to_string(format!("tests/fixtures/{name}.json")).unwrap();
@@ -116,6 +130,26 @@ fn emit_stage_is_semantically_equal_to_the_node_goldens() {
 }
 
 #[test]
+fn emit_hyprlock_is_the_native_golden_and_nothing_without_a_picture() {
+    for fix in FIXTURES {
+        let backend = emitter("hyprlock").expect("hyprlock backend registered");
+        match backend.emit(&resolved(fix), &with_lock_picture()).unwrap() {
+            EmitOutput::Text(s) => {
+                assert_eq!(s, golden(&format!("{fix}.emit-hyprlock")), "{fix}");
+            }
+            other => panic!("{fix}: hyprlock emitted {other:?}, expected Text"),
+        }
+        match backend.emit(&resolved(fix), &EmitOpts::default()).unwrap() {
+            EmitOutput::Text(s) => assert!(
+                s.lines().all(|l| l.starts_with('#')),
+                "{fix}: a song with no picture dresses nothing: {s}"
+            ),
+            other => panic!("{fix}: hyprlock emitted {other:?}, expected Text"),
+        }
+    }
+}
+
+#[test]
 fn file_backend_renders_from_the_registry_with_a_template() {
     let out = emitter("file")
         .expect("file backend registered")
@@ -123,6 +157,7 @@ fn file_backend_renders_from_the_registry_with_a_template() {
             &resolved("valid"),
             &EmitOpts {
                 template: Some("bg={{palette.bg}} border={{window.border}}"),
+                ..EmitOpts::default()
             },
         )
         .unwrap();
@@ -142,6 +177,7 @@ fn file_backend_errors_on_an_unknown_placeholder() {
             &resolved("valid"),
             &EmitOpts {
                 template: Some("{{bogus.bg}}"),
+                ..EmitOpts::default()
             },
         )
         .unwrap_err();
@@ -152,12 +188,15 @@ fn file_backend_errors_on_an_unknown_placeholder() {
 }
 
 #[test]
-fn registry_lists_exactly_the_five_backends_in_order() {
+fn registry_lists_exactly_the_six_backends_in_order() {
     let targets: Vec<&str> = aoide_song::livery::emit::registry()
         .iter()
         .map(|e| e.target())
         .collect();
-    assert_eq!(targets, ["stage", "hyprctl", "osc", "file", "kitty"]);
+    assert_eq!(
+        targets,
+        ["stage", "hyprctl", "osc", "file", "kitty", "hyprlock"]
+    );
 }
 
 /// The polarity field (CONTRACTS.md §1) is LINT-ONLY: a notes document may
@@ -188,14 +227,14 @@ fn polarity_is_lint_only_and_moves_no_emitted_byte() {
         "polarity must not reach `livery resolve`"
     );
 
-    for target in ["osc", "hyprctl", "stage"] {
+    for target in ["osc", "hyprctl", "stage", "hyprlock"] {
         let one = emitter(target)
             .expect("backend registered")
-            .emit(&resolved("valid-polarity"), &EmitOpts::default())
+            .emit(&resolved("valid-polarity"), &with_lock_picture())
             .unwrap();
         let two = emitter(target)
             .expect("backend registered")
-            .emit(&resolve(&without).expect("fixture resolves"), &EmitOpts::default())
+            .emit(&resolve(&without).expect("fixture resolves"), &with_lock_picture())
             .unwrap();
         assert_eq!(one, two, "{target}: polarity must not move an emitted byte");
     }

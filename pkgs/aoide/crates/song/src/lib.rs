@@ -1,7 +1,7 @@
 //! aoide-song — Aoide's ricing/design engine.
 //!
 //! `livery` is the native design-token engine: schema validation, `{group.key}`
-//! deref + component fallback, and the stage/hyprctl/osc/file/kitty emitters.
+//! deref + component fallback, and the stage/hyprctl/osc/file/kitty/hyprlock emitters.
 //! `live` computes the Hyprland
 //! geometry/border keyword list a staged notes document implies and
 //! (best-effort) applies it to a running compositor, and renders + pushes

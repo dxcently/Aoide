@@ -130,6 +130,17 @@ pub fn derive_cover(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// The lock picture a song ships: `lockscreen.<ext>` at the root of its own
+/// folder, the first of [`COVER_EXTS`] that exists. The name is the render
+/// surface's (`aoide.surfaces.lockscreen`), so a song declares nothing: the
+/// file is the whole opinion, and deleting it takes the opinion away.
+pub fn lockscreen_image(song_dir: &Path) -> Option<PathBuf> {
+    COVER_EXTS
+        .iter()
+        .map(|ext| song_dir.join(format!("lockscreen.{ext}")))
+        .find(|p| p.is_file())
+}
+
 /// Resolve a `cover set <path|name>` argument to an absolute cover path.
 ///
 /// An absolute `arg` is taken literally; anything else resolves against the
@@ -385,6 +396,30 @@ mod tests {
 
         assert_eq!(derive_cover("dusk"), Some(covers.join("dusk.png")));
         assert_eq!(derive_cover("nope"), None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn lockscreen_image_is_the_first_of_the_cover_extensions_in_the_song_folder() {
+        let root = unique_tmp("lockscreen-image");
+        let song = root.join("barcarolle");
+        std::fs::create_dir_all(&song).unwrap();
+        assert_eq!(lockscreen_image(&song), None);
+
+        std::fs::write(song.join("cover.png"), b"").unwrap();
+        std::fs::create_dir(song.join("lockscreen.webp")).unwrap();
+        assert_eq!(lockscreen_image(&song), None, "another name, or a directory, is no picture");
+
+        std::fs::write(song.join("lockscreen.jpeg"), b"").unwrap();
+        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.jpeg")));
+        std::fs::write(song.join("lockscreen.jpg"), b"").unwrap();
+        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.jpg")));
+        std::fs::write(song.join("lockscreen.png"), b"").unwrap();
+        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.png")));
+        std::fs::remove_dir(song.join("lockscreen.webp")).unwrap();
+        std::fs::write(song.join("lockscreen.webp"), b"").unwrap();
+        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.webp")));
 
         let _ = std::fs::remove_dir_all(&root);
     }

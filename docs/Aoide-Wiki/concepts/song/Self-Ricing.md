@@ -329,7 +329,12 @@ a new one opens, and each window's font zoom resets. Never a raw OSC write into 
 interleaves with whatever the program there is printing and gets eaten. `rice
 mode declarative` rewrites the file from the declared twin through the same
 re-pin, so leaving staging restores the declared colours the same live way;
-`rice back` and `lyra reload`'s draft sync write it too. On the compositor
+`rice back` and `lyra reload`'s draft sync write it too. The lock screen
+follows through the same writers: a song that ships a `lockscreen.<ext>` at its
+folder root dresses hyprlock with that picture and colours from tiers it
+already authors, as hyprlang variables in `$AOIDE_ROOT/song/stage/hyprlock.conf`
+(the `hyprlock` emitter), and a song that ships none leaves the lock as the host
+has it. Nothing is pushed: hyprlock reads the file at every lock. On the compositor
 side, `geometry.blurEnabled` switches hyprglass along with Hyprland's
 blur: `plugin:hyprglass:enabled` and `plugin:hyprglass:layers:enabled` are
 live keywords, so a song with blur off (cadenza) turns the glass off without

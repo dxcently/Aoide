@@ -168,6 +168,22 @@
   `geometry.terminalOpacity` is linted in `livery::schema` as a plain
   number in [0, 1] or null, through `schema::terminal_opacity_value`, the
   same predicate the hot path uses to find an opinion.
+- **`commands::rice::stage_lockscreen` is the ONE writer of
+  `stage/hyprlock.conf` and is called wherever `stage_terminal_colors` is**
+  (`handle_rice_stage`, `rice back`, `lyra reload`'s `sync_draft_in_place`,
+  after the §7.5 gate there). Only a song that ships `lockscreen.<ext>`
+  (`cover::lockscreen_image`) dresses the lock: the `hyprlock` emitter writes
+  all ten variables with it and comments alone without it, and a song with no
+  picture still rewrites the file, which is what clears an earlier staged
+  song's dress. A dressed file is complete, so a staged song's picture never
+  mixes with the previous one's colours. The picture comes from the RUNTIME
+  songbook (`shellbridge::songbook_dir`), never the checkout or a nix eval. No
+  value carries `#` (a hyprlang comment): colours are `rgb(rrggbb)`, and the
+  path is refused if it is relative or holds a control character, `#`, `$`,
+  `{`, `}` or `\`. Never fatal, no mode gate of its own, and no push: hyprlock
+  reads its config at every lock. The file's includer rules live in
+  CONTRACTS.md §4, not here; the emitter's fail-closed facts name hyprlock
+  0.9.6 and hyprlang 0.6.8 and are re-checked on a bump.
 - **`polarity` is a LINTED top-level field and no emitter carries it**
   (`livery::schema::POLARITY_VALUES`, exactly `"light"`/`"dark"`; absent or
   null is "no opinion"). It is the baked fan-out's register — the stylix lane

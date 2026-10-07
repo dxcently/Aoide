@@ -1438,6 +1438,9 @@ struct BackResult {
     /// The terminal colour push's envelope data
     /// (`super::rice::stage_terminal_colors`).
     terminal: serde_json::Value,
+    /// The lock-screen dress write's envelope data
+    /// (`super::rice::stage_lockscreen`).
+    lock_screen: serde_json::Value,
 }
 
 /// The unlocked revert core — see the section banner above for the shape.
@@ -1573,6 +1576,15 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
         crate::live::terminal_colors(&target_record.livery).as_deref(),
     );
     changed.extend(terminal_changed);
+    // And the lock screen's dress, off the same livery: the song's own picture
+    // from the runtime songbook, or nothing, which clears the dress a later
+    // staged song left behind.
+    let lock_image = crate::cover::lockscreen_image(&shellbridge::songbook_dir(&song));
+    let (lock_changed, lock_screen) = super::rice::stage_lockscreen(
+        crate::live::lockscreen_fragment(&target_record.livery, lock_image.as_deref()),
+        lock_image.as_deref(),
+    );
+    changed.extend(lock_changed);
 
     // Cover restore is narrowed to the STAGE ONLY (advisor verdict D4):
     // `stage/cover.json` is not symlink-routed the way `livery.json` is
@@ -1642,6 +1654,7 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
         registry_note: registry_sync.note,
         hyprctl_status,
         terminal,
+        lock_screen,
     })
 }
 
@@ -1741,6 +1754,7 @@ fn render_back_outcome(result: BackResult) -> Outcome {
             "wallpaper": crate::wallpaper_provider::sync(),
             "hyprctl": result.hyprctl_status,
             "terminal": result.terminal,
+            "lockScreen": result.lock_screen,
             "registry": result.registry_note,
         }))
 }
@@ -2478,6 +2492,51 @@ mod tests {
 
         let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_livery).unwrap()).unwrap();
         assert_eq!(restored, take1.livery);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `rice back` redresses the lock off the take it restores, the same
+    /// writer `rice stage` uses: the target take's colours with the song's own
+    /// picture, and nothing once the song ships none.
+    #[test]
+    fn back_restores_the_lock_dress_off_the_target_take() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, song, _draft, _draft_livery) = routed_draft_symlinked("back-lock-dress");
+        let stage = shellbridge::stage_dir();
+        let picture = shellbridge::songbook_dir(&song).join("lockscreen.png");
+        std::fs::write(&picture, b"").unwrap();
+        let write_full = |bg: &str| {
+            std::fs::write(
+                stage.join("livery.json"),
+                format!(
+                    r##"{{"schemaVersion":"0","palette":{{"bg":"{bg}","fg":"#eeeeee","accent":"#00ff00","urgent":"#ff0000"}}}}"##
+                ),
+            )
+            .unwrap();
+        };
+
+        write_full("#111111");
+        snapshot("rice.take", "stage").unwrap();
+        write_full("#222222");
+        snapshot("rice.take", "stage").unwrap();
+
+        let out = handle_rice_back(&inv_back(None, Some(1)));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
+        assert!(lock.lines().any(|l| l == "$aoide_lock_color = rgb(111111)"), "{lock}");
+        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
+        assert_eq!(out.data.unwrap()["lockScreen"]["status"], "written");
+
+        std::fs::remove_file(&picture).unwrap();
+        let out = handle_rice_back(&inv_back(None, Some(2)));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(
+            std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap(),
+            crate::livery::emit::hyprlock::NO_DRESS
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

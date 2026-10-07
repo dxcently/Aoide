@@ -1,7 +1,7 @@
 # aoide-song
 
 Aoide's ricing/design engine: the native livery engine (schema validation,
-`{group.key}` deref + component fallback, stage/hyprctl/osc/file/kitty
+`{group.key}` deref + component fallback, stage/hyprctl/osc/file/kitty/hyprlock
 emitters), `rice compose`'s scaffolding/rendering, cover-art derivation, the
 Hyprland geometry keyword live-apply, the staged terminal colours, and the
 element render pipeline (non-QML rice targets — waybar, dunst, anything with
@@ -27,7 +27,10 @@ a config file). Paint-side — ships in `lyra`, not core.
   `ls`, per `$XDG_RUNTIME_DIR/kitty-<pid>` socket, bounded, best-effort). `commands::rice::stage_terminal_colors` is
   the one writer of `stage/terminal-colors.conf` (CONTRACTS.md §4), shared by
   `rice stage`, the `rice mode` re-pins, `rice back` and `lyra reload`'s
-  draft sync.
+  draft sync. The lock screen follows the same way: `lockscreen_fragment`
+  renders the staged song's hyprlock dress, and
+  `commands::rice::stage_lockscreen` writes `stage/hyprlock.conf` beside the
+  terminal file, for a song that ships a `lockscreen.<ext>` (`cover`).
 - `compose` — the pure `rice compose` scaffolding/rendering engine.
 - `cover` — cover-art derivation + resolution, and `stage/cover.json`'s
   writers, which stamp the staged song into every file they write

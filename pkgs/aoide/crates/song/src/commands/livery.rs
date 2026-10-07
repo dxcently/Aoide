@@ -24,14 +24,15 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["livery", "emit"],
-        summary: "Emit the fully-resolved livery set through a backend: stage JSON, hyprctl keyword lines, terminal OSC sequences, or a file template ({{group.key}}).",
+        summary: "Emit the fully-resolved livery set through a backend: stage JSON, hyprctl keyword lines, terminal OSC sequences, a file template ({{group.key}}), kitty colours, or the lock screen's hyprlock dress.",
         args: [
-            arg!("target", "string", true, "Emitter backend: stage, hyprctl, osc, file, or kitty."),
+            arg!("target", "string", true, "Emitter backend: stage, hyprctl, osc, file, kitty, or hyprlock."),
             arg!("name", "string", false, "Song name or path to a livery file; defaults to the staged livery."),
         ],
         flags: [
             flag!("out", "string", "Write the emitted bytes to PATH atomically instead of stdout."),
             flag!("template", "string", "Template for the file backend ({{palette.bg}}-style placeholders)."),
+            flag!("song-dir", "string", "hyprlock target: the absolute song folder whose lockscreen.<ext> the lock screen draws; without one the song dresses nothing."),
         ],
         gated: false,
         implemented: true,
@@ -220,17 +221,18 @@ fn handle_livery_resolve(inv: &Invocation) -> Outcome {
     }
 }
 
-/// `livery emit <target> [<name>|<path>] [--out PATH] [--template STR]` —
-/// run the resolved set through one backend and print (or atomically write)
-/// its bytes. `--out` generalizes the Node `emit stage --out` contract to
-/// every target.
+/// `livery emit <target> [<name>|<path>] [--out PATH] [--template STR]
+/// [--song-dir DIR]` — run the resolved set through one backend and print (or
+/// atomically write) its bytes. `--out` generalizes the Node `emit stage
+/// --out` contract to every target; `--song-dir` is the `hyprlock` target's
+/// song folder, searched for the lock picture the song ships.
 fn handle_livery_emit(inv: &Invocation) -> Outcome {
     let target = match inv.args.first() {
         Some(t) => t.clone(),
         None => {
             return Outcome::usage(
                 "livery.emit",
-                "usage: aoide livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]",
+                "usage: aoide livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--song-dir DIR] [--json]",
             )
             .with_data(json!({ "reason": "missing-target" }));
         }
@@ -261,13 +263,18 @@ fn handle_livery_emit(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "livery.emit",
-                format!("emit: unknown target \"{target}\" (stage|hyprctl|osc|file|kitty)"),
+                format!("emit: unknown target \"{target}\" (stage|hyprctl|osc|file|kitty|hyprlock)"),
             )
             .with_data(json!({ "reason": "unknown-target", "target": target }));
         }
     };
     let template = inv.flags.get("template").map(|s| s.as_str());
-    let output = match backend.emit(&resolved, &EmitOpts { template }) {
+    let image = inv
+        .flags
+        .get("song-dir")
+        .and_then(|dir| crate::cover::lockscreen_image(Path::new(dir)));
+    let opts = EmitOpts { template, image: image.as_deref() };
+    let output = match backend.emit(&resolved, &opts) {
         Ok(o) => o,
         Err(e) => {
             return Outcome::error("livery.emit", e.to_string()).with_data(json!({
@@ -312,4 +319,60 @@ fn handle_livery_emit(inv: &Invocation) -> Outcome {
         "livery": notes_path.to_string_lossy(),
         "stdout": stdout,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aoide_protocol::output::Status;
+    use aoide_test_support::{inv, unique_tmp};
+
+    const FIXTURE: &str = "tests/fixtures/valid-base16.json";
+
+    fn emit_hyprlock(song_dir: Option<&Path>) -> Outcome {
+        let mut i = inv(&["livery", "emit"], &["hyprlock", FIXTURE]);
+        if let Some(dir) = song_dir {
+            i.flags.insert("song-dir".into(), dir.to_string_lossy().into_owned());
+        }
+        handle_livery_emit(&i)
+    }
+
+    fn stdout(out: &Outcome) -> String {
+        out.data.as_ref().unwrap()["stdout"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn hyprlock_draws_the_song_folders_lock_picture_and_nothing_without_one() {
+        let song = unique_tmp("livery-emit-hyprlock");
+        let out = emit_hyprlock(Some(&song));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(stdout(&out), crate::livery::emit::hyprlock::NO_DRESS, "no picture, no dress");
+        assert_eq!(stdout(&emit_hyprlock(None)), crate::livery::emit::hyprlock::NO_DRESS);
+
+        std::fs::write(song.join("lockscreen.png"), b"").unwrap();
+        let out = emit_hyprlock(Some(&song));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let want = format!("$aoide_lock_image = {}", song.join("lockscreen.png").display());
+        let text = stdout(&out);
+        assert!(text.lines().any(|l| l == want), "{text}");
+        assert_eq!(text.lines().filter(|l| l.starts_with("$aoide_lock_")).count(), 10, "{text}");
+        let _ = std::fs::remove_dir_all(&song);
+    }
+
+    #[test]
+    fn hyprlock_writes_the_same_bytes_through_out() {
+        let song = unique_tmp("livery-emit-hyprlock-out");
+        std::fs::write(song.join("lockscreen.webp"), b"").unwrap();
+        let dst = song.join("out").join("hyprlock.conf");
+        let mut i = inv(&["livery", "emit"], &["hyprlock", FIXTURE]);
+        i.flags.insert("song-dir".into(), song.to_string_lossy().into_owned());
+        i.flags.insert("out".into(), dst.to_string_lossy().into_owned());
+        let out = handle_livery_emit(&i);
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(
+            std::fs::read_to_string(&dst).unwrap(),
+            stdout(&emit_hyprlock(Some(&song)))
+        );
+        let _ = std::fs::remove_dir_all(&song);
+    }
 }

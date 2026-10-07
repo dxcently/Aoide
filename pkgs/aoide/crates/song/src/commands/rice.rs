@@ -37,7 +37,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "stage"],
-        summary: "Hot-load a rice live — ALWAYS the declared committed content, ignoring any saved draft (stage/livery.json hot-reload + best-effort hyprctl geometry/border/glass apply + stage/terminal-colors.conf pushed to open kitty windows); nothing committed. No <name>: re-stages the currently active song's declared content, overriding whatever draft `rice mode stage` may have auto-loaded. Refuses while `rice mode declarative` is locked.",
+        summary: "Hot-load a rice live — ALWAYS the declared committed content, ignoring any saved draft (stage/livery.json hot-reload + best-effort hyprctl geometry/border/glass apply + stage/terminal-colors.conf pushed to open kitty windows + stage/hyprlock.conf, the lock screen's dress); nothing committed. No <name>: re-stages the currently active song's declared content, overriding whatever draft `rice mode stage` may have auto-loaded. Refuses while `rice mode declarative` is locked.",
         args: [arg!("name", "string", false, "Rice/song name to stage; defaults to the currently active song's declared content.")],
         flags: [],
         gated: false,
@@ -470,6 +470,8 @@ pub(crate) struct StagePlan {
     staged: String,
     hypr_keywords: Vec<String>,
     terminal_conf: Option<String>,
+    lock_image: Option<std::path::PathBuf>,
+    lock_conf: Result<String, String>,
     songbook: crate::widgets::StageSongbook,
 }
 
@@ -552,6 +554,11 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
     let hypr_keywords = crate::live::geometry_keywords(&parsed);
     // The terminal half, off the same parsed notes (see `stage_terminal_colors`).
     let terminal_conf = crate::live::terminal_colors(&parsed);
+    // The lock-screen half: only a song that ships its own picture dresses
+    // the lock, and the picture comes from the runtime songbook alone, never
+    // the checkout (see `stage_lockscreen`).
+    let lock_image = crate::cover::lockscreen_image(&shellbridge::songbook_dir(&name));
+    let lock_conf = crate::live::lockscreen_fragment(&parsed, lock_image.as_deref());
 
     // Inject the song name into the staged notes: LiveryState.qml's
     // `songName` property reads this to resolve per-song flavor widgets
@@ -581,12 +588,12 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
         }
     };
 
-    Ok(StagePlan { name, repin, staged, hypr_keywords, terminal_conf, songbook })
+    Ok(StagePlan { name, repin, staged, hypr_keywords, terminal_conf, lock_image, lock_conf, songbook })
 }
 
 /// The writing half of a stage, from a [`plan_rice_stage`] plan.
 pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
-    let StagePlan { name, repin, staged, hypr_keywords, terminal_conf, songbook } = plan;
+    let StagePlan { name, repin, staged, hypr_keywords, terminal_conf, lock_image, lock_conf, songbook } = plan;
     let stage = shellbridge::stage_dir();
     let notes_dst = stage.join("livery.json");
     if let Err(e) = shellbridge::atomic_write(&notes_dst, &staged) {
@@ -608,6 +615,8 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
     // never fatal, reported in the envelope.
     let (terminal_changed, terminal_data) = stage_terminal_colors(terminal_conf.as_deref());
     changed.extend(terminal_changed);
+    let (lock_changed, lock_data) = stage_lockscreen(lock_conf, lock_image.as_deref());
+    changed.extend(lock_changed);
 
     // Cover: the song's own default, or the user's pick for it (CONTRACTS.md
     // §4). The song is stamped into whatever is written, which is what lets a
@@ -723,6 +732,7 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
         "wallpaper": crate::wallpaper_provider::sync(),
         "hyprctl": hyprctl_status,
         "terminal": terminal_data,
+        "lockScreen": lock_data,
         "widgets": widget_sync.note,
         "slots": widget_sync.slots,
         "registry": registry_sync.note,
@@ -732,7 +742,9 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
                  live via best-effort, guarded `hyprctl reload config-only` then \
                  `hyprctl --batch keyword …` (see live.rs); terminal colours land in \
                  stage/terminal-colors.conf (every new kitty window includes it) and \
-                 open kitty windows reload their config over kitty's control socket",
+                 open kitty windows reload their config over kitty's control socket; a song that \
+                 ships a lock picture also dresses stage/hyprlock.conf, which hyprlock \
+                 reads at every lock",
     }))
 }
 
@@ -777,6 +789,52 @@ pub(crate) fn stage_terminal_colors(conf: Option<&str>) -> (Vec<String>, Value) 
     let mut data = json!({ "status": "skipped", "message": "test build: no push to live kitty" });
     data["file"] = json!(path.to_string_lossy());
     (vec![path.to_string_lossy().into_owned()], data)
+}
+
+/// Write the staged lock-screen dress (`<stage>/hyprlock.conf`,
+/// [`crate::live::LOCKSCREEN_FILE`]), the lock's twin of
+/// [`stage_terminal_colors`] and called from every site that calls it.
+/// `conf` is [`crate::live::lockscreen_fragment`] of the notes just staged and
+/// `image` the picture it was rendered with.
+///
+/// The one lock writer every stage path shares, so no path can move the shell
+/// and leave the lock behind. It rides each caller's mode gate and adds none,
+/// is never fatal (`stage/livery.json` is already written), and pushes
+/// nothing: hyprlock reads its config afresh at every lock. A song with no
+/// picture writes the fragment that dresses nothing, which clears what an
+/// earlier staged song left. A fragment that could not be rendered leaves the
+/// previous file as it was.
+pub(crate) fn stage_lockscreen(
+    conf: Result<String, String>,
+    image: Option<&std::path::Path>,
+) -> (Vec<String>, Value) {
+    let conf = match conf {
+        Ok(conf) => conf,
+        Err(message) => {
+            return (
+                Vec::new(),
+                json!({ "status": "skipped", "message": format!("lock screen left as it was: {message}") }),
+            );
+        }
+    };
+    let path = shellbridge::stage_dir().join(crate::live::LOCKSCREEN_FILE);
+    if let Err(e) = shellbridge::atomic_write(&path, &conf) {
+        return (
+            Vec::new(),
+            json!({
+                "status": "write-failed",
+                "message": format!("failed to write {}: {e}", path.display()),
+            }),
+        );
+    }
+    (
+        vec![path.to_string_lossy().into_owned()],
+        json!({
+            "status": "written",
+            "file": path.to_string_lossy(),
+            "image": image.map(|p| p.to_string_lossy()),
+        }),
+    )
 }
 
 /// Resolve `--from <song>`'s source `livery.json` for `rice compose`
@@ -1251,8 +1309,8 @@ mod tests {
         assert_eq!(parsed["palette"]["bg"], "#0b1021");
         assert_eq!(
             out.changed.len(),
-            2,
-            "livery.json and the terminal colour file — no legacy mirror (Phase 4)"
+            3,
+            "livery.json, the terminal colour file and the lock-screen dress — no legacy mirror (Phase 4)"
         );
         assert!(out
             .changed
@@ -1270,11 +1328,86 @@ mod tests {
             .iter()
             .any(|c| c.ends_with("stage/terminal-colors.conf")));
         assert_eq!(out.data.as_ref().unwrap()["terminal"]["status"], "skipped");
+        // The lock half: a song with no lock picture dresses nothing, and says so.
+        assert_eq!(
+            std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap(),
+            crate::livery::emit::hyprlock::NO_DRESS
+        );
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
+        let lock = &out.data.as_ref().unwrap()["lockScreen"];
+        assert_eq!(lock["status"], "written");
+        assert!(lock["image"].is_null(), "{lock}");
         assert!(!stage.join("cover.json").exists());
         let data = out.data.unwrap();
         assert!(data["cover"].is_null());
         assert_eq!(data["coverStage"], "none");
         assert!(out.message.contains("no derivable cover for `moonlight`"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Only a song that ships its own lock picture dresses the lock, and the
+    /// picture is the RUNTIME songbook's (CONTRACTS.md §4 `hyprlock.conf`):
+    /// staging a song without one afterwards clears the dress, so a lock never
+    /// outlives the song that dressed it.
+    #[test]
+    fn stage_dresses_the_lock_only_for_a_song_that_ships_a_lock_picture() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("stage-lock-dress");
+        let stage = root.join("stage");
+        let barcarolle = root.join("songbook").join("barcarolle");
+        let sonata = root.join("songbook").join("sonata");
+        for song in [&barcarolle, &sonata] {
+            std::fs::create_dir_all(song).unwrap();
+            std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        }
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(barcarolle.join("lockscreen.png"), b"").unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["barcarolle"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let dress = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
+        let picture = barcarolle.join("lockscreen.png");
+        assert!(dress.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{dress}");
+        assert!(dress.lines().any(|l| l == "$aoide_lock_color = rgb(0b1021)"), "{dress}");
+        assert!(dress.lines().any(|l| l == "$aoide_lock_field_check = rgb(82aaff)"), "{dress}");
+        assert!(dress.lines().any(|l| l == "$aoide_lock_field_y = -26%"), "{dress}");
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/hyprlock.conf")));
+        let data = out.data.unwrap();
+        assert_eq!(data["lockScreen"]["status"], "written");
+        assert_eq!(data["lockScreen"]["image"], picture.to_string_lossy().as_ref());
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(
+            std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap(),
+            crate::livery::emit::hyprlock::NO_DRESS,
+            "a song with no lock picture clears the previous song's dress"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A fragment that cannot be rendered never replaces the file: the lock
+    /// keeps the dress it had, and the envelope says why.
+    #[test]
+    fn an_unrenderable_dress_leaves_the_staged_file_and_reports_skipped() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("stage-lock-skipped");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::fs::write(stage.join("hyprlock.conf"), "# the previous dress\n").unwrap();
+
+        let (changed, data) = stage_lockscreen(Err("palette.bg is not a hex colour".into()), None);
+        assert!(changed.is_empty());
+        assert_eq!(data["status"], "skipped");
+        assert!(data["message"].as_str().unwrap().contains("palette.bg"), "{data}");
+        assert_eq!(
+            std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap(),
+            "# the previous dress\n"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2318,9 +2451,9 @@ mod tests {
         // widgets/ dir → no per-song run/qml songs/moonlight/ dir.
         assert_eq!(
             out.changed.len(),
-            4,
+            5,
             "no widgets/ dir → no bodies synced, but manifest.json + registry.json still are \
-             (plus livery.json and the terminal colour file): {:?}",
+             (plus livery.json, the terminal colour file and the lock-screen dress): {:?}",
             out.changed
         );
         assert!(out.changed.iter().any(|c| c.ends_with("stage/livery.json")));

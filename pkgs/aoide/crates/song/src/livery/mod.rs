@@ -14,7 +14,8 @@
 //!       ▼
 //!   emit/       one Emitter trait, one registry: stage · hyprctl · osc
 //!               (+ file, the arbitrary-config-template generalization proof,
-//!               + kitty, the staged terminal colour file)
+//!               + kitty, the staged terminal colour file,
+//!               + hyprlock, the staged lock-screen dress)
 //! ```
 //!
 //! Pure computation only: the effectful half (running `hyprctl --batch`,

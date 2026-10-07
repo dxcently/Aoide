@@ -211,7 +211,7 @@ tier): a document that carries it must spell one of these two.
 note object — by name; `null` (or the key absent, the ordinary case for a
 document written before the field existed) is "no opinion" and the option
 system's `"light"` stands. Unlike every colour tier, NO engine emitter carries
-it: `livery resolve` and `emit stage`/`hyprctl`/`osc`/`file`/`kitty` are
+it: `livery resolve` and `emit stage`/`hyprctl`/`osc`/`file`/`kitty`/`hyprlock` are
 byte-identical with and without it (`livery_goldens`' polarity fixture pins
 that), because it is not a colour a surface paints — it is the register the
 baked fan-out derives its colours from.
@@ -2247,6 +2247,84 @@ opens; a reload moves `background_opacity` only for an instance started with
 zoom resets to the configured size on each reload. Best-effort, bounded per
 call, never fatal; the outcome envelope's `terminal` object reports
 `{status, message, instances, windows, failed, file}`.
+
+### `song/stage/hyprlock.conf` — **v0**
+
+The staged song's lock-screen dress in hyprlang variables, nothing else: `#`
+comment lines and, only when the song ships a lock picture (§5), exactly ten
+variable definitions in the order below. A song that ships none writes the
+comment lines alone and dresses nothing, so the lock stands exactly as the
+venue's own look has it.
+
+| Variable | Value | Source |
+| --- | --- | --- |
+| `$aoide_lock_color` | `rgb(rrggbb)` | `palette.bg`, the ground behind the picture |
+| `$aoide_lock_image` | absolute path | the song's `lockscreen.<ext>` (§5) in the RUNTIME songbook, `$AOIDE_ROOT/song/songbook/<song>/` |
+| `$aoide_lock_field_y` | `-26%` | `livery::emit::hyprlock::FIELD_Y`: the password field's centre, percent of output height below the middle |
+| `$aoide_lock_field_outer` | `rgb(rrggbb)` | `window.border` |
+| `$aoide_lock_field_inner` | `rgb(rrggbb)` | `notif.bg` |
+| `$aoide_lock_field_font` | `rgb(rrggbb)` | `notif.fg` |
+| `$aoide_lock_field_check` | `rgb(rrggbb)` | `palette.accent` |
+| `$aoide_lock_field_fail` | `rgb(rrggbb)` | `notif.urgent` |
+| `$aoide_lock_name_y` | `-21%` | `livery::emit::hyprlock::NAME_Y`: the account name's centre, between the tile and the field |
+| `$aoide_lock_name_font` | `rgb(ffffff)` | `livery::emit::hyprlock::NAME_FONT`, a constant: no tier knows a picture's luminance |
+
+The mapping reuses decisions the song already made: `notif.bg`/`notif.fg` is
+the pair it checks for contrast as plate and ink, and `window.border` is its
+focus ring, with every component fallback (§1) applied. A colour is written
+`rgb(rrggbb)`, lowercase, never with `#`, which starts a hyprlang comment. A
+non-hex colour, or a picture path that is relative or carries a control
+character, `#`, `$`, `{`, `}` or `\`, is an emitter error and nothing is
+written.
+
+Writer: `aoide-song`'s `commands::rice::stage_lockscreen`, the one writer,
+called from every site that calls `stage_terminal_colors` (above): `rice
+stage`, `rice mode stage`, `rice mode declarative`'s re-pin (rendered from the
+declared twin when that is the song re-pinned), `rice back` and `lyra
+reload`'s draft sync. It rides each caller's mode gate and adds none, writes
+through `atomic_write`, and is never fatal: the outcome envelope's
+`lockScreen` object is `{status: "written", file, image}`,
+`{status: "skipped", message}` (the notes did not resolve or the emitter
+refused; the previous file stays) or `{status: "write-failed", message}`. The
+picture's path comes from the runtime songbook alone, never the checkout or a
+nix eval (root `AGENTS.md` rule 10). A song with no picture rewrites the file
+to the comment lines, which clears what an earlier staged song left. `lyra
+livery emit hyprlock <song> [--song-dir DIR]` renders the same content, the
+picture being the `lockscreen.<ext>` found in `DIR`.
+
+No push: hyprlock reads its config afresh at every lock, so the next lock is
+already dressed.
+
+Reader: a host's hyprlock lane. It defines the ten variables with its own look
+as their values, `source`s this file, and only then writes its widgets, which
+name the variables. hyprlang substitutes the LAST definition for every line
+parsed after it, so a dressed file overrides the defaults and an undressed one
+leaves them. The lane's `$aoide_lock_name_font` default is fully transparent,
+so a lock no song dresses shows no name, and its name label carries a shadow,
+which is what lets the white read over any picture.
+
+Includer obligations. A variable appears only in the background's `color` and
+`path`, the input field's `outer_color`, `inner_color`, `font_color`,
+`check_color`, `fail_color` and `position`, and the name label's `position`
+and `color`. Never in a `text`, `placeholder_text`, `fail_text` or
+`check_text` (hyprlock runs `cmd[]` in them), an `onclick`, a `reload_cmd`, or
+any `general:*` or `auth:*` key.
+
+The lock never fails open. A song's content reaches the file only as a
+validated hex colour, one of three constants and a vetted path, and a file of
+variables cannot add a widget, an `onclick`, a `source`, a `general:*` or an
+`auth:*` key. Verified against hyprlock 0.9.6 and hyprlang 0.6.8: a missing,
+empty or garbage sourced file is a collected config error that hyprlock logs
+(`Proceeding ignoring faulty entries`) and then locks; an unclosed `{` in a
+sourced file is dropped at end of file; the picture decodes after the lock is
+held, and a missing or undecodable one draws the solid ground colour. Only a
+missing MAIN config exits before locking, and that file is the lane's own
+store link, never song-controlled. Re-check on every hyprlock or hyprlang
+bump.
+
+A song with no picture writes no variables, so it cannot undo a dress an
+earlier file set: the stage file clears what an earlier STAGED song left, but
+it does not mask a dress the host's own declared lock carries.
 
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 
@@ -6832,6 +6910,23 @@ a documented convention backed by code review.
 
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `livery.json` from v0 to v1 with the livery schema (§1).
+
+### The lock picture
+
+A song MAY ship one file, `lockscreen.{webp,png,jpg,jpeg}` at the root of its
+folder: `song/songbook/<name>/lockscreen.<ext>`, the first extension in that
+order that exists. It is the song's whole lock-screen opinion: no tier, no
+field, nothing in `rice.nix`. Only a song that ships it dresses the lock
+screen, with the picture and colours from tiers it already authors
+(`song/stage/hyprlock.conf`, §4); a song that ships none leaves the lock as the
+venue has it, and deleting the file takes the opinion away with no trace. The
+name is the render surface's, `aoide.surfaces.lockscreen`.
+
+The picture is authored at 16:9 and keeps its subject, the tile and the mark,
+inside the central ±20% of its height. The password field then sits at 26% of
+the output height below centre and the account name at 21%, one constant each
+in the emitter. An output wider than 16:9 crops the picture by width, and
+there the field overlaps the tile's lower edge.
 
 ### Per-song flavor widgets
 

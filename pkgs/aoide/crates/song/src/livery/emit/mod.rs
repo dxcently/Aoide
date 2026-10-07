@@ -15,14 +15,17 @@
 
 use crate::livery::emit::file::FileTemplate;
 use crate::livery::emit::hyprctl::Hyprctl;
+use crate::livery::emit::hyprlock::Hyprlock;
 use crate::livery::emit::kitty::Kitty;
 use crate::livery::emit::osc::Osc;
 use crate::livery::emit::stage::Stage;
 use crate::livery::resolve::Resolved;
 use std::fmt;
+use std::path::Path;
 
 pub mod file;
 pub mod hyprctl;
+pub mod hyprlock;
 pub mod kitty;
 pub mod osc;
 pub mod stage;
@@ -62,25 +65,30 @@ pub enum EmitOutput {
     Text(String),
 }
 
-/// Per-call emitter options. Only the `file` backend reads `template` today;
-/// a future backend adds its field here (the struct is additive).
+/// Per-call emitter options. Only the `file` backend reads `template` and only
+/// the `hyprlock` backend reads `image`; a future backend adds its field here
+/// (the struct is additive).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EmitOpts<'a> {
     pub template: Option<&'a str>,
+    /// The song's lock picture, absolute: what `hyprlock` dresses the lock
+    /// with. None means the song ships none and dresses nothing.
+    pub image: Option<&'a Path>,
 }
 
 /// One emit backend. `Sync` so the static registry is `&'static dyn Emitter`.
 pub trait Emitter: Sync {
-    /// The CLI-facing target name: `"stage" | "hyprctl" | "osc" | "file" | "kitty"`.
+    /// The CLI-facing target name:
+    /// `"stage" | "hyprctl" | "osc" | "file" | "kitty" | "hyprlock"`.
     fn target(&self) -> &'static str;
     /// Produce the output for one fully-resolved note set.
     fn emit(&self, r: &Resolved, o: &EmitOpts) -> Result<EmitOutput, EmitError>;
 }
 
 /// The full backend registry, in a fixed order (stage, hyprctl, osc, file,
-/// kitty) — append-only, like every registry in this workspace.
+/// kitty, hyprlock) — append-only, like every registry in this workspace.
 pub fn registry() -> &'static [&'static dyn Emitter] {
-    &[&Stage, &Hyprctl, &Osc, &FileTemplate, &Kitty]
+    &[&Stage, &Hyprctl, &Osc, &FileTemplate, &Kitty, &Hyprlock]
 }
 
 /// Look one backend up by its target name.

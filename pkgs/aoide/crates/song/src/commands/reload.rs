@@ -230,8 +230,8 @@ fn route_to_marked_draft(song: &str, draft: &str) -> Result<bool, Outcome> {
         .map_err(|e| Outcome::error("reload", e).with_data(json!({ "reason": "symlink-setup-failed" })))
 }
 
-/// Draft mode's own "sync" beat: apply hyprctl geometry/border keywords and
-/// the terminal colours (both derived from the CURRENT staged livery —
+/// Draft mode's own "sync" beat: apply hyprctl geometry/border keywords, the
+/// terminal colours and the lock-screen dress (all derived from the CURRENT staged livery —
 /// already the draft's own content via its routing symlink) and sync
 /// widget bodies + the widget-type registry into `run/qml` — the SAME primitives
 /// [`super::rice::handle_rice_stage`] itself calls (`crate::live`/
@@ -290,7 +290,16 @@ fn sync_draft_in_place(song: &str) -> Outcome {
         }
     };
 
+    // The lock screen is written after the gate, unlike the terminal call
+    // above, which predates it.
+    let lock_image = crate::cover::lockscreen_image(&aoide_storage::fs::songbook_dir(song));
+    let (lock_changed, lock_data) = super::rice::stage_lockscreen(
+        crate::live::lockscreen_fragment(&parsed, lock_image.as_deref()),
+        lock_image.as_deref(),
+    );
+
     let mut changed = terminal_changed;
+    changed.extend(lock_changed);
     changed.extend(widget_sync.changed.clone());
     changed.extend(registry_sync.changed.clone());
 
@@ -299,6 +308,7 @@ fn sync_draft_in_place(song: &str) -> Outcome {
         .with_data(json!({
             "hyprctl": hyprctl_status,
             "terminal": terminal_data,
+            "lockScreen": lock_data,
             "widgets": widget_sync.note,
             "registry": registry_sync.note,
         }))
@@ -771,6 +781,50 @@ mod tests {
         assert_eq!(std::fs::read_to_string(songs.join("sonata").join("bar.qml")).unwrap(), "// bar\n");
         assert!(manifest_has_sonata());
         assert!(!std::fs::symlink_metadata(&stage_livery).unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A draft sync dresses the lock off the draft's own colours through the
+    /// same writer `rice stage` uses, with the base song's own picture.
+    #[test]
+    fn draft_mode_reload_dresses_the_lock_off_the_draft() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, stage) = runtime_stage("reload-draft-lock");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let songbook = shellbridge::songbook_dir("sonata");
+        std::fs::create_dir_all(&songbook).unwrap();
+        std::fs::write(songbook.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(songbook.join("lockscreen.png"), b"").unwrap();
+
+        let draft_dir = shellbridge::draft_dir("sonata", "neon-night");
+        std::fs::create_dir_all(&draft_dir).unwrap();
+        std::fs::write(
+            draft_dir.join("livery.json"),
+            r##"{"schemaVersion":"0","palette":{"bg":"#abcdef","fg":"#eeeeee","accent":"#00ff00","urgent":"#ff0000"}}"##,
+        )
+        .unwrap();
+        let stage_livery = stage.join("livery.json");
+        let _ = std::fs::remove_file(&stage_livery);
+        std::os::unix::fs::symlink(draft_dir.join("livery.json"), &stage_livery).unwrap();
+        save_mode_marker(&ModeMarker {
+            mode: RiceMode::Draft,
+            song: Some("sonata".to_string()),
+            draft: Some("neon-night".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let out = handle_reload(&reload_inv());
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
+        let picture = songbook.join("lockscreen.png");
+        assert!(lock.lines().any(|l| l == "$aoide_lock_color = rgb(abcdef)"), "{lock}");
+        assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
+        assert_eq!(out.data.unwrap()["sync"]["lockScreen"]["status"], "written");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

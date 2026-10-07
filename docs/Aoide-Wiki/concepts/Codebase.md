@@ -430,8 +430,9 @@ commands — `rice declare/transpose`, the five-command `content` pipeline, `mak
 real; only the live-system action is deferred. (`rice stage`/`rice compose`/
 the `rice draft` group are **real** — `rice stage` stages
 `song/stage/livery.json` for Quickshell hot-reload, applies geometry,
-borders and the hyprglass switch over `hyprctl`, and recolours kitty through
-`stage/terminal-colors.conf` and kitty's control socket. There is
+borders and the hyprglass switch over `hyprctl`, recolours kitty through
+`stage/terminal-colors.conf` and kitty's control socket, and dresses the lock
+screen of a song that ships a lock picture through `stage/hyprlock.conf`. There is
 no `rice gen` — a speculative prompt/wallpaper generator that was cut
 outright rather than left as a stub with no design behind it.)
 

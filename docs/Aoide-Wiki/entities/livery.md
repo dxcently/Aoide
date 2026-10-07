@@ -184,8 +184,8 @@ note object — where the font tier's fields are a convention the lint does not
 enforce.
 
 It is BAKED, not staged. No emitter carries it: `livery resolve` and every
-`emit stage`/`hyprctl`/`osc`/`file`/`kitty` are byte-identical with and without
-it (the `livery_goldens` polarity fixture pins that), and `rice stage` applies
+`emit stage`/`hyprctl`/`osc`/`file`/`kitty`/`hyprlock` are byte-identical with and
+without it (the `livery_goldens` polarity fixture pins that), and `rice stage` applies
 nothing for it, because GTK/Qt and every Stylix target read the register when
 their theme is built. A polarity change lands on the user-gated rebuild, like a
 face change. A song nevertheless declares it in both halves —
@@ -205,7 +205,7 @@ no new crate, no Node toolchain. What moved, in place:
 - `resolve.rs` — the flat resolver: single-level `{group.key}` alias deref
   (cycle-guarded, replacing Style Dictionary's `exportPlatform`) + the
   component `null → palette` fallback.
-- `emit/{stage,hyprctl,osc,file,kitty}.rs` — five pure emitters behind one
+- `emit/{stage,hyprctl,osc,file,kitty,hyprlock}.rs` — six pure emitters behind one
   `Emitter` trait + registry; a new backend is one file + one registry line.
   `file` (arbitrary config-file template, `{{palette.bg}}` placeholders) is
   the generalization proof; `gtk`/`gsettings` host-mutating apply stays
@@ -237,9 +237,11 @@ CLI's `Invocation`/`Outcome` shell:
   lint` runs this engine natively — no binary locate, no shell-out.
 - **`lyra livery resolve [<song>|<path>]`** — print the fully-resolved,
   flattened livery set.
-- **`lyra livery emit <target> [<song>|<path>]`** — run one of the five
-  emitters (`stage` · `hyprctl` · `osc` · `file` · `kitty`); `--out PATH`
-  writes atomically, `--template` supplies the file backend's template.
+- **`lyra livery emit <target> [<song>|<path>]`** — run one of the six
+  emitters (`stage` · `hyprctl` · `osc` · `file` · `kitty` · `hyprlock`);
+  `--out PATH` writes atomically, `--template` supplies the file backend's
+  template, `--song-dir DIR` the folder the hyprlock backend searches for the
+  song's lock picture.
 
 No argument defaults to the staged livery. Exit codes align with the CLI
 convention: `0` ok · `2` usage · `1` error. [[Rice-and-Livery]] carries each
@@ -249,7 +251,7 @@ backs.
 
 ## The emitters
 
-All five consume the *same* fully-resolved livery set (from `resolve.rs`), so
+All six consume the *same* fully-resolved livery set (from `resolve.rs`), so
 the live targets can never disagree:
 
 1. **`stage`** → `song/stage/livery.json` for [[Quickshell]]. With `--out PATH` it
@@ -269,6 +271,14 @@ the live targets can never disagree:
    the tinted-kitty base16 template Stylix bakes, key for key. A note with no
    base16 tier gets the scheme the stylix lane synthesises from its palette,
    so every slot is written either way (CONTRACTS.md §4).
+6. **`hyprlock`** → `song/stage/hyprlock.conf`, the lock screen's dress as
+   hyprlang variables. Only a song that ships a `lockscreen.<ext>` writes any:
+   ten variables, its picture and ground (`palette.bg`), the password field's
+   colours (`window.border`, `notif.bg`, `notif.fg`, `palette.accent`,
+   `notif.urgent`) and the field's and the account name's positions. A song
+   with none writes comments alone and the venue's own look stands. A file of
+   variables can never add a widget or an `onclick`, which is what keeps the
+   lock from failing open (CONTRACTS.md §4).
 
 ## The livery schema v0
 

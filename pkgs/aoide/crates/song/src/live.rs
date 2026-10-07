@@ -22,6 +22,10 @@
 //! config, which includes that file. The
 //! write itself stays with the caller (`commands::rice::stage_terminal_colors`),
 //! like the stage file's: this module holds no storage dependency.
+//!
+//! The lock-screen half ([`lockscreen_fragment`]) renders the staged song's
+//! hyprlock dress, which nothing pushes: hyprlock reads its config afresh on
+//! every lock. Its writer is `commands::rice::stage_lockscreen`.
 
 use crate::livery::schema;
 use serde_json::Value;
@@ -312,6 +316,26 @@ pub fn terminal_colors(notes: &Value) -> Option<String> {
         out.push_str(&format!("background_opacity {o}\n"));
     }
     Some(out)
+}
+
+/// The staged lock-screen dress's name inside the stage dir — the runtime
+/// root's contract path `$AOIDE_ROOT/song/stage/hyprlock.conf`, the file the
+/// host's hyprlock lane sources.
+pub const LOCKSCREEN_FILE: &str = "hyprlock.conf";
+
+/// Render the staged lock-screen dress one notes document implies, through the
+/// livery engine's `hyprlock` emitter. `image` is the song's own lock picture
+/// ([`crate::cover::lockscreen_image`]): without one the song dresses nothing
+/// and the notes are not even read, so a song that ships no picture always
+/// clears what an earlier staged song left. `Err` carries the reason the
+/// notes did not resolve or the emitter refused; the caller leaves the
+/// previous file in place rather than writing a guess.
+pub fn lockscreen_fragment(notes: &Value, image: Option<&std::path::Path>) -> Result<String, String> {
+    if image.is_none() {
+        return Ok(crate::livery::emit::hyprlock::NO_DRESS.to_string());
+    }
+    let r = crate::livery::resolve(notes).map_err(|e| e.to_string())?;
+    crate::livery::emit::hyprlock::emit_hyprlock(&r, image).map_err(|e| e.to_string())
 }
 
 /// Every kitty control socket under `runtime_dir`: entries named
@@ -791,6 +815,26 @@ mod tests {
         }
         notes.as_object_mut().unwrap().remove("geometry");
         assert!(!terminal_colors(&notes).unwrap().contains("background_opacity"));
+    }
+
+    #[test]
+    fn lockscreen_fragment_dresses_only_with_a_picture_and_never_reads_notes_without_one() {
+        let raw = std::fs::read_to_string("tests/fixtures/valid-base16.json").unwrap();
+        let notes: Value = serde_json::from_str(&raw).unwrap();
+        let picture = std::path::Path::new("/r/song/songbook/cadenza/lockscreen.png");
+
+        let dressed = lockscreen_fragment(&notes, Some(picture)).unwrap();
+        assert!(dressed.lines().any(|l| l == "$aoide_lock_image = /r/song/songbook/cadenza/lockscreen.png"), "{dressed}");
+        assert!(dressed.lines().any(|l| l == "$aoide_lock_color = rgb(1e1e2e)"), "{dressed}");
+
+        // No picture: nothing, whatever the notes are — even notes that
+        // cannot resolve clear a previously staged dress.
+        let nothing = crate::livery::emit::hyprlock::NO_DRESS;
+        assert_eq!(lockscreen_fragment(&notes, None).as_deref(), Ok(nothing));
+        let torn = json!({ "palette": { "bg": "{palette.bg}" } });
+        assert_eq!(lockscreen_fragment(&torn, None).as_deref(), Ok(nothing));
+        assert!(lockscreen_fragment(&torn, Some(picture)).is_err(), "torn notes cannot be dressed");
+        assert!(lockscreen_fragment(&notes, Some(std::path::Path::new("relative.png"))).is_err());
     }
 
     #[test]
