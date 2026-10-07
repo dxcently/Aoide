@@ -2920,10 +2920,20 @@ mod tests {
         crate::graph::pty::write_stdout(&payload);
 
         unsafe { libc::fcntl(read_fd, libc::F_SETFL, libc::O_NONBLOCK) };
-        let mut buf = [0u8; 128];
-        let n = unsafe {
-            libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
-        };
+        // Everything on fd 1 lands in this pipe while it is redirected — the
+        // harness's own result lines from other threads included — so drain it
+        // and look for the payload as one unbroken run.
+        let mut got = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = unsafe {
+                libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+            };
+            if n <= 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n as usize]);
+        }
         // Restore this process's stdout whatever the read said.
         unsafe {
             libc::dup2(saved, libc::STDOUT_FILENO);
@@ -2931,8 +2941,10 @@ mod tests {
             libc::close(read_fd);
             libc::close(write_fd);
         }
-        assert!(n > 0, "nothing was on stdout yet — a buffered write would hold it here");
-        assert_eq!(&buf[..n as usize], payload.as_slice());
+        assert!(
+            got.windows(payload.len()).any(|w| w == payload.as_slice()),
+            "the chunk was not on stdout yet — a buffered write would hold it here; got {got:?}"
+        );
     }
 
     /// The end-to-end Windows test the review's finding 1 asked for: a LIVE

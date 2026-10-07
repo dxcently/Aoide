@@ -1330,11 +1330,26 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         assert!(probe_port(port, Duration::from_millis(200)));
 
-        let never_bound = {
-            let l = TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
-        };
-        assert!(!probe_port(never_bound, Duration::from_millis(200)));
+        // Bound but never `listen`ed: connecting is refused, and the port
+        // stays held, so a parallel test's `bind(0)` cannot be handed it.
+        let (fd, not_listening) = bound_but_not_listening();
+        assert!(!probe_port(not_listening, Duration::from_millis(200)));
+        unsafe { libc::close(fd) };
+    }
+
+    fn bound_but_not_listening() -> (libc::c_int, u16) {
+        unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+            assert!(fd >= 0);
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_addr.s_addr = u32::from_ne_bytes([127, 0, 0, 1]);
+            let len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+            assert_eq!(libc::bind(fd, &addr as *const _ as *const libc::sockaddr, len), 0);
+            let mut got = len;
+            assert_eq!(libc::getsockname(fd, &mut addr as *mut _ as *mut libc::sockaddr, &mut got), 0);
+            (fd, u16::from_be(addr.sin_port))
+        }
     }
 
     #[test]
