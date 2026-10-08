@@ -60,7 +60,8 @@ lane's `home.activation.aoideSeedStage` reasserts it from the active song's
 committed `song/songbook/<song>/livery.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
 `lib/livery.nix`'s `stagePatch` — the same `aoide.livery.override` venue
-recolour the Stylix/compositor fan-outs apply through `resolve` — so a
+recolour the Stylix/compositor fan-outs apply through `resolve`, with the
+host's `aoide.livery.geometry` laid over the document's — so a
 freshly booted host carries a correctly recoloured stage twin even before
 `rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
 names a staged or drafted song, `lyra reload` — run by the lane's
@@ -69,12 +70,13 @@ over the seed. The same script also publishes the DECLARED twin,
 `song/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
 own name, its `"song"` field naming the song the venue declared — and the
 venue's own part as data, `song/declared/venue.json`: `lib/livery.nix`'s
-`venueDelta`, the slots `stagePatch` changes in the committed document, `{}`
-with no override (`checks.livery-fanout` guards it beside the other two). The
+`venueDelta`, the slots and geometry fields `stagePatch` changes in the
+committed document, `{}` with neither (`checks.livery-fanout` guards it beside the other two). The
 runtime writers (`rice stage`, `rice mode stage`, `reload`'s staging arm)
 derive every song from the runtime songbook, where a song is edited; for the
 declared song — the twin's `"song"` field is the whole scope — they lay
-`venue.json` over it, so the venue wins on the slots it recolours and an edit
+`venue.json` over it, so the venue wins on the slots it recolours and the
+geometry it sets, and an edit
 shows everywhere else, while the recolour law stays in nix. `rice mode
 declarative`'s re-pin restores declared truth instead, and reads the twin.
 `stage/livery.json` is canonical; the legacy-mirror write and the fallback
@@ -126,12 +128,18 @@ default rather than leaving the previous song's glass in place — and the bake
 takes the same two keys from the same field, so a booted desktop and a staged
 one agree), and
 `terminalOpacity`, not a Hyprland keyword at all, rides
-`song/stage/terminal-colors.conf` — the song's value, or the kitty dendrite's
-baked `0.86` when it has none (§4) — and the activation seed writes the
-DECLARED song's own line into `song/declared/terminal-opacity.conf`, which
-the kitty dendrite includes FIRST: a host that has never staged anything still
-opens its terminal at the song's opacity, and a live stage (included second,
-last-value-wins) overrides it. The call is a no-op off
+`song/stage/terminal-colors.conf` as a `background_opacity` line written only
+for a song that has a value (§4). With none, kitty falls through to
+`song/declared/terminal-opacity.conf` — the activation seed writes the
+DECLARED song's own line there, host settings included, and deletes the file
+when the field is null — and then to kitty.conf's own `background_opacity`,
+the host's bake (0.86 on the kitty dendrite). The dendrite includes the
+declared fragment first and the stage file last, so a host that has never
+staged anything opens its terminal at the song's opacity and a live stage
+with an opinion overrides it. Open windows follow by `kitty @ --to
+unix:<sock> load-config` per `kitty-<pid>` socket: kitty re-reads kitty.conf
+and its includes, so an open window ends where a new one opens, and its font
+zoom resets. The `hyprctl` call is a no-op off
 Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
 staging outcome. It never runs `hyprctl reload` — every field it touches is
 live-settable via `keyword`, and a reload would re-read the baked

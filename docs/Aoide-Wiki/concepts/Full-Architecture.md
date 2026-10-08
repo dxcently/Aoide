@@ -412,7 +412,7 @@ default `~/.aoide`), split by owner: `song/stage/*.json`
 DAG layer's own conducting files). Beside them, the lyra lane's
 activation seed publishes `song/declared/livery.json`, the venue's read-only
 statement of the declared song, and `song/declared/venue.json`, the slots the
-venue recolours (CONTRACTS §4). `lib/aoideos.nix`'s constructor
+venue recolours and the geometry the host sets (CONTRACTS §4). `lib/aoideos.nix`'s constructor
 injects `pkgs.aoide` by overlay from the **same**
 `callPackage` paths as the flake's `packages` output, so the units and the
 flake always build the same binaries, never a drifted copy.

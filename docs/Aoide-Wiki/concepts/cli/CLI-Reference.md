@@ -64,7 +64,8 @@ start at [[aoide-cli]] and the group pages linked below.
   `rice lint/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
   Stage files: `song/stage/{livery,cover,mode}.json`, the declared twin
-  `song/declared/livery.json` and the venue's `song/declared/venue.json`;
+  `song/declared/livery.json` and the venue's `song/declared/venue.json` (the slots it recolours and the
+  geometry the host sets);
   songbook and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG: bare
   `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,

@@ -289,8 +289,8 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   declared: `rice mode declarative` re-pins from it, and its `"song"` field
   names the declared song. The staging writers derive every song from the
   runtime songbook and, for the declared one, lay the seed's
-  `song/declared/venue.json` (the slots the venue recolours, `{}` with no
-  override) over it. `state/stage/` holds
+  `song/declared/venue.json` (the slots the venue recolours and the geometry the host
+  sets, `{}` with neither) over it. `state/stage/` holds
   CONDUCTING
   state — `sessions.json` (agent session roster, written by
   [[shellbridge]]; records may carry an additive optional `parentSessionId`),

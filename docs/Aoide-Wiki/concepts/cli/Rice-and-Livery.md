@@ -75,7 +75,8 @@ lyra rice stage [<name>] [--json]
 - **Reads:** `song/stage/mode.json` (entrypoint guard), then the notes for
   `<name>` (must parse as JSON; full schema validation is `rice lint`'s job)
   — the runtime `song/songbook/<name>/livery.json`, with the venue's
-  `song/declared/venue.json` laid over it when `<name>` is the declared song
+  `song/declared/venue.json` (the slots it recolours and the geometry the
+  host sets) laid over it when `<name>` is the declared song
   (the twin `song/declared/livery.json`'s own `"song"` field names it;
   CONTRACTS.md §4). A `venue.json` that cannot be parsed refuses before
   anything is written. No `<name>`:

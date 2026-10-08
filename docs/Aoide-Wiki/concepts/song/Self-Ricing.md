@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, pushed over kitty's control socket to the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` applied and publishes the same bytes at `song/declared/livery.json`, the declared twin that `rice mode declarative` re-pins from, beside `song/declared/venue.json`, the slots the venue recolours as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared song reads the runtime songbook, where the song is edited, with the venue laid over it: the venue wins on the slots it recolours and an edit shows everywhere else. The seed is declared truth and nothing more: the lyra lane's `aoide-rice-reload` unit then runs `lyra reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged song, or the routed draft. `rice declare` is implemented — gated, it copies the runtime song tree, less its top-level `takes/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` and the host's geometry applied and publishes the same bytes at `song/declared/livery.json`, the declared twin that `rice mode declarative` re-pins from, beside `song/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared song reads the runtime songbook, where the song is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the lyra lane's `aoide-rice-reload` unit then runs `lyra reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged song, or the routed draft. `rice declare` is implemented — gated, it copies the runtime song tree, less its top-level `takes/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -298,17 +298,21 @@ key; a song with no base16 tier gets the scheme the stylix lane
 synthesises from its palette, so every slot is written either way and no
 slot of an earlier song survives), through the livery engine's `kitty`
 emitter, plus the song's `geometry.terminalOpacity` as kitty's
-`background_opacity` (the kitty dendrite's baked 0.86 when the song has
-none). The kitty dendrite includes that file
-after Stylix's baked colours and after `song/declared/terminal-opacity.conf` —
-the one-line declared fragment the activation seed writes from the same field,
-so a host that has never staged anything still opens its terminal at the
-song's opacity; the staged file is included LAST, so a live stage wins. So
-every NEW window opens in the staged song;
-for the windows already open, `rice stage` runs `kitty @ set-colors --all
---configured <file>` and `kitty @ set-background-opacity --all <n>` over
+`background_opacity`, written only for a song that has one. The kitty
+dendrite includes that file after Stylix's baked colours and after
+`song/declared/terminal-opacity.conf` — the one-line declared fragment the
+activation seed writes from the same field (host settings included) and
+deletes when it is null. A song with no opinion therefore writes no opacity
+line, and kitty falls through to the fragment and then to kitty.conf's own
+`background_opacity`, the host's bake (0.86 on the kitty dendrite): a host
+that has never staged anything still opens its terminal at the declared
+song's opacity, and the staged file, included LAST, wins when it carries one.
+So every NEW window opens in the staged song; the windows already open
+follow when `rice stage` runs `kitty @ --to unix:<sock> load-config` over
 every kitty control socket (`$XDG_RUNTIME_DIR/kitty-<pid>`, the dendrite's
-`listen_on`) and reports how many windows it recoloured. Never a raw OSC write into a pty: that
+`listen_on`) and reports how many windows it reloaded. With no path kitty
+re-reads its own kitty.conf and every include, so an open window ends where
+a new one opens, and each window's font zoom resets. Never a raw OSC write into a pty: that
 interleaves with whatever the program there is printing and gets eaten. `rice
 mode declarative` rewrites the file from the declared twin through the same
 re-pin, so leaving staging restores the declared colours the same live way;
