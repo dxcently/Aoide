@@ -607,15 +607,24 @@ fn dispatch_rice_mode(action: &RiceModeAction) -> Result<String, String> {
     }
 }
 
-/// Fire a detached `notify-send "Aoide" <message>` — the same reaper-thread
+/// A toast body is text, never markup: daemons that render the freedesktop
+/// body's HTML subset would draw a song folder named `<b>x</b>` as bold.
+fn escape_body(message: &str) -> String {
+    message.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Fire a detached `notify-send -- "Aoide" <message>` — the same reaper-thread
 /// idiom as [`dispatch_power`]'s spawned child, so a slow or hung
-/// `notify-send` can never block a connection. A spawn failure is logged and
+/// `notify-send` can never block a connection. The message can echo a song
+/// folder name: `--` keeps a leading `-` from reading as an option and
+/// [`escape_body`] keeps markup inert. A spawn failure is logged and
 /// nothing more: the action this toast reports already ran, and a dead or
 /// missing `notify-send` must not turn its outcome into a different one.
 fn notify(message: &str) {
     match std::process::Command::new("notify-send")
+        .arg("--")
         .arg("Aoide")
-        .arg(message)
+        .arg(escape_body(message))
         .spawn()
     {
         Ok(mut child) => {
@@ -3670,6 +3679,41 @@ esac
             stub_argv_log(&root),
             ["rice mode stage fugue --json", "rice mode declarative --json"]
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `notify` hands `notify-send` a `--` before the positionals and a body
+    /// with markup escaped, so a hostile folder name is neither an option nor
+    /// markup. A stub `notify-send` on PATH logs its argv; the real one is
+    /// never reached.
+    ///
+    /// GATED on Unix with its reason: the stub is a `#!/bin/sh` script.
+    #[cfg(unix)]
+    #[test]
+    fn notify_ends_options_and_escapes_the_body() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = aoide_test_support::unique_tmp("shellbridge-notify");
+        std::fs::create_dir_all(&root).unwrap();
+        let stub = root.join("notify-send");
+        let log = root.join("argv.log");
+        std::fs::write(
+            &stub,
+            format!("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\n", log.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&["PATH"]);
+        std::env::set_var("PATH", &root);
+
+        notify("-x <b>a&b</b>");
+        for _ in 0..200 {
+            if std::fs::read_to_string(&log).map(|t| t.lines().count() >= 3).unwrap_or(false) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let argv: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(str::to_string).collect();
+        assert_eq!(argv, ["--", "Aoide", "-x &lt;b&gt;a&amp;b&lt;/b&gt;"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
