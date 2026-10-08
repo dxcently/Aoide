@@ -345,6 +345,9 @@
   `Threshold` one; the model in the module doc (a `Fixed` size below the
   request ranks last, every other kind ranks by its range distance) matches
   88, and the oracle for it is a Quickshell run against the same data dirs.
+  Ties between subdirs keep the first: later-wins fits cache-less probe
+  themes (560 of 560) but every real theme ships `icon-theme.cache`, which Qt
+  follows, and later-wins mispicks 3 of the 89 real apps.
   Reordering the key or folding the kinds together reopens that regression.
 - **`apps publish --run` re-resolves every path on every tick and holds no
   watch.** A nix profile swap re-points a chain of symlinks, so an inotify

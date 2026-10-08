@@ -24,6 +24,7 @@ use crate::registry::{arg, cmd, flag, Registry};
 use crate::xdg::entry::{self, Entry, Found, Missing};
 use crate::xdg::icon_theme::Resolver;
 use crate::xdg::Env;
+use aoide_conduct::graph::clean_line;
 use aoide_protocol::suggest::closest;
 use aoide_protocol::Door;
 use serde_json::{json, Value};
@@ -77,13 +78,18 @@ pub fn register(r: &mut Registry) {
 fn handle_list(_inv: &Invocation) -> Outcome {
     let env = Env::from_process();
     let doc = document(&env, &Resolver::new(&env), &aoide_storage::time::now_iso_utc());
+    Outcome::ok("apps.list", list_text(&doc)).with_data(doc)
+}
+
+fn list_text(doc: &Value) -> String {
     let entries = doc["entries"].as_array().map(Vec::as_slice).unwrap_or_default();
     let mut lines = vec![format!("{} apps", entries.len())];
     for e in entries {
         let terminal = if e["terminal"] == true { " terminal" } else { "" };
-        lines.push(format!("  {} ({}){terminal}", e["name"].as_str().unwrap_or_default(), e["id"].as_str().unwrap_or_default()));
+        let (name, id) = (e["name"].as_str().unwrap_or_default(), e["id"].as_str().unwrap_or_default());
+        lines.push(format!("  {} ({}){terminal}", clean_line(name), clean_line(id)));
     }
-    Outcome::ok("apps.list", lines.join("\n")).with_data(doc)
+    lines.join("\n")
 }
 
 fn handle_show(inv: &Invocation) -> Outcome {
@@ -137,7 +143,12 @@ fn show(env: &Env, resolver: &Resolver, id: &str) -> Outcome {
     doc["listed"] = json!(filter.is_none());
     doc["filtered"] = json!(filter.map(|f| f.as_str()));
     let note = filter.map(|f| format!(", unlisted: {}", f.as_str())).unwrap_or_default();
-    let message = format!("{} ({}){note} from {}", e.name.as_deref().unwrap_or_default(), e.id, e.file.display());
+    let message = format!(
+        "{} ({}){note} from {}",
+        clean_line(e.name.as_deref().unwrap_or_default()),
+        clean_line(&e.id),
+        clean_line(&e.file.display().to_string())
+    );
     Outcome::ok(cmd, message).with_data(doc)
 }
 
@@ -266,17 +277,16 @@ fn fingerprint(env: &Env) -> Vec<String> {
         }
     }
     let settings = env.config_home.join("gtk-3.0/settings.ini");
-    lines.push(match std::fs::canonicalize(&settings) {
-        Ok(canonical) => format!("{} {}", canonical.display(), stamp(&canonical)),
-        Err(_) => "settings.ini absent".to_string(),
-    });
+    lines.push(format!("settings.ini {}", stamp(&settings)));
     lines
 }
 
+/// The link target is part of the stamp: a store file always has mtime 1, and a re-pointed link can keep the size.
 fn stamp(path: &Path) -> String {
-    let Ok(meta) = std::fs::metadata(path) else { return "absent".to_string() };
+    let target = std::fs::canonicalize(path).map_or_else(|_| "unresolved".to_string(), |p| p.display().to_string());
+    let Ok(meta) = std::fs::metadata(path) else { return format!("{target} absent") };
     let modified = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
-    format!("{} {modified}", meta.len())
+    format!("{target} {} {modified}", meta.len())
 }
 
 #[cfg(test)]
@@ -396,6 +406,45 @@ mod tests {
         s.touch("share/applications/more.txt");
         s.touch("share/icons/hicolor/48x48/apps/y.png");
         assert_eq!(fingerprint(&env), settled, "other files do not count");
+    }
+
+    #[test]
+    fn the_fingerprint_sees_a_per_file_link_retargeted_to_a_file_of_the_same_size_and_mtime() {
+        let s = Scratch::new("apps-print-relink");
+        let one = s.write("store1/a.desktop", &app("Alpha"));
+        let two = s.write("store2/a.desktop", &app("Bravo"));
+        assert_eq!(one.metadata().unwrap().len(), two.metadata().unwrap().len());
+        let epoch = UNIX_EPOCH + Duration::from_secs(1);
+        for f in [&one, &two] {
+            std::fs::File::options().write(true).open(f).unwrap().set_modified(epoch).unwrap();
+        }
+        std::fs::create_dir_all(s.path("share/applications")).unwrap();
+        let link = s.path("share/applications/a.desktop");
+        std::os::unix::fs::symlink(&one, &link).unwrap();
+        let env = s.env(&["share"]);
+        let before = fingerprint(&env);
+        assert_eq!(build(&env, "t")["entries"][0]["name"], "Alpha");
+
+        std::os::unix::fs::symlink(&two, s.path("share/applications/a.new")).unwrap();
+        std::fs::rename(s.path("share/applications/a.new"), &link).unwrap();
+        assert_ne!(fingerprint(&env), before);
+        assert_eq!(build(&env, "t")["entries"][0]["name"], "Bravo");
+    }
+
+    #[test]
+    fn untrusted_names_are_cleaned_before_they_reach_a_terminal_or_a_message() {
+        let s = Scratch::new("apps-clean");
+        let evil = "Calc\\n  Forged (fake)\\n\u{1b}]0;owned\u{7}";
+        s.write("share/applications/evil.desktop", &format!("[Desktop Entry]\nType=Application\nName={evil}\nExec=x\n"));
+        let env = s.env(&["share"]);
+        let name = build(&env, "t")["entries"][0]["name"].as_str().unwrap().to_string();
+        assert!(name.contains('\n') && name.contains('\u{1b}'), "the data keeps the raw text: {name:?}");
+        let message = show(&env, &Resolver::new(&env), "evil").message;
+        assert_eq!(message.lines().count(), 1, "{message:?}");
+        assert!(!message.chars().any(char::is_control), "{message:?}");
+        let list = list_text(&build(&env, "t"));
+        assert_eq!(list.lines().count(), 2, "a count line and one entry line: {list:?}");
+        assert!(!list.replace('\n', "").chars().any(char::is_control), "{list:?}");
     }
 
     #[test]

@@ -30,8 +30,12 @@
 //! Measured against Qt's own picks. Over 560 synthetic subdir sets (15
 //! subdir shapes, in pairs and triples) a scratch Quickshell never picked a
 //! file outside the nearest set this rule names; among tied subdirs it takes
-//! the later one, or follows `icon-theme.cache` when a theme has one, and this
-//! rule keeps the first. On osaka, for 48 px, 88 of 89 apps got Qt's file, a
+//! the later one when the theme has no `icon-theme.cache` (the later one in
+//! all 560; keeping the first misses 24), and follows the cache when it has
+//! one. This rule keeps the first because every theme on osaka ships a cache:
+//! with later-wins, hicolor's `Threshold` 32 and 64 tie at 48 px and
+//! gpu_screen_recorder, cups and Tabletop Simulator paint the 64 px file where
+//! Qt paints the 32 px one. On osaka, for 48 px, 88 of 89 apps got Qt's file, a
 //! byte-identical copy of it, or an icon Qt found nothing for; vesktop is the
 //! exception: Qt took its `Scalable` 256 px, 16 px outside range, over the
 //! `Threshold` 32 px, 14 px outside it.
