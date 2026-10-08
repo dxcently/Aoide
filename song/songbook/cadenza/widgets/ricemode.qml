@@ -127,6 +127,7 @@ Item {
     Text {
         visible: root.canPick
         x: root.kit.cells(3 + root.word.length)
+        y: 1
         text: root.kit.glyph.ricePick
         color: root.lit ? root.kit.title : root.kit.dim
         font: root.kit.font
