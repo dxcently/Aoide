@@ -408,7 +408,7 @@ fn nix_string(s: &str) -> String {
 fn refusal_no_nix(name: &str) -> String {
     format!(
         "{name} is not built into this system and this host has no nix; \
-         add it to song.available and rebuild"
+         add it to habit.song.available and rebuild"
     )
 }
 
@@ -418,7 +418,7 @@ fn refusal_no_nix(name: &str) -> String {
 fn refusal_rebuild_needed(name: &str, missing: &[String]) -> String {
     format!(
         "rebuild needed: {name} needs {} (not in this system); \
-         add \"{name}\" to song.available in hosts/<host> and rebuild",
+         add \"{name}\" to habit.song.available in hosts/<host> and rebuild",
         missing.join(", ")
     )
 }

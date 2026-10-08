@@ -1025,7 +1025,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         "name": name,
         "from": from,
         "nextSteps": [
-            format!("truth: set song.declared = \"{name}\" in hosts/<host> and rebuild"),
+            format!("truth: set habit.song.declared = \"{name}\" in hosts/<host> and rebuild"),
             format!("sketch: `aoide rice stage {name}` to hot-load it live, no rebuild"),
         ],
     }))
@@ -2577,7 +2577,7 @@ mod tests {
             out.message
         );
         assert!(
-            out.message.contains("add it to song.available and rebuild"),
+            out.message.contains("add it to habit.song.available and rebuild"),
             "the taught refusal names the way out: {}",
             out.message
         );
@@ -3072,7 +3072,7 @@ mod tests {
         );
         assert!(
             out.message
-                .contains("add \"moonlight\" to song.available"),
+                .contains("add \"moonlight\" to habit.song.available"),
             "…and the way out: {}",
             out.message
         );
