@@ -166,9 +166,8 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-/// Lowercase hex, no separator — this crate's established per-module copy
-/// over a shared `pub` utility (`wire_auth`'s and `identity`'s own note).
-fn hex_encode(bytes: &[u8]) -> String {
+/// Lowercase hex, no separator.
+pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 

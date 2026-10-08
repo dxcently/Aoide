@@ -778,6 +778,15 @@ pub fn declared_notes() -> std::path::PathBuf {
     song_dir().join("declared").join("livery.json")
 }
 
+/// What `lyra rice refresh` last wrote into the machine's copy of built-in song
+/// `name` — `<song>/declared/songbook/<name>.json`, `{schemaVersion, song,
+/// source, files: {relpath: sha256}}`. Beside [`declared_notes`] and outside
+/// the song folder on purpose: the folder-equality gate, `rice declare`,
+/// `rice list`, `rice take` and the widget sync never see it.
+pub fn songbook_record(name: &str) -> std::path::PathBuf {
+    song_dir().join("declared").join("songbook").join(format!("{name}.json"))
+}
+
 /// The venue's recolour of the declared song — `<song>/declared/venue.json`
 /// (CONTRACTS.md §4): the slots `aoide.livery.override` changes, tier by tier,
 /// published by the lyra lane's activation seed (`{}` when the host sets no

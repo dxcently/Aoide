@@ -644,8 +644,8 @@ pub struct StageSongbook {
 /// `{ declared, songs, packages }`, the host's built-in set as lyra recorded
 /// it (`modules/dendrites/lyra`'s override). Read for §7.5's two questions —
 /// is this song built in, and does it need a package this system lacks.
-struct BuiltIn {
-    songs: Vec<String>,
+pub(crate) struct BuiltIn {
+    pub(crate) songs: Vec<String>,
     packages: Vec<String>,
 }
 
@@ -656,7 +656,7 @@ struct BuiltIn {
 /// running that installed no song's packages. Every stage then falls to case 2
 /// with an empty `packages` baseline, which refuses anything that declares a
 /// need. A PRESENT but unparseable file is a broken package and says so.
-fn read_builtin(templates: &Path) -> Result<BuiltIn, WidgetSyncErr> {
+pub(crate) fn read_builtin(templates: &Path) -> Result<BuiltIn, WidgetSyncErr> {
     let path = templates.join("builtin.json");
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Ok(BuiltIn {
@@ -763,7 +763,7 @@ fn machine_copy_differs(name: &str, templates: &Path) -> bool {
 /// (callers pass [`MACHINE_RUNTIME_DIRS`], whose names are top-level only).
 /// Directories are compared by what they hold, not by their mtimes, and
 /// symlinks are followed (a song folder holds none).
-fn trees_equal(a: &Path, b: &Path, skip: &[&str]) -> bool {
+pub(crate) fn trees_equal(a: &Path, b: &Path, skip: &[&str]) -> bool {
     let (Ok(a_entries), Ok(b_entries)) = (std::fs::read_dir(a), std::fs::read_dir(b)) else {
         return false;
     };

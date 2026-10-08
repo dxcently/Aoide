@@ -106,6 +106,7 @@ pub fn all() -> Registry {
     onboard::register(&mut r); // onboard (P-I3: the nix half of the onboarding flow, root-coupled like meta)
     infra::register_mcp(&mut r); // mcp serve (root-coupled: reads this assembled registry)
     aoide_song::commands::rice::register(&mut r); // rice lint, list, stage, compose
+    aoide_song::commands::refresh::register(&mut r); // rice refresh — a built-in song takes the repo's changes to files the machine never edited
     aoide_song::commands::draft::register(&mut r); // rice draft save/list/drop
     aoide_song::commands::mode::register(&mut r); // rice mode status/stage/declarative/draft
     aoide_song::commands::cover::register(&mut r); // cover set

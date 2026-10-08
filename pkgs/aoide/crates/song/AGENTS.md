@@ -244,6 +244,25 @@
   (`songbook_dir(name).exists()`) — never a per-file fill; a caller adding
   a THIRD staging entry point must call the same function, not reimplement
   the check.
+- **`commands/refresh.rs` is the only writer of a built-in song's record
+  (`fs::songbook_record(song)`: `{schemaVersion, song, source, files:
+  {relpath: sha256}}`) and the only place the three-way rule lives.** Per
+  file, S = shipped, M = machine, R = recorded: M = S is in-sync (record S);
+  M differs and R = M is stale (replace, record S); M differs and R != M is
+  edited, and M differs with no R is unrecorded (both kept); S present and M
+  absent is new (add) without an R and machine-deleted (not re-added) with
+  one; S absent and R = M is gone (delete, prune empty parents, never the
+  song root, drop R), S absent and R != M is kept and R dropped, S absent
+  with no R is machine-only and untouched. Top-level `takes/`/`drafts/`
+  (`widgets::MACHINE_RUNTIME_DIRS`) and machine-side symlinks are never
+  touched; a symlink in the shipped copy is an error; a symlinked song
+  folder is skipped. The record lives OUTSIDE the song folder so the §7.5
+  `trees_equal` gate, `rice declare`, `rice list`, `rice take` and the
+  widget sync never see it; it is written last and atomically, under
+  `with_stage_lock`. `seed_songbook_from_templates` goes through
+  `refresh_song` so a stage-time seed records too. Changing the rule, the
+  record shape or the report states updates this entry and the README in the
+  same commit.
 - **`aoide_storage::takes`' functions take `draft: Option<&str>`, not
   `&str` — `None` means staging-mode (`songbook/<song>/takes/`), `Some`
   means a routed draft (`songbook/<song>/drafts/<name>/takes/`).**

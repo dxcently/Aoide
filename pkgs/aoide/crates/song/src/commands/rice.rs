@@ -831,12 +831,11 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
 /// Reuses [`shellbridge::song_templates_dir`] — the SAME shipped/env
 /// templates resolver [`resolve_from_notes_path`] above already falls back
 /// to for `rice compose --from`, never a second resolver — and
-/// [`shellbridge::copy_dir_recursive`] (`aoide_storage::fs`'s existing
-/// cross-filesystem migration helper) for the whole-tree copy, landed via
-/// a sibling-tmp-dir-then-rename swap so a copy that fails partway never
-/// leaves a half-seeded `songbook_dir(name)` behind (same idiom
-/// `aoide_storage::fs::migrate_dir` already uses for its own cross-fs
-/// fallback).
+/// [`super::refresh::refresh_song`] for the copy: its absent-folder arm is
+/// the whole-tree seed (sibling tmp dir, then rename, so a copy that fails
+/// partway never leaves a half-seeded `songbook_dir(name)` behind) and it
+/// records what it wrote, which is what later lets `rice refresh` tell an
+/// unedited file from an edited one.
 ///
 /// **Dir-level, never-clobber, exactly per task #41's contract:**
 /// `songbook_dir(name)` existing AT ALL — even missing half its files from
@@ -866,24 +865,14 @@ pub(crate) fn seed_songbook_from_templates(name: &str) -> Result<Option<PathBuf>
     if target.exists() {
         return Ok(None);
     }
-    let Some(source) = shellbridge::song_templates_dir().map(|t| t.join(name)) else {
+    let Some(templates) = shellbridge::song_templates_dir() else {
         return Ok(None);
     };
+    let source = templates.join(name);
     if !source.is_dir() {
         return Ok(None);
     }
-
-    let tmp = target.with_extension(format!("seed-tmp.{}", std::process::id()));
-    let result = shellbridge::copy_dir_recursive(&source, &tmp)
-        .and_then(|()| std::fs::rename(&tmp, &target));
-    if let Err(e) = result {
-        let _ = std::fs::remove_dir_all(&tmp);
-        return Err(format!(
-            "failed to seed songbook `{name}` from shipped template at {}: {e}",
-            source.display()
-        ));
-    }
-    Ok(Some(source))
+    super::refresh::refresh_song(name, &templates, false).map(|_| Some(source))
 }
 
 /// `rice compose <name> [--from <song>] [--force]` — scaffold a new

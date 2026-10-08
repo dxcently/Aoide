@@ -119,7 +119,13 @@ a config file). Paint-side — ships in `lyra`, not core.
   for a SHIPPED song the runtime `songbook_dir(name)` lacks entirely copies
   that song's whole template tree in — once, dir-level never-clobber (a
   songbook dir with anything in it, even partially, is left alone), so
-  idempotent by construction. Both staging entry points call it before
+  idempotent by construction; the copy is `commands::refresh::refresh_song`'s
+  absent-folder arm, so it also writes the song's record
+  (`fs::songbook_record(name)`, outside the song folder). `lyra rice refresh
+  [<name>] [--check] [--json]` is the same function on a folder that
+  exists: per file, a file the machine never edited takes the shipped
+  change, an edited one is kept (`commands/refresh.rs` holds the rule).
+  Both staging entry points call the seeder before
   `handle_rice_stage` (the sync) ever reads the songbook; `rice mode
   declarative`'s re-pin and `lyra reload`'s staging arm reuse
   `handle_rice_stage` directly and need nothing extra, since by then the

@@ -163,6 +163,7 @@ mod tests {
             "rice.mode.draft",
             "rice.mode.stage",
             "rice.mode.status",
+            "rice.refresh",
             "rice.stage",
             "rice.take",
             "rice.take.diff",
