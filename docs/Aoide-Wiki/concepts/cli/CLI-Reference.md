@@ -52,7 +52,7 @@ start at [[aoide-cli]] and the group pages linked below.
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 81
-  command paths (74 real, 7 stubs), `lyra schema --json` holds 48 (47 real,
+  command paths (74 real, 7 stubs), `lyra schema --json` holds 49 (48 real,
   1 stub) — every group page prefixes
   each heading `aoide `/`lyra ` so the binary a command belongs to is never
   ambiguous.
@@ -61,7 +61,7 @@ start at [[aoide-cli]] and the group pages linked below.
 ## Group pages
 
 - [[Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
-  `rice lint/list/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
+  `rice lint/list/stage/compose/refresh/declare/transpose`, the `rice draft` / `rice mode` /
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
   Stage files: `song/stage/{livery,cover,mode}.json`, the declared twin
   `song/declared/livery.json` and the venue's `song/declared/venue.json` (the slots it recolours and the

@@ -95,6 +95,14 @@ already has anything for the song, even partially. This is what gives a
 fresh host's very first `rice mode stage sonata` somewhere to read from and
 write back to, without requiring `rice compose` first.
 
+After the seed, the repo's changes to a built-in song reach the machine through
+`lyra rice refresh [<name>]`: a file the machine never edited takes the repo's
+version, an edited or unrecorded file is kept and reported, a file the machine
+deleted is not re-added, and `takes/`, `drafts/` and machine-only files are
+never touched. `--check` reports each file's state and writes nothing. The rule,
+the record it reads (`song/declared/songbook/<song>.json`) and the first-run
+behaviour are in `CONTRACTS.md` §5, "The songbook belongs to the machine".
+
 ## Drafts — durable scratch, reached by ROUTING not copying
 
 Between staging a song and declaring it, drafts give the rice loop a way to

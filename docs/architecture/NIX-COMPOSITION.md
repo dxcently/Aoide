@@ -632,8 +632,9 @@ a host names the songs it builds in on its own record (`song.declared` /
 the packages installed, the folders `pkgs/lyra-songbook` ships for that host,
 and the `builtin.json` the runtime compares a staged song's needs against.
 `~/.aoide/song/songbook` belongs to the MACHINE: it is seeded from that baseline
-only where a folder is absent — no comparison, no merge, never an overwrite
-(root `AGENTS.md` rule 10) — and the machine's copy wins for staging.
+where a folder is absent, the repo's later changes reach only the files the
+machine never edited (`lyra rice refresh`, `CONTRACTS.md` §5; root `AGENTS.md`
+rule 10), and the machine's copy wins for staging.
 
 Bound QML colors may hotload. Hyprland configuration switching uses an explicit
 reload backend and managed configuration scope; host-owned settings are not

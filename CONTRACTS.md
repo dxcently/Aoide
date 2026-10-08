@@ -1245,9 +1245,12 @@ invocation. A third consumer (task #41): the first `rice stage <name>`/
 entirely — never composed on this host, only shipped — copies
 `<templates>/<name>/`'s whole tree in via
 `commands::rice::seed_songbook_from_templates`, once, before
-`handle_rice_stage` (the sync) ever reads the songbook; a songbook dir with
-anything in it already, even partially, is left untouched, so a second
-stage of an already-seeded song is a no-op by the same check. Two tiers,
+`handle_rice_stage` (the sync) ever reads the songbook. That seed goes through
+`commands::refresh::refresh_song`, the function `lyra rice refresh` runs, so it
+writes the song's record (`song/declared/songbook/<song>.json`, below) too; a
+songbook dir with anything in it already, even partially, is left untouched by
+the seed, so a second stage of an already-seeded song is a no-op by the same
+check. Two tiers,
 absolute-path-wins like every override above:
 `$AOIDE_SONG_TEMPLATES` itself, else a sibling of `current_exe()`'s
 directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory
@@ -1980,6 +1983,26 @@ already carries it. **Absent** is the identity: a host that never activated the
 lane stages the runtime song as it is. A file that cannot be read or parsed is
 a taught refusal (`rice.stage`, `Kind::Failed`, fix `lyra rice mode
 declarative`), raised before anything is written; a rebuild republishes it.
+
+### `song/declared/songbook/<song>.json` — **v0**
+
+The record of what `lyra rice refresh` last wrote into a built-in song's machine
+copy: `{"schemaVersion":"0","song":"<song>","source":"<templates>/<song>",
+"files":{"<relpath>":"<sha256 hex>"}}`. `files` maps each file's path under the
+song folder to the hash of the shipped bytes written there; it is what lets
+refresh tell a file the machine never edited (its hash is still the record's)
+from one it did. `source` is informational: where the shipped copy was read
+from, never consulted.
+
+It is not song content. It lives beside the declared twins, outside
+`song/songbook/<song>/`, so the song folder stays exactly the song: the §7.5
+folder-equality gate, `rice declare`, `rice list`, `rice take` and the widget
+sync never see it, and it is never declared into the checkout nor taken. Sole
+writer: `lyra rice refresh`, including the stage-time seed, which runs the same
+function (`pkgs/aoide/crates/song/src/commands/refresh.rs`); written last and
+atomically, under the stage lock. Sole reader: `rice refresh`. **Absent** is
+"nothing recorded": every file that differs from the shipped one is
+`unrecorded` and kept.
 
 ### `song/declared/terminal-opacity.conf` — **v0**
 
@@ -5632,21 +5655,45 @@ bump: every "shipped baseline" reference in this section simply names
 ### The songbook belongs to the machine
 
 `~/.aoide/song/songbook` is the MACHINE's own: its built-in songs plus whatever
-it made itself. It is never a link to, or a copy synced from, the repo — and a
-rebuild never rewrites what it holds. The lyra lane's activation step
-`aoideSeedSongbook` copies each built-in song folder in **only when that folder
-does not exist**: no comparison, no merge, never an overwrite, and the copy is
-left writable by its owner. A folder already there with anything lacking
-owner-write (a copy in the store's read-only modes) gets that mode back and
-nothing else; a writable folder is not touched. `sonata/takes/`,
-`sonata/drafts/` and hand-edited `design/` notes on a machine that already has
-them survive every switch (root `AGENTS.md` rule 10 — staging never waits on
-the declared build, and is always the last song staged).
+it made itself. It is never a link to the repo, and a rebuild never rewrites
+what it holds. The lyra lane's activation step `aoideSeedSongbook` copies a
+built-in song folder in only when the machine has none (left writable by its
+owner; a folder already there with anything lacking owner-write gets that mode
+back and nothing else). What the repo changes afterwards reaches the machine
+through `lyra rice refresh [<name>]` (no name: every song in the shipped
+`builtin.json`), a three-way rule per file over S (shipped), M (machine) and R
+(the hash recorded by the last refresh, `song/declared/songbook/<song>.json`,
+§4):
+
+```
+S present, M = S                  in-sync          record S
+S present, M != S, R = M          stale            replace with S, record S
+S present, M != S, R != M         edited           keep
+S present, M != S, no R           unrecorded       keep
+S present, M absent, no R         new              add, record S
+S present, M absent, R            machine-deleted  stays absent
+S absent,  M present, R = M       gone             delete, prune empty folders, drop R
+S absent,  M present, R != M      edited           keep, drop R
+S absent,  M present, no R        machine-only     untouched
+```
+
+So the repo's changes reach every file the machine never edited; an edited or
+unrecorded file is kept and reported; a file the machine deleted is not re-added;
+a file gone upstream goes only if unedited. Top-level `takes/` and `drafts/`,
+machine-only files and symlinks are never touched, and so `sonata/takes/`,
+`sonata/drafts/` and hand-edited `design/` notes survive (root `AGENTS.md`
+rule 10 — staging never waits on the declared build, and is always the last
+song staged).
+
+First run: a machine seeded before the record existed has none, so every file
+that differs from the shipped one reads `unrecorded` and is kept; unchanged
+files are recorded and the next refresh is exact. To take the shipped copy
+whole, the user moves the machine's folder aside: refresh then seeds it afresh
+and records it. `lyra rice refresh --check` writes nothing and reports each
+file's state and the action refresh would take.
 
 When a song is both built in and present in the machine songbook, the MACHINE
-copy wins for staging: it is the one the user can edit without a rebuild. To
-return to the shipped copy, the user moves the machine's folder aside by hand —
-nothing does it for them.
+copy wins for staging: it is the one the user can edit without a rebuild.
 
 ### Self-registration (dendrite discipline)
 

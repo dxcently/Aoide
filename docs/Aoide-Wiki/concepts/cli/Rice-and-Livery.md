@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-27
+updated: 2026-10-08
 tags: [aoide, cli, rice, livery, song]
 ---
 
@@ -493,6 +493,39 @@ lyra livery lint [<name>|<path>] [--json]
   (`pkgs/aoide/crates/song/src/livery/schema.rs`). `rice lint` wraps the same
   engine but renders the standard Outcome message instead of the raw
   envelope.
+
+### lyra rice refresh
+
+```
+lyra rice refresh [<name>] [--check] [--json]
+```
+
+- **Reads:** the shipped songbook (`fs::song_templates_dir`: `$AOIDE_SONG_TEMPLATES`,
+  else `share/lyra/songbook` beside the binary) — `builtin.json` when no `<name>`
+  is given, and each song's tree — the machine copy
+  `song/songbook/<name>/`, and the song's record
+  `song/declared/songbook/<name>.json`.
+- **Writes:** per file, the three-way rule of `CONTRACTS.md` §5 over shipped,
+  machine and recorded hash: a file the machine never edited is replaced, added
+  or (when gone upstream) deleted; an edited or unrecorded file is kept; a file
+  the machine deleted is not re-added. A machine folder that does not exist is
+  seeded whole. Owner-write is restored on any entry lacking it. The record is
+  rewritten last, atomically, under the stage lock. Nothing under the song's
+  top-level `takes/` or `drafts/`, no machine-only file and no symlink is
+  touched. `--check` writes nothing.
+- **Output:** `"refreshed N song(s)"` (`"checked N song(s)"` with `--check`) and
+  one line per song, `<song>: N replaced, M added, K deleted, J kept, I in
+  sync`, then a line per file not in sync with its state (`stale`, `new`,
+  `gone`, `edited`, `unrecorded`, `machine-deleted`) and action; data
+  `{check, songs: [{song, skipped, seeded, modesFixed, files: [{path, state,
+  action}]}], errors}`, plus the changed-file list on the envelope's `changed`
+  field.
+- **Notes:** not gated. `<name>` must be a song the shipped songbook carries,
+  else a refusal (`rice.refresh`, `Kind::Refused`); a song whose machine folder
+  is a symlink is skipped and said so; a symlink in the shipped copy is an
+  error. With no record yet, every differing file is `unrecorded` and kept;
+  moving the machine's folder aside lets refresh seed it afresh. The stage-time
+  seed runs the same function. Exit 1 if any song errored.
 
 ### lyra rice declare
 
