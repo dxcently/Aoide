@@ -16,8 +16,9 @@
 //!
 //! The terminal half (below the compositor functions) renders the staged
 //! terminal file (every colour slot through the livery engine's `kitty`
-//! emitter, plus the song's `background_opacity`) and pushes a written one
-//! to every open kitty over its control socket. The
+//! emitter, plus a `background_opacity` only when the song has an opinion)
+//! and tells every open kitty over its control socket to reload its own
+//! config, which includes that file. The
 //! write itself stays with the caller (`commands::rice::stage_terminal_colors`),
 //! like the stage file's: this module holds no storage dependency.
 
@@ -256,11 +257,14 @@ fn run_batch(keywords: &[String]) -> Batch {
 // kitty has no FileView: a colour file on disk reaches a NEW window through
 // the kitty dendrite's `include` of it, and an OPEN window only when kitty is
 // told. The telling goes through kitty's own control socket
-// (`kitty @ set-colors`), never a raw OSC write to a pty — an OSC write
+// (`kitty @ load-config`, with no path, so kitty re-reads its own kitty.conf
+// and every include), never a raw OSC write to a pty — an OSC write
 // interleaves with whatever the program in that pty is printing and gets
-// eaten. The sockets are found by the path pattern the kitty dendrite
-// configures (`listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}`), a
-// plain directory listing — no process-table or /proc walk.
+// eaten. A reload resets every window to the configured state, so a song
+// with no opinion lands on the host's bake with no value copied here. The
+// sockets are found by the path pattern the kitty dendrite configures
+// (`listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}`), a plain directory
+// listing — no process-table or /proc walk.
 
 /// The staged terminal colour file's name inside the stage dir — the runtime
 /// root's contract path `$AOIDE_ROOT/song/stage/terminal-colors.conf`, the
@@ -271,56 +275,31 @@ pub const TERMINAL_COLORS_FILE: &str = "terminal-colors.conf";
 /// whose kitty is wedged must not stall `rice stage`.
 const KITTY_CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// kitty's `background_opacity` as the kitty dendrite bakes it
-/// (`modules/dendrites/kitty.nix`, `background_opacity = "0.86"`) — what a
-/// staged song with no `geometry.terminalOpacity` opinion restores. The
-/// dendrite is nix and this crate is cargo-only, so nothing can share one
-/// definition: the two are kept equal by hand, and each names the other.
-pub const TERMINAL_OPACITY_BAKED: f64 = 0.86;
-
-/// The staged song's terminal background opacity: `geometry.terminalOpacity`
-/// when it is a plain number in [0, 1], else [`TERMINAL_OPACITY_BAKED`] — no
-/// opinion (absent or null) restores the baked value, and a value lint would
-/// reject is treated as no opinion, never written.
-pub fn terminal_opacity(notes: &Value) -> f64 {
+/// The song's terminal background opacity opinion: `geometry.terminalOpacity`
+/// when it is a plain number in [0, 1]. `None` is no opinion (absent, null,
+/// or a value lint would reject, which is never written): the host's bake
+/// shows, because kitty falls through to its own config.
+pub fn terminal_opacity(notes: &Value) -> Option<f64> {
     notes
         .get("geometry")
         .and_then(|g| g.get("terminalOpacity"))
         .and_then(schema::terminal_opacity_value)
-        .unwrap_or(TERMINAL_OPACITY_BAKED)
 }
 
 /// Render the staged terminal file one notes document implies: the livery
-/// engine's `kitty` emitter (every colour slot), then one
-/// `background_opacity` line from [`terminal_opacity`] — always present, so
-/// the file alone decides the colours and the opacity a NEW kitty INSTANCE
-/// opens with (`kitty @ set-background-opacity` moves the runtime value of
-/// one already running; kitty exposes no control call for the configured one,
-/// so a new OS window opened inside a pre-stage instance keeps that runtime
-/// value). `None` when the notes don't resolve (a torn or reference-cyclic
-/// notes file) — the caller leaves the previous file in place rather than
-/// writing a guess.
+/// engine's `kitty` emitter (every colour slot), then a `background_opacity`
+/// line from [`terminal_opacity`] only for a song with an opinion. The file
+/// is the last include of kitty.conf, so a line here beats the declared
+/// fragment and the bake; without one kitty falls through to them. `None`
+/// when the notes don't resolve (a torn or reference-cyclic notes file) — the
+/// caller leaves the previous file in place rather than writing a guess.
 pub fn terminal_colors(notes: &Value) -> Option<String> {
     let r = crate::livery::resolve(notes).ok()?;
     let mut out = crate::livery::emit::kitty::emit_kitty(&r);
-    out.push_str(&format!("background_opacity {}\n", terminal_opacity(notes)));
+    if let Some(o) = terminal_opacity(notes) {
+        out.push_str(&format!("background_opacity {o}\n"));
+    }
     Some(out)
-}
-
-/// The `background_opacity` a written terminal file carries, as the token to
-/// hand kitty — re-checked against the same range lint uses, so a
-/// hand-edited file cannot put anything but a number on the argv.
-fn file_opacity(conf: &std::path::Path) -> Option<String> {
-    let body = std::fs::read_to_string(conf).ok()?;
-    body.lines()
-        .filter_map(|l| l.strip_prefix("background_opacity "))
-        .map(str::trim)
-        .find(|v| {
-            v.parse::<f64>()
-                .ok()
-                .is_some_and(|o| o.is_finite() && (0.0..=1.0).contains(&o))
-        })
-        .map(str::to_string)
 }
 
 /// Every kitty control socket under `runtime_dir`: entries named
@@ -399,26 +378,25 @@ fn count_windows(ls: &[u8]) -> Option<usize> {
     )
 }
 
-/// Guarded, best-effort push of a terminal file to every open kitty:
-/// `kitty @ --to unix:<sock> set-colors --all --configured <file>` per
-/// socket (`--configured` so a new window of that same instance opens in
-/// the staged colours too), then an `ls` of the recoloured instance to
-/// count its windows, then — when the file carries a `background_opacity`
-/// line — `set-background-opacity --all <v>` to that instance (kitty 0.49
-/// refuses it unless the instance started with `dynamic_background_opacity
-/// yes`; a refusal is counted in `opacity_refused` and fails nothing). Never
-/// a `Result` — the same tier as [`apply_live`]: the file on disk is already
-/// the truth for every new kitty, and this only brings the open ones along.
+/// Guarded, best-effort reload of every open kitty:
+/// `kitty @ --to unix:<sock> load-config` per socket, with no path, so kitty
+/// re-reads its own kitty.conf and every include (the staged terminal file
+/// among them) and an open window ends where a new one opens; then an `ls` of
+/// the instance to count its windows. kitty moves `background_opacity` on a
+/// reload only for an instance started with `dynamic_background_opacity yes`,
+/// which both kitty lanes set. Every window's font zoom resets to the
+/// configured size. Never a `Result` — the same tier as [`apply_live`]: the
+/// file on disk is already the truth for every new kitty, and this only
+/// brings the open ones along.
 ///
-/// A quiet skip, not a failure, when there is nothing to push to: no
+/// A quiet skip, not a failure, when there is nothing to reload: no
 /// `$XDG_RUNTIME_DIR`, no `kitty-<pid>` socket under it, or no `kitty` on
 /// `PATH`. The returned object is the outcome envelope's `terminal` data:
-/// `{status, message, instances, windows, failed, opacity, opacity_refused}`.
-pub fn push_kitty_colors(conf: &std::path::Path) -> Value {
+/// `{status, message, instances, windows, failed}`.
+pub fn reload_kitty() -> Value {
     let skip = |why: &str| {
         serde_json::json!({
             "status": "skipped", "message": why, "instances": 0, "windows": 0, "failed": 0,
-            "opacity": null, "opacity_refused": 0,
         })
     };
     let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) else {
@@ -429,22 +407,11 @@ pub fn push_kitty_colors(conf: &std::path::Path) -> Value {
         return skip("no kitty control socket open");
     }
 
-    let opacity = file_opacity(conf);
     let (mut instances, mut windows, mut failed) = (0usize, 0usize, 0usize);
-    let mut opacity_refused = 0usize;
     for sock in &sockets {
         let mut to = std::ffi::OsString::from("unix:");
         to.push(sock.as_os_str());
-        let set = kitty_call(&[
-            "@".as_ref(),
-            "--to".as_ref(),
-            to.as_os_str(),
-            "set-colors".as_ref(),
-            "--all".as_ref(),
-            "--configured".as_ref(),
-            conf.as_os_str(),
-        ]);
-        match set {
+        match kitty_call(&["@".as_ref(), "--to".as_ref(), to.as_os_str(), "load-config".as_ref()]) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return skip("kitty not on PATH");
             }
@@ -452,23 +419,6 @@ pub fn push_kitty_colors(conf: &std::path::Path) -> Value {
                 instances += 1;
                 let ls = kitty_call(&["@".as_ref(), "--to".as_ref(), to.as_os_str(), "ls".as_ref()]);
                 windows += ls.ok().flatten().and_then(|b| count_windows(&b)).unwrap_or(0);
-                // The file's opacity too, to every OS window of the instance.
-                // kitty refuses it unless that instance started with
-                // `dynamic_background_opacity yes` (one started before the
-                // dendrite set it): counted apart, the recolour still stands.
-                if let Some(o) = &opacity {
-                    let set = kitty_call(&[
-                        "@".as_ref(),
-                        "--to".as_ref(),
-                        to.as_os_str(),
-                        "set-background-opacity".as_ref(),
-                        "--all".as_ref(),
-                        o.as_ref(),
-                    ]);
-                    if !matches!(set, Ok(Some(_))) {
-                        opacity_refused += 1;
-                    }
-                }
             }
             // A stale socket (its kitty gone), a refusal, or a timeout.
             _ => failed += 1,
@@ -482,22 +432,12 @@ pub fn push_kitty_colors(conf: &std::path::Path) -> Value {
     serde_json::json!({
         "status": status,
         "message": format!(
-            "recoloured {windows} kitty window(s) across {instances} instance(s){}{}",
+            "reloaded {windows} kitty window(s) across {instances} instance(s){}",
             if failed > 0 { format!("; {failed} socket(s) did not answer") } else { String::new() },
-            if opacity_refused > 0 {
-                format!(
-                    "; {opacity_refused} instance(s) refused the opacity \
-                     (started without dynamic_background_opacity)"
-                )
-            } else {
-                String::new()
-            }
         ),
         "instances": instances,
         "windows": windows,
         "failed": failed,
-        "opacity": opacity.as_deref().and_then(|o| o.parse::<f64>().ok()),
-        "opacity_refused": opacity_refused,
     })
 }
 
@@ -779,32 +719,34 @@ mod tests {
         let out = terminal_colors(&notes).expect("valid notes resolve");
         assert!(out.lines().any(|l| l == "background #0a0a0d"), "{out}");
         assert!(out.lines().any(|l| l == "color15 #ffffff"), "{out}");
-        // No terminalOpacity opinion: the baked opacity, always written.
-        assert_eq!(out.lines().last(), Some("background_opacity 0.86"), "{out}");
+        assert!(!out.contains("background_opacity"), "no opinion writes no line: {out}");
     }
 
     #[test]
-    fn terminal_opacity_is_the_songs_value_or_the_baked_default() {
+    fn terminal_opacity_is_the_songs_opinion_or_no_line() {
         let raw = std::fs::read_to_string("tests/fixtures/valid-base16.json").unwrap();
         let mut notes: Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(TERMINAL_OPACITY_BAKED, 0.86, "the kitty dendrite's background_opacity");
         for (geometry, want) in [
-            (json!({ "terminalOpacity": 0.7 }), "0.7"),
-            (json!({ "terminalOpacity": 1 }), "1"),
-            (json!({ "terminalOpacity": 0 }), "0"),
-            (json!({ "terminalOpacity": null }), "0.86"),
-            (json!({}), "0.86"),
+            (json!({ "terminalOpacity": 0.7 }), Some("0.7")),
+            (json!({ "terminalOpacity": 1 }), Some("1")),
+            (json!({ "terminalOpacity": 0 }), Some("0")),
+            (json!({ "terminalOpacity": null }), None),
+            (json!({}), None),
+            (Value::Null, None),
             // Lint rejects these; the hot path treats them as no opinion.
-            (json!({ "terminalOpacity": 1.5 }), "0.86"),
-            (json!({ "terminalOpacity": "0.7\nshell /bin/evil" }), "0.86"),
+            (json!({ "terminalOpacity": 1.5 }), None),
+            (json!({ "terminalOpacity": "0.7\nshell /bin/evil" }), None),
         ] {
             notes["geometry"] = geometry.clone();
             let out = terminal_colors(&notes).unwrap();
             let lines: Vec<&str> =
                 out.lines().filter(|l| l.starts_with("background_opacity")).collect();
-            assert_eq!(lines, vec![format!("background_opacity {want}")], "{geometry}");
+            let want: Vec<String> = want.iter().map(|w| format!("background_opacity {w}")).collect();
+            assert_eq!(lines, want, "{geometry}");
             assert!(!out.contains("evil"));
         }
+        notes.as_object_mut().unwrap().remove("geometry");
+        assert!(!terminal_colors(&notes).unwrap().contains("background_opacity"));
     }
 
     #[test]
@@ -820,24 +762,23 @@ mod tests {
     }
 
     #[test]
-    fn push_skips_quietly_without_a_runtime_dir_or_a_socket() {
+    fn reload_skips_quietly_without_a_runtime_dir_or_a_socket() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = aoide_test_support::EnvSaver::capture(&["XDG_RUNTIME_DIR"]);
-        let conf = std::path::Path::new("/nonexistent/terminal-colors.conf");
 
         std::env::remove_var("XDG_RUNTIME_DIR");
-        assert_eq!(push_kitty_colors(conf)["status"], "skipped");
+        assert_eq!(reload_kitty()["status"], "skipped");
 
         let dir = short_tmp("empty");
         std::env::set_var("XDG_RUNTIME_DIR", &dir);
-        let out = push_kitty_colors(conf);
+        let out = reload_kitty();
         assert_eq!(out["status"], "skipped");
         assert_eq!(out["message"], "no kitty control socket open");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn push_drives_set_colors_per_socket_and_counts_the_windows() {
+    fn reload_drives_load_config_per_socket_and_counts_the_windows() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = aoide_test_support::EnvSaver::capture(&["XDG_RUNTIME_DIR", "PATH"]);
         let dir = short_tmp("push");
@@ -861,48 +802,33 @@ mod tests {
         std::env::set_var("XDG_RUNTIME_DIR", &dir);
         std::env::set_var("PATH", &bin);
 
-        let conf = dir.join("terminal-colors.conf");
-        std::fs::write(&conf, "background #000000\nbackground_opacity 0.7\n").unwrap();
-        let out = push_kitty_colors(&conf);
+        let out = reload_kitty();
         assert_eq!(out["status"], "applied", "{out}");
         assert_eq!(out["instances"], 1);
         assert_eq!(out["windows"], 3);
-        assert_eq!(out["opacity"], 0.7);
-        assert_eq!(out["opacity_refused"], 0);
+        assert_eq!(out["failed"], 0);
+        assert!(out.get("opacity").is_none() && out.get("opacity_refused").is_none(), "{out}");
         let argv = std::fs::read_to_string(&log).unwrap();
         let sock = dir.join("kitty-42");
-        let lines: Vec<&str> = argv.lines().collect();
         assert_eq!(
-            lines[0],
-            format!("@ --to unix:{} set-colors --all --configured {}", sock.display(), conf.display())
+            argv.lines().collect::<Vec<_>>(),
+            vec![
+                format!("@ --to unix:{} load-config", sock.display()),
+                format!("@ --to unix:{} ls", sock.display()),
+            ]
         );
-        assert_eq!(lines[1], format!("@ --to unix:{} ls", sock.display()));
-        assert_eq!(
-            lines[2],
-            format!("@ --to unix:{} set-background-opacity --all 0.7", sock.display())
-        );
+        assert!(!argv.contains("set-colors") && !argv.contains("set-background-opacity"));
 
-        // An instance started without `dynamic_background_opacity` refuses
-        // the opacity: counted apart, and the recolour still reports applied.
-        std::fs::write(&shim, "#!/bin/sh\ncase \"$*\" in *set-background-opacity*) exit 1;; esac\n")
-            .unwrap();
-        let out = push_kitty_colors(&conf);
-        assert_eq!(out["status"], "applied", "{out}");
-        assert_eq!(out["opacity_refused"], 1);
-        assert!(out["message"].as_str().unwrap().contains("dynamic_background_opacity"));
-
-        // A file with no usable opacity line pushes the colours only.
-        std::fs::write(&conf, "background #000000\nbackground_opacity 7; rm -rf\n").unwrap();
-        let _ = std::fs::remove_file(&log);
-        std::fs::write(&shim, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display())).unwrap();
-        let out = push_kitty_colors(&conf);
-        assert_eq!(out["opacity"], Value::Null, "{out}");
-        let argv = std::fs::read_to_string(&log).unwrap();
-        assert!(!argv.contains("set-background-opacity"), "{argv}");
+        // A kitty that refuses the reload counts as failed, and nothing applied.
+        std::fs::write(&shim, "#!/bin/sh\ncase \"$*\" in *load-config*) exit 1;; esac\n").unwrap();
+        let out = reload_kitty();
+        assert_eq!(out["status"], "failed", "{out}");
+        assert_eq!(out["failed"], 1);
+        assert_eq!(out["instances"], 0);
 
         // No `kitty` on PATH at all: a quiet skip, never a failure.
         std::env::set_var("PATH", dir.join("nowhere"));
-        assert_eq!(push_kitty_colors(&conf)["message"], "kitty not on PATH");
+        assert_eq!(reload_kitty()["message"], "kitty not on PATH");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

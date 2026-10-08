@@ -265,7 +265,7 @@ re-stage of the declared song reproduces the bake.
 | `geometry.blurEnabled`| `nullOr bool` | `true`   | `decoration:blur:enabled`; live, also `plugin:hyprglass:enabled` + `plugin:hyprglass:layers:enabled` |
 | `geometry.blurSize`   | `nullOr int`  | `8`      | `decoration:blur:size`  |
 | `geometry.blurPasses` | `nullOr int`  | `3`      | `decoration:blur:passes`|
-| `geometry.terminalOpacity` | `nullOr number` in [0, 1] | `0.86` | none — kitty `background_opacity` (live only; see below) |
+| `geometry.terminalOpacity` | `nullOr number` in [0, 1] | the host's bake (kitty.conf) | none — kitty `background_opacity` (live only; see below) |
 
 Border *colours* (`window.border` / `window.borderInactive`, component tier
 above) already map to `col.active_border` / `col.inactive_border` and are
@@ -283,30 +283,32 @@ Hyprland's own `decoration:blur:enabled` keeps the ordinary no-opinion rule
 (no keyword sent).
 
 `terminalOpacity` is the one geometry field that is not a Hyprland keyword:
-it is kitty's `background_opacity`, and it is live-side only. TWO files carry
-it, and kitty reads them in order — the DECLARED fragment first, the STAGE
-second:
+it is kitty's `background_opacity`, and it is live-side only. A song with no
+opinion (`null`) shows the HOST's bake, the `background_opacity` in the host's
+kitty.conf; there is no Aoide constant and nothing in cargo copies it. TWO
+files carry a song's value, and kitty reads them in order — the DECLARED
+fragment first, the STAGE second:
 
 - `song/declared/terminal-opacity.conf` (§4) is one
-  `background_opacity <n>` line the activation seed writes from the song's own
-  value, and DELETES when the song has none. It is what a host that has never
-  staged anything opens its terminal at — without it, a fresh declarative boot
-  would keep the baked default while the glass beside it already followed the
-  song.
-- `song/stage/terminal-colors.conf` (§4) is the staged song's colours plus its
-  own `background_opacity` line — the song's value, or the fallback `0.86` when
-  it has none — written by `rice stage` and pushed to every open kitty with
-  `kitty @ set-background-opacity --all`.
+  `background_opacity <n>` line the activation seed writes from the declared
+  song's effective value (the host's geometry included), and DELETES when
+  there is none. It is what a host that has never staged anything opens its
+  terminal at — without it, a fresh declarative boot would keep the bake
+  while the glass beside it already followed the song.
+- `song/stage/terminal-colors.conf` (§4) is the staged song's colours plus,
+  only for a song with an opinion, its own `background_opacity` line, written
+  by `rice stage`; every open kitty then reloads its own config
+  (`kitty @ load-config`).
 
 The kitty dendrite includes the declared file BEFORE the staged one
 (`modules/dendrites/kitty.nix`, both `mkAfter` after Stylix's baked
-base16 include): kitty takes the LAST value a repeated key sets, so a live
-stage stays authoritative while the declared truth covers the never-staged
-case. The fallback is the kitty dendrite's baked `background_opacity`,
-mirrored by `aoide-song`'s `live::TERMINAL_OPACITY_BAKED`; nothing bakes a
-song's own value into `kitty.conf` itself (that dendrite reads no
-`aoide.livery`), so a new kitty takes it from those two includes. `livery
-lint` rejects anything but a plain number in [0, 1] or `null`.
+base16 include): kitty takes the LAST value a repeated key sets, so an
+opinionated stage stays authoritative, a stage without one falls through to
+the declared fragment and then the bake, and the declared truth covers the
+never-staged case. Nothing bakes a song's own value into `kitty.conf` itself
+(that dendrite reads no `aoide.livery`), so a new kitty takes it from those
+two includes. `livery lint` rejects anything but a plain number in [0, 1] or
+`null`.
 
 ### Cover-art tier (v0 — the wallpaper note)
 
@@ -1781,8 +1783,8 @@ tier). `lyra rice stage` reads it (alongside `window.border`/
 block, or a missing/null field within it, sends no keyword for that field,
 with two exceptions §1 states: the hyprglass pair is always sent (a song with
 no `blurEnabled` opinion restores the baked default), and `terminalOpacity`
-is not a keyword at all — it rides `song/stage/terminal-colors.conf` with the
-kitty dendrite's baked `0.86` when the song has none. Readers must tolerate
+is not a keyword at all — it rides `song/stage/terminal-colors.conf` only
+when the song has an opinion, and the host's bake shows otherwise. Readers must tolerate
 both forms.
 
 ### `song/stage/cover.json` — **v0**
@@ -1979,15 +1981,15 @@ Writer: `home.activation.aoideSeedStage`'s seed script
 (`modules/dendrites/lyra/default.nix`), the same run that publishes the two
 `livery.json` twins above and below. It writes the active song's
 `aoide.livery.geometry.terminalOpacity` (§1), and **deletes the file when that
-is `null`** — an absent file is what makes kitty fall through to the baked
+is `null`** — an absent file is what makes kitty fall through to the host's
 `background_opacity`, and a value left over from a previous song must not
 outlive it. Read-only for everyone else: no runtime writer touches it, and no
 Rust crate writes it.
 
 Reader: the kitty dendrite's `mkAfter` block
 (`modules/dendrites/kitty.nix`), which includes it BEFORE
-`song/stage/terminal-colors.conf` (§4) so a live stage — whose file carries its
-own opacity line — wins (kitty takes the last value a repeated key sets). That
+`song/stage/terminal-colors.conf` (§4) so a live stage — whose file carries an
+opacity line when its song has an opinion — wins (kitty takes the last value a repeated key sets). That
 ordering is the whole contract: the declared file covers a host that has never
 staged anything, and a stage overrides it the moment one runs. Absent (no
 activation yet, or a song with no opinion) means the baked opacity stands;
@@ -2110,8 +2112,8 @@ the routing and falling back to `staging` — switch modes first
 ### `song/stage/terminal-colors.conf` — **v0**
 
 The staged song's terminal look in kitty's own config syntax: one
-`<key> #rrggbb` line per colour, then exactly one `background_opacity <n>`
-line (`n` in [0, 1]), `#` comment lines, nothing else. The kitty dendrite
+`<key> #rrggbb` line per colour, then at most one `background_opacity <n>`
+line (`n` in [0, 1], present only when the song has an opinion), `#` comment lines, nothing else. The kitty dendrite
 (`modules/dendrites/kitty.nix`) `include`s it after Stylix's baked colour
 include AND after `song/declared/terminal-opacity.conf` (§4, the declared
 song's own opacity line), so every NEW kitty opens in the staged song while a
@@ -2133,19 +2135,20 @@ synthesises from its palette and component tiers (`synthesisedScheme`;
 carries every slot and is complete on its own: a push needs no reset first,
 and no slot of an earlier song survives a palette-only stage. Every value
 is hex-linted before it is written; a non-hex value drops its line, never
-reaches the file. The opacity line is `geometry.terminalOpacity` (§1), or
-the kitty dendrite's baked `0.86` when the song has none
-(`live::TERMINAL_OPACITY_BAKED`), so it is always present.
+reaches the file. The opacity line is `geometry.terminalOpacity` (§1) and
+appears only when the song has that opinion; otherwise kitty falls through to
+the declared fragment and then the host's bake.
 
-After each write the same file is pushed to every OPEN kitty through its
-control socket: `kitty @ --to unix:<sock> set-colors --all --configured
-<file>` for each `$XDG_RUNTIME_DIR/kitty-<pid>` unix socket (the dendrite's
-`listen_on`), then `kitty @ --to unix:<sock> set-background-opacity --all
-<n>` with the file's opacity. kitty refuses the opacity unless that instance
-started with `dynamic_background_opacity yes` (the dendrite sets it); a
-refusal is counted and fails nothing. Best-effort, bounded per call, never
-fatal; the outcome envelope's `terminal` object reports `{status, message,
-instances, windows, failed, opacity, opacity_refused, file}`.
+After each write every OPEN kitty reloads its own config through its control
+socket: `kitty @ --to unix:<sock> load-config` with no path, for each
+`$XDG_RUNTIME_DIR/kitty-<pid>` unix socket (the dendrite's `listen_on`), then
+an `ls` of that instance to count its windows. With no path kitty re-reads its
+own kitty.conf and every include, so an open window ends where a new one
+opens; a reload moves `background_opacity` only for an instance started with
+`dynamic_background_opacity yes` (the dendrite sets it). Every window's font
+zoom resets to the configured size on each reload. Best-effort, bounded per
+call, never fatal; the outcome envelope's `terminal` object reports
+`{status, message, instances, windows, failed, file}`.
 
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 

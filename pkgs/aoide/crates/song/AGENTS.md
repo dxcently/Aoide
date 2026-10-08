@@ -133,29 +133,29 @@
   `stage/livery.json` calls it too, off the same notes, or the terminals
   keep the previous song. It adds no mode gate of its own and is never
   fatal. Open windows are reached ONLY through kitty's control socket
-  (`live::push_kitty_colors`), never a raw OSC write into a pty — that
-  interleaves with the program's own output and gets eaten. Sockets are
-  found by the `kitty-<pid>` name the kitty dendrite's `listen_on` gives
-  them, a directory listing: no `/proc` or process-table discovery. **A test
-  build never pushes** (`#[cfg(test)]` in `stage_terminal_colors`): handler
-  tests run against the real `$XDG_RUNTIME_DIR`, and a push from one would
-  recolour the operator's own terminals. Test the push through
-  `live::push_kitty_colors` with a stand-in `kitty` on `PATH`, as `live.rs`
-  does. Every colour is hex-linted in the `kitty` emitter before it is
-  written: the file is an `include` in kitty.conf, so a value carrying a
-  newline would be a config directive. **The file carries every slot,
-  base16 note or not** (`livery::emit::kitty::synthesised_base16`, the
-  Stylix lane's `synthesisedScheme` twin — change both together). The push
-  relies on it: `set-colors --reset` restores kitty's STARTUP colours, which
-  already include whatever staged file was on disk then, so a partial file
-  would leave an earlier song's slots behind and a reset could not clear
-  them. The same holds for its one `background_opacity` line: always
-  written (`live::terminal_opacity`, `live::TERMINAL_OPACITY_BAKED` when the
-  song has none). Keep that constant equal to the kitty dendrite's
-  `background_opacity` (cargo cannot read nix; each names the other).
+  (`live::reload_kitty`: `load-config` with NO path, so kitty re-reads its
+  own kitty.conf and every include; a path would replace the whole config
+  with that one file), never a raw OSC write into a pty — that interleaves
+  with the program's own output and gets eaten. Sockets are found by the
+  `kitty-<pid>` name the kitty dendrite's `listen_on` gives them, a
+  directory listing: no `/proc` or process-table discovery. **A test build
+  never reloads** (`#[cfg(test)]` in `stage_terminal_colors`): handler tests
+  run against the real `$XDG_RUNTIME_DIR`, and a reload from one would
+  redraw the operator's own terminals. Test the reload through
+  `live::reload_kitty` with a stand-in `kitty` on `PATH`, as `live.rs` does.
+  Every colour is hex-linted in the `kitty` emitter before it is written:
+  the file is an `include` in kitty.conf, so a value carrying a newline
+  would be a config directive. **The file carries every colour slot, base16
+  note or not** (`livery::emit::kitty::synthesised_base16`, the Stylix
+  lane's `synthesisedScheme` twin — change both together): a reload reads it
+  as config, and a missing slot would show the bake's colour under the
+  staged song. **It carries a `background_opacity` line only for a song with
+  an opinion** (`live::terminal_opacity`): no opinion writes no line, so
+  kitty falls through to the declared fragment and then the host's own
+  `background_opacity`, and no cargo constant copies that bake.
   `geometry.terminalOpacity` is linted in `livery::schema` as a plain
   number in [0, 1] or null, through `schema::terminal_opacity_value`, the
-  same predicate the hot path uses to fall back.
+  same predicate the hot path uses to find an opinion.
 - **`polarity` is a LINTED top-level field and no emitter carries it**
   (`livery::schema::POLARITY_VALUES`, exactly `"light"`/`"dark"`; absent or
   null is "no opinion"). It is the baked fan-out's register — the stylix lane

@@ -689,13 +689,13 @@ fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
                  live via best-effort, guarded `hyprctl --batch keyword …` (see hypr.rs) \
                  — keyword-only, never `hyprctl reload`; terminal colours land in \
                  stage/terminal-colors.conf (every new kitty window includes it) and \
-                 reach open kitty windows over kitty's control socket",
+                 open kitty windows reload their config over kitty's control socket",
     }))
 }
 
 /// Write the staged terminal colour file
 /// (`<stage>/terminal-colors.conf`, [`crate::live::TERMINAL_COLORS_FILE`])
-/// and push it to every open kitty ([`crate::live::push_kitty_colors`]).
+/// and reload every open kitty's config ([`crate::live::reload_kitty`]).
 /// `conf` is [`crate::live::terminal_colors`] of the notes just staged.
 ///
 /// The one terminal writer every stage path shares — `handle_rice_stage`
@@ -724,12 +724,12 @@ pub(crate) fn stage_terminal_colors(conf: Option<&str>) -> (Vec<String>, Value) 
             }),
         );
     }
-    // A test build never pushes: every handler test here stages into an
+    // A test build never reloads: every handler test here stages into an
     // isolated stage dir, but `$XDG_RUNTIME_DIR` is the real session's, and a
-    // test run from a terminal would recolour the operator's own kitty
-    // windows. The push itself is tested in `live.rs` against a stand-in.
+    // test run from a terminal would reload the operator's own kitty
+    // windows. The reload itself is tested in `live.rs` against a stand-in.
     #[cfg(not(test))]
-    let mut data = crate::live::push_kitty_colors(&path);
+    let mut data = crate::live::reload_kitty();
     #[cfg(test)]
     let mut data = json!({ "status": "skipped", "message": "test build: no push to live kitty" });
     data["file"] = json!(path.to_string_lossy());
@@ -1136,9 +1136,11 @@ mod tests {
             .any(|c| c.ends_with("stage/livery.json")));
         // The terminal half: the staged colour file every new kitty window
         // includes, rendered from the same notes (VALID_NOTES has no base16,
-        // so the synthesised scheme), and the push reported in the envelope.
+        // so the synthesised scheme, and no geometry, so no opacity opinion),
+        // and the reload reported in the envelope.
         let terminal = std::fs::read_to_string(stage.join("terminal-colors.conf")).unwrap();
         assert!(terminal.lines().any(|l| l == "background #0b1021"), "{terminal}");
+        assert!(!terminal.contains("background_opacity"), "{terminal}");
         assert!(out
             .changed
             .iter()

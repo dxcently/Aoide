@@ -759,6 +759,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A declared twin that carries no `geometry.terminalOpacity` re-pins to a
+    /// terminal file with no `background_opacity` line: the host's bake shows.
+    #[test]
+    fn declarative_repin_of_a_twin_with_no_geometry_writes_no_opacity_line() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("mode-declarative-no-geometry");
+        let stage = root.join("stage");
+        let declared = root.join("declared");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(root.join("songbook").join("sonata")).unwrap();
+        std::fs::create_dir_all(&declared).unwrap();
+        std::fs::write(root.join("songbook").join("sonata").join("livery.json"), VALID_NOTES)
+            .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::fs::write(
+            declared.join("livery.json"),
+            r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,
+        )
+        .unwrap();
+
+        let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &["sonata"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let terminal = std::fs::read_to_string(stage.join("terminal-colors.conf")).unwrap();
+        assert!(terminal.lines().any(|l| l == "background #0b1021"), "{terminal}");
+        assert!(!terminal.contains("background_opacity"), "{terminal}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The declared twin (CONTRACTS.md §4) outranks the stage file's own
     /// breadcrumb: with a DIFFERENT song currently staged, bare `rice mode
     /// declarative` must land back on the song the VENUE declares — the song

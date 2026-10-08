@@ -16,10 +16,10 @@
 #     rebuild): kitty.conf includes `<aoide.root>/song/stage/terminal-colors.conf`
 #     AFTER Stylix's baked colour include, so a new window opens in the song
 #     `rice stage` last staged, and opens a per-instance control socket
-#     (`listen_on`, `allow_remote_control socket-only`) that `rice stage`
-#     pushes the same file down to recolour the windows already open. `rice
-#     mode declarative` rewrites the file from the declared twin, so leaving
-#     staging restores the baked colours the same live way. The path is the
+#     (`listen_on`, `allow_remote_control socket-only`) over which `rice stage`
+#     has the windows already open reload their config, this file included.
+#     `rice mode declarative` rewrites the file from the declared twin, so
+#     leaving staging restores the declared look the same live way. The path is the
 #     runtime root's contract path, read off `aoide.root` like `aoide.user`.
 #
 # Adapted vs dxflake: dxflake gated this on `dx.aggregations.desktop`; Aoide has
@@ -133,13 +133,13 @@ let
                   # the surface on top (compositor manage_window_blur). The cream +
                   # dark-ink look is unchanged; only the surface got brighter.
                   #
-                  # This is also the baked opacity a staged song with no
-                  # `geometry.terminalOpacity` restores: aoide-song's
-                  # `live::TERMINAL_OPACITY_BAKED` mirrors it (cargo cannot read
-                  # nix), so change the two together. A song's own value arrives
-                  # through the staged include below and, for open windows, over
-                  # the control socket (`set-background-opacity --all`), which
-                  # kitty refuses unless dynamic_background_opacity is on.
+                  # This is the host's bake: what a song with no
+                  # `geometry.terminalOpacity` opinion shows. Nothing in cargo
+                  # copies it; kitty falls through to it when neither include
+                  # below carries a line. A song's own value arrives through those
+                  # includes, and open windows follow by reloading the config over
+                  # the control socket, which moves the opacity only because
+                  # dynamic_background_opacity is on.
                   background_opacity = "0.86";
                   dynamic_background_opacity = true;
                   background_blur = 0;
@@ -148,10 +148,11 @@ let
                   tab_powerline_style = "slanted";
 
                   # Staged colours reach OPEN windows over kitty's control socket:
-                  # `rice stage` runs `kitty @ --to unix:<sock> set-colors --all
-                  # --configured <file>` against every socket this line opens
-                  # (aoide-song's live.rs finds them by the `kitty-<pid>` name in
-                  # the runtime dir — a directory listing, no process-table walk).
+                  # `rice stage` runs `kitty @ --to unix:<sock> load-config` (no
+                  # path: kitty re-reads this file and every include) against every
+                  # socket this line opens (aoide-song's live.rs finds them by the
+                  # `kitty-<pid>` name in the runtime dir — a directory listing, no
+                  # process-table walk).
                   # socket-only: remote control is accepted on this socket and
                   # nowhere else, never from a program writing the escape code into
                   # its own pty. The socket sits in the 0700 runtime dir, so only
@@ -180,10 +181,12 @@ let
               #      (CONTRACTS.md §4): the declared truth, so a host that has
               #      never staged anything still opens its terminal at the
               #      song's opacity instead of the baked default.
-              #   2. `song/stage/terminal-colors.conf` — the colours and
-              #      opacity `rice stage` writes. SECOND, because kitty takes
-              #      the LAST value for a repeated key: a live stage stays
-              #      authoritative.
+              #   2. `song/stage/terminal-colors.conf` — the colours `rice stage`
+              #      writes, and a `background_opacity` only for a song with an
+              #      opinion. SECOND, because kitty takes the LAST value for a
+              #      repeated key: a live stage stays authoritative, and a stage
+              #      without an opacity line falls through to the declared
+              #      fragment and then the bake above.
               #
               # Both are mkAfter (after Stylix's baked base16 include) and both
               # sit outside the `mkForce` on purpose: a forced extraConfig would
