@@ -444,11 +444,33 @@ pub(crate) fn handle_rice_stage_without_cover(inv: &Invocation) -> Outcome {
 }
 
 fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
+    match plan_rice_stage(inv, repin) {
+        Ok(plan) => apply_rice_stage(plan),
+        Err(refusal) => refusal,
+    }
+}
+
+/// Everything a stage needs that is read or computed before it writes. A
+/// caller that must tear something down first plans, tears down, then applies,
+/// so a refusal leaves what it was about to tear down in place.
+pub(crate) struct StagePlan {
+    name: String,
+    repin: bool,
+    staged: String,
+    hypr_keywords: Vec<String>,
+    terminal_conf: Option<String>,
+    songbook: crate::widgets::StageSongbook,
+}
+
+/// The read-only half of [`handle_rice_stage`] (`repin` false) and
+/// [`handle_rice_stage_without_cover`] (`repin` true): the name guard, the
+/// notes, the venue overlay and §7.5's songbook gate. Writes nothing.
+pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan, Outcome> {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
-            return Outcome::usage("rice.stage", "usage: aoide rice stage <name> [--json]")
-                .with_data(json!({ "reason": "missing-name" }));
+            return Err(Outcome::usage("rice.stage", "usage: aoide rice stage <name> [--json]")
+                .with_data(json!({ "reason": "missing-name" })));
         }
     };
     // Same guard `rice compose` applies to its own `<name>`: this string is
@@ -459,14 +481,14 @@ fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
     // `draft`/`mode` commands' own path-building. Reject it here, once, at the
     // source.
     if !crate::compose::valid_song_name(&name) {
-        return Outcome::error(
+        return Err(Outcome::error(
             "rice.stage",
             format!(
                 "`{name}` is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$` \
                  (lowercase letters, digits, hyphens; no leading hyphen, no `/`, no `..`)"
             ),
         )
-        .with_data(json!({ "reason": "invalid-name", "name": name }));
+        .with_data(json!({ "reason": "invalid-name", "name": name })));
     }
 
     let notes_src = if repin {
@@ -477,7 +499,7 @@ fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
     let raw = match std::fs::read_to_string(&notes_src) {
         Ok(s) => s,
         Err(e) => {
-            return Outcome::error(
+            return Err(Outcome::error(
                 "rice.stage",
                 format!("no song `{name}`: cannot read {} ({e})", notes_src.display()),
             )
@@ -485,7 +507,7 @@ fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
                 "reason": "song-not-found",
                 "name": name,
                 "expected": notes_src.to_string_lossy(),
-            }));
+            })));
         }
     };
     // Never stage a torn palette: require the notes to at least parse as JSON
@@ -493,7 +515,7 @@ fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
     let mut parsed: Value = match serde_json::from_str::<Value>(&raw) {
         Ok(v) => v,
         Err(e) => {
-            return Outcome::error(
+            return Err(Outcome::error(
                 "rice.stage",
                 format!("notes for `{name}` are not valid JSON: {e}"),
             )
@@ -501,13 +523,11 @@ fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
                 "reason": "invalid-json",
                 "name": name,
                 "livery": notes_src.to_string_lossy(),
-            }));
+            })));
         }
     };
     if !repin && declared_song().as_deref() == Some(name.as_str()) {
-        if let Err(refusal) = overlay_venue(&mut parsed) {
-            return refusal;
-        }
+        overlay_venue(&mut parsed)?;
     }
 
     // Compute the compositor keyword batch BEFORE `parsed` is consumed below
@@ -540,11 +560,17 @@ fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
     let songbook = match crate::widgets::plan_stage(&name) {
         Ok(songbook) => songbook,
         Err(e) => {
-            return Outcome::error("rice.stage", e.error)
-                .with_data(json!({ "reason": "stage-refused", "target": e.target }));
+            return Err(Outcome::error("rice.stage", e.error)
+                .with_data(json!({ "reason": "stage-refused", "target": e.target })));
         }
     };
 
+    Ok(StagePlan { name, repin, staged, hypr_keywords, terminal_conf, songbook })
+}
+
+/// The writing half of a stage, from a [`plan_rice_stage`] plan.
+pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
+    let StagePlan { name, repin, staged, hypr_keywords, terminal_conf, songbook } = plan;
     let stage = shellbridge::stage_dir();
     let notes_dst = stage.join("livery.json");
     if let Err(e) = shellbridge::atomic_write(&notes_dst, &staged) {

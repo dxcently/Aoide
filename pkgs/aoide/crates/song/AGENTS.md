@@ -48,6 +48,12 @@
   write is its drift snapshot — `reload`) calls `plan_stage` before writing
   anything, and an in-crate test pins the `back` case (§9(d) only covers
   `stage`). Don't move the gate down into a sync.
+- **A transition that swaps `stage/livery.json`'s type or target plans first and
+  writes `mode.json` last.** `rice mode stage`/`rice mode declarative` run the
+  template seed and `plan_rice_stage` before `teardown_draft_symlink`, so a song
+  that cannot be staged leaves the draft routed and the marker `draft`; the
+  shell's livery watch holds an inode and re-arms only on a `mode.json` write
+  (CONTRACTS.md §4). A new transition owes the same order.
 - **`baseline_songbook` only ever resolves a NO-`_widgets/`-shelf song's own
   entry — it must skip the patch, not guess, when `name` has one.** Borrowed
   ownership resolves only in `composeSong`, and for a built-in song the baked

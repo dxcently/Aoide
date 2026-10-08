@@ -1272,7 +1272,7 @@ fn stage_livery(
 // ─────────────────────────── other lane stage files ───────────────────────────
 
 /// `ROOT/song/stage/mode.json` -- the lane QML's own rice-mode read
-/// (`LiveryState.qml`, lines 216/267, and its callers all expect this file
+/// (`LiveryState.qml`'s `modeFile`, and its callers all expect this file
 /// to exist). Rewritten UNCONDITIONALLY on every `lyra preview` build and
 /// on `preview set --song`: the canvas's mode is always "staging" of the
 /// PREVIEWED song, never whatever the live root's own `rice mode` last

@@ -58,8 +58,11 @@
 //! plain declared content, so that write lands in a real file rather than
 //! transparently through into whatever draft the symlink still pointed at.
 //! Neither leaves a dangling symlink behind when transitioning out of
-//! `Draft`. Neither leaves a dangling symlink behind when transitioning out
-//! of `Draft`.
+//! `Draft`. The teardown comes AFTER the template seed and
+//! [`super::rice::plan_rice_stage`], so a song that cannot be staged fails
+//! with the symlink and the `draft` marker exactly as they were. `mode.json`
+//! is written last: a watcher of `stage/livery.json` re-arms on it
+//! (CONTRACTS.md §4).
 
 use aoide_protocol::Invocation;
 use aoide_protocol::output::{Outcome, Status};
@@ -199,10 +202,10 @@ fn teardown_draft_symlink() -> std::io::Result<()> {
 ///
 /// ALWAYS means plain declared content — zero draft-awareness. If currently
 /// in `Draft` mode, this doubles as how you LEAVE it:
-/// [`teardown_draft_symlink`] removes the routing symlink before the
-/// declared-content write below, so that write lands in a real file rather
-/// than transparently through into whatever draft the symlink still pointed
-/// at.
+/// [`teardown_draft_symlink`] removes the routing symlink, once the seed and
+/// the stage plan have accepted the song and before the declared-content
+/// write, so that write lands in a real file rather than transparently
+/// through into whatever draft the symlink still pointed at.
 fn handle_mode_stage(inv: &Invocation) -> Outcome {
     let explicit_name = inv.args.first().cloned();
     let existing = load_mode_marker();
@@ -219,14 +222,9 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
         .or_else(|| existing.staging_song.clone())
         .or_else(current_staged_song);
 
-    if let Err(e) = teardown_draft_symlink() {
-        return Outcome::error("rice.mode.stage", format!("failed to clear draft routing: {e}"))
-            .with_data(json!({ "reason": "symlink-teardown-failed" }));
-    }
-
     let mut changed: Vec<String> = Vec::new();
     // Seed a first-stage runtime songbook entry from the shipped template
-    // BEFORE the sync below ever reads `songbook_dir(name)` (task #41) —
+    // BEFORE the plan below ever reads `songbook_dir(name)` (task #41) —
     // this is the OTHER staging entry point `rice stage`'s own
     // `handle_rice_stage_entry` needs the same seed at (see
     // `commands::rice::seed_songbook_from_templates`'s doc): a fresh host's
@@ -236,7 +234,11 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
     // hook point that actually matters for that case, not an optional
     // extra. No-op whenever the songbook already has anything for the
     // song, or nothing is shipped for it either.
+    //
+    // Seed and plan come BEFORE the draft routing is torn down: a name that
+    // cannot be staged must leave the shell where it was, not routed nowhere.
     let mut seeded_from: Option<std::path::PathBuf> = None;
+    let mut plan = None;
     if let Some(name) = &resolved_name {
         seeded_from = match super::rice::seed_songbook_from_templates(name) {
             Ok(Some(source)) => {
@@ -255,7 +257,22 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
             flags: inv.flags.clone(),
             door: inv.door,
         };
-        let mut staged = super::rice::handle_rice_stage(&stage_inv);
+        plan = match super::rice::plan_rice_stage(&stage_inv, false) {
+            Ok(plan) => Some(plan),
+            Err(mut refusal) => {
+                refusal.command = "rice.mode.stage".to_string();
+                return refusal;
+            }
+        };
+    }
+
+    if let Err(e) = teardown_draft_symlink() {
+        return Outcome::error("rice.mode.stage", format!("failed to clear draft routing: {e}"))
+            .with_data(json!({ "reason": "symlink-teardown-failed" }));
+    }
+
+    if let Some(plan) = plan {
+        let mut staged = super::rice::apply_rice_stage(plan);
         if staged.status != Status::Ok {
             staged.command = "rice.mode.stage".to_string();
             return staged;
@@ -331,8 +348,9 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
 /// nothing is discarded, because there was nothing live to discard.
 ///
 /// If currently in `Draft` mode, this is also how you leave it: the SAME
-/// [`teardown_draft_symlink`] call [`handle_mode_stage`] makes, so the
-/// re-pin write below lands in a real file, never through a stale symlink.
+/// [`teardown_draft_symlink`] call [`handle_mode_stage`] makes, after the
+/// same plan, so the re-pin write below lands in a real file, never through a
+/// stale symlink, and a song that cannot be re-pinned leaves the draft routed.
 ///
 /// A resolvable song whose re-pin fails returns that error and does NOT flip
 /// the marker — same failure handling the `<name>` path already had.
@@ -342,20 +360,35 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
         .or_else(super::rice::declared_song)
         .or_else(current_staged_song);
 
+    // The plan comes BEFORE the draft routing is torn down: a name that cannot
+    // be re-pinned must leave the shell where it was, not routed nowhere.
+    let plan = match &resolved_name {
+        Some(name) => {
+            let stage_inv = Invocation {
+                path: vec!["rice".to_string(), "stage".to_string()],
+                args: vec![name.clone()],
+                flags: inv.flags.clone(),
+                door: inv.door,
+            };
+            match super::rice::plan_rice_stage(&stage_inv, true) {
+                Ok(plan) => Some(plan),
+                Err(mut refusal) => {
+                    refusal.command = "rice.mode.declarative".to_string();
+                    return refusal;
+                }
+            }
+        }
+        None => None,
+    };
+
     if let Err(e) = teardown_draft_symlink() {
         return Outcome::error("rice.mode.declarative", format!("failed to clear draft routing: {e}"))
             .with_data(json!({ "reason": "symlink-teardown-failed" }));
     }
 
     let mut changed: Vec<String> = Vec::new();
-    if let Some(name) = &resolved_name {
-        let stage_inv = Invocation {
-            path: vec!["rice".to_string(), "stage".to_string()],
-            args: vec![name.clone()],
-            flags: inv.flags.clone(),
-            door: inv.door,
-        };
-        let mut staged = super::rice::handle_rice_stage_without_cover(&stage_inv);
+    if let Some(plan) = plan {
+        let mut staged = super::rice::apply_rice_stage(plan);
         if staged.status != Status::Ok {
             staged.command = "rice.mode.declarative".to_string();
             return staged;
@@ -1468,6 +1501,64 @@ mod tests {
         assert_eq!(marker.draft, None);
         let staged = std::fs::read_to_string(stage.join("livery.json")).unwrap();
         assert!(staged.contains("\"accent\""), "re-pinned from the committed songbook: {staged}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A drafted stage: `sonata` committed, the stage routed into the draft
+    /// `neon-night`. Callers own `remove_dir_all(&root)`.
+    fn drafted_stage(tag: &str) -> (PathBuf, PathBuf) {
+        let root = unique_tmp(tag);
+        let stage = root.join("stage");
+        let song = root.join("songbook").join("sonata");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&song).unwrap();
+        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(
+            stage.join("livery.json"),
+            r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
+        )
+        .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        save_mode_marker(&ModeMarker { mode: RiceMode::Staging, song: Some("sonata".to_string()), ..Default::default() }).unwrap();
+        let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        (root, stage)
+    }
+
+    fn assert_still_drafted(stage: &std::path::Path) {
+        assert!(
+            std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink(),
+            "the routing symlink must survive a refused transition"
+        );
+        let marker = load_mode_marker();
+        assert_eq!(marker.mode, RiceMode::Draft);
+        assert_eq!(marker.draft, Some("neon-night".to_string()));
+    }
+
+    #[test]
+    fn mode_stage_of_an_unknown_song_leaves_the_draft_routed() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, stage) = drafted_stage("mode-stage-bad-name-from-draft");
+
+        let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["nosuchsong"]));
+        assert_eq!(out.status, Status::Error);
+        assert_eq!(out.command, "rice.mode.stage");
+        assert_still_drafted(&stage);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mode_declarative_of_an_unknown_song_leaves_the_draft_routed() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, stage) = drafted_stage("mode-declarative-bad-name-from-draft");
+
+        let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &["nosuchsong"]));
+        assert_eq!(out.status, Status::Error);
+        assert_eq!(out.command, "rice.mode.declarative");
+        assert_still_drafted(&stage);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

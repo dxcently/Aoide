@@ -1730,10 +1730,12 @@ re-routes a draft; content writers going through `atomic_write` swap nothing
 and owe nothing),
 and a watching reader re-reads `livery.json` on every `mode.json` change
 (`mode.json` is always a real file, atomically replaced; the shell's
-`LiveryState.qml` is that reader). A failed transition and the activation
-reseed sit outside that guarantee: the reader is re-armed by the next
-`mode.json` write (after a reseed in draft mode, `lyra reload`'s re-route) or
-the shell restart. Writers going through `aoide_storage::fs::atomic_write`
+`LiveryState.qml` is that reader). A transition that cannot stage its song
+changes nothing: `rice mode stage` and `rice mode declarative` plan before they
+remove the symlink, so the entry and the `draft` marker stay as they were. A
+failure after the plan, and the activation reseed, sit outside the guarantee:
+the reader is re-armed by the next `mode.json` write (after a reseed in draft
+mode, `lyra reload`'s re-route) or the shell restart. Writers going through `aoide_storage::fs::atomic_write`
 transparently write through the symlink too; the activation seed does not. It
 RENAMES its declared file over the entry (`mv -f`, never a write through the
 link), so the draft's own file is untouched and the link is gone. `lyra reload`
@@ -2023,6 +2025,10 @@ staging writes; never an error.
   "since": "2026-08-14T00:00:00Z"
 }
 ```
+
+Every command that changes the type or target of `stage/livery.json` writes
+this file LAST, because a watching reader re-arms on it (§4's
+`song/stage/livery.json` entry).
 
 `song`/`draft`/`stagingSong`/`since` are optional (omitted, not `null`, when
 absent — the `SessionRecord`/`Node` Option convention). `song` names the

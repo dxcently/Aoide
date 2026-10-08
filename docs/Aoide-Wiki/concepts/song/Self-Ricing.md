@@ -131,11 +131,13 @@ Entering `Draft` mode points `stage/livery.json` at a SYMLINK into the
 draft's own file (forking it from whatever's currently in the stage first,
 if the name doesn't exist yet). From then on, every writer of the stage
 file — `rice stage`, a hand-edit, Quickshell's own FileView reload —
-transparently lands in the draft, with zero code anywhere aware that
-routing exists: `aoide_storage::fs::atomic_write` resolves and writes
+transparently lands in the draft, with no writer aware that routing exists:
+`aoide_storage::fs::atomic_write` resolves and writes
 through a symlink at its destination rather than replacing it (POSIX
 `rename()` would otherwise silently replace the symlink itself on the very
-first write). Routing, not guessing — no mtime comparison, no auto-prefer
+first write). One reader is aware: a FileView holds the inode it loaded, so
+the shell re-reads `livery.json` on every `mode.json` change, and every
+command that swaps the entry writes `mode.json` last. Routing, not guessing — no mtime comparison, no auto-prefer
 heuristic; a draft is only ever live because something explicitly pointed
 the stage at it.
 
