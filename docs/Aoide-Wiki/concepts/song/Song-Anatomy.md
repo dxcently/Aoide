@@ -169,7 +169,7 @@ $AOIDE_FLAKE_ROOT/song/  (dev git checkout — committed score, default ~/Aoide/
 $AOIDE_ROOT/             (runtime root, default ~/.aoide — created on demand)
 ├── song/
 │   ├── stage/           live preview state — livery.json · cover.json · mode.json · grimoire.json
-│   ├── declared/        the declared twin, the venue's slots and geometry, the declared terminal opacity — livery.json · venue.json · terminal-opacity.conf, written by the activation seed
+│   ├── declared/        the declared twin, the venue's slots and geometry, the declared terminal opacity — livery.json · venue.json · terminal-opacity.conf, written by the activation seed; songbook/<song>.json, each built-in song's refresh record, written by `lyra rice refresh`
 │   └── songbook/        composed host songbook (rice compose) · <song>/drafts/ (rice draft save)
 ├── state/               conducting state — state/stage/ holds sessions/hooks/projects/graph
 ├── run/qml/             live-deployed QML tree the desktop shell reads
