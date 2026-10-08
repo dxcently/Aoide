@@ -18,11 +18,9 @@
 //! A note with no base16 tier gets the scheme the stylix lane synthesises
 //! for the baked side (`modules/dendrites/stylix.nix`,
 //! `synthesisedScheme` — [`synthesised_base16`] is its slot-for-slot twin),
-//! so EVERY slot is written either way. The file is complete on its own: a
-//! push never has to reset first, and no slot of an earlier song survives a
-//! palette-only stage. (`set-colors --reset` could not do that job — kitty
-//! resets to the colours it had at startup, which include whatever staged
-//! file was on disk then, not the baked baseline.)
+//! so EVERY slot is written either way. The file is complete on its own: no
+//! slot of an earlier song survives a palette-only stage, and open windows
+//! pick it up when kitty re-reads its config (`kitty @ load-config`).
 //!
 //! Every value is hex-linted before it is written: this file is an
 //! `include` in every new kitty window's config, so a value carrying a
