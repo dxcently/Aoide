@@ -243,9 +243,9 @@ lyra rice mode stage [<name>] [--json]
 - **Reads:** `song/stage/mode.json`; for a bare call, resolves the song from
   the marker's `stagingSong` first, then `song/stage/livery.json`'s `"song"`
   field.
-- **Writes:** tears down any Draft-mode routing symlink at
-  `song/stage/livery.json` first, then — when a song resolves — everything
-  `rice stage` writes (stage livery/cover, widget sync, registry sync, live
+- **Writes:** when a song resolves, seeds and plans its stage first; only
+  once the song is accepted does it tear down any Draft-mode routing symlink
+  at `song/stage/livery.json`, then write everything `rice stage` writes (stage livery/cover, widget sync, registry sync, live
   `hyprctl`/Quickshell IPC); finally `song/stage/mode.json`
   (`mode: "staging"`, `song`, `stagingSong`, `since`).
 - **Output:** the data of the `rice stage` it ran (`hyprctl`, `terminal`,
@@ -255,7 +255,7 @@ lyra rice mode stage [<name>] [--json]
 - **Notes:** unlocks staging writers AND hot-loads immediately — never a
   bare flag-flip except on a genuinely fresh box with no resolvable song.
   This is also how you leave Draft mode. A failed stage (unknown song) does
-  not flip the marker.
+  not flip the marker and leaves the draft routed.
 
 ### lyra rice mode declarative
 
@@ -267,8 +267,9 @@ lyra rice mode declarative [<name>] [--json]
   song off `song/declared/livery.json`'s `"song"` field, falling back to
   `song/stage/livery.json`'s own `"song"` field only when no such twin exists
   (CONTRACTS.md §4).
-- **Writes:** tears down any Draft-mode routing symlink; when a song
-  resolves, re-pins `song/stage/livery.json` (plus widget/registry sync,
+- **Writes:** when a song resolves, plans the re-pin first and tears down
+  any Draft-mode routing symlink only once it is accepted (a refusal leaves
+  the draft routed); then re-pins `song/stage/livery.json` (plus widget/registry sync,
   same as `rice stage`) from that song's COMMITTED
   `song/songbook/<name>/livery.json` — or, for the song the declared twin
   names, from the twin, venue recolour included; then writes
