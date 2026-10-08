@@ -105,7 +105,7 @@ struct Entry {
 
 pub(crate) struct SongReport {
     song: String,
-    skipped: Option<String>,
+    pub(crate) skipped: Option<String>,
     seeded: bool,
     entries: Vec<Entry>,
     modes: usize,
@@ -158,6 +158,16 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     let (mut reports, mut errors) = (Vec::new(), Vec::new());
     shellbridge::with_stage_lock(|| {
         for name in &names {
+            if !crate::compose::valid_song_name(name) {
+                reports.push(SongReport {
+                    song: name.clone(),
+                    skipped: Some("not a valid song name".into()),
+                    seeded: false,
+                    entries: vec![],
+                    modes: 0,
+                });
+                continue;
+            }
             match refresh_song(name, &templates, check) {
                 Ok(report) => reports.push(report),
                 Err(e) => errors.push(format!("{name}: {e}")),
@@ -252,13 +262,50 @@ fn hash_file(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
+/// True when no component from `root` down to `path`'s parent is a symlink (a
+/// missing component is fine: nothing there to follow).
+fn path_is_clean(root: &Path, path: &Path) -> bool {
+    let Some(parent) = path.parent() else { return false };
+    let Ok(rel) = parent.strip_prefix(root) else { return false };
+    let mut cur = root.to_path_buf();
+    for c in rel.components() {
+        cur.push(c);
+        match std::fs::symlink_metadata(&cur) {
+            Ok(m) if m.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(_) => return true,
+        }
+    }
+    true
+}
+
+/// Write beside `target` and rename over it. Deliberately not
+/// `atomic_write_bytes`, whose stale-temp sweep would delete a machine-only
+/// `*.tmp.<pid>` file in the same directory; the dotfile name cannot collide
+/// with a song file.
+fn write_beside(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let name = target.file_name().expect("file target").to_string_lossy();
+    let tmp = target.with_file_name(format!(".{name}.aoide-refresh.{}", std::process::id()));
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, target)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
 fn is_symlink(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
 }
 
 /// Give the owner write on every file and dir lacking it (a store copy is
 /// 0444/0555). Returns how many entries needed it; symlinks are left alone.
-fn fix_modes(path: &Path, apply: bool) -> Result<usize, String> {
+fn fix_modes(path: &Path, apply: bool, root: bool) -> Result<usize, String> {
     let meta = std::fs::symlink_metadata(path).map_err(|e| format!("cannot stat {}: {e}", path.display()))?;
     if meta.file_type().is_symlink() {
         return Ok(0);
@@ -275,7 +322,10 @@ fn fix_modes(path: &Path, apply: bool) -> Result<usize, String> {
     if meta.is_dir() {
         for entry in std::fs::read_dir(path).map_err(|e| format!("cannot read {}: {e}", path.display()))? {
             let entry = entry.map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-            fixed += fix_modes(&entry.path(), apply)?;
+            if root && MACHINE_RUNTIME_DIRS.contains(&entry.file_name().to_string_lossy().as_ref()) {
+                continue;
+            }
+            fixed += fix_modes(&entry.path(), apply, false)?;
         }
     }
     Ok(fixed)
@@ -355,7 +405,7 @@ fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<Song
             let tmp = machine.with_extension(format!("seed-tmp.{}", std::process::id()));
             let seeded = shellbridge::copy_dir_recursive(&source, &tmp)
                 .map_err(|e| e.to_string())
-                .and_then(|()| fix_modes(&tmp, true).map(|n| report.modes = n))
+                .and_then(|()| fix_modes(&tmp, true, true).map(|n| report.modes = n))
                 .and_then(|()| std::fs::rename(&tmp, &machine).map_err(|e| e.to_string()));
             if let Err(e) = seeded {
                 let _ = std::fs::remove_dir_all(&tmp);
@@ -368,7 +418,7 @@ fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<Song
         Err(e) => return Err(io_cause("stat", &machine, &e).why),
     }
 
-    report.modes = fix_modes(&machine, !check)?;
+    report.modes = fix_modes(&machine, !check, true)?;
     let on_machine = walk(&machine, false)?;
     let old = read_record(song)?;
     let mut record = old.clone();
@@ -377,7 +427,7 @@ fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<Song
         let rel = *rel;
         let target = machine.join(rel);
         let r_hash = old.get(rel);
-        let (state, action) = if is_symlink(&target) {
+        let (state, action) = if is_symlink(&target) || !path_is_clean(&machine, &target) {
             (if r_hash.is_some() { State::Edited } else { State::Unrecorded }, Action::Keep)
         } else if let Some(m_path) = on_machine.get(rel) {
             let m_hash = hash_file(m_path)?;
@@ -405,7 +455,7 @@ fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<Song
                 std::fs::create_dir_all(parent).map_err(|e| io_cause("create", parent, &e).why)?;
             }
             let bytes = std::fs::read(&store[rel]).map_err(|e| io_cause("read", &store[rel], &e).why)?;
-            shellbridge::atomic_write_bytes(&target, &bytes).map_err(|e| io_cause("write", &target, &e).why)?;
+            write_beside(&target, &bytes).map_err(|e| io_cause("write", &target, &e).why)?;
         }
         report.entries.push(Entry { path: rel.clone(), state, action });
     }
@@ -823,5 +873,117 @@ mod tests {
         assert_eq!(fx.record().len(), 3);
         assert_eq!(fx.read("bar.qml").unwrap(), "B1");
         assert!(crate::commands::rice::seed_songbook_from_templates("sonata").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_symlinked_subdirectory_is_never_written_through() {
+        let fx = Fx::new("refresh-symlinked-subdir");
+        fx.store("widgets/dock.qml", "NEW");
+        fx.store("widgets/clock.qml", "C");
+        fx.store("bar.qml", "B");
+        fx.machine("bar.qml", "B");
+        let outside = fx.root.join("outside");
+        put(&outside.join("dock.qml"), "PRECIOUS");
+        let song = shellbridge::songbook_dir("sonata");
+        std::os::unix::fs::symlink(&outside, song.join("widgets")).unwrap();
+        let out = fx.run(&[], false);
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert_eq!(std::fs::read_to_string(outside.join("dock.qml")).unwrap(), "PRECIOUS");
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1, "nothing new outside");
+        assert_eq!(file_state(&out, "widgets/dock.qml").1, "keep");
+        assert_eq!(file_state(&out, "widgets/clock.qml").1, "keep");
+        assert!(is_symlink(&song.join("widgets")));
+    }
+
+    #[test]
+    fn mode_fixes_never_reach_takes_or_drafts() {
+        let fx = Fx::new("refresh-modes-runtime");
+        seeded(&fx);
+        fx.machine("takes/1/livery.json", "T");
+        fx.machine("drafts/d.json", "D");
+        let song = shellbridge::songbook_dir("sonata");
+        for rel in ["takes/1/livery.json", "drafts/d.json"] {
+            std::fs::set_permissions(song.join(rel), std::fs::Permissions::from_mode(0o444)).unwrap();
+        }
+        std::fs::set_permissions(song.join("takes/1"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        fx.run(&[], false);
+        assert_eq!(mode(&song.join("takes/1/livery.json")), 0o444);
+        assert_eq!(mode(&song.join("drafts/d.json")), 0o444);
+        assert_eq!(mode(&song.join("takes/1")), 0o555);
+        std::fs::set_permissions(song.join("takes/1"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn a_write_does_not_sweep_machine_only_temp_lookalikes() {
+        let fx = Fx::new("refresh-no-sweep");
+        seeded(&fx);
+        fx.machine("widgets/foo.tmp.999999", "mine");
+        fx.store("widgets/dock.qml", "D2");
+        fx.run(&[], false);
+        assert_eq!(fx.read("widgets/dock.qml").unwrap(), "D2");
+        assert_eq!(fx.read("widgets/foo.tmp.999999").unwrap(), "mine");
+        let left: Vec<_> = std::fs::read_dir(shellbridge::songbook_dir("sonata").join("widgets"))
+            .unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(!left.iter().any(|n| n.contains("aoide-refresh")), "{left:?}");
+    }
+
+    #[test]
+    fn an_invalid_builtin_name_is_reported_and_skipped() {
+        let fx = Fx::new("refresh-bad-builtin");
+        shipped(&fx);
+        put(&fx.root.join("x/livery.json"), "X");
+        fx.builtin(&["../x", "sonata"]);
+        let out = fx.run(&[], false);
+        let songs = out.data.as_ref().unwrap()["songs"].as_array().unwrap().clone();
+        assert_eq!(songs[0]["song"], "../x");
+        assert!(songs[0]["skipped"].is_string());
+        assert!(shellbridge::songbook_dir("sonata").is_dir());
+        assert!(!fx.root.join("aoide/song/x").exists() && !shellbridge::songbook_root().join("../x").exists());
+    }
+
+    #[test]
+    fn the_seeder_reports_nothing_seeded_when_refresh_skipped() {
+        let fx = Fx::new("refresh-seed-skipped");
+        shipped(&fx);
+        std::fs::create_dir_all(shellbridge::songbook_root()).unwrap();
+        std::os::unix::fs::symlink("/nonexistent-dangling", shellbridge::songbook_dir("sonata")).unwrap();
+        let seeded = crate::commands::rice::seed_songbook_from_templates("sonata").unwrap();
+        assert!(seeded.is_none());
+    }
+
+    #[test]
+    fn a_crash_between_seed_rename_and_record_self_heals() {
+        let fx = Fx::new("refresh-crash-heal");
+        seeded(&fx);
+        std::fs::remove_file(shellbridge::songbook_record("sonata")).unwrap();
+        let out = fx.run(&[], false);
+        assert_eq!(file_state(&out, "bar.qml"), ("in-sync".into(), "none".into()));
+        assert_eq!(fx.record().len(), 3);
+    }
+
+    #[test]
+    fn a_record_entry_under_takes_is_ignored() {
+        let fx = Fx::new("refresh-record-takes");
+        seeded(&fx);
+        fx.machine("takes/1/x", "T");
+        let mut rec = fx.record();
+        rec.insert("takes/1/x".into(), h("T"));
+        write_record("sonata", &fx.templates.join("sonata"), &rec).unwrap();
+        let out = fx.run(&[], false);
+        assert_eq!(fx.read("takes/1/x").unwrap(), "T");
+        assert!(out.data.as_ref().unwrap()["songs"][0]["files"].as_array().unwrap().iter().all(|f| f["path"] != "takes/1/x"));
+    }
+
+    #[test]
+    fn a_read_only_dir_still_takes_a_gone_delete_and_prune() {
+        let fx = Fx::new("refresh-ro-gone");
+        seeded(&fx);
+        std::fs::remove_file(fx.templates.join("sonata/widgets/dock.qml")).unwrap();
+        std::fs::remove_dir(fx.templates.join("sonata/widgets")).unwrap();
+        let song = shellbridge::songbook_dir("sonata");
+        std::fs::set_permissions(song.join("widgets"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let out = fx.run(&[], false);
+        assert_eq!(file_state(&out, "widgets/dock.qml"), ("gone".into(), "delete".into()));
+        assert!(!song.join("widgets").exists());
     }
 }

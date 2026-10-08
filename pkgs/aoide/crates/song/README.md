@@ -124,7 +124,8 @@ a config file). Paint-side — ships in `lyra`, not core.
   (`fs::songbook_record(name)`, outside the song folder). `lyra rice refresh
   [<name>] [--check] [--json]` is the same function on a folder that
   exists: per file, a file the machine never edited takes the shipped
-  change, an edited one is kept (`commands/refresh.rs` holds the rule).
+  change, an edited one is kept (`commands/refresh.rs` holds the rule). It never follows a machine-side symlink, never
+  touches `takes/`/`drafts/` modes, and never sweeps temp files.
   Both staging entry points call the seeder before
   `handle_rice_stage` (the sync) ever reads the songbook; `rice mode
   declarative`'s re-pin and `lyra reload`'s staging arm reuse

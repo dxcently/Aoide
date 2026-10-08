@@ -262,7 +262,15 @@
   `with_stage_lock`. `seed_songbook_from_templates` goes through
   `refresh_song` so a stage-time seed records too. Changing the rule, the
   record shape or the report states updates this entry and the README in the
-  same commit.
+  same commit. Machine symlinks anywhere on a path are never followed: every
+  component from the song root to a file's parent is checked before a write,
+  and a blocked file is kept and reported. Mode fixes never reach
+  `takes/`/`drafts/`. Refresh never sweeps temp files: it writes through its
+  own dotfile temp, not `atomic_write_bytes` (whose stale-temp sweep would
+  delete a machine-only `*.tmp.<pid>` file). Names in `builtin.json` pass
+  `valid_song_name` or are reported skipped. The stage-time seed now refuses
+  a shipped copy containing a symlink (the old plain copy carried it over)
+  and reports nothing seeded when refresh skipped the folder.
 - **`aoide_storage::takes`' functions take `draft: Option<&str>`, not
   `&str` — `None` means staging-mode (`songbook/<song>/takes/`), `Some`
   means a routed draft (`songbook/<song>/drafts/<name>/takes/`).**

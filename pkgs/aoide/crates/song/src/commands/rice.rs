@@ -872,7 +872,8 @@ pub(crate) fn seed_songbook_from_templates(name: &str) -> Result<Option<PathBuf>
     if !source.is_dir() {
         return Ok(None);
     }
-    super::refresh::refresh_song(name, &templates, false).map(|_| Some(source))
+    let report = super::refresh::refresh_song(name, &templates, false)?;
+    Ok(report.skipped.is_none().then_some(source))
 }
 
 /// `rice compose <name> [--from <song>] [--force]` — scaffold a new
