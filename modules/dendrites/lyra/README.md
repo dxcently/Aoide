@@ -26,15 +26,16 @@ modules/dendrites/lyra/
   means at the byte level: the deployed `manifest.json`/`registry.json` cover
   the built-in songs only, `pkgs.lyra-songbook` is overridden to ship just those
   folders plus `builtin.json` (`{ declared, songs, packages }`), and
-  `home.activation.aoideSeedSongbook` copies each one into the machine's own
-  songbook **only when it is absent** — a rebuild never rewrites what the machine
-  has — and leaves the copy writable by its owner, not in the store's read-only
-  modes: the runtime songbook is the one place a song is edited, and staging
-  writes `takes/` there. A folder that is already there and has anything
-  without owner-write (a copy in the store's read-only modes) gets `chmod -R
-  u+w` and nothing else — no content is rewritten, added or deleted, a
-  writable folder is not touched, and a symlink at the song's path is left to
-  its owner. That set is CLOSED UNDER BORROWS (`lib/songbook.nix`'s `builtIn`): a
+  `home.activation.aoideSeedSongbook` runs `lyra rice refresh` over them: a
+  file the machine never edited takes the repo's change, a built-in song absent
+  from the machine is added whole, a file the machine edited (or that has no
+  record) is kept and reported, and `takes/`, `drafts/` and symlinks are never
+  touched. What it wrote is recorded in
+  `$AOIDE_ROOT/song/declared/songbook/<song>.json`, outside the song folder.
+  `lyra rice refresh [--check]` is the CLI twin; a dry-run activation runs
+  `--check`. The songbook is the one place a song is edited, so the copy is
+  writable by its owner. That set is CLOSED UNDER BORROWS
+  (`lib/songbook.nix`'s `builtIn`): a
   selected song's records name their slot bodies by `owner`, so the lenders ship
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Guarded on that fact; the lane sets it

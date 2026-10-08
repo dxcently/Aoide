@@ -73,6 +73,8 @@ let
 
       builtIn = config.aoide.songbook.builtIn;
 
+      refreshCmd = "${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook ${pkgs.aoide.rice}/bin/lyra rice refresh";
+
       # ── The songs this derivation reads, as their OWN store paths ────────────
       # The same contract `pkgs/lyra-songbook` keeps, for the same reason: a path
       # literal that names the songbook DIRECTORY makes every song in the repo
@@ -539,35 +541,36 @@ let
         # ── The machine's own songbook first (house rule 10) ─────────────────────
         # The machine OWNS `~/.aoide/song/songbook` (CONTRACTS.md §5): its
         # built-in songs plus whatever it made itself, never a link to or a sync
-        # of the repo. Each built-in song's folder is copied in ONLY when that
-        # folder does not exist — no comparison, no merge, never an overwrite.
-        # `sonata/takes/`, `sonata/drafts/` and edited `design/` notes on a
-        # machine that already holds them survive every rebuild.
+        # of the repo. Activation runs `lyra rice refresh` over the built-in set,
+        # which applies one three-way rule per file (shipped copy, machine copy,
+        # the hash recorded at the last refresh):
         #
-        # The copy is left writable by its owner. `cp -r` out of the store keeps
-        # the store's modes (dr-xr-xr-x), and the runtime songbook is the ONE
-        # place a song is edited: a read-only song cannot be edited by an agent,
-        # and staging cannot write its `takes/` there. A folder that already
-        # exists with the store's modes gets the same `chmod -R u+w` whenever
-        # anything in it lacks owner-write: a mode fix only, never a rewrite,
-        # an addition or a deletion. `find` finds nothing on a writable copy,
-        # which is then not touched at all. A symlink at the song's path is
-        # the machine's own link and stays as it is.
+        #   - a file the machine never edited takes the repo's change, and a
+        #     built-in song absent from the machine is added whole;
+        #   - a file the machine edited, or one with no record, is kept and
+        #     reported, never overwritten;
+        #   - `takes/` and `drafts/` and any symlink at a song's path are never
+        #     touched.
+        #
+        # What refresh wrote is recorded in
+        # `$AOIDE_ROOT/song/declared/songbook/<song>.json`, outside the song
+        # folder so nothing that reads the songbook sees it. The command is the
+        # CLI twin of this step: `lyra rice refresh [--check]` does by hand what
+        # activation does, and `--check` writes nothing and reports each file's
+        # state. A dry-run activation runs exactly that `--check`. A failure
+        # fails the activation.
         #
         # Gated on the BUILT-IN set, not on the active song: a host that builds a
-        # song in as `available` without performing it still gets seeded, and a
-        # host that built none in gets no seed step at all. Its OWN definition of
-        # the user's home — two definitions of one submodule MERGE (that is the
-        # module system's job), while a single `//` between them would take the
-        # right-hand `home` whole and silently drop the other's activation
-        # entries.
+        # song in as `available` without performing it still gets refreshed, and
+        # a host that built none in gets no refresh step at all. Its OWN
+        # definition of the user's home — two definitions of one submodule MERGE
+        # (that is the module system's job), while a single `//` between them
+        # would take the right-hand `home` whole and silently drop the other's
+        # activation entries.
         #
         # The source is the deployed baseline (`pkgs.lyra-songbook`, which this
-        # host already restricted to its built-in set). `[ ! -e ]` is a read,
-        # evaluated even under `--dry-run`, while `run cp` is not: a dry run over
-        # an existing songbook writes nothing, and one over an absent song prints
-        # the copy and the chmod it would make, as one over a read-only copy
-        # prints the chmod.
+        # host already restricted to its built-in set, `builtin.json` included,
+        # which a bare `rice refresh` reads).
         home-manager.users.${config.aoide.user} =
           { lib, ... }:
           {
@@ -579,18 +582,12 @@ let
             imports = [
               (lib.optionalAttrs (builtIn != [ ]) {
                 home.activation.aoideSeedSongbook = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                  songbookDir="${config.aoide.root}/song/songbook"
-                  run ${pkgs.coreutils}/bin/mkdir -p "$songbookDir"
-                  ${lib.concatMapStrings (name: ''
-                    songDir="$songbookDir/${name}"
-                    if [ ! -e "$songDir" ] && [ ! -L "$songDir" ]; then
-                      run ${pkgs.coreutils}/bin/cp -r "${pkgs.lyra-songbook}/share/lyra/songbook/${name}" "$songDir"
-                      run ${pkgs.coreutils}/bin/chmod -R u+w "$songDir"
-                    elif [ -d "$songDir" ] && [ ! -L "$songDir" ] \
-                      && [ -n "$(${pkgs.findutils}/bin/find "$songDir" ! -perm -u+w -print -quit)" ]; then
-                      run ${pkgs.coreutils}/bin/chmod -R u+w "$songDir"
-                    fi
-                  '') builtIn}
+                  run ${pkgs.coreutils}/bin/mkdir -p "${config.aoide.root}/song/songbook"
+                  if [[ -v DRY_RUN ]]; then
+                    ${refreshCmd} --check
+                  else
+                    ${refreshCmd}
+                  fi
                 '';
               })
 
