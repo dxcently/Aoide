@@ -59,8 +59,10 @@ modules/dendrites/lyra/
   children with none, and it stays active even when the reload refuses or is
   cut off. At login the session starts it; on a switch
   `aoideRestartRice` restarts it together with the shell in ONE `try-restart`,
-  after home-manager's file and systemd steps, which is what puts the reload
-  between the seed and the shell's restart.
+  after home-manager's file and systemd steps and after the QML deploy and both
+  seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedSongbook` — the reload
+  reads the runtime songbook), which is what puts the reload between the seed
+  and the shell's restart.
 
 ## The seam with `quickshell`
 

@@ -651,7 +651,8 @@ let
                 # ONE try-restart names both units, so systemd orders them: the shell is
                 # stopped, `aoide-rice-reload` (Before the shell, below) writes the staged
                 # or drafted song over the declared seed, and only then does the shell
-                # start. Ordered after both writes above, so the reload lands over the
+                # start. Ordered after the three writes (the QML rsync, the stage seed and
+                # the songbook seed, which the reload reads), so the reload lands over the
                 # fresh seed and the restarted shell reads the new tree, never the old
                 # one; after `reloadSystemd`, so a unit this switch introduces is loaded;
                 # and after `onFilesChange`, where home-manager's `hyprctl reload
@@ -673,6 +674,7 @@ let
                   lib.hm.dag.entryAfter
                     [
                       "aoideDeployQml"
+                      "aoideSeedSongbook"
                       "aoideSeedStage"
                       "onFilesChange"
                       "reloadSystemd"
