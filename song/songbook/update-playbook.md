@@ -58,10 +58,12 @@ come back here for the steps. To dress a slot:
 `slot: "ricemode"` (the check reads that literal). The slot resolves through
 the baseline chain below: a song with no `widgets/ricemode.qml` is dressed by
 sonata's, and a song may author its own to put the control in its own grammar,
-provided it keeps the contract: left click calls `bridge.toggleRiceMode()`,
-right or middle click opens the draft picker over `bridge.riceDrafts(cb)` and
-`bridge.riceDraft(action, name)`, and a bridge without `riceDrafts` shows no
-picker. `checks.bar-ricemode` fails a bar body that omits the embed, and a
+provided it keeps the contract: any click opens the rice menu over
+`bridge.riceMenu(cb)` (the cell itself never switches), a song row calls
+`bridge.riceMode("stage", name)`, the declarative row calls
+`bridge.riceMode("declarative")`, the draft rows call
+`bridge.riceDraft(action, name)`, and a bridge without `riceMenu` shows no
+menu. `checks.bar-ricemode` fails a bar body that omits the embed, and a
 songbook whose sonata has no `ricemode`. It reads the committed songbook, so a
 song that exists only in the runtime songbook is checked when `rice declare`
 brings it into the checkout.

@@ -585,7 +585,7 @@ Item {
                 // ── the ❋ spark IS the refresh button ────────────────────────
                 // No new chrome/glyph (nothing to font-verify, hazards §1): the
                 // heartbeat glyph doubles as the affordance, house grammar (the
-                // bar's clef→powermenu, ricemode.qml's cell→toggleRiceMode click
+                // bar's clef→powermenu, ricemode.qml's cell→menu click
                 // precedents).
                 // A ~32px hit area over the 26px glyph; the glyph itself is
                 // untouched. Last child of `head` so it's top-most exactly here.
