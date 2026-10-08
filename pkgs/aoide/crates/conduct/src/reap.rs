@@ -1913,10 +1913,6 @@ mod tests {
     use super::*;
     use aoide_protocol::agents::EIDOLON_PROFILE;
 
-    /// `profile_for` dispatches purely off `rec.agent` (never an env var
-    /// like `CLAUDE_PROFILE`) — an eidolon-enrolled record (whatever put it
-    /// on the roster: `sync_eidolon_sessions` in production) gets
-    /// `EIDOLON_PROFILE` the same generic way any other harness would.
     /// `announce_reap` puts `--` after `--app-name=` and escapes the message.
     /// A stub `notify-send` on PATH logs its argv; the real one is never
     /// reached. GATED on Unix: the stub is a `#!/bin/sh` script.
@@ -1949,6 +1945,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// `profile_for` dispatches purely off `rec.agent` (never an env var
+    /// like `CLAUDE_PROFILE`) — an eidolon-enrolled record (whatever put it
+    /// on the roster: `sync_eidolon_sessions` in production) gets
+    /// `EIDOLON_PROFILE` the same generic way any other harness would.
     #[test]
     fn profile_for_dispatches_eidolon_records_off_their_own_agent_field() {
         let mut rec = agent("user-0001", "", "2026-09-12T00:00:00Z");
