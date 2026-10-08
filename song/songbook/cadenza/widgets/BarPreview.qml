@@ -112,8 +112,8 @@ Item {
     // nothing here can reach a socket either.
     property QtObject replyStub: QtObject {
         function focusSession(id) { harness.bridge.focusSession(id) }
-        function toggleRiceMode() { harness.bridge.toggleRiceMode() }
-        function riceDrafts(cb) { harness.bridge.riceDrafts(cb) }
+        function riceMode(a, n) { harness.bridge.riceMode(a, n) }
+        function riceMenu(cb) { harness.bridge.riceMenu(cb) }
         function riceDraft(a, n) { harness.bridge.riceDraft(a, n) }
         function sendCommand(o) { harness.bridge.sendCommand(o) }
         function workspaceAction(fields, cb) {

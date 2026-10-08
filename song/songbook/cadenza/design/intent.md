@@ -250,17 +250,20 @@ One 28px line in the tmux/termui idiom, left to right:
   `14:02:31` (the calendar pane). CPU and spend are not on the bar; they
   live on the board's SYS tab.
 - **The rice-mode cell is the `ricemode` slot** (`widgets/ricemode.qml`,
-  cadenza's own body; every bar embeds the slot). A left click sends the
-  toggle once and the cell reads a dim `󰏘 …` (padded to the word, so nothing
-  moves) at once; further clicks do nothing until the mode
-  (`song/stage/mode.json` `mode`, through `livery.riceMode`) actually
-  changes, or 10s pass. A switch reloads the shell; a toggle that changed
-  nothing in 10s simply returns the cell to its word and says no more. A
-  right or middle click opens the draft picker, marked by the `󰅀` after the
-  word: a kit Pane titled RICE listing the staged song's saved drafts (the
-  current one lit), `[+ new draft]`, and, in staging only, `[save as draft]`.
-  It has no inner glow, takes no keyboard, and closes on a row, a click on
-  the cell, or 600ms after the pointer leaves both.
+  cadenza's own body; every bar embeds the slot). Any click (left, right or
+  middle) opens the menu, marked by the `󰅀` after the word; the cell itself
+  never switches. The menu is a kit Pane titled RICE (its stat the live
+  song) with three sections: the runtime songs (the staged one lit, the
+  last-staged one hollow while locked, an unreadable one dim and dead), the
+  `[declarative]` row, and `drafts · <song>` listing the staged song's saved
+  drafts (the current one lit), `[+ new draft]`, and, in staging only,
+  `[save as draft]`. A row sends one switch and the cell reads a dim `󰏘 …`
+  (padded to the word, so nothing moves) at once; clicks do nothing until
+  the mode (`song/stage/mode.json` `mode`, through `livery.riceMode`), the
+  draft or the song actually changes, or 10s pass. A switch reloads the
+  shell; one that changed nothing in 10s simply returns the cell to its word
+  and says no more. The Pane has no inner glow, takes no keyboard, and closes
+  on a row, a click on the cell, or 600ms after the pointer leaves both.
 - **The sound + bluetooth pane.** One pane, two sections. SOUND: the output
   and input with volume and mute (click toggles mute, wheel steps volume),
   and the default device picker. BLUETOOTH: a power toggle `[on]`/`[off]`,
