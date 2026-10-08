@@ -56,14 +56,14 @@
           # aoide-shell — kitty's login shell: conduct-by-default with a hard
           # safe-fallback. Order matters and every branch ends in an `exec` so a
           # broken conduct can NEVER strand the user without a shell:
-            #   1. AOIDE_NO_CONDUCT set        → the plain login shell (escape hatch).
-            #   2. `aoide` not on PATH         → the plain login shell (never shell-less).
-            #   3. otherwise                   → `aoide conduct` the login shell, always
-            #      parented to $AOIDE_SESSION_ID when already in the env (nested
-            #      terminals build the graph tree). We ALWAYS wrap — a kitty spawned from
-            #      a conducted shell is still its own conducted session, just parented.
-            #   4. belt-and-suspenders         → if the conduct exec ever returns, fall
-            #      through to the plain login shell anyway.
+          #   1. AOIDE_NO_CONDUCT set        → the plain login shell (escape hatch).
+          #   2. `aoide` not on PATH         → the plain login shell (never shell-less).
+          #   3. otherwise                   → `aoide conduct` the login shell, always
+          #      parented to $AOIDE_SESSION_ID when already in the env (nested
+          #      terminals build the graph tree). We ALWAYS wrap — a kitty spawned from
+          #      a conducted shell is still its own conducted session, just parented.
+          #   4. belt-and-suspenders         → if the conduct exec ever returns, fall
+          #      through to the plain login shell anyway.
           # The login shell is resolved from $SHELL, then passwd, then /bin/sh.
           aoide-shell = pkgs.writeShellScriptBin "aoide-shell" ''
             # Resolve the user's login shell robustly.

@@ -255,7 +255,7 @@ in
   # modules/nucleus/options.nix: a Wayland compositor is started on this host.
   # No module reads another module (root AGENTS.md house rule 5), so a lane
   # that needs a session but not THIS compositor reads the fact instead of
-  # reaching in here. This lane's `nixos` half sets it `mkDefault true`.
+  # reaching in here. This module sets it `mkDefault true`.
   config = lib.mkMerge [
     { aoide.compositor.enable = lib.mkDefault true; }
     (lib.mkIf config.aoide.compositor.enable {
