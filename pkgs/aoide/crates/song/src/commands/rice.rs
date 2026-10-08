@@ -139,9 +139,10 @@ fn handle_rice_lint(inv: &Invocation) -> Outcome {
 /// `missing-name` usage error a truly bare call always had.
 ///
 /// **Marker bookkeeping while in `Staging` mode:** on success, updates
-/// `mode.json`'s `song` to the name just staged (`draft` stays/becomes
-/// `None` — this handler always writes plain declared content, never a
-/// draft). **While in `Draft` mode, the marker is left completely
+/// `mode.json`'s `song` and `stagingSong` to the name just staged (`draft`
+/// stays/becomes `None` — this handler always writes plain declared content,
+/// never a draft). The staged song is always the last one staged, by either
+/// door. **While in `Draft` mode, the marker is left completely
 /// untouched.** This is deliberate, not an oversight: `stage/livery.json`
 /// may currently be a symlink into `songbook/<song>/drafts/<name>/livery.json`
 /// (`rice mode draft`, `commands/mode.rs`), and `handle_rice_stage`'s write
@@ -155,7 +156,7 @@ fn handle_rice_lint(inv: &Invocation) -> Outcome {
 /// marker alone sidesteps that entirely. Only `rice mode stage`/`rice mode
 /// declarative` ever transition OUT of `Draft` (tearing the symlink down
 /// first); this entrypoint is not one of those.
-fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
+pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     let mode_marker = aoide_storage::mode::load_mode_marker();
     if mode_marker.mode == aoide_storage::mode::RiceMode::Declarative {
         return Outcome::error(
@@ -274,11 +275,7 @@ fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
                 mode: mode_marker.mode,
                 song: Some(name.clone()),
                 draft: None,
-                // Out of scope for this entrypoint (the direct, guard-checked
-                // `rice stage <name>` CLI, not `rice mode stage`) — carry the
-                // existing "what was I staging" memory forward unchanged
-                // rather than deriving a new opinion about it here.
-                staging_song: mode_marker.staging_song,
+                staging_song: Some(name.clone()),
                 since: mode_marker.since,
             };
             if aoide_storage::mode::save_mode_marker(&updated).is_ok() {

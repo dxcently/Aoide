@@ -94,8 +94,8 @@ lyra rice stage [<name>] [--json]
   `song/songbook/<name>/widgets/*.qml` into `run/qml/songs/<name>/`;
   `run/qml/songs/registry.json` rewritten for the song from the livery's
   `.widgets` key. In Staging mode with an explicit `<name>`, also updates
-  `song/stage/mode.json`'s `song` (in Draft mode the marker is deliberately
-  untouched). In Draft mode, auto-mints a take (cause `"stage"`): writes
+  `song/stage/mode.json`'s `song` and `stagingSong` (in Draft mode the marker is
+  deliberately untouched). In Draft mode, auto-mints a take (cause `"stage"`): writes
   `song/songbook/<song>/drafts/<draft>/takes/NNNN.json` and
   `takes/head.json` — non-fatal on failure (`take: null, takeError` in data).
 - **Pipes to / output:** best-effort `hyprctl --batch "keyword …; …"` with

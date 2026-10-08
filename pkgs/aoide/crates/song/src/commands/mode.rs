@@ -1652,4 +1652,26 @@ mod tests {
         assert_eq!(read(), forked);
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn rice_stage_in_staging_mode_is_the_song_a_bare_mode_stage_returns_to() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, _stage) = pick_tmp("mode-rice-stage-records-staging-song", &["nocturne", "cadenza", "sonata"]);
+
+        let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["nocturne"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let out = super::super::rice::handle_rice_stage_entry(&inv(&["rice", "stage"], &["cadenza"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let marker = load_mode_marker();
+        assert_eq!((marker.song.as_deref(), marker.staging_song.as_deref()), (Some("cadenza"), Some("cadenza")));
+
+        let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &["sonata"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let marker = load_mode_marker();
+        assert_eq!((marker.song.as_deref(), marker.staging_song.as_deref()), (Some("cadenza"), Some("cadenza")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

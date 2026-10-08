@@ -2056,7 +2056,7 @@ watch. A draft whose `livery.json` is gone is refused by name, writing
 nothing.
 
 **Additive in v0 (khoa, 2026-08-17):** `stagingSong` remembers the last song
-actively used in `Staging` mode — distinct from `song`, which `rice mode
+staged in `Staging` mode, by `rice mode stage <name>` or `rice stage <name>` — distinct from `song`, which `rice mode
 declarative` legitimately overwrites to name the song it re-pinned to (the
 declared song `song/declared/livery.json` names, else the currently staged
 one). Locking declarative must never touch or clear `stagingSong`, so a
