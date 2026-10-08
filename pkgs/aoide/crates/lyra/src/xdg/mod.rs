@@ -7,7 +7,7 @@
 //! `key[locale]=value`, the value types — is [`keyfile`].
 //!
 //! Two consumers read through it: `lyra apps` (`commands::apps`, the listing
-//! and `song/stage/apps.json`) and `lyra launch`. Both take a [`Env`], never
+//! and `song/stage/apps.json`) and the planned `lyra launch`. Both take a [`Env`], never
 //! the process environment, so a test builds an `Env` over temp dirs. A
 //! second parser for any of the three formats does not belong anywhere in the
 //! workspace: widen this module instead (`pkgs/aoide/crates/AGENTS.md`, "no

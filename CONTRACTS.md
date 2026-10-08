@@ -1190,7 +1190,7 @@ applied to the stage tree itself):
 - **`song/stage/`** — rice/paint staging. `livery.json`, `mode.json`, the
   draft-routing symlink target, `grimoire.json`, `apps.json`. Emitted by the
   notes package, `lyra rice`/`cover`/`draft`, `lyra apps publish`
-  (`apps.json`, kept current by the `aoide-apps` user unit) and QML itself
+  (`apps.json`; the `aoide-apps` user unit that keeps it current is planned) and QML itself
   (`grimoire.json`); read by Quickshell. This is lyra's tree.
 - **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
   `projects.json`, `graph.json`, `pending.json`, `herald.json`. Written by
@@ -3616,18 +3616,24 @@ surface, never an API).
 **The single writer is `lyra apps publish`**, over `crate::xdg`, the
 workspace's one freedesktop key-file reader (`.desktop` files, `index.theme`
 files and `gtk-3.0/settings.ini` are the same grammar). The `aoide-apps`
-user unit runs `lyra apps publish --run`: every 2 s it recomputes a
-fingerprint of everything the document is built from — the canonical path of
-each data dir, the name, size and mtime of every `*.desktop` below its
-canonical `applications/`, and the canonical path, size and mtime of
-`$XDG_CONFIG_HOME/gtk-3.0/settings.ini` — and rebuilds only when it changed.
-Every path is re-resolved on every tick and nothing holds an inode or a
+user unit (planned, phase L5c; not on this branch) will run
+`lyra apps publish --run`, which every 2 s recomputes a
+fingerprint of everything the document is built from and rebuilds only when
+it changed. Stamped, each by canonical path: every data dir; in it every
+`*.desktop` below `applications/` (the file's own canonical target, size,
+mtime); `$XDG_CONFIG_HOME/gtk-3.0/settings.ini` (target, size, mtime); every
+`<icon base>/<theme>` the icon chain asks for (the configured theme, its
+`Inherits`, `hicolor`), present or not (directory mtime), and in each one that
+exists its `index.theme` (size, mtime) and every subdir that index lists
+(directory mtime, 0 when absent; a file added to a directory bumps it); and
+the loose-icon dirs, each icon base dir and each `pixmaps` dir (directory
+mtime). Icon files themselves are not stamped. Every path is re-resolved on every tick and nothing holds an inode or a
 watch, so a nix profile swap (a new canonical path) is seen. The file is
 replaced, atomically (`aoide_storage::fs::atomic_write`), only when the new
 document minus `at` differs from the file on disk minus `at`. There is no
 stage lock: the file has one writer and is replaced whole.
 
-**Readers.** QML through `bridge.apps` (`AppsState.qml`); agents through
+**Readers.** QML through `bridge.apps` (`AppsState.qml`, planned, phase L5d); agents through
 `lyra apps list --json`, whose `data` is this exact document, built fresh and
 never read back from the file. `lyra apps show <id> --json` returns one entry
 in the same shape plus `file` (the winning `.desktop`), `listed` (bool) and
@@ -3662,7 +3668,8 @@ in the same shape plus `file` (the winning `.desktop`), `listed` (bool) and
   scale 1. `fallbackIcon`: `application-x-executable` resolved through the same
   chain, or `null`; a body paints it for any entry whose `icon` is `null`.
 - `entries`: sorted by (`name` lowercased, then `id`). Every entry is listable
-  and launchable by id through `lyra launch <id>`. All keys are always present.
+  and launchable by id (`lyra launch <id>`, planned, phase L5b). All keys are
+  always present.
   - `id`: the desktop-file id — the path relative to `applications/` with `/`
     turned into `-`, minus `.desktop`. The first data dir wins (`$XDG_DATA_HOME`,
     then `$XDG_DATA_DIRS` in order). Ids may hold spaces and punctuation
@@ -3674,7 +3681,7 @@ in the same shape plus `file` (the winning `.desktop`), `listed` (bool) and
     and `categories` are `[]`.
   - `icon`: the absolute path of an existing regular `.png`, `.svg` or `.xpm`
     file, or `null`. Never an icon name.
-  - `terminal`: `Terminal=true`; `lyra launch` opens such an app in a
+  - `terminal`: `Terminal=true`; `lyra launch` (planned) opens such an app in a
     conducted terminal. `startupWMClass`: `StartupWMClass` verbatim, or `null`;
     it matches a running window's class to its entry, and the matching is the
     body's job.
@@ -3683,7 +3690,7 @@ in the same shape plus `file` (the winning `.desktop`), `listed` (bool) and
 
 **Never present:** `Exec`, `Path`, `TryExec`, the `.desktop` file path,
 `NoDisplay` or `Hidden` entries, MIME associations, recents, any ranking. What
-runs is decided by `lyra launch <id>`, never by a field of a file under the
+runs is decided by `lyra launch <id>` (planned), never by a field of a file under the
 stage tree.
 
 **Every text field is untrusted** (`name`, `genericName`, `comment`, `keywords`,

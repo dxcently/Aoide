@@ -19,7 +19,8 @@ Handlers live in `pkgs/aoide/crates/lyra/src/commands/apps.rs`. They read
 through `pkgs/aoide/crates/lyra/src/xdg/`, the workspace's one freedesktop
 key-file reader: `entry.rs` (`.desktop` files and the listing filter),
 `icon_theme.rs` (themes and icon lookup), `keyfile.rs` (the shared grammar).
-lyra launch reads the same module; no second parser exists. The document
+`lyra launch` (planned, phase L5b) will read the same module; no second
+parser exists. The document
 shape, the listing filter and the icon rules are CONTRACTS.md §4,
 "`song/stage/apps.json`".
 
@@ -43,7 +44,7 @@ and scale 1.
 Every text field an entry carries (`name`, `genericName`, `comment`,
 `keywords`, `startupWMClass`, action names) is untrusted data from a file
 anyone can install. `Exec`, `Path` and `TryExec` are never emitted: launching
-is by id, through lyra launch.
+is by id, through the planned `lyra launch` (phase L5b).
 
 ## lyra apps list
 
@@ -99,10 +100,17 @@ lyra apps publish [--run] [--json]
 - **Output:** `{path, written, entries, theme}`. A second run with nothing
   changed reports `written: false`.
 - **`--run`:** keeps the file current until stopped. Every 2 s it recomputes a
-  fingerprint of the data dirs' canonical paths, every `*.desktop` below their
-  canonical `applications/` (name, size, mtime) and the canonical
-  `settings.ini`, rebuilds only when it changed, and prints one stderr line for
-  a write. Every path is re-resolved on every tick and nothing holds a watch or
+  fingerprint and rebuilds only when it changed, printing one stderr line for
+  a write. Stamped, each by canonical path: every data dir; in it every
+  `*.desktop` below `applications/` (the file's own canonical target, size,
+  mtime); `settings.ini` (target, size, mtime); every `<icon base>/<theme>` the
+  icon chain asks for (the configured theme, its `Inherits`, `hicolor`),
+  present or not (directory mtime), and in each one that exists its
+  `index.theme` (size, mtime) and every subdir that index lists (directory
+  mtime, 0 when absent); and the loose-icon dirs, each icon base dir and each
+  `pixmaps` dir (directory mtime). A file added to a directory bumps its
+  mtime, so an icon landing after its `.desktop` file is seen; icon files
+  themselves are not stamped. Every path is re-resolved on every tick and nothing holds a watch or
   an inode, so a nix profile swap is seen. A failed write is logged and the
   loop continues. `--run` never returns and is CLI-only: another door refuses it at
   exit 2.
@@ -112,10 +120,11 @@ lyra apps publish
 lyra apps publish --run
 ```
 
-## The aoide-apps unit
+## The aoide-apps unit (planned, phase L5c)
 
-`aoide-apps` is a user unit in `modules/dendrites/lyra/shellbridge.nix`:
-`ExecStart` is `lyra apps publish --run`, `Type=simple`, wanted by, ordered
+Not on this branch. `aoide-apps` will be a user unit in
+`modules/dendrites/lyra/shellbridge.nix`: `ExecStart` is
+`lyra apps publish --run`, `Type=simple`, wanted by, ordered
 after and part of `graphical-session.target`, `Restart=on-failure`
 (`RestartSec=3s`), with `AOIDE_USER` and `AOIDE_ROOT` in its environment and
 `NoNewPrivileges`. The user manager hands it `XDG_DATA_DIRS`,

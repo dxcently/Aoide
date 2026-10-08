@@ -8,14 +8,15 @@
 //! - `apps publish` writes `song/stage/apps.json` (CONTRACTS.md §4, "apps.json
 //!   v0"). With `--run` it keeps that file current until stopped: every 2 s it
 //!   recomputes a [`fingerprint`] of everything the document is read from, and
-//!   only a changed fingerprint rebuilds it. The `aoide-apps` user unit runs
-//!   exactly that, so the shell reads a file instead of parsing `.desktop`
-//!   files itself.
+//!   only a changed fingerprint rebuilds it. The planned `aoide-apps` user unit
+//!   will run exactly that, so the shell reads a file instead of parsing
+//!   `.desktop` files itself.
 //!
 //! Desktop entries and icon themes are read by `crate::xdg`, the workspace's
 //! one freedesktop parser. The document carries what a launcher paints and
 //! launches by id: never `Exec`, `Path` or `TryExec`, so what runs is decided
-//! by `lyra launch`, not by a file anyone could write into the stage tree.
+//! by the planned `lyra launch`, not by a file anyone could write into the
+//! stage tree.
 //! `lyra icon` is unrelated: it serves pinned Iconify glyphs.
 
 use crate::dispatch::Invocation;
@@ -157,14 +158,14 @@ fn refuse(cmd: &str, env: &Env, id: &str, missing: Missing) -> Outcome {
         Missing::Unknown => {
             let ids = entry::ids(env);
             let near = closest(id, ids.iter().map(String::as_str), 3);
-            let hint = near.iter().map(|id| format!("`{id}`")).collect::<Vec<_>>().join(", ");
+            let hint = near.iter().map(|id| format!("`{}`", clean_line(id))).collect::<Vec<_>>().join(", ");
             let hint = if near.is_empty() { String::new() } else { format!("; did you mean {hint}?") };
             format!("no desktop entry has that id{hint}")
         }
         Missing::Hidden => "the entry is marked Hidden, which deletes it".to_string(),
         Missing::Invalid(reason) => reason,
     };
-    Outcome::refuse(cmd, Kind::Refused, format!("no app `{id}`"), why, Fix::Run("lyra apps list".into()))
+    Outcome::refuse(cmd, Kind::Refused, format!("no app `{}`", clean_line(id)), why, Fix::Run("lyra apps list".into()))
 }
 
 fn icon_path(resolver: &Resolver, icon: Option<&str>) -> Option<String> {
@@ -262,8 +263,21 @@ fn run(env: &Env, path: &Path) -> ! {
 
 /// Everything the document is built from, as lines that compare equal while nothing changed.
 ///
-/// Every path is re-resolved on every call and nothing here holds an inode: a
-/// nix profile swap shows only as a new canonical path.
+/// Stamped, each by canonical path:
+/// - every data dir, and in it each `*.desktop` file (size, mtime);
+/// - `gtk-3.0/settings.ini` (size, mtime);
+/// - every `<base>/<theme>` the icon lookup chain asks for (the configured
+///   theme, its `Inherits`, `hicolor`), in every icon base dir, present or not
+///   (directory mtime), and in each one that exists its `index.theme` (size,
+///   mtime) and each subdir the index lists (directory mtime, 0 when absent: a
+///   file added to a directory bumps it; a subdir is not canonicalized);
+/// - the loose-icon dirs: each icon base dir and each `pixmaps` dir (directory
+///   mtime).
+///
+/// Icon files themselves and `.desktop` files outside the data dirs'
+/// `applications/` are not stamped. Every path is re-resolved on every call
+/// and nothing here holds an inode: a nix profile swap shows only as a new
+/// canonical path.
 fn fingerprint(env: &Env) -> Vec<String> {
     let mut lines = Vec::new();
     for dir in &env.data_dirs {
@@ -278,6 +292,15 @@ fn fingerprint(env: &Env) -> Vec<String> {
     }
     let settings = env.config_home.join("gtk-3.0/settings.ini");
     lines.push(format!("settings.ini {}", stamp(&settings)));
+    let inputs = Resolver::inputs(env);
+    for theme in &inputs.themes {
+        lines.push(format!("icon-theme {} {}", theme.dir.display(), dir_stamp(&theme.dir)));
+        if theme.dir.is_dir() {
+            lines.push(format!("icon-index {} {}", theme.index.display(), stamp(&theme.index)));
+            lines.extend(theme.subdirs.iter().map(|d| format!("icon-dir {} {}", d.display(), mtime(d))));
+        }
+    }
+    lines.extend(inputs.loose.iter().map(|d| format!("icon-loose {} {}", d.display(), dir_stamp(d))));
     lines
 }
 
@@ -287,6 +310,17 @@ fn stamp(path: &Path) -> String {
     let Ok(meta) = std::fs::metadata(path) else { return format!("{target} absent") };
     let modified = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
     format!("{target} {} {modified}", meta.len())
+}
+
+fn dir_stamp(path: &Path) -> String {
+    let target = std::fs::canonicalize(path).map_or_else(|_| "unresolved".to_string(), |p| p.display().to_string());
+    format!("{target} {}", mtime(path))
+}
+
+/// Directory mtime in nanoseconds, 0 when absent: a file added to the directory bumps it.
+fn mtime(path: &Path) -> u128 {
+    let modified = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+    modified.and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos())
 }
 
 #[cfg(test)]
@@ -384,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn the_fingerprint_follows_the_desktop_files_and_nothing_else() {
+    fn the_fingerprint_follows_desktop_file_changes_and_ignores_stray_files() {
         let s = Scratch::new("apps-print");
         let env = s.env(&["share"]);
         let file = s.write("share/applications/a.desktop", &app("a"));
@@ -401,11 +435,57 @@ mod tests {
         assert_ne!(fingerprint(&env), modified, "a file removed");
 
         s.touch("share/applications/notes.txt");
-        s.touch("share/icons/hicolor/48x48/apps/x.png");
         let settled = fingerprint(&env);
         s.touch("share/applications/more.txt");
-        s.touch("share/icons/hicolor/48x48/apps/y.png");
-        assert_eq!(fingerprint(&env), settled, "other files do not count");
+        s.touch("share/other/x.png");
+        assert_eq!(fingerprint(&env), settled, "files that are not desktop entries or icon inputs do not count");
+    }
+
+    #[test]
+    fn an_icon_landing_after_its_desktop_file_changes_the_fingerprint_and_the_republished_document() {
+        let s = Scratch::new("apps-print-icon");
+        s.write("share/icons/hicolor/index.theme", "[Icon Theme]\nName=hicolor\nDirectories=48x48/apps\n\n[48x48/apps]\nSize=48\nType=Fixed\n");
+        s.write("share/applications/tool.desktop", &desktop_with_icon("tool"));
+        let env = s.env(&["share"]);
+        let path = s.path("stage/apps.json");
+        publish(&env, &path, "t1").unwrap();
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(doc["entries"][0]["icon"], Value::Null);
+        let before = fingerprint(&env);
+        assert_eq!(fingerprint(&env), before);
+
+        let icon = s.touch("share/icons/hicolor/48x48/apps/tool.png");
+        assert_ne!(fingerprint(&env), before, "the icon landed in a listed subdir");
+        assert!(publish(&env, &path, "t2").unwrap().written);
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(doc["entries"][0]["icon"], icon.display().to_string());
+    }
+
+    #[test]
+    fn a_new_theme_a_missing_subdir_appearing_and_a_pixmap_all_change_the_fingerprint() {
+        let s = Scratch::new("apps-print-theme");
+        s.write("config/gtk-3.0/settings.ini", "[Settings]\ngtk-icon-theme-name=late\n");
+        s.write("share/icons/hicolor/index.theme", "[Icon Theme]\nName=hicolor\nDirectories=48x48/apps\n\n[48x48/apps]\nSize=48\nType=Fixed\n");
+        let env = s.env(&["share"]);
+        let before = fingerprint(&env);
+        assert_eq!(Resolver::new(&env).theme(), "hicolor");
+
+        std::fs::create_dir_all(s.path("share/icons/hicolor/48x48/apps")).unwrap();
+        let subdir = fingerprint(&env);
+        assert_ne!(subdir, before, "a listed subdir that did not exist");
+        s.write("share/icons/late/index.theme", "[Icon Theme]\nName=late\nInherits=deep\nDirectories=16x16/apps\n\n[16x16/apps]\nSize=16\nType=Fixed\n");
+        let theme = fingerprint(&env);
+        assert_ne!(theme, subdir, "the configured theme gets an index.theme");
+        assert_eq!(Resolver::new(&env).theme(), "late");
+        s.write("share/icons/deep/index.theme", "[Icon Theme]\nName=deep\nDirectories=\n");
+        let parent = fingerprint(&env);
+        assert_ne!(parent, theme, "an Inherits parent that did not exist");
+        s.touch("share/pixmaps/tool.xpm");
+        assert_ne!(fingerprint(&env), parent, "a loose pixmap");
+    }
+
+    fn desktop_with_icon(icon: &str) -> String {
+        format!("{}Icon={icon}\n", app("Tool"))
     }
 
     #[test]
@@ -445,6 +525,19 @@ mod tests {
         let list = list_text(&build(&env, "t"));
         assert_eq!(list.lines().count(), 2, "a count line and one entry line: {list:?}");
         assert!(!list.replace('\n', "").chars().any(char::is_control), "{list:?}");
+    }
+
+    #[test]
+    fn a_refusal_cleans_the_ids_it_suggests_and_the_id_it_echoes() {
+        let s = Scratch::new("apps-clean-near");
+        s.write("share/applications/firefox\n\u{1b}.desktop", &app("Evil"));
+        let env = s.env(&["share"]);
+        let o = show(&env, &Resolver::new(&env), "firefoxes");
+        let why = o.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap();
+        assert!(why.contains("did you mean `firefox`"), "a suggestion was made: {why:?}");
+        for text in [why, o.message.as_str()] {
+            assert!(!text.chars().any(char::is_control), "{text:?}");
+        }
     }
 
     #[test]

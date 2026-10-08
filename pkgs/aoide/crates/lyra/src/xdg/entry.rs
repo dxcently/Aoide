@@ -30,7 +30,7 @@ pub struct Entry {
     pub icon: Option<String>,
     /// `Exec` after the key-file string unescape and nothing more. The field
     /// codes and the argument quoting rules apply to exactly this value, and
-    /// `lyra launch` is the only reader that applies them.
+    /// the planned `lyra launch` is the only reader that applies them.
     pub exec: Option<String>,
     pub path: Option<String>,
     pub terminal: bool,

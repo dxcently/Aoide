@@ -386,12 +386,12 @@ are core `aoide` identity, root `AGENTS.md`).
   `gtk-3.0/settings.ini` share), `entry` (desktop entries by id, the first
   data dir wins, and the listing filter) and `icon_theme` (the theme chain and
   icon lookup at one nominal size). Everything takes an `Env`, never the
-  process environment, so a test builds one over temp dirs. `commands::apps` and
-  `lyra launch` read through it; neither carries a parser of its own.
+  process environment, so a test builds one over temp dirs. `commands::apps` (and the
+  planned `lyra launch`) read through it; neither carries a parser of its own.
 - `commands::apps` — `apps list`/`apps show`/`apps publish [--run]`: the
   installed desktop apps with their icons resolved to files, and
-  `song/stage/apps.json` (CONTRACTS.md §4), which the `aoide-apps` user unit
-  keeps current with `apps publish --run`. `list` and `show` build fresh and
+  `song/stage/apps.json` (CONTRACTS.md §4), which `apps publish --run` keeps
+  current (the `aoide-apps` user unit that runs it is planned). `list` and `show` build fresh and
   never read the file; `publish` replaces it atomically, and only when the
   document minus `at` changed. docs/Aoide-Wiki/concepts/cli/Apps-Commands.md
   has the commands.

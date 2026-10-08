@@ -51,8 +51,27 @@ const EXTENSIONS: [&str; 3] = ["png", "svg", "xpm"];
 
 pub struct Resolver {
     theme: String,
+    wanted: Option<String>,
+    bases: Vec<PathBuf>,
+    visited: Vec<String>,
     chain: Vec<Theme>,
     unthemed: Vec<PathBuf>,
+}
+
+/// What a [`Resolver`] read, as paths: change one and a fresh resolver may answer differently.
+pub struct Inputs {
+    /// Every `<base>/<theme>` the chain asked for, present or not.
+    pub themes: Vec<ThemeInput>,
+    /// The dirs searched for a loose icon: each base dir and each `pixmaps` dir.
+    pub loose: Vec<PathBuf>,
+}
+
+pub struct ThemeInput {
+    pub dir: PathBuf,
+    /// Its `index.theme`.
+    pub index: PathBuf,
+    /// The subdirs its index lists, present or not; empty for a theme the chain did not find.
+    pub subdirs: Vec<PathBuf>,
 }
 
 struct Theme {
@@ -61,6 +80,7 @@ struct Theme {
 }
 
 struct Subdir {
+    rel: String,
     kind: Kind,
     size: u32,
     min: u32,
@@ -132,6 +152,15 @@ fn outside(low: u32, high: u32, size: u32) -> u32 {
 
 impl Resolver {
     pub fn new(env: &Env) -> Resolver {
+        Resolver::read(env, true)
+    }
+
+    /// What [`Resolver::new`] reads, without listing a single icon directory.
+    pub fn inputs(env: &Env) -> Inputs {
+        Resolver::read(env, false).inputs_read()
+    }
+
+    fn read(env: &Env, list: bool) -> Resolver {
         let bases: Vec<PathBuf> =
             std::iter::once(env.home.join(".icons")).chain(env.data_dirs.iter().map(|d| d.join("icons"))).collect();
         let unthemed = bases
@@ -140,13 +169,29 @@ impl Resolver {
             .chain(env.data_dirs.iter().map(|d| d.join("pixmaps")))
             .chain(std::iter::once(PathBuf::from("/usr/share/pixmaps")))
             .collect();
-        let theme = user_theme(env)
-            .filter(|t| index(&bases, t).is_some())
-            .unwrap_or_else(|| HICOLOR.to_string());
-        let mut chain = Vec::new();
-        collect(&bases, &theme, &mut chain);
-        collect(&bases, HICOLOR, &mut chain);
-        Resolver { theme, chain, unthemed }
+        let wanted = user_theme(env);
+        let theme = wanted.clone().filter(|t| index(&bases, t).is_some()).unwrap_or_else(|| HICOLOR.to_string());
+        let (mut chain, mut visited) = (Vec::new(), Vec::new());
+        collect(&bases, &theme, &mut chain, &mut visited, list);
+        collect(&bases, HICOLOR, &mut chain, &mut visited, list);
+        Resolver { theme, wanted, bases, visited, chain, unthemed }
+    }
+
+    fn inputs_read(&self) -> Inputs {
+        let mut names: Vec<&str> = self.wanted.iter().chain(&self.visited).map(String::as_str).collect();
+        names.dedup();
+        let themes = names
+            .iter()
+            .flat_map(|name| {
+                let listed = self.chain.iter().find(|t| t.name == *name);
+                self.bases.iter().map(move |base| {
+                    let dir = base.join(name);
+                    let subdirs = listed.map_or_else(Vec::new, |t| t.dirs.iter().map(|d| dir.join(&d.rel)).collect());
+                    ThemeInput { index: dir.join("index.theme"), dir, subdirs }
+                })
+            })
+            .collect();
+        Inputs { themes, loose: self.unthemed.clone() }
     }
 
     /// The theme the chain started from.
@@ -187,22 +232,23 @@ fn index(bases: &[PathBuf], theme: &str) -> Option<PathBuf> {
 }
 
 /// Appends `name` then its parents depth-first; a theme already in the chain is skipped.
-fn collect(bases: &[PathBuf], name: &str, chain: &mut Vec<Theme>) {
-    if chain.iter().any(|t| t.name == name) {
+fn collect(bases: &[PathBuf], name: &str, chain: &mut Vec<Theme>, visited: &mut Vec<String>, list: bool) {
+    if visited.iter().any(|v| v == name) {
         return;
     }
+    visited.push(name.to_string());
     let Some(kf) = index(bases, name).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| KeyFile::parse(&t).ok())
     else {
         return;
     };
     let parents = kf.comma_list("Icon Theme", "Inherits").unwrap_or_default();
-    chain.push(Theme { name: name.to_string(), dirs: subdirs(&kf, bases, name) });
+    chain.push(Theme { name: name.to_string(), dirs: subdirs(&kf, bases, name, list) });
     for parent in parents {
-        collect(bases, &parent, chain);
+        collect(bases, &parent, chain, visited, list);
     }
 }
 
-fn subdirs(kf: &KeyFile, bases: &[PathBuf], theme: &str) -> Vec<Subdir> {
+fn subdirs(kf: &KeyFile, bases: &[PathBuf], theme: &str, list: bool) -> Vec<Subdir> {
     let listed = |key: &str| kf.comma_list("Icon Theme", key).unwrap_or_default();
     let number = |dir: &str, key: &str| kf.string(dir, key).and_then(|v| v.parse::<u32>().ok());
     listed("Directories")
@@ -219,12 +265,13 @@ fn subdirs(kf: &KeyFile, bases: &[PathBuf], theme: &str) -> Vec<Subdir> {
                 _ => Kind::Threshold,
             };
             Some(Subdir {
+                rel: path.clone(),
                 kind,
                 size,
                 min: number(&path, "MinSize").unwrap_or(size),
                 max: number(&path, "MaxSize").unwrap_or(size),
                 threshold: number(&path, "Threshold").unwrap_or(2),
-                places: bases.iter().filter_map(|b| Place::list(b.join(theme).join(&path))).collect(),
+                places: if list { bases.iter().filter_map(|b| Place::list(b.join(theme).join(&path))).collect() } else { Vec::new() },
             })
         })
         .collect()

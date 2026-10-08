@@ -330,10 +330,10 @@
   (`Directories`, `ScaledDirectories`, `Inherits`) are comma-separated
   (`KeyFile::comma_list`); desktop-entry lists are `;`-separated.
 - **`apps.json` never carries `Exec`, `Path` or `TryExec`.** The document
-  names an app by id and `lyra launch <id>` decides what runs, so nothing
+  names an app by id and `lyra launch <id>` (planned, L5b) decides what runs, so nothing
   under the stage tree can name a command. `commands::apps`' test greps the
   serialized document for all three.
-- **`TryExec` is checked only when it is absolute.** The `aoide-apps` unit's
+- **`TryExec` is checked only when it is absolute.** The planned `aoide-apps` unit's
   `PATH` is its `path` list, not the session's, so looking up a relative
   `TryExec` there would drop kitty, nvim and every other app that carries one
   from the launcher, and `lyra apps list` in a terminal would disagree with
@@ -351,8 +351,12 @@
   Reordering the key or folding the kinds together reopens that regression.
 - **`apps publish --run` re-resolves every path on every tick and holds no
   watch.** A nix profile swap re-points a chain of symlinks, so an inotify
-  watch on a store path never fires again; `fingerprint` canonicalizes each
-  data dir and `settings.ini` afresh each tick instead. `--run` is CLI-only,
+  watch on a store path never fires again; `fingerprint` re-resolves each
+  data dir, `.desktop` file, `settings.ini` and icon-theme input afresh each
+  tick instead. It stamps what the `Resolver` reads (`Resolver::inputs`): the
+  theme chain's `index.theme` files, the subdirs they list and the loose-icon
+  dirs, by directory mtime, so an icon landing after its `.desktop` is seen.
+  A new thing `Resolver` reads belongs in `inputs`. `--run` is CLI-only,
   because over another door it would hold the call open forever.
 
 ## Extension points
@@ -362,7 +366,7 @@
   lyra's `commands::all()`.
 - **A new special-cased command** extends the `special` closure passed to
   `aoide_protocol::door::run` in `run_lyra`.
-- **A new reader of desktop entries** (`lyra launch`) calls
+- **A new reader of desktop entries** (the planned `lyra launch`) calls
   `xdg::entry::{find, ids, scan}` and applies the `Exec` field codes and
   argument quoting to `Entry::exec`, the key-file-unescaped value; that
   tokenising stays with the reader that executes.

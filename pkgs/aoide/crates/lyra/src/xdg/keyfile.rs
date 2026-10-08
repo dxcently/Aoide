@@ -38,7 +38,7 @@ impl KeyFile {
     /// Groups keep their order. The first occurrence of a key in a group wins.
     pub fn parse(text: &str) -> Result<KeyFile, ParseError> {
         let mut groups: Vec<Group> = Vec::new();
-        for (i, raw) in text.lines().enumerate() {
+        for (i, raw) in text.strip_prefix('\u{feff}').unwrap_or(text).lines().enumerate() {
             let line = raw.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
@@ -175,6 +175,12 @@ mod tests {
 
     fn kf(text: &str) -> KeyFile {
         KeyFile::parse(text).unwrap()
+    }
+
+    #[test]
+    fn a_leading_byte_order_mark_is_not_part_of_the_first_group() {
+        let k = kf("\u{feff}[G]\nA=1\n");
+        assert_eq!(k.raw("G", "A"), Some("1"));
     }
 
     #[test]
