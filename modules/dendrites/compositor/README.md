@@ -18,7 +18,7 @@ modules/dendrites/compositor/
   only the provider the selecting host named; the whole-tree aggregate
   contributes every provider's `body`. Adding an alternative is one directory
   plus one line here; removing it is deleting both, with no other edit in the
-  tree. Each provider file is a lane record of its own.
+  tree. Each provider file is a plain module of its own.
 - **`hyprland/default.nix` — the LOOK.** Wires Hyprland as the NixOS Wayland
   compositor (`programs.hyprland`, the home-manager `wayland.windowManager.
   hyprland` config, `package = null` so the binary is installed once), applies

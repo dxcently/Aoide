@@ -59,7 +59,7 @@ records, found one level deep by their own directories' `default.nix`. This is
 [[dxflake]]'s pattern, implemented in-house, and
 the concrete case of [[Plugin-Architecture]]'s discovery-by-existing rule.
 
-**habit's composition** (`inputs.habit`, re-exported as `lib.composition`) is the selection engine: the host record is evaluated
+**habit's composition** (`inputs.habit`, re-exported as `lib.composition`) is the selection engine: the host module's `habit.*` keys are evaluated
 in an ordinary `evalModules` pass that knows nothing about NixOS, and the
 platform module list is assembled from the result — only what selection kept is
 imported. It resolves the aggregations a host (or one of its users) took, the
@@ -89,8 +89,8 @@ Aoide's own flake inputs once, in `nucleusModule` (the same value exported as
 **discovered-packages overlay** from `lib/pkgs.nix` — the *same* source the
 flake's `packages` output and the `pkg-<name>` checks read, so paint lanes
 reference `pkgs.aoide` / `pkgs.lyra-shell` … without drift — and wires the two
-song hooks (`selectionModules` puts `song.declared`/`song.available` on the host
-record; `extraModulesFor` turns the selection into the built-in songs'
+song hooks (`selectionModules` puts `habit.song.declared`/`habit.song.available` on the host
+module; `extraModulesFor` turns the selection into the built-in songs'
 `rice.nix` files and the `aoide.song`/`aoide.songbook.builtIn` facts). Each
 song's `rice.nix` guards itself with
 `lib.mkIf (config.aoide.song == "<name>")`, so a host performs the one song it
@@ -132,7 +132,7 @@ package (from `lib/pkgs.nix`) so every package builds under `nix flake check`.
 headless QEMU boot of the whole stack via `pkgs.testers.runNixOSTest`
 (4 GiB / 4 vCPU, KVM). Its node is assembled from the **same** parts
 the constructor uses — habit's composition `mkNixosModules` over an inline
-host record, the nucleus lane, the
+host module, the nucleus lane, the
 home-manager modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
 so the overlay applies) — so the test boots the real assembly, not a
@@ -177,7 +177,7 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.song` (`nullOr str`, default `null`) — which song this host performs.
   Null performs no song: the paint lanes read the null and deploy nothing (no
   QML tree, no shell service). Set once in `hosts/<host>/default.nix` (and
-  `song.available` with it, for what the host keeps built in); each
+  `habit.song.available` with it, for what the host keeps built in); each
   song's `rice.nix` guards itself
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`

@@ -29,8 +29,8 @@ songLandmineFires                   throws  songbook landmine: an unselected son
 songUnknownName                     throws  'nope' is not in the songbook; discovered: alpha, landmine, noshelf
 songAvailableUnknown                throws  'nope2' is not in the songbook; discovered: alpha, landmine, noshelf
 songNoRice                          throws  song noshelf has no rice.nix
-songWithoutLyra                     throws  song.declared = "alpha" needs the lyra dendrite: select aggregations.aoideos (or dendrites.lyra) on this host
-songAvailableWithoutLyra            throws  song.available = ["alpha"] needs the lyra dendrite: select aggregations.aoideos (or dendrites.lyra) on this host
+songWithoutLyra                     throws  habit.song.declared = "alpha" needs the lyra dendrite: select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host
+songAvailableWithoutLyra            throws  habit.song.available = ["alpha"] needs the lyra dendrite: select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host
 songEscapeClean                     ok      ""
 songEscapeFound                     ok      "escaper/rice.nix"
 songBorrowClosure                   ok      "borrower lender"

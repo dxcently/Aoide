@@ -1,9 +1,9 @@
-# tests/consumer/hosts/consumer.nix — the fixture's host record.
+# tests/consumer/hosts/consumer.nix — the fixture's host module.
 #
-# A consumer's host record answers the same interface AoideOS's do, because it is
+# A consumer's host answers the same interface AoideOS's do, because it is
 # the same constructor: aggregations it selects, songs it performs and builds
-# in, people, then its own platform settings. `song.declared` is the song it
-# PERFORMS; `song.available` holds the other song it builds in — which borrows
+# in, people, then its own platform settings. `habit.song.declared` is the song it
+# PERFORMS; `habit.song.available` holds the other song it builds in — which borrows
 # the performer's widgets, so the borrow closure is exercised on a consumer's own
 # songbook rather than on Aoide's.
 _: {

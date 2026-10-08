@@ -1,7 +1,7 @@
 # tests/quickshell-seam/hosts/test-song-without-lyra.nix — a song with no
 # performer.
 #
-# `aoide.song` is a FACT derived from the host record's `song.declared`: it says
+# `aoide.song` is a FACT derived from the host's `habit.song.declared`: it says
 # "perform this rice". A host that says so and takes no `lyra` lane has nothing
 # to build the QML from, deploy it, seed the stage or restart — the failure is
 # silent everywhere else (every `rice.nix` self-gates on its own name, and no

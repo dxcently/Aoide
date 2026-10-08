@@ -5629,7 +5629,7 @@ true against null — so a host that names nothing imports no song and gets no
 song's config, and the paint lanes (which read the active song to bake and
 deploy) activate only when a song IS named: no QML tree, no shell service
 otherwise, not an empty surface. A song selected with no `lyra` lane is refused
-by name — `song.declared = "<n>" needs the lyra dendrite: select
+by name — `habit.song.declared = "<n>" needs the lyra dendrite: select
 aggregations.aoideos (or dendrites.lyra) on this host` — because a song is QML
 painted by lyra, and every `rice.nix` self-gates on a name nothing else reads.
 `sonata` is the shipped standard, the guaranteed-present baseline every fleet

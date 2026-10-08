@@ -58,9 +58,9 @@ sits outside it under `$AOIDE_ROOT`, created on demand.
 
 ### `songbook/<name>/` — one song each
 
-A song is SELECTED, not walked: a host record names what it performs
-(`song.declared`) and what it keeps built in to stage without a rebuild
-(`song.available`); `lib/songbook.nix` finds `song/songbook/<song>/` by one
+A song is SELECTED, not walked: a host module names what it performs
+(`habit.song.declared`) and what it keeps built in to stage without a rebuild
+(`habit.song.available`); `lib/songbook.nix` finds `song/songbook/<song>/` by one
 typed scan and `lib/aoideos.nix` wires exactly the selected songs' `rice.nix`
 files in, each guarding itself with
 `lib.mkIf (config.aoide.song == "<name>")` ([[Self-Ricing]],

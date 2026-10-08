@@ -295,7 +295,7 @@ the same commit as the seams they describe.
   derivation table (unit/exec-once/reload/override), render failure
   leaves the old config and reports.
 - **L-E3 — the elements lane (nix, L).** `modules/dendrites/elements/`
-  (its lane record, README + AGENTS): readDir the declared song's
+  (its plain module, README + AGENTS): readDir the declared song's
   `elements/`, parse descriptors at eval, populate
   `aoide.arrangement.elements` (new option under the existing
   arrangement namespace, declared in nucleus options.nix) and the

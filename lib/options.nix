@@ -71,7 +71,7 @@ let
       # value `lib/aoideos.nix`'s nucleus module imports into a host. It comes
       # from HERE rather than through `../modules/nucleus` because the
       # `aoide.*` option contract is part of the doc list this file renders,
-      # and a bare `evalModules` has no lane to close over the inputs for it.
+      # and a bare `evalModules` has no constructor to close over the inputs for it.
       aoideInputs.aoide.nixosModules.default
       { config._module.check = false; }
     ];

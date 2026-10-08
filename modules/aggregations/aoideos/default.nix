@@ -6,10 +6,11 @@
 # app set, and without a single coding agent. Composing the two is the host's
 # line to write, not this body's to guess.
 #
-# The SONGS are not a member. A host names them on its own record
-# (`song.declared` / `song.available`), because whether a `rice.nix` is imported
-# is decided in the constructor's gate pass — before any aggregation body is
-# read — and only the host record is available that early. `lyra` rides here
+# The SONGS are not a member. A host names them in its own module
+# (`habit.song.declared` / `habit.song.available`), because whether a `rice.nix`
+# is imported is decided in the constructor's selection pass — before any
+# aggregation body is read — and only the host module's `habit.*` keys are
+# available that early. `lyra` rides here
 # because a host performing a song without a performer is refused (with a
 # message naming this aggregation as the fix).
 #

@@ -45,7 +45,7 @@ let
   # Aoide's.
 
   # ── What this host BUILDS IN ────────────────────────────────────────────
-  # `song.declared ∪ song.available` on its record, derived by the
+  # `habit.song.declared ∪ habit.song.available` in its module, derived by the
   # constructor's hook into the fact `aoide.songbook.builtIn`. Everything below
   # that used to run over every committed song runs over these names
   # instead: the deployed manifest and registry, the widget bodies, the

@@ -27,7 +27,7 @@ every host, and defeats the seam it lives in.
 ## Never a second naming site
 
 `modules/overrides/default.nix` names the records, by file name. Nothing else
-names a record file — not `flake.nix`, not a host record, not another module.
+names a record file — not `flake.nix`, not a host, not another module.
 Deleting a file plus nothing else removes the fix: that is what makes it a
 plugin.
 

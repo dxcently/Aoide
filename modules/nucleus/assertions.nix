@@ -1,10 +1,10 @@
 # modules/nucleus/assertions.nix — the platform's invariant surface.
 #
-# The twin of the constructor's gate pass: habit's composition checks a host
-# RECORD before any module graph exists, and this file checks the graph that
-# graph produced. Both exist because neither can see the other's failure — a
-# hand-set `aoide.song` with no lane to paint it gets past the record (the
-# record says nothing about songs today) and lands here, where the platform
+# The twin of the constructor's selection pass: habit's composition reads a
+# host's `habit.*` keys before any module graph exists, and this file checks
+# the graph that graph produced. Both exist because neither can see the other's
+# failure — a hand-set `aoide.song` with no lane to paint it gets past the
+# selection (which says nothing about a hand-set option) and lands here, where the platform
 # knows.
 #
 # It reads only what nucleus is allowed to read (root AGENTS.md house rule 5):
@@ -31,7 +31,7 @@
     # to change is which lane the host takes.
     {
       assertion = config.aoide.song == null || config.aoide.lyra.enable;
-      message = "aoide.song = \"${config.aoide.song}\" needs the lyra dendrite: select aggregations.aoideos (or dendrites.lyra) on this host";
+      message = "aoide.song = \"${config.aoide.song}\" needs the lyra dendrite: select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host";
     }
   ];
 }

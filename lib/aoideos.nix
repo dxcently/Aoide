@@ -3,7 +3,7 @@
 # Two things, and they answer to each other: `hostNames` is the machines this
 # flake holds, and `mkHost name` assembles the per-host outputs for one of them.
 # It is the only place that knows both halves of the flake's shape at once —
-# where the module tree is, where the host records are, and which input supplies
+# where the module tree is, where the hosts are, and which input supplies
 # Home Manager — so `flake.nix` stays a list of the flake's own outputs and
 # nothing else.
 #
@@ -140,7 +140,7 @@ in
       inherit system;
 
       hostName = name;
-      # The host records this flake holds, for the one thing the constructor
+      # The hosts this flake holds, for the one thing the constructor
       # needs the list for: an override record confined to unknown host names is
       # a typo, and it fails by name instead of applying nowhere.
       knownHosts = hostNames;

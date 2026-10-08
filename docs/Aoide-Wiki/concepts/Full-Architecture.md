@@ -246,8 +246,8 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
 
 Song replay is implemented: `aoide.song` (nucleus option, `nullOr str`,
 default `null` — naming no song performs no song) is the song a host
-performs, and a host SELECTS its songs (`song.declared` is what it performs,
-`song.available` what it builds in to stage without a rebuild);
+performs, and a host SELECTS its songs (`habit.song.declared` is what it performs,
+`habit.song.available` what it builds in to stage without a rebuild);
 `lib/songbook.nix` finds `song/songbook/<song>/` by one typed scan and
 `lib/aoideos.nix` builds exactly the selected songs in, so a committed song
 self-registers and self-gates on `config.aoide.song == "<name>"` — the same

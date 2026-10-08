@@ -18,7 +18,7 @@ modules/dendrites/wallpaper/
   only the provider the selecting host named; the whole-tree aggregate
   contributes every provider's `body`. Adding an alternative is one file plus
   one line here; removing it is deleting both, with no other edit in the tree.
-  Each provider file is a lane record of its own.
+  Each provider file is a plain module of its own.
 - **The fact `aoide.wallpaper.provider`** (`modules/nucleus/options.nix`) is the
   name of the provider that answers here: each provider sets it to its own name
   `mkDefault`, so a host may stand a provider's config down by overriding it

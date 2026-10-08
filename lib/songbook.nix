@@ -4,8 +4,8 @@
 # THREE callers, one file, so nothing here can drift from anything else:
 #
 #   - `lib/aoideos.nix`, the constructor — `discover` names the songs,
-#     `selectionModule` puts `song.declared` / `song.available` on the host
-#     record, and `songModules` / `builtIn` turn that selection into the
+#     `selectionModule` puts `habit.song.declared` / `habit.song.available`
+#     on the host module, and `songModules` / `builtIn` turn that selection into the
 #     platform's modules and facts.
 #   - `modules/dendrites/lyra/default.nix`'s `quickshellConfig` derivation
 #     imports this at BUILD time to emit `manifest.json`/`registry.json` into
@@ -298,9 +298,9 @@ let
   ) songNames;
 
   # ── Selection ───────────────────────────────────────────────────────────────
-  # `song.declared` and `song.available` are HOST-RECORD fields: whether a song's
-  # `rice.nix` is imported is decided in the gate pass, before any platform
-  # evaluation, and only the host record is read that early
+  # `habit.song.declared` and `habit.song.available` are HOST fields: whether a
+  # song's `rice.nix` is imported is decided in the selection pass, before any
+  # platform evaluation, and only the host module's `habit.*` keys are read that early
   # (docs/architecture/NIX-COMPOSITION.md, "Selection before platform
   # evaluation"). A user-level selection could be added later, additively; there
   # is no such thing today.
@@ -343,8 +343,8 @@ let
   # ── The gate-pass checks ────────────────────────────────────────────────────
   # Run by the constructor's hook before the platform module list is assembled,
   # which is as early as the selection exists: a bad song name, a song with no
-  # `rice.nix`, and a song with no performer are all record typos or record
-  # mistakes, and all three are cheaper to catch before a module graph exists
+  # `rice.nix`, and a song with no performer are all typos or mistakes in the
+  # host's selection, and all three are cheaper to catch before a module graph exists
   # than after.
   #
   # A `throw`, not an assertion hung on the selection config: the gate pass is a
@@ -362,9 +362,9 @@ let
       noRice = lib.filter (n: !(builtins.pathExists (songbook + "/${n}/rice.nix"))) selected;
       named =
         if song.declared != null then
-          "song.declared = \"${song.declared}\""
+          "habit.song.declared = \"${song.declared}\""
         else
-          "song.available = ${builtins.toJSON song.available}";
+          "habit.song.available = ${builtins.toJSON song.available}";
     in
     lib.throwIf (unknown != [ ])
       (
@@ -375,7 +375,7 @@ let
         lib.throwIf (noRice != [ ]) "song ${lib.concatStringsSep ", " noRice} has no rice.nix" (
           lib.throwIf (selected != [ ] && !lyra) (
             "${named} needs the lyra dendrite:"
-            + " select aggregations.aoideos (or dendrites.lyra) on this host"
+            + " select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host"
           ) song
         )
       );
@@ -387,7 +387,7 @@ let
   # lender that is not itself built in leaves the borrower's manifest naming a
   # directory that is not on disk: the deployed `songs/<owner>/<file>` does not
   # exist, and the slot renders nothing. The closure is not a new concept — it is
-  # exactly what the host writing `song.available = [ … ]` would say — and it is
+  # exactly what the host writing `habit.song.available = [ … ]` would say — and it is
   # the same set the runtime resolves against (`StagingEngine`'s `entry.owner`),
   # so the widget copy, the shipped templates, `packagesFor`, the machine
   # songbook seed and `builtin.json` all agree by construction. A lender becomes
@@ -423,7 +423,7 @@ let
   # The package names the built-in songs' widgets declare (`lib/song.nix`'s
   # `composeSong`), resolved by the caller against its own `pkgs`. Takes the
   # NAMES, not a selection: the lane that installs them reads the fact
-  # `aoide.songbook.builtIn`, not the host record.
+  # `aoide.songbook.builtIn`, not the host module.
   packagesFor = names: lib.unique (lib.concatMap (name: songMeta.${name}.packages or [ ]) names);
 in
 {

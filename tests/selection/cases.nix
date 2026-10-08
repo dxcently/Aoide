@@ -68,7 +68,7 @@ rec {
     builtins.concatStringsSep "," inv.aggregation;
 
   # ── Songs: discovery and selection (lib/songbook.nix) ──────────────────────
-  # The songbook the constructor validates a host record against, over a fixture
+  # The songbook the constructor validates a host's selection against, over a fixture
   # with the shapes the real one holds: a plain song, a song whose `rice.nix` is
   # a landmine, a folder with no `rice.nix`, a `_`-shelved folder, and a stray
   # non-`.nix` file. Discovery names songs and nothing else; a selection decides

@@ -1,6 +1,6 @@
 # tests/consumer/songs/duet/rice.nix — the song built in but NOT performed.
 #
-# `song.available = [ "duet" ]` imports this file (it is built in: its widgets
+# `habit.song.available = [ "duet" ]` imports this file (it is built in: its widgets
 # land in the deployed tree and its folder in the shipped templates), and its
 # own gate — `aoide.song == "duet"`, which nothing sets on this host — keeps it
 # from dressing a desktop it is not painting. An available song that quietly

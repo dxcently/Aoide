@@ -483,7 +483,7 @@ in
         record's song selection — and CLOSED UNDER BORROWS (CONTRACTS.md §5): a
         song whose records borrow another song's slots builds the lender in too,
         because the borrower's slots resolve to `songs/<owner>/<file>` on disk.
-        A host record never sets it.
+        A host never sets it.
       '';
     };
 
