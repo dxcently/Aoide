@@ -110,10 +110,8 @@ lyra shellbridge [--run] [--json]
 ```
 
 - **Reads:** env `$XDG_RUNTIME_DIR` (socket parent; falls back to
-  `/run/user/1000`), `$AOIDE_DEFAULT_SONG` (the rice-mode toggle's
-  declarative-direction song, baked in by `modules/dendrites/lyra/shellbridge.nix`);
-  `song/stage/mode.json` (the toggle's current mode — rice staging, so it
-  stays under `song/stage/`). Newline-delimited JSON commands on its socket
+  `/run/user/1000`), `song/stage/mode.json` (the menu's
+  current mode — rice staging, so it stays under `song/stage/`). Newline-delimited JSON commands on its socket
   (below).
 - **Writes:** seeds `state/stage/sessions.json` and `state/stage/hooks.json`
   with their empty v0 registry shapes, atomic and only when absent or corrupt
@@ -135,9 +133,11 @@ lyra shellbridge [--run] [--json]
   `focussession` (Hyprland jump via `crate::graph`), `power`
   (`lock|logout|suspend|hibernate|reboot|shutdown` → spawns `hyprlock`,
   `hyprctl dispatch exit`, or `systemctl suspend|hibernate|reboot|poweroff`,
-  detached with a reaper thread), `ricemode` (re-execs the same binary as
-  `rice mode <stage|declarative> [song] --json`, waits, then fires a detached
-  `notify-send "Aoide" <message>`), `ricedraft` (the draft picker's gesture, a
+  detached with a reaper thread), `ricemode` (the RICE menu's switch, a closed
+  `stage <name>|declarative` whitelist: re-execs `lyra rice mode stage <name>` /
+  a bare `lyra rice mode declarative` with `--json`, waits, then fires a
+  detached `notify-send "Aoide" <message>` on success and failure; the audit
+  line is `ricemode action <action>: <ok|failed>`, never a song), `ricedraft` (the draft picker's gesture, a
   closed `enter|new|save` whitelist, fire-and-forget like `ricemode`: re-execs
   `lyra rice mode draft <name>` / `lyra rice draft save` with `--json` — from
   declarative, `enter` and `new` first run a bare `lyra rice mode stage` and
@@ -145,10 +145,12 @@ lyra shellbridge [--run] [--json]
   `partial: `-prefixed when an earlier step had already succeeded; `enter` is
   enter-or-create, because the CLI forks the stage into a name that is not
   there yet; the audit line is `ricedraft action <action>: <ok|partial|
-  failed>`, never a name), `ricedrafts` (the picker's READ: re-execs `lyra rice
-  draft list <song> --json` under a 4 s bound and answers one line, `{ok, mode,
-  song, drafts: [{name, savedAt, current}]}`, or `{ok:false, reason, message}`;
-  it takes no fields, so it has no gate to fail), `refreshusage` (detached re-exec
+  failed>`, never a name), `ricemenu` (the menu's READ: re-execs `lyra rice
+  list --json`, then `lyra rice draft list <song> --json` when the mode names a
+  song, under one 4 s budget, and answers one line, the list's `{mode, song,
+  draft, stagingSong, declared, songs}` plus `{draftsSong, drafts: [{name,
+  savedAt, current}]}`, or `{ok:false, reason, message}`; it takes no fields, so
+  it has no gate to fail), `refreshusage` (detached re-exec
   `usage --json`; the gadget picks up the `state/usage.json` write itself),
   `rechecksessions` (detached re-exec `session reap --announce --json`),
   `heraldpush` / `heraldverdict` / `heralddismiss` (the ledger; a verdict

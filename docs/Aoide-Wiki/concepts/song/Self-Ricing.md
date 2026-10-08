@@ -258,7 +258,7 @@ songbook stages and hot-loads without a commit, a merge or a rebuild. The
 declarative path may seed staging (the activation seed, the baked
 templates), never gate it. The staged song is always the LAST one staged:
 `stage/mode.json` remembers it as `stagingSong`, and every way back into
-staging (the bar's RICE toggle, a bare `rice mode stage`, a login after a
+staging (the RICE menu's last-staged row, a bare `rice mode stage`, a login after a
 reboot or a switch) restores that song, never the declared one.
 
 A switch and a reboot restore it the same way. The activation lays the

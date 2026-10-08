@@ -828,7 +828,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   ANSWERED with that refusal rather than dropped, the same rule
   `sessiontrace` holds: one rule for every parked caller.
   The other two replying commands are the READS, `sessiontrace` and
-  `ricedrafts` (both below); every other socket command, `ricemode` and
+  `ricemenu` (both below); every other socket command, `ricemode` and
   `ricedraft` among them, stays fire-and-forget.
 - `commands` — this crate's CLI commands, registered from one `register()`
   call (`conduct/src/commands/graph.rs`, still that file's name
@@ -906,19 +906,31 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   DISCARDED (`no-answer`) rather than answered from partially. Audits refuse,
   never every poll: one line per second per card is not a human gesture, and the
   audit line carries no argument values.
-- **The draft picker's two verbs over the bridge (`shellbridge.rs::RiceDrafts`,
-  `RiceDraft`).** Both re-exec the sibling `lyra` (`daemon::bin::rice_bin()`):
-  `rice` lives there and conduct never depends on the song crate, so the
-  draft-name regex, the minting and every refusal stay the CLI's.
-  `{"cmd":"ricedrafts"}` is the second READ, answered on its own connection and
-  thread like `sessiontrace`: `drafts_song` names the song from the mode
+- **The RICE menu's three verbs over the bridge (`shellbridge.rs::RiceMenu`,
+  `RiceMode`, `RiceDraft`).** Any click on the bar's RICE cell opens the one
+  menu; nothing switches until a row is chosen. All three re-exec the sibling
+  `lyra` (`daemon::bin::rice_bin()`): `rice` lives there and conduct never
+  depends on the song crate, so the name regexes, the minting and every refusal
+  stay the CLI's.
+  `{"cmd":"ricemenu"}` is the second READ, answered on its own connection and
+  thread like `sessiontrace`: `dispatch_rice_menu` runs `rice list --json`
+  under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and
+  passes its `data` through (`mode`, `song`, `draft`, `stagingSong`,
+  `declared`, `songs`); then, when `drafts_song` names a song from the mode
   marker (`stagingSong` first while declarative is locked, since an unlock
-  lands there; `song` first otherwise), `run_bin_bounded` — the runner
-  `run_core_bounded` wraps — holds `rice draft list <song> --json` to 4 s,
-  under the QML client's 5 s, and the answer is `{ok, mode, song, drafts:
-  [{name, savedAt, current}]}` or `{ok:false, reason: cli-failed|no-answer,
-  message}`: a child that did not answer is never an empty list. With no song
-  the answer is empty and nothing is spawned.
+  lands there; `song` first otherwise), runs `rice draft list <song> --json`
+  with the budget left. The answer adds `draftsSong` and `drafts:
+  [{name, savedAt, current}]`, or is `{ok:false, reason: cli-failed|no-answer,
+  message}`: a child that did not answer is never an empty list, and a failed
+  `rice list` starts no second child. With no song `drafts` is empty and one
+  child ran.
+  `{"cmd":"ricemode","action":"stage|declarative","name"?}` is the switch,
+  fire-and-forget: `stage` takes a `name` that is one argv token and runs `rice
+  mode stage <name>`; `declarative` refuses one and runs a bare `rice mode
+  declarative` (the CLI resolves the declared twin); anything else is dropped.
+  The outcome is a toast through the shared `notify`, on success and failure;
+  the audit line is `ricemode action <stage|declarative>: <ok|failed>` and
+  carries no song name.
   `{"cmd":"ricedraft","action":"enter|new|save","name"?}` is fire-and-forget
   like `ricemode`, its outcome a toast through the shared `notify`. The set is
   closed (`RiceDraftAction::from_wire`: `enter` takes a `name` that is one argv
@@ -928,11 +940,11 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   stopping at the first failure — `partial` when an earlier step had
   succeeded, which nothing rolls back. From declarative, `enter` and `new` first
   run a BARE `rice mode stage` (house rule 10: it restores `stagingSong`,
-  where the toggle's lock direction passes the declared song), and `save` is a
+  never the declared song), and `save` is a
   taught refusal, `declarative mode is locked — unlock first, then save the
   draft`: the stage there is the declared song, `rice draft save` nests under
   the song the stage names, and the listing names `stagingSong`, so a save
-  would land where the picker never looks. `enter` is enter-or-create: `rice
+  would land where the menu never looks. `enter` is enter-or-create: `rice
   mode draft` forks the stage into a name that does not exist yet, and the
   bridge cannot tell. The audit line is one per action
   (`ricedraft action <enter|new|save>: <ok|partial|failed>`) and carries

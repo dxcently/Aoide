@@ -205,8 +205,8 @@ ShellRoot {
 
     // The stub bridge — every method the songbook widgets call today, each
     // only logging. Confirmed against `grep -rn 'bridge\.' song/songbook/*/
-    // widgets/`: sendCommand, focusSession, recheckSessions, toggleRiceMode,
-    // refreshUsage, sessionAction. `focusWindow` and the picker's `riceDrafts`
+    // widgets/`: sendCommand, focusSession, recheckSessions, riceMode,
+    // refreshUsage, sessionAction. `focusWindow` and the menu's `riceMenu`
     // and `riceDraft` are on ShellBridge but no committed widget calls them
     // yet; they are stubbed anyway so a widget that starts calling one on this
     // canvas gets a log line, not a crash.
@@ -218,7 +218,6 @@ ShellRoot {
             canvas.log("bridge.focusWindow " + JSON.stringify({ address: address }))
         }
         function recheckSessions() { canvas.log("bridge.recheckSessions {}") }
-        function toggleRiceMode() { canvas.log("bridge.toggleRiceMode {}") }
         function refreshUsage() { canvas.log("bridge.refreshUsage {}") }
         function sendCommand(obj) {
             canvas.log("bridge.sendCommand " + JSON.stringify(obj))
@@ -238,25 +237,40 @@ ShellRoot {
                            message: "preview canvas stub — nothing was sent" })
             })
         }
-        // The picker's read — same signature and callback contract as
-        // ShellBridge.riceDrafts, answered ASYNCHRONOUSLY (Qt.callLater, for
-        // the same reason sessionAction is) so the picker's pending state
-        // renders. The mode is the canvas livery's own; the control file's
-        // `drafts` key replaces the one canned draft, so a canvas run can pin
-        // an empty list or a long one.
-        function riceDrafts(callback) {
-            canvas.log("bridge.riceDrafts {}")
+        // The menu's gesture — only logs, like sendCommand: the real one is
+        // fire-and-forget and its outcome is a daemon toast. The logged line is
+        // the one ShellBridge.riceMode would send: a name only for a non-empty
+        // string on `stage`.
+        function riceMode(action, name) {
+            var wanted = { action: "" + action }
+            if (action === "stage" && typeof name === "string" && name.length > 0)
+                wanted.name = name
+            canvas.log("bridge.riceMode " + JSON.stringify(wanted))
+        }
+        // The menu's read — same signature and callback contract as
+        // ShellBridge.riceMenu, answered ASYNCHRONOUSLY (Qt.callLater, for
+        // the same reason sessionAction is) so the menu's pending state
+        // renders. The mode is the canvas livery's own and the songbook is the
+        // canvas song alone; the control file's `drafts` key replaces the one
+        // canned draft, so a canvas run can pin an empty list or a long one.
+        function riceMenu(callback) {
+            canvas.log("bridge.riceMenu {}")
             if (!callback) return
             Qt.callLater(function () {
                 callback({ ok: true, stub: true,
                            mode: canvas.liveryState.riceMode,
                            song: canvas.songName,
+                           draft: null,
+                           stagingSong: canvas.songName,
+                           declared: null,
+                           songs: [{ name: canvas.songName, ok: true }],
+                           draftsSong: canvas.songName,
                            drafts: canvas.controlDoc.drafts
                                || [{ name: "draft-1", savedAt: "2026-01-01T00:00:00Z",
                                      current: false }] })
             })
         }
-        // The picker's gesture — only logs, like sendCommand: the real one is
+        // The menu's draft gesture — only logs, like sendCommand: the real one is
         // fire-and-forget and its outcome is a daemon toast. The logged line is
         // the one ShellBridge.riceDraft would send: a name only for a non-empty
         // string on `enter`.

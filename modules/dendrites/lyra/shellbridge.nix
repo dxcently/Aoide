@@ -102,7 +102,7 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
     #                the compositor to exec hyprlock, since a hyprlock started
     #                under this unit's NoNewPrivileges cannot run the setuid
     #                unix_chkpwd and refuses every password.
-    #   libnotify  — `notify-send`: the rice-mode toggle's success toast.
+    #   libnotify  — `notify-send`: the RICE menu's toasts.
     #   procps     — `ps`: the desktop-Codex process-table scan the window
     #                listener's ticks run (`conduct::graph::codex_app::
     #                process_table`).
@@ -165,19 +165,6 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
         # carry this var — review finding, task #107: paint data belongs on
         # the unit that paints, not every unit this file happens to declare.
         "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
-      ]
-      # Nix-declared baseline song — same env-baked-into-the-service
-      # precedent as quickshell's AOIDE_WALLPAPER (modules/dendrites/lyra/
-      # default.nix). Read by dispatch_rice_mode_toggle's declarative-
-      # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
-      # re-pins to the shipped baseline instead of whatever song happens to
-      # be staged. Null when no song is named (a null song deploys nothing —
-      # options.nix) — omit the var entirely rather than interpolate null;
-      # shellbridge.rs already reads it as an Option (std::env::var(..).ok()),
-      # so an absent var and a re-pin with nothing to re-pin to are the same
-      # thing to the reader.
-      ++ lib.optionals (config.aoide.song != null) [
-        "AOIDE_DEFAULT_SONG=${config.aoide.song}"
       ]
       ++ [
         # The process running this unit IS lyra now, so shellbridge's core_bin()

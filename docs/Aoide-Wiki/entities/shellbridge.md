@@ -57,7 +57,7 @@ issues the socket command, never shells out. The command set is narrow (jump
 only; prune remains an open thread, see below).
 
 **The read-only trace query** (`{cmd:"sessiontrace", sessionId, lines, clip}`)
-is one of the socket's two READs (the draft picker's `ricedrafts`, below, is the
+is one of the socket's two READs (the RICE menu's `ricemenu`, below, is the
 other): it re-execs the existing CLI —
 `aoide session trace <id> --tail N --clip line|detail --json`,
 [[Eidolon-Trace]] — and replies with one JSON line of STEPS (one object per
@@ -77,20 +77,32 @@ The conductor card and its Details page are its only callers
 flight, stopped the moment nothing is looked at — a snapshot while viewed, never
 a token stream). Refusals are audited; a successful poll is not.
 
-**The draft picker** is two verbs over the song's saved rice drafts, both
-re-execs of the sibling `lyra` (`rice` lives there, as `ricemode` does) and
-neither holding a draft rule of its own — the CLI owns the name regex, the
-minting and every refusal, and conduct never depends on the song crate.
+**The RICE menu** is three verbs over the runtime songbook and the song's
+saved rice drafts, all re-execs of the sibling `lyra` (`rice` lives there) and
+none holding a rice rule of its own — the CLI owns the name regexes, the
+minting and every refusal, and conduct never depends on the song crate. Any
+click on the bar's RICE cell opens the one menu; nothing switches until a row
+is chosen.
 
-`{cmd:"ricedrafts"}` is the socket's other READ. It names the song through
-the mode marker — `stagingSong` first while declarative is locked (the song an
-unlock lands on), `song` first in every other mode — and re-execs `lyra rice
-draft list <song> --json` under a 4 s wall clock, below the QML client's own
-5 s. The answer is one line, `{ok:true, mode, song, drafts:[{name, savedAt,
-current}]}`; with no song to name it is `drafts:[]` and no child is started. A
-child that fails or answers nothing readable is a refusal, `{ok:false,
-reason:"cli-failed"|"no-answer", message}`, never an empty list. Refusals are
-audited as `ricedrafts-refused`; a successful read is not.
+`{cmd:"ricemenu"}` is the socket's other READ. It runs `lyra rice list --json`
+and passes its `data` through (`mode`, `song`, `draft`, `stagingSong`,
+`declared`, `songs`), then names the drafts' song through the mode marker —
+`stagingSong` first while declarative is locked (the song an unlock lands on),
+`song` first in every other mode — and runs `lyra rice draft list <song>
+--json` with the budget left of one 4 s wall clock, below the QML client's own
+5 s. The answer is one line, the list's data plus `draftsSong` and
+`drafts:[{name, savedAt, current}]`; with no song to name it is `drafts:[]` and
+only one child ran. A child that fails or answers nothing readable is a
+refusal, `{ok:false, reason:"cli-failed"|"no-answer", message}`, never an
+empty answer, and a failed `rice list` starts no second child. Refusals are
+audited as `ricemenu-refused`; a successful read is not.
+
+`{cmd:"ricemode", action:"stage"|"declarative", name?}` is the switch, and
+fire-and-forget: `stage` needs a `name` that is one argv token and runs `rice
+mode stage <name>`; `declarative` refuses a `name` and runs a bare `rice mode
+declarative`, whose declared twin the CLI resolves. The outcome is a
+`notify-send` toast carrying the CLI's own message, on success and on failure;
+the audit line is `ricemode action <action>: <ok|failed>`, never a song.
 
 `{cmd:"ricedraft", action:"enter"|"new"|"save", name?}` is the gesture, and
 fire-and-forget like `ricemode`: the outcome is a `notify-send` toast carrying
@@ -101,8 +113,8 @@ dropped instead of misread as success. Whether the name is a valid draft name
 is the CLI's call, and so is what happens to it: `rice mode draft <name>`
 ENTERS or CREATES, forking the current stage into a valid name that does not
 exist yet. So `enter` is enter-or-create, and the bridge cannot tell the two
-apart: a stale picker row, or a draft dropped elsewhere since the last
-`ricedrafts`, comes back as a fresh copy of the stage rather than a refusal.
+apart: a stale menu row, or a draft dropped elsewhere since the last
+`ricemenu`, comes back as a fresh copy of the stage rather than a refusal.
 `enter` runs `rice mode draft <name>`; `new` runs `rice draft save` with no
 name, which mints the lowest free `draft-<n>` of the staged song, then enters
 the `data.name` it answered with; `save` runs `rice draft save` and never
@@ -110,12 +122,11 @@ changes the mode.
 
 Entering a draft is refused while declarative is locked, so `enter` and `new`
 from there first run a BARE `rice mode stage` — which restores the remembered
-`stagingSong` (house rule 10), where the toggle's own lock direction passes the
-declared song. `save` has no such step: it is REFUSED while declarative is
+`stagingSong` (house rule 10), never the declared song. `save` has no such step: it is REFUSED while declarative is
 locked, with the toast `declarative mode is locked — unlock first, then save
 the draft`, because the lock re-pins the stage to the declared song and `rice
-draft save` nests under the song the stage names, while `ricedrafts` lists
-`stagingSong`. A save there would land under a song the picker never shows. The
+draft save` nests under the song the stage names, while `ricemenu` lists
+`stagingSong`. A save there would land under a song the menu never shows. The
 refusal runs nothing, and is `failed`, not `partial`. Steps stop at the first
 failure. A failure after an earlier step succeeded is `partial`: nothing rolls
 back (the unlock stands, a minted draft stays saved), and the toast says so,

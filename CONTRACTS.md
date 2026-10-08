@@ -2067,7 +2067,7 @@ staged in `Staging` mode, by `rice mode stage <name>` or `rice stage <name>` —
 declarative` legitimately overwrites to name the song it re-pinned to (the
 declared song `song/declared/livery.json` names, else the currently staged
 one). Locking declarative must never touch or clear `stagingSong`, so a
-later bare `rice mode stage` (no name — what the bar toggle sends) can still
+later bare `rice mode stage` (no name — what a draft row sends to unlock) can still
 resolve back to what was being staged, instead of losing that memory the
 moment a declarative round-trip overwrites `song`. Absent when never set (a
 fresh `mode.json`, or one written before this field existed); readers fall
@@ -5840,9 +5840,10 @@ set of "flavor" surfaces — committed files, not nix options:
   The slot resolves through the baseline chain, so a song with no
   `widgets/ricemode.qml` is dressed by sonata's, which is the floor. A song MAY
   author its own body to put the control in its own grammar; every body keeps
-  the same bridge calls (`toggleRiceMode`, `riceDrafts`, `riceDraft`) and the
-  same gestures: left click toggles staging and declarative, right or middle
-  click opens the draft picker. A borrowed bar brings its lender's body with
+  the same bridge calls (`riceMenu`, `riceMode`, `riceDraft`) and the same
+  gesture: any click opens the one menu — the runtime songbook's songs, one
+  back-to-declarative row, then the draft rows — and nothing switches until a
+  row is chosen. A borrowed bar brings its lender's body with
   it (quodlibet takes fugue's `ricemode` with fugue's `bar`).
 - **Playbook:** `song/songbook/update-playbook.md`.
 

@@ -9,7 +9,7 @@
 // "cmd" field and payload fields. The socket path is the shellbridge default:
 // $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
 // Every command is fire-and-forget except "sessionaction", "projectaction",
-// "workspaceaction", "sessiontrace" and "ricedrafts", which are answered with
+// "workspaceaction", "sessiontrace" and "ricemenu", which are answered with
 // one JSON line on the same connection, which then closes.
 //
 // Communication discipline: this is the ONLY outbound channel from QML.
@@ -54,18 +54,6 @@ QtObject {
         sendCommand({
             cmd: "focuswindow",
             address: address
-        })
-    }
-
-    // ── Rice-mode toggle ───────────────────────────────────────────────────
-    // Backs the bar's mode cell (bar.qml, rightContent's modeText). A click
-    // is a two-way toggle, not a picker: no payload — the daemon reads
-    // stage/mode.json itself and decides staging⇄declarative (see
-    // shellbridge.rs's dispatch_rice_mode_toggle). The picker is the two
-    // verbs below it: riceDrafts reads, riceDraft acts.
-    function toggleRiceMode() {
-        sendCommand({
-            cmd: "ricemode"
         })
     }
 
@@ -216,37 +204,49 @@ QtObject {
                        message: "shellbridge client unavailable" })
     }
 
-    // ── The draft picker ───────────────────────────────────────────────────
-    // One read and one gesture over the song's saved drafts. Neither holds a
-    // draft rule: the daemon re-execs `lyra rice …`, and the CLI owns the name
-    // regex, the minting and every refusal.
+    // ── The RICE menu ──────────────────────────────────────────────────────
+    // One read and two gestures behind the bar's RICE cell. Any click opens the
+    // menu; nothing switches until a row is chosen. None holds a rice rule: the
+    // daemon re-execs `lyra rice …`, and the CLI owns the name rules, the
+    // minting and every refusal.
     //
-    //   bridge.riceDrafts(cb)                 // what the picker lists
+    //   bridge.riceMenu(cb)                   // what the menu lists
+    //   bridge.riceMode("stage", "fugue")     // stage that runtime song
+    //   bridge.riceMode("declarative")        // lock back to the declared song
     //   bridge.riceDraft("enter", "draft-2")  // route the stage into a draft
     //   bridge.riceDraft("new")               // mint the next draft-<n>, enter it
     //   bridge.riceDraft("save")              // snapshot the stage as a draft
     //
-    // `riceDrafts` answers like traceSession: `cb` EXACTLY ONCE, on its own
-    // throwaway socket, no queue and no replay, the daemon's child bounded
-    // under replyTimeoutMs. The answer is
-    // { ok: true, mode, song, drafts: [{ name, savedAt, current }] } — `song`
-    // null and `drafts` empty when nothing is staged — or { ok: false, reason,
-    // message } with `reason` cli-failed / no-answer / no-client. An empty list
-    // with ok:true is "none yet"; a refusal is "nobody answered", and the
-    // picker must not paint the second as the first.
+    // `riceMenu` answers like traceSession: `cb` EXACTLY ONCE, on its own
+    // throwaway socket, no queue and no replay, the daemon's children bounded
+    // together under replyTimeoutMs. The answer is
+    // { ok: true, mode, song, draft, stagingSong, declared, songs: [{ name, ok,
+    // reason? }], draftsSong, drafts: [{ name, savedAt, current }] } — `song`,
+    // `draft`, `stagingSong`, `declared` and `draftsSong` null when unset, and
+    // `drafts` empty when no song is named — or { ok: false, reason, message }
+    // with `reason` cli-failed / no-answer / no-client. An empty list with
+    // ok:true is "none yet"; a refusal is "nobody answered", and the menu must
+    // not paint the second as the first.
     //
-    // `riceDraft` is fire-and-forget through the shared queue, like
-    // toggleRiceMode: no reply, and the outcome is a toast the daemon fires.
-    // `enter` and `new` from the locked declarative mode unlock it first, so a
-    // caller re-reads stage/mode.json and riceDrafts to see what happened; `save`
-    // is refused there (toast: unlock first). `enter` is enter-or-create: the CLI
-    // forks the stage into a name that does not exist yet, so a stale row comes
-    // back as a copy, not a refusal. Only `enter` takes a name, and a missing or
-    // empty one is sent as no name at all, so the daemon drops the line instead
-    // of entering a draft called "undefined".
-    function riceDrafts(callback) {
-        _ask({ cmd: "ricedrafts" }, callback,
+    // `riceMode` and `riceDraft` are fire-and-forget through the shared queue:
+    // no reply, and the outcome is a toast the daemon fires. `riceMode` sends a
+    // name only for "stage" with a non-empty string, so the daemon drops the
+    // line instead of staging a song called "undefined". `riceDraft` `enter`
+    // and `new` from the locked declarative mode unlock it first, so a caller
+    // re-reads riceMenu to see what happened; `save` is refused there (toast:
+    // unlock first). `enter` is enter-or-create: the CLI forks the stage into a
+    // name that does not exist yet, so a stale row comes back as a copy, not a
+    // refusal. Only `enter` takes a name.
+    function riceMenu(callback) {
+        _ask({ cmd: "ricemenu" }, callback,
              { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
+    }
+
+    function riceMode(action, name) {
+        var wanted = { cmd: "ricemode", action: "" + action }
+        if (action === "stage" && typeof name === "string" && name.length > 0)
+            wanted.name = name
+        sendCommand(wanted)
     }
 
     function riceDraft(action, name) {

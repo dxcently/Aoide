@@ -258,8 +258,9 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    `send` injection, acknowledged session actions (the session-menu's
    `undying`/`project`/`kill`/`createproject`/`editproject` calls), the bar's
    `workspaceaction` bind and unbind, the read-only `sessiontrace` query
-   above, and the draft picker's two verbs — the read `ricedrafts` and the
-   gesture `ricedraft` (`enter`/`new`/`save`) — nothing else leaves QML. A new
+   above, and the RICE menu's three verbs — the read `ricemenu`, the switch
+   `ricemode` (`stage <name>`/`declarative`) and the gesture `ricedraft`
+   (`enter`/`new`/`save`) — nothing else leaves QML. A new
    verb is one of two shapes: a READ answers on its own connection, with the
    daemon's bound under the client's reply timeout; an ACTION is
    fire-and-forget, and its outcome is a toast the daemon fires — a widget

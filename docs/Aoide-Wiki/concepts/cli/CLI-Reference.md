@@ -61,7 +61,7 @@ start at [[aoide-cli]] and the group pages linked below.
 ## Group pages
 
 - [[Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
-  `rice lint/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
+  `rice lint/list/stage/compose/declare/transpose`, the `rice draft` / `rice mode` /
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
   Stage files: `song/stage/{livery,cover,mode}.json`, the declared twin
   `song/declared/livery.json` and the venue's `song/declared/venue.json` (the slots it recolours and the

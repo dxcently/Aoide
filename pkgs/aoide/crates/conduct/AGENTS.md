@@ -509,7 +509,7 @@ in the message.
   `sessionId`, a nonsense `lines` and an unknown `clip` (clamping `lines` from
   above only), and `handle_conn` still ANSWERS a line naming that verb which
   fails its gate (`bad-request`) — silence is not an answer. `run_bin_bounded`
-  (`run_core_bounded` is its core-binary wrapper; the picker's read calls it
+  (`run_core_bounded` is its core-binary wrapper; the menu's read calls it
   with `lyra`) is the only way this module runs a READ's child: a wall-clock
   deadline with kill + `wait` (no zombie, no live child past the bound), pipes
   drained by SLOT-COUNTED reader threads that are NEVER joined (`ReaderSlot`; a
@@ -519,7 +519,7 @@ in the message.
   one timed-out tick can outrun. Refusals are audited; a successful poll is not
   (one line per second per card is not a human gesture), and an audit line never
   carries an argument value.
-- **The picker's two verbs hold no draft rule, and the planner is the one place
+- **The RICE menu's verbs hold no rice rule, and the planner is the one place
   a mode changes the plan.** `ricedraft` is `RiceDraftAction::from_wire` (the
   ONE gate: `enter` needs a `safe_session_id`-shaped `name`, `new` and `save`
   REFUSE one — an ignored field is a caller's mistake read as success — and a
@@ -530,15 +530,17 @@ in the message.
   draft-name regex here — `aoide-song` is lyra-only and conduct must not depend
   on it — and never pre-check that a draft exists: `rice mode draft` creates
   one, so an `enter` is enter-or-create and a pre-check would only race it. The
-  unlock is a BARE `rice mode stage` (house rule 10); the toggle's lock
-  direction passes `AOIDE_DEFAULT_SONG`, this one must not. `drafts_song` and
+  unlock is a BARE `rice mode stage` (house rule 10), never a declared song. `drafts_song` and
   the plan agree on ONE song per mode: declarative lists `stagingSong` because
   an unlock lands there, and refuses `save` because the stage there is the
-  declared song — change one and the other moves with it. `ricedrafts` is a
-  READ: it answers on its own connection under `RICE_DRAFTS_TIMEOUT` (below the
-  client's 5 s reply timeout), a child that did not answer is a refusal and
-  never an empty list, and no audit line of either verb carries a draft or a
-  song name.
+  declared song — change one and the other moves with it. `ricemenu` is a
+  READ: it answers on its own connection with both children under the one
+  `RICE_MENU_TIMEOUT` budget (below the client's 5 s reply timeout), the
+  `rice list` data passes through verbatim, a child that did not answer is a
+  refusal and never an empty list, and a failed `rice list` starts no second
+  child. `ricemode` takes `stage` + one argv-token `name` or a bare
+  `declarative` (the CLI resolves the declared twin — never an env song here),
+  and no audit line of any of the three verbs carries a draft or a song name.
 
 - **`session bind` assigns continuity, never authority.** Keep the operation
   daemon-owned and local-only; no missing-daemon fallback. It does not load
@@ -2147,8 +2149,8 @@ in the message.
   and a doc that describes only the sending end is half a page.
 - A change to shellbridge's replying verbs — the
   `sessionaction`/`projectaction`/`workspaceaction` whitelists and reply
-  shapes, the `sessiontrace`/`ricedrafts` reads — or to the fire-and-forget
-  `ricedraft` set updates `ShellBridge.qml`'s protocol comment
+  shapes, the `sessiontrace`/`ricemenu` reads — or to the fire-and-forget
+  `ricemode`/`ricedraft` sets updates `ShellBridge.qml`'s protocol comment
   (`pkgs/lyra-shell/qml/ShellBridge.qml`, which names the verbs it answers) and
   `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same commit.
 - **`graph.json`'s compositor block (`doc::workspace_block`) is ONE seam.**
