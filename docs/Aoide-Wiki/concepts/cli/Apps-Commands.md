@@ -120,9 +120,9 @@ lyra apps publish
 lyra apps publish --run
 ```
 
-## The aoide-apps unit (planned, phase L5c)
+## The aoide-apps unit (planned)
 
-Not on this branch. `aoide-apps` will be a user unit in
+`aoide-apps` will be a user unit in
 `modules/dendrites/lyra/shellbridge.nix`: `ExecStart` is
 `lyra apps publish --run`, `Type=simple`, wanted by, ordered
 after and part of `graphical-session.target`, `Restart=on-failure`

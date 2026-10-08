@@ -3616,7 +3616,7 @@ surface, never an API).
 **The single writer is `lyra apps publish`**, over `crate::xdg`, the
 workspace's one freedesktop key-file reader (`.desktop` files, `index.theme`
 files and `gtk-3.0/settings.ini` are the same grammar). The `aoide-apps`
-user unit (planned, phase L5c; not on this branch) will run
+user unit (planned) will run
 `lyra apps publish --run`, which every 2 s recomputes a
 fingerprint of everything the document is built from and rebuilds only when
 it changed. Stamped, each by canonical path: every data dir; in it every
