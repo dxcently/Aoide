@@ -29,7 +29,8 @@ songbook `lyra rice compose` writes (`$AOIDE_ROOT/song/songbook/<name>/`),
 saved drafts (`$AOIDE_ROOT/song/songbook/<song>/drafts/`), plus `run/qml/`,
 `state/`, and `log`. `lyra rice declare <name>` is the seam between the two
 roots: it copies a composed song from the runtime songbook into the checkout's
-`song/songbook/<name>/` — no `git add`, no rebuild; the user gates those.
+`song/songbook/<name>/`, less its top-level `takes/` and `drafts/` (the
+machine's undo history and scratch, which stay behind) — no `git add`, no rebuild; the user gates those.
 
 ## The subfolders
 
