@@ -158,6 +158,7 @@ mod tests {
             "rice.draft.list",
             "rice.draft.save",
             "rice.lint",
+            "rice.list",
             "rice.mode.declarative",
             "rice.mode.draft",
             "rice.mode.stage",

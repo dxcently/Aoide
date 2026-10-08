@@ -166,6 +166,24 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
   `modules/nucleus/aoided.nix`'s `environment.sessionVariables` (gated on
   `aoide.lyra.enable`) — core-only units don't carry it.
 
+### lyra rice list
+
+```
+lyra rice list [--json]
+```
+
+- **Reads:** the directories under `song/songbook/` whose name is a valid song
+  name and which hold a `livery.json`; each one's notes are parsed. Also reads
+  `song/stage/mode.json` and the declared twin `song/declared/livery.json`.
+- **Output:** `"N song(s)"`; data `{mode, song, draft, stagingSong, declared,
+  songs: [{name, ok, reason?}]}`, `songs` sorted by name. `mode` is the rice
+  mode; `song` and `draft` are the live pair, `stagingSong` the last-staged
+  song, `declared` the declared one (each null when absent). `ok` is false with
+  `reason` `unreadable` or `invalid-json` when the notes do not parse.
+- **Notes:** read-only. The song-stage gate (the §7.5 songbook evaluation) is
+  not run, so `ok` means the notes parse and `lyra rice mode stage <name>`
+  decides the rest. An absent songbook is `ok` with an empty list.
+
 ### lyra rice draft save
 
 ```
@@ -370,7 +388,7 @@ lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
   `clear-takes-no-path`, exit 2 — the two spellings mean opposite things.
   A cover applies only while its `song` matches the staged song; one naming
   another song is ignored, which is why a pick survives re-staging its own
-  song (a bare `lyra rice stage`, the RICE toggle, a declarative re-seed, a
+  song (a bare `lyra rice stage`, the bar's RICE control, a declarative re-seed, a
   rebuild) and never shows over a different one. Nothing is committed; the
   baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback. When the host's
   wallpaper provider is not the shell's own layer (a page of its own:

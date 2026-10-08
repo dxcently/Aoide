@@ -24,6 +24,15 @@ pub fn register(r: &mut Registry) {
         handler: handle_rice_lint,
     ));
     r.insert(cmd!(
+        path: ["rice", "list"],
+        summary: "List the runtime songbook's songs — what `rice mode stage <name>` switches to — with the rice mode, the live and last-staged song and the declared one.",
+        args: [],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: handle_rice_list,
+    ));
+    r.insert(cmd!(
         path: ["rice", "stage"],
         summary: "Hot-load a rice live — ALWAYS the declared committed content, ignoring any saved draft (stage/livery.json hot-reload + best-effort hyprctl geometry/border/glass apply + stage/terminal-colors.conf pushed to open kitty windows); nothing committed. No <name>: re-stages the currently active song's declared content, overriding whatever draft `rice mode stage` may have auto-loaded. Refuses while `rice mode declarative` is locked.",
         args: [arg!("name", "string", false, "Rice/song name to stage; defaults to the currently active song's declared content.")],
@@ -45,6 +54,40 @@ pub fn register(r: &mut Registry) {
         handler: handle_rice_compose,
         examples: ["rice compose moonlight --from sonata"],
     ));
+}
+
+fn handle_rice_list(_inv: &Invocation) -> Outcome {
+    let mut songs: Vec<Value> = std::fs::read_dir(shellbridge::songbook_root())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| {
+            crate::compose::valid_song_name(name) && shellbridge::songbook_notes(name).is_file()
+        })
+        .map(|name| {
+            let parsed = std::fs::read_to_string(shellbridge::songbook_notes(&name))
+                .map_err(|_| "unreadable")
+                .and_then(|raw| {
+                    serde_json::from_str::<Value>(&raw).map_err(|_| "invalid-json")
+                });
+            match parsed {
+                Ok(_) => json!({ "name": name, "ok": true }),
+                Err(reason) => json!({ "name": name, "ok": false, "reason": reason }),
+            }
+        })
+        .collect();
+    songs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    let m = aoide_storage::mode::load_mode_marker();
+    Outcome::ok("rice.list", format!("{} song(s)", songs.len())).with_data(json!({
+        "mode": super::mode::mode_word(m.mode),
+        "song": m.song,
+        "draft": m.draft,
+        "stagingSong": m.staging_song,
+        "declared": declared_song(),
+        "songs": songs,
+    }))
 }
 
 /// Resolve the `livery.json` a `rice` command should act on:
@@ -1012,6 +1055,89 @@ mod tests {
     }
     use aoide_test_support::*;
     use aoide_protocol::output::Status;
+
+    fn list_fixture(tag: &str) -> (std::path::PathBuf, EnvSaver) {
+        let saver = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp(tag);
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        (root, saver)
+    }
+
+    fn put_song(root: &std::path::Path, name: &str, body: &str) {
+        let dir = root.join("songbook").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("livery.json"), body).unwrap();
+    }
+
+    #[test]
+    fn list_with_no_songbook_is_ok_empty_and_declarative() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-absent");
+        let out = handle_rice_list(&inv(&["rice", "list"], &[]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let d = out.data.unwrap();
+        assert!(d["songs"].as_array().unwrap().is_empty());
+        assert_eq!(d["mode"], "declarative");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_keeps_only_valid_named_dirs_with_notes_sorted() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-filter");
+        put_song(&root, "b-song", "{}");
+        put_song(&root, "a-song", "{}");
+        put_song(&root, "Bad_Name", "{}");
+        put_song(&root, "x.seed-tmp.1", "{}");
+        std::fs::create_dir_all(root.join("songbook").join("nolivery")).unwrap();
+        let out = handle_rice_list(&inv(&["rice", "list"], &[]));
+        let d = out.data.unwrap();
+        let names: Vec<&str> =
+            d["songs"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["a-song", "b-song"]);
+        assert_eq!(out.message, "2 song(s)");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_flags_invalid_json_notes() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-badjson");
+        put_song(&root, "broken", "{not json");
+        put_song(&root, "fine", "{}");
+        let out = handle_rice_list(&inv(&["rice", "list"], &[]));
+        assert_eq!(out.status, Status::Ok);
+        let d = out.data.unwrap();
+        let songs = d["songs"].as_array().unwrap();
+        assert_eq!(songs[0]["name"], "broken");
+        assert_eq!(songs[0]["ok"], false);
+        assert_eq!(songs[0]["reason"], "invalid-json");
+        assert_eq!(songs[1]["ok"], true);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_echoes_the_mode_the_last_staged_and_the_declared_song() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-mode");
+        std::fs::write(
+            root.join("stage").join("mode.json"),
+            r#"{"mode":"declarative","song":"sonata","stagingSong":"cadenza"}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("declared")).unwrap();
+        std::fs::write(root.join("declared").join("livery.json"), r#"{"song":"sonata"}"#).unwrap();
+        let out = handle_rice_list(&inv(&["rice", "list"], &[]));
+        let d = out.data.unwrap();
+        assert_eq!(d["mode"], "declarative");
+        assert_eq!(d["song"], "sonata");
+        assert_eq!(d["stagingSong"], "cadenza");
+        assert_eq!(d["declared"], "sonata");
+        assert!(d["draft"].is_null());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn lint_no_arg_without_staged_notes_is_usage_exit_2() {
