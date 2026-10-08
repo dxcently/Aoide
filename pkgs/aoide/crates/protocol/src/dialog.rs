@@ -5,9 +5,10 @@
 //! spawn-retry backoff a failing dialog binary backs off on
 //! ([`next_spawn_backoff`]), and the one pure string-trim
 //! ([`strip_one_trailing_newline`]) every dialog child's stdout is read
-//! through.
+//! through, plus [`escape_markup`], the one escaper for `notify-send` text.
 //!
-//! **This is a pure extraction — every item here moved VERBATIM from
+//! **Apart from [`escape_markup`], this is a pure extraction — every item
+//! here moved VERBATIM from
 //! `aoide_secrets::watch`/`aoide_secrets::client`, generalized away from
 //! secrets-specific naming and doc references only, never its mechanics**
 //! (the same `aoide_protocol::feed::Follower` precedent, P-D1, this
@@ -24,6 +25,8 @@
 //! (`aoide-secrets`' `zenity`/`lyra` entry dialogs AND P-P5's own pairing
 //! confirm dialog), so the type name drops the single-binary implication;
 //! the shim re-exports it under the old name at the old path.
+//! [`escape_markup`] is the one item that is not an extraction: it never
+//! lived in `aoide-secrets`, so it has no old path and no shim.
 //!
 //! `aoide-protocol` is the DAG leaf every domain crate already depends on
 //! (`feed.rs`'s own module doc restates this crate's own dependency
@@ -336,6 +339,16 @@ pub fn escape_markup(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn escape_markup_escapes_ampersand_first_and_leaves_plain_text() {
+        assert_eq!(escape_markup("&lt;"), "&amp;lt;");
+        assert_eq!(escape_markup("<b>a&b</b>"), "&lt;b&gt;a&amp;b&lt;/b&gt;");
+        assert_eq!(escape_markup("<"), "&lt;");
+        assert_eq!(escape_markup(">"), "&gt;");
+        assert_eq!(escape_markup("&"), "&amp;");
+        assert_eq!(escape_markup("plain text 123-456"), "plain text 123-456");
+    }
     #[cfg(unix)]
     use std::path::{Path, PathBuf};
     #[cfg(unix)]
