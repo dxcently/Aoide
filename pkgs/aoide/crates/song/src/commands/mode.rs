@@ -272,12 +272,14 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
             .with_data(json!({ "reason": "symlink-teardown-failed" }));
     }
 
+    let mut data = json!({});
     if let Some(plan) = plan {
         let mut staged = super::rice::apply_rice_stage(plan);
         if staged.status != Status::Ok {
             staged.command = "rice.mode.stage".to_string();
             return staged;
         }
+        data = staged.data.take().unwrap_or(data);
         changed.extend(staged.changed);
     }
 
@@ -303,6 +305,10 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
     }
     changed.push(mode_marker_path().to_string_lossy().into_owned());
 
+    data["mode"] = json!("staging");
+    data["song"] = json!(marker.song);
+    data["seeded"] = json!(seeded_from.as_ref().map(|p| p.to_string_lossy().into_owned()));
+
     // Never silent (task #41's outcome contract).
     let seed_note = match &seeded_from {
         Some(source) => format!(" — seeded songbook from shipped template at {}", source.display()),
@@ -322,11 +328,7 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
         },
     )
     .changed(changed)
-    .with_data(json!({
-        "mode": "staging",
-        "song": marker.song,
-        "seeded": seeded_from.as_ref().map(|p| p.to_string_lossy().into_owned()),
-    }))
+    .with_data(data)
 }
 
 /// `rice mode declarative [<name>]` — lock staging writers. With `<name>`,
@@ -388,12 +390,14 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
     }
 
     let mut changed: Vec<String> = Vec::new();
+    let mut data = json!({});
     if let Some(plan) = plan {
         let mut staged = super::rice::apply_rice_stage(plan);
         if staged.status != Status::Ok {
             staged.command = "rice.mode.declarative".to_string();
             return staged;
         }
+        data = staged.data.take().unwrap_or(data);
         changed = staged.changed;
     }
 
@@ -417,6 +421,9 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
     }
     changed.push(mode_marker_path().to_string_lossy().into_owned());
 
+    data["mode"] = json!("declarative");
+    data["song"] = json!(marker.song);
+
     Outcome::ok(
         "rice.mode.declarative",
         match &resolved_name {
@@ -429,7 +436,7 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
         },
     )
     .changed(changed)
-    .with_data(json!({ "mode": "declarative", "song": marker.song }))
+    .with_data(data)
 }
 
 /// Point `stage/livery.json` at `draft_livery`, removing whatever sits there
@@ -1672,6 +1679,26 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let marker = load_mode_marker();
         assert_eq!((marker.song.as_deref(), marker.staging_song.as_deref()), (Some("cadenza"), Some("cadenza")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stage_and_declarative_keep_the_inner_stage_data_and_add_their_own_keys() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, _stage) = pick_tmp("mode-envelope-keeps-inner-data", &["sonata"]);
+
+        let staged = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["sonata"])).data.unwrap();
+        for key in ["hyprctl", "terminal", "reload", "widgets", "registry", "mode", "song", "seeded"] {
+            assert!(staged.get(key).is_some(), "stage data lacks `{key}`: {staged}");
+        }
+        assert_eq!((staged["mode"].as_str(), staged["song"].as_str()), (Some("staging"), Some("sonata")));
+
+        let locked = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &["sonata"])).data.unwrap();
+        for key in ["hyprctl", "terminal", "reload", "widgets", "registry", "mode", "song"] {
+            assert!(locked.get(key).is_some(), "declarative data lacks `{key}`: {locked}");
+        }
+        assert_eq!(locked["mode"], "declarative");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

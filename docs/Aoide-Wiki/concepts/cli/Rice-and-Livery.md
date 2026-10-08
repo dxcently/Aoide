@@ -108,7 +108,8 @@ lyra rice stage [<name>] [--json]
   anything, spawns `quickshell -p <run_qml_dir>/shell.qml ipc call shell
   reload` (best-effort; success judged on empty stdout, not the exit code —
   `pkgs/aoide/crates/song/src/ipc.rs`). Data keys: `{name, livery, cover,
-  hyprctl, widgets, slots, registry, reload, seam}`.
+  coverStage, wallpaper, hyprctl, terminal, widgets, slots, registry, reload,
+  seam}`.
 - **Notes:** refuses with `reason: "declarative-mode-locked"` (exit 1) while
   `rice mode declarative` is locked. Always stages plain declared content —
   never auto-loads a draft. Nothing is committed. Re-staging identical
@@ -245,7 +246,10 @@ lyra rice mode stage [<name>] [--json]
   `rice stage` writes (stage livery/cover, widget sync, registry sync, live
   `hyprctl`/Quickshell IPC); finally `song/stage/mode.json`
   (`mode: "staging"`, `song`, `stagingSong`, `since`).
-- **Output:** data `{mode: "staging", song, seeded}`.
+- **Output:** the data of the `rice stage` it ran (`hyprctl`, `terminal`,
+  `widgets`, `registry`, `reload`, … — a best-effort failure shows there),
+  plus `{mode: "staging", song, seeded}`; with no song to stage, only those
+  three.
 - **Notes:** unlocks staging writers AND hot-loads immediately — never a
   bare flag-flip except on a genuinely fresh box with no resolvable song.
   This is also how you leave Draft mode. A failed stage (unknown song) does
@@ -271,7 +275,9 @@ lyra rice mode declarative [<name>] [--json]
   unchanged). `song/stage/cover.json` is NOT touched — a lock is not a song
   switch, so a pick stamped for another song is hidden read-side rather than
   dropped (CONTRACTS.md §4).
-- **Output:** data `{mode: "declarative", song}`.
+- **Output:** the data of the re-pin it ran (`hyprctl`, `terminal`,
+  `widgets`, `registry`, `reload`, …), plus `{mode: "declarative", song}`;
+  with no song to re-pin, only those two.
 - **Notes:** locks staging — afterwards `rice stage` and `cover set` refuse
   with `declarative-mode-locked`, with ONE exemption: `cover set --from-skwd`
   records what an external wallpaper provider is already showing (see that
