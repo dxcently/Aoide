@@ -23,7 +23,8 @@
 //! covers this file's own `rice take` handler AND `rice stage`/`cover
 //! set`'s auto-take hooks (phase A3, `commands/rice.rs`/`commands/cover.rs`)
 //! — both call [`snapshot`] plainly, unconditionally, on every successful
-//! Draft-mode write. [`snapshot_if_drifted_unlocked`] carries NO locked
+//! Draft-mode write, and fold the result into their outcome with
+//! [`attach_take`]. [`snapshot_if_drifted_unlocked`] carries NO locked
 //! counterpart at all, deliberately not reintroduced, because it has
 //! exactly ONE sanctioned caller: `rice back`, which must
 //! snapshot-if-drifted, write the revert, AND advance the head cursor as
@@ -40,7 +41,11 @@
 //! preserve un-taken edits before destroying them. A3's hooks run AFTER a
 //! write has already landed — nothing is about to be destroyed — so that
 //! rationale never applied to them, and reusing the drift core there was
-//! this file's own earlier mistake, corrected before landing.
+//! this file's own earlier mistake, corrected before landing. They record
+//! what a write left, so the state BEFORE the first write of a draft has no
+//! take of its own: `rice mode draft` mints that baseline on entry through
+//! [`snapshot_if_identical_to_head`] (cause `enter`), which is what makes the
+//! first edit undoable.
 //!
 //! Everything else about the model — the parent pointer, the flat monotone
 //! counter, the head cursor — lives in `aoide_storage::takes`; this module
@@ -314,8 +319,9 @@ pub(crate) fn snapshot_if_drifted_unlocked(cmd: &str, cause: &str) -> Result<Opt
     snapshot_unlocked(cmd, cause).map(Some)
 }
 
-/// `lyra reload`'s own snapshot core (staging/draft dispatch beat 1,
-/// `lyra reload` design settled by the User 2026-08-31): mints a take of the
+/// The dedupe core (staging/draft dispatch beat 1, `lyra reload` design
+/// settled by the User 2026-08-31), shared by `lyra reload` and the draft
+/// entry baseline (`rice mode draft`): mints a take of the
 /// currently staged livery+cover+widget bodies UNLESS it would be key-wise
 /// IDENTICAL to the current head — the "dedupe against head" rule the User
 /// settled alongside the command itself, so an agent hammering `lyra reload`
@@ -350,12 +356,41 @@ pub(crate) fn snapshot_if_identical_to_head_unlocked(cmd: &str, cause: &str) -> 
     snapshot_unlocked(cmd, cause).map(Some)
 }
 
-/// `lyra reload`'s locked entrypoint: exactly ONE `with_stage_lock` around
+/// The dedupe core's locked entrypoint: exactly ONE `with_stage_lock` around
 /// [`snapshot_if_identical_to_head_unlocked`]'s whole read-compare-write —
-/// same shape as [`snapshot`], reused because reload is not itself already
-/// inside a locked mutator.
+/// same shape as [`snapshot`], reused because neither `lyra reload` nor
+/// `rice mode draft` is itself already inside a locked mutator.
 pub(crate) fn snapshot_if_identical_to_head(cmd: &str, cause: &str) -> Result<Option<TakeRecord>, Outcome> {
     shellbridge::with_stage_lock(|| snapshot_if_identical_to_head_unlocked(cmd, cause))
+}
+
+/// Fold the take a write minted into that write's outcome, the one shape
+/// `rice stage`, `cover set` and `rice mode draft` share: the take and head
+/// files join `changed` (when `marker` names the song and draft they live
+/// under) and `data.take` is the bare take number, `null` when the dedupe core
+/// minted nothing. A failed mint is never fatal — it reads `data.take` null
+/// and `data.takeError`, because the write it records already landed.
+/// (`lyra reload` keeps its own `{take, deduped}` object.)
+pub(crate) fn attach_take(out: &mut Outcome, marker: &mode::ModeMarker, minted: Result<Option<TakeRecord>, Outcome>) {
+    let take = match minted {
+        Ok(Some(record)) => {
+            if let (Some(song), Some(draft)) = (&marker.song, &marker.draft) {
+                out.changed.push(takes::take_path(song, Some(draft), record.take).to_string_lossy().into_owned());
+                out.changed.push(takes::head_path(song, Some(draft)).to_string_lossy().into_owned());
+            }
+            json!(record.take)
+        }
+        Ok(None) => Value::Null,
+        Err(err) => {
+            if let Some(Value::Object(map)) = &mut out.data {
+                map.insert("takeError".to_string(), json!(err.message));
+            }
+            Value::Null
+        }
+    };
+    if let Some(Value::Object(map)) = &mut out.data {
+        map.insert("take".to_string(), take);
+    }
 }
 
 /// `rice take` — the explicit snapshot command (cause `"explicit"`). A bare
@@ -1622,7 +1657,7 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
 /// same `reason: "no-selection"`, still no stdin read and still nothing
 /// written. Only its wording moved when the picker landed, since the old
 /// wording called the picker unbuilt.
-fn handle_rice_back(inv: &Invocation) -> Outcome {
+pub(crate) fn handle_rice_back(inv: &Invocation) -> Outcome {
     let take_flag = match inv.flags.get("take") {
         Some(raw) => match raw.parse::<u32>() {
             Ok(n) => Some(n),

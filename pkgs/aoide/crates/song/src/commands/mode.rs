@@ -30,14 +30,15 @@
 //!   draft-awareness and never auto-prefer or auto-detect one — reaching a
 //!   draft at all only ever happens through `rice mode draft <name>`.
 //!
-//! `stage`/`declarative` both reuse [`super::rice::handle_rice_stage`]
-//! directly (guard-free, `pub(crate)`) when a song name is given — the SAME
-//! side effects a bare `rice stage <name>` has — so `declarative <name>` can
+//! `stage`/`declarative` both run [`super::rice::plan_rice_stage`] and
+//! [`super::rice::apply_rice_stage`] directly (guard-free, `pub(crate)`) when a
+//! song name is given — the SAME side effects a bare `rice stage <name>` has —
+//! so `declarative <name>` can
 //! re-pin `stage/livery.json` to that song's declared notes and lock it in
 //! one step, even from the default (unmarked) declarative state, without
 //! tripping its own guard (the marker isn't flipped until AFTER the write
-//! succeeds). `declarative` takes
-//! [`super::rice::handle_rice_stage_without_cover`]: a lock is not a song
+//! succeeds). `declarative` plans with `repin` set
+//! ([`super::rice::plan_rice_stage`]): a lock is not a song
 //! switch, so it leaves `stage/cover.json` exactly as it stands.
 //!
 //! `rice mode stage` never leaves a bare flag-flip: with no name it resolves
@@ -105,7 +106,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "mode", "draft"],
-        summary: "Route stage/livery.json into songbook/<song>/drafts/<name>/livery.json via a symlink — every future write (rice stage, a hand-edit) lands directly in the draft. Forks the draft from the current stage first if it doesn't exist yet. Refuses while `rice mode declarative` is locked.",
+        summary: "Route stage/livery.json into songbook/<song>/drafts/<name>/livery.json via a symlink — every future write (rice stage, a hand-edit) lands directly in the draft. Forks the draft from the current stage first if it doesn't exist yet, and mints a baseline take of it (unless it equals the head) so the first edit can be undone. Refuses while `rice mode declarative` is locked.",
         args: [arg!("name", "string", true, "Draft name to route the stage into (forked from the current stage if new).")],
         flags: [],
         gated: false,
@@ -549,12 +550,18 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
     }
     changed.push(mode_marker_path().to_string_lossy().into_owned());
 
-    Outcome::ok(
+    // The baseline: a take of the draft as entered, so the first edit has
+    // something to go back to (`rice back --take 1`). After the marker, which
+    // `take::resolve_scope` reads; deduped against the head, so re-entering an
+    // unchanged draft mints nothing; never fatal, the route is already made.
+    let mut out = Outcome::ok(
         "rice.mode.draft",
         format!("draft mode routed — stage/livery.json now points at `{song}`'s draft `{name}`"),
     )
     .changed(changed)
-    .with_data(json!({ "mode": "draft", "song": song, "draft": name }))
+    .with_data(json!({ "mode": "draft", "song": song, "draft": name }));
+    super::take::attach_take(&mut out, &marker, super::take::snapshot_if_identical_to_head("rice.mode.draft", "enter"));
+    out
 }
 
 // ── Tests (rice mode status/stage/declarative/draft) ──────────────────────────
@@ -1504,9 +1511,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A drafted stage: `sonata` committed, the stage routed into the draft
-    /// `neon-night`. Callers own `remove_dir_all(&root)`.
-    fn drafted_stage(tag: &str) -> (PathBuf, PathBuf) {
+    /// `sonata` committed and staged, mode `Staging`. Callers own
+    /// `remove_dir_all(&root)`.
+    fn staged_sonata(tag: &str) -> (PathBuf, PathBuf) {
         let root = unique_tmp(tag);
         let stage = root.join("stage");
         let song = root.join("songbook").join("sonata");
@@ -1521,6 +1528,12 @@ mod tests {
         crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         save_mode_marker(&ModeMarker { mode: RiceMode::Staging, song: Some("sonata".to_string()), ..Default::default() }).unwrap();
+        (root, stage)
+    }
+
+    /// [`staged_sonata`], then routed into the draft `neon-night`.
+    fn drafted_stage(tag: &str) -> (PathBuf, PathBuf) {
+        let (root, stage) = staged_sonata(tag);
         let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         (root, stage)
@@ -1559,6 +1572,84 @@ mod tests {
         assert_eq!(out.status, Status::Error);
         assert_eq!(out.command, "rice.mode.declarative");
         assert_still_drafted(&stage);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── the baseline take on draft entry ──────────────────────────────────
+
+    #[test]
+    fn entering_a_fresh_draft_mints_take_one_with_no_parent() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, stage) = staged_sonata("mode-draft-baseline-fresh");
+
+        let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(out.data.as_ref().unwrap()["take"], 1);
+        assert!(out.changed.iter().any(|c| c.ends_with("neon-night/takes/0001.json")), "{:?}", out.changed);
+
+        let take = aoide_storage::takes::load_take("sonata", Some("neon-night"), 1).unwrap();
+        assert_eq!(take.parent, None);
+        assert_eq!(take.cause, "enter");
+        assert_eq!(take.livery["palette"]["bg"], "#seed");
+        assert_eq!(std::fs::read_to_string(stage.join("livery.json")).unwrap(), std::fs::read_to_string(
+            shellbridge::draft_dir("sonata", "neon-night").join("livery.json")).unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn re_entering_an_unchanged_draft_mints_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, _stage) = drafted_stage("mode-draft-baseline-reenter");
+
+        let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert!(out.data.as_ref().unwrap()["take"].is_null());
+        assert_eq!(aoide_storage::takes::list_takes("sonata", Some("neon-night")).len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_draft_saved_by_rice_draft_save_gets_its_baseline_on_entry() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, _stage) = staged_sonata("mode-draft-baseline-saved");
+        let saved = super::super::draft::fork_stage_into("sonata", "neon-night");
+        assert_eq!(saved.status, Status::Ok, "{:?}", saved.data);
+        assert!(aoide_storage::takes::list_takes("sonata", Some("neon-night")).is_empty());
+
+        let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(out.data.as_ref().unwrap()["take"], 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rice_back_to_the_baseline_restores_the_forked_draft_after_a_reload() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, stage) = drafted_stage("mode-draft-baseline-back");
+        let read = || -> Value { serde_json::from_str(&std::fs::read_to_string(stage.join("livery.json")).unwrap()).unwrap() };
+        let forked = read();
+
+        std::fs::write(
+            stage.join("livery.json"),
+            r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#edited"}}"##,
+        )
+        .unwrap();
+        let reloaded = super::super::take::snapshot_if_identical_to_head("reload", "reload").unwrap().unwrap();
+        assert_eq!((reloaded.take, reloaded.parent), (2, Some(1)));
+
+        let mut back = inv(&["rice", "back"], &[]);
+        back.flags.insert("take".to_string(), "1".to_string());
+        let out = super::super::take::handle_rice_back(&back);
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(read(), forked);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

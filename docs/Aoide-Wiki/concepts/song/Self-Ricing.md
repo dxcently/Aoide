@@ -30,9 +30,11 @@ rice lint                                    (real — livery schema validation)
     ↓  fail → reject + songbook note
 lyra rice mode draft <draft-name>           (real — ROUTES stage/livery.json into a saved
     ↓                                          draft via a symlink; forks it from the
-    ↓                                          current stage if new; see Drafts below)
+    ↓                                          current stage if new, and takes a baseline
+    ↓                                          take of it; see Drafts below)
     ⋯ iterate freely: edit → `lyra reload` → look, no separate save step; every
-       reload snapshots the routed draft too (undo for free via `rice back`); switch
+       reload snapshots the routed draft too (undo for free via `rice back`, back to
+       the entry baseline at the least); switch
        to a different saved iteration any time with another `rice mode draft <name>` ⋯
 lyra rice mode declarative                  (real — tears the routing down, re-pins
     ↓                                          the declared truth; the draft itself
@@ -145,7 +147,8 @@ the stage at it.
   `songbook/<song>/drafts/<name>/livery.json` (`<song>` auto-resolved off
   the current stage, same as `rice mode stage`'s no-arg form). Forks the
   draft from the current stage first if it's a new name. Sets the marker to
-  `{mode: draft, song, draft: <name>}`. Refuses while `rice mode
+  `{mode: draft, song, draft: <name>}`, then mints a baseline take of the
+  draft as entered (none when it equals the head). Refuses while `rice mode
   declarative` is locked.
 - **`rice draft save <name>`** — an INDEPENDENT command: explicitly forks
   whatever's currently live into a new or updated draft snapshot, without

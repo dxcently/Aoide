@@ -297,8 +297,13 @@ lyra rice mode draft <name> [--json]
   save` performs, incl. `cover.json` mirror). Then removes whatever sits at
   `song/stage/livery.json` and creates it as a SYMLINK to
   `song/songbook/<song>/drafts/<name>/livery.json`. Finally writes
-  `song/stage/mode.json` (`mode: "draft"`, `song`, `draft`, `since`).
-- **Output:** data `{mode: "draft", song, draft}`.
+  `song/stage/mode.json` (`mode: "draft"`, `song`, `draft`, `since`). Last, a
+  baseline take of the draft as entered (cause `enter`, the take and head files
+  join `changed`), unless it equals the head: re-entering an unchanged draft
+  mints nothing, and a failed mint never fails the command.
+- **Output:** data `{mode: "draft", song, draft, take}`; `take` is the minted
+  take number, `null` when none was minted (`takeError` says why when the mint
+  failed).
 - **Notes:** refuses while declarative-locked (`declarative-mode-locked`) and
   when no song is staged (`no-resolvable-song`). From here on every write to
   the stage file — `rice stage`, a hand-edit — lands directly in the draft

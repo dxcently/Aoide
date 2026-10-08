@@ -205,7 +205,7 @@
   own, `"song"` injected, keys sorted; `venue.json` is `venueDelta`, only the
   slots that override recolours and the geometry the host sets, `{}` with
   neither. `commands::rice::notes_source` reads the twin for the re-pin
-  (`handle_rice_stage_without_cover`, `rice mode declarative` alone), and
+  (`plan_rice_stage(inv, true)`, `rice mode declarative` alone), and
   `commands::rice::declared_song` exposes its `"song"` field
   (`rice mode declarative`'s no-`<name>` resolve uses it, ahead of
   `current_staged_song`). `handle_rice_stage` reads the RUNTIME songbook for

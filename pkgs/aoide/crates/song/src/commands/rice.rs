@@ -246,7 +246,9 @@ fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     // for a genuinely different job: `rice back`, a later step, must
     // preserve un-taken edits that are ABOUT TO BE DESTROYED by an
     // overwrite. This hook runs after a write has already landed — nothing
-    // is about to be destroyed, so that rationale does not transfer here.)
+    // is about to be destroyed, so that rationale does not transfer here.
+    // What the draft held BEFORE this first write has its own take:
+    // `rice mode draft` mints the baseline on entry.)
     // `snapshot` (the locked wrapper) is correct: `handle_rice_stage` just
     // above holds no stage lock of its own for this to nest inside.
     //
@@ -261,31 +263,7 @@ fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     if out.status == aoide_protocol::output::Status::Ok
         && mode_marker.mode == aoide_storage::mode::RiceMode::Draft
     {
-        match super::take::snapshot("rice.stage", "stage") {
-            Ok(record) => {
-                if let (Some(song), Some(draft)) = (&mode_marker.song, &mode_marker.draft) {
-                    out.changed.push(
-                        aoide_storage::takes::take_path(song, Some(draft), record.take)
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
-                    out.changed.push(
-                        aoide_storage::takes::head_path(song, Some(draft))
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
-                }
-                if let Some(Value::Object(map)) = &mut out.data {
-                    map.insert("take".to_string(), json!(record.take));
-                }
-            }
-            Err(err) => {
-                if let Some(Value::Object(map)) = &mut out.data {
-                    map.insert("take".to_string(), Value::Null);
-                    map.insert("takeError".to_string(), json!(err.message));
-                }
-            }
-        }
+        super::take::attach_take(&mut out, &mode_marker, super::take::snapshot("rice.stage", "stage").map(Some));
     }
 
     if out.status == aoide_protocol::output::Status::Ok
@@ -431,20 +409,7 @@ fn venue_refusal(cause: Cause) -> Outcome {
 /// with zero symlink-awareness needed here, which is the entire mechanism.
 ///
 pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
-    handle_rice_stage_inner(inv, false)
-}
-
-/// `rice mode declarative`'s re-pin: everything `rice stage` does except the
-/// cover half, and it derives from declared truth ([`notes_source`]) where
-/// `rice stage` derives from the runtime songbook. A lock is not a song
-/// switch, and the read-side rule already hides a cover stamped for another
-/// song (CONTRACTS.md §4).
-pub(crate) fn handle_rice_stage_without_cover(inv: &Invocation) -> Outcome {
-    handle_rice_stage_inner(inv, true)
-}
-
-fn handle_rice_stage_inner(inv: &Invocation, repin: bool) -> Outcome {
-    match plan_rice_stage(inv, repin) {
+    match plan_rice_stage(inv, false) {
         Ok(plan) => apply_rice_stage(plan),
         Err(refusal) => refusal,
     }
@@ -462,9 +427,14 @@ pub(crate) struct StagePlan {
     songbook: crate::widgets::StageSongbook,
 }
 
-/// The read-only half of [`handle_rice_stage`] (`repin` false) and
-/// [`handle_rice_stage_without_cover`] (`repin` true): the name guard, the
-/// notes, the venue overlay and §7.5's songbook gate. Writes nothing.
+/// The read-only half of a stage: the name guard, the notes, the venue overlay
+/// and §7.5's songbook gate. Writes nothing.
+///
+/// `repin` is `rice mode declarative`'s re-pin: everything `rice stage` does
+/// except the cover half, deriving from declared truth ([`notes_source`]) where
+/// `rice stage` derives from the runtime songbook. A lock is not a song switch,
+/// and the read-side rule already hides a cover stamped for another song
+/// (CONTRACTS.md §4).
 pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan, Outcome> {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
@@ -1033,6 +1003,14 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `rice mode declarative`'s re-pin, as that command runs it.
+    fn repin(inv: &Invocation) -> Outcome {
+        match plan_rice_stage(inv, true) {
+            Ok(plan) => apply_rice_stage(plan),
+            Err(refusal) => refusal,
+        }
+    }
     use aoide_test_support::*;
     use aoide_protocol::output::Status;
 
@@ -1585,7 +1563,7 @@ mod tests {
         std::fs::write(declared.join("venue.json"), r##"{"palette":{"bg":"#191724"}}"##).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        let out = handle_rice_stage_without_cover(&inv(&["rice", "stage"], &["sonata"]));
+        let out = repin(&inv(&["rice", "stage"], &["sonata"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let parsed: Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("livery.json")).unwrap())
@@ -2709,7 +2687,7 @@ mod tests {
         .unwrap();
         assert!(!shellbridge::songbook_dir("sonata").is_dir(), "no runtime songbook entry for sonata");
 
-        let out = handle_rice_stage_without_cover(&inv(&["rice", "stage"], &["sonata"]));
+        let out = repin(&inv(&["rice", "stage"], &["sonata"]));
         assert_eq!(out.status, Status::Ok, "re-pin sonata from the declared twin: {:?}", out.data);
 
         let manifest: Value = serde_json::from_str(
@@ -2906,7 +2884,7 @@ mod tests {
         )
         .unwrap();
 
-        let out = handle_rice_stage_without_cover(&inv(&["rice", "stage"], &["sonata"]));
+        let out = repin(&inv(&["rice", "stage"], &["sonata"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
             !root.join("nix-instantiate-argv.txt").exists(),

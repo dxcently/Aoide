@@ -81,31 +81,7 @@ fn handle_cover_set_entry(inv: &Invocation) -> Outcome {
         && !recorded_nothing
         && mode_marker.mode == aoide_storage::mode::RiceMode::Draft
     {
-        match super::take::snapshot("cover.set", "cover-set") {
-            Ok(record) => {
-                if let (Some(song), Some(draft)) = (&mode_marker.song, &mode_marker.draft) {
-                    out.changed.push(
-                        aoide_storage::takes::take_path(song, Some(draft), record.take)
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
-                    out.changed.push(
-                        aoide_storage::takes::head_path(song, Some(draft))
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
-                }
-                if let Some(Value::Object(map)) = &mut out.data {
-                    map.insert("take".to_string(), json!(record.take));
-                }
-            }
-            Err(err) => {
-                if let Some(Value::Object(map)) = &mut out.data {
-                    map.insert("take".to_string(), Value::Null);
-                    map.insert("takeError".to_string(), json!(err.message));
-                }
-            }
-        }
+        super::take::attach_take(&mut out, &mode_marker, super::take::snapshot("cover.set", "cover-set").map(Some));
     }
     out
 }
