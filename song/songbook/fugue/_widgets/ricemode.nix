@@ -2,7 +2,7 @@
 # `WidgetSlot { slot: "ricemode" }` in the right row. `kind` absent -> null:
 # a bar-embedded WidgetSlot, never a declared `arrangement.widgets` entry.
 # fugue dresses it itself rather than falling back to sonata's floor; it keeps
-# the same bridge calls (toggleRiceMode, riceDrafts, riceDraft).
+# the same bridge calls (riceMenu, riceMode, riceDraft).
 #
 # `dependsOn`: absent. ricemode.qml addresses no sibling slot.
 #

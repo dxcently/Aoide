@@ -1,29 +1,39 @@
-// ricemode.qml -- fugue's "ricemode" slot: the `mode` cell and its draft
-// picker, hosted by bar.qml's WidgetSlot as the first cell of the right row
+// ricemode.qml -- fugue's "ricemode" slot: the `mode` cell and its menu,
+// hosted by bar.qml's WidgetSlot as the first cell of the right row
 // (checks.bar-ricemode fails a bar that does not embed it).
 //
 // The look is fugue's: Cell instances on the lattice, a flat plate, a 2px rule
 // for what is live, no ornament. The contract is the one every `ricemode`
-// body keeps (sonata's is the floor), through the same bridge verbs:
-//   left click             bridge.toggleRiceMode()   staging <-> declarative
-//   right OR middle click  the draft picker: bridge.riceDrafts(cb) lists the
-//                          staged song's drafts; a row sends
-//                          bridge.riceDraft("enter", name) and the two fixed
-//                          rows send ("new") and ("save"); `save` is offered in
+// body keeps (sonata's is the floor), through the same bridge verbs. Left,
+// right and middle click all do one thing: open the menu, or close it. The
+// cell never switches; nothing changes until a row is chosen.
+// bridge.riceMenu(cb) fills the plate, top to bottom:
+//   songs                  the runtime songbook; a row sends
+//                          bridge.riceMode("stage", name). A song that does not
+//                          load is a dim row that does nothing
+//   declarative · <song>   sends bridge.riceMode("declarative")
+//   drafts · <song>        the staged song's drafts, a row sends
+//                          bridge.riceDraft("enter", name); the two fixed rows
+//                          send ("new") and ("save"); `save` is offered in
 //                          staging only (in draft mode writes already land in
 //                          the draft, in declarative nothing is unsaved)
-// A toggle, an enter and a new each change the mode, so the word reads `...`
-// and every click is swallowed until livery.riceMode or the draft name changes,
-// or 10s pass: the double click that sent two toggles. A `save` changes no mode
-// and holds nothing.
+// What is live wears the 2px accent rule: the song staged now, the declarative
+// row while it is locked, the current draft. The last-staged song while locked
+// wears a 1px rule at half strength. The marked rows only close the menu. In
+// draft mode the drafted song's row is live: it leaves the draft for plain
+// staging.
+// A stage, a declarative, an enter and a new each change what is live, so the
+// word reads `...` and every click is swallowed until livery.riceMode, the
+// draft name or the song changes, or 10s pass: the double click that sent two
+// switches. A `save` changes nothing and holds nothing.
 //
-// The second gesture is marked by a narrow cell after `mode`, holding a drawn
-// chevron (two 1px rules, never a glyph: nothing on this lattice relies on a
-// glyph nobody has seen render), so it is on screen at rest. The two cells are
-// one control: a left click on either toggles. A bridge without `riceDrafts`
-// has no picker and no chevron cell.
+// The menu is marked by a narrow cell after `mode`, holding a drawn chevron
+// (two 1px rules, never a glyph: nothing on this lattice relies on a glyph
+// nobody has seen render), so it is on screen at rest. The two cells are one
+// control: a click on either opens the menu. A bridge without `riceMenu` has no
+// menu and no chevron cell, and the cells stay inert.
 //
-// The picker is a PopupWindow made on open and destroyed on close, so no hover
+// The menu is a PopupWindow made on open and destroyed on close, so no hover
 // state carries into the next open. It closes on a row action, on any click on
 // the cells, and 600ms after the pointer is over neither the cells nor the
 // popup. No text input, so no keyboard and no focus grab: the CLI mints a new
@@ -49,40 +59,42 @@ Item {
 
     readonly property string mode: root.livery.riceMode
     readonly property string draft: (root.livery.modeRaw && root.livery.modeRaw.draft) || ""
-    readonly property bool canPick: !!root.bridge && typeof root.bridge.riceDrafts === "function"
+    readonly property string song: root.livery.songName
+    readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
 
     property bool pending: false       // a mode change was sent and has not landed
-    property bool open: false          // the picker
-    property var answer: null          // the last riceDrafts reply, null while asking
+    property bool open: false          // the menu
+    property var answer: null          // the last riceMenu reply, null while asking
     property int asked: 0              // which ask a reply belongs to
-    property Item hotRow: null         // the picker row under the pointer
-    readonly property var drafts: root.answer && root.answer.ok && Array.isArray(root.answer.drafts)
-                                  ? root.answer.drafts : []
+    property Item hotRow: null         // the menu row under the pointer
+    readonly property bool ready: !!root.answer && root.answer.ok === true
+    readonly property var songs: root.ready && Array.isArray(root.answer.songs) ? root.answer.songs : []
+    readonly property var drafts: root.ready && Array.isArray(root.answer.drafts) ? root.answer.drafts : []
 
     onModeChanged: root.pending = false
     onDraftChanged: root.pending = false
+    onSongChanged: root.pending = false
     Timer { interval: 10000; running: root.pending; onTriggered: root.pending = false }
 
-    function gesture(button) {
-        var wasOpen = root.open
-        root.open = false
-        if (root.pending) return
-        if (button === Qt.LeftButton) {
-            root.pending = true
-            root.bridge.toggleRiceMode()
-        } else if (root.canPick && !wasOpen) {
-            root.answer = null
-            var ask = ++root.asked
-            root.open = true
-            root.bridge.riceDrafts(function (reply) { if (ask === root.asked) root.answer = reply })
+    function gesture() {
+        if (root.pending || !root.canMenu) return
+        if (root.open) {
+            root.open = false
+            return
         }
+        root.answer = null
+        var ask = ++root.asked
+        root.open = true
+        root.bridge.riceMenu(function (reply) { if (ask === root.asked) root.answer = reply })
     }
 
-    // `save` never changes the mode; `enter` and `new` do.
-    function act(action, name) {
+    // `save` never changes what is live; the rest do.
+    function act(kind, name) {
         root.open = false
-        if (action !== "save") root.pending = true
-        root.bridge.riceDraft(action, name)
+        if (kind !== "save") root.pending = true
+        if (kind === "stage") root.bridge.riceMode("stage", name)
+        else if (kind === "declarative") root.bridge.riceMode("declarative")
+        else root.bridge.riceDraft(kind, name)
     }
 
     // -- The cells -----------------------------------------------------------
@@ -106,16 +118,16 @@ Item {
                    : root.modeWord(root.mode)
             active: root.mode === "staging"
             interactive: true
-            onActivated: root.gesture(Qt.LeftButton)
+            onActivated: root.gesture()
         }
         Cell {
             id: pickCell
-            visible: root.canPick
+            visible: root.canMenu
             livery: root.livery
             paper: root.livery.barBg
             ink: root.livery.barFg
             interactive: true
-            onActivated: root.gesture(Qt.LeftButton)
+            onActivated: root.gesture()
 
             // The mark: a 7x4 chevron of two 1px rules meeting at the bottom.
             Item {
@@ -140,25 +152,27 @@ Item {
         }
     }
 
-    // Right and middle go to the picker. Left is not accepted here, so it
+    // Right and middle open the menu too. Left is not accepted here, so it
     // reaches the Cells beneath, which keep their own hover and rule.
     MouseArea {
         id: pickMa
         anchors.fill: parent
+        enabled: root.canMenu
         acceptedButtons: Qt.RightButton | Qt.MiddleButton
         cursorShape: Qt.PointingHandCursor
-        onClicked: function (mouse) { root.gesture(mouse.button) }
+        onClicked: root.gesture()
     }
     HoverHandler { id: cellsHover }
 
-    // -- The picker ----------------------------------------------------------
-    // One row of the plate: a label, a hover tone, a 2px rule when marked, tap.
+    // -- The menu ------------------------------------------------------------
+    // One row of the plate: a label, a hover tone, a rule when marked, tap.
     component PickRow: Item {
         id: row
         property string label: ""
         property real ink: 1.0
-        property bool marked: false       // the draft the stage is routed into
-        property bool live: true          // false for a message
+        property bool marked: false       // the 2px rule: what is live now
+        property bool faint: false        // a 1px half-strength rule: the secondary "last staged"
+        property bool live: true          // false for a header or a message
         readonly property bool hot: root.hotRow === row
         signal activated()
 
@@ -166,12 +180,13 @@ Item {
         height: 22
 
         Rectangle {
-            visible: row.marked
+            visible: row.marked || row.faint
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            width: 2
-            color: root.livery.paletteAccent
+            width: row.marked ? 2 : 1
+            color: row.marked ? root.livery.paletteAccent : root.livery.barFg
+            opacity: row.marked ? 1.0 : 0.5
         }
         Text {
             x: 9
@@ -243,12 +258,47 @@ Item {
                     PickRow {
                         live: false
                         ink: 0.6
-                        label: root.answer
-                               ? (root.answer.ok ? (root.answer.song || "no song") : (root.answer.message || "no answer"))
-                               : "..."
+                        label: "songs"
                     }
                     PickRow {
-                        visible: root.answer !== null && root.answer.ok === true && root.drafts.length === 0
+                        visible: !root.ready
+                        live: false
+                        ink: 0.6
+                        label: !root.answer ? "..." : "" + (root.answer.message || "no answer")
+                    }
+                    Repeater {
+                        model: root.songs
+                        PickRow {
+                            required property var modelData
+                            readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.song
+                            readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingSong
+                            live: !!modelData.ok
+                            ink: modelData.ok ? 1.0 : 0.4
+                            label: modelData.ok ? "" + modelData.name
+                                   : modelData.name + " · " + (modelData.reason || "unreadable")
+                            marked: here
+                            faint: last
+                            onActivated: {
+                                if (here) root.open = false
+                                else root.act("stage", "" + modelData.name)
+                            }
+                        }
+                    }
+                    PickRow {
+                        label: root.ready && root.answer.declared ? "declarative · " + root.answer.declared : "declarative"
+                        marked: root.mode === "declarative"
+                        onActivated: {
+                            if (root.mode === "declarative") root.open = false
+                            else root.act("declarative")
+                        }
+                    }
+                    PickRow {
+                        live: false
+                        ink: 0.6
+                        label: root.ready && root.answer.draftsSong ? "drafts · " + root.answer.draftsSong : "drafts"
+                    }
+                    PickRow {
+                        visible: root.ready && root.drafts.length === 0
                         live: false
                         ink: 0.6
                         label: "no saved drafts"

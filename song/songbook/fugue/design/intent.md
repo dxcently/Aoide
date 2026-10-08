@@ -48,7 +48,7 @@ pediments, rounded glass, cast shadow).
 ## Slots dressed
 
 Three: `bar` (the always-visible surface, `WidgetSlot`), `ricemode` (the
-rice-mode control and its draft picker, a `WidgetSlot` the bar embeds as the
+rice-mode control and its menu, a `WidgetSlot` the bar embeds as the
 first cell of its right row) and `herald` (the notification popup,
 `SurfaceSlot`). `bar` and `herald` are the two anchors that prove both
 resolution paths; `ricemode` is dressed because the cell belongs to the
