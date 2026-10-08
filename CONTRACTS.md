@@ -2096,10 +2096,9 @@ record's pid was really above the registering process, or the parent is the
 agent whose `hookAncestry` it matched (`window::spawner_is_attested`). It is a
 birth fact stamped by the registering process, set or cleared on every
 registration (a parent counts when its pid is really above the registering
-process AND its seal verifies, or it is the agent whose `hookAncestry`
-matched; a registration made after the spawner returned, such as a detached
-spawn that was reparented to init first, has no ancestry left and gets no
-stamp), and holds the id itself rather than a flag: `parentSessionId` can
+process, or it is the agent whose `hookAncestry` matched; a registration made
+after the spawner returned, such as a detached spawn that was reparented to
+init first, has no ancestry left and gets no stamp), and holds the id itself rather than a flag: `parentSessionId` can
 be rewritten by a bare `session start --parent` with no evidence at all, and a
 reader trusts the edge only while `attestedSpawner == parentSessionId`. It
 exists because a detached `aoide spawn` leaves its child reparented to init, so
@@ -3438,13 +3437,12 @@ least 12 minutes and under 24 hours old. `hooks.json` carries no reason for a
 state, so the `awaiting` line has none. The line goes to the child's SPAWNER,
 never to its `parentSessionId` (a hook child's own host wrap): the host wrap
 must be a conducted wrap whose pid is in the child's `hookAncestry` and whose
-daemon seal verifies against the live daemon key (the hook door stores an
-unauthenticated payload `pid` onto an existing record; a seal re-derives the
-pid's start time, so a rewritten pid fails it, and an unreachable daemon
-fails every check closed), and its `parentSessionId` counts only while it
-equals its `attestedSpawner` (§ `sessions.json`); a conducted spawner is sealed
-too. A child with no such recipient is not tracked and has no
-entry. A reader that does not know `hook` ignores it. A child whose session
+daemon seal verifies against the live daemon key (a seal re-derives the
+pid's start time, so a pid reused by another process after its wrap died, or
+a hand-edited `sessions.json`, fails it, and an unreachable daemon fails every
+check closed), and its `parentSessionId` counts only while it equals its
+`attestedSpawner` (§ `sessions.json`); a conducted spawner is sealed too. A
+child with no such recipient is not tracked and has no entry. A reader that does not know `hook` ignores it. A child whose session
 leaves the roster drops out on the same pass.
 
 ### `state/stage/remote-children.json` — **v0**

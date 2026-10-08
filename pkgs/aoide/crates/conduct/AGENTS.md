@@ -944,19 +944,21 @@ in the message.
   into the user's composer. `hook::recipient` climbs: (1) the host wrap must
   be a conducted wrap whose pid is in the child's `hookAncestry` (stamped by
   the hook door from the hook process's own peer credentials; `session start`
-  cannot write it) AND whose daemon seal verifies — `hook_ensure_session_with`
-  rewrites the `pid` of ANY existing id from an unauthenticated payload field,
-  and a seal re-derives the pid's start time; the key is fetched once per
-  pass, before the lock, and no answering daemon means no recipient; (2) the
+  cannot write it) AND whose daemon seal verifies — a seal re-derives the
+  pid's start time, so a pid reused after the wrap died (its record lingers
+  `done`, and `host_wrap` checks no state) or a hand-edited `sessions.json`
+  fails it; the key is fetched once per pass, before the lock, and no
+  answering daemon means no recipient; (2) the
   wrap's `parentSessionId` is the spawner only while it equals the wrap's
   `attestedSpawner` (stamped by `session_conduct` from its own `/proc`
   ancestry, `window::spawner_is_attested`, set-or-cleared on every
   registration — a detached `aoide spawn` child is reparented to init, so the
   evidence cannot be re-derived later and must be stamped at birth, and a
   registration that happens only AFTER the spawner returned has none left to
-  read and stays unstamped: fail-closed, never guessed; a pid match also needs
-  the parent's seal to verify); (3) a conducted (sealed) spawner hears it, a
-  hook-registered spawner is resolved to its own attested host wrap by (1).
+  read and stays unstamped: fail-closed, never guessed; the stamp takes no
+  seal, the hook-time check in (1) and (3) is the only one); (3) a conducted
+  (sealed) spawner hears it, a hook-registered spawner is resolved to its own
+  attested host wrap by (1).
   Never the child, never its host wrap, and a bare `session start --parent`
   edge, an explicit `--parent` the kernel did not back, and a wrap registered
   by `aoide wrap` have no recipient: do NOT accept a `parentSessionId` on its

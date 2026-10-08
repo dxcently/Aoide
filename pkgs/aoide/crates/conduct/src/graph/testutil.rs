@@ -434,5 +434,6 @@ pub(crate) fn seal_record(id: &str, kp: &aoide_storage::identity::Keypair) {
     };
     rec.seal = Some(aoide_storage::sealed_id::mint_seal(kp, &identity));
     rec.sealed_issued_at = Some(issued_at);
+    rec.ever_sealed = Some(true);
     write_stage(&sessions_path(), &file).unwrap();
 }

@@ -674,7 +674,7 @@ pub(in crate::graph) fn stamp_spawned(id: &str) {
 }
 
 /// Stamp `attestedSpawner`: the parent id the registering process's own kernel
-/// ancestry confirmed (`window::parent_is_attested`), or clear it.
+/// ancestry confirmed (`window::spawner_is_attested`), or clear it.
 ///
 /// Set-or-clear on every registration — never once-only — because the value
 /// names the parent it vouches for: re-registering an id under a parent the

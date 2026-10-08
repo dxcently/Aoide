@@ -292,8 +292,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   the entry's `hook` field of `pingback.json`, and delivered by the same
   `deliver` — it adds a cursor half and three lines, never a second transport.
   The recipient is the child's SPAWNER, resolved through the wrap that hosts
-  it and only over an edge the kernel attested (`recipient`, below). An eidolon, a remote-parented child, a shell and a sub-agent node
-  are not its children.
+  it and only over an edge the kernel attested (`hook::recipient`; the climb
+  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell and a
+  sub-agent node are not its children.
 - **`graph::pingback`** (P-EIDOLON slice E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice") is where a parent hears the children it
   spawned: the reaper tick reads each `agent:"eidolon"` child's trace tail,

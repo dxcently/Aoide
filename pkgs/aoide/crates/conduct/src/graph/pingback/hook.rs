@@ -31,10 +31,11 @@
 //!    whose pid is in the child's `hookAncestry` (stamped by the hook door
 //!    from the hook process's own peer credentials — `session start` cannot
 //!    write it, so a forged `--parent` edge has none) AND whose daemon seal
-//!    verifies. The seal is what makes the pid a fact: the hook door rewrites
-//!    the `pid` of an existing record from an unauthenticated payload field,
-//!    and a seal re-derives the pid's `/proc` start time, so a rewritten pid
-//!    names a process the seal was never minted over;
+//!    verifies. The seal is what makes the pid a fact: it re-derives the pid's
+//!    `/proc` start time, so a pid reused by another process after the wrap
+//!    died (its record lingers `done`, and nothing here checks state), or a
+//!    hand-edited `sessions.json`, names a process the seal was never minted
+//!    over;
 //! 2. the spawner is that wrap's `parentSessionId`, honoured only while it
 //!    equals the wrap's `attestedSpawner` — the parent `conduct` registration
 //!    saw in its own `/proc` ancestry (`window::spawner_is_attested`). A
@@ -475,10 +476,10 @@ mod tests {
 
     #[test]
     fn a_wrap_whose_pid_was_rewritten_or_whose_seal_fails_yields_no_recipient() {
-        // The hook door rewrites an existing record's `pid` from an
-        // unauthenticated payload field; the seal re-derives the pid's start
-        // time, so a rewritten pid fails it. Modelled as a verifier that
-        // refuses the one record whose pid moved.
+        // The seal re-derives the pid's start time, so a pid reused by
+        // another process after the wrap died (or a hand-edited
+        // `sessions.json`) fails it. Modelled as a verifier that refuses the
+        // one record whose pid moved.
         let mut roster = spawned_shape();
         roster[1].pid = Some(777);
         roster[2].hook_ancestry = vec![999, 777, 1];

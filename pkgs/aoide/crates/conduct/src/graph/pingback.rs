@@ -2320,11 +2320,12 @@ mod tests {
         assert!(raw.contains(r#""hook":{"phase":"awaiting","at":"#), "{raw}");
         assert!(!cursor.contains_key("forged"), "an unattested child is never tracked: {raw}");
 
-        // The hook door rewrites an existing record's `pid` from an
-        // unauthenticated payload field. Rewrite the host wrap's to another
-        // live process the child's ancestry also names: the seal was minted
-        // over the old pid's start time, so it no longer verifies, and the
-        // child — however it cycles through phases — has nobody to tell.
+        // A conducted record's pid no longer moves through any door, so a
+        // hand edit of `sessions.json` is the only way to reach this state.
+        // Point the host wrap at another live process the child's ancestry
+        // also names: the seal was minted over the old pid's start time, so it
+        // no longer verifies, and the child — however it cycles through
+        // phases — has nobody to tell.
         let moved = 1u32;
         {
             let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
