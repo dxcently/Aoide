@@ -159,7 +159,8 @@ other crate in this workspace sits above.
   (`next_spawn_backoff` + its floor/ceiling) and its interruptible sleep
   (`sleep_backoff_interruptible`, #108 — chops the backoff into ~200ms
   ticks against a caller-owned `AtomicBool` so Ctrl-C/shutdown never waits
-  out the full up-to-60s backoff), and the one pure
+  out the full up-to-60s backoff), `escape_markup` (the one escaper for
+  `notify-send` text, shared by `aoide-client` and `aoide-conduct`), and the one pure
   `strip_one_trailing_newline` trim every dialog child's stdout is read
   through. Extracted from `aoide-secrets`' `watch`/`client` modules (P-P5,
   same `feed`-precedent shape above) so a SECOND dialog consumer

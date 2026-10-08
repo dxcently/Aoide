@@ -324,6 +324,15 @@ pub fn strip_one_trailing_newline(mut s: String) -> String {
     s
 }
 
+/// Text for a freedesktop notification, inert: `&`, `<` and `>` escaped so a
+/// daemon rendering the body's HTML subset draws a node or song name like
+/// `<b>x</b>` as itself, never as markup. The one escaper every `notify-send`
+/// caller uses; the caller still puts `--` before the positionals so a
+/// leading `-` is never read as an option.
+pub fn escape_markup(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

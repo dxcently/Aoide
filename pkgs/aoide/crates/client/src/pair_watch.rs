@@ -652,9 +652,10 @@ fn show_reply_code(lyra_cmd: Option<&str>, p: &Pending, code: &str, json_mode: b
 /// outcome already handed back, never a feed line), so it is unit-testable
 /// with no `notify-send` spawn involved. `name` is the NODE's own display
 /// name (node-supplied, root `AGENTS.md` house rule 4's untrusted-display-
-/// data rule) — it lands in the returned strings as plain text and reaches
-/// `notify-send` as a single argv element in [`notify_reply_code`], never
-/// through a shell, so nothing in it is ever interpreted.
+/// data rule) — it lands in the returned strings as plain text; the
+/// builder does not escape, [`notify_reply_code`] does, through
+/// `aoide_protocol::dialog::escape_markup`, and hands each string to
+/// `notify-send` as one argv element after `--`, never through a shell.
 fn reply_notification_text(name: &str, code: &str) -> (String, String) {
     let summary = format!("pairing reply code for {name}");
     let body = format!("{code}\n\nrelay this to {name} \u{2014} they type it into their own pairing prompt to finish");
@@ -679,7 +680,12 @@ fn reply_notification_text(name: &str, code: &str) -> (String, String) {
 /// it needs no masking here either.
 fn notify_reply_code(name: &str, code: &str, json_mode: bool) {
     let (summary, body) = reply_notification_text(name, code);
-    match std::process::Command::new("notify-send").args(["--app-name=aoide", &summary]).arg(&body).spawn() {
+    match std::process::Command::new("notify-send")
+        .args(["--app-name=aoide", "--"])
+        .arg(aoide_protocol::dialog::escape_markup(&summary))
+        .arg(aoide_protocol::dialog::escape_markup(&body))
+        .spawn()
+    {
         Ok(mut child) => {
             std::thread::spawn(move || {
                 let _ = child.wait();
@@ -2155,9 +2161,8 @@ mod tests {
         // Same discipline as `dialog_context_and_title_survive_hostile_name_
         // intact_and_never_carry_the_sas`: the builder never escapes or
         // truncates a hostile name — it just formats what it was given.
-        // Safety here comes from argv (each `.args`/`.arg` element reaches
-        // `execve` as one opaque string, never a shell), not from this
-        // function stripping anything.
+        // `notify_reply_code` escapes and ends options at the spawn
+        // (`notify_reply_code_ends_options_and_escapes_the_text`).
         let hostile = "box-<b>evil</b>-&-$(rm -rf ~)-`whoami`";
         let (summary, body) = reply_notification_text(hostile, "999-000");
         assert!(summary.contains(hostile), "{summary}");
@@ -2172,6 +2177,45 @@ mod tests {
         let (dsum, dbody) = reply_notification_text(dashed, "111-222");
         assert!(!dsum.starts_with("--"), "summary must not start with a flag: {dsum}");
         assert!(!dbody.starts_with("--"), "body must not start with a flag: {dbody}");
+    }
+
+    /// `notify_reply_code` hands `notify-send` `--app-name=` BEFORE a `--`, then
+    /// summary and body with markup escaped, so a hostile node name is neither
+    /// an option nor markup. A stub `notify-send` on PATH logs its argv; the
+    /// real one is never reached.
+    ///
+    /// GATED on Unix with its reason: the stub is a `#!/bin/sh` script.
+    #[cfg(unix)]
+    #[test]
+    fn notify_reply_code_ends_options_and_escapes_the_text() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = aoide_test_support::unique_tmp("pair-watch-notify");
+        std::fs::create_dir_all(&root).unwrap();
+        let stub = root.join("notify-send");
+        let log = root.join("argv.log");
+        std::fs::write(
+            &stub,
+            format!("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\n", log.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&["PATH"]);
+        std::env::set_var("PATH", &root);
+
+        notify_reply_code("-x <b>a&b</b>", "123-456", true);
+        for _ in 0..200 {
+            if std::fs::read_to_string(&log).map(|t| t.contains("relay this to")).unwrap_or(false) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let argv: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(str::to_string).collect();
+        assert_eq!(argv[0], "--app-name=aoide");
+        assert_eq!(argv[1], "--");
+        assert_eq!(argv[2], "pairing reply code for -x &lt;b&gt;a&amp;b&lt;/b&gt;");
+        assert_eq!(argv[3], "123-456");
+        assert!(argv[5].contains("relay this to -x &lt;b&gt;a&amp;b&lt;/b&gt;"), "{argv:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).

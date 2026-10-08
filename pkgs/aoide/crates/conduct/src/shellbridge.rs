@@ -607,24 +607,18 @@ fn dispatch_rice_mode(action: &RiceModeAction) -> Result<String, String> {
     }
 }
 
-/// A toast body is text, never markup: daemons that render the freedesktop
-/// body's HTML subset would draw a song folder named `<b>x</b>` as bold.
-fn escape_body(message: &str) -> String {
-    message.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-}
-
 /// Fire a detached `notify-send -- "Aoide" <message>` — the same reaper-thread
 /// idiom as [`dispatch_power`]'s spawned child, so a slow or hung
 /// `notify-send` can never block a connection. The message can echo a song
 /// folder name: `--` keeps a leading `-` from reading as an option and
-/// [`escape_body`] keeps markup inert. A spawn failure is logged and
+/// [`aoide_protocol::dialog::escape_markup`] keeps markup inert. A spawn failure is logged and
 /// nothing more: the action this toast reports already ran, and a dead or
 /// missing `notify-send` must not turn its outcome into a different one.
 fn notify(message: &str) {
     match std::process::Command::new("notify-send")
         .arg("--")
         .arg("Aoide")
-        .arg(escape_body(message))
+        .arg(aoide_protocol::dialog::escape_markup(message))
         .spawn()
     {
         Ok(mut child) => {
