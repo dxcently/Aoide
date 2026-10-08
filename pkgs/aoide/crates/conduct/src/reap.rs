@@ -1248,7 +1248,10 @@ pub fn reap_and_announce(inv: &Invocation) -> Outcome {
 /// child would stack units). A missing/failed notifier is an eprintln, never an
 /// error: the sweep already happened, and losing the toast must not turn a
 /// successful reap into a failed one. Same idiom as shellbridge's
-/// `dispatch_rice_mode`.
+/// `dispatch_rice_mode`. The message can echo session and node names: `--`
+/// keeps a leading `-` from reading as an option and
+/// `aoide_protocol::dialog::escape_markup` keeps markup inert; the summary is
+/// fixed text.
 ///
 /// Returns whether the notifier was handed the toast at all (the spawn
 /// succeeded) — never whether the daemon drew it, which is dunst's business
@@ -1272,8 +1275,8 @@ fn announce_reap(message: &str) -> bool {
         // The word leads and the sickle follows: the herald card already
         // carries `aoide` in its own header row, so the summary owes no app
         // name — it says what happened, and the glyph closes the line.
-        .args(["--app-name=aoide", "reaped 𓌳"])
-        .arg(message)
+        .args(["--app-name=aoide", "--", "reaped 𓌳"])
+        .arg(aoide_protocol::dialog::escape_markup(message))
         .spawn()
     {
         Ok(mut child) => {
@@ -1914,6 +1917,38 @@ mod tests {
     /// like `CLAUDE_PROFILE`) — an eidolon-enrolled record (whatever put it
     /// on the roster: `sync_eidolon_sessions` in production) gets
     /// `EIDOLON_PROFILE` the same generic way any other harness would.
+    /// `announce_reap` puts `--` after `--app-name=` and escapes the message.
+    /// A stub `notify-send` on PATH logs its argv; the real one is never
+    /// reached. GATED on Unix: the stub is a `#!/bin/sh` script.
+    #[cfg(unix)]
+    #[test]
+    fn announce_reap_ends_options_and_escapes_the_message() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = aoide_test_support::unique_tmp("reap-announce");
+        std::fs::create_dir_all(&root).unwrap();
+        let stub = root.join("notify-send");
+        let log = root.join("argv.log");
+        std::fs::write(
+            &stub,
+            format!("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\n", log.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&["PATH"]);
+        std::env::set_var("PATH", &root);
+
+        assert!(announce_reap("-x <b>a&b</b>"));
+        for _ in 0..200 {
+            if std::fs::read_to_string(&log).map(|t| t.lines().count() >= 4).unwrap_or(false) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let argv: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(str::to_string).collect();
+        assert_eq!(argv, ["--app-name=aoide", "--", "reaped 𓌳", "-x &lt;b&gt;a&amp;b&lt;/b&gt;"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn profile_for_dispatches_eidolon_records_off_their_own_agent_field() {
         let mut rec = agent("user-0001", "", "2026-09-12T00:00:00Z");
