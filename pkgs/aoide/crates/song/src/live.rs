@@ -131,7 +131,9 @@ pub fn batch_command(keywords: &[String]) -> String {
 ///
 /// Guard: only runs `hyprctl` when `$HYPRLAND_INSTANCE_SIGNATURE` is set
 /// (off-Hyprland — headless, VM, or the common test path — is a silent
-/// no-op) and there is at least one keyword to apply.
+/// no-op). An empty keyword list is not a reason to skip: a song with no
+/// opinion at all still gets the reload, which is what puts the host's bake
+/// back under it.
 ///
 /// What it runs is [`hyprctl_calls`]: the config reload, then the keyword
 /// batches. The reload is the reset and the batches the overlay, so out-of-band
@@ -142,9 +144,6 @@ pub fn batch_command(keywords: &[String]) -> String {
 /// borders, gaps and blur share — and its refusal cannot be read as a
 /// core-keyword failure. Off-Hyprland, all of it is skipped together.
 pub fn apply_live(keywords: &[String]) -> &'static str {
-    if keywords.is_empty() {
-        return "skipped (no geometry/border keywords resolved)";
-    }
     let on_hyprland = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
         .map(|v| !v.is_empty())
         .unwrap_or(false);
@@ -709,10 +708,18 @@ mod tests {
     }
 
     #[test]
-    fn apply_live_skips_with_no_keywords_without_touching_env() {
+    fn no_keywords_still_reload_the_config_and_reach_the_compositor_guard() {
+        let calls = hyprctl_calls(&[]);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, Call::Reload);
+        assert_eq!(calls[0].1, vec!["reload".to_string(), "config-only".to_string()]);
+
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = aoide_test_support::EnvSaver::capture(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test-signature");
         assert_eq!(
             apply_live(&[]),
-            "skipped (no geometry/border keywords resolved)"
+            "skipped (this crate's own test build: no live hyprctl)"
         );
     }
 

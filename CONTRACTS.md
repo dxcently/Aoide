@@ -1791,7 +1791,8 @@ tier). `lyra rice stage` reads it (alongside `window.border`/
 `borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
 block, or a missing/null field within it, sends no keyword for that field:
 the `hyprctl reload config-only` that precedes the batch (§1) has put the
-host's baked value there. `terminalOpacity` is not a keyword at all — it rides
+host's baked value there. The reload runs even when no keyword resolves, so a
+song with no window and no geometry block still clears the previous song's. `terminalOpacity` is not a keyword at all — it rides
 `song/stage/terminal-colors.conf` only when the song has an opinion, and the
 host's bake shows otherwise. Readers must tolerate both forms.
 

@@ -1912,10 +1912,10 @@ mod tests {
     }
 
     #[test]
-    fn stage_with_no_window_or_geometry_has_no_compositor_keyword_to_apply() {
+    fn stage_with_no_window_or_geometry_still_reaches_the_compositor_reload() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test-signature");
         let root = unique_tmp("stage-hypr-empty");
         let stage = root.join("stage");
         let song = root.join("songbook").join("moonlight");
@@ -1928,7 +1928,7 @@ mod tests {
         assert_eq!(out.status, Status::Ok);
         assert_eq!(
             out.data.unwrap()["hyprctl"],
-            "skipped (no geometry/border keywords resolved)"
+            "skipped (this crate's own test build: no live hyprctl)"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
