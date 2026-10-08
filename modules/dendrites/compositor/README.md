@@ -23,7 +23,7 @@ modules/dendrites/compositor/
   compositor (`programs.hyprland`, the home-manager `wayland.windowManager.
   hyprland` config, `package = null` so the binary is installed once), applies
   compositor-side livery (gaps/radius/borders/blur, the `aoide-*` layerrules,
-  hyprglass, kitty opacity/rounding) at build time, and exposes the Hyprland IPC
+  hyprglass, kitty rounding) at build time, and exposes the Hyprland IPC
   socket for shellbridge to consume. Guarded on the FACT `aoide.compositor.enable`.
   The hyprglass block's two enable keys are the song's own
   `geometry.blurEnabled`, so a blur-off song is glassless in the bake exactly as

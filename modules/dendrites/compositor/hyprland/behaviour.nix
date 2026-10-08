@@ -15,7 +15,7 @@
 #   LOOK / SHAPE  → default.nix beside this file (the `hyprland` provider of
 #     the `compositor` capability)
 #     Anything derived from `aoide.livery`: border colours, gaps, rounding,
-#     blur, the aoide-* layerrules, hyprglass, the kitty opacity/rounding
+#     blur, the aoide-* layerrules, hyprglass, the kitty rounding
 #     rules. Re-riced whenever the song changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
 #     hyprpolkitagent, xdg.portal).
@@ -184,7 +184,7 @@ let
             # ── Behavioural window rules ──────────────────────────────────────────
             # The seam for rules that are about BEHAVIOUR — float this dialog, pin
             # that app to a workspace, inhibit idle while fullscreen. Deliberately
-            # empty: the rules currently shipped (kitty opacity/rounding) are
+            # empty: the rules currently shipped (kitty rounding) are
             # APPEARANCE and correctly live in the compositor lane, and dxflake's
             # rules were workspace assignments for apps Aoide does not ship
             # (vesktop, steam, strawberry), so importing them would bind nothing.

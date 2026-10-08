@@ -151,7 +151,7 @@ file header rather than a shared cross-cutting blueprint:
 |---|---|---|
 | bar sheet (`AoideBar.qml`) | `paletteBg` alpha | 1.0 — OPAQUE, no glass, no gloss gradient (khoa: flat solid strip) |
 | bar popouts (`BarPopout.qml`) | glass alpha | 0.72 (the popout reads solid against the thinned strip) |
-| kitty terminal (kitty dendrite) | `background_opacity` | 0.86 (compositor fades unfocused windows to 0.80) |
+| kitty terminal (kitty dendrite) | `background_opacity` | the host's bake (0.86 on Aoide's kitty dendrite); no compositor fade |
 | launcher (`AoideLauncher.qml`) | glass alpha (over busy windows) | 0.72 |
 | dock + gadget frames (`AoideAgentWidgets`/`GadgetFrame`) | glass alpha | 0.72 |
 | workspace strip | resting notes | solid plum-charcoal ink (`paletteFg` `#2f2a33`) |

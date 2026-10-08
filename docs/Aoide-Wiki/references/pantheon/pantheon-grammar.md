@@ -224,9 +224,9 @@ behind every layer):
   frosts behind it. kitty's own `background_blur` stays off (a macOS/KDE-only
   path, inert under Hyprland) — the compositor does the frosting. Hyprland
   0.56 rejects the `class:^(kitty)$` windowrule matcher form outright
-  ("invalid field ... missing a value"); the compositor facet uses
-  `match:class kitty` for the opacity rule (focused 1.0 / unfocused 0.90 —
-  a gentle Aero defocus fade) and the rounding rule.
+  ("invalid field ... missing a value"); the compositor facet keeps
+  only the `match:class kitty` rounding rule. The terminal's opacity is
+  entirely the song's say: no compositor rule fades it.
 - The exact alpha values are facet constants tuned against the performed
   key and recorded in that song's `design/intent.md` (the vision-check in
   the [Ricing Protocol](../../concepts/song/Ricing-Protocol.md)
