@@ -377,15 +377,16 @@ fn venue_refusal(cause: Cause) -> Outcome {
 /// `rice stage <name>` — hot-load a committed song live: stage its
 /// `livery.json` (plus a derivable cover) into `<stage>/` so the Quickshell
 /// surfaces hot-reload it, AND best-effort live-apply its geometry + border
-/// colours to the running compositor via `hyprctl --batch keyword …`
-/// (guarded on `$HYPRLAND_INSTANCE_SIGNATURE`; see hypr.rs). ALSO syncs the
+/// colours to the running compositor: `hyprctl reload config-only`, then
+/// `hyprctl --batch keyword …` over it (guarded on
+/// `$HYPRLAND_INSTANCE_SIGNATURE`; see `crate::live::apply_live`). ALSO syncs the
 /// song's widget QML bodies (`song/songbook/<name>/widgets/*.qml`) into the
 /// live runtime tree (`run/qml/songs/<name>/`, `crate::widgets`) so
 /// Quickshell's own file-watcher hot-reloads an edited EXISTING widget file
 /// too — no rebuild for that either (a brand-new widget file still needs a
 /// service restart to be discovered). Nothing is committed; the hyprctl
-/// call is keyword-only (never `reload`) and never fatal — a failed/absent
-/// hyprctl still leaves the stage file updated.
+/// calls are never fatal — a failed/absent hyprctl still leaves the stage
+/// file updated.
 ///
 /// This is the honest form of the hand-copy agents had been doing: drive the
 /// runtime songbook's notes into the stage so the shell has a palette to
@@ -498,8 +499,8 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
     }
 
     // Compute the compositor keyword batch BEFORE `parsed` is consumed below
-    // (geometry + border colours only — see hypr.rs for why an absent/null
-    // geometry field is skipped rather than defaulted).
+    // (geometry + border colours only — an absent/null geometry field is
+    // skipped rather than defaulted, see `crate::live::geometry_keywords`).
     let hypr_keywords = crate::live::geometry_keywords(&parsed);
     // The terminal half, off the same parsed notes (see `stage_terminal_colors`).
     let terminal_conf = crate::live::terminal_colors(&parsed);
@@ -550,7 +551,8 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
     // guarded, non-fatal). The stage-file write above is already the source of
     // truth for the hot-reload half (Quickshell's FileView); this hyprctl call
     // is on top of it, never a precondition for it — a failed/absent hyprctl
-    // never turns this preview into an error. No `hyprctl reload`: see hypr.rs.
+    // never turns this preview into an error. It reloads the host's config
+    // first and overlays the keywords on it (`crate::live::apply_live`).
     let hyprctl_status = crate::live::apply_live(&hypr_keywords);
 
     // Terminals: the staged colour file every new kitty window includes, then
@@ -679,8 +681,8 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
         "reload": reload_data,
         "seam": "Quickshell hot-reloads stage/livery.json (palette + component tiers); \
                  geometry + border colours are ALSO applied \
-                 live via best-effort, guarded `hyprctl --batch keyword …` (see hypr.rs) \
-                 — keyword-only, never `hyprctl reload`; terminal colours land in \
+                 live via best-effort, guarded `hyprctl reload config-only` then \
+                 `hyprctl --batch keyword …` (see live.rs); terminal colours land in \
                  stage/terminal-colors.conf (every new kitty window includes it) and \
                  open kitty windows reload their config over kitty's control socket",
     }))
@@ -1910,7 +1912,7 @@ mod tests {
     }
 
     #[test]
-    fn stage_with_no_window_or_geometry_still_sends_the_baked_glass() {
+    fn stage_with_no_window_or_geometry_has_no_compositor_keyword_to_apply() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
@@ -1924,11 +1926,9 @@ mod tests {
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok);
-        // No opinion is still a batch: the hyprglass switches go back to the
-        // baked default, so the only skip left is "not on Hyprland".
         assert_eq!(
             out.data.unwrap()["hyprctl"],
-            "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)"
+            "skipped (no geometry/border keywords resolved)"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

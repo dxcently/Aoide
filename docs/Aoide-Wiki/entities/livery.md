@@ -117,17 +117,15 @@ tier is outside the engine's schema and reaches Hyprland through
 `live::geometry_keywords`, which types each field itself.
 
 Staging applies geometry and the window-border colours to the running
-compositor directly: `lyra rice stage` builds one `hyprctl --batch`
-`keyword` list, in a fixed order (gaps → border size → border colours →
-rounding → blur, then a second batch for the hyprglass pair), emitting a
-keyword only for a field that actually resolves — an unset geometry field
-sends no keyword, so the call never fights a host's baked config or a user's
-own live tweak. Two fields are the exception, both in §1: the hyprglass pair
-is always sent (a song with no `blurEnabled` opinion restores the baked
-default rather than leaving the previous song's glass in place — and the bake
-takes the same two keys from the same field, so a booted desktop and a staged
-one agree), and
-`terminalOpacity`, not a Hyprland keyword at all, rides
+compositor directly: `lyra rice stage` first runs `hyprctl reload
+config-only`, which puts the host's baked config back, then builds one
+`hyprctl --batch` `keyword` list over it, in a fixed order (gaps → border size
+→ border colours → rounding → blur, then a second batch for the hyprglass
+pair), emitting a keyword only for a field that actually resolves — an unset
+geometry field sends no keyword, so a song with no opinion shows the host's
+bake, whatever the previous song or an out-of-band tweak left (the bake takes
+the same two hyprglass keys from the same `blurEnabled`, so a booted desktop
+and a staged one agree). `terminalOpacity`, not a Hyprland keyword at all, rides
 `song/stage/terminal-colors.conf` as a `background_opacity` line written only
 for a song that has a value (§4). With none, kitty falls through to
 `song/declared/terminal-opacity.conf` — the activation seed writes the
@@ -141,10 +139,9 @@ unix:<sock> load-config` per `kitty-<pid>` socket: kitty re-reads kitty.conf
 and its includes, so an open window ends where a new one opens, and its font
 zoom resets. The `hyprctl` call is a no-op off
 Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
-staging outcome. It never runs `hyprctl reload` — every field it touches is
-live-settable via `keyword`, and a reload would re-read the baked
-`hyprland.conf` from disk, discarding whatever else the compositor is
-carrying live.
+staging outcome. The reload is the reset: it re-reads the baked
+`hyprland.conf` from disk, discarding whatever else the compositor was
+carrying live, so a staged song is the host's bake plus what the song says.
 
 ## The font tier
 

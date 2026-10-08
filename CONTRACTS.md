@@ -248,8 +248,8 @@ defaulting to `null`. A notes file with no `geometry` block behaves exactly
 as before — the compositor lane applies the fallback, not the option
 system. Rides `song/stage/livery.json` for live application: `lyra rice
 stage` live-applies this tier (plus `window.border`/`borderInactive`) via
-best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
-paragraph — in addition to baking the value at build time into
+best-effort, guarded `hyprctl` calls (a config reload, then keywords) — see
+§4's staged-geometry paragraph — in addition to baking the value at build time into
 `hyprland.conf`. The option set is the song's AND the host's: a host may set
 any field (a host-wide `blurEnabled = false`, a `terminalOpacity` for one
 song), and the value the option resolves to is what the baked files carry and
@@ -275,12 +275,19 @@ liquid-glass plugin the compositor lane loads), on BOTH fan-outs: the baked
 (`plugin:hyprglass:enabled` and `plugin:hyprglass:layers:enabled`) from this
 same field, and a live stage sends them as keywords. So a song with blur off
 reads glassless whether it booted or was staged, and one with blur on gets it
-back on either path. A
-song with no `blurEnabled` opinion gets the baked default (both keys
-on — `aoide-song`'s `live::HYPRGLASS_BAKED`, the values the compositor lane
-bakes), so the glass a blur-off song turned off does not outlive it.
-Hyprland's own `decoration:blur:enabled` keeps the ordinary no-opinion rule
-(no keyword sent).
+back on either path.
+
+A live stage resets, then overlays: `lyra rice stage` (and every other
+writer that applies a song to the compositor, `rice mode stage`/`declarative`,
+`rice back` and `lyra reload`) first runs `hyprctl reload config-only`, which
+re-reads the host's baked `hyprland.conf`, then sends keywords only for the
+fields the song has an opinion about. So a field with no opinion shows the
+HOST's baked value, whatever the previous song or an out-of-band
+`hyprctl keyword` left, and no baked value is copied into cargo. On a host
+whose bake carries the declared song's geometry, a no-opinion staged song
+shows that bake, as a booted desktop does. A song with no `blurEnabled`
+opinion sends neither `decoration:blur:enabled` nor the hyprglass pair, so the
+glass a blur-off song turned off does not outlive it.
 
 `terminalOpacity` is the one geometry field that is not a Hyprland keyword:
 it is kitty's `background_opacity`, and it is live-side only. A song with no
@@ -1782,12 +1789,11 @@ option system's `"light"`.
 Absent means "this song carries no geometry opinion" (§1's additive-optional
 tier). `lyra rice stage` reads it (alongside `window.border`/
 `borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
-block, or a missing/null field within it, sends no keyword for that field,
-with two exceptions §1 states: the hyprglass pair is always sent (a song with
-no `blurEnabled` opinion restores the baked default), and `terminalOpacity`
-is not a keyword at all — it rides `song/stage/terminal-colors.conf` only
-when the song has an opinion, and the host's bake shows otherwise. Readers must tolerate
-both forms.
+block, or a missing/null field within it, sends no keyword for that field:
+the `hyprctl reload config-only` that precedes the batch (§1) has put the
+host's baked value there. `terminalOpacity` is not a keyword at all — it rides
+`song/stage/terminal-colors.conf` only when the song has an opinion, and the
+host's bake shows otherwise. Readers must tolerate both forms.
 
 ### `song/stage/cover.json` — **v0**
 

@@ -7,12 +7,13 @@
 //! this module turns the staged notes into a single best-effort
 //! `hyprctl --batch` keyword list and (when on Hyprland) runs it.
 //!
-//! Every field here is live-settable via `hyprctl keyword` — there is
-//! deliberately no `hyprctl reload` anywhere in this seam. `reload` re-reads
-//! `hyprland.conf` from disk; nothing here rewrites that file (the baked
-//! config is still the build-time source for the NEXT compositor start), so
-//! a reload would find nothing new to pick up and would needlessly reset
-//! every OTHER live-tweaked keyword a user has set out-of-band.
+//! [`apply_live`] runs `hyprctl reload config-only` first, as its own call:
+//! the compositor re-reads the host's baked `hyprland.conf`, so every field
+//! starts from what the host bakes, and the keyword batch lays only what the
+//! song has an opinion about over it. A field the song says nothing about
+//! therefore shows the host's baked value, whatever the previous song or an
+//! out-of-band `hyprctl keyword` set, and no baked value is named in this
+//! crate: only the compositor knows its host's.
 //!
 //! The terminal half (below the compositor functions) renders the staged
 //! terminal file (every colour slot through the livery engine's `kitty`
@@ -25,18 +26,9 @@
 use crate::livery::schema;
 use serde_json::Value;
 
-/// The baked hyprglass switches, `(enabled, layers:enabled)`: what the
-/// compositor lane's `plugin:hyprglass` block leaves in `hyprland.conf` for a
-/// song with NO `geometry.blurEnabled` opinion — the block takes both keys
-/// from that field, so an opinionated song's bake is glass off/on with it, the
-/// same two values this crate stages. A staged song with no opinion restores
-/// exactly this. Change it together with that block.
-pub const HYPRGLASS_BAKED: (bool, bool) = (true, true);
-
 /// Build the `hyprctl keyword …` list for one staged notes document, in the
 /// fixed order CONTRACTS.md §1's geometry table lists them (gaps, border
-/// size, border colours, rounding, blur), then the two hyprglass switches
-/// (always emitted; see [`HYPRGLASS_BAKED`]).
+/// size, border colours, rounding, blur), then the two hyprglass switches.
 ///
 /// Only emits a keyword for a field that actually resolves to a concrete
 /// value:
@@ -49,10 +41,9 @@ pub const HYPRGLASS_BAKED: (bool, bool) = (true, true);
 /// * **Geometry** (`geometry.*`) is additive-optional (§1): a notes file with
 ///   no `geometry` block, or a block with a `null` field, means "this song
 ///   never opted in" — we skip that keyword rather than asserting the
-///   compositor's own fallback constant (8/6/2/0/true/8/3). Asserting the
-///   fallback here would fight a host's baked `hyprland.conf` (or a user's
-///   own live tweak) on every preview of a song that carries no geometry
-///   opinion; skipping lets the existing value stand.
+///   compositor's own fallback constant (8/6/2/0/true/8/3). The reload
+///   [`apply_live`] runs first has already put the host's baked value there,
+///   so a song with no opinion shows that.
 pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     let geo = notes.get("geometry");
     let mut out = Vec::new();
@@ -99,24 +90,13 @@ pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     // global window-glass switch, `layers:enabled` the layer-surface one the
     // compositor lane resolves for the aoide-* namespaces — the BAKE takes
     // both from that same `blurEnabled`, so a staged song agrees with a
-    // desktop that booted straight into it.
-    //
-    // Unlike the geometry keywords above, these are ALWAYS emitted: a song
-    // with no `blurEnabled` opinion restores the baked default
-    // ([`HYPRGLASS_BAKED`]) rather than keeping whatever glass the previously
-    // staged song left behind (house rule 10: a stage hot-loads the song as
-    // declared, and a song that says nothing about glass is declared with the
-    // baked glass). [`apply_live`] partitions them out and sends them as
-    // their own second `hyprctl --batch`, so a host without the plugin loaded
+    // desktop that booted straight into it. A song with no opinion sends
+    // neither: the reload put the host's glass back. [`apply_live`] partitions
+    // them out and sends them as their own batch, so a host without the plugin
     // loses its glass batch alone — the borders, gaps and blur keywords are
     // never entangled with the plugin's refusal.
-    let blur = geo.and_then(|g| g.get("blurEnabled")).and_then(Value::as_bool);
-    let (window_glass, layer_glass) = match blur {
-        Some(b) => (b, b),
-        None => HYPRGLASS_BAKED,
-    };
-    out.push(format!("keyword plugin:hyprglass:enabled {}", u8::from(window_glass)));
-    out.push(format!("keyword plugin:hyprglass:layers:enabled {}", u8::from(layer_glass)));
+    push_bool01(&mut out, geo, "blurEnabled", "plugin:hyprglass:enabled");
+    push_bool01(&mut out, geo, "blurEnabled", "plugin:hyprglass:layers:enabled");
 
     out
 }
@@ -153,11 +133,14 @@ pub fn batch_command(keywords: &[String]) -> String {
 /// (off-Hyprland — headless, VM, or the common test path — is a silent
 /// no-op) and there is at least one keyword to apply.
 ///
-/// TWO batches, deliberately: the `plugin:hyprglass:*` keywords go in their
-/// own `hyprctl --batch` after the core one, so a host that never loaded the
-/// plugin (a compositor without it, or a non-nix host) cannot fail the batch
-/// the borders, gaps and blur share — and its refusal cannot be read as a
-/// core-keyword failure. Off-Hyprland, both are skipped together, as before.
+/// What it runs is [`hyprctl_calls`]: the config reload, then the keyword
+/// batches. The reload is the reset and the batches the overlay, so out-of-band
+/// `hyprctl keyword` tweaks do not survive a stage, and a song's no-opinion
+/// fields show the host's bake. The `plugin:hyprglass:*` keywords go in their
+/// own batch after the core one, so a host that never loaded the plugin (a
+/// compositor without it, or a non-nix host) cannot fail the batch the
+/// borders, gaps and blur share — and its refusal cannot be read as a
+/// core-keyword failure. Off-Hyprland, all of it is skipped together.
 pub fn apply_live(keywords: &[String]) -> &'static str {
     if keywords.is_empty() {
         return "skipped (no geometry/border keywords resolved)";
@@ -172,16 +155,45 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
     // this crate's own unit tests and nothing else: a `lyra`/CLI integration
     // test, or any other crate linking this library, still reaches the
     // compositor when the operator's `HYPRLAND_INSTANCE_SIGNATURE` is set —
-    // and every batch now carries the hyprglass switches, so such a run would
-    // flip the live glass and borders. Nothing in the tree does that today.
+    // and every call would reload the live config and set its keywords.
+    // Nothing in the tree does that today.
     if cfg!(test) {
         return "skipped (this crate's own test build: no live hyprctl)";
     }
 
+    let (mut reload, mut core, mut glass) = (Batch::Applied, Batch::Applied, Batch::Applied);
+    for (call, args) in hyprctl_calls(keywords) {
+        let outcome = run_hyprctl(&args);
+        match call {
+            Call::Reload => reload = outcome,
+            Call::Core => core = outcome,
+            Call::Glass => glass = outcome,
+        }
+    }
+    live_status(reload, core, glass)
+}
+
+/// The `hyprctl` calls one [`apply_live`] makes, IN ORDER, each with its role
+/// and arguments: the config reload first, then the core batch and the glass
+/// batch, each only when it has keywords. Pure, so a test can pin the order
+/// ([`apply_live`] itself is inert in this crate's test builds).
+pub fn hyprctl_calls(keywords: &[String]) -> Vec<(Call, Vec<String>)> {
     let (core, glass) = partition_keywords(keywords);
-    let core = if core.is_empty() { Batch::Applied } else { run_batch(&core) };
-    let glass = if glass.is_empty() { Batch::Applied } else { run_batch(&glass) };
-    live_status(core, glass)
+    let mut calls = vec![(Call::Reload, vec!["reload".to_string(), "config-only".to_string()])];
+    for (call, batch) in [(Call::Core, core), (Call::Glass, glass)] {
+        if !batch.is_empty() {
+            calls.push((call, vec!["--batch".to_string(), batch_command(&batch)]));
+        }
+    }
+    calls
+}
+
+/// What one of [`hyprctl_calls`] is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Call {
+    Reload,
+    Core,
+    Glass,
 }
 
 /// Split a keyword list into the two batches [`apply_live`] runs, IN ORDER:
@@ -207,27 +219,32 @@ pub fn partition_keywords(keywords: &[String]) -> (Vec<String>, Vec<String>) {
     (core, glass)
 }
 
-/// The status string for a pair of batch outcomes — the whole
+/// The status string for a stage's three call outcomes — the whole
 /// outcome→envelope mapping, pure so a test can reach it (`apply_live` itself
 /// is inert in this crate's test builds). A failed GLASS batch is reported as
 /// best-effort alongside a good core one rather than as a failure, because the
 /// borders, gaps and blur are what a stage is judged on; a bad CORE batch
-/// reports its own cause.
-pub fn live_status(core: Batch, glass: Batch) -> &'static str {
-    match (core, glass) {
-        (Batch::Applied, Batch::Applied) => "applied",
-        (Batch::Applied, _) => {
+/// reports its own cause. A failed RELOAD is reported beside a good core batch
+/// too: the overlay applied, but the host's bake was not put back under it.
+pub fn live_status(reload: Batch, core: Batch, glass: Batch) -> &'static str {
+    match (reload, core, glass) {
+        (_, Batch::Failed, _) => "best-effort: hyprctl reported an error (stage file already updated)",
+        (_, Batch::Unavailable, _) => {
+            "best-effort: hyprctl unavailable (stage file already updated)"
+        }
+        (Batch::Applied, Batch::Applied, Batch::Applied) => "applied",
+        (Batch::Applied, Batch::Applied, _) => {
             "applied; best-effort: the hyprglass batch failed (plugin not loaded?) \
              — stage file already updated"
         }
-        (Batch::Failed, _) => "best-effort: hyprctl reported an error (stage file already updated)",
-        (Batch::Unavailable, _) => {
-            "best-effort: hyprctl unavailable (stage file already updated)"
+        (_, Batch::Applied, _) => {
+            "applied; best-effort: the config reload failed, so a field with no opinion may \
+             show an earlier value — stage file already updated"
         }
     }
 }
 
-/// How one `hyprctl --batch` call went.
+/// How one `hyprctl` call went.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Batch {
     Applied,
@@ -237,14 +254,10 @@ pub enum Batch {
     Unavailable,
 }
 
-/// Run ONE `hyprctl --batch` payload. Never a `Result`: the caller only
-/// reports which way it went.
-fn run_batch(keywords: &[String]) -> Batch {
-    match std::process::Command::new("hyprctl")
-        .arg("--batch")
-        .arg(batch_command(keywords))
-        .output()
-    {
+/// Run ONE `hyprctl` call. Never a `Result`: the caller only reports which
+/// way it went.
+fn run_hyprctl(args: &[String]) -> Batch {
+    match std::process::Command::new("hyprctl").args(args).output() {
         Ok(out) if out.status.success() => Batch::Applied,
         Ok(_) => Batch::Failed,
         Err(_) => Batch::Unavailable,
@@ -446,21 +459,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The two hyprglass lines a song with no `blurEnabled` opinion gets:
-    /// the baked default, closing every batch.
-    fn baked_glass() -> Vec<String> {
-        let (w, l) = HYPRGLASS_BAKED;
-        vec![
-            format!("keyword plugin:hyprglass:enabled {}", u8::from(w)),
-            format!("keyword plugin:hyprglass:layers:enabled {}", u8::from(l)),
-        ]
-    }
-
-    fn with_baked_glass(mut v: Vec<String>) -> Vec<String> {
-        v.extend(baked_glass());
-        v
-    }
-
     #[test]
     fn full_geometry_and_window_produce_every_keyword_in_order() {
         let notes = json!({
@@ -502,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn hyprglass_follows_blur_and_restores_the_baked_glass_without_an_opinion() {
+    fn hyprglass_follows_blur_and_is_silent_without_an_opinion() {
         // cadenza's shape: blur off, glass off, both live keywords.
         let off = geometry_keywords(&json!({ "geometry": { "blurEnabled": false, "rounding": 0 } }));
         assert!(off.contains(&"keyword plugin:hyprglass:enabled 0".to_string()));
@@ -511,19 +509,17 @@ mod tests {
         let on = geometry_keywords(&json!({ "geometry": { "blurEnabled": true } }));
         assert!(on.contains(&"keyword plugin:hyprglass:enabled 1".to_string()));
         assert!(on.contains(&"keyword plugin:hyprglass:layers:enabled 1".to_string()));
-        // No opinion (null, missing field, no geometry block at all) restores
-        // the baked glass, so a blur-off song's glass never outlives it.
+        // No opinion (null, missing field, no geometry block at all) sends no
+        // glass and no blur keyword: the reload ahead of the batch put the
+        // host's back.
         for notes in [
             json!({ "geometry": { "blurEnabled": null } }),
             json!({ "geometry": { "rounding": 4 } }),
             json!({}),
         ] {
             let kw = geometry_keywords(&notes);
-            assert_eq!(kw[kw.len() - 2..].to_vec(), baked_glass(), "{notes}");
-            // Hyprland's own blur keeps the plain no-opinion rule.
-            assert!(kw.iter().all(|k| !k.contains("decoration:blur")), "{kw:?}");
+            assert!(kw.iter().all(|k| !k.contains("hyprglass") && !k.contains("decoration:blur")), "{kw:?}");
         }
-        assert_eq!(HYPRGLASS_BAKED, (true, true), "the compositor lane bakes both on");
     }
 
     #[test]
@@ -531,10 +527,10 @@ mod tests {
         let notes = json!({ "window": { "border": "#a07414", "borderInactive": "#3f867e" } });
         assert_eq!(
             geometry_keywords(&notes),
-            with_baked_glass(vec![
+            vec![
                 "keyword general:col.active_border rgb(a07414)".to_string(),
                 "keyword general:col.inactive_border rgb(3f867e)".to_string(),
-            ])
+            ]
         );
     }
 
@@ -545,10 +541,7 @@ mod tests {
         let notes = json!({
             "geometry": { "gapsOut": null, "gapsIn": 6, "borderSize": null }
         });
-        assert_eq!(
-            geometry_keywords(&notes),
-            with_baked_glass(vec!["keyword general:gaps_in 6".to_string()])
-        );
+        assert_eq!(geometry_keywords(&notes), vec!["keyword general:gaps_in 6".to_string()]);
     }
 
     #[test]
@@ -561,9 +554,8 @@ mod tests {
         let notes = json!({
             "window": { "border": "0; dispatch exec touch /tmp/pwned" }
         });
-        assert_eq!(
-            geometry_keywords(&notes),
-            baked_glass(),
+        assert!(
+            geometry_keywords(&notes).is_empty(),
             "an injection-shaped border value must be skipped entirely"
         );
     }
@@ -575,15 +567,15 @@ mod tests {
         });
         assert_eq!(
             geometry_keywords(&notes),
-            with_baked_glass(vec!["keyword general:col.active_border rgb(89b4fa)".to_string()]),
+            vec!["keyword general:col.active_border rgb(89b4fa)".to_string()],
             "the valid sibling field still emits; only the malformed one is dropped"
         );
     }
 
     #[test]
-    fn no_geometry_and_no_window_yields_only_the_baked_glass() {
+    fn no_geometry_and_no_window_yields_nothing() {
         let notes = json!({ "palette": { "bg": "#1e1e2e" } });
-        assert_eq!(geometry_keywords(&notes), baked_glass());
+        assert!(geometry_keywords(&notes).is_empty());
     }
 
     #[test]
@@ -644,30 +636,75 @@ mod tests {
     }
 
     #[test]
-    fn live_status_covers_every_outcome_pair() {
-        assert_eq!(live_status(Batch::Applied, Batch::Applied), "applied");
+    fn live_status_covers_every_outcome() {
+        use Batch::{Applied, Failed, Unavailable};
+        assert_eq!(live_status(Applied, Applied, Applied), "applied");
         // A failed glass batch (or an absent `hyprctl` FOR it) never hides a
         // good core batch: the borders and gaps did apply.
-        for glass in [Batch::Failed, Batch::Unavailable] {
+        for glass in [Failed, Unavailable] {
             assert_eq!(
-                live_status(Batch::Applied, glass),
+                live_status(Applied, Applied, glass),
                 "applied; best-effort: the hyprglass batch failed (plugin not loaded?) \
                  — stage file already updated"
             );
         }
+        // A failed reload never hides a good overlay either, but says the
+        // reset did not happen.
         assert_eq!(
-            live_status(Batch::Failed, Batch::Applied),
+            live_status(Failed, Applied, Applied),
+            "applied; best-effort: the config reload failed, so a field with no opinion may \
+             show an earlier value — stage file already updated"
+        );
+        assert_eq!(
+            live_status(Applied, Failed, Applied),
             "best-effort: hyprctl reported an error (stage file already updated)"
         );
         assert_eq!(
-            live_status(Batch::Unavailable, Batch::Applied),
+            live_status(Applied, Unavailable, Applied),
             "best-effort: hyprctl unavailable (stage file already updated)"
         );
-        // The core failure wins the report even when the glass batch also
-        // failed — there is one string, and the core keyword is the reason.
+        // The core failure wins the report even when the others also failed —
+        // there is one string, and the core keyword is the reason.
         assert_eq!(
-            live_status(Batch::Failed, Batch::Failed),
+            live_status(Failed, Failed, Failed),
             "best-effort: hyprctl reported an error (stage file already updated)"
+        );
+    }
+
+    #[test]
+    fn the_config_reload_comes_first_and_a_song_with_no_blur_opinion_sends_no_glass() {
+        let kw = geometry_keywords(&json!({
+            "window": { "border": "#89b4fa", "borderInactive": "#1e1e2e" },
+            "geometry": { "gapsIn": 4 }
+        }));
+        let calls = hyprctl_calls(&kw);
+        assert_eq!(
+            calls.iter().map(|(call, _)| *call).collect::<Vec<_>>(),
+            vec![Call::Reload, Call::Core],
+            "no glass pair without a blurEnabled opinion"
+        );
+        assert_eq!(calls[0].1, vec!["reload".to_string(), "config-only".to_string()]);
+        assert_eq!(calls[1].1[0], "--batch");
+        assert!(calls[1].1[1].starts_with("keyword general:gaps_in 4; "), "{:?}", calls[1].1);
+    }
+
+    #[test]
+    fn a_song_with_a_blur_opinion_sends_the_glass_batch_after_the_core_one() {
+        let kw = geometry_keywords(&json!({
+            "window": { "border": "#89b4fa" },
+            "geometry": { "blurEnabled": false }
+        }));
+        let calls = hyprctl_calls(&kw);
+        assert_eq!(
+            calls.iter().map(|(call, _)| *call).collect::<Vec<_>>(),
+            vec![Call::Reload, Call::Core, Call::Glass]
+        );
+        assert_eq!(
+            calls[2].1,
+            vec![
+                "--batch".to_string(),
+                "keyword plugin:hyprglass:enabled 0; keyword plugin:hyprglass:layers:enabled 0".to_string(),
+            ]
         );
     }
 

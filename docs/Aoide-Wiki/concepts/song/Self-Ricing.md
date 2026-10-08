@@ -328,9 +328,9 @@ live keywords, so a song with blur off (cadenza) turns the glass off without
 unloading the plugin, and a song with blur on turns it back on. The BAKE takes
 the same two keys from the same field, so the compositor lane's
 `hyprland.conf` reads glassless for cadenza too — booted and staged agree. A song with
-no `blurEnabled` opinion restores the baked default (both on,
-`live::HYPRGLASS_BAKED`), so a no-opinion song staged after cadenza gets its
-glass back.
+no `blurEnabled` opinion sends neither: the `hyprctl reload config-only` every
+live stage runs first has already put the host's glass back, so a no-opinion
+song staged after cadenza gets its glass back.
 
 **Polarity is the one livery field `rice stage` does not apply.** A song's
 `aoide.livery.polarity` (`"light"`/`"dark"`, beside its palette) is read by the
@@ -385,8 +385,9 @@ in the codebase routes through that one function.
 A song may set `aoide.livery.geometry` — gaps, border size, rounding, and
 blur, every field optional — alongside its palette and window tiers; see
 [[livery#The geometry tier]] for the field list and the fallback/live-apply
-mechanism. A song that sets no geometry performs with the compositor
-lane's own defaults, unchanged.
+mechanism. A song that sets no geometry performs with the host's baked
+values, unchanged: every live stage reloads the compositor's config before it
+lays the song's own fields over it.
 
 ## The Shipped Baseline Is Guarded, Not Frozen
 

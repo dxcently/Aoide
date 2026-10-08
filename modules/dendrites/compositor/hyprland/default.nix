@@ -202,7 +202,8 @@ let
         # keys `aoide-song`'s `live::apply_live` sends as keywords — so a song
         # that turns blur off (cadenza) reads glassless whether the desktop
         # booted into it or staged it, and a song with NO opinion gets the
-        # baked default (both on, `live::HYPRGLASS_BAKED`). `enabled` is the
+        # host's bake (both on): a live stage sends no glass keyword for it
+        # and reloads this file first. `enabled` is the
         # global window-glass switch, `layers.enabled` the layer-surface one;
         # `manage_window_blur` is neither, so it stays 1 (a later blur-on
         # needs no reload, and the plugin stays loaded exactly as live

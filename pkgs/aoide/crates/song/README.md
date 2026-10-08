@@ -15,8 +15,10 @@ a config file). Paint-side — ships in `lyra`, not core.
   block), so a document may legitimately hold more than the resolved set —
   `tests/livery_goldens.rs`'s polarity fixture is the contract.
 - `live` — computes + (best-effort) applies the Hyprland geometry/border
-  keyword list a staged notes document implies (`blurEnabled` also switches
-  hyprglass's two live enable keys; no opinion restores `HYPRGLASS_BAKED`),
+  keyword list a staged notes document implies, over a `hyprctl reload
+  config-only` that puts the host's bake back first (`blurEnabled` also
+  switches hyprglass's two live enable keys; a field with no opinion sends
+  nothing and shows the bake),
   renders the staged terminal colour
   file (`terminal_colors`, through the `kitty` emitter, with a
   `background_opacity` line only when the song has an opinion:

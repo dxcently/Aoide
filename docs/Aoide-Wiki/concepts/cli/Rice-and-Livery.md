@@ -98,12 +98,14 @@ lyra rice stage [<name>] [--json]
   deliberately untouched). In Draft mode, auto-mints a take (cause `"stage"`): writes
   `song/songbook/<song>/drafts/<draft>/takes/NNNN.json` and
   `takes/head.json` — non-fatal on failure (`take: null, takeError` in data).
-- **Pipes to / output:** best-effort `hyprctl --batch "keyword …; …"` with
+- **Pipes to / output:** best-effort `hyprctl reload config-only` (the host's
+  bake back under the song), then `hyprctl --batch "keyword …; …"` with
   geometry + border keywords (`general:gaps_out`, `general:gaps_in`,
   `general:border_size`, `general:col.active_border`,
   `general:col.inactive_border`, `decoration:rounding`,
-  `decoration:blur:enabled|size|passes`) — keyword-only, never
-  `hyprctl reload`, skipped silently off Hyprland, never fatal
+  `decoration:blur:enabled|size|passes`, plus the hyprglass pair when the song
+  has a `blurEnabled` opinion) — a field with no opinion shows the host's
+  bake, skipped silently off Hyprland, never fatal
   (`pkgs/aoide/crates/song/src/live.rs`). If the widget-body sync changed
   anything, spawns `quickshell -p <run_qml_dir>/shell.qml ipc call shell
   reload` (best-effort; success judged on empty stdout, not the exit code —

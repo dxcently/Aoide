@@ -173,29 +173,31 @@
   produces byte-identical output with and without it. `rice compose` copies the
   field into a scaffolded `rice.nix` (`aoide.livery.polarity`), defaulting to
   `schema::POLARITY_DEFAULT` when the source notes carry none.
-- **A song with no `blurEnabled` opinion restores the baked hyprglass
-  switches** (`live::HYPRGLASS_BAKED`, both on), so every
-  `geometry_keywords` call carries the two hyprglass keywords — which
-  `live::apply_live` partitions out (`live::partition_keywords`) and sends as
-  their OWN second `hyprctl --batch`, so a host without the plugin loses its
-  glass batch alone and the borders/gaps/blur batch is never entangled with
-  it. The predicate is a `contains("plugin:hyprglass:")` on the EMITTED
-  keyword, which carries the `keyword ` prefix — matching the bare plugin
-  name by prefix silently puts both in the core batch, and
+- **`live::apply_live` resets, then overlays.** It runs `hyprctl reload
+  config-only` as its own best-effort call, then the keyword batches
+  (`live::hyprctl_calls` is the pure order), so a field a song has no
+  opinion about shows the HOST's baked value, whatever the previous song or an
+  out-of-band `hyprctl keyword` set. Do not name a baked value in this crate
+  (a constant is right on one host and wrong on another): only the compositor
+  knows its host's. Every caller gets the reset — `rice stage`,
+  `rice mode stage`/`declarative`, `rice back`, `lyra reload`'s draft sync. A
+  song with no `blurEnabled` opinion therefore sends no `decoration:blur:*`
+  and no hyprglass keyword. The two hyprglass keywords, when sent, are
+  partitioned out (`live::partition_keywords`) as their OWN second `hyprctl
+  --batch`, so a host without the plugin loses its glass batch alone. The
+  predicate is a `contains("plugin:hyprglass:")` on the EMITTED keyword, which
+  carries the `keyword ` prefix — matching the bare plugin name by prefix
+  silently puts both in the core batch, and
   `every_glass_keyword_the_emitter_produces_lands_in_the_glass_batch` is the
-  test that catches it. Keep the
-  constant equal to what the compositor lane bakes for a song with NO
-  `blurEnabled` opinion — the lane's block takes both keys from that same
-  field, so the bake follows the song. `decoration:blur:*`
-  keeps the plain no-opinion rule (no keyword). **This crate's own unit
+  test that catches it. **This crate's own unit
   tests never run `hyprctl` and never reload the live shell** (`cfg!(test)`
   in `live::apply_live`, after the `HYPRLAND_INSTANCE_SIGNATURE` check, and
   at the head of `ipc::quickshell_ipc_reload`): `cfg!` is evaluated when
   *this crate* is compiled, so a `lyra`/CLI integration test, or anything
   else linking this library, still reaches the compositor and the shell —
-  and with a batch in every stage, such a handler test run from a Hyprland
-  terminal would flip the operator's live glass and borders, and a reload
-  rebuilds the whole running scene.
+  and with a config reload in every stage, such a handler test run from a
+  Hyprland terminal would reset the operator's live compositor and flip its
+  glass and borders, and a shell reload rebuilds the whole running scene.
 - **`song/declared/livery.json` (the declared twin) and
   `song/declared/venue.json` (the venue's slots and geometry), CONTRACTS.md §4,
   are READ-ONLY for this crate — only the nix side writes them.** The lyra
