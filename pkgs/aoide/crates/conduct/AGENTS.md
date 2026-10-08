@@ -946,8 +946,8 @@ in the message.
   the hook door from the hook process's own peer credentials; `session start`
   cannot write it) AND whose daemon seal verifies — a seal re-derives the
   pid's start time, so a pid reused after the wrap died (its record lingers
-  `done`, and `host_wrap` checks no state) or a hand-edited `sessions.json`
-  fails it; the key is fetched once per pass, before the lock, and no
+  `done`, and `host_wrap` checks no state) or a pid hand-edited into
+  `sessions.json` fails it; the key is fetched once per pass, before the lock, and no
   answering daemon means no recipient; (2) the
   wrap's `parentSessionId` is the spawner only while it equals the wrap's
   `attestedSpawner` (stamped by `session_conduct` from its own `/proc`
