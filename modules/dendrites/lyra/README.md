@@ -109,15 +109,16 @@ at build time (the structural half is `checks.song-runtime-untracked`); committe
 songbook score is not a runtime path.
 
 `checks.livery-fanout` guards the activation seed: the stage twin is the active
-song's committed livery with the venue's `aoide.livery.override` applied through
-`lib/livery.nix`'s `stagePatch`, and the same jq run publishes the declared twin
+song's committed livery with the venue's `aoide.livery.override` applied and the
+host's geometry laid over the song's own, through `lib/livery.nix`'s
+`stagePatch`, and the same jq run publishes the declared twin
 (`song/declared/livery.json`) — this lane is its only writer. The same script
 publishes the venue's part as data, `song/declared/venue.json`
-(`lib/livery.nix`'s `venueDelta`: only the slots the venue recolours, `{}` with
-no override), which the runtime stage lays over the runtime songbook's copy of
-the declared song; `checks.livery-fanout` guards `venueDelta` beside
-`stagePatch`. The same script publishes one more declared artefact,
-`song/declared/terminal-opacity.conf`
+(`lib/livery.nix`'s `venueDelta`: only the slots the venue recolours and the
+geometry it sets, `{}` with neither), which the runtime stage lays over the
+runtime songbook's copy of the declared song; `checks.livery-fanout` guards
+`venueDelta` beside `stagePatch`. The same script publishes one more declared
+artefact, `song/declared/terminal-opacity.conf`
 (one `background_opacity` line from the song's `geometry.terminalOpacity`,
 deleted when that is null): the kitty dendrite includes it BEFORE the staged
 colours, so a host that has never staged a song still opens its terminal at the

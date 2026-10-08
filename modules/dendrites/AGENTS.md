@@ -61,11 +61,11 @@ covers only what's specific to dendrites.
   writes the same bytes to `song/declared/livery.json` too (CONTRACTS.md §4):
   the declared twin that `rice mode declarative` re-pins from. It also publishes
   `song/declared/venue.json` — `venueDelta`, the slots the same `stagePatch`
-  rule changes, `{}` with no override — which staging lays over the runtime
-  copy of the declared song, and `checks.livery-fanout` guards it. The `lyra`
-  lane is the ONLY writer of both: `rice stage` and the other runtime writers
-  read them and must never write them, since only the nix evaluator can
-  compute the override tier.
+  rule recolours and the geometry the host sets, `{}` with neither — which
+  staging lays over the runtime copy of the declared song, and
+  `checks.livery-fanout` guards it. The `lyra` lane is the ONLY writer of
+  both: `rice stage` and the other runtime writers read them and must never
+  write them, since only the nix evaluator can compute the override tier.
 - **A surface takes its size from its CONTENT; content never sizes itself
   from the SCREEN.** A layer anchors only the edges it genuinely occupies
   and lets `implicitWidth`/`implicitHeight` follow what it draws (the

@@ -354,12 +354,15 @@ fn notes_source(name: &str) -> PathBuf {
     }
 }
 
-/// Lay the venue's recolour over the declared song's parsed notes: each tier
-/// object in `song/declared/venue.json` (CONTRACTS.md §4) sets its keys on the
-/// notes' same tier, and a tier the notes do not hold as an object is skipped.
-/// The venue wins on the slots it recolours; everywhere else the notes stand,
-/// so an edit to the runtime song shows. An absent file is the identity; one
-/// that cannot be read or parsed is refused, before anything is written.
+/// Lay the venue over the declared song's parsed notes: each tier object in
+/// `song/declared/venue.json` (CONTRACTS.md §4) sets its keys on the notes'
+/// same tier. A colour tier the notes do not hold as an object is skipped,
+/// because the venue recolours and there is nothing to recolour; `geometry`
+/// is created when the notes hold none (or null), because the venue sets
+/// that value. The venue wins on the fields it names; everywhere else the
+/// notes stand, so an edit to the runtime song shows. An absent file is the
+/// identity; one that cannot be read or parsed is refused, before anything
+/// is written.
 fn overlay_venue(notes: &mut Value) -> Result<(), Outcome> {
     let path = shellbridge::declared_venue();
     let raw = match std::fs::read_to_string(&path) {
@@ -369,9 +372,17 @@ fn overlay_venue(notes: &mut Value) -> Result<(), Outcome> {
     };
     let venue: serde_json::Map<String, Value> =
         serde_json::from_str(&raw).map_err(|e| venue_refusal(serde_cause(&path, &e)))?;
+    let Some(notes) = notes.as_object_mut() else {
+        return Ok(());
+    };
     for (tier, slots) in venue {
-        if let (Value::Object(slots), Some(Value::Object(held))) = (slots, notes.get_mut(&tier)) {
-            held.extend(slots);
+        let Value::Object(slots) = slots else { continue };
+        match notes.get_mut(&tier) {
+            Some(Value::Object(held)) => held.extend(slots),
+            Some(Value::Null) | None if tier == "geometry" => {
+                notes.insert(tier, Value::Object(slots));
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -403,10 +414,10 @@ fn venue_refusal(cause: Cause) -> Outcome {
 ///
 /// This is the honest form of the hand-copy agents had been doing: drive the
 /// runtime songbook's notes into the stage so the shell has a palette to
-/// render. For the DECLARED song the venue's recolour
+/// render. For the DECLARED song the venue
 /// (`song/declared/venue.json`, [`overlay_venue`], CONTRACTS.md §4) is laid
-/// over them, so the host's venue holds on the slots it recolours and an edit
-/// to the song shows everywhere else.
+/// over them, so the host's venue holds on the slots it recolours and the
+/// geometry it sets, and an edit to the song shows everywhere else.
 ///
 /// `pub(crate)`, not private: `rice mode`'s `stage`/`declarative` handlers
 /// (`commands/mode.rs`) call this directly to get the SAME live-apply side
@@ -1305,8 +1316,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A venue tier the song does not hold as an object has nothing to
-    /// recolour, and is skipped rather than created.
+    /// A venue colour tier the song does not hold as an object has nothing to
+    /// recolour, and is skipped rather than created (`geometry` is the one
+    /// tier the venue creates, below).
     #[test]
     fn stage_skips_a_venue_tier_the_song_does_not_hold() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1336,6 +1348,74 @@ mod tests {
                 .unwrap();
         assert!(parsed.get("base16").is_none(), "no base16 tier was invented: {parsed}");
         assert_eq!(parsed["schemaVersion"], "0", "a non-object notes value is not overwritten");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The venue SETS geometry (a value the host chooses), so a song that holds
+    /// none gets the venue's block rather than a skip. Its terminal opacity
+    /// reaches the staged terminal file.
+    #[test]
+    fn stage_creates_the_geometry_the_song_does_not_hold_from_the_venue() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("stage-declared-venue-geometry");
+        ensure_default_songbook_fixture();
+        let stage = root.join("stage");
+        let song = root.join("songbook").join("sonata");
+        let declared = root.join("declared");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&declared).unwrap();
+        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(declared.join("livery.json"), r##"{"schemaVersion":"0","song":"sonata"}"##)
+            .unwrap();
+        std::fs::write(declared.join("venue.json"), r##"{"geometry":{"terminalOpacity":1}}"##)
+            .unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let parsed: Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("livery.json")).unwrap())
+                .unwrap();
+        assert_eq!(parsed["geometry"]["terminalOpacity"], 1, "the venue's geometry was created");
+        let terminal = std::fs::read_to_string(stage.join("terminal-colors.conf")).unwrap();
+        assert!(terminal.lines().any(|l| l == "background_opacity 1"), "{terminal}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A geometry the song already holds merges: the venue wins the fields it
+    /// names, and an edit to any other field shows.
+    #[test]
+    fn stage_shows_a_geometry_edit_while_the_venue_wins_its_field() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("stage-declared-venue-geometry-merge");
+        ensure_default_songbook_fixture();
+        let stage = root.join("stage");
+        let song = root.join("songbook").join("sonata");
+        let declared = root.join("declared");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&declared).unwrap();
+        std::fs::write(
+            song.join("livery.json"),
+            r##"{"schemaVersion":"0","palette":{"bg":"#0b1021","fg":"#c8d3f5","accent":"#82aaff","urgent":"#ff757f"},"geometry":{"gapsIn":10,"terminalOpacity":0.7}}"##,
+        )
+        .unwrap();
+        std::fs::write(declared.join("livery.json"), r##"{"schemaVersion":"0","song":"sonata"}"##)
+            .unwrap();
+        std::fs::write(declared.join("venue.json"), r##"{"geometry":{"terminalOpacity":1}}"##)
+            .unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let parsed: Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("livery.json")).unwrap())
+                .unwrap();
+        assert_eq!(parsed["geometry"]["gapsIn"], 10, "an edit to a field the venue leaves alone shows");
+        assert_eq!(parsed["geometry"]["terminalOpacity"], 1, "the venue wins its own field");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1437,7 +1517,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             declared.join("venue.json"),
-            r##"{"palette":{"bg":"#191724","accent":"#ebbcba"}}"##,
+            r##"{"palette":{"bg":"#191724","accent":"#ebbcba"},"geometry":{"terminalOpacity":1}}"##,
         )
         .unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1452,6 +1532,7 @@ mod tests {
             "nocturne's own accent, not the venue's recolour of sonata"
         );
         assert_eq!(parsed["palette"]["bg"], "#0b1021");
+        assert!(parsed.get("geometry").is_none(), "the venue's geometry stays with sonata: {parsed}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

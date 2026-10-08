@@ -1,4 +1,4 @@
-# lib/livery.nix — the venue-recolour resolver (CONTRACTS.md §1, override tier).
+# lib/livery.nix — the venue resolver (CONTRACTS.md §1, override and geometry tiers).
 #
 # `aoide.livery.override.*` is a HOST-set, never song-set tier. Two registers,
 # two passes, fixed order:
@@ -25,10 +25,18 @@
 # zero lines.
 #
 # The runtime stage re-derives the declared song from the runtime songbook, not
-# from this file's output, so the recolour reaches it as DATA: `venueDelta`
-# is `stagePatch` minus the document, the slots the venue changes and nothing
-# else, published beside the declared twin as `song/declared/venue.json`. The
-# law stays here, in nix alone; the runtime only overlays what it is handed.
+# from this file's output, so the venue reaches it as DATA: `venueDelta` is
+# `stagePatch` minus the document — the slots the recolour changes and the
+# geometry the host sets, nothing else — published beside the declared twin as
+# `song/declared/venue.json`. The law stays here, in nix alone; the runtime
+# only overlays what it is handed.
+#
+# Geometry is the venue's third register and the one that is not a recolour:
+# `aoide.livery.geometry` is set by the song AND by the host (a host-wide
+# `blurEnabled = false`, a song-conditional `terminalOpacity`), and the baked
+# `hyprland.conf` and kitty fragment already carry the host's value. `stagePatch`
+# lays the option's non-null geometry over the document's own, so the twin
+# equals the bake.
 #
 # Usage: (import ./lib/livery.nix { inherit lib; }).resolve config.aoide.livery
 { lib }:
@@ -120,12 +128,19 @@ rec {
   # does not; so the stage side patches the file in place instead of
   # re-serialising `resolve`'s output. Same two passes, same order, same
   # precedence as `resolve` — one rule, stated once, for both fan-outs.
+  #
+  # Then the geometry, which is a value the host sets and not a recolour: the
+  # option's non-null fields are laid over the document's own geometry whether
+  # or not the document holds the tier, where a colour tier the document lacks
+  # is skipped (there is nothing to recolour). With no geometry in the option
+  # set the result is untouched, so the identity holds.
   stagePatch =
     livery: doc:
     let
       m = overrideMap livery;
       o = livery.override or { };
       slots = slotPatch livery;
+      geo = lib.filterAttrs (_: v: v != null) (livery.geometry or { });
       sub = v: if builtins.isString v then (m.${norm v} or v) else v;
       # One tier: the anchor recolour, then the named-key overlay, then the
       # tier's own extra (palette's null-hot direct set).
@@ -146,13 +161,17 @@ rec {
     // patch "base16" { }
     // patch "bar" { }
     // patch "notif" { }
-    // patch "window" { };
+    // patch "window" { }
+    // lib.optionalAttrs (geo != { }) {
+      geometry = (if (doc.geometry or null) == null then { } else doc.geometry) // geo;
+    };
 
   # What the venue changes in a committed `livery.json` DOCUMENT: per tier,
   # the attrs `stagePatch` leaves unequal to the document's own (a key the
-  # document lacks, or holds null, counts as changed). A tier with nothing
-  # changed is omitted, so `{}` is "no venue override" — the identity the
-  # runtime overlays without a branch.
+  # document lacks, or holds null, counts as changed) — the recoloured slots
+  # of the five colour tiers and the geometry fields the host sets to another
+  # value. A tier with nothing changed is omitted, so `{}` is "no venue" — the
+  # identity the runtime overlays without a branch.
   venueDelta =
     livery: doc:
     let
@@ -171,6 +190,7 @@ rec {
         "bar"
         "notif"
         "window"
+        "geometry"
       ] changed
     );
 }

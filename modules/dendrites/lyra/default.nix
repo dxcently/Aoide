@@ -108,18 +108,21 @@ let
 
       # The stage twin is the committed livery with the VENUE applied — the same
       # `aoide.livery.override` recolour the Stylix and compositor fan-outs get
-      # (CONTRACTS.md §1, override tier), through the same `lib/livery.nix`. Not
-      # a second rule: `stagePatch` is `resolve`'s two passes against the file's
-      # own shape. Identity when the host sets no override, so a host without a
-      # venue stages exactly the committed bytes it staged before.
+      # (CONTRACTS.md §1, override tier), through the same `lib/livery.nix`, and
+      # the geometry the host resolves (`aoide.livery.geometry`, which
+      # `hyprland.conf` and the kitty fragment already bake) laid over the song's
+      # own, so the twin equals the bake. Not a second rule: `stagePatch` is
+      # `resolve`'s two passes against the file's own shape. Identity when the
+      # host sets no override and no geometry beyond the song's own, so a host
+      # without a venue stages exactly the committed bytes it staged before.
       stageLivery = pkgs.writeText "aoide-stage-livery.json" (
         builtins.toJSON (livery.stagePatch config.aoide.livery committedLivery)
       );
 
-      # The venue's recolour as DATA — only the slots it changes in the
-      # committed livery, `{}` when the host sets no override
-      # (`lib/livery.nix`'s `venueDelta`). Published beside the declared twin
-      # as `song/declared/venue.json`: the runtime stage reads the declared
+      # The venue as DATA — only the slots it recolours and the geometry it
+      # sets differently in the committed livery, `{}` when the host sets
+      # neither (`lib/livery.nix`'s `venueDelta`). Published beside the declared
+      # twin as `song/declared/venue.json`: the runtime stage reads the declared
       # song from the runtime songbook and overlays this, so the recolour law
       # stays in nix alone.
       venueFile = pkgs.writeText "aoide-declared-venue.json" (
@@ -192,17 +195,17 @@ let
 
       # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
       # Lays down the DECLARED song on every activation: the ACTIVE song's
-      # committed livery, with the venue override applied (`stageLivery`, above),
+      # committed livery, with the venue applied (`stageLivery`, above),
       # into the live stage twin (`song/stage/livery.json`, CONTRACTS.md §4) AND
       # its declared twin (`song/declared/livery.json`), injecting the same
       # `"song"` field `lyra rice stage` injects (jq's `. + {song: …}`; `-S` sorts
       # keys to match serde_json::Value's BTreeMap ordering). The declared twin is
       # what `rice mode declarative` re-pins the declared song from — that song's
-      # notes with the venue recolour already applied. The staging writers (`rice
-      # stage`, `rice mode stage`, `lyra reload`) derive the declared song from
-      # the runtime songbook instead, with the venue's slots
-      # (`song/declared/venue.json`, `venueFile` above) laid over it, so an edit
-      # to the song shows and the recolour still stands.
+      # notes with the venue's recolour and geometry already applied. The staging
+      # writers (`rice stage`, `rice mode stage`, `lyra reload`) derive the
+      # declared song from the runtime songbook instead, with the venue's slots
+      # and geometry (`song/declared/venue.json`, `venueFile` above) laid over
+      # it, so an edit to the song shows and the venue still stands.
       # The seed is declared truth and nothing else: when `stage/mode.json` names
       # a staged or drafted song, `aoide-rice-reload` (below) puts that one back
       # once the session is up.

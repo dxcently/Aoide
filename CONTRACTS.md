@@ -250,7 +250,11 @@ system. Rides `song/stage/livery.json` for live application: `lyra rice
 stage` live-applies this tier (plus `window.border`/`borderInactive`) via
 best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
 paragraph — in addition to baking the value at build time into
-`hyprland.conf`.
+`hyprland.conf`. The option set is the song's AND the host's: a host may set
+any field (a host-wide `blurEnabled = false`, a `terminalOpacity` for one
+song), and the value the option resolves to is what the baked files carry and
+what the declared twin and `song/declared/venue.json` (§4) publish, so a
+re-stage of the declared song reproduces the bake.
 
 | Key                  | Type          | Fallback | Hyprland keyword       |
 | --------------------- | ------------- | -------- | ----------------------- |
@@ -364,10 +368,11 @@ system keeps storing the song's authored values inert; no config-side
 `song/stage/livery.json` (`lyra rice stage`, `rice mode stage`, `reload`'s
 staging arm — §4) derive every song from the runtime songbook, the place a
 song is edited. For the DECLARED song they then lay the venue's slots over it
-(`song/declared/venue.json`, §4 — `lib/livery.nix`'s `venueDelta`, the slots
-the recolour changes in the committed document), so the venue wins on the
-slots it recolours and an edit to the song shows everywhere else, while the
-rule itself stays in nix and Rust overlays only the data it is handed. Staging
+(`song/declared/venue.json`, §4 — `lib/livery.nix`'s `venueDelta`, the venue's
+part of the declared song: the slots it recolours and the geometry it sets),
+so the venue wins on those fields and an edit to the song shows everywhere
+else, while the rule itself stays in nix and Rust overlays only the data it
+is handed. Staging
 any OTHER song applies no venue: the rule is the VENUE recolouring the song it
 declares. `rice mode declarative` is the one writer that restores declared
 truth instead: its re-pin reads the declared twin
@@ -1696,7 +1701,8 @@ mirror + fallback were dropped in Phase 4 of the livery merge —
 
 Beyond `lyra rice stage <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes, with the
-venue's `aoide.livery.override` applied, on every activation**
+venue's `aoide.livery.override` applied and the host's geometry laid over the
+song's own, on every activation**
 (`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`,
 via `lib/livery.nix`'s `stagePatch`) — so a host that boots without ever
 running `rice stage` still has a correct, recoloured live stage twin from
@@ -1705,10 +1711,10 @@ boot. The seed is declared truth, written whatever the mode: when
 `aoide-rice-reload` user unit, run Before the shell at login and restarted with
 it on every switch) re-stages it over the seed. The same script publishes the
 declared twin below, which `rice mode declarative` re-pins from, and the
-venue's slots (`song/declared/venue.json`, below), which the staging writers
-lay over the declared song's runtime copy — so their next re-stage reproduces
-the venue recolour rather than reverting the stage twin to the song's own
-colours.
+venue (`song/declared/venue.json`, below: the slots it recolours and the
+geometry it sets), which the staging writers lay over the declared song's
+runtime copy — so their next re-stage reproduces the venue's recolour and
+geometry rather than reverting the stage twin to the song's own.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
@@ -1899,9 +1905,10 @@ the staged state without a rebuild.
 ### `song/declared/livery.json` — **v0**
 
 The DECLARED song's notes: the active song's committed `livery.json` with the
-venue's `aoide.livery.override` applied (`lib/livery.nix`'s `stagePatch`, §1's
-override tier), its top-level `song` field set to that song's name, keys
-sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
+venue's `aoide.livery.override` applied and the host's resolved geometry (the
+non-null fields of `aoide.livery.geometry`) laid over the song's own
+(`lib/livery.nix`'s `stagePatch`, §1's override and geometry tiers), its
+top-level `song` field set to that song's name, keys sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
 the SAME activation seed that writes `song/stage/livery.json` above
 (`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`) —
 one `jq` run, two destinations. In `staging` and `draft` mode the session's
@@ -1913,7 +1920,7 @@ Why it exists: `stage/livery.json` is the LIVE stage, rewritten by runtime
 writers, so it cannot itself say what the venue declared. This file is the
 venue's read-only statement of that: declarative mode is declared truth, so
 `rice mode declarative`'s re-pin restores the declared song from it, venue
-recolour included, whatever the runtime songbook now holds. It also names WHICH
+recolour and geometry included, whatever the runtime songbook now holds. It also names WHICH
 song is declared, in its own `"song"` field. The staging writers do not read it
 for notes: they derive from the runtime songbook, where a song is edited, and
 lay `song/declared/venue.json` (below) over the declared song. A plain file,
@@ -1934,25 +1941,29 @@ Nothing in the Rust crates writes it — `handle_rice_stage` only reads.
 
 ### `song/declared/venue.json` — **v0**
 
-The venue's recolour of the DECLARED song, as data: a JSON object keyed by
-livery tier (`palette`, `base16`, `bar`, `notif`, `window`), each value the
-slots the host's `aoide.livery.override` changes in the active song's committed
-`livery.json`, such as `{"palette":{"bg":"#191724"}}`. It is
+The venue's part of the DECLARED song, as data: a JSON object keyed by livery
+tier (`palette`, `base16`, `bar`, `notif`, `window`, `geometry`). A colour
+tier's value is the slots the host's `aoide.livery.override` changes in the
+active song's committed `livery.json`; `geometry`'s is the fields the host's
+`aoide.livery.geometry` sets to a value other than the document's, such as
+`{"palette":{"bg":"#191724"},"geometry":{"terminalOpacity":1}}`. It is
 `lib/livery.nix`'s `venueDelta` — `stagePatch`'s result minus the committed
-document — so a slot the recolour leaves alone is not in it, and the file is
-`{}` when the host sets no override. Written by the SAME activation seed as the
+document — so a slot or field the venue leaves alone is not in it, and the file
+is `{}` when the host sets neither. Written by the SAME activation seed as the
 twin above (`home.activation.aoideSeedStage`,
 `modules/dendrites/lyra/default.nix`): a temp file made in `song/declared/` and
-renamed over the target, so a reader never sees a torn file. The recolour rule
-stays in nix (§1's override tier, guarded by `checks.livery-fanout`); no Rust
-crate computes it or writes this file.
+renamed over the target, so a reader never sees a torn file. The rules stay in
+nix (§1's override and geometry tiers, guarded by `checks.livery-fanout`); no
+Rust crate computes it or writes this file.
 
 Readers: the staging writers — `lyra rice stage <name>`, `rice mode stage`,
 `reload`'s staging arm — when the song they stage is the declared one. They lay
 it over the runtime song's parsed notes: each tier object in the file sets its
-keys on the same tier of the notes, and a tier the notes do not hold as an
-object is skipped. The venue therefore wins on the slots it recolours, and an
-edit to the runtime song shows everywhere else. Staging any other song applies
+keys on the same tier of the notes. A colour tier the notes do not hold as an
+object is skipped (the venue recolours, and there is nothing to recolour);
+`geometry` is created when the notes hold none or null (the venue sets that
+value). The venue therefore wins on the slots it recolours and the geometry it
+sets, and an edit to the runtime song shows everywhere else. Staging any other song applies
 no venue, and `rice mode declarative`'s re-pin reads the twin above, which
 already carries it. **Absent** is the identity: a host that never activated the
 lane stages the runtime song as it is. A file that cannot be read or parsed is

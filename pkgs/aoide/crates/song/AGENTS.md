@@ -191,20 +191,22 @@
   terminal would flip the operator's live glass and borders, and a reload
   rebuilds the whole running scene.
 - **`song/declared/livery.json` (the declared twin) and
-  `song/declared/venue.json` (the venue's slots), CONTRACTS.md §4, are
-  READ-ONLY for this crate — only the nix side writes them.** The lyra
+  `song/declared/venue.json` (the venue's slots and geometry), CONTRACTS.md §4,
+  are READ-ONLY for this crate — only the nix side writes them.** The lyra
   lane's activation seed (`home.activation.aoideSeedStage`) publishes them: the
   twin is the declared song's committed notes with the venue's
-  `aoide.livery.override` applied, `"song"` injected, keys sorted; `venue.json`
-  is `venueDelta`, only the slots that override changes, `{}` with no override.
-  `commands::rice::notes_source` reads the twin for the re-pin
+  `aoide.livery.override` applied and the host's geometry laid over the song's
+  own, `"song"` injected, keys sorted; `venue.json` is `venueDelta`, only the
+  slots that override recolours and the geometry the host sets, `{}` with
+  neither. `commands::rice::notes_source` reads the twin for the re-pin
   (`handle_rice_stage_without_cover`, `rice mode declarative` alone), and
   `commands::rice::declared_song` exposes its `"song"` field
   (`rice mode declarative`'s no-`<name>` resolve uses it, ahead of
   `current_staged_song`). `handle_rice_stage` reads the RUNTIME songbook for
   every song and, for the declared one, `commands::rice::overlay_venue` lays
-  `venue.json` over the parsed notes. **The declared-song test is `"song"`
-  EQUALITY against the name being staged — never a mode, never a mtime,
+  `venue.json` over the parsed notes: a colour tier the notes lack is
+  skipped, `geometry` is created (the venue sets that value, it does not
+  recolour it). **The declared-song test is `"song"` EQUALITY against the name being staged — never a mode, never a mtime,
   never "the twin exists so use it".** The twin describes exactly one song;
   staging any other applies no venue, and re-pinning any other derives from
   that song's own runtime notes. A host that never activated the lane has no

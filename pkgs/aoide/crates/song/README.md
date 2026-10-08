@@ -138,8 +138,9 @@ dev-dependency.
 `livery`/`live` are otherwise dependency-free leaves.
 
 `declared_notes` (`song/declared/livery.json`, CONTRACTS.md §4) is the
-DECLARED song's own notes, venue override applied — published by the
-lyra lane's activation seed, read-only here.
+DECLARED song's own notes, venue override applied and the host's geometry laid
+over the song's own — published by the lyra lane's activation seed, read-only
+here.
 `commands::rice::notes_source` reads it for `rice mode declarative`'s re-pin
 whenever its `"song"` field equals the name being re-pinned (never otherwise),
 because declarative mode is declared truth;
@@ -148,8 +149,9 @@ declarative`'s no-`<name>` resolve and to the staging writers, which derive
 every song from `songbook_notes` (the runtime songbook, where a song is edited)
 and, for the declared song, lay `declared_venue` over it
 (`commands::rice::overlay_venue`: `song/declared/venue.json`, the slots the
-venue recolours; absent is the identity, unparseable is a taught refusal). A
-host with no twin falls back to `songbook_notes` unchanged.
+venue recolours and the geometry it sets; absent is the identity, unparseable
+is a taught refusal). A host with no twin falls back to `songbook_notes`
+unchanged.
 
 ## How it composes
 

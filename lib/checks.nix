@@ -65,8 +65,10 @@
 #       Proves the general law against a fixed in-file fixture (never a real
 #       host or committed song): `lib/livery.nix`'s `stagePatch`'s palette
 #       output matches `resolve`'s under a one-anchor override,
-#       `stagePatch` is the identity with no override set, and `venueDelta`
-#       is exactly the one recoloured slot (`{ }` with no override).
+#       `stagePatch` is the identity with no override set, `venueDelta`
+#       is exactly the one recoloured slot (`{ }` with no override), and a
+#       host-set geometry field is laid over the document's own — created when
+#       the document has none, shown in `venueDelta` only where it differs.
 #
 #   11, 12. generator-offline, generator-relocatable — the shipped songbook
 #       generator reproduces `songbookManifest` offline, and from a relocated
@@ -607,7 +609,9 @@ let
   # no-override identity `stagePatch` promises callers. `venueDelta` (the
   # `song/declared/venue.json` the runtime stage overlays) is proved on the
   # same fixture: the one recoloured slot and nothing else, `{ }` without an
-  # override.
+  # override. Geometry is the third case: a value the host sets, laid over the
+  # document whether or not it holds the tier, and in `venueDelta` only where
+  # it differs from the document's own.
   liveryFanout =
     let
       livery = import ./livery.nix { inherit lib; };
@@ -648,6 +652,21 @@ let
         schemaVersion = "0";
         palette = fixturePalette;
       };
+      # A host that sets one geometry field (null fields are no opinion), against
+      # a document with no geometry and against one whose own geometry it
+      # partly shares.
+      fixtureGeo = fixtureBare // {
+        geometry = {
+          terminalOpacity = 1.0;
+          gapsOut = null;
+        };
+      };
+      fixtureDocGeo = fixtureDoc // {
+        geometry = {
+          terminalOpacity = 0.7;
+          gapsIn = 4;
+        };
+      };
       resolvedPalette = (livery.resolve fixtureLivery).palette;
       stagedPalette = (livery.stagePatch fixtureLivery fixtureDoc).palette;
       identity = livery.stagePatch fixtureBare fixtureDoc == fixtureDoc;
@@ -658,9 +677,46 @@ let
           };
         };
       deltaBare = livery.venueDelta fixtureBare fixtureDoc == { };
+      geoCreated =
+        (livery.stagePatch fixtureGeo fixtureDoc).geometry or null == {
+          terminalOpacity = 1.0;
+        }
+        && livery.venueDelta fixtureGeo fixtureDoc == {
+          geometry = {
+            terminalOpacity = 1.0;
+          };
+        };
+      geoMerged =
+        (livery.stagePatch fixtureGeo fixtureDocGeo).geometry or null == {
+          terminalOpacity = 1.0;
+          gapsIn = 4;
+        }
+        && livery.venueDelta fixtureGeo fixtureDocGeo == {
+          geometry = {
+            terminalOpacity = 1.0;
+          };
+        };
+      geoEqual =
+        let
+          same = fixtureBare // {
+            geometry = {
+              terminalOpacity = 0.7;
+            };
+          };
+        in
+        livery.stagePatch same fixtureDocGeo == fixtureDocGeo && livery.venueDelta same fixtureDocGeo == { };
     in
-    assertCheck "livery-fanout" (stagedPalette == resolvedPalette && identity && deltaOne && deltaBare)
-      "stagePatch and resolve disagree on the override recolour, stagePatch is not the identity with no override set, or venueDelta is not exactly the recoloured slots";
+    assertCheck "livery-fanout"
+      (
+        stagedPalette == resolvedPalette
+        && identity
+        && deltaOne
+        && deltaBare
+        && geoCreated
+        && geoMerged
+        && geoEqual
+      )
+      "stagePatch and resolve disagree on the override recolour, stagePatch is not the identity with no override set, venueDelta is not exactly the recoloured slots, or a host-set geometry field is not laid over the document (created when absent, merged when present, no delta when equal)";
   # ── Checks 11 and 12: the shipped songbook generator is offline ───────────
   # §9's claim, as a build: `share/lyra/nix/manifest.nix` (shipped by
   # `pkgs/lyra-songbook`) is the runtime's generator, and a plain
