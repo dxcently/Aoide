@@ -28,7 +28,8 @@
 // holds nothing.
 //
 // ── The picker ──────────────────────────────────────────────────────────────
-// A PopupWindow hung under the cell the way BarPopout hangs, created on open and
+// A PopupWindow hung from the bar's bottom edge (the anchor rect runs from the
+// cell down to the window's end), created on open and
 // destroyed on close so no hover state carries from one open to the next. It
 // closes on a row action, on any click on the cell, and 600ms after the pointer
 // is over neither the cell nor the popup. There is no text input, so no
@@ -144,7 +145,7 @@ Item {
     // ── The face ────────────────────────────────────────────────────────────
     Row {
         id: face
-        spacing: 4
+        spacing: 8
         // Declarative — locked, at rest, the ~always state — recedes like the
         // net cell's dead-link register; both unlocked modes read at full
         // strength (they're the news). A swallowed click reads the same dim.
@@ -166,9 +167,11 @@ Item {
         }
 
         // The second gesture, drawn: a 7×4 chevron, two 1px rules meeting at
-        // the bottom, 4px after the word (the Row's spacing).
+        // the bottom, 8px after the word (the Row's spacing, as cadenza's gap),
+        // centred on the word's x-height: the baseline less half a 6px x-height
+        // and the chevron's own 2.
         Item {
-            anchors.verticalCenter: parent.verticalCenter
+            y: word.y + word.baselineOffset - 5
             visible: root.canPick
             width: 7
             height: 4
@@ -257,6 +260,10 @@ Item {
             visible: true
             color: "transparent"
             anchor.item: root
+            anchor.rect.x: 0
+            anchor.rect.y: 0
+            anchor.rect.width: root.width
+            anchor.rect.height: root.QsWindow.window.height - root.mapToItem(null, 0, 0).y
             anchor.edges: Edges.Bottom
             anchor.gravity: Edges.Bottom
             anchor.adjustment: PopupAdjustment.FlipY | PopupAdjustment.Slide
