@@ -1315,7 +1315,7 @@ mod tests {
 
     /// The ruling (2026-09-28): a user's wallpaper pick is what shows, and
     /// re-staging the SAME song must not quietly revert it to the song's
-    /// default. `rice mode stage` (the RICE toggle, a no-arg call that
+    /// default. `rice mode stage` (the no-arg call, the CLI default, that
     /// re-stages the current rice) and a declarative re-seed both land here.
     #[test]
     fn restaging_the_same_song_keeps_a_pick() {

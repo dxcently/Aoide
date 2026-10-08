@@ -989,8 +989,8 @@ mod tests {
     // overwrites on EVERY stage — including the re-pin a declarative lock
     // performs. So staging `etude`, then locking declarative on `sonata`,
     // used to permanently lose the memory that `etude` was ever staged: a
-    // later bare `rice mode stage` (no name — exactly what the bar toggle
-    // sends) would resolve back to `sonata`, never `etude`. `staging_song` is
+    // later bare `rice mode stage` (no name — the CLI default, which the RICE
+    // menu never sends) would resolve back to `sonata`, never `etude`. `staging_song` is
     // a separate, declarative-immune memory of "what was I staging" that a
     // bare `rice mode stage` now prefers over the unreliable file-read.
 
@@ -1030,8 +1030,8 @@ mod tests {
             "declarative locking must not erase the staging memory"
         );
 
-        // A bare `rice mode stage` (no name — exactly what the bar toggle
-        // sends) must resolve back to `etude`, NOT `sonata` and NOT whatever
+        // A bare `rice mode stage` (no name — the CLI default, which the RICE
+        // menu never sends) must resolve back to `etude`, NOT `sonata` and NOT whatever
         // `current_staged_song()`/`stage/livery.json` currently says.
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -1109,7 +1109,7 @@ mod tests {
     }
 
     /// Stage `cadenza`, pick a wallpaper, fork a Draft, then leave Draft mode
-    /// with a bare `rice mode stage` (what the RICE toggle sends).
+    /// with a bare `rice mode stage` (the no-name CLI call).
     #[test]
     fn leaving_draft_mode_by_stage_keeps_a_pick_made_for_the_same_song() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());

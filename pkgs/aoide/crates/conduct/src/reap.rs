@@ -1248,7 +1248,7 @@ pub fn reap_and_announce(inv: &Invocation) -> Outcome {
 /// child would stack units). A missing/failed notifier is an eprintln, never an
 /// error: the sweep already happened, and losing the toast must not turn a
 /// successful reap into a failed one. Same idiom as shellbridge's
-/// `dispatch_rice_mode_toggle`.
+/// `dispatch_rice_mode`.
 ///
 /// Returns whether the notifier was handed the toast at all (the spawn
 /// succeeded) — never whether the daemon drew it, which is dunst's business

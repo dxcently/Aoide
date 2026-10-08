@@ -662,7 +662,7 @@ fn restart_service() {
 }
 
 /// Raise a toast through the stock freedesktop client, detached — same
-/// idiom as `aoide-conduct`'s `announce_reap`/`dispatch_rice_mode_toggle`: a
+/// idiom as `aoide-conduct`'s `announce_reap`/`dispatch_rice_mode`: a
 /// slow/missing `notify-send` must never delay or fail the healthcheck
 /// itself (it is a `oneshot` on a 15s timer). Fired once per episode, only
 /// once the ladder has bottomed out at its 900s floor (see

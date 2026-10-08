@@ -56,7 +56,7 @@ pub struct ModeMarker {
     /// overwrites). Locking declarative must never touch or clear this
     /// field: it is the only durable memory of "what was I staging" that
     /// survives a declarative round-trip, so a bare `rice mode stage` (no
-    /// explicit name — what the bar toggle sends) can resolve back to it
+    /// explicit name — the CLI default, never the RICE menu, which names its song) can resolve back to it
     /// instead of re-reading `stage/livery.json`'s own `"song"` field (which
     /// `Declarative` just overwrote to something else). Absent on a fresh
     /// marker or one written before this field existed — callers fall back

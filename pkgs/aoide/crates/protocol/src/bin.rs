@@ -1,7 +1,7 @@
 //! Sibling-binary resolver: how one aoide process locates the OTHER aoide
 //! binary (core `aoide` from lyra's side is not this phase's problem — P-A6
 //! only wires conduct's shellbridge, which needs `aoide` for itself and
-//! `lyra` for the rice-mode toggle) without hardcoding a bare name that
+//! `lyra` for the RICE menu's `riceMode`) without hardcoding a bare name that
 //! could resolve to nothing off `PATH`.
 //!
 //! Three tiers, tried in order:
