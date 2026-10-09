@@ -43,7 +43,7 @@
     # Its nixpkgs only feeds habit's own checks; the library takes `lib` from
     # whoever applies it.
     habit = {
-      url = "github:dxcently/habit/v2";
+      url = "github:dxcently/habit/v0.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
