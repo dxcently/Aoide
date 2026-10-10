@@ -55,13 +55,13 @@ aggregation is the part any host can.
 
 ## The nucleus aggregation
 
-The six services that used to be nucleus files are dendrites, named in the
+The six services are dendrites, named in the
 catalogue and members of the `nucleus` aggregation beside the command-line
 members (`modules/dendrites/README.md`, "The nucleus members"):
 
 | catalogue name   | file                                    | what it is                                             |
 |------------------|-----------------------------------------|--------------------------------------------------------|
-| `aoided`         | `modules/dendrites/aoided.nix`          | the doors, the mail adapter, the usage poller, the pair-watch popup, the discovery firewall carve |
+| `aoided`         | `modules/dendrites/aoided.nix`          | the AoideOS deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve, `AOIDE_SONG_TEMPLATES` |
 | `aoide-secrets`  | `modules/dendrites/aoide-secrets.nix`   | the secrets broker and its popup watcher               |
 | `melete-adapter` | `modules/dendrites/melete-adapter.nix`  | the thin adapter on the `aoided` event stream          |
 | `aoide-config`   | `modules/dendrites/aoide-config.nix`    | renders `aoide.config.settings` and points `AOIDE_CONFIG` at it |

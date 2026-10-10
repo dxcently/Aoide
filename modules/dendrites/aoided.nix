@@ -1,5 +1,13 @@
 # modules/dendrites/aoided.nix — the AoideOS deltas for the aoided unit.
 #
+# Deselecting this dendrite does not remove the aoided daemon: `aoided.service`,
+# its tmpfiles rules and the core session variables come from the core module
+# `pkgs/aoide/module/aoided.nix`, which `nucleusModule` imports whenever
+# `aoide.enable` is set. What this dendrite carries is the AoideOS deployment on
+# top of that unit: the a2a, mcp and mail-adapter doors, the pair-watch popup,
+# the usage poller and its timer, the discovery firewall carve (UDP 8711) and
+# `AOIDE_SONG_TEMPLATES`.
+#
 # `pkgs/aoide/module/aoided.nix` owns the tmpfiles rules, the core session
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).
 # This file carries only what is paint-dependent: the lyra-gated

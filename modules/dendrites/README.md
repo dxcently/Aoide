@@ -146,7 +146,8 @@ contract in `modules/nucleus`.
   the same way the secrets watcher prefers `lyra secrets ask`.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream. It orders itself against `aoided.service`, which the core module
-  defines, so it evaluates with or without the `aoided` dendrite.
+  defines on `aoide.enable` alone (the `aoided` dendrite adds only the AoideOS
+  deltas to it), so it evaluates with or without the `aoided` dendrite.
 - `aoide-secrets.nix` — the secrets broker's deployment: its own system user
   `aoide-secrets` + groups `aoide-secrets`/`aoide-secrets-access`, and a SYSTEM
   `aoide-secrets-serve.service` (own uid, `/var/lib` home) running `aoide

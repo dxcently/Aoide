@@ -107,8 +107,9 @@ them in addition to the ones above.
   document is the split-brain the point-don't-copy design exists to avoid.
 - **A member reads the contract, never another member.** `aoided` and
   `melete-adapter` order against `aoided.service`, a unit the core module
-  defines; none reads another member's option or config, so a host may deselect
-  any one of them and still evaluate (checked by deselecting each in turn on
+  defines on `aoide.enable` alone (the `aoided` dendrite adds only the AoideOS
+  deltas: doors, popup, usage poller, firewall carve, `AOIDE_SONG_TEMPLATES`);
+  none reads another member's option or config, so a host may deselect any one of them and still evaluate (checked by deselecting each in turn on
   `hosts/yomi-strix`). An option a member renders for a consumer to set is
   declared in the contract (`modules/nucleus`), not in the member.
 - **`aoide.mail.adapter` has `enable` and `port` and must never grow a bind
