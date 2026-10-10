@@ -950,7 +950,7 @@ in
           a2a on and a graphical session does NOT get the popup unless it
           also sets this. It lives in the `a2a` family because it
           is meaningless without the door (`aoide.a2a.enable` is part of
-          its gate). See `modules/nucleus/aoided.nix` for the unit and
+          its gate). See `modules/dendrites/aoided.nix` for the unit and
           CONTRACTS.md §6's "Pairing events feed" subsection for the
           popup's own typed-code contract.
         '';
@@ -1019,7 +1019,7 @@ in
           (0700, secrets-uid), socket `/run/aoide-secrets/secrets.sock`
           (0660, group `aoide-secrets-access`) as the only door. Off by
           default, same house policy as the MCP façade/A2A door/usage
-          poller above — see `modules/nucleus/secrets.nix` for the unit,
+          poller above — see `modules/dendrites/aoide-secrets.nix` for the unit,
           and `pkgs/aoide/crates/secrets/README.md` for the broker itself
           (the binary is nix-independent; this option is deployment only).
         '';

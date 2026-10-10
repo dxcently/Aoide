@@ -227,7 +227,7 @@ in
 
           # Rice preview / adopt shortcuts. `rice` left core's registry at P-A5
           # of the binary-split workstream — it lives only in `lyra` now
-          # (bare name resolves via PATH: modules/nucleus/packages.nix puts
+          # (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
           # `pkgs.aoide.rice` — lyra's own droppable output, P-A8 — on
           # systemPackages whenever `aoide.lyra.enable` is on, which defaults
           # to the lyra fact).
