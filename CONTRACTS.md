@@ -1038,37 +1038,6 @@ count.
   (`reason: "config-unreadable"`) or for no mesh to name
   (`reason: "no-mesh-declared"`). `--json`'s `data.report` shape:
   `{"mesh", "rows": [{"node", "outcome", …}], "sameOperatorNote"?}`.
-- `do <sentence…>` and `do kit [--out <file>]`, appended newest — a sentence to
-  the one command it means, through the verba-volantia classifier
-  (`docs/architecture/AOIDE-VV-JEV.md`, "VV — `aoide do`"). **`do` prints the
-  resolved command and never runs it**: a model suggests, the person decides.
-  It shells out to `verba-volantia dispatch --out <kit>` (binary: `[verba]
-  binary`, default `verba-volantia` on `PATH`; kit directory: `[verba]
-  weightsDir`, default `$AOIDE_ROOT/verba/aoide`; both §4's `config.toml`),
-  reads the first JSON line, and applies the fail-closed table: `accept` not
-  true, non-empty `conflicts`, non-null `trailing_editorial_text`, intent
-  `none`, an intent or slot the registry does not hold (the denied set —
-  `secrets_*` but `secrets_status`, `mesh_charter_*`, irreversible removals, trust/grant/config changes, `pair*`, server modes — is
-  never in the kit), a value with a control character, a bound command the
-  registry's own `Command::check` refuses, or a printed line that does not
-  re-parse to the checked invocation each end in a taught refusal, exit 1
-  (a missing binary or kit, a timeout, an unreadable verdict likewise). An
-  abstention lists the nearest commands as full lines, best first, in
-  `data.candidates` (strings, which the text render prints) with the raw
-  verdict in `data.verdict`; an unfilled required slot refuses with the
-  command shown with the slot named (`aoide session trace <id>`, also
-  `data.command`). A success is `message` = `data.command` = the printed line,
-  plus `intent`, `slots`, `margin`, `threshold`, `verdict`. Text mode on the
-  CLI door prints the bare line on stdout and refusals on stderr with nothing
-  on stdout (the `workspace root` shape), so `$(aoide do "…")` substitutes
-  cleanly; `--json` keeps the envelope. `do kit` derives the classifier's
-  training spec (verba-volantia's `templates.json`: `wrappers`, then one
-  function per implemented, non-`internal` command except `do` — `name` the
-  path joined with `_`, `params` its positionals then value-taking flags,
-  `templates` its phrasings — and a final `none` function of non-command
-  requests) from the registry; text mode prints the spec itself, `--out`
-  writes it and prints the commands that train it. Bool flags are not slots.
-
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/reload/screen/shellbridge/herald/take/
   element, the painted surface. `crates/lyra/src/registry.rs`'s golden test
@@ -1507,7 +1476,7 @@ house policy as every other door), and partial management (nix owning one
 section while the CLI owns another) is deliberately not offered: two writers
 on one document is the split-brain the design exists to avoid.
 
-Schema v0 — three SETTABLE sections plus the DECLARED families, and a new
+Schema v0 — two SETTABLE sections plus the DECLARED families, and a new
 section lands with the consumer that reads it, never ahead of one:
 
 ```toml
@@ -1518,10 +1487,6 @@ homeMesh = "home"
 
 [upkeep]
 verifyCommand = "nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.nix-lint"
-
-[verba]
-binary = "verba-volantia"
-weightsDir = "/home/me/.aoide/verba/aoide"
 
 [mesh.home]
 grant = ["read", "spawn"]
@@ -1604,14 +1569,10 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   hook timeout. The command is `nix build`, not `nix flake check`: the latter
   takes no attribute fragment, so scoping is only expressible as a build of
   the check derivations.
-- `verba.binary` (string, default `"verba-volantia"`) — the classifier `aoide do`
-  shells out to: a bare name resolved on `PATH`, or a path. A blank value is the
-  default. Free-form, like `upkeep.verifyCommand`: core cannot judge it.
-- `verba.weightsDir` (string, default `""`) — the trained kit directory
-  `aoide do` hands the classifier (`meta.json`, `model.safetensors`, optional
-  `lexicon.txt`). Empty means `$AOIDE_ROOT/verba/aoide`. Neither `verba` key is
-  written by any default path, so a rollback to a binary without the section
-  has nothing to unlearn unless an operator set one.
+- `verba` — a RETIRED section. A `[verba]` table is accepted and read by
+  nothing, so a file written before the section went still loads (it would
+  otherwise be an unknown section, refused); `config set` refuses its keys as
+  unknown, and the table is never written back out.
 - `mesh.<name>` (task #135 P4, zero or more, keyed by the operator's own
   mesh name) — a declared mesh this instance believes it belongs to,
   compared against the live node registry by `aoide mesh`

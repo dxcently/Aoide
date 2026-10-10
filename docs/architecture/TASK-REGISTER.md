@@ -3027,3 +3027,25 @@ re-read the tree against its own prose.
   was a scale anchor worth citing. What is an identity: the toplevel drvPath a
   tree reports to `tests/inventory.sh`, and the `packages.aoide` drvPath, both
   read from that tree.
+
+## 36. `aoide do` retired (User ruling, 2026-10-10)
+
+Appended, never edited in place: §12's "Integration preparation" entry (the
+`aoide do` shell-out boundary) and the dated operations handoffs that queue
+`aoide do` stand as written, and this entry closes them as RETIRED.
+
+- **Ruling.** `aoide do` — a sentence to the one `aoide` command it means,
+  printed and never run, through the `verba-volantia` classifier — is removed
+  entirely. A blind probe scored it 56% right, with wrong commands printed, and
+  the User ruled it not worth keeping. Nothing else in Aoide read its code.
+- **What went.** `do` and `do kit` leave the registry (and the cli crate's
+  `vv` module, its stdout special case and its integration test); the
+  `[verba]` config section loses its keys and validation, so `config set
+  verba.*` is an unknown key; the CONTRACTS ledger entry, the wiki's CLI pages
+  and the cli crate's README/AGENTS lose their `do` text.
+- **What stays.** `[verba]` is the one retired section the config loader
+  tolerates: a `config.toml` that still carries the table loads, the table is
+  read by nothing and never written back. `docs/architecture/AOIDE-VV-JEV.md`
+  keeps the JEV contract and fixture only. Open items closed as retired: the
+  `aoide do` VV shell-out, its kit and the trained-kit adoption, the frozen
+  probe and the token-savings row, and the rule-baseline measurement for `do`.

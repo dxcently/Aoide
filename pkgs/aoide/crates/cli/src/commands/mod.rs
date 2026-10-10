@@ -15,7 +15,6 @@ mod infra;
 mod meta;
 mod onboard;
 mod stubs;
-mod vv;
 
 use crate::registry::{Layout, Registry};
 
@@ -26,7 +25,7 @@ use crate::registry::{Layout, Registry};
 const LAYOUT: Layout = Layout {
     tagline: "conduct agents, terminals and machines from any shell",
     sections: &[
-        ("Start here", &[("guide", ""), ("onboard", ""), ("do", "Turn a sentence into the one aoide command it means")]),
+        ("Start here", &[("guide", ""), ("onboard", "")]),
         (
             "Sessions & conducting",
             &[
@@ -158,7 +157,6 @@ pub fn all() -> Registry {
     aoide_client::context::register(&mut r); // explicit shared persona/memory retrieval
     aoide_conduct::commands::graph::register_mail_ring(&mut r); // the local doorbell (MAIL.md "Delivery and the doorbell", P-M5a-2)
     aoide_client::charter::register(&mut r); // mesh charter init/sign/accept/reroot — one operator's machines, signed and carried (P-CHARTER, appended newest)
-    vv::register(&mut r); // do, do kit — a sentence to the one command it means, through the verba-volantia classifier (appended newest)
 
     r.arrange(LAYOUT);
     r
