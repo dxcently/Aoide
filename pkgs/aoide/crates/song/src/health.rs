@@ -746,7 +746,7 @@ pub fn run_healthcheck() -> HealthOutcome {
     if let Some(parent) = marker.parent() {
         // Best-effort, same guarded posture as every write below: `state/`
         // is normally seeded by the nix module's systemd-tmpfiles rule
-        // (`modules/nucleus/aoided.nix`), but nothing in this crate creates
+        // (`pkgs/aoide/module/aoided.nix`), but nothing in this crate creates
         // it, and an absent directory would otherwise make BOTH writes below
         // silently fail — `recent` would then never accumulate, the ladder
         // would permanently take its "no prior restart" branch, and the

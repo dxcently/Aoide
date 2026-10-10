@@ -10,7 +10,7 @@
 //! `docs/architecture/AOIDED.md`'s "L1 — the event bus"/"L2 — the fourth
 //! door" sections) are the RESIDENT daemon: the `aoided` binary's own main
 //! loop, running behind the unit flip that phase makes
-//! (`modules/nucleus/aoided.nix`, `Type=simple` + `Restart=on-failure`).
+//! (`pkgs/aoide/module/aoided.nix`, `Type=simple` + `Restart=on-failure`).
 //! Extracted from root `src/daemon.rs` (Phase 4c restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md) — only `run` (the daemon skeleton's
 //! own wiring/demo) moves here; the audit-log contract (`Door`, `EventClass`,

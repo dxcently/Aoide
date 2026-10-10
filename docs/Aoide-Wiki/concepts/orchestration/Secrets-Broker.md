@@ -244,7 +244,7 @@ normally the entire time.
 
 ## Deployment
 
-The nix module (`modules/nucleus/secrets.nix`, `aoide.secrets.enable`,
+The nix module (`modules/dendrites/aoide-secrets.nix`, `aoide.secrets.enable`,
 default off) provisions the `aoide-secrets` system user, the
 `aoide-secrets`/`aoide-secrets-access` groups, and a system service
 (`aoide-secrets-serve`, anchored to `multi-user.target`, no graphical-session

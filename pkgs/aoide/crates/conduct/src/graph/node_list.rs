@@ -26,7 +26,7 @@
 //!   fold), run CONCURRENTLY with the probes so the wall clock stays ~one
 //!   window, not two. An empty sweep is normal (a default-deny firewall
 //!   eats broadcast datagrams before any socket sees them —
-//!   `modules/nucleus/aoided.nix`'s documented asymmetry); even a sweep
+//!   `modules/dendrites/aoided.nix`'s documented asymmetry); even a sweep
 //!   that cannot LISTEN (bind failure) only annotates the roster
 //!   (`data.sweep.error` + one trailing line), never fails the command —
 //!   the paired half of the roster is still true.

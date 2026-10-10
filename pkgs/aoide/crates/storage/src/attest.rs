@@ -34,7 +34,7 @@
 //! to `None` — UNIDENTIFIED, never "verified". For the send gate that is
 //! fail-closed (pending); for the broker's origin gate it means the gate
 //! keys only on POSITIVE attestation (see `aoide-secrets/broker.rs`). In
-//! the packaged cross-uid deployment (`modules/nucleus/secrets.nix` runs
+//! the packaged cross-uid deployment (`modules/dendrites/aoide-secrets.nix` runs
 //! the broker as the `aoide-secrets` system user) both the daemon socket
 //! (`0600` inside the operator's `0700` `$XDG_RUNTIME_DIR`) and the
 //! operator's own `state/stage/sessions.json` are unreachable, so every

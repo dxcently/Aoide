@@ -228,7 +228,7 @@ optional target:
   `approve_inbound`/`approve_outbound` paths the CLI runs: the CLI is
   always sufficient, and the popup is a second door over the same
   primitive. A graphical session runs it as the `aoide-pair-watch.service`
-  user unit (`modules/nucleus/aoided.nix`), gated on `aoide.a2a.enable &&
+  user unit (`modules/dendrites/aoided.nix`), gated on `aoide.a2a.enable &&
   aoide.a2a.pairingPopup` — the last of
   those OFF by default. Deliberately NOT gated on the shell fact
   (`aoide.quickshell.enable`), which says only that Aoide paints a shell here:

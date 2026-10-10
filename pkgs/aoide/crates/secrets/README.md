@@ -10,7 +10,7 @@ secrets serve`/`exec`/`add`/`rm`/`grant`/`revoke`, registered into
 live, plus the backend-preset docs below. P-V4 was deployment:
 `broker::bind_socket` chmods the socket to `0660` on bind, and the
 "Deployment" section below covers both the nix module
-(`modules/nucleus/secrets.nix`) and the non-nix install path. **P-V4c
+(`modules/dendrites/aoide-secrets.nix`) and the non-nix install path. **P-V4c
 (this commit) is the backend build-out**: a built-in `file` backend
 (plain `0600` files under the secrets home, expressed entirely through the
 template mechanism — see "Backend presets" below), a `{home}` template
@@ -863,7 +863,7 @@ while a crate lock is held (see below).
 
 **Why a third destination, and why it lives beside the socket rather than
 under the operator's home.** The deployed broker unit runs with
-`ProtectHome=true` (`modules/nucleus/secrets.nix`) — its best-effort mirror
+`ProtectHome=true` (`modules/dendrites/aoide-secrets.nix`) — its best-effort mirror
 into `~/Aoide/log` silently fails there, so `secrets watch` (below) received
 ZERO event lines in the field and fell back to its 30s pending-reconcile
 tick for every popup (found live on yomi-strix, 2026-08-23). A path beside
@@ -1706,7 +1706,7 @@ making the broker process's effective group `aoide-secrets-access` so every
 file it creates (the socket included) inherits that gid — is deployment's
 job, not this crate's: the code sets mode bits, deployment sets identity.
 
-### The nix module (`modules/nucleus/secrets.nix`)
+### The nix module (`modules/dendrites/aoide-secrets.nix`)
 
 For an Aoide-managed NixOS host: `aoide.secrets.enable = true;` (default
 `false`) provisions the `aoide-secrets`/`aoide-secrets-access` groups, the
@@ -1772,7 +1772,7 @@ the nix module's `PATH` the same way `bash`/`coreutils` were absent before
 the fix documented two paragraphs up. Since `age` is now `secrets add`'s
 DEFAULT backend, a fresh nix-deployed broker will fail every `age`-backed
 `get`/`set`/mint with the taught "`age`/`age-keygen` CLI on PATH" error
-(`backend::missing_age_binary_hint`) until `modules/nucleus/secrets.nix`'s
+(`backend::missing_age_binary_hint`) until `modules/dendrites/aoide-secrets.nix`'s
 `path` gains `pkgs.age` in a follow-up commit — the SAME fix shape the
 `bash`/`coreutils`/`qrencode` additions above already are, just not yet
 made for this new default.

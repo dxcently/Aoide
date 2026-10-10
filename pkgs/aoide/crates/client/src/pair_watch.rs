@@ -670,7 +670,7 @@ fn reply_notification_text(name: &str, code: &str) -> (String, String) {
 /// popup path never depends on either way. Same idiom
 /// `aoide_conduct::reap::announce_reap` already holds: `notify-send` by
 /// BARE NAME (bare-name lookup needs `pkgs.libnotify` on the deployed
-/// unit's own `path`, `modules/nucleus/aoided.nix`, the same reason
+/// unit's own `path`, `modules/dendrites/aoided.nix`, the same reason
 /// `pkgs.zenity` rides there already), spawned and collected on a detached
 /// thread so a slow/hung notifier can never delay the ceremony, and a
 /// spawn failure is an `eprintln`, never a panic or a return that blocks

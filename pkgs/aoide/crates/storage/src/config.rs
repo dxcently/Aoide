@@ -12,7 +12,7 @@
 //! a config decision for a CORE command cannot live in a NixOS module option:
 //! on a non-nix host that option does not exist, and "rebuild to change a
 //! grant" is not an operation. Nix is ONE authoring front-end that WRITES this
-//! file, never its owner — `modules/nucleus/config.nix` renders the whole file
+//! file, never its owner — `modules/dendrites/aoide-config.nix` renders the whole file
 //! to a read-only store path and points [`ENV_CONFIG`] at it. Immutability IS
 //! the provenance: there is no marker field to go stale, and the two worlds
 //! never write the same path, so a rebuild structurally cannot eat a CLI edit.

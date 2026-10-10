@@ -965,7 +965,7 @@
   file.
 - **Deployment LANDED at P-V4** — `broker::bind_socket` chmods the socket
   to `0660` on bind (group-connectable is the DESIGN; group OWNERSHIP is
-  `modules/nucleus/secrets.nix`'s job via the service's `Group=`, never this
+  `modules/dendrites/aoide-secrets.nix`'s job via the service's `Group=`, never this
   crate's — see `broker.rs`'s module doc and this file's own invariant
   below). The real `/var/lib/aoide-secrets` path and a real `aoide-secrets`
   system user are provisioned by that nix module (nix-dependent by design
@@ -978,7 +978,7 @@
   now the fixed `/run/aoide-secrets/secrets.sock` (never derived from
   `home::secrets_home()` — see `socket.rs`'s module doc), so an env-less
   client shell (`aoide secrets exec`/`put` run by hand) resolves the real
-  deployed socket with no export needed. `modules/nucleus/secrets.nix`'s
+  deployed socket with no export needed. `modules/dendrites/aoide-secrets.nix`'s
   service gained `path = [ pkgs.bash pkgs.coreutils ]` (a systemd unit's
   default `PATH` carries no `sh`, and every backend template — including
   the built-in `file` backend's own `get`/`set` — runs via `sh -c`) and
@@ -1192,7 +1192,7 @@
   ITSELF REPLACED at P-G4 (task #77): `watch.rs` now tail-follows a
   broker-owned EVENTS FEED instead, not the mirrored aoide log.** Found
   live on yomi-strix (2026-08-23): the deployed broker unit runs with
-  `ProtectHome=true` (`modules/nucleus/secrets.nix`), so `emit_notify`'s
+  `ProtectHome=true` (`modules/dendrites/aoide-secrets.nix`), so `emit_notify`'s
   best-effort mirror into the operator's `~/Aoide/log` silently failed
   there — `secrets watch` received ZERO event lines and fell back to its
   30s pending-reconcile tick for EVERY popup, turning the "about a second"

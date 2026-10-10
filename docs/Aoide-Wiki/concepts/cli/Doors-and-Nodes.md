@@ -296,7 +296,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   the autogate match: by caller address, by an autogate-marked node's own
   `tokenFile`, or by the resolved signed node's `autogate` flag; read fresh
   off disk per request). The `aoide-a2a` systemd unit
-  (`modules/nucleus/aoided.nix`) sets
+  (`modules/dendrites/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
   `AOIDE_A2A_NODE_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
 - **Writes:** an audit record (door `a2a`) for every handled request, spawn,
