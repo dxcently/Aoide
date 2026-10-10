@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-09-27
+updated: 2026-10-10
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
