@@ -62,6 +62,7 @@ pub(crate) fn session(
         context_tokens: None,
         context_ceiling: None,
         needs_sudo: None,
+        question: None,
         log_path: None,
         petname: None,
         task: None,

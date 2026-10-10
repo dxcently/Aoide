@@ -1735,6 +1735,8 @@ fn do_session_end_inner(id: &str) -> Outcome {
                 ledger_session_exit(s, &now);
             }
             s.state = "done".to_string();
+            // The pty is gone and so is whatever it was asking.
+            s.question = None;
             // A managed task run's end instant and its discriminated end are
             // facts the `session watch` footer and the exit-report lane both
             // read. Stamped only for a task record, and only where the child's

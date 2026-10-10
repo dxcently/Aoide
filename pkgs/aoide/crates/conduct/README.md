@@ -298,6 +298,24 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   it and only over an edge the kernel attested (`hook::recipient`; the climb
   is in `AGENTS.md`). An eidolon, a remote-parented child, a shell and a
   sub-agent node are not its children.
+- **`graph::prompt`** is the screen source of `awaiting`, for a conducted
+  program that reports through neither hooks nor a trace (a `codex`, an
+  `aider`, a REPL, an installer in a plain conducted shell). The wrap's
+  multiplex feeds it the bytes it already relays; once the pty has been quiet
+  for 3 seconds with its last non-empty line on one row of a small closed table
+  (`[y/N]`, `[Y/n]`, `(y/n)`, `(yes/no)`, a password or passphrase prompt,
+  `Press Enter`, a trailing `Continue?` / `Proceed?` / `Overwrite?`) and
+  nothing typed into that line, the wrap's tick writes `state: awaiting` and
+  that one capped, sanitised line as the record's `question` through
+  `do_session_refresh`; output resuming or input typed takes both back. The
+  `sudo` row is the old `[sudo] password for` text-scan, now one row of the
+  table, and also raises `needsSudo`. A session with a hook phase or a trace is
+  never touched.
+- **`graph::pingback::prompt`** is the ping-back's third source: the wrap that
+  published a `question` is the child, its attested spawner hears
+  `[<agent> <petname>] asking: "<line>"` once per question, claimed into the
+  entry's `screen` field of `pingback.json` in the same stage-lock section as
+  the other two, delivered by the same `deliver`.
 - **`graph::pingback`** (P-EIDOLON slice E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice") is where a parent hears the children it
   spawned: the reaper tick reads each `agent:"eidolon"` child's trace tail,

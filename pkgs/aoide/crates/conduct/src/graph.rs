@@ -66,6 +66,11 @@ mod remote;
 // per-child at-most-once cursor in `state/stage/pingback.json`.
 mod pingback;
 mod permit;
+// The screen source of `awaiting` (`prompt.rs`'s module doc): the conducted pty's
+// last line against one closed table, once the output has gone quiet. `conduct.rs`
+// drives it from the multiplexer's tick and the ping-back's third source reads the
+// question it publishes.
+mod prompt;
 mod resurrect;
 mod send;
 mod session_store;

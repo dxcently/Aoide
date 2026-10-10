@@ -996,6 +996,23 @@ in the message.
   per stamp (a day-old `working` is a crashed record). The hook source emits
   no `PingEvent` and never spools: a child that belongs on a ring is
   `remoteParent`-stamped and so is not its child.
+  **The screen source is the third, as a child module
+  (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
+  harness has neither profile (`prompt::tracked`: `agent_profile` is none, and
+  the hook and trace sources do not track it) is read off the `question` its
+  own wrap published (below), and its `[<agent> <petname>] asking: "<line>"`
+  joins the SAME `claims.lines`, claimed inside the SAME `with_stage_lock`
+  section after `hook::claim`, into the entry's `screen` half — the last
+  question announced. There is no baseline (the wrap publishes after seconds
+  of quiet), a different question is a new episode, the same one is not heard
+  twice, and a record that no longer holds a question while `awaiting` clears
+  the key. The child IS the wrap, so there is no host to climb from:
+  `prompt::recipient` requires a daemon seal over the wrap's own pid, then the
+  spawner climb the hook source uses (`hook::spawner_of`, steps (2) and (3)
+  above) — one climb, two callers; do not fork a second. The seal key is
+  fetched before the lock for a pass that has a `prompt::pending` record, as
+  for a hook one. The question is cleaned and quoted again at render: it was
+  capped where it was written, but this is the line a parent types.
   **The event and the line are two things, and a remote parent gets the
   event (P-RSA S8, `CONTRACTS.md` §4/§6).** `choose_event` decides WHICH
   `PingEvent` a child's new records amount to — a closed enum whose every
@@ -1444,6 +1461,49 @@ in the message.
   set explicitly via `OpenOptionsExt`/`PermissionsExt`, never left to
   umask. Don't reintroduce a second open/stamp call site for either arm —
   headless and interactive both go through the one function.
+- **A wrapped program with no hook and no trace says it is waiting on a human
+  through the pty bytes the wrap already relays, in `graph/prompt.rs`, and
+  nowhere else.** `conduct_multiplex` feeds the master-read side to
+  `PromptWatch::output` and marks stdin or inbox input with `input()` (no
+  bytes — a no-echo password is never read, only counted as "typed into this
+  line"); its ~1s tick asks `standing(now)`: output quiet for `QUIET` (3s) AND
+  the last non-empty line matches ONE named row of `ROWS` AND nothing was typed
+  into that line since it was written. The child still running is the loop
+  still looping. Hold these when editing:
+  - **The table is closed and each row is end-anchored.** A row is a named
+    `fn(&str) -> bool` over the lowercased, flattened line and a test beside
+    the others — every row's positive and its near-misses (a sentence that
+    only mentions `[y/N]` or `password`). A new prompt is a new row, never a
+    looser one; a false `awaiting` is noise a parent is paged for. The `sudo`
+    row is the text-scan that used to boost the shell tick, now one row: it is
+    the only row that also raises `needsSudo`, and a shell's
+    foreground-is-`sudo` check (`sudo_awaiting`) still holds that badge on its
+    own.
+  - **Precedence is hook phase > trace > screen > presence.** The wrap is
+    watched only when it is a shell or its label has no `agent_profile`
+    (`watch_prompts` at the `conduct_multiplex` call), and the writer
+    (`do_session_refresh`) re-checks `hooks.json` under the stage lock and, for
+    a wrap that gained a hook record, takes back the `question` and `needsSudo`
+    the screen had set and sets nothing (the hook door owns `state`). It clears
+    `awaiting` only as the screen's own: a state it did not set (`working` from
+    a `session phase`) is never rewritten, and `idle` is what an answered
+    question returns to.
+  - **The line is foreign text (house rule 4).** It leaves the module only as
+    the record's single `question` field: escape sequences and control
+    characters stripped, flattened, `"` softened, cut to `QUESTION_MAX`
+    keeping its END. Memory holds the current and the last non-empty line,
+    each bounded; unmatched screens are never kept and never logged. The
+    session log still tees the master-read side only.
+  - **Pure text over the pty.** No `/proc`, no `cfg(target_os)` — the shell
+    tick's foreground facts stay in `conduct_refresh_shell`, the screen is one
+    portable path for shell and non-shell alike. The non-shell wrap writes
+    through the same `do_session_refresh` (change-only, one stage lock), with
+    no shell snapshot.
+  - **The herald's summons card is not raised for it.** `permit::
+    spawn_summons` is the hook door's and types a profile's approve/deny
+    keystrokes; a program with no profile has none. The conductor, the dock
+    and the A2A `input-required` fold read `state: awaiting` and need nothing
+    more.
 - **Gate the sweep on `spawned`, never on `headless` and never on
   `parentSessionId`.** `headless` is the wrong axis: `spawn --windowed`
   execs a real terminal running the same `aoide conduct`, and a windowed
@@ -2265,7 +2325,7 @@ in the message.
 - `doorbell.rs` changes update `docs/architecture/MAIL.md`'s "Delivery and
   the doorbell" section — that document is the design's canonical prose
   statement, this file only the invariants an editor must hold.
-- `pingback.rs` and `pingback/hook.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
+- `pingback.rs`, `pingback/hook.rs` and `pingback/prompt.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
   "Second slice" section (the ping-back's canonical prose statement), the
   `state/stage/pingback.json` shape in `CONTRACTS.md` §4, and
   `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md`'s
@@ -2280,6 +2340,10 @@ in the message.
   report is delivered" (the remote-parent paragraph), and `EIDOLON-TRACE.md`'s
   "Second slice" beside the spool half: the two lanes are one conversation,
   and a doc that describes only the sending end is half a page.
+- `prompt.rs` or the screen half of `conduct.rs`'s tick changes update
+  `docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md`'s "Programs with no
+  harness — the screen" (the table and the quiet are written there too) and
+  the `question` and `needsSudo` fields in `CONTRACTS.md` §4.
 - A change to shellbridge's replying verbs — the
   `sessionaction`/`projectaction`/`workspaceaction` whitelists and reply
   shapes, the `sessiontrace`/`ricemenu` reads — or to the fire-and-forget

@@ -285,7 +285,7 @@ is, never an empty listing.
 
 **And the parent hears it.** The same tick that folds the state also reads
 what each child just did and, under the resident daemon alone, delivers ONE
-line about the child to the parent that spawned it. Two sources feed it, one
+line about the child to the parent that spawned it. Three sources feed it, one
 delivery. An eidolon child is read off its trace — `[eidolon <petname>]
 settled end_turn · 90 calls · 31 min · last: "…"`, `… cancelled …`, `… died
 mid-turn …` (its eidolon record was just dropped with the turn still open),
@@ -322,14 +322,21 @@ recipient nor its host wrap's. Two limits are known and deliberate. A detached
 silent — never guessed. And a claude launched through another claude's Bash
 tool, with no wrap of its own in between, shares that claude's host wrap: its
 line reaches that wrap's attested spawner, an ancestor of the real launcher,
-not the launcher itself. It is not a send
+not the launcher itself. A wrap whose program has neither hook nor trace (a
+`codex`, an `aider`, a REPL) is read off its own screen, below: `[codex
+<petname>] asking: "Apply patch? [y/N]"`. There is no hook session under it, so
+the wrap itself plays the child and its pid must carry a verifying daemon seal;
+its attested spawner, found by the same climb, hears it. A question is heard
+once: the same one is not repeated while it stands, a different one is a new
+episode, and the next ask after an answer is heard again. It is not a send
 and never becomes one: the send door attests the sender from the running
 process's `/proc` ancestry, so inside the daemon the sender is the daemon and
 never the child — the line is raw-injected the doorbell's way (a live channel
 socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
 `state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
-for a trace; `hook` for a hook phase), claimed inside one short stage-lock
+for a trace; `hook` for a hook phase; `screen` for the question last heard),
+claimed inside one short stage-lock
 section before the write, so each event is delivered at most once. A parent
 that is a shell is skipped — a line typed into a shell would run, and the WRAP
 decides that (its wrapped program's own basename, not the `agent` label a
@@ -343,6 +350,65 @@ aoide does not conduct — no agent profile, no hook, no control socket, and it
 keeps out of the reaper's agent-arm entirely, since N threads of one app
 legitimately share one window address and one app-server pid. Its discovery
 is a try-flock on the thread's own writer lock plus one parsed `ps` table.
+
+## Programs with no harness — the screen
+
+A harness that reports through hooks or a trace says when it is waiting on a
+human. A program that does neither (`codex`, `gemini`, `aider`, a REPL, an
+installer in a plain conducted shell) prints `Apply patch? [y/N]` and blocks,
+and nothing else knows. The conduct wrap already relays that program's bytes,
+so it reads the answer off them: no terminal emulator, no classifier, one
+closed table.
+
+```
+ pty bytes ──► last non-empty line (ANSI-stripped) ──┐
+                                                     ▼
+   output quiet for 3 s  AND  child still running  AND  one table row matches
+   AND nothing was typed into that line since it was written
+                                                     │
+                                                     ▼
+              state: awaiting      question: "<that line, ≤ 80 chars>"
+```
+
+The table is a list of named rows, each anchored to the END of the line, so a
+sentence that merely mentions a prompt is not one:
+
+| row        | the line ends with                                                   |
+| ---------- | -------------------------------------------------------------------- |
+| `sudo`     | `[sudo] password for <user>:`                                        |
+| `password` | `password:` / `passphrase:` / `password for <name>:`                 |
+| `y-n`      | `[y/N]` `[Y/n]` `(y/n)`, then at most one `?` or `:`                 |
+| `yes-no`   | `(yes/no)`, `[yes/no]`, `(yes/no/[fingerprint])`, then `?` or `:`    |
+| `press-key`| `Press Enter` / `Press any key` and a short tail (`to continue`)     |
+| `confirm`  | `continue?` `proceed?` `overwrite?`                                  |
+
+Three seconds is the quiet: long enough that a prompt a script answers in
+milliseconds never flaps, short enough that the ~1 s tick and the wait together
+leave a human waiting only a moment. Output resuming ends the episode, and so
+does input typed into the line: the human's keys and an injected send both
+count, which is what lets a no-echo password end it when the password is typed
+and keeps a half-typed command at an idle shell prompt from reading as a
+question. Matching `sudo` additionally raises `needsSudo` (the dock's lock
+badge and the A2A `auth-required` state): it is the human's password, not an
+agent's question.
+
+Precedence, highest first: **hook phase, trace, screen, presence.** A session
+whose harness is an agent with a profile (claude, kimi, pi, eidolon) is never
+watched, and a record that gains a hook phase has what the screen set on it
+taken back. The screen is a source of `state` and `question` only for a wrap
+that nothing else speaks for.
+
+The line is foreign text (house rule 4). It is stripped of escape sequences and
+control characters, flattened to one line, its `"` softened to `'`, cut to 80
+characters keeping its end, and stored as the one `question` field of the
+session record; it is never logged, and a screen that matches no row is never
+kept. Everything after the matched prompt is, by the end anchor, nothing.
+
+Downstream it is an ordinary `awaiting` session: the conductor graph, the dock
+peek and the notification path that fire on `awaiting` fire here too, and a
+spawner hears it as the third ping-back source (above). The herald's summons
+card is not raised, because that card types a profile's keystrokes into the
+asking session and a program with no profile has none to type.
 
 ## Liveness reaping — the SIGKILL problem
 

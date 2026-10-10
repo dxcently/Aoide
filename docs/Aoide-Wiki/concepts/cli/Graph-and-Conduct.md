@@ -941,8 +941,11 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   `/proc` ppid-ancestry (best-effort window discovery); for conducted SHELLS a
   ~1 Hz tick reads the PTY foreground pgid (`tcgetpgrp`), `/proc/<pid>/cwd`,
   `/proc/<pid>/cmdline|comm`, and `/proc/<pid>/task/<pid>/children` (the
-  sudo-prompt probe, boosted by a `[sudo] password for` text scan of the
-  output stream).
+  sudo-prompt probe). Every wrap whose program has no hook or trace profile, a
+  shell or not, also reads its own pty output for a quiet question on one row
+  of a small closed table (`[y/N]`, a password prompt, `Press Enter`, …) — pure
+  text, no `/proc` — and publishes it as `state: awaiting` plus a `question`
+  line ([[Session-Graph]], "Programs with no harness — the screen").
 - **Writes:** binds the per-session control socket
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` (unlinked on exit and on start if
   stale); registers the session in `state/stage/sessions.json` with
@@ -953,7 +956,8 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   [[Session-Graph]]); the daemon's tick sweep seals the record
   (`seal`/`sealedIssuedAt`) within ~1s of registration, since this direct
   write never passes through the dispatch handler. Shell ticks push live
-  `cwd`/`activity`/`state`/`needsSudo` (change-only, re-staging `graph.json`);
+  `cwd`/`activity`/`state`/`needsSudo` (change-only, re-staging `graph.json`),
+  and `state`/`question` for a non-shell wrap whose screen is asking;
   `do_session_end` on exit whatever happened. Spawns `<command>` on a fresh
   PTY (`openpty`; `setsid` + `TIOCSCTTY`; slave dup'd over fds 0/1/2) with
   `AOIDE_SESSION_ID` exported, and puts the real tty in raw mode for the

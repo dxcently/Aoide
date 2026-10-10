@@ -7,8 +7,9 @@
 //! delivered to the child's `parentSessionId`.
 //!
 //! A second source, `hook.rs`, speaks for every other harness whose hooks
-//! write `hooks.json`; it fills the same claim section and rides the same
-//! delivery below.
+//! write `hooks.json`; a third, `prompt.rs`, for a conducted wrap that has
+//! neither a hook nor a trace and went `awaiting` off its own screen. Each
+//! fills the same claim section and rides the same delivery below.
 //!
 //! **The daemon's own line, never a `send`.** The send door attests the SENDER
 //! from the running process's `/proc` ancestry, so inside the resident daemon
@@ -72,6 +73,7 @@
 //! or `!`.
 
 mod hook;
+mod prompt;
 
 use super::common::{clean_line, clip_flat, strip_unsafe};
 use super::conduct::{channel_socket_path, wrapped_program_is_a_shell};
@@ -202,6 +204,10 @@ struct CursorEntry {
     /// examined phase and stamp. Never set on an entry the trace source owns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hook: Option<hook::HookCursor>,
+    /// The screen source's half (`prompt.rs`): the question a wrap was last
+    /// announced as asking. Never set on an entry another source owns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    screen: Option<String>,
 }
 
 /// The `serde` skip for a latch: a `false` field is never written, so every
@@ -403,11 +409,12 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
 
     // The daemon's live seal key, fetched ONCE per pass and BEFORE the lock (a
     // bounded socket round trip has no business inside it), and only when some
-    // hook child could need it. `None` — no daemon answering — fails every
-    // seal check closed: the hook source then speaks for nobody.
+    // hook child, or a wrap asking off its screen, could need it. `None` — no
+    // daemon answering — fails every seal check closed: those sources then
+    // speak for nobody.
     let seal_key = roster
         .iter()
-        .any(hook::tracked)
+        .any(|r| hook::tracked(r) || prompt::pending(r))
         .then(aoide_storage::attest::daemon_seal_pubkey_hex)
         .flatten();
     let sealed = |rec: &SessionRecord| {
@@ -429,10 +436,16 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         let hooks_now: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
         let hook_children = hook::gather(&roster_now, &hooks_now.hooks, &sealed);
         let mut tracked_now = tracked_ids.clone();
-        tracked_now.extend(roster_now.iter().filter(|r| hook::tracked(r)).map(|r| r.session_id.clone()));
+        tracked_now.extend(
+            roster_now
+                .iter()
+                .filter(|r| hook::tracked(r) || prompt::tracked(r))
+                .map(|r| r.session_id.clone()),
+        );
 
         let (mut claims, old_cursor, mut new_cursor) = claim_locked(&children, &tracked_now, now_ms);
         claims.lines.extend(hook::claim(&hook_children, &mut new_cursor, now_ms));
+        claims.lines.extend(prompt::claim(&roster_now, &sealed, &mut new_cursor));
         if new_cursor != old_cursor {
             match serde_json::to_string(&new_cursor) {
                 Ok(body) => {
@@ -614,6 +627,7 @@ fn decide(child: &Child, entry: &CursorEntry, now_ms: i64) -> (Option<PingEvent>
             silent_at,
             exited,
             hook: None,
+            screen: None,
         },
     )
 }

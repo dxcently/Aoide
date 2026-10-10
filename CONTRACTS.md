@@ -2267,6 +2267,25 @@ switch re-caps the meter automatically. Same lifecycle as `contextTokens`:
 absent for shells and until the session has produced an assistant turn, and a
 legacy record without it falls back to a conservative 200k client-side.
 
+**Additive in v0:** a session record MAY also carry an optional `question`
+(string) — the line a conducted program is waiting on while its `state` is
+`awaiting` off its SCREEN, for a wrap whose harness reports through neither
+hooks nor a trace (a `codex`, an `aider`, a REPL, an installer in a plain
+conducted shell). It is the pty's last non-empty line with escape sequences
+and control characters stripped, flattened to one line, `"` softened to `'`,
+and cut to 80 characters keeping its end; it exists only while the output has
+been quiet for 3 seconds on a row of `conduct/src/graph/prompt.rs`'s closed
+table (`[y/N]`, `[Y/n]`, `(y/n)`, `(yes/no)`, a password or passphrase prompt,
+`Press Enter` / `press any key`, a trailing `Continue?` / `Proceed?` /
+`Overwrite?`), the child is still running and nothing was typed into the
+line since it was written. The `sudo` row also sets `needsSudo`. Output
+resuming, input typed, the child exiting or the session ending clears it: the
+key disappears and the `awaiting` it set returns to `idle`. It is
+the only screen text kept anywhere and is never logged. A session with a hook
+phase or a trace never carries one — the hook phase, then the trace, then the
+screen decide `state`, and the screen only for a wrap nothing else speaks for.
+Readers tolerate its absence and round-trip fields they do not know.
+
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
 tool's name plus the first argument naming its subject, read off the same
@@ -3483,14 +3502,15 @@ anyone who can already write to the target's control socket.
 
 ### `state/stage/pingback.json` — **v0**
 
-The ping-back's per-child cursor, for its two sources. An
+The ping-back's per-child cursor, for its three sources. An
 `agent:"eidolon"` child whose trace the reaper tick has examined (P-EIDOLON
 slice E5b, `docs/architecture/EIDOLON-TRACE.md`'s "Second slice") has a
 `seen`/`silentAt` entry; a local-parented child of any other registered
-harness that reports through hooks has a `hook` entry. Either is keyed by the
-child's own native session id (the eidolon presence id, verbatim — the same id
-`sessions.json` carries); a child belongs to exactly one source, so an entry
-carries one half.
+harness that reports through hooks has a `hook` entry; a local-parented
+conducted wrap whose program has neither has a `screen` entry. Each is keyed by
+the child's own native session id (the eidolon presence id, verbatim — the
+same id `sessions.json` carries); a child belongs to exactly one source, so an
+entry carries one half.
 
 ```json
 {
@@ -3541,6 +3561,21 @@ equals its `attestedSpawner` (§ `sessions.json`); a conducted spawner is
 sealed too. A child with no such recipient is not tracked and has no entry. A
 reader that does not know `hook` ignores it. A child whose session leaves the
 roster drops out on the same pass.
+
+**`screen` — additive in v0.** A screen-source child's entry is
+`{ "screen": "<question>" }`: the `question` (§ `sessions.json`) last
+announced for it. There is no baseline — the wrap publishes only after seconds
+of quiet, so the first examination may already find a question, and that is
+news. A question that differs from the cursor's is a new episode and is
+claimed (`[<agent> <petname>] asking: "<question>"`, the question cleaned and
+quoted again as eidolon's `asking:` line is); the same question is not claimed
+again; a record that no longer holds a question while `awaiting` clears the
+key, so the next ask is heard. The child IS the wrap, with no hook session
+under it: its own pid must carry a verifying daemon seal, and the line goes to
+its `attestedSpawner` resolved by the same climb the `hook` source uses — a
+wrap no spawner attested (a terminal the User opened) has nobody to tell and no
+entry. A question with no recipient yet keeps its cursor unclaimed and is heard
+on the pass that finds one. A reader that does not know `screen` ignores it.
 
 ### `state/stage/remote-children.json` — **v0**
 

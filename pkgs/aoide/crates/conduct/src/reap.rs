@@ -705,7 +705,7 @@ fn orphaned_subagents(
 ///     pty log and a session that never ticked has none.)
 ///   * `state == "idle"` (the bare prompt) — never `working` (a live
 ///     foreground command, however quiet) or `awaiting` (a sudo prompt
-///     mid-conversation). Only a terminal doing NOTHING right now is even
+///     or any other question on the screen, mid-conversation). Only a terminal doing NOTHING right now is even
 ///     considered.
 ///   * `!exempt` (task #20, `aoide session grant exempt on|off`) — an agent
 ///     that wants ITS OWN spawned worker terminal safe from this arm marks

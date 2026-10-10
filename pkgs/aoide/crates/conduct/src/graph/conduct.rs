@@ -13,9 +13,10 @@
 
 use super::doc::restage_graph;
 use super::model::{
-    canonical_state, load_stage, sessions_path, write_stage, RestoreSnapshot, SessionRecord,
-    SessionsFile, STAGE_GRAPH_VERSION,
+    canonical_state, hooks_path, load_stage, sessions_path, write_stage, HooksFile,
+    RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
+use super::prompt::{Prompt, PromptWatch};
 use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize};
 #[cfg(unix)]
 use super::pty::signal_name;
@@ -24,6 +25,7 @@ use super::session_store::{
     stamp_attested_spawner, stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
 };
 use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
+use aoide_protocol::agents::agent_profile;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
 use aoide_storage::attest::is_node_origin;
@@ -667,67 +669,105 @@ fn proc_has_children(pid: i32) -> Option<bool> {
     }
 }
 
-/// Is a conducted SHELL currently blocked on a `sudo` password prompt? A
-/// conducted shell is sudo-blocked iff the `[sudo] password for` prompt was
-/// just seen (booster), OR the foreground process IS `sudo` AND it has not yet
-/// forked its command child (`Some(false)` children == still in the PAM
-/// conversation, i.e. at the prompt). `Some(true)` (command already running,
-/// e.g. cached-cred `sudo nixos-rebuild`) and `None` (children unreadable →
-/// don't trust the primary, rely on the booster) both DON'T fire the primary.
-/// Pure and unit-tested; the real caller passes `proc_comm(fg) == Some("sudo")`,
-/// `proc_has_children(fg)`, and the booster's recency check.
+/// Is the foreground process a `sudo` still at its password prompt? True iff
+/// the foreground process IS `sudo` AND it has not yet forked its command child
+/// (`Some(false)` children == still in the PAM conversation, i.e. at the
+/// prompt). `Some(true)` (command already running, e.g. cached-cred `sudo
+/// nixos-rebuild`) and `None` (children unreadable, or no process table at all)
+/// both DON'T fire. The text of the prompt is a different witness, read by the
+/// `sudo` row of `prompt.rs`'s table; this is the process table's own. Pure and
+/// unit-tested; the real caller passes `proc_comm(fg) == Some("sudo")` and
+/// `proc_has_children(fg)`.
 ///
 /// WHY the children gate: `sudo` stays the process-group leader for the WHOLE
 /// runtime of `sudo <cmd>` on a PAM system (it forks the command/monitor
 /// child; it never execs in place), so `comm(fg) == "sudo"` alone would also
 /// be true for a multi-minute `sudo nixos-rebuild switch` running on CACHED
 /// credentials — no prompt at all. Gating on "sudo has not yet forked a
-/// child" narrows the primary signal to the actual PAM conversation window.
-fn sudo_awaiting(fg_is_sudo: bool, fg_has_children: Option<bool>, booster_recent: bool) -> bool {
-    booster_recent || (fg_is_sudo && fg_has_children == Some(false))
+/// child" narrows the signal to the actual PAM conversation window.
+fn sudo_awaiting(fg_is_sudo: bool, fg_has_children: Option<bool>) -> bool {
+    fg_is_sudo && fg_has_children == Some(false)
 }
 
-/// Update a conducted session's live shell fields — `cwd`, `activity` (the
-/// current foreground command, or cleared), `state` (idle at the prompt,
-/// working while a command runs, or forced `awaiting` while blocked on
-/// `sudo`), `needsSudo`, and `restore` (the P-C5 continuous capture snapshot,
-/// see [`RestoreSnapshot`]) — CHANGE-ONLY, under the stage lock, and re-stage
-/// graph.json only when it actually wrote. Called ~1 Hz from conduct's PTY
-/// tick for SHELL sessions (an agent's state/activity come from hooks, so
-/// conduct never drives those). No-op for an unregistered id.
+/// What a conducted SHELL's tick reads off its terminal: the cwd, the current
+/// foreground command (`None` clears it), the idle/working/awaiting state and
+/// the P-C5 continuous capture snapshot (see [`RestoreSnapshot`]).
+struct ShellFacts<'a> {
+    cwd: Option<&'a str>,
+    activity: Option<&'a str>,
+    state: &'a str,
+    restore: RestoreSnapshot,
+}
+
+/// Update a conducted session's live fields off its terminal — CHANGE-ONLY,
+/// under the stage lock, and re-stage graph.json only when it actually wrote.
+/// No-op for an unregistered id.
+///
+/// A SHELL (`shell: Some`) writes everything [`ShellFacts`] names, ~1 Hz from
+/// conduct's PTY tick; its `state` already folds the screen in
+/// ([`shell_snapshot`]). Any other wrap is harness-less here (an agent's
+/// state/activity come from hooks, so conduct never drives those): it writes
+/// only what the SCREEN says, and only when the screen's verdict changes. A
+/// question held makes the record `awaiting`; once it is gone the record
+/// returns to `idle`, the state it was registered with, and only if the
+/// question is what moved it. A wrap that has a hook record answers to that
+/// phase alone: the screen never sets over it, and clears what it set.
+///
+/// `question` is the one screen line kept on the record (`prompt.rs`);
+/// `needs_sudo` is the `sudo` row or the process table's witness.
 fn do_session_refresh(
     id: &str,
-    cwd: Option<&str>,
-    activity: Option<&str>,
-    state: &str,
+    shell: Option<ShellFacts<'_>>,
     needs_sudo: bool,
-    restore: RestoreSnapshot,
+    question: Option<&str>,
 ) {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return,
         };
+        let hooked = shell.is_none()
+            && load_stage::<HooksFile>(&hooks_path())
+                .is_ok_and(|h| h.hooks.iter().any(|x| x.session_id == id));
+        let (needs_sudo, question) = if hooked { (false, None) } else { (needs_sudo, question) };
         let mut changed = false;
         for s in file.sessions.iter_mut() {
             if s.session_id != id {
                 continue;
             }
-            if let Some(c) = cwd {
-                if s.cwd != c {
-                    s.cwd = c.to_string();
+            if let Some(t) = &shell {
+                if let Some(c) = t.cwd {
+                    if s.cwd != c {
+                        s.cwd = c.to_string();
+                        changed = true;
+                    }
+                }
+                let act = t.activity.filter(|a| !a.is_empty()).map(str::to_string);
+                if s.activity != act {
+                    s.activity = act;
                     changed = true;
                 }
-            }
-            let act = activity.filter(|a| !a.is_empty()).map(str::to_string);
-            if s.activity != act {
-                s.activity = act;
-                changed = true;
-            }
-            let canon = canonical_state(state);
-            if s.state != canon {
-                s.state = canon.to_string();
-                changed = true;
+                let canon = canonical_state(t.state);
+                if s.state != canon {
+                    s.state = canon.to_string();
+                    changed = true;
+                }
+                if s.restore.as_ref() != Some(&t.restore) {
+                    s.restore = Some(t.restore.clone());
+                    changed = true;
+                }
+            } else if !hooked {
+                let screen_state = if question.is_some() {
+                    Some("awaiting")
+                } else if s.question.is_some() && canonical_state(&s.state) == "awaiting" {
+                    Some("idle")
+                } else {
+                    None
+                };
+                if let Some(state) = screen_state.filter(|state| s.state != *state) {
+                    s.state = state.to_string();
+                    changed = true;
+                }
             }
             // Change-only, and cleared to `None` (never written as
             // `Some(false)`) so the key disappears the moment the prompt clears.
@@ -736,8 +776,9 @@ fn do_session_refresh(
                 s.needs_sudo = want;
                 changed = true;
             }
-            if s.restore.as_ref() != Some(&restore) {
-                s.restore = Some(restore.clone());
+            let want = question.map(str::to_string);
+            if s.question != want {
+                s.question = want;
                 changed = true;
             }
         }
@@ -771,25 +812,30 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
     }
 }
 
-/// Pure resolution of a conducted shell's (state, activity, needs_sudo) from
-/// the pty foreground pgid. Injected lookups make it unit-testable. Real caller
-/// passes (proc_comm, proc_command, proc_has_children). The shell (spawned
-/// under `setsid`) is its own process group leader, so a foreground pgid equal
-/// to the shell pid means "at the bare prompt" (idle); anything else is a
-/// command running in the foreground (working, its command captured as
-/// `activity`). `booster_recent` is the text-scan signal from
-/// `conduct_multiplex` (a `[sudo] password for` prompt seen crossing
-/// master→stdout within the last ~2s); when [`sudo_awaiting`] is true off
-/// either signal, `state` is FORCED to `awaiting` regardless of the
-/// idle/working computation above — a sudo prompt needs the user NOW.
+/// Pure resolution of a conducted shell's (state, activity, needs_sudo,
+/// question) from the pty foreground pgid and the screen. Injected lookups make
+/// it unit-testable. Real caller passes (proc_comm, proc_command,
+/// proc_has_children). The shell (spawned under `setsid`) is its own process
+/// group leader, so a foreground pgid equal to the shell pid means "at the bare
+/// prompt" (idle); anything else is a command running in the foreground
+/// (working, its command captured as `activity`).
+///
+/// `prompt` is the screen's verdict (`prompt.rs`: the pty quiet on a row of the
+/// table), from `conduct_multiplex`. It does not wait for a foreground command:
+/// a shell's own `read -p` / `select` / sourced script asks from the shell's own
+/// process, and text typed at the bare prompt is already ruled out by the
+/// screen's typed-input mark. When [`sudo_awaiting`] (the process table's
+/// witness) or the screen says so, `state` is FORCED to `awaiting` regardless
+/// of the idle/working computation above — a prompt needs the user NOW — and
+/// `needs_sudo` is set when either witness was the `sudo` prompt.
 fn shell_snapshot(
     fg: i32,
     shell_pid: i32,
-    booster_recent: bool,
+    prompt: Option<&Prompt>,
     comm_of: impl Fn(i32) -> Option<String>,
     command_of: impl Fn(i32) -> Option<String>,
     children_of: impl Fn(i32) -> Option<bool>,
-) -> (&'static str, Option<String>, bool) {
+) -> (&'static str, Option<String>, bool, Option<String>) {
     let (mut state, activity) = if fg <= 0 || fg == shell_pid {
         // At the bare prompt: idle, but label the row with the shell PROCESS
         // itself (e.g. `bash`) so the terminal roster is never blank.
@@ -801,11 +847,11 @@ fn shell_snapshot(
     };
     let fg_is_sudo = fg > 0 && comm_of(fg).as_deref() == Some("sudo");
     let children = if fg_is_sudo { children_of(fg) } else { None };
-    let needs_sudo = sudo_awaiting(fg_is_sudo, children, booster_recent);
-    if needs_sudo {
+    let needs_sudo = sudo_awaiting(fg_is_sudo, children) || prompt.is_some_and(Prompt::sudo);
+    if needs_sudo || prompt.is_some() {
         state = "awaiting";
     }
-    (state, activity, needs_sudo)
+    (state, activity, needs_sudo, prompt.map(|p| p.question.clone()))
 }
 
 /// Pure resolution of a conducted shell's P-C5 restore snapshot from the pty
@@ -838,11 +884,11 @@ fn restore_snapshot(
 
 /// One conduct-tick refresh for a SHELL session: read the child terminal's
 /// foreground process group and the live cwd, and push cwd + the current
-/// command + the idle/working state via [`shell_snapshot`], plus the P-C5
-/// restore snapshot via [`restore_snapshot`]. `typed` comes from
-/// `conduct_multiplex`'s own typed-line buffer (`None` for a headless session,
-/// which never reads stdin) — this function has no access to the keystroke
-/// stream itself.
+/// command + the idle/working/awaiting state via [`shell_snapshot`], plus the
+/// P-C5 restore snapshot via [`restore_snapshot`]. `prompt` is the screen's
+/// standing question, if any. `typed` comes from `conduct_multiplex`'s own
+/// typed-line buffer (`None` for a headless session, which never reads stdin) —
+/// this function has no access to the keystroke stream itself.
 ///
 /// The foreground process group comes from the seam
 /// ([`Pty::foreground_pgid`]), which is `tcgetpgrp(2)` on Unix and `0` — "no
@@ -855,34 +901,22 @@ fn conduct_refresh_shell(
     id: &str,
     pty: &Pty,
     shell_pid: i32,
-    booster_recent: bool,
+    prompt: Option<&Prompt>,
     typed: Option<String>,
 ) {
     let fg = pty.foreground_pgid();
     let cwd = cwd_for(fg, shell_pid, proc_cwd);
-    let (state, activity, needs_sudo) = shell_snapshot(
+    let (state, activity, needs_sudo, question) = shell_snapshot(
         fg,
         shell_pid,
-        booster_recent,
+        prompt,
         proc_comm,
         proc_command,
         proc_has_children,
     );
     let restore = restore_snapshot(fg, shell_pid, cwd.clone(), typed, proc_argv);
-    do_session_refresh(id, cwd.as_deref(), activity.as_deref(), state, needs_sudo, restore);
-}
-
-/// True iff the `[sudo] password for` prompt appears at the start of a line in
-/// `chunk` (buffer start, or right after `\n`/`\r`). The line-start guard keeps
-/// `grep '[sudo] password'` / `cat auth.log`-style output from false-triggering,
-/// while real sudo prints its prompt at line start. A needle split across two
-/// reads is tolerated (missed here, caught next tick by the primary).
-fn scan_for_sudo_prompt(chunk: &[u8]) -> bool {
-    const NEEDLE: &[u8] = b"[sudo] password for";
-    chunk
-        .windows(NEEDLE.len())
-        .enumerate()
-        .any(|(i, w)| w == NEEDLE && (i == 0 || chunk[i - 1] == b'\n' || chunk[i - 1] == b'\r'))
+    let facts = ShellFacts { cwd: cwd.as_deref(), activity: activity.as_deref(), state, restore };
+    do_session_refresh(id, Some(facts), needs_sudo, question.as_deref());
 }
 
 /// Cap on the P-C5 typed-line buffer, bytes.
@@ -1038,6 +1072,7 @@ fn conduct_multiplex(
     child: &mut PtyChild,
     id: &str,
     is_shell: bool,
+    watch_prompts: bool,
     read_stdin: bool,
     sink: &mut OutputSink,
     deadline: Option<std::time::Instant>,
@@ -1056,12 +1091,12 @@ fn conduct_multiplex(
     const WAIT_TIMEOUT_MS: i32 = 1000;
     let tick_period = std::time::Duration::from_millis(950);
     let mut last_tick = std::time::Instant::now();
-    // The sudo-prompt TEXT-SCAN booster: the instant a `[sudo] password for`
-    // prompt is seen crossing terminal→stdout, latch a timestamp so the next
-    // tick(s) within `SUDO_BOOSTER_WINDOW` treat the shell as sudo-blocked
-    // even if the foreground pgid read hasn't caught `sudo` yet.
-    let mut sudo_prompt_seen_at: Option<std::time::Instant> = None;
-    const SUDO_BOOSTER_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+    // The screen: what the terminal last said and when, for a shell and for a
+    // wrap with no hook or trace of its own (`prompt.rs`). The tick asks it
+    // whether the child has gone quiet on a question; a shell folds the answer
+    // into its own refresh, any other wrap publishes it when it changes.
+    let mut watch = watch_prompts.then(|| PromptWatch::new(std::time::Instant::now()));
+    let mut published: Option<Prompt> = None;
     // P-C5: the typed-line buffer only exists for an interactive shell — a
     // headless conduct never reads stdin (no prompt line to reconstruct) and
     // an agent harness has no shell prompt at all.
@@ -1072,7 +1107,7 @@ fn conduct_multiplex(
     };
     if is_shell {
         let typed = typed_buf.as_ref().and_then(|b| b.typed());
-        conduct_refresh_shell(id, pty, shell_pid, false, typed); // stamp initial cwd/state now.
+        conduct_refresh_shell(id, pty, shell_pid, None, typed); // stamp initial cwd/state now.
     }
 
     let mut timed_out = false;
@@ -1139,14 +1174,23 @@ fn conduct_multiplex(
             }
         };
         let ready = wait_ready(pty, console, inbox.as_deref(), !stdin_eof, wait_ms);
-        // Refresh the conducted shell's live cwd/command/state on the ~1s clock
-        // (a plain timeout also ticks; a busy shell ticks at most this often).
-        if is_shell && last_tick.elapsed() >= tick_period {
-            let booster_recent = sudo_prompt_seen_at
-                .map(|t| t.elapsed() < SUDO_BOOSTER_WINDOW)
-                .unwrap_or(false);
-            let typed = typed_buf.as_ref().and_then(|b| b.typed());
-            conduct_refresh_shell(id, pty, shell_pid, booster_recent, typed);
+        // Refresh the conducted shell's live cwd/command/state, and any watched
+        // wrap's screen question, on the ~1s clock (a plain timeout also ticks;
+        // a busy shell ticks at most this often). A child that has exited asks
+        // nothing, whatever its last line said.
+        if watch.is_some() && last_tick.elapsed() >= tick_period {
+            let standing = watch
+                .as_ref()
+                .filter(|_| !child_exited)
+                .and_then(|w| w.standing(std::time::Instant::now()));
+            if is_shell {
+                let typed = typed_buf.as_ref().and_then(|b| b.typed());
+                conduct_refresh_shell(id, pty, shell_pid, standing.as_ref(), typed);
+            } else if standing != published {
+                let question = standing.as_ref().map(|p| p.question.as_str());
+                do_session_refresh(id, None, standing.as_ref().is_some_and(Prompt::sudo), question);
+                published = standing;
+            }
             last_tick = std::time::Instant::now();
         }
 
@@ -1155,11 +1199,8 @@ fn conduct_multiplex(
             match pty.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    // Booster text-scan: shells only, a cheap byte-substring search
-                    // (never a String allocation of the whole buffer) over exactly
-                    // what was just read, gated to a line-start match.
-                    if is_shell && scan_for_sudo_prompt(&buf[..n]) {
-                        sudo_prompt_seen_at = Some(std::time::Instant::now());
+                    if let Some(w) = watch.as_mut() {
+                        w.output(&buf[..n], std::time::Instant::now());
                     }
                     sink.write(&buf[..n]);
                     // A byte that arrived is the settle window's own reset: it
@@ -1183,6 +1224,9 @@ fn conduct_multiplex(
                     if let Some(tb) = typed_buf.as_mut() {
                         tb.feed(&buf[..n]);
                     }
+                    if let Some(w) = watch.as_mut() {
+                        w.input();
+                    }
                     pty.write(&buf[..n]);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -1200,6 +1244,9 @@ fn conduct_multiplex(
                     // them would preload a line no human composed.
                     if let Some(tb) = typed_buf.as_mut() {
                         tb.feed_injected(&chunk);
+                    }
+                    if let Some(w) = watch.as_mut() {
+                        w.input();
                     }
                     pty.write(&chunk);
                 }
@@ -1561,13 +1608,18 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // is the honest answer — a kill is never dressed as a numeric code on the
     // record or in the report (plan §3.1: absent, never 0).
     let mut inbox = inbox;
+    let is_shell = program_is_a_shell(&inv.args);
     let end = conduct_multiplex(
         &mut pty,
         &mut console,
         inbox.as_mut(),
         &mut child,
         &id,
-        program_is_a_shell(&inv.args),
+        is_shell,
+        // The screen speaks for a shell, and for a wrap whose harness has no
+        // hook or trace profile to speak for itself. A harness that reports
+        // through hooks or a trace is never touched by it.
+        is_shell || agent_profile(&agent).is_none(),
         !headless,
         &mut sink,
         deadline,
@@ -1986,34 +2038,32 @@ mod tests {
         assert_eq!(generic_command_label(&argv(&[])), None);
     }
     #[test]
-    fn sudo_awaiting_gates_the_primary_signal_on_children() {
-        // The booster fires regardless of the primary signal's inputs.
-        assert!(sudo_awaiting(false, None, true));
-        assert!(sudo_awaiting(true, Some(true), true));
-        assert!(sudo_awaiting(true, Some(false), true));
-        assert!(sudo_awaiting(true, None, true));
+    fn sudo_awaiting_gates_the_process_table_signal_on_children() {
         // fg IS sudo, and it has forked NO children yet: still at the PAM
-        // prompt — the primary signal fires.
-        assert!(sudo_awaiting(true, Some(false), false));
+        // prompt — the signal fires.
+        assert!(sudo_awaiting(true, Some(false)));
         // fg IS sudo, but it HAS forked a child: auth already succeeded and the
         // command is running (e.g. cached-cred `sudo nixos-rebuild switch` — a
-        // multi-minute build with no prompt at all). The primary must NOT fire.
-        assert!(!sudo_awaiting(true, Some(true), false));
-        // fg IS sudo but children are unreadable: don't trust the primary,
-        // fall back to the booster alone (which is false here).
-        assert!(!sudo_awaiting(true, None, false));
-        // fg is not sudo at all: primary never fires, no booster.
-        assert!(!sudo_awaiting(false, None, false));
-        assert!(!sudo_awaiting(false, Some(false), false));
-        assert!(!sudo_awaiting(false, Some(true), false));
+        // multi-minute build with no prompt at all). It must NOT fire.
+        assert!(!sudo_awaiting(true, Some(true)));
+        // fg IS sudo but children are unreadable: don't trust it (the screen's
+        // `sudo` row is the other witness).
+        assert!(!sudo_awaiting(true, None));
+        // fg is not sudo at all: never.
+        assert!(!sudo_awaiting(false, None));
+        assert!(!sudo_awaiting(false, Some(false)));
+        assert!(!sudo_awaiting(false, Some(true)));
+    }
+    fn asking(question: &str, sudo: bool) -> Prompt {
+        Prompt { question: question.to_string(), row: if sudo { "sudo" } else { "y-n" } }
     }
     #[test]
     fn shell_snapshot_idle_at_bare_prompt() {
         // fg == shell_pid: idle, activity from comm_of(shell_pid), no sudo.
-        let (state, activity, needs_sudo) = shell_snapshot(
+        let (state, activity, needs_sudo, question) = shell_snapshot(
             100,
             100,
-            false,
+            None,
             |_| Some("bash".to_string()),
             |_| panic!("command_of should not be consulted at the bare prompt"),
             |_| panic!("children_of should not be consulted when fg isn't sudo"),
@@ -2021,14 +2071,15 @@ mod tests {
         assert_eq!(state, "idle");
         assert_eq!(activity.as_deref(), Some("bash"));
         assert!(!needs_sudo);
+        assert_eq!(question, None);
     }
     #[test]
     fn shell_snapshot_working_reads_foreground_command() {
         // fg != shell_pid, and it's not sudo: working, activity from command_of(fg).
-        let (state, activity, needs_sudo) = shell_snapshot(
+        let (state, activity, needs_sudo, question) = shell_snapshot(
             200,
             100,
-            false,
+            None,
             |_| Some("cargo".to_string()),
             |pid| {
                 assert_eq!(pid, 200);
@@ -2039,16 +2090,17 @@ mod tests {
         assert_eq!(state, "working");
         assert_eq!(activity.as_deref(), Some("cargo test"));
         assert!(!needs_sudo);
+        assert_eq!(question, None);
     }
     #[test]
     fn shell_snapshot_forces_awaiting_while_sudo_has_no_children() {
         // fg IS sudo, with no children yet (still at the password prompt):
         // state is FORCED to awaiting and needs_sudo is true, regardless of
-        // what command_of would have said.
-        let (state, activity, needs_sudo) = shell_snapshot(
+        // what command_of would have said. No screen text, so no question.
+        let (state, activity, needs_sudo, question) = shell_snapshot(
             300,
             100,
-            false,
+            None,
             |_| Some("sudo".to_string()),
             |_| Some("sudo nixos-rebuild switch".to_string()),
             |pid| {
@@ -2059,16 +2111,17 @@ mod tests {
         assert_eq!(state, "awaiting");
         assert_eq!(activity.as_deref(), Some("sudo nixos-rebuild switch"));
         assert!(needs_sudo);
+        assert_eq!(question, None);
     }
     #[test]
     fn shell_snapshot_cached_cred_sudo_does_not_force_awaiting() {
         // fg IS sudo, but it has already forked its command child (cached
         // creds, no prompt): state stays "working" off the normal computation,
         // needs_sudo is false — the F1 fix's whole point.
-        let (state, activity, needs_sudo) = shell_snapshot(
+        let (state, activity, needs_sudo, _) = shell_snapshot(
             300,
             100,
-            false,
+            None,
             |_| Some("sudo".to_string()),
             |_| Some("sudo nixos-rebuild switch".to_string()),
             |pid| {
@@ -2081,25 +2134,56 @@ mod tests {
         assert!(!needs_sudo);
     }
     #[test]
-    fn scan_for_sudo_prompt_requires_line_start() {
-        const NEEDLE: &str = "[sudo] password for";
-        // At the very start of the buffer: true.
-        assert!(scan_for_sudo_prompt(NEEDLE.as_bytes()));
-        // Right after a newline: true.
-        let after_nl = format!("hello\n{NEEDLE}");
-        assert!(scan_for_sudo_prompt(after_nl.as_bytes()));
-        // Right after a carriage return (a pty commonly emits \r\n): true.
-        let after_cr = format!("hello\r{NEEDLE}");
-        assert!(scan_for_sudo_prompt(after_cr.as_bytes()));
-        // Mid-line — e.g. a compiler error message or `grep` output quoting the
-        // needle — must NOT false-trigger.
-        let mid_line = format!("foo.rs:9:{NEEDLE} x");
-        assert!(!scan_for_sudo_prompt(mid_line.as_bytes()));
-        // No needle at all.
-        assert!(!scan_for_sudo_prompt(b"just some ordinary shell output"));
-        // Empty / too-short buffers must not panic.
-        assert!(!scan_for_sudo_prompt(b""));
-        assert!(!scan_for_sudo_prompt(b"[sudo]"));
+    fn shell_snapshot_folds_the_screens_question_into_awaiting() {
+        let ask = asking("Overwrite? [y/N]", false);
+        // A foreground command asking: awaiting, the question carried, no lock.
+        let (state, activity, needs_sudo, question) = shell_snapshot(
+            200,
+            100,
+            Some(&ask),
+            |_| Some("cp".to_string()),
+            |_| Some("cp -i a b".to_string()),
+            |_| panic!("children_of should not be consulted when fg isn't sudo"),
+        );
+        assert_eq!(state, "awaiting");
+        assert_eq!(activity.as_deref(), Some("cp -i a b"));
+        assert!(!needs_sudo);
+        assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
+        // The shell's own `read -p` runs in the shell process: fg is the
+        // shell, and it is still a question.
+        let (state, _, needs_sudo, question) = shell_snapshot(
+            100,
+            100,
+            Some(&ask),
+            |_| Some("bash".to_string()),
+            |_| panic!("command_of should not be consulted at the bare prompt"),
+            |_| panic!("children_of should not be consulted when fg isn't sudo"),
+        );
+        assert_eq!(state, "awaiting");
+        assert!(!needs_sudo);
+        assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
+    }
+    #[test]
+    fn shell_snapshot_takes_the_lock_badge_from_the_sudo_row_alone() {
+        // The `sudo` row is the old text-scan: awaiting AND needs_sudo, without
+        // the process table having caught `sudo` yet.
+        let sudo = asking("[sudo] password for khoa:", true);
+        let (state, _, needs_sudo, question) = shell_snapshot(
+            100,
+            100,
+            Some(&sudo),
+            |_| Some("bash".to_string()),
+            |_| None,
+            |_| None,
+        );
+        assert_eq!(state, "awaiting");
+        assert!(needs_sudo);
+        assert_eq!(question.as_deref(), Some("[sudo] password for khoa:"));
+        // Any other row is a question, not the human's sudo password.
+        let other = asking("Password:", false);
+        let (state, _, needs_sudo, _) =
+            shell_snapshot(100, 100, Some(&other), |_| None, |_| None, |_| None);
+        assert_eq!((state, needs_sudo), ("awaiting", false));
     }
     #[test]
     fn cwd_for_prefers_foreground_process_then_falls_back_to_shell() {
@@ -3776,8 +3860,13 @@ mod tests {
             typed: None,
         };
 
+        let refresh = |activity, state, needs_sudo, question, restore: &RestoreSnapshot| {
+            let facts = ShellFacts { cwd: Some("/proj"), activity, state, restore: restore.clone() };
+            do_session_refresh("sh", Some(facts), needs_sudo, question);
+        };
+
         // At the prompt: idle, no activity, cwd tracked.
-        do_session_refresh("sh", Some("/proj"), None, "idle", false, idle_restore.clone());
+        refresh(None, "idle", false, None, &idle_restore);
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s.sessions[0].state, "idle");
         assert_eq!(s.sessions[0].cwd, "/proj");
@@ -3787,9 +3876,7 @@ mod tests {
 
         // A foreground command: working + the command as activity, and the
         // restore snapshot's raw argv persists change-only alongside it.
-        do_session_refresh(
-            "sh", Some("/proj"), Some("cargo test"), "working", false, working_restore.clone(),
-        );
+        refresh(Some("cargo test"), "working", false, None, &working_restore);
         let s2: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s2.sessions[0].state, "working");
         assert_eq!(s2.sessions[0].activity.as_deref(), Some("cargo test"));
@@ -3800,21 +3887,30 @@ mod tests {
         // `state` string passed in (the caller already resolves the force in
         // `conduct_refresh_shell`, but do_session_refresh itself just persists
         // both fields change-only).
-        do_session_refresh("sh", Some("/proj"), Some("sudo"), "awaiting", true, idle_restore.clone());
+        refresh(Some("sudo"), "awaiting", true, Some("[sudo] password for khoa:"), &idle_restore);
         let s3: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s3.sessions[0].state, "awaiting");
         assert_eq!(s3.sessions[0].needs_sudo, Some(true));
+        assert_eq!(s3.sessions[0].question.as_deref(), Some("[sudo] password for khoa:"));
 
         // The prompt clears: needs_sudo=false CLEARS the field back to None
         // (never left as Some(false)) — change-only, so the key disappears.
-        do_session_refresh("sh", Some("/proj"), None, "idle", false, idle_restore.clone());
+        refresh(None, "idle", false, None, &idle_restore);
         let s4: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s4.sessions[0].needs_sudo, None);
+        assert_eq!(s4.sessions[0].question, None);
         let raw = std::fs::read_to_string(sessions_path()).unwrap();
         assert!(!raw.contains("needsSudo"), "cleared key must be absent: {raw}");
+        assert!(!raw.contains("question"), "cleared key must be absent: {raw}");
 
         // An unknown id is a safe no-op (never panics, never inserts).
-        do_session_refresh("nope", Some("/x"), Some("x"), "working", false, idle_restore);
+        let facts = ShellFacts {
+            cwd: Some("/x"),
+            activity: Some("x"),
+            state: "working",
+            restore: idle_restore,
+        };
+        do_session_refresh("nope", Some(facts), false, None);
         let s5: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s5.sessions.len(), 1);
 
@@ -3823,5 +3919,262 @@ mod tests {
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A wrap with no hook or trace of its own (a codex, an aider): a screen
+    /// question makes its record `awaiting` with the line beside it, and taking
+    /// the question back returns it to the `idle` it registered with. Nothing
+    /// else on the record moves — it is not a shell and gains no snapshot.
+    #[test]
+    fn a_harnessless_wrap_publishes_its_screens_question_and_takes_it_back() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-screen");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            Some(std::process::id()), "2026-01-01T00:00:00Z",
+        );
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+        let record = || {
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            s.sessions.into_iter().next().unwrap()
+        };
+
+        do_session_refresh("wrap", None, false, Some("Apply patch? [y/N]"));
+        let rec = record();
+        assert_eq!(rec.state, "awaiting");
+        assert_eq!(rec.question.as_deref(), Some("Apply patch? [y/N]"));
+        assert_eq!(rec.needs_sudo, None);
+        assert_eq!((rec.restore, rec.activity, rec.shell), (None, None, false));
+
+        // A different question is the same episode's record, rewritten.
+        do_session_refresh("wrap", None, false, Some("Run the tests? [Y/n]"));
+        assert_eq!(record().question.as_deref(), Some("Run the tests? [Y/n]"));
+
+        // The `sudo` row asks for the lock badge beside it, and loses it with it.
+        do_session_refresh("wrap", None, true, Some("[sudo] password for khoa:"));
+        assert_eq!(record().needs_sudo, Some(true));
+        do_session_refresh("wrap", None, false, None);
+        let rec = record();
+        assert_eq!((rec.state.as_str(), rec.question, rec.needs_sudo), ("idle", None, None));
+        let raw = std::fs::read_to_string(sessions_path()).unwrap();
+        assert!(!raw.contains("question") && !raw.contains("needsSudo"), "{raw}");
+
+        // With nothing standing and nothing to take back, a tick writes nothing.
+        let before = std::fs::read_to_string(sessions_path()).unwrap();
+        do_session_refresh("wrap", None, false, None);
+        assert_eq!(std::fs::read_to_string(sessions_path()).unwrap(), before);
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The screen only takes back a state it set: a wrap whose `state` came from
+    /// somebody else (an adapter's `session phase`) and which holds no question
+    /// keeps that state through every tick.
+    #[test]
+    fn the_screen_returns_only_a_state_its_own_question_set() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-screen-own");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            None, "2026-01-01T00:00:00Z",
+        );
+        sessions[0].state = "working".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+
+        do_session_refresh("wrap", None, false, None);
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(s.sessions[0].state, "working");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Precedence: hook phase > screen. A wrap that has a hook record answers to
+    /// that phase alone — the screen never sets a state or a question over it,
+    /// and takes back what it had set before the hook record existed.
+    #[test]
+    fn the_screen_never_sets_over_a_hook_phase() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-screen-hooked");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            None, "2026-01-01T00:00:00Z",
+        );
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+
+        // Before any adapter reports: the screen speaks.
+        do_session_refresh("wrap", None, true, Some("[sudo] password for khoa:"));
+        let record = || {
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            s.sessions.into_iter().next().unwrap()
+        };
+        assert_eq!(record().state, "awaiting");
+
+        // An adapter reports a phase for the wrap's own id: now it is the authority.
+        let mut hooks = Vec::new();
+        crate::graph::session_store::upsert_hook(&mut hooks, "wrap", "working", "2026-01-01T00:01:00Z");
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+        do_session_refresh("wrap", None, true, Some("Apply patch? [y/N]"));
+        let rec = record();
+        assert_eq!(rec.question, None, "what the screen had set is taken back");
+        assert_eq!(rec.needs_sudo, None);
+        assert_eq!(rec.state, "awaiting", "…but the state is the hook door's to write, not the screen's");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Poll `ready` against the first record of `sessions.json` until it holds
+    /// or `budget` runs out; the record that satisfied it, or the last one read.
+    #[cfg(unix)]
+    fn wait_for_record(
+        id: &str,
+        budget: std::time::Duration,
+        ready: impl Fn(&SessionRecord) -> bool,
+    ) -> Option<SessionRecord> {
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if let Ok(f) = load_stage::<SessionsFile>(&sessions_path()) {
+                if let Some(rec) = f.sessions.into_iter().find(|r| r.session_id == id) {
+                    if ready(&rec) {
+                        return Some(rec);
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        None
+    }
+
+    /// A real conducted pty end to end: the child prints a question and blocks,
+    /// the record goes `awaiting` carrying the line after the quiet, an answer
+    /// typed into the session's inbox ends it while the child is still running,
+    /// and the record returns to a state that is not `awaiting`.
+    ///
+    /// The session is a real `aoide conduct --headless` PROCESS, driven exactly
+    /// as `aoide send` drives one, and the connection comes from this test
+    /// process, the session's parent: an in-process `session_conduct` would
+    /// register this very pid, and the inbox refuses a connector whose own
+    /// nearest session is the one being typed into.
+    ///
+    /// GATED on Unix with its reason: the children are POSIX programs
+    /// (`sh -c`, `awk`) and the answer goes through the Unix-domain inbox.
+    #[cfg(unix)]
+    fn a_blocked_child_is_asking_until_answered(tag: &str, argv: &[&str], agent: &str, shell: bool) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let mut conducting = std::process::Command::new(built_aoide_bin())
+            .args(["conduct", "--headless", "--id", tag, "--agent", agent, "--"])
+            .args(argv)
+            .env("AOIDE_STAGE_DIR", &stage)
+            .env("AOIDE_STATE_DIR", &state)
+            .env("AOIDE_AUDIT_LOG", root.join("log"))
+            .env("XDG_RUNTIME_DIR", &root)
+            .env_remove("AOIDE_SESSION_ID")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("aoide conduct starts");
+        let reap = |child: &mut std::process::Child| {
+            let _ = child.kill();
+            let _ = child.wait();
+        };
+
+        // QUIET plus a tick; the budget has room for a loaded box.
+        let Some(asking) = wait_for_record(tag, std::time::Duration::from_secs(30), |r| {
+            r.state == "awaiting" && r.question.is_some()
+        }) else {
+            reap(&mut conducting);
+            panic!("the quiet question never made the record awaiting");
+        };
+        assert_eq!(asking.question.as_deref(), Some("Overwrite? [y/N]"));
+        assert_eq!(asking.needs_sudo, None, "an ordinary question is not the human's password");
+        assert_eq!(asking.shell, shell);
+        assert_eq!(asking.restore.is_some(), shell, "only a shell is ticked as one");
+
+        use std::io::Write as _;
+        let mut door = std::os::unix::net::UnixStream::connect(conduct_socket_path(tag))
+            .expect("the session's inbox is bound while its child runs");
+        door.write_all(b"y\n").unwrap();
+        drop(door);
+
+        let Some(answered) = wait_for_record(tag, std::time::Duration::from_secs(30), |r| {
+            r.state != "awaiting" && r.question.is_none()
+        }) else {
+            reap(&mut conducting);
+            panic!("the answered question never left the record");
+        };
+        assert_ne!(answered.state, "done", "the child is still running its sleep");
+
+        let status = conducting.wait().expect("conduct returns");
+        assert!(status.success(), "conduct exited {status:?}");
+        let rec = wait_for_record(tag, std::time::Duration::from_secs(5), |r| r.state == "done").unwrap();
+        assert_eq!(rec.question, None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A shell's own `read` builtin asks from the shell process itself, with no
+    /// foreground command: still a question.
+    #[cfg(unix)]
+    #[test]
+    fn a_shell_blocked_in_read_is_asking_until_answered() {
+        a_blocked_child_is_asking_until_answered(
+            "screen-shell-read",
+            &["sh", "-c", "printf 'Overwrite? [y/N] '; read x; sleep 4"],
+            "worker",
+            true,
+        );
+    }
+
+    /// A program that is not a shell and reports through neither hooks nor a
+    /// trace: the wrap itself speaks for it, and writes no shell snapshot.
+    #[cfg(unix)]
+    #[test]
+    fn a_harnessless_program_blocked_on_a_question_is_asking_until_answered() {
+        a_blocked_child_is_asking_until_answered(
+            "screen-awk-read",
+            &["awk", "BEGIN { printf \"Overwrite? [y/N] \"; fflush(); getline x < \"-\"; system(\"sleep 4\") }"],
+            "awk",
+            false,
+        );
     }
 }

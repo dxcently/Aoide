@@ -135,6 +135,20 @@ fn recipient(
     sealed: &impl Fn(&SessionRecord) -> bool,
 ) -> Option<String> {
     let host = host_wrap(kid, roster, sealed)?;
+    spawner_of(host, &kid.session_id, roster, sealed)
+}
+
+/// Steps 2 and 3 of [`recipient`]: the spawner of a conducted `host` wrap,
+/// over the edge `host`'s registration attested, resolved to the conducted
+/// session that can be written to. Shared with the screen source
+/// (`prompt.rs`), whose child IS the wrap and so has no hook child to climb
+/// from. Never `kid_id` itself and never `host`.
+pub(super) fn spawner_of(
+    host: &SessionRecord,
+    kid_id: &str,
+    roster: &[SessionRecord],
+    sealed: &impl Fn(&SessionRecord) -> bool,
+) -> Option<String> {
     let spawner_id = host.parent_session_id.as_deref()?;
     if host.attested_spawner.as_deref() != Some(spawner_id) {
         return None;
@@ -145,7 +159,7 @@ fn recipient(
     } else {
         host_wrap(spawner, roster, sealed)?
     };
-    (target.session_id != kid.session_id && target.session_id != host.session_id)
+    (target.session_id != kid_id && target.session_id != host.session_id)
         .then(|| target.session_id.clone())
 }
 

@@ -1767,6 +1767,7 @@ mod tests {
             model: None,
             context_tokens: None,
             needs_sudo: None,
+            question: None,
             context_ceiling: None,
             log_path: None,
             sources: None,
