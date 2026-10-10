@@ -50,7 +50,7 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
   and, the moment a window opens (or moves / retitles), (re)resolves any tracked
   session still missing its `windowAddress`: it walks each session's recorded
   lifecycle **pid** up the `/proc` ppid chain and matches an ancestor against
-  `hyprctl clients -j`, stamping the client's canonical `0x…` address into
+  the `j/clients` socket read, stamping the client's canonical `0x…` address into
   `sessions.json` via the atomic graph writer. The same pass also reads the
   client's `workspace.id` and stamps it onto the session's additive **`workspace`**
   field — and, because a resolved window can be *dragged* to another workspace,
@@ -68,10 +68,13 @@ The plumbing already exists ([[Desktop-Architecture]], [[shellbridge]]):
   disables itself; the shellbridge socket keeps serving regardless.
 - **Discovery + hook backfill (fallback).** The older, in-process paths remain as
   belt-and-suspenders: `conduct`'s launch-time **phase ② discovery** (it walks its
-  own pid ↔ `hyprctl clients -j`) and the **hook door** — the same pid-ancestry
-  match at `SessionStart`, backfilled on any later hook while still empty. These
-  cover a session whose window the event listener didn't stamp (e.g. a hook-only
-  Claude Code session with no recorded conduct pid for the listener to walk).
+  own pid ↔ the `j/clients` socket read) and the **hook door**, which walks the hook
+  process's ancestry the same way at `SessionStart` and backfills on any later
+  hook while still empty. The door yields the window only, never the owning
+  app's pid. A hook-only session with no recorded pid (a Claude Code session
+  running headless inside one desktop app window) is bound by the listener's
+  sweep through its stored hook chain, and only while any live process of that chain, a tab shell included, stands beneath the window's owner. Several such sessions can share one
+  window, and each keeps its own address.
 - Agent hooks post execution phase, so each row shows live state (working ·
   awaiting · stopped · idle · done) — claude's `Notification` / `Stop` /
   `Pre-PostToolUse`, kimi's same core events plus its dedicated

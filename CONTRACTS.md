@@ -2455,20 +2455,28 @@ and `parentSessionId` together, never off `kind` alone.
 
 **Additive in v0 (task #89):** a session record MAY also carry an optional
 `hookAncestry` (array of integer pids, at most 8, self-first) — the
-hook-firing process's own `/proc` `ppid` walk, stamped ONCE at a hook
-session's own SessionStart/self-heal registration (`aoide session hook`)
-and never re-stamped afterward (a birth fact, not a live signal). A
-later `conduct`/`spawn` registration with no explicit `--parent` walks
-ITS OWN `/proc` ancestry and looks for a live, not-`done`, agent-kind session
-whose `hookAncestry` intersects it — the closest (deepest) matching ancestor
-wins as parent, so a nested headless `conduct`/`spawn` launched from inside
-an agent's shell tool lands as that agent's CHILD rather than, via a stale
-ambient `AOIDE_SESSION_ID`, as a sibling of the enclosing terminal. Absent
-means "no ancestry recorded" (a legacy record, or any non-hook registration);
-readers must tolerate both forms and round-trip fields they do not know.
-Consumed internally for parent resolution only — never rendered.
+hook-firing process's own `/proc` `ppid` walk. It lands in one locked write
+with each of three events: the registration (a SessionStart, or the first hook
+event of an unknown id, `aoide session hook`), the first window bind to the
+session, and a per-turn heal. It is the chain of the harness's latest process.
+It is replaced only where `ancestry_may_move` allows: a pid-less record always
+takes the new chain, and a record anchored to a live pid of its own keeps the
+stored chain while that pid is alive outside the new one. That pid is the only
+anchor, so two live processes under one session id resolve to the latest
+SessionStart's process. A per-turn heal is stricter. It fires only on a dead→live transition: the stored chain is non-empty, no pid of the record, its own pid or a stored chain pid, is alive outside the hook's chain (`lives_apart`; such a pid holds the chain, so the heal is blocked), and the hook's chain holds a live harness the stored chain lacks. The skipped pids are the invocation's own: the hook process and the shell layers it dies with, counted by `session_store::hook_invocation_pids(profile, capture_shell)`: `1 + AgentProfile.hook_shell_layers` on a plain install, and `1 + CAPTURE_SHELL_LAYERS` (1) when `capture_shell` is set. Claude's profile has one shell layer, so its plain hook is `[hook, sh, harness, …]` with `sh` as the hook's parent. kimi-code's and pi's have none on a default install (`[hook, harness, …]`). kimi's shape is measured under `sh -c` on this box; its harness spawn call site is not verified. pi spawns directly. A `hooks install --capture` renders `--capture-shell` into each hook command, and the door reads that flag off its own invocation. The capture wrap runs the pipeline under one `sh -c`, which the harness's own `sh -c` execs in place, so one shell sits above the hook for Claude and kimi alike (`[hook, pipeline sh, harness, …]`, count `1 + 1`). `commands/hooks.rs`'s `the_rendered_hook_commands_match_their_invocation_depth` takes each count's capture argument from the flag the rendered command names, and pins the measured depth of each rendered shape, the flag included. `send.rs`'s `a_capture_wrapped_door_skips_the_pipeline_shell_above_its_hook` pins the door's reading of that flag. So a live stored chain is not rewritten per turn, and a hook that is a direct child of its harness heals it only under a profile that counts no shell layer. The heal needs no compositor: only the window bind does (discovery answers nothing without `HYPRLAND_INSTANCE_SIGNATURE`). Codex has no profile in this tree, so its shape is unpinned. A later
+`conduct`/`spawn`
+registration with no explicit `--parent` walks ITS OWN `/proc` ancestry and
+looks for a live, not-`done`, agent-kind session whose `hookAncestry`
+intersects it — the closest (deepest) matching ancestor wins as parent, so a
+nested headless `conduct`/`spawn` launched from inside an agent's shell tool
+lands as that agent's CHILD rather than, via a stale ambient
+`AOIDE_SESSION_ID`, as a sibling of the enclosing terminal. The window sweep
+also reads it: a pid-less hosted session binds to a window only while any live process of its chain, a tab shell included, stands beneath that window's owner (never a pid, never a payload
+claim). Absent means "no ancestry recorded" (a legacy record, or any
+non-hook registration); readers must tolerate both forms and round-trip fields
+they do not know. Consumed internally only — never rendered.
 
-**Additive in v0 (task #89, review round 2):** a session record MAY also
+**Additive in v0 (task #89):** a session record MAY also
 carry an optional `headless` (bool, default/absent means `false`) — a
 PERMANENT, self-reported registration fact stamped exactly once, by `aoide
 conduct --headless` right after registration, and never cleared afterward.
@@ -2604,7 +2612,7 @@ case, and every legacy record); readers must tolerate both forms and
 round-trip fields they do not know.
 
 **Additive in v0 (P-P3, `docs/architecture/PAIRING.md` decision 7; record
-authority tightened at LANE IDENTITY P-ID0, G16/G5, review round 1):** a
+authority tightened at LANE IDENTITY P-ID0, G16/G5):** a
 session record MAY also carry an optional `origin` (string) — `"node:<name>"`
 for a session `aoide-server`'s A2A door spawned on behalf of an identified,
 PAIRED node (§6's P-P3 amendment above). `aoide_conduct::graph::
@@ -2705,8 +2713,7 @@ is `conductable`, sealed, or has EVER been sealed never moves its pid, dead or
 alive (a dead wrap is the reaper's to end); only a plain hook record whose
 process is gone (a harness restarted under its own id) is replaced. Liveness
 is the reaper's probe, `kill(pid, 0)`, and an unanswerable probe reads as
-ALIVE. A hook payload's `pid` is taken only when it names the hook process or
-one of its own `/proc` ancestors. `aoide conduct --id <existing conducted or
+ALIVE. Discovery never stamps the owning app's pid. A hook payload's `pid` is taken only when it names the hook process or one of its own `/proc` ancestors, and that ancestor owns no Hyprland window: the owning app is an ancestor too, so a self-report that owns a client is refused (`send.rs::vouched_payload_pid`). `aoide conduct --id <existing conducted or
 sealed id>` is refused: a conducted id is born once, and a restart registers a
 fresh id. Sealing happens once per record: `everSealed` (bool, additive,
 set by `stamp_seal`, never cleared) bars the daemon — both the tick and the
@@ -2797,7 +2804,7 @@ pty — when the CONNECTOR'S OWN nearest live registered session (walking
 its ancestry nearest-first, `aoide_conduct::graph::identity::
 is_self_originated`) resolves to the socket's OWN session. **Deliberately
 NOT "the target's pid appears anywhere in the connector's ancestry"**
-(review round 1 MUST-FIX): `session_conduct` registers WITHOUT detaching,
+`session_conduct` registers WITHOUT detaching,
 so a legitimate CHILD session's pid is a genuine OS descendant of its
 parent's registered pid — a raw-ancestry-containment check refused the
 single most common flow, a child sending to its own live parent, with a
@@ -2964,23 +2971,24 @@ already gone (that is the signal it reaped on), so a `/proc` read there
 returns nothing, every time — the snapshot is always the last one the live
 tick took, up to ~950ms stale at worst.
 
-**Windowless lineage (task #89, corrected in review round 2):** a session is
+**Windowless lineage (task #89):** a session is
 windowless BY CONSTRUCTION — no `windowAddress`, no window-owning pid ever
 attached to it — in either of two cases: (1) it IS ITSELF a conducted
 (`conductable`) session with `headless == true`, or with `headless` absent
 and its own `windowAddress` empty; or (2) its `parentSessionId` chain passes
 through a session matching case (1). Enforcing this is not "four sites" —
-it is a discovery GATE plus a listener SELF-CHECK plus the four historical
-backfill call sites:
+it is a discovery GATE plus a listener SELF-CHECK plus every backfill call
+site:
 - the discovery gate: `aoide conduct --headless`'s own registration path
-  never calls window discovery at all when `headless` is set — the
-  unconditional call was the review-round-2 defect; a headless wrap's own
+  never calls window discovery at all when `headless` is set — an
+  unconditional call would resolve to the enclosing terminal's window; a
+  headless wrap's own
   record must never even attempt to discover a window, not merely have one
   filtered out downstream;
 - the listener self-check: the shellbridge window-event listener
   (`resolve_pending_session_windows`) and every hook-time backfill site
-  (`aoide session hook`, `graph/send.rs`'s two `discover_window()`
-  call sites, `graph/window.rs::ensure_session_window`) all route through
+  (`aoide session hook`, `graph/send.rs`'s two `discover_window_from`
+  call sites and its five `ensure_session_window` calls) all route through
   `windowless_by_lineage`, which now checks the session's OWN record first
   (case 1 above) before ever walking its parent chain (case 2) — so a
   headless wrap's own record is caught by the same function that catches
@@ -2988,18 +2996,26 @@ backfill call sites:
 
 A session with no parent, or whose chain anchors in a windowed conducted
 session directly (an interactive `conduct` with a real `windowAddress`),
-keeps the ordinary backfill. The same-window eviction
-(immediately above `graph.json`'s render, below) is lineage-safe on top of
-this: it never retires a member of the newly registering session's own
-lineage (every ancestor AND descendant, walking `parentSessionId`), only a
-same-window record with NO lineage relation to it — the legitimate
-compact/resume-twin case. The reaper's own same-window dedup pass
-(`aoide session reap`'s `superseded_agent_duplicates`) carries the identical
-lineage carve-out as defense in depth: a windowless-by-construction session
-never enters a same-window dedup group in the first place, but if a bug
-upstream ever lets one acquire a window anyway, the dedup pass still will
-not retire its own lineage — only a genuine no-lineage same-window twin
-collapses.
+keeps the ordinary backfill. Discovery walks the hook process (the door's
+`SO_PEERCRED` pid on the daemon arm, this process on the CLI arm) and yields
+the window and its workspace only (the client list comes off Hyprland's request socket, `j/clients`, never a `hyprctl` binary, so the daemon arm reads the same list as the CLI arm): a discovered window's OWNING pid is never
+stamped as the session's pid. The same-window eviction
+(immediately above `graph.json`'s render, below) never retires a sharing
+window by itself. A same-window record is retired only as a superseded twin
+(`superseded_by`): it has no live process of its own outside the new
+record's chain, and its chain (when it has one) meets the new chain at the
+same depth. A member of the newly registering session's own lineage (every
+ancestor AND descendant, walking `parentSessionId`) is never retired, and a
+live sibling sharing the window is never retired. The reaper's own
+same-window dedup pass (`aoide session reap`'s `superseded_agent_duplicates`)
+applies the identical `superseded_by` rule and the identical lineage carve-out,
+so a window hosting six live sessions keeps all six. A conducted PTY host
+(`conductable`) is never a candidate for either pass. "No live process of its
+own" is judged against the record's stored `hookAncestry`. A pid-less record
+takes a fresh chain at every SessionStart (`ancestry_may_move`), so for a pid-less
+record a stale chain survives only a SessionStart that was missed or refused (an
+anchored record keeps its chain while its own pid lives, by design). The residual is a SessionStart that was missed or refused: such a record holds a stale chain until a per-turn hook from its live harness heals it (`hookAncestry` above), and until then a same-depth sibling registration can still retire the record. A chainless record with no pid is never a twin (`superseded_by`).
+Tab-shell residual: a chain whose tab shell stands beneath the window owner binds that window (`window_for_hook_chain`), but its heal is blocked while the tab shell lives outside the hook's chain (`lives_apart`), so such a stored chain stays stale until the shell exits.
 
 **Additive in v0 (P-CX-5):** a session record MAY also carry an optional
 `sources` (object, string → string): a provenance map from a captured
@@ -4595,7 +4611,7 @@ given`) since neither path had anything to go on. Naming BOTH misses is
 conditioned on having genuinely tried the walk — an invocation that DID
 give one of the three flags (`--id` alone, say, with no `--project`) never
 attempts a manifest walk at all and gets the ORIGINAL, accurate
-`--project`-missing usage error instead; a review fix (U2 review round 1)
+`--project`-missing usage error instead; a U2 fix
 closed an earlier bug where that case wrongly got the manifest-miss
 wording despite never having looked for one. Each spec resolves
 independently (one spec's failure never aborts the rest, same posture
@@ -4672,7 +4688,7 @@ older binaries this phase must stay compatible with, so the wire itself is
 never touched here.
 
 **Manifest-revived sessions are marked undying (orchestrator design
-ruling, U2 review round 1) — LOCAL revivals only.** A remote summon (U4,
+ruling, U2) — LOCAL revivals only.** A remote summon (U4,
 above) never reaches this: the resurrected id lives on the node, not here.
 Both the LOCAL enrichment path and the LOCAL clean-spawn
 path pass the same `--undying` flag `resurrect_one`/`clean_spawn_from_spec`
@@ -4692,7 +4708,7 @@ undying) — a manifest-mode revival marks unconditionally, because there is
 no ordinary-revive case to protect against here: every manifest-mode spawn
 already came from an explicit, operator-authored declaration.
 
-**The picker's node writer (U3, command-defrag lane U; review round 1 fixed
+**The picker's node writer (U3, command-defrag lane U; fixed
 the batch-poisoning defect below, same phase; relocated to `aoide session
 grant undying` bare at the session-surface redesign, command-defrag lane X,
 2026-08-28 — bare `aoide session` itself now renders the roster instead).**
@@ -9192,7 +9208,7 @@ full schema.
 <ssh-target>] [--via <ssh-target>] [--secs N] [--wait SECS]
 [--allow read,spawn] [--yes]` / `aoide pair reject <id|name>` /
 `aoide pair watch [--popup|--json]` (P-P2, P-PV2 — the User's locked
-spec, three grill rounds, appended newest directly after `node hub`;
+spec, appended newest directly after `node hub`;
 collapsed to this one-command shape at task #135 P3' — the old `request`/
 `pending`/`approve`/`reject` subcommands died outright, no aliases —
 §6's "Pairing wire" subsection above has the exact wire shapes and SAS

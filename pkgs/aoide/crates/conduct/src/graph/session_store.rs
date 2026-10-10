@@ -25,7 +25,7 @@ use super::model::HookRecord;
 use aoide_protocol::agents::AgentProfile;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
-use aoide_storage::fs::with_stage_lock;
+use aoide_storage::fs::{pid_is_alive, with_stage_lock};
 use serde_json::json;
 #[cfg(test)]
 use serde_json::Value;
@@ -54,7 +54,7 @@ use aoide_storage::time::iso_utc_from_epoch;
 /// inserted (the caller already excludes `s.session_id != id` separately).
 ///
 /// `pub(crate)`, not private or `pub(in crate::graph)`: `crate::reap`'s own
-/// `superseded_agent_duplicates` (review round 2 of task #89) — a SIBLING
+/// `superseded_agent_duplicates` (task #89) — a SIBLING
 /// module, not a descendant of `graph` — reuses this SAME lineage set as its
 /// own defense-in-depth carve-out — never a second, parallel lineage
 /// computation.
@@ -87,6 +87,125 @@ pub(crate) fn lineage_of(id: &str, sessions: &[SessionRecord]) -> HashSet<String
     out
 }
 
+/// Some process of `rec`'s own, its recorded pid or a pid of its stored
+/// `hookAncestry`, is alive and is not one of the new record's: not in `chain`
+/// and not `pid`. Pure over an injected `alive`, so the rule is testable with
+/// fake liveness; production passes `pid_is_alive`.
+fn lives_apart(
+    rec: &SessionRecord,
+    chain: &[i32],
+    pid: Option<u32>,
+    alive: &impl Fn(u32) -> bool,
+) -> bool {
+    let new_pids: HashSet<u32> = chain
+        .iter()
+        .filter_map(|&p| u32::try_from(p).ok())
+        .chain(pid)
+        .collect();
+    rec.hook_ancestry
+        .iter()
+        .filter_map(|&p| u32::try_from(p).ok())
+        .chain(rec.pid)
+        .any(|p| !new_pids.contains(&p) && alive(p))
+}
+
+/// May `old`, a same-window agent not in the new record's lineage, be retired in
+/// favour of a record with `chain` and `pid`? The window is shared by design (one
+/// app window hosts many agents), so the window itself never decides. Only a
+/// twin does: the same harness under a new session id (a `/clear`, a compact, a
+/// same-tab successor). Rules, in order:
+///   - a process of `old`'s own still alive outside the new chain: never (it is
+///     a live sibling, not a twin);
+///   - `old` has no `hookAncestry` and holds a pid: yes (the legacy owner-pid
+///     record, unchanged); no `hookAncestry` and no pid: no (nothing names a
+///     process position, so nothing marks it a twin);
+///   - the first pid of `old`'s chain that the new chain also holds sits at the
+///     same depth in both chains: yes (the same process position);
+///   - otherwise, including no shared pid at all: no (the new run is nested
+///     beneath `old`, or another shape).
+/// Both eviction passes call this, so registration and the reaper agree.
+pub(crate) fn superseded_by(
+    old: &SessionRecord,
+    chain: &[i32],
+    pid: Option<u32>,
+    alive: impl Fn(u32) -> bool,
+) -> bool {
+    if lives_apart(old, chain, pid, &alive) {
+        return false;
+    }
+    if old.hook_ancestry.is_empty() {
+        return old.pid.is_some();
+    }
+    match old.hook_ancestry.iter().find(|p| chain.contains(*p)) {
+        None => false,
+        Some(shared) => {
+            old.hook_ancestry.iter().position(|p| p == shared)
+                == chain.iter().position(|p| p == shared)
+        }
+    }
+}
+
+/// May `rec`'s stored `hookAncestry` be replaced by `chain`, the chain of a fresh
+/// SessionStart? Yes when nothing is stored, when the record has no pid, or when
+/// its pid is dead or still in the new chain. Refused only while the record's own
+/// pid is alive outside the new chain: that pid is the record's anchor. A pid-less
+/// record follows its latest SessionStart, so two live processes under one session
+/// id resolve to the latest one. Sits beside pid trust, not inside it: the chain is
+/// kernel truth and never a payload claim, and a sealed record's chain may still
+/// refresh (the seal binds `(pid, starttime)`, not the chain).
+pub(in crate::graph) fn ancestry_may_move(
+    rec: &SessionRecord,
+    chain: &[i32],
+    alive: impl Fn(u32) -> bool,
+) -> bool {
+    rec.hook_ancestry.is_empty()
+        || match rec.pid {
+            None => true,
+            Some(p) => !alive(p) || chain.iter().any(|&c| u32::try_from(c).ok() == Some(p)),
+        }
+}
+
+/// The shell layers the `--capture` wrap adds above the hook process: the one
+/// `sh -c 'tee … | aoide …'` that runs the pipeline. Measured per harness by
+/// `commands/hooks.rs`'s `the_rendered_hook_commands_match_their_invocation_depth`.
+const CAPTURE_SHELL_LAYERS: usize = 1;
+
+/// The leading pids of a hook door's chain that belong to one invocation: the
+/// `aoide` hook process itself, and each shell layer its harness runs the command
+/// under. They die with the invocation, so none of them is evidence of a live harness.
+/// A plain install's layers are [`AgentProfile::hook_shell_layers`]: Claude's chain is
+/// `[hook, sh, harness, …]`, so its harness sits at index 2, and kimi's and pi's are
+/// `[hook, harness, …]`, so theirs sit at index 1. A `--capture` install
+/// (`capture_shell`, the `--capture-shell` flag) runs the hook under one `sh -c 'tee … | aoide …'`
+/// pipeline: the harness's own `sh -c` execs that pipeline in place, so the one layer above the
+/// hook is the pipeline's `sh` (measured for Claude and kimi, `commands/hooks.rs`). Both the CLI arm and
+/// the daemon arm walk the same shape, since the daemon's door pid is the hook process.
+pub(crate) fn hook_invocation_pids(profile: &AgentProfile, capture_shell: bool) -> usize {
+    1 + if capture_shell { CAPTURE_SHELL_LAYERS } else { profile.hook_shell_layers }
+}
+
+/// Is `rec`'s stored `hookAncestry` stale against `chain`, the chain of a live
+/// per-turn hook? Stale means the record holds no live process of its own outside
+/// `chain` ([`lives_apart`] is false), and `chain` carries a live harness the stored
+/// chain does not hold. The first `invocation_pids` pids of `chain` never count, so a
+/// stored chain that already holds its live harness is not stale: its hook and shell
+/// pids are dead by the next invocation. The shared far ancestors (the window owner,
+/// systemd) are alive while any sibling runs, so their liveness is not evidence
+/// either: only a process of the record's own, outside the new chain, holds it live.
+pub(in crate::graph) fn chain_is_stale(
+    rec: &SessionRecord,
+    chain: &[i32],
+    invocation_pids: usize,
+    alive: impl Fn(u32) -> bool,
+) -> bool {
+    !rec.hook_ancestry.is_empty()
+        && !lives_apart(rec, chain, None, &alive)
+        && chain
+            .iter()
+            .skip(invocation_pids)
+            .any(|&p| !rec.hook_ancestry.contains(&p) && u32::try_from(p).is_ok_and(&alive))
+}
+
 /// Core of `session start`: cycle-check a parent, UPSERT, re-stage.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::graph) fn do_session_start(
@@ -102,10 +221,32 @@ pub(in crate::graph) fn do_session_start(
 ) -> Outcome {
     with_stage_lock(|| {
         do_session_start_inner(
-            id, agent, cwd, window, parent, conductable, socket, title, pid,
+            id, agent, cwd, window, parent, conductable, socket, title, pid, &[],
         )
     })
 }
+
+/// Core of a hook door's SessionStart registration (`send.rs`): [`do_session_start`]
+/// with the hook process's own chain (`ancestry`, self-first) landed in the same
+/// locked write. Registration is a SessionStart or the first hook event of an
+/// unknown id, so a resumed harness that got a new process gets a current chain;
+/// the move is gated by [`ancestry_may_move`].
+pub(in crate::graph) fn do_hook_session_start(
+    id: &str,
+    agent: Option<&str>,
+    cwd: Option<&str>,
+    window: Option<&str>,
+    parent: Option<&str>,
+    pid: Option<u32>,
+    ancestry: &[i32],
+) -> Outcome {
+    with_stage_lock(|| {
+        do_session_start_inner(
+            id, agent, cwd, window, parent, None, None, None, pid, ancestry,
+        )
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn do_session_start_inner(
     id: &str,
@@ -117,6 +258,7 @@ fn do_session_start_inner(
     socket: Option<&str>,
     title: Option<&str>,
     pid: Option<u32>,
+    ancestry: &[i32],
 ) -> Outcome {
     let cmd = "session.start";
     let mut file: SessionsFile = match load_stage(&sessions_path()) {
@@ -149,6 +291,17 @@ fn do_session_start_inner(
         pid,
         &now,
     );
+    // The hook chain lands in this same locked write, and only where
+    // `ancestry_may_move` allows (see that fn): a record anchored to a live pid of
+    // its own keeps its chain.
+    if let Some(rec) = file.sessions.iter_mut().find(|s| s.session_id == id) {
+        if !ancestry.is_empty()
+            && rec.hook_ancestry != ancestry
+            && ancestry_may_move(rec, ancestry, pid_is_alive)
+        {
+            rec.hook_ancestry = ancestry.to_vec();
+        }
+    }
     let (r_agent, r_started) = file
         .sessions
         .iter()
@@ -156,34 +309,21 @@ fn do_session_start_inner(
         .map(|s| (s.agent.clone(), s.started_at.clone()))
         .unwrap_or_default();
 
-    // Registration-time same-window agent eviction: Claude Code fires
-    // SessionStart once per process invocation, so if this NEWLY registering
-    // session is an agent sharing a window with another still-live (not-`done`)
-    // agent record, the old one's process is necessarily gone already — a
-    // terminal cannot hold two live foreground claudes, and a window address
-    // cannot be shared by two SIMULTANEOUSLY open windows (a compositor
-    // invariant), so a same-window pair always means the other side is stale
-    // (typically a compact/resume that minted a fresh session id whose
-    // predecessor never ran its own `SessionEnd`). Collapse it the instant the
-    // new session appears — no grace needed (unlike the reaper's own dedup pass,
-    // which resolves a pair it merely OBSERVES together and so must wait to tell
-    // which twin is real; here the new registration itself is the deciding
-    // signal). The ~12s reaper (`crate::reap`) stays the safety net for the
-    // slower path where a window resolves later via the window-event listener.
-    // Two carve-outs: a conducted PTY host (`conductable` — e.g. `conduct --
-    // kimi`'s wrapper, which `is_agent_kind` refuses despite its published
-    // "agent" kind) is the control-socket owner, not a second foreground
-    // agent; and the new record's WHOLE LINEAGE (every ancestor AND
-    // descendant, not just its direct parent) is excluded outright. Widened
-    // from "direct parent only" (task #89): a nested headless `conduct`/
-    // `spawn` chain — terminal wrap -> agent hook session -> nested headless
-    // wrap -> that wrap's own hook session — can legitimately land a
-    // same-window pair that are grandparent/grandchild (or cousins through a
-    // shared ancestor) rather than direct parent/child, and the old
-    // direct-parent-only carve-out evicted them as if they were stale twins.
-    // A genuine stale twin (a compact/resume pair with NO lineage relation)
-    // still has an empty intersection with the new record's lineage, so it
-    // collapses exactly as before.
+    // Registration-time same-window agent eviction. A window hosts any number of
+    // live agents (one Claude desktop app runs six headless sessions in one
+    // window), so the shared window alone never retires anyone. A same-window
+    // record is retired only when it is this record's superseded twin
+    // ([`superseded_by`]): its own processes are gone, and the new record is the
+    // same harness position under a new session id. The new registration itself
+    // is the deciding signal, so no grace is needed here (unlike the reaper's
+    // dedup pass, which resolves a pair it merely OBSERVES together and so must
+    // wait to tell which twin is real). The ~12s reaper (`crate::reap`) is the
+    // safety net for the slower path. Carve-outs: a conducted PTY host
+    // (`conductable` — e.g. `conduct -- kimi`'s wrapper, which `is_agent_kind`
+    // refuses despite its published "agent" kind) is the control-socket owner,
+    // not a second foreground agent; and the new record's WHOLE LINEAGE (every
+    // ancestor AND descendant) is excluded outright, so a nested headless
+    // `conduct`/`spawn` chain is never evicted as a twin of its own launcher.
     let new_rec = file.sessions.iter().find(|s| s.session_id == id).cloned();
     let evicted: Vec<String> = match &new_rec {
         Some(rec) if crate::reap::is_agent_kind(rec) && !rec.window_address.is_empty() => {
@@ -196,6 +336,7 @@ fn do_session_start_inner(
                         && s.state != "done"
                         && s.window_address == rec.window_address
                         && crate::reap::is_agent_kind(s)
+                        && superseded_by(s, &rec.hook_ancestry, rec.pid, pid_is_alive)
                 })
                 .map(|s| s.session_id.clone())
                 .collect()
@@ -503,47 +644,11 @@ pub(in crate::graph) fn stamp_session_exit(
     });
 }
 
-/// Stamp `hookAncestry` — up to 8 ancestor pids of the hook-firing process,
-/// self-first — on a session record, ONCE, at its own SessionStart/self-heal
-/// registration (`session hook`'s two Start-shaped call sites in
-/// `send.rs`). A later `wrap`/`conduct`/`spawn` registration with no
-/// explicit `--parent` walks ITS OWN `/proc` ancestry and looks for a live
-/// agent whose `hookAncestry` intersects it — the automatic-parenting seam
-/// (task #89) this field backs. Change-only: never re-stamps an
-/// already-populated record (the ancestry is a birth fact, not a live
-/// signal, so a later hook on the same id must not overwrite it) and never
-/// writes an empty slice. No `restage_graph()` — `hookAncestry` is consumed
-/// internally for parent resolution only, never rendered, so stamping it
-/// must not churn the widget-facing `graph.json`. Silent no-op on a stage
-/// error or an unknown id, same posture as [`set_session_log_path`].
-pub(in crate::graph) fn stamp_hook_ancestry(id: &str, ancestry: &[i32]) {
-    if ancestry.is_empty() {
-        return;
-    }
-    with_stage_lock(|| {
-        let mut file: SessionsFile = match load_stage(&sessions_path()) {
-            Ok(f) => f,
-            Err(_) => return,
-        };
-        if let Some(s) = file
-            .sessions
-            .iter_mut()
-            .find(|s| s.session_id == id && s.hook_ancestry.is_empty())
-        {
-            s.hook_ancestry = ancestry.to_vec();
-            if file.schema_version.is_empty() {
-                file.schema_version = STAGE_GRAPH_VERSION.to_string();
-            }
-            let _ = write_stage(&sessions_path(), &file);
-        }
-    });
-}
-
 /// Stamp `parentSessionId` on a hook record from ATTESTED kernel process
 /// evidence (P-QOL-C §1, `send.rs`'s `hook_ensure_session`) — the fix for a
 /// record born under an EARLIER wrap (a harness id survives `--resume`)
 /// never re-parenting onto the wrap that hosts it NOW. Three differences
-/// from [`stamp_hook_ancestry`] just above, despite the identical
+/// from the hook chain ([`do_hook_session_start`]), despite the identical
 /// silent-no-op-on-error/unknown-id posture: (a) CHANGE-ONLY on difference,
 /// not write-once — a resumed record must keep following its current wrap,
 /// the whole transfer-window case this exists for; (b) refuses a self-parent
@@ -617,7 +722,7 @@ pub(in crate::graph) fn clear_stale_parent(id: &str) {
 }
 
 /// Stamp `headless = true` on a headless `aoide conduct` wrap's OWN record —
-/// a PERMANENT registration fact (task #89, review round 2), called
+/// a PERMANENT registration fact (task #89), called
 /// unconditionally right after `do_session_start` whenever `--headless` was
 /// given, regardless of whether window discovery or the log-file open below
 /// succeed. Distinct from "`windowAddress` happens to be empty right now":
@@ -626,8 +731,8 @@ pub(in crate::graph) fn clear_stale_parent(id: &str) {
 /// hook-child subtree's) survives even if something upstream still manages
 /// to stamp a stray window onto the record. Change-only (a no-op once
 /// already `true`) and a silent no-op for an unknown id, same posture as
-/// [`set_session_log_path`]/[`stamp_hook_ancestry`]. No `restage_graph()` —
-/// like `hookAncestry`, `headless` is consumed internally, never rendered.
+/// [`set_session_log_path`]. No `restage_graph()` — like `hookAncestry`,
+/// `headless` is consumed internally, never rendered.
 pub(in crate::graph) fn stamp_headless(id: &str) {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
@@ -734,7 +839,7 @@ pub(in crate::graph) fn stamp_shell(id: &str, is_shell: bool) {
 
 /// Stamp `origin` on a just-registered session record (P-P3,
 /// `docs/architecture/PAIRING.md` decision 7). A PERMANENT birth fact, like
-/// `headless`/`hookAncestry`: stamped once, change-only (a no-op once
+/// `headless`: stamped once, change-only (a no-op once
 /// already set to this exact value), never re-derived later. No
 /// `restage_graph()` — like `hookAncestry`/`headless`, consumed internally
 /// (the durable session ledger, via `doc::ledger_session_exit`) rather than
@@ -905,7 +1010,7 @@ pub fn stamp_seal(id: &str, seal: &str, issued_at: i64) {
 
 /// Stamp `harnessSessionId` — the raw hook payload's OWN `session_id` field
 /// (P-D7) — on a session record, on EVERY hook event that carries one, not
-/// just at registration: unlike `hookAncestry`/`headless` (birth facts,
+/// just at registration: unlike `headless` (a birth fact,
 /// stamped once), this can legitimately be re-asserted on every event
 /// without harm (a resumed/compacted session refires SessionStart with the
 /// same id), so the guard is "would this write actually change anything",
@@ -1775,6 +1880,7 @@ pub fn session_end(inv: &Invocation) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aoide_protocol::agents::{CLAUDE_PROFILE, PI_PROFILE};
     use crate::graph::model::merged_sessions;
     use crate::graph::testutil::*;
     use crate::graph::manage::{project_add, view};
@@ -1890,11 +1996,19 @@ mod tests {
         let stage = unique_stage("regi-evict");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        // A phantom claude registers on a window first (the old, un-ended id).
-        session_start(&flag_invocation(
-            &["session", "start"],
-            &[("id", "old"), ("agent", "claude"), ("cwd", "/p"), ("window", "0xWIN")],
-        ));
+                // A phantom claude registers on a window first (the old, un-ended id). It holds a
+        // dead legacy pid: a bare record with neither pid nor chain is never a twin.
+        do_session_start(
+            "old",
+            Some("claude"),
+            Some("/p"),
+            Some("0xWIN"),
+            None,
+            None,
+            None,
+            None,
+            Some(2_000_000_000),
+        );
         // A NEW claude registers on the SAME window (the real re-id after a
         // compact/resume) — this must retire "old" immediately, no grace, no
         // waiting on the reaper.
@@ -2030,13 +2144,15 @@ mod tests {
             "claude", Some("claude"), Some("/w"), Some("0xWIN"), Some("term-wrap"), None, None,
             None, None,
         );
-        // claude's own `hookAncestry`, stamped as it would be at its real
-        // SessionStart: a REAL ancestor pid of THIS test process — the
-        // ancestry walk below has no fake `/proc` to read from, so the only
-        // way to exercise the real mechanism is to seed it with the test
-        // process's own genuine ancestry.
+        // claude's own `hookAncestry`, landed as its real SessionStart lands
+        // it: the hook's dead pids, then the harness and the live tail of THIS
+        // test process's own ancestry — the ancestry walk below has no fake
+        // `/proc` to read from, so the mechanism is exercised with genuine pids.
         let my_ancestry = crate::graph::window::pid_ancestry(std::process::id() as i32);
-        stamp_hook_ancestry("claude", &[my_ancestry[1]]);
+        do_hook_session_start(
+            "claude", Some("claude"), Some("/w"), Some("0xWIN"), Some("term-wrap"), None,
+            &[DEAD, DEAD + 1, my_ancestry[1], my_ancestry[2]],
+        );
 
         // Part 3 — automatic parenting: `spawn`'s own re-exec'd
         // `conduct --headless` for kimi carries no explicit `--parent`. The
@@ -2077,7 +2193,7 @@ mod tests {
         // backfill stays live (today's behavior, unchanged).
         assert!(!crate::graph::window::windowless_by_lineage_from_parent(Some("term-wrap"), &snapshot));
 
-        // Review round 2 — the re-poison scenario: even if window discovery
+        // The re-poison scenario (task #89): even if window discovery
         // (or the shellbridge listener) somehow still stamped a STRAY window
         // onto kimi-wrap's own record — the exact bug the gate at
         // `conduct.rs:825` and the listener skip now prevent — the
@@ -2137,9 +2253,11 @@ mod tests {
         // lineage relation to anything already there must still collapse
         // instantly — the widened carve-out protects only an ACTUAL lineage
         // member, never every same-window occupant.
-        let out2 = do_session_start(
-            "claude-resumed", Some("claude"), Some("/w"), Some("0xWIN"), None, None, None, None,
-            None,
+        // The resumed twin is the same harness position under a new id: its
+        // chain shares claude's depth (the desktop-sibling dead-process case).
+        let out2 = do_hook_session_start(
+            "claude-resumed", Some("claude"), Some("/w"), Some("0xWIN"), None, None,
+            &[DEAD + 2, DEAD + 3, my_ancestry[1], my_ancestry[2]],
         );
         assert_eq!(out2.status, aoide_protocol::output::Status::Ok);
         let s2: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2150,8 +2268,8 @@ mod tests {
             "the old same-window twin with no lineage relation to the new one still collapses (evicted, then pruned)"
         );
         assert!(
-            !ids2.contains(&"kimi"),
-            "kimi too — same window, no lineage relation to the freshly-registered twin"
+            ids2.contains(&"kimi"),
+            "kimi survives: it names no process (no chain, no pid), so a same-window sibling does not retire it"
         );
 
         match saved {
@@ -2160,6 +2278,426 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+    /// A pid no process holds: `kill` answers ESRCH, so it is the dead half of a chain.
+    const DEAD: i32 = 2_000_000_000;
+
+    /// A hosted agent in window `0xW`. Its chain and pid are the only facts the
+    /// pure tests below vary.
+    fn hosted(id: &str, chain: &[i32], pid: Option<u32>) -> SessionRecord {
+        let mut r = session(id, "/w", "working", "2026-10-10T00:00:00Z", None);
+        r.window_address = "0xW".into();
+        r.hook_ancestry = chain.to_vec();
+        r.pid = pid;
+        r
+    }
+
+    /// Fake liveness: exactly the pids named here answer as alive.
+    fn live(pids: &'static [u32]) -> impl Fn(u32) -> bool {
+        move |p| pids.contains(&p)
+    }
+
+    /// The invocation pids of Claude's hook shape, derived from its profile.
+    fn claude_pids() -> usize {
+        hook_invocation_pids(&CLAUDE_PROFILE, false)
+    }
+
+    #[test]
+    fn desktop_siblings_live_apart_are_never_superseded() {
+        // Two headless claudes under one app (867785, under systemd 1454). The
+        // old one's harness (1137986) is still alive, so the two are siblings.
+        let old = hosted("sib-a", &[DEAD, DEAD + 1, 1137986, 867785, 1454], None);
+        let new = [DEAD + 2, DEAD + 3, 1651171, 867785, 1454];
+        assert!(!superseded_by(&old, &new, None, live(&[1137986, 1651171, 867785, 1454])));
+    }
+
+    #[test]
+    fn a_clear_twin_in_the_same_harness_is_superseded() {
+        // `/clear`: the same claude process (500) under a new hook. Shell and
+        // kitty are shared, and the old hook is gone.
+        let old = hosted("before", &[DEAD, DEAD + 1, 500, 600, 700], None);
+        let new = [DEAD + 2, DEAD + 3, 500, 600, 700];
+        assert!(superseded_by(&old, &new, None, live(&[500, 600, 700])));
+    }
+
+    #[test]
+    fn a_same_tab_successor_is_superseded_once_the_old_harness_is_dead() {
+        // The old claude (DEAD+4) exited; a new claude (800) runs at the same
+        // depth under the same shell (600) and kitty (700).
+        let old = hosted("old", &[DEAD, DEAD + 1, DEAD + 4, 600, 700], None);
+        let new = [DEAD + 2, DEAD + 3, 800, 600, 700];
+        assert!(superseded_by(&old, &new, None, live(&[600, 700, 800])));
+    }
+
+    #[test]
+    fn a_session_nested_beneath_a_live_one_is_not_a_twin() {
+        // The old claude (500) is alive, and the new session runs beneath it:
+        // the shared claude sits at depth 2 in the old chain and depth 3 in the new.
+        let old = hosted("outer", &[DEAD, DEAD + 1, 500, 600, 700], None);
+        let new = [DEAD + 2, DEAD + 3, 900, 500, 600, 700];
+        assert!(!superseded_by(&old, &new, None, live(&[500, 600, 700, 900])));
+    }
+
+    #[test]
+    fn a_legacy_record_holding_the_owner_pid_is_still_superseded() {
+        // A pre-chain record whose pid is the kitty window's pid, which the new
+        // chain holds too: today's rule, unchanged.
+        let old = hosted("legacy", &[], Some(700));
+        assert!(superseded_by(&old, &[800, 600, 700], None, live(&[700, 600, 800])));
+    }
+
+    #[test]
+    fn a_legacy_record_with_a_live_payload_pid_lives_apart() {
+        // A harness that reports its own pid (pi) and is still running.
+        let old = hosted("pi", &[], Some(4242));
+        assert!(!superseded_by(&old, &[800, 600, 700], None, live(&[4242, 600, 700, 800])));
+    }
+
+    #[test]
+    fn a_reused_pid_keeps_the_record() {
+        // The chain's middle pid (555) was reused by an unrelated live process.
+        // "Alive" keeps the record: the fail-safe direction.
+        let old = hosted("reused", &[DEAD, 555, 700], None);
+        assert!(!superseded_by(&old, &[800, 700], None, live(&[555, 700, 800])));
+    }
+
+    #[test]
+    fn ancestry_moves_off_a_dead_chain_whatever_the_seal() {
+        let plain = hosted("plain", &[DEAD, DEAD + 1, DEAD + 2], None);
+        assert!(ancestry_may_move(&plain, &[800, 700], live(&[700, 800])));
+        let mut sealed = hosted("sealed", &[DEAD, DEAD + 1, DEAD + 2], Some(DEAD as u32));
+        sealed.seal = Some("seal".into());
+        sealed.ever_sealed = Some(true);
+        sealed.conductable = Some(true);
+        assert!(ancestry_may_move(&sealed, &[800, 700], live(&[700, 800])));
+    }
+
+    #[test]
+    fn ancestry_refuses_only_while_its_own_pid_lives_outside_the_new_chain() {
+        // Pid-less: follows its latest SessionStart, even over a live stored process.
+        let pidless = hosted("pidless", &[DEAD, 555, 700], None);
+        assert!(ancestry_may_move(&pidless, &[800, 700], live(&[555, 700, 800])));
+        // Anchored to a live pid of its own outside the new chain: held.
+        let anchored = hosted("anchored", &[DEAD, 555, 700], Some(555));
+        assert!(!ancestry_may_move(&anchored, &[800, 700], live(&[555, 700, 800])));
+        // The anchor is dead, or sits in the new chain: it moves.
+        assert!(ancestry_may_move(&anchored, &[800, 700], live(&[700, 800])));
+        assert!(ancestry_may_move(&anchored, &[800, 555], live(&[555, 700, 800])));
+        let fresh = hosted("fresh", &[], None);
+        assert!(ancestry_may_move(&fresh, &[800, 700], live(&[700, 800])));
+    }
+
+    #[test]
+    fn a_stale_chain_with_only_dead_pids_heals_and_a_live_chain_is_never_rewritten() {
+        // The record's harness exited: every stored pid is dead.
+        let stale = hosted("all-dead", &[DEAD, DEAD + 1, DEAD + 2], None);
+        let first = [DEAD + 3, DEAD + 4, 500, 600, 700];
+        assert!(chain_is_stale(&stale, &first, claude_pids(), live(&[500, 600, 700])));
+        // Healed: the next turn from the same harness, with new hook and shell pids,
+        // finds the stored chain live and leaves it alone.
+        let mut healed = stale.clone();
+        healed.hook_ancestry = first.to_vec();
+        let next = [DEAD + 5, DEAD + 6, 500, 600, 700];
+        assert!(!chain_is_stale(&healed, &next, claude_pids(), live(&[500, 600, 700])));
+    }
+
+    #[test]
+    fn a_stale_desktop_chain_heals_onto_its_live_harness_and_survives_a_sibling() {
+        // The desktop shape: the record's harness (DEAD+2) is dead, the window owner
+        // (867785) and systemd (1454) are alive, and the live harness 1137986 runs
+        // under the owner but was never recorded.
+        let stale = hosted("stale", &[DEAD, DEAD + 1, DEAD + 2, 867785, 1454], None);
+        let hook_chain = [DEAD + 3, DEAD + 4, 1137986, 867785, 1454];
+        let alive = live(&[1137986, 867785, 1454]);
+        let sibling = [DEAD + 5, DEAD + 6, 1651171, 867785, 1454];
+        let sibling_alive = live(&[1137986, 1651171, 867785, 1454]);
+        assert!(superseded_by(&stale, &sibling, None, &sibling_alive), "unhealed, the sibling retires it");
+        assert!(chain_is_stale(&stale, &hook_chain, claude_pids(), &alive));
+        let mut healed = stale.clone();
+        healed.hook_ancestry = hook_chain.to_vec();
+        assert!(!superseded_by(&healed, &sibling, None, &sibling_alive));
+    }
+
+    #[test]
+    fn a_live_pid_of_the_records_own_outside_the_new_chain_blocks_the_heal() {
+        // Anchored to a live pid of its own (555), which the new chain does not hold.
+        let anchored = hosted("anchored", &[DEAD, DEAD + 1, DEAD + 2, 700], Some(555));
+        assert!(!chain_is_stale(&anchored, &[800, 801, 900, 700], claude_pids(), live(&[555, 700, 900])));
+        // A live process of the stored chain outside the new chain blocks it too.
+        let held = hosted("held", &[DEAD, 555, 700], None);
+        assert!(!chain_is_stale(&held, &[800, 801, 900, 700], claude_pids(), live(&[555, 700, 900])));
+    }
+
+    #[test]
+    fn a_chain_brings_no_heal_without_a_live_harness_of_its_own() {
+        // Only the hook's own pids and the shared owner are alive: nothing to record.
+        let stale = hosted("stale", &[DEAD, DEAD + 1, DEAD + 2, 700], None);
+        assert!(!chain_is_stale(&stale, &[800, 801, 700], claude_pids(), live(&[800, 801, 700])));
+        // A record with no stored chain follows registration, never this rule.
+        let fresh = hosted("fresh", &[], None);
+        assert!(!chain_is_stale(&fresh, &[800, 801, 900], claude_pids(), live(&[900])));
+    }
+
+    /// Claude's hook shape, `[hook, sh, harness, owner, init]`: the harness sits
+    /// past the two invocation pids, and a stale record heals onto it.
+    #[test]
+    fn claudes_hook_shape_heals_its_harness_at_depth_two() {
+        let stale = hosted("claude", &[DEAD, DEAD + 1, DEAD + 2, 867785, 1454], None);
+        let chain = [DEAD + 3, DEAD + 4, 1137986, 867785, 1454];
+        assert!(chain_is_stale(&stale, &chain, claude_pids(), live(&[1137986, 867785, 1454])));
+    }
+
+    /// A direct-child hook, `[hook, harness, owner, init]` (pi's `spawn`, kimi's
+    /// `sh -c` exec): the harness sits at depth one and the heal lands on it. Before
+    /// the heal a same-depth sibling retires the live record; after it, the record
+    /// survives.
+    #[test]
+    fn a_direct_child_hook_heals_its_harness_at_depth_one() {
+        let stale = hosted("direct", &[DEAD, DEAD + 1, 867785, 1454], None);
+        let chain = [DEAD + 3, 1137986, 867785, 1454];
+        let alive = live(&[1137986, 867785, 1454]);
+        assert!(chain_is_stale(&stale, &chain, hook_invocation_pids(&PI_PROFILE, false), &alive));
+        let sibling = [DEAD + 5, 1651171, 867785, 1454];
+        let sibling_alive = live(&[1137986, 1651171, 867785, 1454]);
+        assert!(superseded_by(&stale, &sibling, None, &sibling_alive), "unhealed, the sibling retires it");
+        let mut healed = stale.clone();
+        healed.hook_ancestry = chain.to_vec();
+        assert!(!superseded_by(&healed, &sibling, None, &sibling_alive));
+    }
+
+    /// A chainless, pid-less record names no process, so a same-window sibling does
+    /// not retire it (the `aoide session start --id X --window W` shape).
+    #[test]
+    fn a_bare_record_is_never_retired_by_a_same_window_sibling() {
+        let bare = hosted("bare", &[], None);
+        let sibling = [DEAD + 2, DEAD + 3, 800, 700];
+        assert!(!superseded_by(&bare, &sibling, None, live(&[800, 700])));
+    }
+
+    /// A stored chain whose pids are all dead and share none with the new chain is
+    /// not a twin: no process position is shared, so nothing says they are one harness.
+    #[test]
+    fn a_chain_sharing_no_pid_with_the_new_one_is_not_a_twin() {
+        let old = hosted("disjoint", &[DEAD, DEAD + 1, DEAD + 2], None);
+        let new = [DEAD + 5, DEAD + 6, 800, 700];
+        assert!(!superseded_by(&old, &new, None, live(&[800, 700])));
+    }
+
+    /// `aoide session start --id X --window W`: no pid, no chain. A same-window
+    /// sibling registration leaves it standing, since nothing names its process.
+    #[test]
+    fn a_bare_session_start_survives_a_same_window_sibling() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("bare-start");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        do_session_start("x", Some("claude"), Some("/w"), Some("0xW"), None, None, None, None, None);
+        do_hook_session_start("y", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD, DEAD + 1]);
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(
+            s.sessions.iter().any(|r| r.session_id == "x" && r.state != "done"),
+            "a bare record names no process, so the sibling does not retire it"
+        );
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Seven harnesses in one app window, each with its own live process beneath
+    /// the shared app pid (the live desktop shape). None is a twin of another.
+    #[test]
+    fn seven_hosted_sessions_in_one_window_register_without_evicting_each_other() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("seven-hosted");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let me = std::process::id() as i32;
+        let mut children: Vec<std::process::Child> = (0..7)
+            .map(|_| std::process::Command::new("sleep").arg("30").spawn().unwrap())
+            .collect();
+        for (i, child) in children.iter().enumerate() {
+            let i = i as i32;
+            let chain = [DEAD + i, DEAD + 100 + i, child.id() as i32, me];
+            do_hook_session_start(
+                &format!("h{i}"), Some("claude"), Some("/w"), Some("0xW"), None, None, &chain,
+            );
+        }
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let live_in_window = s
+            .sessions
+            .iter()
+            .filter(|r| r.window_address == "0xW" && r.state != "done")
+            .count();
+        for c in children.iter_mut() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+        assert_eq!(live_in_window, 7, "all seven hosted sessions survive their siblings' registrations");
+    }
+
+    #[test]
+    fn a_clear_twin_still_evicts_at_registration() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("clear-twin");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
+        do_hook_session_start(
+            "before", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD, DEAD + 1, a[1], a[2]],
+        );
+        do_hook_session_start(
+            "after", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD + 2, DEAD + 3, a[1], a[2]],
+        );
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let ids: Vec<&str> = s.sessions.iter().map(|r| r.session_id.as_str()).collect();
+        assert!(ids.contains(&"after"));
+        assert!(!ids.contains(&"before"), "the same-harness twin is superseded at registration");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn a_same_tab_successor_still_evicts_at_registration() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("same-tab");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        // The old claude's process (DEAD+4) is gone; the shell (a[1]) and the
+        // window's own process (a[2]) are the same, at the same depth.
+        let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
+        do_hook_session_start(
+            "old-tab", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD, DEAD + 1, DEAD + 4, a[1], a[2]],
+        );
+        do_hook_session_start(
+            "new-tab", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD + 2, DEAD + 3, DEAD + 5, a[1], a[2]],
+        );
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let ids: Vec<&str> = s.sessions.iter().map(|r| r.session_id.as_str()).collect();
+        assert!(ids.contains(&"new-tab"));
+        assert!(!ids.contains(&"old-tab"), "the dead predecessor in the same tab is superseded");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn a_nested_unlinked_parent_survives_registration() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("nested-unlinked");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        // The outer claude's harness is a[1] (alive, at depth 2). The new session
+        // runs beneath it: the same harness sits at depth 4 in the new chain.
+        let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
+        do_hook_session_start(
+            "outer", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD, DEAD + 1, a[1], a[2]],
+        );
+        do_hook_session_start(
+            "inner", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD + 2, DEAD + 3, DEAD + 5, DEAD + 6, a[1], a[2]],
+        );
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let outer = s.sessions.iter().find(|r| r.session_id == "outer");
+        assert!(outer.is_some_and(|r| r.state != "done"), "the live outer session survives");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The chain lands on registration. A pid-less record follows its latest
+    /// SessionStart; a record anchored to a live pid of its own keeps its chain
+    /// until that pid leaves the new chain.
+    #[test]
+    fn a_hook_chain_lands_on_registration_and_only_a_live_anchor_holds_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("chain-lands");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
+        do_hook_session_start(
+            "h", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD, DEAD + 1, a[1], a[2]],
+        );
+        let chain_of = || {
+            load_stage::<SessionsFile>(&sessions_path())
+                .unwrap()
+                .sessions
+                .iter()
+                .find(|r| r.session_id == "h")
+                .unwrap()
+                .hook_ancestry
+                .clone()
+        };
+        assert_eq!(chain_of(), vec![DEAD, DEAD + 1, a[1], a[2]]);
+
+        // A resumed run that shares the harness moves the chain.
+        do_hook_session_start(
+            "h", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD + 2, DEAD + 3, a[1], a[2]],
+        );
+        assert_eq!(chain_of(), vec![DEAD + 2, DEAD + 3, a[1], a[2]]);
+
+        // Pid-less: the latest SessionStart's chain wins, even though a[1] is alive.
+        do_hook_session_start(
+            "h", Some("claude"), Some("/w"), Some("0xW"), None, None,
+            &[DEAD + 4, DEAD + 5],
+        );
+        assert_eq!(chain_of(), vec![DEAD + 4, DEAD + 5], "a pid-less record follows its latest SessionStart");
+
+        // Anchored to a[1], alive: a registration whose chain drops a[1] is refused.
+        do_hook_session_start(
+            "anchored", Some("claude"), Some("/w"), Some("0xA"), None, Some(a[1] as u32),
+            &[DEAD, a[1], a[2]],
+        );
+        do_hook_session_start(
+            "anchored", Some("claude"), Some("/w"), Some("0xA"), None, None,
+            &[DEAD + 6, DEAD + 7],
+        );
+        let anchored_chain = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|r| r.session_id == "anchored")
+            .unwrap()
+            .hook_ancestry
+            .clone();
+        assert_eq!(anchored_chain, vec![DEAD, a[1], a[2]], "a live pid of its own holds the chain");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
     #[test]
     fn stamp_attested_parent_rewrites_a_changed_parent_and_refuses_a_cycle() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

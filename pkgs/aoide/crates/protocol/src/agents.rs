@@ -209,6 +209,19 @@ pub struct AgentProfile {
     pub model_ceiling: fn(Option<&str>) -> u64,
     pub transcript: TranscriptSpec,
     pub hook_settings: SettingsSpec,
+    /// Shell layers the hook command runs under, between the `aoide` hook process
+    /// and the harness: the processes that die with each invocation and sit above
+    /// it in a hook's `pid_ancestry`. Claude's command is a compound
+    /// `a=$(…) || exit 0; "$a" session hook …; exit 0`, which `sh` must run and
+    /// keeps as the hook's parent: 1. kimi-code's command is understood to run under
+    /// `shell: true` (its harness spawn call site is unverified on this box), and `sh -c`
+    /// execs a single simple command in place: 0, measured under `sh -c` here (bash, the
+    /// `/bin/sh` on this box and on NixOS, does; a shell that forks would add a layer).
+    /// pi's extension spawns `aoide` directly from node: 0. Measured for claude, kimi
+    /// and pi by `commands/hooks.rs`'s `the_rendered_hook_commands_match_their_invocation_depth`.
+    /// Codex has no profile and no installer, so its shape is unpinned, and eidolon's 0
+    /// is unverified (see its profile). Read by `session_store::hook_invocation_pids`.
+    pub hook_shell_layers: usize,
     /// Where this harness discovers installable skills — a directory of
     /// `<skill-name>/SKILL.md` packages — relative to `$HOME` (claude:
     /// `.claude/skills`). `None` for a harness with no skills-directory
@@ -781,6 +794,7 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
         relative_path: ".claude/settings.json",
         format: SettingsFormat::Json,
     },
+    hook_shell_layers: 1,
     // Claude Code loads personal skills from `~/.claude/skills/<name>/SKILL.md`.
     skills_dir: Some(".claude/skills"),
     launch: &["claude"],
@@ -1228,6 +1242,7 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
         relative_path: ".kimi-code/config.toml",
         format: SettingsFormat::Toml,
     },
+    hook_shell_layers: 0,
     // No skills-directory concept verified for Kimi Code — never a guessed
     // path; `hooks install` skips the skill link with a taught message.
     skills_dir: None,
@@ -1562,6 +1577,7 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
         relative_path: ".pi/agent/extensions/aoide-pi-session.ts",
         format: SettingsFormat::Declarative,
     },
+    hook_shell_layers: 0,
     // pi's extension surface is declarative (see `hook_settings`); it has no
     // skills directory.
     skills_dir: None,
@@ -2970,6 +2986,9 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
         relative_path: ".config/eidolon/config.toml",
         format: SettingsFormat::Declarative,
     },
+    // Unverified: eidolon has no hook file on this box to run, and its config is
+    // read-only and nix-generated, so this 0 is not measured by any test.
+    hook_shell_layers: 0,
     // No SKILL.md concept — see the profile doc above.
     skills_dir: None,
     launch: &["eidolon"],

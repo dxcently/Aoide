@@ -174,15 +174,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   the same accounting `server/README.md`'s G8 line holds for `send`, and a
   daemon that stamps no pid means NO parent claim and NO ancestry stamp — never
   `std::process::id()`, which daemon-side is `aoided`, and systemd's tree is not
-  the agent's. `hookAncestry` is stamped from `pid_ancestry(door_pid)` for the
-  same reason.
-- **An `aoided` older than this build silently registers hook sessions
-  parentless: restart `aoided` after upgrading.** Both keys this door reads are
-  ignored by an older daemon — it never overwrites `DAEMON_PEER_PID_FLAG` and
-  never forwards `HOOK_PARENT_FLAG` — so it falls back to its own env and the
-  record keeps no parent, which reads downstream as `spawn --prompt`'s "not
-  ready" after the full budget, with no error (that was this door's original
-  defect, verbatim). There is no version handshake to refuse it: `ping` reports
+  the agent's. `hookAncestry` is landed from `pid_ancestry(door_pid)` at
+  registration (a SessionStart, or the first hook event of an unknown id), when
+  a window is first bound, and when a per-turn hook heals a stale chain
+  (`chain_is_stale`, with or without a compositor), for the same reason. Window discovery walks the same door
+  pid: it yields the window (and its workspace), never a pid. A self-reported pid that owns a window client is refused (`send.rs::vouched_payload_pid`).
+- **An `aoided` that predates `DAEMON_PEER_PID_FLAG` or `HOOK_PARENT_FLAG` silently registers
+  hook sessions parentless: restart `aoided` after upgrading.** Such a daemon never overwrites
+  `DAEMON_PEER_PID_FLAG` and never forwards `HOOK_PARENT_FLAG`, so it falls back to its own env and the
+  record keeps no parent, which reads downstream as `spawn --prompt`'s "not ready" after the full
+  budget, with no error. There is no version handshake to refuse it: `ping` reports
   `AOIDE_VERSION` and no client compares it, daemon restarts are user-gated
   (house rule 2), and the wire is otherwise compatible in both directions.
 - **The check lane (task #139), wired into `session hook`'s three lifecycle
@@ -401,7 +402,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   bare mode already uses, U2, and NEVER auto-created: no manifest above cwd
   reports every node mark/unmark in that confirm as `skipped[]`, while any
   local rows in the SAME confirm still land. A node cwd that cannot be
-  relativized under the project root (review round 1's fix) is likewise
+  relativized under the project root is likewise
   rejected BEFORE it ever touches `manifest.sessions` — never a raw-cwd
   fallback, which `save_manifest`'s own whole-batch validation would refuse
   outright, silently sinking every other legitimate node change in the same
@@ -510,7 +511,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   carries a real touch signal and the timer can take it on its own —
   the gesture (`--now`) is no longer the only path in.
 - `graph/window.rs` — window discovery/backfill/listener PLUS the
-  automatic-parenting seam (task #89, corrected in review round 2):
+  automatic-parenting seam (task #89):
   `is_windowless_wrap` (a conducted record is windowless when `headless` is
   set OR its own `windowAddress` is empty — `headless` overrides a stray
   address) backs `windowless_by_lineage`, which checks a session's OWN
@@ -545,17 +546,40 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   straight into `do_session_start`'s own parent upsert, not through
   `stamp_attested_parent` — so a harness id that survives `--resume` under a
   new terminal re-parents onto its CURRENT wrap at SessionStart, not on its
-  next per-turn hook. Unlike `hookAncestry` (write-once, a birth fact),
-  `stamp_attested_parent`'s re-stamp is change-only on difference, and
+  next per-turn hook. Unlike `hookAncestry` (the latest registration's chain,
+  moved where `ancestry_may_move` allows, and healed by a per-turn hook on a
+  stale chain), `stamp_attested_parent`'s
+  re-stamp is change-only on difference, and
   `do_session_start`'s upsert writes the resolved parent as it does every
   other field on a re-start. Either way, no daemon reachable or no
   conducted ancestor found leaves the parent untouched, fail-closed.
   `session_store::lineage_of`
   (ancestors + descendants) is the matching widened carve-out for the
   same-window registration-time eviction, reused by `reap.rs`'s dedup pass
-  as defense in depth. See AGENTS.md's invariants for the full reasoning
+  as defense in depth. Sharing a window is never by itself a reason to
+  evict: a same-window record is retired only when `session_store::superseded_by`
+  says it is the twin of the registering (or keeper) record: no process of its
+  own alive outside that record's chain, and the two chains meet at the same
+  depth. A record with no chain is a twin only when it holds a pid. Both passes call that one rule. See AGENTS.md's invariants for the full reasoning
   and every site that must agree: the discovery gate, the listener
-  self-check, and the four historical backfill call sites.
+  self-check, and the five backfill call sites in `send.rs`.
+  Discovery walks the HOOK pid, never this process: `discover_window_from(pid)`
+  yields the window and its workspace, never the owning pid, and
+  `ensure_session_window(id, hook_pid)` does nothing without a door pid, and a
+  bind lands the door's chain in the same write, gated by `ancestry_may_move`.
+  That same per-turn call heals a stale stored chain (`chain_is_stale`): when the
+  record holds no live process of its own outside the hook's chain, and the
+  chain brings a live harness the stored one lacks (the hook and shell pids do
+  not count), the hook's chain lands in one locked write, whether or not a bind
+  happens. The heal needs no compositor (`ensure_session_window` is gated on the
+  record not being windowless by lineage and on nothing else); the bind does,
+  because `discover_window_from` answers nothing without
+  `HYPRLAND_INSTANCE_SIGNATURE`. A live stored chain is never rewritten per turn.
+  The skipped pids are `session_store::hook_invocation_pids(profile, capture_shell)`: `1 + AgentProfile.hook_shell_layers` on a plain install (Claude's has one shell layer, kimi-code's and pi's none), and `1 + CAPTURE_SHELL_LAYERS` (1) under `--capture-shell`, the flag the `hooks install --capture` wrap renders into each command. A hook that is a direct child of its harness heals it only under a profile that counts no shell layer (`a_direct_child_hook_heals_its_harness_at_depth_one`, `a_direct_child_hook_heals_through_its_profiles_count`). A stored chain whose pids are dead is replaced by the next per-turn hook from its live harness, whatever wrote it. Tab-shell residual: a tab shell beneath the owner binds the window, but the heal is blocked while that shell lives outside the new chain (`lives_apart`).
+  A pid-less hosted session (the hook-only shape) binds through its stored
+  `hookAncestry` in `resolve_pending_session_windows` (`window_for_hook_chain`):
+  the nearest chain pid that owns a client is the owner, and the session binds
+  only while any live process of its own chain, a tab shell included, stands beneath that owner. A chain whose processes have all exited binds nothing, and nothing the sweep does ever writes a pid.
 - `graph/codex_app.rs` — desktop Codex/ChatGPT task association (P-CX,
   `docs/architecture/CODEX-INTEGRATION.md`). `reconcile_codex_app_threads`
   is the pure core, mirroring `window.rs::reconcile_untracked_terminals`
@@ -1037,8 +1061,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   past the manifest check AND skips the walk entirely — mutually exclusive
   with bare-manifest mode by construction, so an invocation missing
   `--project` but carrying `--id`/`--all` gets `require_flag`'s own
-  ORIGINAL, accurate usage error, never the both-misses wording (review
-  fix, U2 round 1 — that branch used to return the manifest-miss message
+  ORIGINAL, accurate usage error, never the both-misses wording (that branch used to return the manifest-miss message
   unconditionally on ANY `require_flag` failure, which lied for a flag-mode
   caller: a flag WAS given, no walk was ever attempted). Each spec
   (`{host, dir, agent, command?}`) resolves independently, one spec's
@@ -1070,9 +1093,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   (`revived-from-ledger`/`clean-spawned`/`summoned-remote`/`skipped`/
   `failed`) — including a row `resurrect_one` itself pushed, stamped after
   the fact since that function has no idea it's being called from manifest
-  mode (review fix, U2 round 1: those rows used to carry no `disposition`
+  mode (those rows used to carry no `disposition`
   at all). **Manifest-revived sessions are marked undying, LOCAL revivals
-  only** (orchestrator design ruling, U2 round 1) — a remote summon's id
+  only** (orchestrator design ruling, U2) — a remote summon's id
   lives on the node, never marked here — both LOCAL paths, once their spawn
   reaches
   `Status::Ok` (`mark_manifest_revival_undying`, its own
@@ -1137,7 +1160,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   wrapped argv: stamped on the multiplexer's opening tick, so it is present
   from the start of a live shell session.
 - **Session origin (P-P3, `docs/architecture/PAIRING.md` decision 7;
-  write-authority tightened at LANE IDENTITY P-ID0, G16/G5, review round 1):**
+  write-authority tightened at LANE IDENTITY P-ID0, G16/G5):**
   `session_store.rs::stamp_origin` (now `pub`, crossing the crate boundary)
   stamps `SessionRecord.origin` — `"node:<name>"` for a session
   `aoide-server`'s A2A door spawned on behalf of an identified, paired node.
@@ -1237,8 +1260,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   floor is the cross-uid gate). `graph/conduct.rs`'s per-session
   accept loop calls `peer_cred` on every accepted connection and refuses
   one whose OWN nearest live registered session (`identity::
-  is_self_originated` — nearest-first, session-boundary aware, review
-  round 1 MUST-FIX: an earlier revision refused on raw ancestry
+  is_self_originated` — nearest-first, session-boundary aware. An earlier revision refused on raw ancestry
   CONTAINMENT, which broke a child sending to its own live parent, since
   `session_conduct` registers without detaching) resolves to the socket's
   OWN session — the un-bypassable replacement for the OLD client-side

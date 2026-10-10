@@ -147,27 +147,39 @@ level — staying inside the stave motif rather than a directory tree. Only
 agent→agent/subagent nesting shows in the Conductor; shells stay in the Terminals
 temple. A beamed child row shows its OWN `say` (that sub-agent's latest words).
 
-## One agent per window (dedup)
+## Agents per window (dedup)
 
-A terminal window hosts one foreground agent, but the harness mints a NEW
-`session_id` on compact/resume — and the old record, whose lifecycle-owning `pid`
-resolves to the still-alive TERMINAL (not the agent itself), never runs its own
-`SessionEnd`. Left alone it lingers `working` forever: two agent rows for one
-terminal, the stale one even masking the real record's `say` in the Terminals
-window-merge. The bridge collapses same-window agent records to one:
+A window hosts any number of live agents. One kitty window can run several
+tabs, and one desktop app window can run several headless claudes at once. The
+harness mints a NEW `session_id` on compact/resume, and the old record, whose
+lifecycle `pid` may be the still-alive app or terminal (not the agent itself),
+never runs its own `SessionEnd`. A twin of that kind lingers `working` forever:
+two agent rows for one harness, the stale one even masking the real record's
+`say` in the Terminals window-merge. The bridge collapses such twins, and only
+those. A shared window address never retires a record by itself.
 
-- **At registration** — a new agent `SessionStart` on a window already held by
-  another live agent evicts the sibling immediately (a window address cannot be
-  shared by two simultaneously-open windows, so the pair is always a stale re-id).
-  The eviction spares the new record's own `parentSessionId`: a hooked session
-  starting inside its conducted wrapper must not evict the wrapper it lives in.
-- **In the reaper** (`aoide session reap`, the safety net for a window that resolves
-  later) — among same-window agents past a short grace, keep the one with a real
-  on-disk transcript (→ has `say` → classified `agent` → newest), retire the rest.
+A same-window record is retired only when it is the **superseded twin** of the
+record that replaces it. It has no live process of its own outside the new
+record's chain, and its chain meets the new chain at the same depth (the same
+harness position under a new session id, or a same-tab successor whose
+predecessor died). A record with no chain is a twin only when it holds a pid.
+A live sibling sharing the window is kept.
+
+- **At registration** — a new agent `SessionStart` applies that rule to every
+  agent already in its window, at once. The new record's own lineage
+  (`parentSessionId` ancestors and descendants) is always spared: a hooked
+  session starting inside its conducted wrapper must not evict the wrapper it
+  lives in.
+- **In the reaper** (`aoide session reap`, the safety net for a window that
+  resolves later) — among same-window agents past a short grace, the keeper is
+  the newest (`startedAt`); ties fall to the one with a transcript on disk,
+  then the one with `say`, then the `agent`-kind one, then the session id.
+  Every other member is retired only when the same rule holds against
+  the keeper.
 
 Shells are exempt from the rule: a conducted shell and the agent inside it
-legitimately share one window, so dedup runs among `agent`-kind records only —
-and a **conducted PTY host is never a candidate at all**: an
+legitimately share one window, so dedup runs among `agent`-kind records only.
+A **conducted PTY host is never a candidate at all**: an
 `aoide conduct -- <agent>` wrapper classifies as `agent` from its child's
 basename, but it is the HOST of the session inside it, so `is_agent_kind`
 returns false for any `conductable` record and the dedup (both halves above)

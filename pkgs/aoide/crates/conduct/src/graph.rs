@@ -162,7 +162,9 @@ pub use self::view::session_watch;
 // shape exists to drift from the rendered one.
 pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
-pub use self::send::DAEMON_PEER_PID_FLAG;
+pub use self::send::{CAPTURE_SHELL_FLAG, DAEMON_PEER_PID_FLAG};
+#[cfg(test)]
+pub(crate) use self::session_store::hook_invocation_pids;
 // `session_hook`/`session_send`/`pending_path`: the hook door and the injection
 // door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
 // registry, `aoide-server`'s dispatch).
@@ -306,7 +308,7 @@ pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
-    lineage_of, refresh_subagent_says, refresh_transcript_fields, upsert_hook,
+    lineage_of, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };
 pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;

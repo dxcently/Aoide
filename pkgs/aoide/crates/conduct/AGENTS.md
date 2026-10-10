@@ -194,8 +194,9 @@ in the message.
   must stay closed to every agent-shaped signal.** It is why
   `reap::is_agent_kind` reads false for these records — keeping them out of
   BOTH `superseded_agent_duplicates` (N threads of one desktop app
-  legitimately share one window address; that dedup would otherwise retire
-  N−1 of them) and `is_session_dead`'s staleness arm (the record's `pid` is
+  legitimately share one window address AND one pid; `superseded_by` reads a
+  shared pid as the same process, so it would retire N−1 of them) and
+  `is_session_dead`'s staleness arm (the record's `pid` is
   a SHARED app-server process, never proof any one thread is alive). Do not
   give an `"app"` record a registered agent profile, a hook, or a
   `conductable`/`socket` — there is no transport and no lifecycle event to
@@ -779,7 +780,7 @@ in the message.
   belongs to `aoided`, and a daemon launched from inside a conducted session
   would hand every hook-registered child that session as its parent. Do not
   stamp `hookAncestry` from `std::process::id()` either — use
-  `hook_ancestry(door_pid)`, for the same reason — and do not give a
+  `window::hook_ancestry(door_pid)`, for the same reason — and do not give a
   `hook_pid: None` arm a fallback pid: no pid means `Unclaimed` and no stamp.
 - **The undying transfer is one `save_undying` call, never two.**
   `resurrect.rs`'s `resurrect_one` adds the new id and drops the old one in
@@ -817,7 +818,7 @@ in the message.
   is that a manifest is self-sufficient on a host that has never registered
   the project at all.
 - **The both-misses usage error is conditioned on having actually tried the
-  walk (review fix, U2 round 1).** `flag_mode` (`--project`/`--id`/`--all`,
+  walk.** `flag_mode` (`--project`/`--id`/`--all`,
   any one present) is computed ONCE at the top of `session_resurrect` and
   consulted a SECOND time at the `require_flag(inv, "project")` failure
   branch: `flag_mode == true` there returns `require_flag`'s own original
@@ -826,12 +827,12 @@ in the message.
   `flag_mode == false` builds the "no .aoide/project.json above `<cwd>` and
   no --project/--all/--id given" message. A regression here (returning the
   both-misses message unconditionally on any `require_flag` failure) is
-  exactly the bug the round-1 review caught — `id_without_project_is_the_
+  exactly the bug this split guards against — `id_without_project_is_the_
   ordinary_missing_flag_error_not_the_manifest_message`/`all_without_
   project_is_the_ordinary_missing_flag_error_not_the_manifest_message`
   pin it down.
 - **Every row of `resurrect_from_manifest`'s outcome carries a
-  `disposition` (review fix, U2 round 1).** `resurrect_one` is reused
+  `disposition`.** `resurrect_one` is reused
   VERBATIM for the enrichment path and knows nothing about being called
   from manifest mode — none of its own pushes into `resurrected`/
   `skipped`/`failed` carry a `disposition` key. `resurrect_from_manifest`
@@ -863,7 +864,7 @@ in the message.
   fleet's doors all running a binary new enough to read it.
 - **Manifest-revived sessions are marked undying unconditionally, gated on
   `Status::Ok` alone — never on live registration (orchestrator design
-  ruling, U2 round 1) — LOCAL paths only.** `mark_manifest_revival_undying`
+  ruling, U2) — LOCAL paths only.** `mark_manifest_revival_undying`
   is called from `resurrect_from_manifest` itself, right after EITHER LOCAL
   path (enrichment via `resurrect_one`, clean-spawn via
   `clean_spawn_from_spec`) lands a row in `resurrected` — which by
@@ -1180,8 +1181,8 @@ in the message.
   don't remove it, and a test proving something about the ledger installs
   its own `$AOIDE_STATE_DIR` override on top, same as any other env var.
 - **A nested headless session is windowless BY CONSTRUCTION — never
-  pid-ancestry-walk it to a window (task #89, corrected in review round 2).**
-  It is NOT enough to gate the four historical backfill call sites — a
+  pid-ancestry-walk it to a window (task #89).**
+  It is NOT enough to gate the backfill call sites alone — a
   headless wrap's OWN record needs the same protection its descendants get,
   or the whole mechanism re-poisons on a live compositor. Two parts, both
   required:
@@ -1191,7 +1192,7 @@ in the message.
     already lives. `setsid()` detaches the tty/session-leader relationship,
     not the OS parent-child (`/proc` ppid) one, so an unconditional
     discovery call on a headless wrap resolves straight through to its
-    ENCLOSING terminal's window — the review-round-2 defect. The same call
+    ENCLOSING terminal's window, the failure this rule exists to stop. The same call
     site stamps the permanent `headless: bool` marker via
     `session_store::stamp_headless` (change-only, written once, never
     cleared) right after registration.
@@ -1202,9 +1203,11 @@ in the message.
     that catches its descendants, not by a bolted-on second mechanism. Every
     backfill site routes through this one function: `resolve_pending_session_windows`
     (the shellbridge event listener), `graph/window.rs::ensure_session_window`,
-    and the two `discover_window()` call sites in `graph/send.rs`'s hook
-    Start handling. Miss the discovery gate, the self-check, OR any one of
-    the four backfill sites, and a nested `conduct --headless`/`spawn`
+    the five `ensure_session_window` call sites in `graph/send.rs`, and the
+    two `discover_window_from` call sites in `graph/send.rs`'s hook Start
+    handling (`hook_for_profile_gated`, `hook_ensure_session_with`). Miss the
+    discovery gate, the self-check, OR any one of these sites, and a nested
+    `conduct --headless`/`spawn`
     re-acquires the ENCLOSING terminal's window — which is exactly what made
     the same-window eviction (below) treat an agent and its own headless
     grandchild as stale twins, and (via `reap`'s dedup pass, next bullet)
@@ -1213,24 +1216,40 @@ in the message.
     it is a PERMANENT self-reported registration fact, not a live re-check,
     so a bug elsewhere that stamps a window onto a headless wrap's record
     still can't make `is_windowless_wrap` say otherwise.
-- **The same-window eviction carve-out is the new record's WHOLE lineage,
-  not just its direct parent (task #89).** `session_store::lineage_of`
-  (ancestors + descendants, walking `parentSessionId`) is what
-  `do_session_start_inner`'s registration-time eviction excludes from
-  retirement — widened from "direct parent only" because a nested
-  `conduct`/`spawn` chain can legitimately land a same-window pair that are
-  grandparent/grandchild (or cousins through a shared ancestor), not direct
-  parent/child. A genuine same-window twin with NO lineage relation (a
-  compact/resume pair) still collapses instantly — don't widen the carve-out
-  further than actual graph membership. `reap`'s own same-window dedup pass
-  (`superseded_agent_duplicates`) carries the IDENTICAL `lineage_of`
-  carve-out as defense in depth (review round 2) — a windowless-by-
-  construction session never enters a same-window dedup group to begin
-  with, but if the discovery gate or the listener self-check above ever
-  regresses and lets one acquire a window anyway, `reap` still won't retire
-  its own lineage. Both carve-outs must move together: widening or
-  narrowing `lineage_of` changes both call sites at once, by construction —
-  don't let one drift from the other with a hand-rolled duplicate.
+- **A window hosts any number of agents; a same-window record is evicted
+  only as a superseded twin (`session_store::superseded_by`).** One desktop
+  app window runs six headless claudes, and one kitty window runs several
+  tabs. The shared window address never decides eviction by itself. Two
+  carve-outs come first. The new record's WHOLE lineage is never evicted
+  (`session_store::lineage_of`, ancestors + descendants, walking
+  `parentSessionId`: a nested `conduct`/`spawn` chain can land a same-window
+  grandparent/grandchild pair).
+  A conducted PTY host (`conductable`) is never a candidate. Past those,
+  `superseded_by(old, chain, pid, alive)` retires `old` only when (a) no process of
+  its own (its chain or its pid) is alive outside the new record's chain, and
+  (b) it is a legacy record with no chain that holds a pid (a chainless record with no pid is never a twin), or its first shared chain pid sits
+  at the same depth in both chains (the same harness position under a new id:
+  `/clear`, a compact, a same-tab successor). A nested run beneath a live
+  harness is never a twin. `do_session_start_inner` (registration) and
+  `reap`'s dedup pass (`superseded_agent_duplicates`) call that ONE rule, so
+  they cannot disagree. Do not reintroduce a window-only test in either
+  pass: a live sibling sharing the window would be retired.
+- **Window discovery walks the process it is given and yields a window, never
+  a pid.** `window::discover_window_from(pid)` walks `pid`'s own ancestry to
+  the nearest client and returns the address and workspace. The hook door
+  passes the HOOK process: this process on the CLI arm, the `SO_PEERCRED` pid
+  on the daemon arm. It never walks `std::process::id()` (daemon-side that is
+  `aoided`, whose ancestry is systemd's). Discovery never stamps the owning
+  app's pid on a session. A window's owner is the app, not the session's
+  process, and a stamped owner pid made every subprocess of the app attest as
+  that record. The window sweep (`resolve_pending_session_windows`) and
+  `ensure_session_window(id, hook_pid)` follow the same rule, and
+  `ensure_session_window` does nothing without an attested door pid. Only
+  conduct's own discovery (`discover_window_address`) walks its own pid, and
+  conduct IS the process in the terminal. A self-reported `pid` that owns a Hyprland client is refused by `send.rs::vouched_payload_pid`: a payload may name its harness, never the app that owns the window.
+- **A pid-less hosted session binds only through a live chain.**
+  `window::window_for_hook_chain` walks a record's stored `hookAncestry`: the
+  nearest chain pid that owns a client is the owner, and the record binds while any process of its own chain, a tab shell included, stands beneath that owner (`window_for_hook_chain` tests `pid_ancestry(p).contains(owner)` for each chain pid below the owner). A dead chain binds nothing (a dead pid's ancestry is itself), and a reused pid outside the owner's tree binds nothing. The sweep never writes a pid for such a record. A chain with no live process beneath the owner is replaced by the next per-turn hook from its live harness (`hookAncestry` above), and then binds, given a compositor to discover the window.
 - **`typed` is REFUSAL-based, never best-effort reconstruction (P-C5,
   durable-sessions plan) — the single most important invariant in this
   crate's restore capture.** Readline editing (arrow keys, `^R` history
@@ -1494,21 +1513,50 @@ in the message.
   time "to simplify" — the whole point is the operator finds out BEFORE the
   undying set is relied on, not after a later resurrect silently restores
   nothing.
-- **`hookAncestry` is stamped ONCE, at a hook session's own registration,
-  never touched again.** `session_store::stamp_hook_ancestry` is the only
-  writer (change-only: it refuses to overwrite an already-populated
-  record) — a later `wrap`/`conduct`/`spawn` registration with no explicit
-  `--parent` reads it via `window::ancestry_parent`/
-  `resolve_registration_parent` to find its true launching agent by
-  intersecting ITS OWN `/proc` ancestry against every live agent's
-  `hookAncestry` (deepest/closest match wins), falling back to the ambient
-  `AOIDE_SESSION_ID` env only when nothing intersects. Precedence is
+- **`hookAncestry` is the chain of the latest registration, bind or heal, and it
+  moves only where `session_store::ancestry_may_move` allows.** It lands
+  in the same locked write as three events: the registration
+  (`do_hook_session_start`), a first window bind (`ensure_session_window`), and
+  a per-turn heal (`ensure_session_window` again, through
+  `session_store::chain_is_stale`). Registration is a SessionStart, or the first
+  hook event of an unknown id, so a resumed harness that runs in a new process
+  gets a current chain. `ancestry_may_move` refuses only while the record's own
+  pid is alive outside the new chain: a pid-less record always takes the latest
+  chain, so two live processes under one session id resolve to the latest one.
+  The pid is the only anchor, because a chain-wide liveness test would hold a
+  stale chain for as long as any process of it lives (a shell outlives its
+  harness). It is the hook door's kernel fact, never a payload claim, and
+  attestation never reads it (`attested_record` reads only sealed pids).
+  The heal (`chain_is_stale`) is stricter than registration. It fires only on a
+  dead→live transition: the record has a stored chain and no pid of its own (its
+  pid or a stored chain pid) is alive outside the hook's chain (`lives_apart`), and
+  the hook's chain holds a live harness the stored one lacks. The skipped pids are the
+  invocation's own, the hook process and the shell layers it dies with, counted by
+  `session_store::hook_invocation_pids(profile, capture_shell)`: `1 + AgentProfile.hook_shell_layers`
+  on a plain install, `1 + CAPTURE_SHELL_LAYERS` (1) under `--capture-shell`. `hooks install --capture`
+  renders that flag into every hook command, and the door reads it off its own invocation. Under the
+  capture wrap the pipeline's shell is the one layer above the hook: each harness's own `sh -c` execs
+  the pipeline in place. Claude's profile has one shell layer, so its hook is `[hook, sh, harness, …]` (the hook command `a=$(command -v aoide) || exit 0; "$a" session hook …; exit 0` keeps `sh` as the parent). kimi-code's and pi's have none: kimi's shape is measured under `sh -c` on this box, and its harness spawn call site is unverified; pi spawns directly. `commands/hooks.rs`'s `the_rendered_hook_commands_match_their_invocation_depth` pins the depth and the `--capture-shell` flag of each rendered command, rendering each through `door_command`, and `send.rs`'s `a_capture_wrapped_door_skips_the_pipeline_shell_above_its_hook` pins the door's reading of the flag. Codex has no profile in this tree, so its shape is unpinned. A hook that is a direct child of its harness heals it only under a profile that counts no shell layer (`a_direct_child_hook_heals_its_harness_at_depth_one`, `a_direct_child_hook_heals_through_its_profiles_count`). The heal
+  runs with or without a compositor; only the bind needs one. The window owner
+  and systemd stay alive while any sibling runs, so their liveness is not
+  evidence of the record's own process. Its consequence: a live stored chain is
+  never rewritten by a per-turn hook, and no write happens per turn. Two readers
+  consume it. A later `wrap`/`conduct`/`spawn`
+  registration with no explicit `--parent` reads it via
+  `window::ancestry_parent`/`resolve_registration_parent` to find its true
+  launching agent by intersecting ITS OWN `/proc` ancestry against every live
+  agent's `hookAncestry` (deepest/closest match wins), falling back to the
+  ambient `AOIDE_SESSION_ID` env only when nothing intersects. Precedence is
   explicit `--parent` > ancestry walk > env, in that order, for all three of
   `wrap`/`conduct`/`spawn` (spawn re-execs `conduct --headless`, so fixing
-  `conduct`'s own call covers it).
+  `conduct`'s own call covers it). The window sweep reads it to bind a
+  pid-less hosted session (`window::window_for_hook_chain`), and binds while any live process of that chain, a tab shell included, stands beneath the window's owner. Neither
+  reader ever turns the chain into a pid.
 - **`parentSessionId` on a hook record is re-stamped from ATTESTED kernel
   process evidence at SessionStart and on every per-turn hook, not only at
-  registration — unlike `hookAncestry` above, which stays write-once.**
+  registration — unlike `hookAncestry` above, which moves only where
+  `ancestry_may_move` allows, and heals on a per-turn hook only through
+  `chain_is_stale`.**
   `send.rs::hook_ensure_session` walks the hook-firing process's real
   `/proc` ancestry (`identity::attested_wrap`, narrowed to a sealed,
   `conductable` ancestor) on the `Phase` arm's registration self-heal and
@@ -1584,13 +1632,12 @@ in the message.
   success must never be held hostage to the node half's missing manifest.
 - **A node row's cwd that `node_spec_dir` cannot relativize under the
   project root has NO savable fallback — it is REJECTED before it ever
-  reaches `manifest.sessions`, never the raw absolute cwd (review round 1,
-  U3).** `save_manifest` refuses the WHOLE batch if ANY spec carries an
+  reaches `manifest.sessions`, never the raw absolute cwd (U3).** `save_manifest` refuses the WHOLE batch if ANY spec carries an
   absolute `dir`; a raw-cwd fallback here would therefore not merely write
   an inferior spec, it would silently fail the save for every OTHER
   legitimate node change queued in the SAME confirm while `changed[]` still
-  reported them all as persisted (the exact defect this bullet's own review
-  round caught). Don't reintroduce a `(dir, relativized)`-shaped fallback —
+  reported them all as persisted (the exact defect this bullet exists to
+  prevent). Don't reintroduce a `(dir, relativized)`-shaped fallback —
   `node_spec_dir` returns `Option<String>`, `None` means "no spec, skip
   with a taught reason," full stop. Correspondingly, `apply_diff`'s
   `changed[]` for the node path is populated ONLY after `save_manifest`
@@ -1974,10 +2021,10 @@ in the message.
   so it stays directly unit-testable; do the env reads (`terminal_template`/
   `require_display`) in the thin callers around it, never inside it.
 - **`SessionRecord.origin` is a PERMANENT birth fact stamped ONCE per
-  record, the same discipline `headless`/`hookAncestry` already hold
+  record, the same discipline `headless` already holds
   (P-P3, `docs/architecture/PAIRING.md` decision 7) — never re-derived
   later. Write AUTHORITY is split by SHAPE, not by caller count, tightened
-  at LANE IDENTITY P-ID0 (G16/G5, review round 1).**
+  at LANE IDENTITY P-ID0 (G16/G5).**
   `session_store.rs::stamp_origin` is `pub` (crosses the crate boundary)
   and is the ONE writer function, with THREE call sites today — but the
   invariant that matters is narrower than "exactly two callers": **a
