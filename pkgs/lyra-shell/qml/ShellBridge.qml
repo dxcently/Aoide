@@ -23,8 +23,8 @@ QtObject {
     id: root
 
     // ── Socket path ────────────────────────────────────────────────────────
-    // shellbridge daemon writes its socket here. Quickshell connects on first
-    // command; reconnects automatically on disconnect.
+    // shellbridge daemon writes its socket here. Every command connects to it
+    // fresh, over a socket of its own (see sendCommand and actionFactory).
     readonly property string socketPath: {
         var runtimeDir = Quickshell.env("XDG_RUNTIME_DIR")
         if (!runtimeDir || runtimeDir.length === 0)
@@ -101,12 +101,10 @@ QtObject {
     // `partial: true` when a multi-step action changed something and then
     // failed, and carries the CLI outcome's `data` verbatim when there is
     // one — a kill names the terminal and pid it stops there). Each call gets its
-    // own throwaway socket, never the shared queue above: that queue replays
-    // on the next reconnect, and a replayed kill is not a thing this bridge
-    // will ever do. There is NO queue and NO replay here — a reply that does
-    // not arrive within replyTimeoutMs fires cb({ ok: false, … }) once and the
-    // socket is destroyed. A timed-out action may still have executed; the
-    // caller re-reads the roster, it never re-sends.
+    // own throwaway socket, like sendCommand, and no line is ever replayed. A
+    // reply that does not arrive within replyTimeoutMs fires cb({ ok: false, … })
+    // once and the socket is destroyed. A timed-out action may still have
+    // executed; the caller re-reads the roster, it never re-sends.
     readonly property int replyTimeoutMs: 5000
 
     function sessionAction(sessionId, action, fields, callback) {
@@ -137,7 +135,7 @@ QtObject {
 
     // ── Workspace actions (bind a workspace to a project) ─────────────────
     // The same one-shot socket as sessionAction: one `workspaceaction` line
-    // out, one JSON line back, no queue, no replay. `fields` carries the wire
+    // out, one JSON line back, no replay. `fields` carries the wire
     // keys verbatim — `action` ("set" | "clear"), and optionally `workspace`
     // (an id; absent = the focused one), `project`, `new` (create a name-only
     // project first):
@@ -218,7 +216,7 @@ QtObject {
     //   bridge.riceDraft("save")              // snapshot the stage as a draft
     //
     // `riceMenu` answers like traceSession: `cb` EXACTLY ONCE, on its own
-    // throwaway socket, no queue and no replay, the daemon's children bounded
+    // throwaway socket, no replay, the daemon's children bounded
     // together under replyTimeoutMs. The answer is
     // { ok: true, mode, song, draft, stagingSong, declared, songs: [{ name, ok,
     // reason? }], draftsSong, drafts: [{ name, savedAt, current }] } — `song`,
@@ -228,8 +226,9 @@ QtObject {
     // ok:true is "none yet"; a refusal is "nobody answered", and the menu must
     // not paint the second as the first.
     //
-    // `riceMode` and `riceDraft` are fire-and-forget through the shared queue:
-    // no reply, and the outcome is a toast the daemon fires. `riceMode` sends a
+    // `riceMode` and `riceDraft` are fire-and-forget through sendCommand: no
+    // reply, and the outcome is a toast the daemon fires (a command sent while
+    // the daemon is down is dropped, so no toast fires). `riceMode` sends a
     // name only for "stage" with a non-empty string, so the daemon drops the
     // line instead of staging a song called "undefined". `riceDraft` `enter`
     // and `new` from the locked declarative mode unlock it first, so a caller
@@ -283,8 +282,8 @@ QtObject {
             }
 
             // The guarantee, not the fast path: a peer-close does not reliably
-            // flip `connected` (Quickshell 0.3.0, see sendCommand's comment),
-            // so nothing here waits on a disconnect to decide it heard nothing.
+            // flip `connected` (Quickshell 0.3.0), so nothing here waits on a
+            // disconnect to decide it heard nothing.
             property Timer deadline: Timer {
                 interval: root.replyTimeoutMs
                 repeat: false
@@ -320,48 +319,53 @@ QtObject {
     }
 
     // ── Generic command sender ─────────────────────────────────────────────
-    // Writes one newline-delimited JSON line to the shellbridge socket. EVERY
-    // fire-and-forget command takes the same queue → fresh-connect → flush
-    // path: the line is queued, any stale link is dropped, a new connection
-    // is opened, and the queue drains in onConnectedChanged. sessionAction
-    // deliberately does not use this path — it wants a reply, so it opens its
-    // own connection (see actionFactory above). A persistent link was the
-    // original posture, but a peer-closed socket does not reliably flip
-    // `connected` back to false (Quickshell 0.3.0) — a zombie connection then
-    // eats clicks silently (observed live: four reap clicks flushed in one
-    // burst, minutes late). A unix-socket connect is cheap and every command
-    // here is a human gesture, so a fresh link per command costs nothing and
-    // can never wedge — and the link is also CLOSED after the flush (see
-    // onConnectedChanged below), because the daemon handles one connection
-    // per thread and an idle client held the accept loop before it did.
-    // This is the ONLY outbound path from QML (no hyprctl / MCP / shell exec).
+    // Writes one newline-delimited JSON line to the shellbridge socket, over a
+    // connection of its own: connect, write, flush, close (see commandFactory
+    // below). This is the ONLY outbound path from QML (no hyprctl / MCP / shell
+    // exec). sessionAction and the other answered verbs take actionFactory
+    // instead, because they wait for a reply on their connection.
+    //
+    // Nothing is held between commands. On Quickshell 0.3.1 a long-lived Socket
+    // that has failed one connect does not reconnect, so one command sent
+    // during a daemon outage would silence every later one. A command sent
+    // while the daemon is down is dropped with a console warning and is never
+    // sent late: each command is a human gesture, and a `power` delivered after
+    // the daemon returns would be a shutdown nobody asked for. The connection
+    // closes after its write, because the daemon serves one connection per thread.
     function sendCommand(obj) {
-        socket._queue.push(JSON.stringify(obj) + "\n")
-        socket.connected = false // drop any stale link before…
-        socket.connected = true  // …reconnecting; the queue flushes on connect
+        var conn = commandFactory.createObject(root, {
+            path: root.socketPath,
+            cmd: "" + obj.cmd,
+            line: JSON.stringify(obj) + "\n"
+        })
+        if (conn)
+            conn.connected = true
+        else
+            console.warn("ShellBridge: could not open a socket for '" + obj.cmd + "', dropped")
     }
 
-    // ── Socket connection ──────────────────────────────────────────────────
-    // Quickshell.Io.Socket (0.3.0): a real unix-domain client. `connected` is
-    // both the state and the trigger — sendCommand cycles it false→true per
-    // command (see above), and the queue drains here once the link is up. If
-    // the daemon is down the connect simply fails and the lines wait in
-    // `_queue` for the next command's retry. shellbridge reads
-    // newline-delimited JSON and dispatches (e.g. hyprctl focuswindow) — no
-    // IPC is invented in QML.
-    property Socket socket: Socket {
-        path: root.socketPath
-        connected: false
+    // ── Command connection ──────────────────────────────────────────────────
+    // A Quickshell.Io.Socket: a real unix-domain client. shellbridge reads
+    // newline-delimited JSON and dispatches (e.g. hyprctl focuswindow) — no IPC
+    // is invented in QML.
+    property Component commandFactory: Component {
+        Socket {
+            property string cmd: ""
+            property string line: ""
 
-        // Lines queued while disconnected; drained once the link comes up.
-        property var _queue: []
+            onConnectedChanged: {
+                if (connected) {
+                    write(line)
+                    flush()
+                    connected = false
+                } else {
+                    destroy()
+                }
+            }
 
-        onConnectedChanged: {
-            if (connected) {
-                while (_queue.length > 0)
-                    write(_queue.shift())
-                flush()
-                connected = false
+            onError: function (err) {
+                console.warn("ShellBridge: dropped '" + cmd + "', shellbridge unreachable")
+                destroy()
             }
         }
     }

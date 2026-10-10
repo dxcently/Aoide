@@ -209,8 +209,7 @@ lyra shellbridge [--run] [--json]
   fail-closed like the secrets broker's admin gate (identity lane P-ID3);
   a same-uid caller passes, so the floor is no defense against the
   operator's own uid. Each accepted connection is served on its own thread,
-  so one client idling between commands (the bar's own shared socket) never
-  blocks another's. Client half:
+  so one client idling between commands never blocks another's. Client half:
   `shellbridge::send_line` is how `lyra herald push` and `session permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 

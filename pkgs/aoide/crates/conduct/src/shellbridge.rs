@@ -2325,9 +2325,8 @@ fn serve(listener: &UnixListener) {
 /// connection can no longer starve any other. A read error (dropped
 /// connection) ends only THIS connection, an unparseable/unknown line is
 /// audited and skipped, and a focus dispatch failure is logged. No read
-/// timeout is set on the accepted stream: the shared QML socket legitimately
-/// idles between human gestures, and idleness was never the fault here —
-/// serial accept was.
+/// timeout is set on the accepted stream: a client may idle between
+/// commands, and idleness was never the fault here — serial accept was.
 fn handle_conn(stream: UnixStream) {
     let mut reply = stream.try_clone().ok();
     let reader = BufReader::new(stream);
@@ -4820,9 +4819,8 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
     }
 
     /// Confirms `serve` spawns a thread per connection rather than serving
-    /// serially: an idle, persistent client — exactly what Quickshell's own
-    /// shared socket is, held open between human gestures — must never block
-    /// a later client's line from ever being dispatched. This test binds its
+    /// serially: an idle, persistent client must never block a later
+    /// client's line from ever being dispatched. This test binds its
     /// OWN listener, so `socket_path()` is never consulted and the live
     /// shellbridge socket is never touched.
     ///
@@ -4859,8 +4857,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         std::thread::spawn(move || serve(&listener)); // never joined
 
         // Client 1: connect and hold the link open, writing nothing — the
-        // exact shape of Quickshell's own shared socket idling between human
-        // gestures.
+        // shape of a client idling between commands.
         let _client1 = UnixStream::connect(&sock).unwrap();
 
         // Client 2: a refused sessionaction — the whitelist drops it before
