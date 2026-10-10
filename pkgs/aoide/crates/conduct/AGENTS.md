@@ -1003,10 +1003,12 @@ in the message.
   own wrap published (below), and its `[<agent> <petname>] asking: "<line>"`
   joins the SAME `claims.lines`, claimed inside the SAME `with_stage_lock`
   section after `hook::claim`, into the entry's `screen` half — the last
-  question announced. There is no baseline (the wrap publishes after seconds
-  of quiet), a different question is a new episode, the same one is not heard
-  twice, and a record that no longer holds a question while `awaiting` clears
-  the key. The child IS the wrap, so there is no host to climb from:
+  question announced. There is no baseline (the wrap publishes once its line
+  has stood for 3 s), a different question is a new episode, the same one is not
+  heard twice, and a record that no longer holds a question while `awaiting`
+  clears the key. A question that carries `needsSudo` is never claimed
+  (`prompt::asking`): the password is the human's. The child IS the wrap, so
+  there is no host to climb from:
   `prompt::recipient` requires a daemon seal over the wrap's own pid, then the
   spawner climb the hook source uses (`hook::spawner_of`, steps (2) and (3)
   above) — one climb, two callers; do not fork a second. The seal key is
@@ -1464,36 +1466,49 @@ in the message.
 - **A wrapped program with no hook and no trace says it is waiting on a human
   through the pty bytes the wrap already relays, in `graph/prompt.rs`, and
   nowhere else.** `conduct_multiplex` feeds the master-read side to
-  `PromptWatch::output` and marks stdin or inbox input with `input()` (no
-  bytes — a no-echo password is never read, only counted as "typed into this
-  line"); its ~1s tick asks `standing(now)`: output quiet for `QUIET` (3s) AND
-  the last non-empty line matches ONE named row of `ROWS` AND nothing was typed
-  into that line since it was written. The child still running is the loop
-  still looping. Hold these when editing:
+  `PromptWatch::output(bytes, now)` and the stdin or inbox bytes to
+  `input(bytes)`, which classifies them (a printable key or Enter answers the
+  row; arrows, Tab, Ctrl keys and other escapes do not) and keeps none of them.
+  Its ~1s tick asks `standing(now)`: the last non-empty CR/LF line of the recent
+  output (`strip_ansi` over the last `WINDOW_BYTES`, a CHA to column 1 read as
+  a CR) has stood unchanged for `QUIET` (3s), matches ONE named row of `ROWS`,
+  and no key or Enter has answered its row. The episode identity is (text, row),
+  where a row is the count of newlines before the line; a repaint keeps both and
+  so keeps the clock. The child still running is the loop still looping. Hold
+  these when editing:
   - **The table is closed and each row is end-anchored.** A row is a named
     `fn(&str) -> bool` over the lowercased, flattened line and a test beside
     the others — every row's positive and its near-misses (a sentence that
-    only mentions `[y/N]` or `password`). A new prompt is a new row, never a
-    looser one; a false `awaiting` is noise a parent is paged for. The `sudo`
-    row is the text-scan that used to boost the shell tick, now one row: it is
-    the only row that also raises `needsSudo`, and a shell's
-    foreground-is-`sudo` check (`sudo_awaiting`) still holds that badge on its
-    own.
+    only mentions `[y/N]` or `password`, a `+  password:` diff line). A new
+    prompt is a new row, never a looser one; a false `awaiting` is noise a
+    parent is paged for. The `sudo` row is the only row that also raises
+    `needsSudo`; a shell's foreground-is-`sudo` check (`sudo_awaiting`) holds
+    that badge on its own.
+  - **A shell's screen counts only with a command of its own in the
+    foreground.** `shell_snapshot` drops the prompt when `fg <= 0` or
+    `fg == shell_pid`, so a shell's own `read -p` at its bare prompt is not
+    heard; a `read` in a child command is. This is decided by the foreground
+    tick a shell already has, not a new probe.
   - **Precedence is hook phase > trace > screen > presence.** The wrap is
     watched only when it is a shell or its label has no `agent_profile`
-    (`watch_prompts` at the `conduct_multiplex` call), and the writer
-    (`do_session_refresh`) re-checks `hooks.json` under the stage lock and, for
-    a wrap that gained a hook record, takes back the `question` and `needsSudo`
-    the screen had set and sets nothing (the hook door owns `state`). It clears
-    `awaiting` only as the screen's own: a state it did not set (`working` from
-    a `session phase`) is never rewritten, and `idle` is what an answered
-    question returns to.
+    (`watch_prompts` at the `conduct_multiplex` call). `do_session_refresh`
+    re-checks `hooks.json` under the stage lock: `hooked` is computed only for
+    non-shells, and a non-shell that gained a hook record has the `question` and
+    `needsSudo` the screen set taken back, and sets nothing (the hook door owns
+    its `state`). A shell's `state` is its own snapshot whatever records it
+    holds. The screen clears `awaiting` only as its own: a state it did not set
+    (`working` from a `session phase`) is never rewritten, and `idle` is what an
+    answered question returns to. A record that is `done` keeps no question and
+    is never set `awaiting`; the reaper's done write clears both fields.
   - **The line is foreign text (house rule 4).** It leaves the module only as
     the record's single `question` field: escape sequences and control
     characters stripped, flattened, `"` softened, cut to `QUESTION_MAX`
-    keeping its END. Memory holds the current and the last non-empty line,
-    each bounded; unmatched screens are never kept and never logged. The
-    session log still tees the master-read side only.
+    keeping its END. The window of recent output is memory only, bounded at
+    `WINDOW_BYTES`, and never written; a screen that matches no row leaves
+    nothing behind. The text is held in three places, each capped and
+    sanitised: the record's `question`, the ping-back cursor's `screen`
+    entry, and the audit line of a ping that carried it. The session log
+    still tees the master-read side only.
   - **Pure text over the pty.** No `/proc`, no `cfg(target_os)` — the shell
     tick's foreground facts stay in `conduct_refresh_shell`, the screen is one
     portable path for shell and non-shell alike. The non-shell wrap writes

@@ -942,10 +942,12 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   ~1 Hz tick reads the PTY foreground pgid (`tcgetpgrp`), `/proc/<pid>/cwd`,
   `/proc/<pid>/cmdline|comm`, and `/proc/<pid>/task/<pid>/children` (the
   sudo-prompt probe). Every wrap whose program has no hook or trace profile, a
-  shell or not, also reads its own pty output for a quiet question on one row
-  of a small closed table (`[y/N]`, a password prompt, `Press Enter`, …) — pure
-  text, no `/proc` — and publishes it as `state: awaiting` plus a `question`
-  line ([[Session-Graph]], "Programs with no harness — the screen").
+  shell or not, also reads its own pty output for a last line that has stood
+  still on one row of a small closed table (`[y/N]`, a password prompt,
+  `Press Enter`, …) — pure text, no `/proc` — and publishes it as
+  `state: awaiting` plus a `question` line; a shell counts only while a command
+  of its own is in the foreground ([[Session-Graph]], "Programs with no harness —
+  the screen").
 - **Writes:** binds the per-session control socket
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` (unlinked on exit and on start if
   stale); registers the session in `state/stage/sessions.json` with

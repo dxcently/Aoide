@@ -361,48 +361,73 @@ so it reads the answer off them: no terminal emulator, no classifier, one
 closed table.
 
 ```
- pty bytes ──► last non-empty line (ANSI-stripped) ──┐
-                                                     ▼
-   output quiet for 3 s  AND  child still running  AND  one table row matches
-   AND nothing was typed into that line since it was written
-                                                     │
-                                                     ▼
-              state: awaiting      question: "<that line, ≤ 80 chars>"
+ pty output ──► last 4 KiB ──► strip escapes ──► last non-empty CR/LF line
+                                                          │
+                       ┌──────────────────────────────────┘
+                       ▼
+   line stood unchanged for 3 s   AND   one table row matches its END
+   AND no printable key or Enter landed on its row
+   AND child still running (the caller's fact; a shell: a command of its own
+       is in the foreground)
+                       │
+                       ▼
+          state: awaiting        question: "<line, ≤ 80 chars>"
 ```
 
 The table is a list of named rows, each anchored to the END of the line, so a
-sentence that merely mentions a prompt is not one:
+sentence that merely mentions a prompt is not one. A line that opens like a
+diff or a list item (`+`, `-`, `*`, `>`, `|`, `#`) matches no row.
 
-| row        | the line ends with                                                   |
-| ---------- | -------------------------------------------------------------------- |
-| `sudo`     | `[sudo] password for <user>:`                                        |
-| `password` | `password:` / `passphrase:` / `password for <name>:`                 |
-| `y-n`      | `[y/N]` `[Y/n]` `(y/n)`, then at most one `?` or `:`                 |
-| `yes-no`   | `(yes/no)`, `[yes/no]`, `(yes/no/[fingerprint])`, then `?` or `:`    |
-| `press-key`| `Press Enter` / `Press any key` and a short tail (`to continue`)     |
-| `confirm`  | `continue?` `proceed?` `overwrite?`                                  |
+| row         | the line ends with                                                          |
+| ----------- | --------------------------------------------------------------------------- |
+| `sudo`      | `[sudo] password for <user>:`, which also raises `needsSudo`                |
+| `password`  | `password:` / `passphrase:` / `password for <name>:` / `passphrase (empty for no passphrase):` / `same passphrase again:` / `password (again):` |
+| `y-n`       | `[y/N]` `[Y/n]` `(y/n)` `(y,N)`, then at most one `?` or `:`               |
+| `yes-no`    | `(yes/no)`, `[yes/no]`, `(yes/no/[fingerprint])`, then `?` or `:`           |
+| `yes`       | `? (yes)` (npm's `Is this OK? (yes)`)                                       |
+| `press-key` | `Press Enter` / `Press return` / `Press any key`, then a tail of at most 48 characters that says `continue` (`/enter to continue or any other key to abort:`) |
+| `confirm`   | `continue?` `proceed?` `overwrite?`                                         |
+| `coreutils` | `rm:` / `cp:` / `mv:` / `ln:` lines ending in `?` (`rm: remove regular file 'x'?`) |
 
-Three seconds is the quiet: long enough that a prompt a script answers in
-milliseconds never flaps, short enough that the ~1 s tick and the wait together
-leave a human waiting only a moment. Output resuming ends the episode, and so
-does input typed into the line: the human's keys and an injected send both
-count, which is what lets a no-echo password end it when the password is typed
-and keeps a half-typed command at an idle shell prompt from reading as a
-question. Matching `sudo` additionally raises `needsSudo` (the dock's lock
-badge and the A2A `auth-required` state): it is the human's password, not an
-agent's question.
+The episode is the line. A repaint that leaves its text and its row alone (a
+cursor hide, a redraw of the same prompt) keeps the episode and its clock. It
+ends when the text changes, when output reaches a later row, when a printable
+key or Enter lands on its row, or when the child exits; any other output is only
+more output. A printable key (it echoes, or for a password it does not) or Enter
+answers the row. Arrows, Tab, Ctrl keys and other escape sequences do not. The
+input bytes are classified and dropped, never kept, so a half-typed command at an
+idle shell prompt never reads as a question, and a no-echo password ends its
+episode once it is typed.
 
-Precedence, highest first: **hook phase, trace, screen, presence.** A session
-whose harness is an agent with a profile (claude, kimi, pi, eidolon) is never
-watched, and a record that gains a hook phase has what the screen set on it
-taken back. The screen is a source of `state` and `question` only for a wrap
-that nothing else speaks for.
+Three seconds is the quiet, counted from the line's last change: long enough
+that a prompt a script answers in milliseconds never flaps, short enough that a
+human waits only a moment. Matching `sudo` raises `needsSudo` (the dock's lock
+badge and the A2A `auth-required` state). That row is the human's password, not
+an agent's question, so it is shown and never announced to a spawner. A plain
+shell's own `sudo` shows at once, off the process table (`sudo_awaiting`); under
+a wrapper (`sh -c`, `make`) the screen shows it after the 3-second quiet.
+
+A shell's screen counts only while a command of its own is in the foreground. At
+its bare prompt the shell is never `awaiting` off what it printed, so a `read -p`
+that the shell runs itself goes unseen, while a `read` inside a child command is
+seen. The foreground-command tick that already runs for a shell decides this;
+nothing else probes the process.
+
+Precedence, highest first: **hook phase, trace, screen, presence.** A non-shell
+session whose harness is an agent with a profile (claude, kimi, pi, eidolon) is
+never watched. A non-shell record that gains a hook phase has what the screen set
+on it taken back; that takeback is computed for non-shells only, and a shell's
+`state` is its own snapshot whatever records it holds. The screen is a source of
+`state` and `question` only for a wrap that nothing else speaks for.
 
 The line is foreign text (house rule 4). It is stripped of escape sequences and
 control characters, flattened to one line, its `"` softened to `'`, cut to 80
-characters keeping its end, and stored as the one `question` field of the
-session record; it is never logged, and a screen that matches no row is never
-kept. Everything after the matched prompt is, by the end anchor, nothing.
+characters keeping its end, and stored as the record's one `question` field.
+Three places hold that text, each capped at 80 and sanitised: `sessions.json`
+(`question`), the ping-back cursor's `screen` entry in `pingback.json`, and the
+audit line of a ping that carried it. The recent output the reader works on is
+held in memory only, and a screen that matches no row leaves nothing behind.
+Everything after the matched prompt is, by the end anchor, nothing.
 
 Downstream it is an ordinary `awaiting` session: the conductor graph, the dock
 peek and the notification path that fire on `awaiting` fire here too, and a

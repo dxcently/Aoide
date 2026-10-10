@@ -30,12 +30,16 @@
 //! the first examination of a child may already find the question, and that is
 //! news. A question asked and answered between two ticks is not heard.
 //!
+//! **The `sudo` prompt is the human's.** A question that carries `needsSudo` is
+//! shown on the record (its lock badge) and never announced: the password is not
+//! an agent's to answer, so nothing is pinged for it.
+//!
 //! **The line is foreign text (house rule 4).** `question` was sanitised and
 //! capped where it was written, and is cleaned and quoted again here: one line,
 //! every unsafe character stripped, `"`-quoted, never starting with `/` or `!`
 //! — the same rendering an eidolon's `asking: "…"` gets.
 
-use super::{clean, hook, quote, tracks, ChildClaim, CursorEntry, CursorFile};
+use super::{harness_tag, hook, quote, tracks, ChildClaim, CursorEntry, CursorFile};
 use crate::graph::model::{canonical_state, SessionRecord};
 use aoide_protocol::agents::agent_profile;
 
@@ -54,11 +58,14 @@ pub(super) fn tracked(rec: &SessionRecord) -> bool {
 }
 
 /// The question a tracked wrap is waiting on right now: its `question`, while
-/// its state still reads `awaiting`.
+/// its state still reads `awaiting`. The `sudo` prompt is not one: the password
+/// is the human's to type, so the record shows its lock badge (`needsSudo`) and
+/// nobody is pinged for it.
 fn asking(rec: &SessionRecord) -> Option<&str> {
     rec.question
         .as_deref()
         .filter(|q| !q.trim().is_empty() && canonical_state(&rec.state) == "awaiting")
+        .filter(|_| rec.needs_sudo != Some(true))
 }
 
 /// Is this a record the screen source has something to announce for? What the
@@ -77,14 +84,6 @@ fn recipient(
 ) -> Option<String> {
     (rec.pid.is_some() && sealed(rec)).then_some(())?;
     hook::spawner_of(rec, &rec.session_id, roster, sealed)
-}
-
-/// `[<agent> <petname>]` — the line's own tag. The agent label is a caller's
-/// choice here (`--agent`, or the program's name), so it is cleaned like the
-/// question.
-fn tag(rec: &SessionRecord) -> String {
-    let name = rec.petname.as_deref().filter(|p| !p.trim().is_empty()).unwrap_or(&rec.session_id);
-    format!("[{} {}]", clean(&rec.agent), clean(name))
 }
 
 fn render(tag: &str, question: &str) -> String {
@@ -110,7 +109,8 @@ pub(super) fn claim(
                     continue;
                 };
                 next.entry(rec.session_id.clone()).or_default().screen = Some(question.to_string());
-                lines.push(ChildClaim { parent, line: render(&tag(rec), question) });
+                let tag = harness_tag(&rec.agent, rec.petname.as_deref(), &rec.session_id);
+                lines.push(ChildClaim { parent, line: render(&tag, question) });
             }
             (None, Some(_)) => {
                 if let Some(entry) = next.get_mut(&rec.session_id) {
@@ -336,5 +336,36 @@ mod tests {
         assert!(roster.iter().any(pending));
         roster[1].question = None;
         assert!(!roster.iter().any(pending));
+    }
+
+    #[test]
+    fn a_sudo_question_is_shown_but_never_announced() {
+        // The lock badge rides the question; the password is the human's.
+        let mut roster = spawned_shape();
+        roster[1].question = Some("[sudo] password for khoa:".into());
+        roster[1].needs_sudo = Some(true);
+        let mut next = CursorFile::new();
+        assert!(lines(&roster, &mut next).is_empty());
+        assert!(next.is_empty(), "nothing claimed, so nothing to clear");
+        assert!(!roster.iter().any(pending));
+        // The same question without the badge is the agent's question, and is announced.
+        roster[1].needs_sudo = None;
+        assert_eq!(lines(&roster, &mut next).len(), 1);
+    }
+
+    #[test]
+    fn a_question_repainted_over_its_quiet_is_one_ping() {
+        // Asked at t=0, repainted at t=2s, still the same episode at t=4s: the
+        // record holds it from t=4s, and the redraw that follows claims nothing.
+        let t0 = std::time::Instant::now();
+        let mut watch = crate::graph::prompt::PromptWatch::new(t0);
+        watch.output(b"Overwrite? [y/N] ", t0);
+        watch.output(b"\x1b[?25l", t0 + std::time::Duration::from_secs(2));
+        let mut roster = spawned_shape();
+        roster[1].question = watch.standing(t0 + std::time::Duration::from_secs(4)).map(|p| p.question);
+        let mut next = CursorFile::new();
+        assert_eq!(lines(&roster, &mut next).len(), 1, "one ping");
+        roster[1].question = watch.standing(t0 + std::time::Duration::from_secs(5)).map(|p| p.question);
+        assert!(lines(&roster, &mut next).is_empty(), "the same episode is not heard twice");
     }
 }

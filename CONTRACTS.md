@@ -2271,20 +2271,28 @@ legacy record without it falls back to a conservative 200k client-side.
 (string) — the line a conducted program is waiting on while its `state` is
 `awaiting` off its SCREEN, for a wrap whose harness reports through neither
 hooks nor a trace (a `codex`, an `aider`, a REPL, an installer in a plain
-conducted shell). It is the pty's last non-empty line with escape sequences
-and control characters stripped, flattened to one line, `"` softened to `'`,
-and cut to 80 characters keeping its end; it exists only while the output has
-been quiet for 3 seconds on a row of `conduct/src/graph/prompt.rs`'s closed
-table (`[y/N]`, `[Y/n]`, `(y/n)`, `(yes/no)`, a password or passphrase prompt,
-`Press Enter` / `press any key`, a trailing `Continue?` / `Proceed?` /
-`Overwrite?`), the child is still running and nothing was typed into the
-line since it was written. The `sudo` row also sets `needsSudo`. Output
-resuming, input typed, the child exiting or the session ending clears it: the
-key disappears and the `awaiting` it set returns to `idle`. It is
-the only screen text kept anywhere and is never logged. A session with a hook
-phase or a trace never carries one — the hook phase, then the trace, then the
-screen decide `state`, and the screen only for a wrap nothing else speaks for.
-Readers tolerate its absence and round-trip fields they do not know.
+conducted shell). It is the pty's last non-empty CR/LF line, read off the recent
+output with escape sequences and control characters stripped, flattened to one
+line, `"` softened to `'`, and cut to 80 characters keeping its end. It exists
+while that line has stood unchanged for 3 seconds on a row of
+`conduct/src/graph/prompt.rs`'s closed table (`[y/N]`, `[Y/n]`, `(y/n)`,
+`(y,N)`, `(yes/no)`, `? (yes)`, a password or passphrase prompt, `Press Enter` /
+`Press return` / `press any key` with `continue` close after it, a trailing
+`Continue?` / `Proceed?` / `Overwrite?`, a `rm:` / `cp:` / `mv:` / `ln:` line
+ending in `?`), the child is still running, and no printable key or Enter has
+landed on that line's row. A repaint of the same text keeps it; a changed line,
+a later row, a printable key or Enter, the child exiting or the session ending
+clears it: the key disappears and the `awaiting` it set returns to `idle`. The
+`sudo` row also sets `needsSudo`, and that row is never announced to a spawner.
+The line is held in three places, each capped at 80 characters and sanitised:
+this field, the ping-back cursor's `screen` entry (`pingback.json`), and the
+audit line of a ping that carried it. Nothing else keeps screen text: the recent
+output the reader works on is memory only, and it is never logged. A non-shell
+session with a hook phase or a trace never carries one: the hook phase, then the
+trace, then the screen decide its `state`, and the screen only for a wrap nothing
+else speaks for. A shell's `state` is its own snapshot (foreground command, then
+screen, while a command of its own is foreground), whatever hook records it
+holds. Readers tolerate its absence and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
@@ -3564,13 +3572,14 @@ roster drops out on the same pass.
 
 **`screen` — additive in v0.** A screen-source child's entry is
 `{ "screen": "<question>" }`: the `question` (§ `sessions.json`) last
-announced for it. There is no baseline — the wrap publishes only after seconds
-of quiet, so the first examination may already find a question, and that is
-news. A question that differs from the cursor's is a new episode and is
-claimed (`[<agent> <petname>] asking: "<question>"`, the question cleaned and
+announced for it. There is no baseline — the wrap publishes only once its line
+has stood for 3 seconds, so the first examination may already find a question,
+and that is news. A question that differs from the cursor's is a new episode and
+is claimed (`[<agent> <petname>] asking: "<question>"`, the question cleaned and
 quoted again as eidolon's `asking:` line is); the same question is not claimed
 again; a record that no longer holds a question while `awaiting` clears the
-key, so the next ask is heard. The child IS the wrap, with no hook session
+key, so the next ask is heard. A question that carries `needsSudo` is never
+claimed: it is the human's password, and the record shows only its lock badge. The child IS the wrap, with no hook session
 under it: its own pid must carry a verifying daemon seal, and the line goes to
 its `attestedSpawner` resolved by the same climb the `hook` source uses — a
 wrap no spawner attested (a terminal the User opened) has nobody to tell and no

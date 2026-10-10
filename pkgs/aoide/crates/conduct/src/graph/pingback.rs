@@ -908,6 +908,16 @@ fn clean(s: &str) -> String {
     one_line_clip(&strip_unsafe(s), SAY_MAX)
 }
 
+/// `[<agent> <petname>]` — the line's own tag for a child whose harness has
+/// no profile of its own (a hook-reporting agent, a screen-watched wrap). The
+/// agent label is a caller's choice (`--agent`, or the program's name), so it
+/// is cleaned like the rest of the child's text; the petname falls back to the
+/// id, which only a hand-edited roster can lack.
+fn harness_tag(agent: &str, petname: Option<&str>, id: &str) -> String {
+    let name = petname.filter(|p| !p.trim().is_empty()).unwrap_or(id);
+    format!("[{} {}]", clean(agent), clean(name))
+}
+
 /// [`clean`] as a quoted phrase: additionally never allowed to start with `/`
 /// or `!` (which would read as a command or a shell escape at a parent's
 /// prompt) — a leading space is the guard.

@@ -117,6 +117,59 @@ pub(in crate::graph) fn strip_unsafe(s: &str) -> String {
     s.chars().filter(|c| !is_unsafe(*c)).collect()
 }
 
+/// Terminal escape sequences and control bytes removed from text the pty
+/// wrote, leaving printable text plus `\n`, `\r` and `\t`.
+///
+/// A tokenizer by ECMA-48's byte classes, not terminal emulation: it finds
+/// where each sequence ends and interprets none of them. CSI runs to its final
+/// byte, OSC to BEL or ST, an escape with an intermediate byte (`ESC ( B`) to
+/// its final byte, and any other two-byte escape is ESC and one byte. A
+/// sequence still open at the end of the input emits nothing. `\r` is kept so
+/// a reader can take a line's last rewrite (a progress frame) off it.
+///
+/// `pub` because `aoide-conductor`'s log tail renders through the same rule.
+pub fn strip_ansi(input: &str) -> String {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum State {
+        Normal,
+        Esc,
+        Csi,
+        Osc,
+        OscEsc,
+        EscIntermediate,
+    }
+    let mut out = String::with_capacity(input.len());
+    let mut state = State::Normal;
+    for ch in input.chars() {
+        state = match (state, ch) {
+            (State::Normal, '\x1b') => State::Esc,
+            (State::Normal, '\n' | '\t' | '\r') => {
+                out.push(ch);
+                State::Normal
+            }
+            (State::Normal, c) if (c as u32) < 0x20 || c as u32 == 0x7f => State::Normal,
+            (State::Normal, c) => {
+                out.push(c);
+                State::Normal
+            }
+            (State::Esc, '[') => State::Csi,
+            (State::Esc, ']') => State::Osc,
+            (State::Esc, c) if (0x20..=0x2f).contains(&(c as u32)) => State::EscIntermediate,
+            (State::Esc, _) => State::Normal,
+            (State::Csi, c) if (0x40..=0x7e).contains(&(c as u32)) => State::Normal,
+            (State::Csi, _) => State::Csi,
+            (State::Osc, '\x07') => State::Normal,
+            (State::Osc, '\x1b') => State::OscEsc,
+            (State::Osc, _) => State::Osc,
+            (State::OscEsc, '\\') => State::Normal,
+            (State::OscEsc, _) => State::Osc,
+            (State::EscIntermediate, c) if (0x30..=0x7e).contains(&(c as u32)) => State::Normal,
+            (State::EscIntermediate, _) => State::EscIntermediate,
+        };
+    }
+    out
+}
+
 /// A character no terminal may be handed: every [`char::is_control`]
 /// (`\u{1b}` colour/bell/`\r`/`\n`) plus every Unicode `Cf` (FORMAT)
 /// character — the invisible marks a terminal honours but `is_control` does
@@ -261,5 +314,37 @@ mod tests {
         let out = clean_line(&"é".repeat(LINE_MAX + 50));
         assert_eq!(out.chars().count(), LINE_MAX);
         assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn strip_ansi_removes_sgr_and_keeps_the_text_between() {
+        assert_eq!(strip_ansi("plain \x1b[1;31mred bold\x1b[0m plain again"), "plain red bold plain again");
+    }
+
+    #[test]
+    fn strip_ansi_ends_osc_at_bel_or_st() {
+        assert_eq!(strip_ansi("a\x1b]0;title one\x07b\x1b]0;title two\x1b\\c"), "abc");
+    }
+
+    #[test]
+    fn strip_ansi_ends_an_intermediate_escape_at_its_final_byte() {
+        // ESC ( B selects ASCII as G0: the `(` is an intermediate, the `B` final.
+        assert_eq!(strip_ansi("before\x1b(Bafter"), "beforeafter");
+    }
+
+    #[test]
+    fn strip_ansi_drops_control_bytes_but_keeps_line_breaks_and_tabs() {
+        assert_eq!(strip_ansi("a\x00b\x07c\x08\td\r\ne\x7f"), "abc\td\r\ne");
+    }
+
+    #[test]
+    fn strip_ansi_emits_nothing_for_a_sequence_left_open() {
+        assert_eq!(strip_ansi("kept\x1b[31"), "kept");
+        assert_eq!(strip_ansi("kept\x1b]0;no terminator"), "kept");
+    }
+
+    #[test]
+    fn strip_ansi_keeps_multibyte_text_next_to_escapes() {
+        assert_eq!(strip_ansi("café \x1b[31m日本語\x1b[0m more"), "café 日本語 more");
     }
 }

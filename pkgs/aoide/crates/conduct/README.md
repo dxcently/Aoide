@@ -301,21 +301,25 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
 - **`graph::prompt`** is the screen source of `awaiting`, for a conducted
   program that reports through neither hooks nor a trace (a `codex`, an
   `aider`, a REPL, an installer in a plain conducted shell). The wrap's
-  multiplex feeds it the bytes it already relays; once the pty has been quiet
-  for 3 seconds with its last non-empty line on one row of a small closed table
+  multiplex feeds it the bytes it already relays; once its last non-empty line
+  has stood unchanged for 3 seconds on one row of a small closed table
   (`[y/N]`, `[Y/n]`, `(y/n)`, `(yes/no)`, a password or passphrase prompt,
-  `Press Enter`, a trailing `Continue?` / `Proceed?` / `Overwrite?`) and
-  nothing typed into that line, the wrap's tick writes `state: awaiting` and
-  that one capped, sanitised line as the record's `question` through
-  `do_session_refresh`; output resuming or input typed takes both back. The
-  `sudo` row is the old `[sudo] password for` text-scan, now one row of the
-  table, and also raises `needsSudo`. A session with a hook phase or a trace is
-  never touched.
+  `Press Enter`, a trailing `Continue?` / `Proceed?` / `Overwrite?`) and no
+  printable key or Enter has landed on that row, the wrap's tick writes
+  `state: awaiting` and that one capped, sanitised line as the record's
+  `question` through `do_session_refresh`. A changed line, a later row, or a key
+  takes both back. The `sudo` row also raises `needsSudo`. A shell's screen
+  counts only while a command of its own is in the foreground, and a non-shell
+  session with a hook phase or a trace is never touched.
+- **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape
+  stripper: the screen source reads its window through it, and
+  `aoide-conductor`'s log tail renders through it.
 - **`graph::pingback::prompt`** is the ping-back's third source: the wrap that
   published a `question` is the child, its attested spawner hears
   `[<agent> <petname>] asking: "<line>"` once per question, claimed into the
   entry's `screen` field of `pingback.json` in the same stage-lock section as
-  the other two, delivered by the same `deliver`.
+  the other two, delivered by the same `deliver`. The `sudo` question is shown
+  and never claimed.
 - **`graph::pingback`** (P-EIDOLON slice E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice") is where a parent hears the children it
   spawned: the reaper tick reads each `agent:"eidolon"` child's trace tail,

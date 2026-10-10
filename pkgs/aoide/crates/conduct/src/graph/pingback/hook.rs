@@ -55,7 +55,7 @@
 //! stamp, so any new hook event re-arms it. The first examination of a child
 //! is a baseline only.
 
-use super::{clean, is_false, tracks, ChildClaim, CursorFile};
+use super::{clean, harness_tag, is_false, tracks, ChildClaim, CursorFile};
 use crate::graph::model::{canonical_state, HookRecord, SessionRecord};
 use aoide_protocol::agents::agent_profile;
 use aoide_storage::time::parse_iso_utc;
@@ -176,10 +176,9 @@ pub(super) fn gather(
         .filter(|rec| tracked(rec))
         .filter_map(|rec| {
             let hook = hooks.iter().find(|h| h.session_id == rec.session_id)?;
-            let name = rec.petname.as_deref().filter(|p| !p.trim().is_empty()).unwrap_or(&rec.session_id);
             Some(HookChild {
                 id: rec.session_id.clone(),
-                tag: format!("[{} {}]", rec.agent, clean(name)),
+                tag: harness_tag(&rec.agent, rec.petname.as_deref(), &rec.session_id),
                 recipient: recipient(rec, roster, sealed)?,
                 phase: canonical_state(&hook.phase).to_string(),
                 at: hook.updated_at.clone(),

@@ -714,7 +714,8 @@ struct ShellFacts<'a> {
 /// phase alone: the screen never sets over it, and clears what it set.
 ///
 /// `question` is the one screen line kept on the record (`prompt.rs`);
-/// `needs_sudo` is the `sudo` row or the process table's witness.
+/// `needs_sudo` is the `sudo` row or the process table's witness. A record that
+/// is `done` keeps neither and is never set `awaiting`: its episode is over.
 fn do_session_refresh(
     id: &str,
     shell: Option<ShellFacts<'_>>,
@@ -735,6 +736,8 @@ fn do_session_refresh(
             if s.session_id != id {
                 continue;
             }
+            let done = canonical_state(&s.state) == "done";
+            let (needs_sudo, question) = if done { (false, None) } else { (needs_sudo, question) };
             if let Some(t) = &shell {
                 if let Some(c) = t.cwd {
                     if s.cwd != c {
@@ -748,7 +751,7 @@ fn do_session_refresh(
                     changed = true;
                 }
                 let canon = canonical_state(t.state);
-                if s.state != canon {
+                if s.state != canon && !(done && canon == "awaiting") {
                     s.state = canon.to_string();
                     changed = true;
                 }
@@ -820,13 +823,14 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
 /// prompt" (idle); anything else is a command running in the foreground
 /// (working, its command captured as `activity`).
 ///
-/// `prompt` is the screen's verdict (`prompt.rs`: the pty quiet on a row of the
-/// table), from `conduct_multiplex`. It does not wait for a foreground command:
-/// a shell's own `read -p` / `select` / sourced script asks from the shell's own
-/// process, and text typed at the bare prompt is already ruled out by the
-/// screen's typed-input mark. When [`sudo_awaiting`] (the process table's
-/// witness) or the screen says so, `state` is FORCED to `awaiting` regardless
-/// of the idle/working computation above — a prompt needs the user NOW — and
+/// `prompt` is the screen's verdict (`prompt.rs`), from `conduct_multiplex`. The
+/// screen speaks for a shell only while a command of its own is in the
+/// foreground: at its bare prompt the shell is never `awaiting` off what it
+/// printed. So a `read -p` or `select` that the shell runs itself goes unseen,
+/// because the process table cannot tell it from the prompt; a `read` inside a
+/// child command is seen. When [`sudo_awaiting`] (the process table's witness)
+/// or the screen says so, `state` is FORCED to `awaiting` regardless of the
+/// idle/working computation above — a prompt needs the user NOW — and
 /// `needs_sudo` is set when either witness was the `sudo` prompt.
 fn shell_snapshot(
     fg: i32,
@@ -836,7 +840,9 @@ fn shell_snapshot(
     command_of: impl Fn(i32) -> Option<String>,
     children_of: impl Fn(i32) -> Option<bool>,
 ) -> (&'static str, Option<String>, bool, Option<String>) {
-    let (mut state, activity) = if fg <= 0 || fg == shell_pid {
+    let at_prompt = fg <= 0 || fg == shell_pid;
+    let prompt = prompt.filter(|_| !at_prompt);
+    let (mut state, activity) = if at_prompt {
         // At the bare prompt: idle, but label the row with the shell PROCESS
         // itself (e.g. `bash`) so the terminal roster is never blank.
         ("idle", comm_of(shell_pid))
@@ -1225,7 +1231,7 @@ fn conduct_multiplex(
                         tb.feed(&buf[..n]);
                     }
                     if let Some(w) = watch.as_mut() {
-                        w.input();
+                        w.input(&buf[..n]);
                     }
                     pty.write(&buf[..n]);
                 }
@@ -1246,7 +1252,7 @@ fn conduct_multiplex(
                         tb.feed_injected(&chunk);
                     }
                     if let Some(w) = watch.as_mut() {
-                        w.input();
+                        w.input(&chunk);
                     }
                     pty.write(&chunk);
                 }
@@ -2149,8 +2155,8 @@ mod tests {
         assert_eq!(activity.as_deref(), Some("cp -i a b"));
         assert!(!needs_sudo);
         assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
-        // The shell's own `read -p` runs in the shell process: fg is the
-        // shell, and it is still a question.
+        // The shell's own `read -p` runs in the shell process: at its bare prompt
+        // the screen does not speak for the shell, so it is not heard.
         let (state, _, needs_sudo, question) = shell_snapshot(
             100,
             100,
@@ -2159,31 +2165,27 @@ mod tests {
             |_| panic!("command_of should not be consulted at the bare prompt"),
             |_| panic!("children_of should not be consulted when fg isn't sudo"),
         );
-        assert_eq!(state, "awaiting");
-        assert!(!needs_sudo);
-        assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
+        assert_eq!((state, needs_sudo, question), ("idle", false, None));
     }
     #[test]
     fn shell_snapshot_takes_the_lock_badge_from_the_sudo_row_alone() {
-        // The `sudo` row is the old text-scan: awaiting AND needs_sudo, without
-        // the process table having caught `sudo` yet.
+        // A command of the shell's own is in the foreground (a `make` that runs
+        // `sudo` under a wrapper): awaiting AND needs_sudo, without the process
+        // table having caught `sudo` yet.
+        let comm = |pid: i32| Some(if pid == 200 { "make" } else { "bash" }.to_string());
         let sudo = asking("[sudo] password for khoa:", true);
-        let (state, _, needs_sudo, question) = shell_snapshot(
-            100,
-            100,
-            Some(&sudo),
-            |_| Some("bash".to_string()),
-            |_| None,
-            |_| None,
-        );
+        let (state, _, needs_sudo, question) =
+            shell_snapshot(200, 100, Some(&sudo), comm, |_| None, |_| None);
         assert_eq!(state, "awaiting");
         assert!(needs_sudo);
         assert_eq!(question.as_deref(), Some("[sudo] password for khoa:"));
         // Any other row is a question, not the human's sudo password.
         let other = asking("Password:", false);
-        let (state, _, needs_sudo, _) =
-            shell_snapshot(100, 100, Some(&other), |_| None, |_| None, |_| None);
+        let (state, _, needs_sudo, _) = shell_snapshot(200, 100, Some(&other), comm, |_| None, |_| None);
         assert_eq!((state, needs_sudo), ("awaiting", false));
+        // At the bare prompt the sudo row is not the shell's question either.
+        let (state, _, needs_sudo, _) = shell_snapshot(100, 100, Some(&sudo), comm, |_| None, |_| None);
+        assert_eq!((state, needs_sudo), ("idle", false));
     }
     #[test]
     fn cwd_for_prefers_foreground_process_then_falls_back_to_shell() {
@@ -3975,6 +3977,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
 
+    /// A record reaped to `done` keeps its task record, not its episode: a
+    /// late screen verdict neither sets it `awaiting` nor writes a question or a
+    /// lock badge onto it.
+    #[test]
+    fn a_done_record_is_never_set_awaiting_by_the_screen() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-done");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            Some(std::process::id()), "2026-01-01T00:00:00Z",
+        );
+        sessions[0].state = "done".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+
+        do_session_refresh("wrap", None, true, Some("[sudo] password for khoa:"));
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = &s.sessions[0];
+        assert_eq!(rec.state, "done");
+        assert_eq!((rec.question.as_deref(), rec.needs_sudo), (None, None));
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
     /// The screen only takes back a state it set: a wrap whose `state` came from
     /// somebody else (an adapter's `session phase`) and which holds no question
     /// keeps that state through every tick.
@@ -4081,8 +4114,17 @@ mod tests {
     ///
     /// GATED on Unix with its reason: the children are POSIX programs
     /// (`sh -c`, `awk`) and the answer goes through the Unix-domain inbox.
+    ///
+    /// `heard` false is a question the screen does not speak for (a shell's own
+    /// bare prompt): the record must stay off `awaiting` through the whole wait.
     #[cfg(unix)]
-    fn a_blocked_child_is_asking_until_answered(tag: &str, argv: &[&str], agent: &str, shell: bool) {
+    fn a_blocked_child_is_asking_until_answered(
+        tag: &str,
+        argv: &[&str],
+        agent: &str,
+        shell: bool,
+        heard: bool,
+    ) {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -4119,6 +4161,18 @@ mod tests {
             let _ = child.wait();
         };
 
+        if !heard {
+            // The session must be recorded first, or the negative proves nothing.
+            let recorded = wait_for_record(tag, std::time::Duration::from_secs(10), |_| true);
+            // Past QUIET plus a tick: a heard question would be awaiting by now.
+            let seen = wait_for_record(tag, std::time::Duration::from_secs(8), |r| r.state == "awaiting");
+            reap(&mut conducting);
+            assert!(recorded.is_some(), "the session was never recorded");
+            assert!(seen.is_none(), "the shell's own bare prompt was heard as a question");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+
         // QUIET plus a tick; the budget has room for a loaded box.
         let Some(asking) = wait_for_record(tag, std::time::Duration::from_secs(30), |r| {
             r.state == "awaiting" && r.question.is_some()
@@ -4153,15 +4207,18 @@ mod tests {
     }
 
     /// A shell's own `read` builtin asks from the shell process itself, with no
-    /// foreground command: still a question.
+    /// foreground command: that is the bare prompt, so the screen's question is
+    /// not heard (`shell_snapshot`). The same question from a child command is
+    /// heard; see `a_harnessless_program_blocked_on_a_question_is_asking_until_answered`.
     #[cfg(unix)]
     #[test]
-    fn a_shell_blocked_in_read_is_asking_until_answered() {
+    fn a_shell_blocked_in_its_own_read_is_never_heard() {
         a_blocked_child_is_asking_until_answered(
             "screen-shell-read",
             &["sh", "-c", "printf 'Overwrite? [y/N] '; read x; sleep 4"],
             "worker",
             true,
+            false,
         );
     }
 
@@ -4175,6 +4232,7 @@ mod tests {
             &["awk", "BEGIN { printf \"Overwrite? [y/N] \"; fflush(); getline x < \"-\"; system(\"sleep 4\") }"],
             "awk",
             false,
+            true,
         );
     }
 }

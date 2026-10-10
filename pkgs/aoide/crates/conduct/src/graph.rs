@@ -247,6 +247,9 @@ pub use self::spawn::command_basename;
 // bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
 // refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
 pub use self::common::clean_line;
+// `strip_ansi`: the one escape stripper, shared with `aoide-conductor`'s log tail
+// (`conductor/src/logtail.rs`) and the screen source's own line reader.
+pub use self::common::strip_ansi;
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a

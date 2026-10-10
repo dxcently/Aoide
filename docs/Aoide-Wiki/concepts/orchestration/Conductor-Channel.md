@@ -317,7 +317,7 @@ through.
 
     A third source speaks for a conducted program with neither hooks nor a
     trace (a `codex`, an `aider`, a REPL): the wrap itself, once it has gone
-    quiet on a question (`[y/N]`, a password prompt, `Press Enter`), tells its
+    stood on a question (`[y/N]`, a password prompt, `Press Enter`), tells its
     spawner —
 
     ```
@@ -325,8 +325,9 @@ through.
     ```
 
     once per question, over the same attested spawner edge, with the same
-    delivery, skips and cursor file. See `Session-Graph.md`, "Programs with no
-    harness — the screen".
+    delivery, skips and cursor file. A `sudo` password prompt is the human's and
+    is never announced. See `Session-Graph.md`, "Programs with no harness — the
+    screen".
   - **Remote-parent — the same relation across machines.** The A2A door's
     rule, not the local socket's, listed here because it answers the same
     question — is the sender this target's parent? — for the one send that
