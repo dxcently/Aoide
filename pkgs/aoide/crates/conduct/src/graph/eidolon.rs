@@ -465,7 +465,11 @@ pub(crate) fn eidolon_state_from_trace(lines: &[String]) -> Option<&'static str>
 /// The nearest ancestor of `pid` (self-first) that is itself a conducted wrap
 /// currently on the roster — the identical `conductable == Some(true)` +
 /// not-`done` narrowing `identity::attested_wrap` applies, minus the seal
-/// verification (this is a plain lineage read, not a security gate).
+/// verification (this is a plain lineage read, not a security gate: it only
+/// labels a presence's parent, never signals or injects). `pid` is the
+/// presence process, whose real `/proc` tree is walked; the record side is a
+/// wrap's `pid`, which no hook, upsert or re-seal can move while that process
+/// lives (`aoide_storage::session::pid_may_move`), so the match needs no seal.
 /// `ancestry_of` is the injected walk; production passes
 /// `aoide_storage::attest::pid_ancestry`. A third "conducted ancestor" walk
 /// beside `aoide_storage::attest::attested_record` and `doorbell.rs`'s

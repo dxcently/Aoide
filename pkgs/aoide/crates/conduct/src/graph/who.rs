@@ -800,6 +800,12 @@ fn session_view_json(s: &SessionView) -> Value {
     if let Some(nr) = &s.native_role {
         v["nativeRole"] = json!(shown(nr));
     }
+    // The spawned-by link within the same node, present only when known —
+    // the edge a remote consumer needs to rank a far session under its
+    // parent instead of drawing a node's sessions flat.
+    if let Some(p) = &s.parent {
+        v["parentSessionId"] = json!(shown(p));
+    }
     // The cross-machine parent link (P-RSA S4) — the same present-only-when-
     // known rule the two keys above hold, so an ordinary locally-spawned row
     // stays byte-for-byte as before. `remoteChildren` rides only when
@@ -1150,6 +1156,9 @@ mod tests {
         let child = sessions.iter().find(|s| s.session_id == "child1").unwrap();
         assert_eq!(child.label, "yomi-strix/child/child1");
         assert_eq!(child.presence, "online");
+        // The row JSON carries the same-node parent, and only when there is one.
+        assert_eq!(session_view_json(child)["parentSessionId"], "root1");
+        assert!(session_view_json(root).get("parentSessionId").is_none());
     }
 
     // ── build_mesh_node: the pure probe-outcome + cache classifier ───────

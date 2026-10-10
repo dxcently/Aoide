@@ -180,15 +180,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   destroy outright.
 - **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for
   a successful `session start` dispatch whose record already carries a
-  `pid`, and it is NOT a security gate.** No gate anywhere reads
-  `SessionRecord.seal` yet (P-ID2 adds the first verify-on-accept caller) —
-  don't make this function's success/failure affect the dispatch reply, and
-  don't wire a door/socket decision on `seal`'s presence without first
-  reading the LANE IDENTITY plan section (P-ID2/P-ID4's own scope). The pid
-  it mints over is the record's OWN `pid` field, not yet a peercred-verified
-  connecting pid — stated as scaffolding in its own doc comment, not to be
-  quietly upgraded into a security claim by a future edit that forgets the
-  boundary.
+  `pid`, and it seals a record ONCE.** A record that already carries a
+  `seal`, or ever did (`everSealed`), is never sealed again — by this
+  function or by the `seal_unsealed_live_sessions` tick. `session_start_
+  refusal` refuses a dispatched `session start` BEFORE it runs when the
+  record is sealed over a live pid that no longer verifies (taught error +
+  `seal_refused` event); a sealed record whose process merely died is not
+  refused. Never refuse after mutating, and never add a path that re-mints
+  over a record that has ever been sealed; the pid it mints over is the
+  record's OWN `pid`
+  field (kept immutable by `aoide_storage::session::pid_may_move`), not a
+  peercred-verified connecting pid.
 - **Request-line reads on the daemon socket go through
   `daemon::read_capped_line` (a hand-rolled `fill_buf`/`consume` loop),
   never `BufReader::read_line` (P-D4, closing a P-D2-flagged gap).**

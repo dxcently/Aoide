@@ -79,6 +79,8 @@ pub(crate) fn session(
         origin: None,
         seal: None,
         sealed_issued_at: None,
+        ever_sealed: None,
+        attested_spawner: None,
         restore: None,
         sources: None,
         native_role: None,
@@ -387,4 +389,51 @@ pub(in crate::graph) fn ended_code(child: &mut crate::graph::pty::PtyChild) -> O
         crate::graph::pty::Ended::Code(code) => Some(code),
         crate::graph::pty::Ended::Unknown => None,
     }
+}
+
+/// A stand-in for the daemon's `ping`: answers every connection with
+/// `pubkey_hex` as its `sealPubkeyHex`, so a live key fetch
+/// (`aoide_storage::attest::daemon_seal_pubkey_hex`) resolves. The caller
+/// points `AOIDE_DAEMON_SOCKET` at the returned path.
+#[cfg(unix)]
+pub(crate) fn fake_seal_daemon(pubkey_hex: &str) -> PathBuf {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let tag = format!("seal-daemon-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+    let path = aoide_test_support::short_tmp(&tag).with_extension("sock");
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let reply = format!(
+        "{}\n",
+        serde_json::json!({ "ok": true, "daemon": "aoide", "sealPubkeyHex": pubkey_hex })
+    );
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut line = String::new();
+            let _ = BufReader::new(stream.try_clone().unwrap()).read_line(&mut line);
+            let _ = (&stream).write_all(reply.as_bytes());
+        }
+    });
+    path
+}
+
+/// Put the daemon's seal over a roster record's CURRENT pid, as the daemon's
+/// tick does for every live pid-carrying session.
+pub(crate) fn seal_record(id: &str, kp: &aoide_storage::identity::Keypair) {
+    let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+    let rec = file.sessions.iter_mut().find(|r| r.session_id == id).unwrap();
+    let pid = rec.pid.unwrap() as i32;
+    let issued_at = 1_700_000_000;
+    let identity = aoide_storage::sealed_id::SealedIdentity {
+        session_id: id.to_string(),
+        pid,
+        pid_starttime: super::window::pid_starttime(pid).expect("a live pid"),
+        origin_class: String::new(),
+        issued_at,
+    };
+    rec.seal = Some(aoide_storage::sealed_id::mint_seal(kp, &identity));
+    rec.sealed_issued_at = Some(issued_at);
+    rec.ever_sealed = Some(true);
+    write_stage(&sessions_path(), &file).unwrap();
 }

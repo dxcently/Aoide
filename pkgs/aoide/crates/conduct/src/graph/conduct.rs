@@ -21,9 +21,9 @@ use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild,
 use super::pty::signal_name;
 use super::session_store::{
     do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
-    stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
+    stamp_attested_spawner, stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
 };
-use super::window::{discover_window_address, resolve_registration_parent};
+use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
 use aoide_storage::attest::is_node_origin;
@@ -1249,6 +1249,23 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         .get("id")
         .cloned()
         .unwrap_or_else(|| format!("conduct-{}-{}", std::process::id(), unix_ts()));
+    // A conducted id is born once: an existing record that is conductable or
+    // sealed (now or ever) holds a pid no one may hand to another process, so
+    // reusing its id would leave it stranded on the old pid (or invite a
+    // takeover of a dead wrap's identity). A fresh id registers fresh.
+    if let Ok(f) = load_stage::<SessionsFile>(&sessions_path()) {
+        let me = std::process::id();
+        if f.sessions.iter().any(|s| {
+            s.session_id == id
+                && s.pid != Some(me)
+                && (s.conductable == Some(true) || s.seal.is_some() || s.ever_sealed == Some(true))
+        }) {
+            return Outcome::error(
+                cmd,
+                format!("session id `{id}` belongs to an earlier conducted session; pick a new --id (or omit it)"),
+            );
+        }
+    }
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
@@ -1421,6 +1438,15 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     if inv.flag_present("spawned") {
         stamp_spawned(&id);
     }
+    // `attestedSpawner`: whether the KERNEL backed the parent just registered,
+    // judged here because this process's `/proc` ancestry is the evidence and
+    // a detached spawn loses it the moment its spawner returns. Set or
+    // cleared on every registration, so a re-registration under an
+    // unconfirmed parent drops it.
+    stamp_attested_spawner(
+        &id,
+        parent.as_deref().filter(|p| spawner_is_attested(p, &id, &sessions_snapshot)),
+    );
     // `shell`, on the same footing: a registration fact about THIS record,
     // stamped from the argv this process is actually conducting (launchers
     // resolved by `program_is_a_shell`), so every lane that refuses to type
@@ -2650,6 +2676,54 @@ mod tests {
         let rec = s.sessions.iter().find(|r| r.session_id == "conduct-fail").unwrap();
         assert_eq!(rec.state, "done");
         assert_eq!(rec.agent, "sevens");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    /// `attestedSpawner` is stamped at registration from this process's own
+    /// ancestry: a `--parent` whose pid really is above the registering
+    /// process is confirmed, one the kernel does not back (however it got
+    /// there) is not — and the stamp is set or cleared on every registration.
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
+    #[test]
+    fn conduct_stamps_attested_spawner_only_for_a_parent_the_kernel_backs() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_SESSION_ID"]);
+
+        let root = unique_stage("conduct-attested-spawner");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        // A conducted wrap running above this very process, and one that is not.
+        let mut above = crate::graph::testutil::session("above", "/w", "working", "1", None);
+        above.conductable = Some(true);
+        above.pid = Some(std::process::id());
+        let mut elsewhere = above.clone();
+        elsewhere.session_id = "elsewhere".into();
+        elsewhere.pid = Some(i32::MAX as u32);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { sessions: vec![above, elsewhere], ..Default::default() },
+        )
+        .unwrap();
+
+        for (id, parent, want) in
+            [("kid-ok", "above", Some("above")), ("kid-claimed", "elsewhere", None)]
+        {
+            let out = session_conduct(&conduct_invocation(
+                &["sh", "-c", "exit 0"],
+                &[("id", id), ("parent", parent)],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            let rec = s.sessions.iter().find(|r| r.session_id == id).unwrap();
+            assert_eq!(rec.parent_session_id.as_deref(), Some(parent));
+            assert_eq!(rec.attested_spawner.as_deref(), want, "{id}");
+        }
 
         let _ = std::fs::remove_dir_all(&root);
     }

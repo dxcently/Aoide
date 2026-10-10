@@ -673,6 +673,34 @@ pub(in crate::graph) fn stamp_spawned(id: &str) {
     });
 }
 
+/// Stamp `attestedSpawner`: the parent id the registering process's own kernel
+/// ancestry confirmed (`window::spawner_is_attested`), or clear it.
+///
+/// Set-or-clear on every registration — never once-only — because the value
+/// names the parent it vouches for: re-registering an id under a parent the
+/// kernel does NOT confirm must drop the stamp, and a later `session start
+/// --parent <other>` that rewrites `parentSessionId` leaves a stamp that no
+/// longer equals it, which every reader treats as no evidence at all.
+pub(in crate::graph) fn stamp_attested_spawner(id: &str, attested: Option<&str>) {
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file
+            .sessions
+            .iter_mut()
+            .find(|s| s.session_id == id && s.attested_spawner.as_deref() != attested)
+        {
+            s.attested_spawner = attested.map(str::to_string);
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
 /// Stamp whether this session's wrapped command IS a shell — the durable
 /// half of `conduct::program_is_a_shell`'s verdict, and the ONE registration
 /// fact the auto-typing refusals read off a record.
@@ -866,6 +894,7 @@ pub fn stamp_seal(id: &str, seal: &str, issued_at: i64) {
         {
             s.seal = Some(seal.to_string());
             s.sealed_issued_at = Some(issued_at);
+            s.ever_sealed = Some(true);
             if file.schema_version.is_empty() {
                 file.schema_version = STAGE_GRAPH_VERSION.to_string();
             }
@@ -2191,6 +2220,46 @@ mod tests {
         let before = std::fs::read(sessions_path()).unwrap();
         stamp_attested_parent("missing", "new");
         assert_eq!(std::fs::read(sessions_path()).unwrap(), before);
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+    #[test]
+    fn stamp_attested_spawner_sets_clears_and_never_survives_a_reparent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("stamp-attested-spawner");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { sessions: vec![session("w", "/w", "idle", "t", Some("p"))], ..Default::default() },
+        )
+        .unwrap();
+        let stamped = || {
+            load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions[0].attested_spawner.clone()
+        };
+
+        stamp_attested_spawner("w", Some("p"));
+        assert_eq!(stamped().as_deref(), Some("p"));
+        let before = std::fs::read(sessions_path()).unwrap();
+        stamp_attested_spawner("w", Some("p"));
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), before, "change-only");
+
+        // `session start --id w --parent victim`: the parent moves, the stamp
+        // keeps naming the old one, so no reader can take them as one edge.
+        do_session_start("w", None, None, None, Some("victim"), None, None, None, None);
+        let rec = load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions.remove(0);
+        assert_eq!(rec.parent_session_id.as_deref(), Some("victim"));
+        assert_eq!(rec.attested_spawner.as_deref(), Some("p"));
+        assert_ne!(rec.attested_spawner, rec.parent_session_id);
+
+        // A registration the kernel did not back clears it.
+        stamp_attested_spawner("w", None);
+        assert_eq!(stamped(), None);
+        stamp_attested_spawner("missing", Some("p"));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),

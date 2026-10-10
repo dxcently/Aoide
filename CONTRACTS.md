@@ -1370,7 +1370,11 @@ supplies never carry it (no local session slice to walk), and `node list`
 rows do not carry it either. The same rows carry `nativeRole` under the
 record rule above (present only when the record carries one); a row built
 from a remote node's graph document relays that node's own published
-`nativeRole` and never synthesizes one.
+`nativeRole` and never synthesizes one. The same rows also carry an additive
+`parentSessionId` (string), present only when the row's spawner is a
+session in the same grouping — for a `--hosts` node, a session that node
+itself lists — so a consumer can rank a far forest; a cross-node parent
+rides `remoteParent` instead, never this key.
 
 **`workspaceProject` — the workspace's default project, stamped at birth.**
 A session record MAY carry an optional `workspaceProject` (string), naming
@@ -2207,6 +2211,25 @@ by `aoide graph link` (cycle-checked), cleared by `aoide session prune` when the
 parent is removed. Absent means "no spawned-by edge"; readers must tolerate
 both forms, and rewriters must round-trip fields they do not know.
 
+**`attestedSpawner` — which parent the kernel confirmed.** A session record MAY
+carry an optional `attestedSpawner` (string): the parent id that
+`aoide conduct`'s registration saw in its OWN `/proc` ancestry — the parent
+record's pid was really above the registering process, or the parent is the
+agent whose `hookAncestry` it matched (`window::spawner_is_attested`). It is a
+birth fact stamped by the registering process, set or cleared on every
+registration (a parent counts when its pid is really above the registering
+process, or it is the agent whose `hookAncestry` matched; a registration made
+after the spawner returned, such as a detached spawn that was reparented to
+init first, has no ancestry left and gets no stamp), and holds the id itself
+rather than a flag: `parentSessionId` can be rewritten by a bare `session start --parent` with no evidence at all, and a
+reader trusts the edge only while `attestedSpawner == parentSessionId`. It
+exists because a detached `aoide spawn` leaves its child reparented to init, so
+the ancestry cannot be re-derived later. Absent for every parent the kernel did
+not back (an explicit `--parent` or ambient `AOIDE_SESSION_ID` naming a session
+the registering process does not run beneath, and every wrap registered by
+`aoide wrap`) and every record predating it; additive, round-tripped like every
+unknown field.
+
 **`remoteParent` — the SAME edge across machines, deliberately a SECOND
 field.** A session record MAY carry an optional `remoteParent` object,
 `{node, key, sessionId}`: the session that spawned it on ANOTHER node.
@@ -2671,6 +2694,36 @@ vanished) is UNVERIFIABLE, never "verified": no live process ever reports
 starttime `0`, so a verifier's fresh `/proc` read can never produce a
 matching `0` — a stored `0` cannot be revalidated, not a weaker-but-valid
 seal.**
+
+**A record's `pid` is the kernel's fact, and it never moves by request.**
+The seal binds `pid` + `pidStarttime`, and `session kill`, the reaper, the
+claim check and the attested-ancestry walks all read it, so no door may rewrite
+it from caller-supplied text. The one rule (`aoide_storage::session::
+pid_may_move`, applied by `upsert_session` and the hook door's refresh): a
+record's `pid` is set when it has none and is a no-op when equal; a record that
+is `conductable`, sealed, or has EVER been sealed never moves its pid, dead or
+alive (a dead wrap is the reaper's to end); only a plain hook record whose
+process is gone (a harness restarted under its own id) is replaced. Liveness
+is the reaper's probe, `kill(pid, 0)`, and an unanswerable probe reads as
+ALIVE. A hook payload's `pid` is taken only when it names the hook process or
+one of its own `/proc` ancestors. `aoide conduct --id <existing conducted or
+sealed id>` is refused: a conducted id is born once, and a restart registers a
+fresh id. Sealing happens once per record: `everSealed` (bool, additive,
+set by `stamp_seal`, never cleared) bars the daemon — both the tick and the
+dispatched-`session start` path — from sealing a record that ever carried a
+seal, so a seal that goes missing can never be re-minted over another pid. A
+dispatched `session start --id <id>` is refused BEFORE it runs (taught error,
+`seal_refused` event on the events feed) when the record is sealed over a live
+pid that no longer verifies; a sealed record whose process merely died is
+not refused, and is not re-sealed.
+
+**Open, and not this lane's** (the same-uid trust question, identity OQ1-A /
+P-ID3, awaiting a design decision): `session end` plus `session prune` delete
+a LIVE sealed wrap's record, after which its id can be re-registered and
+sealed over another process; `session start --id C --parent X` rewrites a
+parent edge and so can forge the autogate-parent relation; and a same-uid
+process can hand-edit `sessions.json` (the hand-edit watcher reports it, and
+nothing here stops it).
 
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)
@@ -3456,16 +3509,21 @@ anyone who can already write to the target's control socket.
 
 ### `state/stage/pingback.json` — **v0**
 
-The ping-back's per-child cursor (P-EIDOLON slice E5b,
-`docs/architecture/EIDOLON-TRACE.md`'s "Second slice"): one entry per
-`agent:"eidolon"` child whose trace the reaper tick has examined, keyed by
-that child's own native session id (the eidolon presence id, verbatim —
-the same id `sessions.json` carries).
+The ping-back's per-child cursor, for its two sources. An
+`agent:"eidolon"` child whose trace the reaper tick has examined (P-EIDOLON
+slice E5b, `docs/architecture/EIDOLON-TRACE.md`'s "Second slice") has a
+`seen`/`silentAt` entry; a local-parented child of any other registered
+harness that reports through hooks has a `hook` entry. Either is keyed by the
+child's own native session id (the eidolon presence id, verbatim — the same id
+`sessions.json` carries); a child belongs to exactly one source, so an entry
+carries one half.
 
 ```json
 {
   "user-0001": { "seen": "131", "silentAt": "120" },
-  "user-0002": { "seen": "40" }
+  "user-0002": { "seen": "40" },
+  "6fdc5334-4396-49ec-9208-22345802864d":
+    { "hook": { "phase": "working", "at": "2026-10-07T18:38:30Z", "silent": true } }
 }
 ```
 
@@ -3485,6 +3543,30 @@ the delivery — so a line is delivered at most once, and a crash between the
 claim and the write loses a line rather than duplicating one. A child whose
 eidolon record leaves the roster drops out of this file on the same pass.
 There is no command that reads or edits it: it is a cursor, not a queue.
+
+**`hook` — additive in v0.** A hook-source child's entry is
+`{ "phase", "at", "silent"? }`: `phase` is the canonical phase
+(`canonical_state`) of the child's `hooks.json` record last examined, `at` its
+`updatedAt` verbatim, and `silent` — absent while false — the latch that the
+12-minute silence line was sent for that `at`. A hook event is a `phase` or
+`at` that differs from the cursor's; it re-arms `silent`. The decision over it:
+the first examination of a child (no `hook` yet) is a baseline and claims
+nothing; `awaiting` is claimed on ENTERING that phase (a restamp of it is not
+another entry); `settled` when the cursor last held `working` or `awaiting`
+and the record now reads `stopped` or `idle` (the later `stopped`→`idle` decay
+says nothing); `silent` when the record reads `working` and its `at` is at
+least 12 minutes and under 24 hours old. `hooks.json` carries no reason for a
+state, so the `awaiting` line has none. The line goes to the child's SPAWNER,
+never to its `parentSessionId` (a hook child's own host wrap): the host wrap
+must be a conducted wrap whose pid is in the child's `hookAncestry` and whose
+daemon seal verifies against the live daemon key (a seal re-derives the
+pid's start time, so a pid reused by another process after its wrap died, or
+a pid hand-edited into `sessions.json`, fails it, and an unreachable daemon
+fails every check closed), and its `parentSessionId` counts only while it
+equals its `attestedSpawner` (§ `sessions.json`); a conducted spawner is
+sealed too. A child with no such recipient is not tracked and has no entry. A
+reader that does not know `hook` ignores it. A child whose session leaves the
+roster drops out on the same pass.
 
 ### `state/stage/remote-children.json` — **v0**
 

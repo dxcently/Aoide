@@ -357,6 +357,34 @@ pub(in crate::graph) fn ancestry_parent(sessions: &[SessionRecord]) -> Option<St
     None
 }
 
+/// Does the KERNEL back `parent` as a session this process runs beneath?
+/// True when the parent record (live, not `id` itself) carries a pid that is
+/// really in this process's own `/proc` ancestry — a conducted wrap running
+/// above this registration — or is the agent [`ancestry_parent`] finds by its
+/// `hookAncestry`. An explicit `--parent` or the ambient `AOIDE_SESSION_ID`
+/// naming anything else is only a caller's word, however honest. Evaluated
+/// ONCE, by the registering process itself, because a detached spawn leaves
+/// its child reparented to init and the evidence is gone from `/proc` the
+/// moment the spawner returns — a registration that only happens after that
+/// attests nothing, and the child stays silent: the answer is stamped as
+/// `attestedSpawner`.
+pub(in crate::graph) fn spawner_is_attested(
+    parent: &str,
+    id: &str,
+    sessions: &[SessionRecord],
+) -> bool {
+    if parent == id {
+        return false;
+    }
+    let mine = pid_ancestry(std::process::id() as i32);
+    let by_pid = sessions.iter().any(|s| {
+        s.session_id == parent
+            && s.state != "done"
+            && s.pid.is_some_and(|p| mine.contains(&(p as i32)))
+    });
+    by_pid || ancestry_parent(sessions).as_deref() == Some(parent)
+}
+
 /// The full 3-tier parent-resolution precedence for a `wrap`/`conduct`/
 /// `spawn` registration (task #89) — `graph spawn` re-execs `conduct
 /// --headless`, so this single function backs all three commands via
@@ -1976,6 +2004,41 @@ mod tests {
         wrap.session_id = "wrap".into();
         wrap.conductable = Some(true);
         assert_eq!(ancestry_parent(&[wrap]), None);
+    }
+
+    #[test]
+    fn a_spawner_is_attested_only_when_the_kernel_backs_it() {
+        let mine = pid_ancestry(std::process::id() as i32);
+        assert!(mine.len() >= 3);
+
+        // A conducted wrap whose pid really is above this process.
+        let mut wrap = session("wrap", "/w", "working", "1", None);
+        wrap.conductable = Some(true);
+        wrap.pid = Some(mine[1] as u32);
+        assert!(spawner_is_attested("wrap", "me", &[wrap.clone()]));
+
+        // The same claim naming a pid that is not above this process, however
+        // honest the caller sounds. A registrant reparented to init before it
+        // registered has no spawner above it at all: this same shape, silent.
+        let mut elsewhere = wrap.clone();
+        elsewhere.session_id = "elsewhere".into();
+        elsewhere.pid = Some(i32::MAX as u32);
+        assert!(!spawner_is_attested("elsewhere", "me", &[elsewhere]));
+
+        // A hook-registered agent confirmed by its `hookAncestry`.
+        let mut agent = session("agent", "/w", "working", "2", None);
+        agent.kind = Some("agent".into());
+        agent.hook_ancestry = vec![mine[2]];
+        assert!(spawner_is_attested("agent", "me", &[agent.clone()]));
+        agent.hook_ancestry = vec![i32::MAX];
+        assert!(!spawner_is_attested("agent", "me", &[agent]));
+
+        // Never itself, never a record that has ended, never one that is absent.
+        assert!(!spawner_is_attested("wrap", "wrap", &[wrap.clone()]));
+        let mut done = wrap.clone();
+        done.state = "done".into();
+        assert!(!spawner_is_attested("wrap", "me", &[done]));
+        assert!(!spawner_is_attested("ghost", "me", &[wrap]));
     }
 
     #[test]

@@ -26,7 +26,7 @@ session out of the box — no opt-in. The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
 (sharing a live parent) autogate each other too; and the reciprocal holds as
 well — a parent automatically hears the children it spawned, as the daemon's
-own one-line report off the child's trace, never a prompted send. Headless conduct
+own one-line report off the child's trace or hook phase, never a prompted send. Headless conduct
 (`--headless`, no controlling terminal at all), `spawn` (the detached
 launch command), and sender provenance (a delivered payload carries a `from
 <sender>: ` prefix) round out the no-terminal case without changing the core
@@ -294,6 +294,26 @@ through.
     `done`. Nothing wider than the children it spawned: a stranger's send
     still holds pending. The full statement is `docs/architecture/
     EIDOLON-TRACE.md`'s "Second slice".
+
+    A second source speaks for every other child whose harness reports
+    through hooks (claude, kimi, pi): the same delivery, the same skips, the
+    same cursor file, read off its `hooks.json` phase and the stamp of its
+    last hook event instead of a trace —
+
+    ```
+    [claude <petname>] awaiting
+    [claude <petname>] silent 12 min · last: <the tool in flight, else "working">
+    [claude <petname>] settled
+    ```
+
+    `awaiting` on entering that phase, `silent` when a `working` phase has had
+    no hook event for 12 minutes (once per silence), `settled` when a child
+    last seen `working` or `awaiting` stops; the first look at a child says
+    nothing. The tag is the child's own agent profile name. The recipient is
+    the child's SPAWNER, never the wrap hosting it (a hook child's
+    `parentSessionId` is that wrap, and typing into it would be the child's
+    own next prompt), and only over an edge the kernel attested — see
+    `Session-Graph.md`'s "And the parent hears it".
   - **Remote-parent — the same relation across machines.** The A2A door's
     rule, not the local socket's, listed here because it answers the same
     question — is the sender this target's parent? — for the one send that

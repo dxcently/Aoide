@@ -99,6 +99,17 @@ in the message.
 
 ## Invariants
 
+- **The hook door never moves a live record's pid and never trusts a payload
+  pid it cannot vouch for.** `vouched_payload_pid` keeps a payload `pid` only
+  if it is the hook process or one of its `/proc` ancestors (`hook_pid` is the
+  door's own `SO_PEERCRED` stamp on the daemon arm); both the registration
+  arm (`do_session_start` via `upsert_session`) and the existing-record
+  refresh go through `aoide_storage::session::pid_may_move`. Anything that
+  signals or injects by pid (`session kill`) re-verifies the seal against the
+  live starttime (`terminate_with_key`); `conduct --id` refuses an id whose
+  record is conductable or sealed (a conducted id is born once); lineage-only readers (`eidolon::
+  resolve_parent`, `resolve_parent_claim`) lean on the pid being immutable
+  while the process lives, not on a seal.
 - **The workspace default is stamped ONCE, through ONE seam, at THREE
   sites.** `SessionRecord.workspaceProject` (additive, `skip_serializing_if`)
   is written only by `graph/model.rs::observe_workspace` — the same seam
@@ -926,7 +937,8 @@ in the message.
   `audit_resurrect` sibling precedent), gate label `autogate-child`, the
   delivered line as `untrusted_data`.
   **At-most-once, claimed before the delivery.** The per-child cursor is
-  `state/stage/pingback.json` (`<child id> → {seen, silentAt?}`): a short
+  `state/stage/pingback.json` (`<child id> → {seen, silentAt?}` for a trace,
+  `{hook: {phase, at, silent?}}` for a hook phase): a short
   `with_stage_lock` critical section reads it, decides, and writes the
   advanced cursor (temp-then-rename) — the socket write happens AFTER, with
   no lock held, bounded by `connect_for_ring`'s own write timeout. A crash
@@ -934,6 +946,56 @@ in the message.
   noise in a parent's composer); a child whose `agent:"eidolon"` record is
   gone drops out of the file on the same pass. Do NOT move the delivery
   inside that critical section, and do not add a second lock.
+  **The hook source is the same lane, as a child module
+  (`graph/pingback/hook.rs`).** A local-parented child of any registered
+  harness that is not an `eidolon` (`hook::tracked`: no `remoteParent`, not a
+  shell, sub-agent node or app thread) is read off its `hooks.json` phase and
+  stamp, never a trace, and its lines (`awaiting`, `silent 12 min · last: …`,
+  `settled`) join the SAME `claims.lines` the eidolon source fills, so
+  `deliver` and its skips are one implementation. Its claim runs inside the
+  SAME `with_stage_lock` section over the cursor `claim_locked` just built
+  (`hook::claim`), reading the roster and `hooks.json` inside that lock and
+  writing the entry's `hook` half — `{phase, at, silent?}` — so the two
+  sources never read each other's half and one file write covers both; the
+  hook children's ids join the tracked set, which is what keeps their entries
+  from being pruned by the eidolon pass.
+  **The recipient is the SPAWNER, never the child's `parentSessionId`.** A
+  hook child's `parentSessionId` is its own HOST wrap (`HookAction::Start`
+  resolves it from `attested_wrap(hook_pid)` or `AOIDE_SESSION_ID`), so
+  delivering there rings the child's own PTY: a headless host takes the line
+  as its next prompt (a self-prompt loop), an interactive one has it typed
+  into the user's composer. `hook::recipient` climbs: (1) the host wrap must
+  be a conducted wrap whose pid is in the child's `hookAncestry` (stamped by
+  the hook door from the hook process's own peer credentials; `session start`
+  cannot write it) AND whose daemon seal verifies — a seal re-derives the
+  pid's start time, so a pid reused after the wrap died (its record lingers
+  `done`, and `host_wrap` checks no state) or a pid hand-edited into
+  `sessions.json` fails it; the key is fetched once per pass, before the lock, and no
+  answering daemon means no recipient; (2) the
+  wrap's `parentSessionId` is the spawner only while it equals the wrap's
+  `attestedSpawner` (stamped by `session_conduct` from its own `/proc`
+  ancestry, `window::spawner_is_attested`, set-or-cleared on every
+  registration — a detached `aoide spawn` child is reparented to init, so the
+  evidence cannot be re-derived later and must be stamped at birth, and a
+  registration that happens only AFTER the spawner returned has none left to
+  read and stays unstamped: fail-closed, never guessed; the stamp takes no
+  seal, the hook-time check in (1) and (3) is the only one); (3) a conducted
+  (sealed) spawner hears it, a hook-registered spawner is resolved to its own
+  attested host wrap by (1).
+  Never the child, never its host wrap, and a bare `session start --parent`
+  edge, an explicit `--parent` the kernel did not back, and a wrap registered
+  by `aoide wrap` have no recipient: do NOT accept a `parentSessionId` on its
+  word, and do not widen this to a recipient the evidence does not name.
+  Hold: the first examination of a child is a baseline and announces nothing;
+  `awaiting` is claimed on ENTERING the phase, not on every restamp, and
+  carries no reason (`hooks.json` has none, and `set_session_state` clears
+  `activity` on any non-`working` state, so a tool can never be named there);
+  `settled` needs the cursor to have seen the child `working`/`awaiting`
+  (the hour-later `stopped`→`idle` decay says nothing); `silent` is `>=` 12
+  minutes and under 24 hours of `updatedAt` age on a `working` phase, latched
+  per stamp (a day-old `working` is a crashed record). The hook source emits
+  no `PingEvent` and never spools: a child that belongs on a ring is
+  `remoteParent`-stamped and so is not its child.
   **The event and the line are two things, and a remote parent gets the
   event (P-RSA S8, `CONTRACTS.md` §4/§6).** `choose_event` decides WHICH
   `PingEvent` a child's new records amount to — a closed enum whose every
@@ -2132,7 +2194,7 @@ in the message.
 - `doorbell.rs` changes update `docs/architecture/MAIL.md`'s "Delivery and
   the doorbell" section — that document is the design's canonical prose
   statement, this file only the invariants an editor must hold.
-- `pingback.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
+- `pingback.rs` and `pingback/hook.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
   "Second slice" section (the ping-back's canonical prose statement), the
   `state/stage/pingback.json` shape in `CONTRACTS.md` §4, and
   `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md`'s

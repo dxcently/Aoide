@@ -170,7 +170,7 @@ pub fn draw_actions(f: &mut Frame, area: Rect, app: &App) {
         }
         f.render_widget(
             Paragraph::new(format!(
-                "Canvas {} · {} · {} | a all/focus | Space/middle-drag or wheel pan | Ctrl-wheel zoom | p prune",
+                "Canvas {} · {} · {} | f fold | a all/focus | Space/middle-drag or wheel pan | Ctrl-wheel zoom | p prune",
                 crate::graphview::zoom_label(app),
                 crate::graphview::view_label(app),
                 crate::graphview::readout(app)
@@ -441,10 +441,57 @@ fn draw_tree(f: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-/// The Home column is LEFT-anchored inside the padded surface (never centered).
-pub fn home_content(area: Rect) -> Rect {
+/// Rows the logo block takes when shown: the six art lines and a three-row
+/// breath before the panels.
+const HOME_LOGO_ROWS: u16 = 9;
+
+/// The Home page's placement for one terminal size: a column of at most 62
+/// cells centred across the body, and the whole block — logo, the two
+/// groups, the recent projects — centred down it. The logo is the first
+/// thing to go when the height runs short: the controls are what the page
+/// is for, and a clipped box is worse than a missing crest. A block that
+/// still does not fit sits at the top and clips at the bottom.
+pub struct HomeLayout {
+    /// The column the groups and recent projects stand in; its top is the
+    /// first group row.
+    pub content: Rect,
+    /// Where the logo paints, when there is room for it.
+    pub logo: Option<Rect>,
+}
+
+pub fn home_layout(area: Rect, recent: usize) -> HomeLayout {
     let width = area.width.saturating_sub(12).min(62);
-    Rect::new(area.x + 6, area.y + 1, width, area.height.saturating_sub(3))
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let groups = if width >= 58 { 7 } else { 9 };
+    // groups, a gap, the RECENT header, a blank, then the rows (two lines
+    // and a divider each; "No recent projects." is one row's worth).
+    let block = groups + 2 + recent.max(1) as u16 * 3;
+    let logo = include_str!("../assets/logo.txt");
+    let logo_width = logo
+        .lines()
+        .map(|line| Line::from(line).width())
+        .max()
+        .unwrap_or(0) as u16;
+    let with_logo = block + HOME_LOGO_ROWS;
+    let (height, show_logo) = if area.height >= with_logo + 2 {
+        (with_logo, true)
+    } else {
+        (block, false)
+    };
+    let top = area.y + (area.height.saturating_sub(height) / 2).max(1);
+    let logo = show_logo.then(|| {
+        let w = logo_width.min(width);
+        Rect::new(x + (width - w) / 2, top, w, 6)
+    });
+    let y = if show_logo { top + HOME_LOGO_ROWS } else { top };
+    HomeLayout {
+        content: Rect::new(x, y, width, area.bottom().saturating_sub(y + 1)),
+        logo,
+    }
+}
+
+fn home_content(area: Rect, app: &App) -> Rect {
+    home_layout(area, recent_projects(app).len()).content
 }
 
 pub fn recent_projects(app: &App) -> Vec<&aoide_conduct::graph::Project> {
@@ -474,10 +521,9 @@ pub fn recent_projects(app: &App) -> Vec<&aoide_conduct::graph::Project> {
     rows
 }
 
-fn home_groups(area: Rect) -> Vec<(Rect, &'static str)> {
-    let a = home_content(area);
-    // logo (6 rows) + a three-row breath before the panels
-    let y = a.y + 9;
+fn home_groups(area: Rect, app: &App) -> Vec<(Rect, &'static str)> {
+    let a = home_content(area, app);
+    let y = a.y;
     if a.width >= 58 {
         let w = (a.width - 2) / 2;
         vec![
@@ -508,9 +554,9 @@ fn home_groups(area: Rect) -> Vec<(Rect, &'static str)> {
         ]
     }
 }
-fn home_menu(area: Rect) -> Vec<(Rect, char, &'static str)> {
-    let groups = home_groups(area);
-    let step = if home_content(area).width >= 58 { 2 } else { 1 };
+fn home_menu(area: Rect, app: &App) -> Vec<(Rect, char, &'static str)> {
+    let groups = home_groups(area, app);
+    let step = if home_content(area, app).width >= 58 { 2 } else { 1 };
     [
         (0, 0, 'n', "New project"),
         (0, 1, 'p', "Open project"),
@@ -526,8 +572,8 @@ fn home_menu(area: Rect) -> Vec<(Rect, char, &'static str)> {
     })
     .collect()
 }
-fn recent_start(area: Rect) -> u16 {
-    home_groups(area)
+fn recent_start(area: Rect, app: &App) -> u16 {
+    home_groups(area, app)
         .iter()
         .map(|(r, _)| r.bottom())
         .max()
@@ -535,8 +581,8 @@ fn recent_start(area: Rect) -> u16 {
         + 1
 }
 pub fn home_project_regions(area: Rect, app: &App) -> Vec<(Rect, String)> {
-    let a = home_content(area);
-    let start = recent_start(area) + 2;
+    let a = home_content(area, app);
+    let start = recent_start(area, app) + 2;
     recent_projects(app)
         .iter()
         .enumerate()
@@ -546,8 +592,8 @@ pub fn home_project_regions(area: Rect, app: &App) -> Vec<(Rect, String)> {
         })
         .collect()
 }
-pub fn home_actions(area: Rect) -> Vec<(Rect, Panel, &'static str)> {
-    home_menu(area)
+pub fn home_actions(area: Rect, app: &App) -> Vec<(Rect, Panel, &'static str)> {
+    home_menu(area, app)
         .into_iter()
         .filter_map(|(r, k, l)| match k {
             'p' => Some((r, Panel::Projects, l)),
@@ -560,7 +606,7 @@ pub fn home_actions(area: Rect) -> Vec<(Rect, Panel, &'static str)> {
 }
 pub fn home_hit(area: Rect, app: &App, x: u16, y: u16) -> Hit {
     let pos = ratatui::layout::Position::new(x, y);
-    for (r, k, _) in home_menu(area) {
+    for (r, k, _) in home_menu(area, app) {
         if k == 'n' && r.contains(pos) {
             return Hit::NewProject;
         }
@@ -570,7 +616,7 @@ pub fn home_hit(area: Rect, app: &App, x: u16, y: u16) -> Hit {
             return Hit::Project(name);
         }
     }
-    for (r, p, _) in home_actions(area) {
+    for (r, p, _) in home_actions(area, app) {
         if r.contains(pos) {
             return Hit::Panel(p);
         }
@@ -602,15 +648,15 @@ fn divider(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn home_surface(area: Rect, app: &App) -> Rect {
-    let content = home_content(area);
-    let top = home_groups(area)
+    let content = home_content(area, app);
+    let top = home_groups(area, app)
         .first()
         .map(|(r, _)| r.y)
         .unwrap_or(content.y);
     let bottom = home_project_regions(area, app)
         .last()
         .map(|(r, _)| r.bottom())
-        .unwrap_or_else(|| recent_start(area) + 3);
+        .unwrap_or_else(|| recent_start(area, app) + 3);
     let left = content.x.saturating_sub(3).max(area.x + area.width.min(1));
     let right = (content.right() + 3).min(area.right().saturating_sub(1));
     let top = top.saturating_sub(1).max(area.y);
@@ -624,29 +670,21 @@ fn home_surface(area: Rect, app: &App) -> Rect {
 }
 
 pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
-    let a = home_content(area);
-    let logo = include_str!("../assets/logo.txt");
-    let logo_width = logo
-        .lines()
-        .map(|line| Line::from(line).width())
-        .max()
-        .unwrap_or(0) as u16;
-    let logo_width = logo_width.min(a.width);
-    f.render_widget(
-        Paragraph::new(logo).style(theme::accent_style(&app.palette)),
-        Rect::new(
-            a.x + (a.width - logo_width) / 2,
-            a.y,
-            logo_width,
-            a.height.min(7),
-        ),
-    );
+    let layout = home_layout(area, recent_projects(app).len());
+    let a = layout.content;
+    if let Some(logo) = layout.logo {
+        f.render_widget(
+            Paragraph::new(include_str!("../assets/logo.txt"))
+                .style(theme::accent_style(&app.palette)),
+            logo,
+        );
+    }
     f.render_widget(
         Block::default().style(theme::surface(&app.palette, 4)),
         home_surface(area, app),
     );
-    let menu = home_menu(area);
-    for (r, title) in home_groups(area) {
+    let menu = home_menu(area, app);
+    for (r, title) in home_groups(area, app) {
         f.render_widget(
             frame("")
                 .title(
@@ -691,7 +729,7 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
             columns[1],
         );
     }
-    let start = recent_start(area);
+    let start = recent_start(area, app);
     if start < a.bottom() {
         f.render_widget(
             Paragraph::new("◌ RECENT PROJECTS ────────────────────────────────────────")
@@ -946,7 +984,7 @@ pub fn hit(area: Rect, app: &App, x: u16, y: u16) -> Hit {
             .unwrap_or(Hit::None);
     }
     if app.panel == Panel::Home {
-        for (r, p, _) in home_actions(body) {
+        for (r, p, _) in home_actions(body, app) {
             if r.contains(pos) {
                 return Hit::Panel(p);
             }
@@ -1062,26 +1100,21 @@ mod tests {
         let app = App::for_test(vec![], vec![], vec![]);
         let area = Rect::new(0, 0, 100, 40);
         let surface = home_surface(area, &app);
-        let content = home_content(area);
+        let content = home_content(area, &app);
         assert_eq!(content.x - surface.x, 3);
         assert_eq!(surface.right() - content.right(), 3);
-        assert!(surface.y < home_groups(area)[0].0.y);
-        assert!(surface.bottom() > recent_start(area) + 2);
+        assert!(surface.y < home_groups(area, &app)[0].0.y);
+        assert!(surface.bottom() > recent_start(area, &app) + 2);
         let backend = ratatui::backend::TestBackend::new(100, 40);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw_home(frame, area, &app)).unwrap();
         let buffer = terminal.backend().buffer();
         let logo = include_str!("../assets/logo.txt");
-        let width = logo
-            .lines()
-            .map(|line| Line::from(line).width())
-            .max()
-            .unwrap() as u16;
-        let x = content.x + (content.width - width) / 2;
+        let at = home_layout(area, 0).logo.expect("40 rows hold the logo");
         for (row, line) in logo.lines().enumerate() {
             for (column, glyph) in line.chars().enumerate() {
                 assert_eq!(
-                    buffer[(x + column as u16, content.y + row as u16)].symbol(),
+                    buffer[(at.x + column as u16, at.y + row as u16)].symbol(),
                     glyph.to_string()
                 );
             }
@@ -1101,9 +1134,58 @@ mod tests {
         let a = App::for_test(vec![], vec![], vec![]);
         let area = Rect::new(0, 0, 120, 40);
         let body = page_geometry(area, &a).body;
-        for (r, p, _) in home_actions(body) {
+        for (r, p, _) in home_actions(body, &a) {
             assert_eq!(hit(area, &a, r.x, r.y), Hit::Panel(p));
         }
+    }
+
+    #[test]
+    fn home_sits_in_the_middle_at_every_size_and_drops_the_logo_before_a_box() {
+        let app = App::for_test(vec![], vec![], vec![]);
+        let dump = |w: u16, h: u16| -> (Vec<String>, Rect) {
+            let area = Rect::new(0, 0, w, h);
+            let body = page_geometry(area, &app).body;
+            let backend = ratatui::backend::TestBackend::new(w, h);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|frame| draw_home(frame, body, &app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let rows = (0..h)
+                .map(|y| (0..w).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+                .collect();
+            (rows, body)
+        };
+        // Wide and tall: the column's centre is the body's centre, and the
+        // block's vertical centre is within a row of the body's.
+        for (w, h) in [(150, 40), (220, 60)] {
+            let (rows, body) = dump(w, h);
+            let layout = home_layout(body, 0);
+            let column_centre = layout.content.x + layout.content.width / 2;
+            let body_centre = body.x + body.width / 2;
+            assert!(
+                column_centre.abs_diff(body_centre) <= 1,
+                "{w}x{h}: column centre {column_centre} vs body {body_centre}"
+            );
+            let logo = layout.logo.expect("tall enough for the logo");
+            let first = rows.iter().position(|r| r.contains("A O I D E")).expect("logo drawn");
+            let last = rows.iter().rposition(|r| r.contains("No recent projects.")).expect("recent drawn");
+            let block_centre = (first as u16 + last as u16) / 2;
+            let body_mid = body.y + body.height / 2;
+            assert!(
+                block_centre.abs_diff(body_mid) <= 3,
+                "{w}x{h}: block spans rows {first}..{last}, centre {block_centre} vs body {body_mid}"
+            );
+            assert_eq!(logo.y as usize, first.saturating_sub(5), "the logo's art starts where the layout says");
+            assert!(rows.iter().any(|r| r.contains("COMMUNICATION")));
+        }
+        // 80x24: no room for the logo — the boxes stay whole instead.
+        let (rows, body) = dump(80, 24);
+        assert!(home_layout(body, 0).logo.is_none(), "the logo yields first");
+        assert!(!rows.iter().any(|r| r.contains("A O I D E")));
+        let top = rows.iter().position(|r| r.contains("PROJECTS")).expect("group box");
+        let bottom = rows.iter().rposition(|r| r.contains("No recent projects.")).expect("recent row");
+        assert!(top > 0 && bottom < 23, "the block is clear of the body's edges: {top}..{bottom}");
+        let column = home_layout(body, 0).content;
+        assert!(column.x + column.width / 2 >= body.x + body.width / 2 - 1);
     }
 
     // ── Popup menu sizing (target_menu_area) ────────────────────────────

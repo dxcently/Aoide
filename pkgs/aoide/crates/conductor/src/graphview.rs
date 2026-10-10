@@ -43,15 +43,16 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Padding, Paragraph, Widget};
 use ratatui::Frame;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 
 /// Vertical gap between depth ranks — just enough room for a wire's stem,
 /// spreader and drop, never a wide gutter, since rank stacks eat screen
 /// height fastest.
-const RANK_GAP: i32 = 3;
+const RANK_GAP: i32 = 2;
 /// Fixed card size in world cells; title, identity, and state each have their
 /// own line. Cards never change size — the camera does.
-const CARD_W: i32 = 32;
-const CARD_H: i32 = 7;
+const CARD_W: i32 = 24;
+const CARD_H: i32 = 5;
 /// Horizontal pitch of one leaf slot in the fresh layout — card width plus a
 /// readable gap between siblings.
 const SLOT: i32 = CARD_W + 6;
@@ -96,13 +97,68 @@ pub struct Node {
     /// cards. A remote session id never resolves against the local roster,
     /// so no local action (focus, letter, prune) can reach one by mistake.
     pub host: Option<String>,
+    /// The far session's own id on a remote card — the handle the Mesh row
+    /// is found by. Never `session_id`, which local actions resolve.
+    pub remote_id: Option<String>,
     /// The card's facts are a cache, not a live reply: a `last-seen` row, or
     /// any remote card while the last probe failed. Drawn dimmed.
     pub cached: bool,
+    /// What a folded card hides: the descendant count and how many of them
+    /// are awaiting a human, so a fold never hides a blocked agent silently.
+    pub folded: Option<Fold>,
     pub depth: usize,
     pub row: usize,
     /// The card's retained rectangle in world cells.
     pub world: WorldRect,
+}
+
+/// The summary a folded card wears on its bottom border.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fold {
+    pub hidden: usize,
+    pub awaiting: usize,
+    pub working: usize,
+}
+
+impl Fold {
+    /// `▸ 5 · 1 awaiting` — the hidden count, then the most urgent class
+    /// present (awaiting over working) so the mark says what matters in
+    /// the twenty cells a border holds.
+    pub fn label(&self) -> String {
+        let mut s = format!("▸ {}", self.hidden);
+        if self.awaiting > 0 {
+            s.push_str(&format!(" · {} awaiting", self.awaiting));
+        } else if self.working > 0 {
+            s.push_str(&format!(" · {} working", self.working));
+        }
+        s
+    }
+
+    /// The label at `budget` cells: the full form when it fits, else the
+    /// terse `▸5·1!` that keeps the awaiting count ahead of everything —
+    /// the one number a fold must never truncate away — and only then an
+    /// end-cut.
+    pub fn label_fitting(&self, budget: usize) -> String {
+        let full = self.label();
+        if full.chars().count() <= budget {
+            return full;
+        }
+        let terse = if self.awaiting > 0 {
+            format!("▸{}·{}!", self.hidden, self.awaiting)
+        } else {
+            format!("▸{}", self.hidden)
+        };
+        if terse.chars().count() <= budget {
+            return terse;
+        }
+        if self.awaiting > 0 {
+            let bare = format!("{}!", self.awaiting);
+            if bare.chars().count() <= budget {
+                return bare;
+            }
+        }
+        truncate_end(&terse, budget)
+    }
 }
 
 /// Node metadata carried from the parsed document into the DFS.
@@ -117,6 +173,7 @@ struct Meta {
     tags: Vec<String>,
     model: Option<String>,
     host: Option<String>,
+    remote_id: Option<String>,
     petname: Option<String>,
     activity: String,
     cached: bool,
@@ -166,9 +223,29 @@ pub fn select_index(app: &mut App, i: usize) {
     let model = build_model(app);
     let picked = model.visible().nth(i).map(|n| n.id.clone());
     if let Some(id) = picked {
-        app.graph.selected = id;
-        app.graph.camera.pan = None;
+        pick(app, &model, id);
     }
+}
+
+/// Make `id` the selection: the camera follows it again, and every fold
+/// above it opens, so the cursor can never sit on a card the view hides.
+fn pick(app: &mut App, model: &Model, id: String) {
+    let mut cur = id.clone();
+    let mut hops = 0;
+    while let Some((parent, _)) = model
+        .children
+        .iter()
+        .find(|(p, kids)| kids.contains(&cur) && model.nodes.iter().any(|n| &n.id == *p))
+    {
+        app.graph.folded.remove(parent);
+        cur = parent.clone();
+        hops += 1;
+        if hops > model.nodes.len() {
+            break;
+        }
+    }
+    app.graph.selected = id;
+    app.graph.camera.pan = None;
 }
 
 /// Move the selection to the sibling before (`forward = false`) or after
@@ -211,8 +288,7 @@ pub fn select_sibling(app: &mut App, forward: bool) {
         pos.checked_sub(1).and_then(|p| siblings.get(p))
     };
     if let Some(target_id) = target.filter(|t| model.nodes.iter().any(|n| &n.id == *t)) {
-        app.graph.selected = target_id.clone();
-        app.graph.camera.pan = None;
+        pick(app, &model, target_id.clone());
     }
 }
 
@@ -231,18 +307,37 @@ pub fn select_parent(app: &mut App) {
         .find(|(p, kids)| kids.contains(&id) && model.nodes.iter().any(|n| &n.id == *p))
         .map(|(p, _)| p.clone());
     if let Some(parent) = parent {
-        app.graph.selected = parent;
-        app.graph.camera.pan = None;
+        pick(app, &model, parent);
+    }
+}
+
+/// Fold or unfold the selected card's children. A leaf folds nothing.
+pub fn toggle_fold(app: &mut App) {
+    let model = build_model(app);
+    let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
+        return;
+    };
+    let has_children = model
+        .children
+        .get(&id)
+        .is_some_and(|kids| kids.iter().any(|k| model.nodes.iter().any(|n| &n.id == k)));
+    if !has_children {
+        return;
+    }
+    if !app.graph.folded.remove(&id) {
+        app.graph.folded.insert(id);
     }
 }
 
 /// Move the selection down one rank, onto the selected card's first child in
-/// draw order. Does nothing on a leaf.
+/// draw order. Does nothing on a leaf; a folded card unfolds first, since a
+/// step toward what is hidden is a request to see it.
 pub fn select_child(app: &mut App) {
     let model = build_model(app);
     let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
         return;
     };
+    app.graph.folded.remove(&id);
     let child = model
         .children
         .get(&id)
@@ -251,8 +346,7 @@ pub fn select_child(app: &mut App) {
         .find(|k| model.nodes.iter().any(|n| &n.id == *k))
         .cloned();
     if let Some(child) = child {
-        app.graph.selected = child;
-        app.graph.camera.pan = None;
+        pick(app, &model, child);
     }
 }
 
@@ -299,10 +393,51 @@ pub fn readout(app: &App) -> String {
     }
 }
 
+/// Everything a built model depends on besides the forest's inputs: the
+/// scene's view, selection, folds and camera, the retained world's
+/// generation, and the failed-probe age the host cards print. The inputs
+/// themselves — stage, roster — change only through `sync_graph_scene`,
+/// which clears the cache.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelKey {
+    view: View,
+    selected: String,
+    folded: std::collections::BTreeSet<String>,
+    camera: Camera,
+    generation: u64,
+    probe_failed: Option<String>,
+    /// The wall clock to the minute: the ages a host card prints (`last seen
+    /// 14h07m ago`) are minute-grained, so the build goes stale once a
+    /// minute at most and a frame never pays for a clock tick otherwise.
+    minute: u64,
+}
+
 /// Build the layout model from the canonical graph document and the roster's
-/// last word on every registered node.
-pub fn build_model(app: &App) -> Model {
-    build_model_on(app, &aoide_storage::display::local_host_name())
+/// last word on every registered node — once per distinct key: a frame's
+/// render, hit test, extent and origin all read the same build rather than
+/// re-reading `nodes.json` and every node cache three to five times per
+/// keypress.
+pub fn build_model(app: &App) -> Rc<Model> {
+    let key = ModelKey {
+        view: app.graph.view,
+        selected: app.graph.selected.clone(),
+        folded: app.graph.folded.clone(),
+        camera: app.graph.camera,
+        generation: app.graph.positions.generation(),
+        probe_failed: app.roster_probe_failed(),
+        minute: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() / 60)
+            .unwrap_or(0),
+    };
+    if let Some((k, m)) = app.graph_cache.borrow().as_ref() {
+        if *k == key {
+            return m.clone();
+        }
+    }
+    let model = Rc::new(build_model_on(app, &aoide_storage::display::local_host_name()));
+    *app.graph_cache.borrow_mut() = Some((key, model.clone()));
+    model
 }
 
 /// [`build_model`] with the host every session label carries stated rather
@@ -378,6 +513,7 @@ pub fn build_model_from(
                         tags: Vec::new(),
                         model: None,
                         host: None,
+                        remote_id: None,
                         petname: None,
                         activity: String::new(),
                         cached: false,
@@ -425,6 +561,7 @@ pub fn build_model_from(
                         tags,
                         model,
                         host: None,
+                        remote_id: None,
                         petname: None,
                         activity: String::new(),
                         cached: false,
@@ -477,6 +614,7 @@ pub fn build_model_from(
                 tags: Vec::new(),
                 model: None,
                 host: None,
+                remote_id: None,
                 petname: None,
                 activity: String::new(),
                 cached: false,
@@ -487,19 +625,24 @@ pub fn build_model_from(
     }
 
     // Registered nodes stand after this box's own forest, one root each,
-    // their sessions hanging flat beneath (the roster carries no spawned
-    // edges across the wire). Ids are prefixed with the node's own root id,
-    // so a far session id can never collide with a local one.
+    // their sessions beneath — ranked under a same-node spawner when the
+    // row names one, flat under the node otherwise. Ids are prefixed with
+    // the node's own root id, so a far session id can never collide with a
+    // local one.
     let probe_failed = app.roster_probe_failed();
     for node in roster.iter().filter(|n| !n.is_local) {
         let nid = format!("node:{}", node.name);
-        let mut title = theme::presence_phrase(&node.presence, node.fetched_at.as_deref());
-        if node.presence == "online" {
-            title = format!("{title} · {} session(s)", node.sessions.len());
-        }
-        if let Some(age) = &probe_failed {
-            title = format!("{title} · probe failed {age}");
-        }
+        // The border carries the presence word; the rows carry what is
+        // short enough for a 20-cell card: the cache's age, the session
+        // count, and — on its own row — a probe that has since failed.
+        let title = match node.presence.as_str() {
+            "online" => format!("{} session(s)", node.sessions.len()),
+            "unreachable" => format!(
+                "last seen {}",
+                node.fetched_at.as_deref().map(theme::age_label).unwrap_or_else(|| "unknown".into())
+            ),
+            _ => String::new(),
+        };
         meta.insert(
             nid.clone(),
             Meta {
@@ -507,20 +650,61 @@ pub fn build_model_from(
                 label: node.name.clone(),
                 title,
                 role: "node".into(),
-                harness: String::new(),
+                harness: probe_failed
+                    .as_ref()
+                    .map(|age| format!("probe failed {age}"))
+                    .unwrap_or_default(),
                 session_id: None,
                 state: Some(node.presence.clone()),
                 tags: Vec::new(),
                 model: None,
                 host: None,
+                remote_id: None,
                 petname: None,
                 activity: String::new(),
                 cached: probe_failed.is_some(),
             },
         );
-        let mut kids = Vec::with_capacity(node.sessions.len());
+        // Parentage the far node published is taken only where it leads back
+        // to the node: a row whose chain never reaches the root — a far
+        // `graph link` loop, `A↔B` — falls flat under the node with its
+        // children still beneath it, so every row the node counts is a card
+        // somebody can see, and a blocked agent in a loop still wears its
+        // mark.
+        let on_node = |id: &str| node.sessions.iter().any(|s| s.session_id == id);
+        let far = |id: &str| format!("{nid}/session:{id}");
+        let mut kids: Vec<String> = Vec::new();
+        let mut reach: HashSet<String> = HashSet::new();
+        let mut pending: Vec<(String, String)> = Vec::new();
         for s in &node.sessions {
-            let sid = format!("{nid}/session:{}", s.session_id);
+            match s.parent.as_deref().filter(|p| on_node(p) && *p != s.session_id) {
+                Some(parent) => pending.push((s.session_id.clone(), parent.to_string())),
+                None => {
+                    kids.push(far(&s.session_id));
+                    reach.insert(s.session_id.clone());
+                }
+            }
+        }
+        while !pending.is_empty() {
+            let before = pending.len();
+            let mut rest = Vec::new();
+            for (sid, parent) in pending {
+                if reach.contains(&parent) {
+                    children.entry(far(&parent)).or_default().push(far(&sid));
+                    reach.insert(sid);
+                } else {
+                    rest.push((sid, parent));
+                }
+            }
+            pending = rest;
+            if pending.len() == before {
+                let (sid, _) = pending.remove(0);
+                kids.push(far(&sid));
+                reach.insert(sid);
+            }
+        }
+        for s in &node.sessions {
+            let sid = far(&s.session_id);
             // A cached row's state is what the far node LAST said; the
             // card's state slot carries the cache's word instead, and the
             // old state rides the activity row as history.
@@ -546,12 +730,12 @@ pub fn build_model_from(
                     tags: Vec::new(),
                     model: None,
                     host: Some(node.name.clone()),
+                    remote_id: Some(s.session_id.clone()),
                     petname: s.petname.clone(),
                     activity,
                     cached: s.is_cached() || probe_failed.is_some(),
                 },
             );
-            kids.push(sid);
         }
         if !kids.is_empty() {
             children.insert(nid.clone(), kids);
@@ -573,6 +757,16 @@ pub fn build_model_from(
         .iter()
         .position(|&i| nodes[i].id == app.graph.selected)
         .unwrap_or(0);
+    let summaries: Vec<(usize, Fold)> = nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| app.graph.folded.contains(&n.id))
+        .map(|(i, n)| (i, fold_summary(&n.id, &nodes, &children)))
+        .filter(|(_, f)| f.hidden > 0)
+        .collect();
+    for (i, fold) in summaries {
+        nodes[i].folded = Some(fold);
+    }
 
     for node in nodes.iter_mut().filter(|n| n.host.is_none()) {
         if let Some(record) = node
@@ -641,7 +835,9 @@ fn walk(
             tags: m.tags.clone(),
             model: m.model.clone(),
             host: m.host.clone(),
+            remote_id: m.remote_id.clone(),
             cached: m.cached,
+            folded: None,
             depth,
             row: out.len(),
             world: WorldRect::new(0, 0, CARD_W, CARD_H),
@@ -746,8 +942,11 @@ fn visible_order(
     children: &HashMap<String, Vec<String>>,
     scene: &crate::scene::SceneState,
 ) -> Vec<usize> {
+    let hidden = hidden_by_folds(nodes, children, &scene.folded);
     if scene.view == View::All || nodes.is_empty() {
-        return (0..nodes.len()).collect();
+        return (0..nodes.len())
+            .filter(|i| !hidden.contains(nodes[*i].id.as_str()))
+            .collect();
     }
     let anchor = if nodes.iter().any(|n| n.id == scene.selected) {
         scene.selected.clone()
@@ -775,8 +974,54 @@ fn visible_order(
         }
     }
     (0..nodes.len())
-        .filter(|&i| seen.contains(nodes[i].id.as_str()))
+        .filter(|&i| seen.contains(nodes[i].id.as_str()) && !hidden.contains(nodes[i].id.as_str()))
         .collect()
+}
+
+/// Every descendant of a folded card, by id. A folded card itself stays;
+/// what it folds away is everything beneath it.
+fn hidden_by_folds<'a>(
+    nodes: &'a [Node],
+    children: &'a HashMap<String, Vec<String>>,
+    folded: &std::collections::BTreeSet<String>,
+) -> HashSet<&'a str> {
+    let mut hidden: HashSet<&str> = HashSet::new();
+    for id in folded {
+        let Some(root) = nodes.iter().find(|n| &n.id == id) else {
+            continue;
+        };
+        let mut queue: VecDeque<&str> = VecDeque::from([root.id.as_str()]);
+        while let Some(cur) = queue.pop_front() {
+            for kid in children.get(cur).into_iter().flatten() {
+                if let Some(n) = nodes.iter().find(|n| &n.id == kid) {
+                    if hidden.insert(n.id.as_str()) {
+                        queue.push_back(n.id.as_str());
+                    }
+                }
+            }
+        }
+    }
+    hidden
+}
+
+/// What one folded card hides: the descendants under it and how many are
+/// awaiting a human or working.
+fn fold_summary(id: &str, nodes: &[Node], children: &HashMap<String, Vec<String>>) -> Fold {
+    let one = std::collections::BTreeSet::from([id.to_string()]);
+    let hidden = hidden_by_folds(nodes, children, &one);
+    let mut fold = Fold {
+        hidden: hidden.len(),
+        awaiting: 0,
+        working: 0,
+    };
+    for n in nodes.iter().filter(|n| hidden.contains(n.id.as_str())) {
+        match theme::classify(n.state.as_deref().unwrap_or("")) {
+            theme::StateClass::Awaiting => fold.awaiting += 1,
+            theme::StateClass::Working => fold.working += 1,
+            _ => {}
+        }
+    }
+    fold
 }
 
 // ── Camera geometry: one transform, shared by render, hit test and pan ──────
@@ -1157,21 +1402,9 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     } else {
         surface.patch(theme::state_style(n.state.as_deref().unwrap_or(""), pal))
     };
-    // A cached card is dimmed whole, like the Mesh row it mirrors.
-    let surface = if n.cached { surface.patch(theme::dim()) } else { surface };
-    let border = if n.cached { border.patch(theme::dim()) } else { border };
-    let block = Block::bordered()
-        .border_type(if selected {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        })
-        .border_style(border)
-        .style(surface)
-        .padding(Padding::horizontal(1));
-    let inner = block.inner(area);
-    block.render(area, buf);
-    let budget = inner.width as usize;
+    // A cached card is muted whole, like the Mesh row it mirrors.
+    let surface = if n.cached { surface.patch(theme::muted(pal)) } else { surface };
+    let border = if n.cached { border.patch(theme::muted(pal)) } else { border };
     let state = n.state.as_deref().unwrap_or("");
     let role = if n.role.is_empty() {
         if n.harness == "shell" {
@@ -1198,19 +1431,12 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     } else {
         format!("{mark} {} · {}", role.to_uppercase(), state)
     };
-    let heading = if n.tags.is_empty() {
-        heading
-    } else {
-        format!(
-            "{} {}",
-            heading,
-            n.tags
-                .iter()
-                .map(|t| format!("[{t}]"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        )
-    };
+    let tags = n
+        .tags
+        .iter()
+        .map(|t| format!("[{t}]"))
+        .collect::<Vec<_>>()
+        .join(" ");
     let detail = match (&n.harness, n.model.as_deref()) {
         (h, Some(m)) if !h.is_empty() => format!("{h} · {m}"),
         (_, Some(m)) => m.into(),
@@ -1230,47 +1456,94 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
         }
         _ => n.label.clone(),
     };
-    // An ordered (text, style) sequence, one entry per would-be row, with
-    // empty entries dropped and the survivors renumbered by `enumerate` --
-    // so a titleless card never leaves a blank row where the title would
-    // have gone, and never repeats the harness name the detail row
-    // (`harness · model`) already carries.
-    let rows: Vec<(String, Style)> = if n.kind == NodeKind::Session {
-        vec![
-            (
-                truncate_end(&n.title, budget),
-                surface.add_modifier(Modifier::BOLD),
-            ),
-            (fit_label(&card_identity, budget), surface),
-            (truncate_end(&detail, budget), surface.fg(accent)),
-            (heading, surface.patch(theme::state_style(state, pal))),
-            (truncate_end(&n.activity, budget), surface),
-        ]
+    // The card is 24×5: the top border carries one line of text and the
+    // three inner rows the rest. A session's border is its title — or, with
+    // no title, its harness and model, so a titleless card still names what
+    // runs there exactly once. Inside: the identity (petname and tail), the
+    // role and state with any tags, and the activity — or, when the card is
+    // idle enough to report none, the harness and model the title row did
+    // not already carry. Harness and model otherwise live in the tree row
+    // and the Details view. A non-session card's border is its kind.
+    let border_budget = area.width.saturating_sub(2) as usize;
+    let (top, rows): (String, Vec<(String, Style)>) = if n.kind == NodeKind::Session {
+        let titled = !n.title.is_empty();
+        let top = if titled { n.title.clone() } else { detail.clone() };
+        let heading = if tags.is_empty() {
+            heading
+        } else {
+            format!("{heading} {tags}")
+        };
+        let third = if !n.activity.is_empty() {
+            n.activity.clone()
+        } else if titled {
+            detail.clone()
+        } else {
+            String::new()
+        };
+        (
+            top,
+            vec![
+                (String::new(), surface),
+                (heading, surface.patch(theme::state_style(state, pal))),
+                (third, surface),
+            ],
+        )
     } else {
-        vec![
-            (heading, surface.fg(accent).add_modifier(Modifier::BOLD)),
-            (
-                truncate_end(&n.label, budget),
-                surface.add_modifier(Modifier::BOLD),
-            ),
-            (truncate_end(&n.title, budget), surface),
-            (detail, surface),
-            (
-                n.tags
-                    .iter()
-                    .map(|tag| format!("[{tag}]"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                surface.fg(accent),
-            ),
-        ]
+        (
+            heading,
+            vec![
+                (n.label.clone(), surface.add_modifier(Modifier::BOLD)),
+                (n.title.clone(), surface),
+                (if detail.is_empty() { tags } else { detail }, surface.fg(accent)),
+            ],
+        )
     };
-    for (idx, (text, style)) in rows
-        .into_iter()
-        .filter(|(text, _)| !text.is_empty())
-        .enumerate()
-        .take(inner.height as usize)
-    {
+    let top_style = if n.kind == NodeKind::Session {
+        border.add_modifier(Modifier::BOLD)
+    } else {
+        border.fg(accent).add_modifier(Modifier::BOLD)
+    };
+    let block = Block::bordered()
+        .border_type(if selected {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
+        .border_style(border)
+        .title(Line::from(Span::styled(
+            if border_budget >= 4 {
+                format!(" {} ", truncate_end(&top, border_budget - 2))
+            } else {
+                String::new()
+            },
+            top_style,
+        )))
+        .title_bottom(Line::from(Span::styled(
+            match n.folded {
+                Some(fold) if border_budget >= 4 => {
+                    format!(" {} ", fold.label_fitting(border_budget - 2))
+                }
+                _ => String::new(),
+            },
+            match n.folded {
+                Some(fold) if fold.awaiting > 0 => border.patch(theme::state_style("awaiting", pal)),
+                _ => border.add_modifier(Modifier::BOLD),
+            },
+        )))
+        .style(surface)
+        .padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    block.render(area, buf);
+    let budget = inner.width as usize;
+    let rows = rows.into_iter().enumerate().map(|(i, (text, style))| {
+        let text = if i == 0 && n.kind == NodeKind::Session {
+            fit_label(&card_identity, budget)
+        } else {
+            truncate_end(&text, budget)
+        };
+        (text, style)
+    });
+    for (idx, (text, style)) in rows.enumerate().take(inner.height as usize) {
         buf.set_line(
             inner.x,
             inner.y + idx as u16,
@@ -1516,6 +1789,8 @@ mod tests {
             origin: None,
             seal: None,
             sealed_issued_at: None,
+            ever_sealed: None,
+            attested_spawner: None,
             restore: None,
             extra: Map::new(),
         }
@@ -1872,7 +2147,13 @@ mod tests {
                   "sessions": [
                       { "sessionId": "far2", "label": "sakaki/child/calm-thorn (…far2)",
                         "petname": "calm-thorn", "agent": "shell", "state": "idle",
-                        "presence": "online", "cwd": "/z" } ] },
+                        "presence": "online", "cwd": "/z" },
+                      { "sessionId": "far3", "label": "sakaki/child/keen-fox (…far3)",
+                        "petname": "keen-fox", "agent": "claude", "state": "working",
+                        "presence": "online", "cwd": "/z", "parentSessionId": "far2" },
+                      { "sessionId": "far4", "label": "sakaki/child/lost-elk (…far4)",
+                        "petname": "lost-elk", "agent": "claude", "state": "idle",
+                        "presence": "online", "cwd": "/z", "parentSessionId": "elsewhere" } ] },
                 { "name": "ghost", "isLocal": false, "presence": "never-pulled",
                   "fetchedAt": null, "error": "could not reach the agent", "sessions": [] },
             ],
@@ -1901,7 +2182,7 @@ mod tests {
         assert_eq!(yomi.kind, NodeKind::Host);
         assert_eq!(yomi.depth, 0, "a node is a root of its own");
         assert!(
-            yomi.title.starts_with("unreachable (last seen ") && yomi.title.ends_with(" ago)"),
+            yomi.title.starts_with("last seen ") && yomi.title.ends_with(" ago"),
             "the host card says it is cache, and how old: {}",
             yomi.title
         );
@@ -1913,14 +2194,20 @@ mod tests {
         assert_eq!(far1.petname.as_deref(), Some("misty-comet"));
 
         let sakaki = node(&m, "node:sakaki");
-        assert_eq!(sakaki.title, "online · 1 session(s)");
+        assert_eq!(sakaki.title, "3 session(s)");
         let far2 = node(&m, "node:sakaki/session:far2");
         assert_eq!(far2.state.as_deref(), Some("idle"), "a live row keeps its state");
         assert_eq!(far2.activity, "/z");
         assert_eq!(far2.harness, "shell");
+        // A same-node spawner ranks its child beneath it; a parent the node
+        // does not list leaves the row flat under the node.
+        let far3 = node(&m, "node:sakaki/session:far3");
+        assert_eq!(far3.depth, far2.depth + 1, "far3 hangs off far2");
+        assert_eq!(m.children.get("node:sakaki/session:far2").map(Vec::len), Some(1));
+        assert_eq!(node(&m, "node:sakaki/session:far4").depth, 1, "an unknown parent means flat");
 
         let ghost = node(&m, "node:ghost");
-        assert_eq!(ghost.title, "never pulled");
+        assert_eq!(ghost.title, "");
         assert!(m.children.get("node:ghost").is_none(), "nothing hangs off a node never pulled");
 
         // Local forest first, nodes after — the gathering root precedes every host.
@@ -1935,7 +2222,83 @@ mod tests {
         assert!(out.contains("yomi-strix"), "{out}");
         assert!(out.contains("AGENT · last-seen"), "{out}");
         assert!(out.contains("was working"), "{out}");
-        assert!(out.contains("🖧 NODE · never-pulled"), "{out}");
+        assert!(out.contains("🖧 NODE · never-pull"), "{out}");
+    }
+
+    #[test]
+    fn the_model_is_built_once_per_key_and_rebuilt_when_the_scene_or_the_forest_changes() {
+        let mut app = App::for_test(vec![], vec![session("a", "/x", "working", None)], Vec::new());
+        app.sync_graph_scene();
+        let first = build_model(&app);
+        assert!(Rc::ptr_eq(&first, &build_model(&app)), "same key, same build");
+
+        app.graph.view = View::All;
+        let second = build_model(&app);
+        assert!(!Rc::ptr_eq(&first, &second), "a view change is a new key");
+        assert!(Rc::ptr_eq(&second, &build_model(&app)));
+
+        app.graph.selected = "session:a".into();
+        assert!(!Rc::ptr_eq(&second, &build_model(&app)), "the selection is in the key");
+
+        let before = build_model(&app);
+        app.sessions.push(session("b", "/x", "idle", None));
+        app.sync_graph_scene();
+        let after = build_model(&app);
+        assert!(!Rc::ptr_eq(&before, &after), "a sync clears the cache");
+        assert_eq!(after.nodes.len(), before.nodes.len() + 1);
+    }
+
+    #[test]
+    fn a_fold_hides_the_subtree_and_its_mark_counts_the_awaiting_child() {
+        let mut app = App::for_test(
+            vec![],
+            vec![
+                session("hub", "/x", "working", None),
+                session("a", "/x", "awaiting", Some("hub")),
+                session("b", "/x", "working", Some("hub")),
+                session("b1", "/x", "idle", Some("b")),
+                session("other", "/y", "idle", None),
+            ],
+            Vec::new(),
+        );
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let total = node_order(&app).len();
+        app.graph.selected = "session:hub".into();
+        toggle_fold(&mut app);
+        assert!(app.graph.folded.contains("session:hub"));
+        let m = build_model(&app);
+        assert_eq!(m.visible_len(), total - 3, "a, b and b1 fold away; hub and other stay");
+        assert!(m.visible().any(|n| n.id == "session:hub"));
+        assert!(m.visible().all(|n| n.id != "session:b1"));
+        let hub = node(&m, "hub");
+        assert_eq!(
+            hub.folded,
+            Some(Fold {
+                hidden: 3,
+                awaiting: 1,
+                working: 1
+            })
+        );
+        assert_eq!(hub.folded.unwrap().label(), "▸ 3 · 1 awaiting");
+        let out = dump(&paint(&app, Rect::new(0, 0, 160, 30)));
+        assert!(out.contains("▸ 3 · 1 awaiting"), "{out}");
+
+        // The siblings across the rank still walk; a step toward the hidden
+        // children unfolds the card instead of going nowhere.
+        select_sibling(&mut app, true);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("other"));
+        select_sibling(&mut app, false);
+        select_child(&mut app);
+        assert!(!app.graph.folded.contains("session:hub"), "j unfolds");
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a"));
+        assert_eq!(build_model(&app).visible_len(), total);
+
+        // A leaf has nothing to fold; `f` on it changes nothing.
+        app.graph.selected = "session:a".into();
+        toggle_fold(&mut app);
+        assert!(app.graph.folded.is_empty());
+        assert!(node(&build_model(&app), "a").folded.is_none());
     }
 
     #[test]
@@ -2005,13 +2368,157 @@ mod tests {
         let sakaki = node(&m, "node:sakaki");
         assert!(sakaki.cached, "every remote card is a cache once the probe fails");
         assert!(
-            sakaki.title.starts_with("online · 1 session(s) · probe failed ") && sakaki.title.ends_with(" ago"),
+            sakaki.harness.starts_with("probe failed ") && sakaki.harness.ends_with(" ago"),
             "{}",
-            sakaki.title
+            sakaki.harness
         );
         assert!(node(&m, "node:sakaki/session:far2").cached);
         let out = dump(&paint(&app, Rect::new(0, 0, 320, 40)));
         assert!(out.contains("probe failed"), "{out}");
+    }
+
+    #[test]
+    fn a_far_parent_loop_falls_flat_under_its_node_and_keeps_its_children() {
+        let data = serde_json::json!({
+            "host": "osaka", "generatedAt": "t",
+            "nodes": [
+                { "name": "osaka", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null,
+                  "sessions": [
+                      { "sessionId": "a", "label": "far/child/a (…a)", "petname": "a-a", "agent": "claude",
+                        "state": "awaiting", "presence": "online", "cwd": "/", "parentSessionId": "b" },
+                      { "sessionId": "b", "label": "far/child/b (…b)", "petname": "b-b", "agent": "claude",
+                        "state": "idle", "presence": "online", "cwd": "/", "parentSessionId": "a" },
+                      { "sessionId": "c", "label": "far/child/c (…c)", "petname": "c-c", "agent": "claude",
+                        "state": "working", "presence": "online", "cwd": "/", "parentSessionId": "a" },
+                      { "sessionId": "d", "label": "far/root/d (…d)", "petname": "d-d", "agent": "claude",
+                        "state": "idle", "presence": "online", "cwd": "/" } ] },
+            ],
+        });
+        let mut app = App::for_test(vec![], vec![], Vec::new());
+        app.roster.outcome = Some(aoide_protocol::output::Outcome::ok("session", "x").with_data(data));
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let m = build_model(&app);
+        let host = node(&m, "node:far");
+        assert_eq!(host.title, "4 session(s)");
+        for id in ["a", "b", "c", "d"] {
+            assert!(m.visible().any(|n| n.id == format!("node:far/session:{id}")), "{id} is a card");
+        }
+        let a = node(&m, "node:far/session:a");
+        assert_eq!(a.depth, 1, "the loop's first row falls flat under the node");
+        assert_eq!(node(&m, "node:far/session:b").depth, 2, "its partner hangs beneath it");
+        assert_eq!(node(&m, "node:far/session:c").depth, 2, "and so does its real child");
+        assert_eq!(node(&m, "node:far/session:d").depth, 1);
+        // Folding the node still counts every row, awaiting included.
+        app.graph.selected = "node:far".into();
+        toggle_fold(&mut app);
+        assert_eq!(
+            node(&build_model(&app), "node:far").folded,
+            Some(Fold { hidden: 4, awaiting: 1, working: 1 })
+        );
+    }
+
+    #[test]
+    fn a_fold_label_keeps_the_awaiting_count_when_the_border_is_short() {
+        let fold = Fold { hidden: 12, awaiting: 3, working: 4 };
+        assert_eq!(fold.label_fitting(30), "▸ 12 · 3 awaiting");
+        assert_eq!(fold.label_fitting(10), "▸12·3!");
+        assert_eq!(fold.label_fitting(3), "3!");
+        let calm = Fold { hidden: 5, awaiting: 0, working: 2 };
+        assert_eq!(calm.label_fitting(8), "▸5");
+    }
+
+    #[test]
+    fn picking_a_card_opens_every_fold_above_it() {
+        let mut app = App::for_test(
+            vec![],
+            vec![
+                session("hub", "/x", "working", None),
+                session("mid", "/x", "idle", Some("hub")),
+                session("leaf", "/x", "idle", Some("mid")),
+            ],
+            Vec::new(),
+        );
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        app.graph.folded.insert("session:hub".into());
+        app.graph.folded.insert("session:mid".into());
+        assert!(build_model(&app).visible().all(|n| n.id != "session:leaf"));
+        let model = build_model(&app);
+        pick(&mut app, &model, "session:leaf".into());
+        assert!(app.graph.folded.is_empty(), "both folds above the leaf opened");
+        assert_eq!(selected_session_id(&app).as_deref(), Some("leaf"));
+        assert!(build_model(&app).visible().any(|n| n.id == "session:leaf"));
+    }
+
+    #[test]
+    fn a_far_petname_that_is_no_mailbox_name_gets_no_letter() {
+        let data = serde_json::json!({
+            "host": "osaka", "generatedAt": "t",
+            "nodes": [
+                { "name": "osaka", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null,
+                  "sessions": [
+                      { "sessionId": "x", "label": "far/root/x (…x)", "petname": "x,other/y", "agent": "claude",
+                        "state": "idle", "presence": "online", "cwd": "/" } ] },
+            ],
+        });
+        let mut app = App::for_test(vec![], vec![], Vec::new());
+        app.roster.outcome = Some(aoide_protocol::output::Outcome::ok("session", "x").with_data(data));
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        app.panel = crate::app::Panel::Graph;
+        app.sidebar_focused = false;
+        app.graph.selected = "node:far/session:x".into();
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('s')));
+        assert!(app.mail_draft.is_none(), "a comma or slash in a petname would fan the letter out");
+        assert!(app.last_outcome.is_some());
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('e')));
+        assert_eq!(app.context_menu.as_ref().unwrap().actions, vec![crate::app::ContextAction::Details]);
+        assert!(crate::app::is_mailbox_name("misty-comet") && !crate::app::is_mailbox_name("Misty") && !crate::app::is_mailbox_name(""));
+    }
+
+    #[test]
+    fn a_remote_card_writes_to_its_node_mailbox_and_shows_details_in_mesh() {
+        let mut app = App::for_test(vec![], vec![], Vec::new());
+        app.roster.outcome = Some(roster_fixture());
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        app.panel = crate::app::Panel::Graph;
+        app.sidebar_focused = false;
+        app.graph.selected = "node:yomi-strix/session:far1".into();
+        let card = selected_node(&app).unwrap();
+        assert_eq!(card.remote_id.as_deref(), Some("far1"));
+
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('s')));
+        assert_eq!(
+            app.mail_draft.as_ref().map(|d| d.to.clone()).as_deref(),
+            Some("yomi-strix/misty-comet"),
+            "s addresses the far agent's own mailbox"
+        );
+        app.mail_draft = None;
+
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('e')));
+        let menu = app.context_menu.as_ref().expect("the card has a menu");
+        assert_eq!(
+            menu.actions,
+            vec![crate::app::ContextAction::Details, crate::app::ContextAction::WriteLetter]
+        );
+        app.run_context_action(0);
+        assert_eq!(app.panel, crate::app::Panel::Roster, "Details is the Mesh row");
+        assert!(matches!(
+            app.roster_flat_rows().get(app.roster_sel),
+            Some(crate::app::RosterRow::Session { session, .. }) if session.session_id == "far1"
+        ));
+
+        // A far terminal has no mailbox: only Details, and s refuses.
+        app.panel = crate::app::Panel::Graph;
+        app.graph.selected = "node:sakaki/session:far2".into();
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('s')));
+        assert!(app.mail_draft.is_none());
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('e')));
+        assert_eq!(app.context_menu.as_ref().unwrap().actions, vec![crate::app::ContextAction::Details]);
     }
 
     #[test]
@@ -2044,7 +2551,7 @@ mod tests {
         app.graph.selected = remote.id.clone();
         assert_eq!(selected_session_id(&app), None);
         let out = dump(&paint(&app, Rect::new(0, 0, 200, 40)));
-        assert!(out.contains("yomi-strix/root/") && out.contains("(…far1)"), "{out}");
+        assert!(out.contains("yomi-strix") && out.contains("(…far1)"), "{out}");
     }
 
     #[test]
@@ -2254,7 +2761,13 @@ mod tests {
         );
         // Releasing the pan hands the camera back to the selection.
         app.graph.camera.pan = None;
-        assert_eq!(hit_node(area, &app, area.x, area.y), Some(0));
+        let model = build_model(&app);
+        let o = origin(&model, area);
+        let r = model.camera.scale_rect(model.visible().next().unwrap().world);
+        assert_eq!(
+            hit_node(area, &app, (area.x as i32 + r.x - o.0) as u16, (area.y as i32 + r.y - o.1) as u16),
+            Some(0)
+        );
     }
 
     #[test]
@@ -2569,8 +3082,9 @@ mod tests {
         assert!(right.world.x >= left.world.x + SLOT);
         assert_eq!(root.world.x, (left.world.x + right.world.x) / 2);
 
-        // At every scale the card border stays whole where a wire arrives —
-        // no port circles punched through it.
+        // At every scale a wire ends ABOVE the card it reaches and the card's
+        // corners stay corners — no port glyph punched through a border
+        // (the top border carries the title, so its centre cell is text).
         for zoom in crate::scene::ZOOM_MIN..=crate::scene::ZOOM_MAX {
             app.graph.camera.zoom = zoom;
             app.graph.camera.pan = Some((0, 0));
@@ -2581,11 +3095,20 @@ mod tests {
             for n in model.visible() {
                 let r = model.camera.scale_rect(n.world);
                 let x = (r.x + r.w / 2) as u16;
-                for y in [r.y as u16, (r.bottom() - 1) as u16] {
+                if n.depth > 0 {
+                    // The drop, or — when the rank gap scales to one row —
+                    // the junction itself, sits right above the top edge.
                     assert!(
-                        matches!(buf[(x, y)].symbol(), "─" | "━"),
-                        "zoom {zoom}: card edge at {x},{y} is {:?}",
-                        buf[(x, y)].symbol()
+                        matches!(buf[(x, (r.y - 1) as u16)].symbol(), "│" | "┌" | "┐" | "┬" | "┼" | "├" | "┤"),
+                        "zoom {zoom}: the wire reaches the card's top edge, got {:?}",
+                        buf[(x, (r.y - 1) as u16)].symbol()
+                    );
+                }
+                for (cx, cy) in [(r.x, r.y), (r.right() - 1, r.y), (r.x, r.bottom() - 1), (r.right() - 1, r.bottom() - 1)] {
+                    assert!(
+                        matches!(buf[(cx as u16, cy as u16)].symbol(), "┌" | "┐" | "└" | "┘" | "┏" | "┓" | "┗" | "┛"),
+                        "zoom {zoom}: corner at {cx},{cy} is {:?}",
+                        buf[(cx as u16, cy as u16)].symbol()
                     );
                 }
             }
@@ -2694,8 +3217,8 @@ mod tests {
             // `surface`'s foreground stays constant across layers -- only the
             // background is layer-mixed -- so layer 0 is as good a probe as
             // the card's real layer for the (layer-independent) fg value.
-            assert_eq!(cells[(2, 2)].fg, theme::surface(&pal, 0).fg.unwrap());
-            assert_ne!(cells[(2, 2)].bg, Color::Reset);
+            assert_eq!(cells[(2, 1)].fg, theme::surface(&pal, 0).fg.unwrap());
+            assert_ne!(cells[(2, 1)].bg, Color::Reset);
         }
         let mut wide = root.clone();
         wide.title = "界".repeat(50);
@@ -2786,11 +3309,13 @@ mod tests {
         let cells = block_cells(model.visible().nth(1).unwrap(), true, &app.palette);
         let rows = buffer_rows(&cells);
         let line = |y: usize| rows[y].clone();
-        assert!(line(1).contains("Review conductor"));
-        assert!(line(2).contains("calm-rook"));
-        assert!(line(3).contains("claude · fable"));
-        assert!(line(4).contains("working"));
-        assert!(line(5).contains("Read · Inspect graph"));
+        // 24×5: the title rides the top border, then identity, state and
+        // activity; harness and model leave a card that has an activity.
+        assert!(line(0).contains("Review conductor"), "{rows:?}");
+        assert!(line(1).contains("calm-rook"), "{rows:?}");
+        assert!(line(2).contains("working"), "{rows:?}");
+        assert!(line(3).contains("Read · Inspect graph"), "{rows:?}");
+        assert!(!rows.concat().contains("claude · fable"), "{rows:?}");
         assert_eq!(selected_session_id(&app).as_deref(), Some("canonical-id"));
 
         let area = Rect::new(0, 0, 60, 20);

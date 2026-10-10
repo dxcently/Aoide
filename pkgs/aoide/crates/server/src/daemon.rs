@@ -441,8 +441,12 @@ pub(crate) fn mint_seal(session_id: &str, pid: i32, origin_class: &str) -> (Stri
 /// pid the just-written record carries — module doc's scaffolding boundary.
 /// A silent no-op for every OTHER dispatched command, a failed one, or a
 /// `session start` whose record carries no pid (the common case today,
-/// module doc) — this never turns a successful dispatch into a failed
-/// reply, since P-ID1 mints no security claim worth failing over.
+/// module doc).
+///
+/// A record is sealed at most ONCE in its life: one that carries a seal, or
+/// ever did (`everSealed`), is never sealed again here — a seal that no longer
+/// verifies means the process is gone or the record was tampered with, and
+/// minting over whatever pid it holds now would hand that pid the identity.
 fn seal_freshly_registered_session(inv: &Invocation, outcome: &aoide_protocol::output::Outcome) {
     if outcome.status != aoide_protocol::output::Status::Ok {
         return;
@@ -460,9 +464,40 @@ fn seal_freshly_registered_session(inv: &Invocation, outcome: &aoide_protocol::o
         return;
     };
     let Some(pid) = rec.pid else { return };
+    if rec.seal.is_some() || rec.ever_sealed == Some(true) {
+        return;
+    }
     let origin_class = rec.origin.clone().unwrap_or_default();
     let (seal, issued_at) = mint_seal(id, pid as i32, &origin_class);
     aoide_conduct::graph::stamp_seal(id, &seal, issued_at);
+}
+
+/// Refuse a dispatched `session start --id <id>` BEFORE it runs when the
+/// record is sealed over a pid that is still alive but no longer verifies —
+/// the pid moved under the seal (a hand edit; no code path moves one), so
+/// letting the start through would mutate a record whose identity is
+/// already in doubt. A sealed record whose process is simply gone is a
+/// legitimate caller's, not a refusal: the start proceeds and nothing is
+/// re-sealed.
+fn session_start_refusal(inv: &Invocation) -> Option<String> {
+    if inv.path.len() != 2 || inv.path[0] != "session" || inv.path[1] != "start" {
+        return None;
+    }
+    let id = inv.flags.get("id")?;
+    let file: aoide_storage::records::SessionsFile =
+        aoide_storage::stage::load_stage(&aoide_storage::stage::sessions_path()).ok()?;
+    let rec = file.sessions.iter().find(|s| &s.session_id == id)?;
+    let pid = rec.pid?;
+    if rec.seal.is_none()
+        || !aoide_storage::fs::pid_is_alive(pid)
+        || aoide_storage::attest::verify_seal_over(rec, &seal_keypair().info().pubkey_hex)
+    {
+        return None;
+    }
+    Some(format!(
+        "session `{id}` is sealed over a process that is not pid {pid}; its record was changed \
+         under the seal, so it is not touched — end it and register a new session id"
+    ))
 }
 
 /// LANE IDENTITY P-ID2 (`CONTRACTS.md`'s identity section): mint+stamp a
@@ -497,6 +532,7 @@ fn seal_unsealed_live_sessions() -> bool {
         .iter()
         .filter(|s| {
             s.seal.is_none()
+                && s.ever_sealed != Some(true)
                 && s.pid.is_some()
                 && aoide_protocol::canonical_state(&s.state) != "done"
         })
@@ -1109,6 +1145,21 @@ fn handle_conn(
                 // door-specific policy lives here (module doc).
                 match invocation_from_dispatch_request(&req, door_pid) {
                     Ok(inv) => {
+                        if let Some(refusal) = session_start_refusal(&inv) {
+                            FeedWriter::new(events_path.to_path_buf(), EVENTS_CAP_BYTES, 0o600).append(&json!({
+                                "v": 0,
+                                "ts": aoide_protocol::audit::now_secs(),
+                                "class": serde_json::to_value(EventClass::Audit).unwrap_or_else(|_| json!("audit")),
+                                "kind": "seal_refused",
+                                "source": "aoided",
+                                "payload": { "sessionId": inv.flags.get("id") },
+                            }));
+                            let outcome = aoide_protocol::output::Outcome::error("session.start", refusal);
+                            if write_json_line(&mut writer, &json!({"outcome": outcome})).is_err() {
+                                return;
+                            }
+                            continue;
+                        }
                         let outcome = dispatch(&inv);
                         // task #92: this handler may have just written stage
                         // files via the SAME `do_session_*` code the CLI
@@ -1118,9 +1169,7 @@ fn handle_conn(
                         // regardless of outcome/command (module doc: roster-wide,
                         // not a per-command table).
                         rebaseline_stage_roster(&watcher);
-                        // LANE IDENTITY P-ID1 (module doc, "the sealed
-                        // session credential"): scaffolding only, no gate
-                        // reads this yet.
+                        // LANE IDENTITY P-ID1: seals a fresh registration once.
                         seal_freshly_registered_session(&inv, &outcome);
                         if write_json_line(&mut writer, &json!({"outcome": outcome})).is_err() {
                             return;
@@ -2027,6 +2076,91 @@ mod tests {
             "the same seal must NOT verify under a different (wrong) public key"
         );
 
+        restore_stage(&stage, saved);
+    }
+
+    /// The repoint-then-reseal attack: a sealed record whose pid was moved to
+    /// another live process must NOT be re-sealed by a dispatched
+    /// `session start --id` — the seal stays the old one (which fails to verify
+    /// for the new pid), and the refusal is reported. A record whose seal still
+    /// verifies is a no-op (no fresh seal minted).
+    #[test]
+    fn a_repointed_sealed_record_is_refused_before_mutation_and_never_resealed() {
+        let (_guard, stage, saved) = isolated_stage();
+        let me = std::process::id() as i32;
+        let other = aoide_storage::attest::pid_ancestry(me).get(1).copied().expect("a parent") as u32;
+        let (seal, issued_at) = mint_seal("w", me, "local");
+        let write = |pid: u32| {
+            let sf = aoide_storage::records::SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![aoide_storage::records::SessionRecord {
+                    session_id: "w".to_string(),
+                    agent: "claude".to_string(),
+                    state: "idle".to_string(),
+                    started_at: "2026-01-01T00:00:00Z".to_string(),
+                    pid: Some(pid),
+                    origin: Some("local".to_string()),
+                    seal: Some(seal.clone()),
+                    sealed_issued_at: Some(issued_at),
+                    ..Default::default()
+                }],
+            };
+            aoide_storage::stage::write_stage(&aoide_storage::stage::sessions_path(), &sf).unwrap();
+        };
+        let ok = aoide_protocol::output::Outcome::ok("session.start", "started");
+        let load = || -> aoide_storage::records::SessionRecord {
+            let f: aoide_storage::records::SessionsFile =
+                aoide_storage::stage::load_stage(&aoide_storage::stage::sessions_path()).unwrap();
+            f.sessions.into_iter().next().unwrap()
+        };
+        let inv = dispatch_invocation("w");
+
+        write(me as u32);
+        assert_eq!(session_start_refusal(&inv), None);
+        seal_freshly_registered_session(&inv, &ok);
+        assert_eq!(load().seal.as_deref(), Some(seal.as_str()), "an unchanged seal is left alone");
+
+        // The pid moved to another LIVE process under the seal: refused before
+        // anything runs, and never re-sealed.
+        write(other);
+        assert!(session_start_refusal(&inv).is_some(), "a repointed sealed record is refused");
+        seal_freshly_registered_session(&inv, &ok);
+        let after = load();
+        assert_eq!(after.seal.as_deref(), Some(seal.as_str()), "no fresh seal over the new pid");
+        assert!(!aoide_storage::attest::verify_seal_over(&after, &seal_keypair().info().pubkey_hex));
+
+        // A sealed wrap whose process simply died is a legit caller's start:
+        // not refused, and not re-sealed over anything.
+        write(2_000_000_000);
+        assert_eq!(session_start_refusal(&inv), None);
+        seal_freshly_registered_session(&inv, &ok);
+        assert_eq!(load().seal.as_deref(), Some(seal.as_str()));
+
+        restore_stage(&stage, saved);
+    }
+
+    /// A record that ever carried a seal is never sealed again by the tick,
+    /// even when the seal field is gone and the pid is live.
+    #[test]
+    fn the_tick_never_seals_a_record_that_ever_carried_a_seal() {
+        let (_guard, stage, saved) = isolated_stage();
+        let sf = aoide_storage::records::SessionsFile {
+            schema_version: "0".to_string(),
+            sessions: vec![aoide_storage::records::SessionRecord {
+                session_id: "w".to_string(),
+                agent: "claude".to_string(),
+                state: "idle".to_string(),
+                pid: Some(std::process::id()),
+                conductable: Some(true),
+                ever_sealed: Some(true),
+                ..Default::default()
+            }],
+        };
+        aoide_storage::stage::write_stage(&aoide_storage::stage::sessions_path(), &sf).unwrap();
+        assert!(!seal_unsealed_live_sessions());
+        let after: aoide_storage::records::SessionsFile =
+            aoide_storage::stage::load_stage(&aoide_storage::stage::sessions_path()).unwrap();
+        assert_eq!(after.sessions[0].seal, None);
         restore_stage(&stage, saved);
     }
 

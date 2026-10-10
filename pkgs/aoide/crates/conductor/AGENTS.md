@@ -23,12 +23,37 @@
   one `j` below its root. A parent lookup takes the first DRAWN parent
   inside the search: a resurrected session also sits under its `resumed`
   ghost, which is not a node, and map order must not let it win.
+- A remote row's `parentSessionId` ranks it only under a parent the SAME
+  node lists; a parent the node does not list (or a self-reference) leaves
+  the row flat, never guessed across nodes.
 - Registered nodes enter the graph from the roster outcome (`App::roster_nodes`),
   never from the document's `node:*` fold (fresh only inside the cache TTL,
   written only by `node pull`). A remote card's id is prefixed with its node's
-  root id and its `session_id` is `None`, so no local action — focus, letter,
-  menu, prune — can resolve it against this box's roster; a cached row's
-  state slot carries the roster's `presence` word, never its last live state.
+  root id and its `session_id` is `None`, so no local action — focus,
+  prune, project — can resolve it against this box's roster; its far id
+  rides `remote_id` for the Mesh row and its letter goes to `node/petname`
+  (`ContextTarget::Remote`) only when the petname is a legal mailbox name
+  (`app::is_mailbox_name`, the wire's slug shape — a comma or slash would
+  fan the letter out), and nothing else crosses the node line. A far
+  `parentSessionId` chain that never reaches its node (a loop) falls flat
+  under the node, children kept; every row the node counts is a card. A
+  cached row's state slot carries the roster's `presence` word, never its
+  last live state.
+- `graphview::build_model` is memoised on `App::graph_cache`, keyed by
+  `ModelKey` (view, selection, folds, camera, the retained world's
+  generation, the failed-probe age, the wall-clock minute the host ages
+  print). Every path that changes the forest's inputs — `reload_all`, a
+  stage mtime the tick sees (`poll_refresh`), a landed roster probe, a test
+  that edits `app.sessions` or `app.roster` — must go through
+  `sync_graph_scene`, which clears it; a new scene input that render reads
+  goes into the key.
+- A fold is a view choice in `SceneState::folded`, keyed by node id like the
+  selection, never a scene mutation; a folded card's mark (`graphview::Fold`)
+  must count what it hides and name an awaiting descendant, so the fold
+  never hides a blocked agent silently; when the border is too short for
+  the full mark, the awaiting count survives (`Fold::label_fitting`). A step
+  toward hidden children unfolds rather than doing nothing, and picking any
+  card opens every fold above it, so the cursor never sits on a hidden card.
 - The follow camera (no manual pan) shows the forest, never the pad: an
   axis the forest fits in holds it whole, an overflowing axis centres the
   selected card clamped inside the forest's bounds. The pad is reachable
@@ -37,7 +62,10 @@
   50/75/100/125/150%. Pointer-anchored zoom, pan limits, render and hit tests
   share one transform; never let render record rectangles for a later hit test.
   Terminal glyphs stay fixed-size and clip inside cards; never relayout
-  entities into alternative card presets when zoom changes.
+  entities into alternative card presets when zoom changes. The one preset
+  is 24×5 with the title in the top border: a wire ends above the card's
+  top edge and never enters it, which is what keeps a text-bearing border
+  honest.
 - The painter clips; the world outside the camera is never drawn. Edges paint
   before cards. Focus draws the selected node's connected component and All
   draws every node, and the synthetic root gathering unattached sessions is not
@@ -96,16 +124,21 @@
   use `App::stage`; palette notes use `App::rice_stage`. Historical ledger,
   mail and audit paths use their existing owning APIs.
 - Roster probes remain bounded and asynchronous; refresh throttling must
-  not freeze input. The probe is the one read that bypasses `DispatchFn`:
-  it calls `aoide_conduct::graph::session_roster` through `App::roster_fn`
-  (tests inject `for_test_with_roster`), because a tick-driven read must
-  not write an audit record every fifteen seconds. A cached session row
+  not freeze input. The tick's probe is the one read that bypasses
+  `DispatchFn`: it calls `aoide_conduct::graph::session_roster` through
+  `App::roster_fn` (tests inject `for_test_with_roster`), because a
+  tick-driven read must not write an audit record every fifteen seconds;
+  the manual `r` is an act and takes the audited dispatcher
+  (`spawn_roster_fetch(true)`). A cached session row
   (`presence` of `last-seen` or `unknown`, `RosterSession::is_cached`)
   renders the cache's word and the node header's age, never the live state
   glyph or colour; the backend's `presence` is the only source of that
   fact. A failed probe after a good one keeps the rows
   (`RosterCache::failed`) and every surface that paints them says the probe
-  failed and how long ago; rows never vanish in silence. The presence
+  failed and how long ago, muted; rows never vanish in silence, and an Ok
+  reply without a `nodes` array is that same failure, never an empty
+  roster. "Muted" is `theme::muted` (the palette's muted hue); `theme::dim`
+  is deliberately a no-op and never the way to mark a stale fact. The presence
   phrase and every age come from `theme::presence_phrase`/`age_words`;
   never spell a second one.
 - Pending IDs are array positions. Relist after every approve/deny before
@@ -167,6 +200,10 @@
 A panel adds an App selection/state seam and pure renderer, then joins the
 shared navigation, keyboard and mouse geometry. Number keys 1–9 then 0 and Tab cycling follow the visible tab order. Panel-specific keys
 are scoped to their handlers; text input and overlays take priority.
+
+The sidebar's Agents/Terminals split is by spawn chain, not by a row's own
+kind: a row goes to Agents when it or an ancestor is an agent, so lineage is
+never broken to sort by kind; only all-shell chains are Terminals.
 
 Project rows represent projects, not individual roots. Use `Project::roots`
 and existing attribution/grouping helpers. Tree row models are the common

@@ -8,13 +8,24 @@ existing dispatcher and stores, usable without a desktop session.
 
 Home opens as a full page with Aoide's logo outside a continuous light
 livery surface containing the central actions and recent projects, including
-the gaps between them. The surface has three columns of side padding and
-vertical padding around its controls, with darker outer margins. The logo
-is centered as one preformatted block, preserving its internal alignment. Arrows or `h` / `j` / `k` / `l` select an action or
-recent project; Enter opens it. `H` opens connected hosts and `L` opens Activity. Shared surfaces use even shading and single separator
+the gaps between them. The whole block — logo, the two groups, the recent
+projects — is laid out for the terminal it is in: a column of at most 62
+cells centred across the body, the block centred down it
+(`board::home_layout`), at any size. When the height runs short the logo is
+the first thing to go, so the boxes stay whole rather than clipping; a block
+that still does not fit sits at the top. The surface has three columns of
+side padding and vertical padding around its controls, with darker outer
+margins. The logo is one preformatted block, preserving its internal
+alignment. Arrows or `h` / `j` / `k` / `l` select an action or recent
+project; Enter opens it. `H` opens connected hosts and `L` opens Activity. Shared surfaces use even shading and single separator
 lines; bright selection highlights identify only the keyboard-focused region,
 while other selections retain subdued shading. Workspace views expose a project sidebar whose Agents,
-Terminals and Past groups fold independently. Past includes durable session
+Terminals and Past groups fold independently. The groups follow lineage
+before kind: a session files under Agents when it or any ancestor in its
+spawn chain is an agent, so a terminal an agent spawned nests beneath that
+agent; Terminals holds the chains that are shells throughout, and a wrapper
+shell stays there while the agent it wraps heads its own tree under Agents.
+The header's Agents and Terminals counts stay counts by kind. Past includes durable session
 ledger entries, not just ended records still retained in the current stage.
 Sessions belonging to no project gather in an `Active sessions` group holding
 only live ones; their ended sessions form the one Past node at the root of the
@@ -33,6 +44,7 @@ whenever it holds more rows than fit, and stays gone otherwise.
 | `h` / `l`, Left / Right | Fold or unfold tree groups |
 | `e` / right-click | Actions for a tree, graph, project or session target |
 | `a` in Graph | Whole forest, or only the selected card's own graph |
+| `f` in Graph | Fold or unfold the selected card's children; the fold mark counts what is hidden |
 | `j` / `k`, Down / Up in Graph | Move the selection down/up a rank, toward the first child or the parent, across the whole forest |
 | `h` / `l`, Left / Right in Graph | Move the selection to the previous/next sibling across the rank (for a root, the previous/next root), across the whole forest |
 | Enter in Graph | Open or focus the selected session |
@@ -69,8 +81,14 @@ text into the active field without interpreting it as commands.
 
 Graph is a retained scene, drawn top-down: depth runs downward through ranks
 and siblings spread across a rank, with a parent centred over the horizontal
-span of its own children. Cards are fixed-size rectangles standing at world
-coordinates the scene keeps: a refresh that adds, ends or re-parents sessions
+span of its own children. Cards are one fixed 24×5 preset standing at world
+coordinates the scene keeps — the top border carries a session's title (or,
+untitled, its harness and model), the three rows beneath its identity
+(`petname (…tail)`), its role and state with any tags, and its activity (or
+the harness and model an idle card has room for); a project, group or host
+card's border is its kind and its rows the name, the path or presence
+detail, and the rest. Ranks sit two rows apart. Harness and model otherwise
+live in the tree row and the Details view. Cards stand at coordinates: a refresh that adds, ends or re-parents sessions
 leaves every surviving card where it was, and an arriving card takes the first
 free slot beside its proposed one. A session that changed parent is the one
 exception — it moves to its new rank, because a retained position would draw
@@ -90,6 +108,15 @@ the selected session, `s` writes a letter to the selected agent directly
 without opening the actions menu, and `p` prunes ended sessions — the one
 mutation the panel dispatches on its own.
 
+`f` folds the selected card's children away and unfolds them again. A folded
+card wears a mark on its bottom border — `▸ 5 · 1 awaiting`, the hidden
+count and then the most urgent class among them (awaiting over working),
+drawn in the awaiting colour when one is — so a blocked agent is never
+hidden in silence; a border too short for the full mark keeps the awaiting
+count (`▸12·3!`). `j` on a folded card unfolds it and steps down; `h`/`l`
+walk its rank as before; picking any card opens every fold above it. The fold is a view choice keyed by the card's id,
+so a refresh cannot move it onto another card.
+
 The canvas readout names the zoom, the view and where the cursor stands —
 `card 3/20 · rank 1` — so the forest the pane is not showing has a size.
 
@@ -99,19 +126,27 @@ no project gather under one synthetic root, and that root is not a connection:
 a session attached to nothing shows itself alone under Focus rather than
 borrowing a forest of strangers.
 
-Every registered node stands after this box's forest as a host card (`🖧
-NODE · online|unreachable|never-pulled`, its name, and `online · n
-session(s)`, `unreachable (last seen <age>)` or `never pulled`), with the
-sessions the roster reports for it hanging flat beneath — the roster carries
-no spawned edges across the wire. The rows are the same `session --hosts`
+Every registered node stands after this box's forest as a host card (border
+`🖧 NODE · online|unreachable|never-pulled`, then its name and `n
+session(s)` or `last seen <age>`), with the
+sessions the roster reports for it beneath — ranked under a same-node
+spawner when the row carries `parentSessionId`, flat under the node
+otherwise. The rows are the same `session --hosts`
 probe Mesh paints, refreshed on the same ~15 s throttle while Graph is open;
 a cached row under an unreachable node wears the cache's word (`last-seen`)
 as its state and `was <state>` as its activity, never a live glyph, and is
-drawn dimmed like its Mesh row. A probe that fails after a good one keeps the
-last rows on the canvas, dimmed, every host card ending `· probe failed <age>`
-— the forest never empties in silence. A remote card carries no local session
-id, so Enter, `s` and the menu act on nothing: a far session is looked at
-here, and conducted from Mesh or the shell.
+drawn muted like its Mesh row. A probe that fails after a good one keeps the
+last rows on the canvas, muted, every host card's last row reading `probe
+failed <age>` — the forest never empties in silence. A remote card carries
+no local session id, so Enter and the local actions pass over it; `s` on a
+far agent opens the composer on its own mailbox, `node/petname` (a new way
+into the same gated `mail send` every letter takes; the Mesh row's `s` is a
+terminal `send`, a different thing), and its menu offers Details — the
+card's Mesh row — and Write letter. A petname that is not a legal mailbox
+name (`^[a-z0-9][a-z0-9-]*$`) is refused rather than addressed. Nothing
+else crosses the node line: no focus, no prune, no project. A far spawn
+chain that loops back on itself falls flat under its node with its children
+kept, so every session the node counts is a card.
 
 Space + left drag or middle drag pans the canvas; the wheel pans vertically and
 Shift + wheel pans horizontally. Ctrl + wheel zooms the camera through 50%,
@@ -139,6 +174,7 @@ Enter applies it and Escape closes the menu.
 | Every target | Details |
 | Live local session | Open / focus; Set project (blank restores automatic attribution); Lead project (its effective project, so that project's other roots nest beneath it) |
 | Live local agent with a mailbox petname | Write letter |
+| Remote session (a host card's row) | Details (its Mesh row); Write letter for an agent with a petname, to `node/petname` |
 | Project | Write letter recipient chooser; Add folder; Resurrect its existing undying set |
 | Historical session with a registered project and native session ID or restore snapshot | Resurrect that exact session |
 | Registered node (Mesh) | Pair / re-pair; toggle read, spawn, message; Unregister node (exact name) |
@@ -159,16 +195,22 @@ Removing a project from Projects or a session group opens a confirmation.
 Type the exact project name and press Enter to unregister it; Escape cancels.
 This removes the registration, not project files.
 Mesh reuses bounded asynchronous `session --hosts` probes with cached
-fallback, calling the roster handler (`aoide_conduct::graph::session_roster`)
-as a library function: a read repeated every fifteen seconds while a pane is
-open is not an act and writes no audit record. A node the probe could not
+fallback. The tick's probe, and the one a pane fires on opening, call the
+roster handler (`aoide_conduct::graph::session_roster`) as a library
+function: a read repeated every fifteen seconds is not an act and writes no
+audit record. `r` is an operator's act and goes through the audited
+dispatcher like any typed command. A node the probe could not
 reach heads its rows with `unreachable (last seen <age>)`, and every session
 beneath it wears the roster core's own cache word — `· <label>  last-seen ·
 was <state>`, dimmed, no live glyph — so a row the far node may have long
 since lost is never painted as working. A probe that fails after a good one
 keeps the last rows and says so on the fetch line: `[err] session: <why> ·
-showing rows from before (probe failed <age>)`. Ages are words — `5m ago`,
-`2h21m ago`, `3d ago` — never a clock reading.
+showing rows from before (probe failed <age>)`, and every row reads muted
+(the palette's muted hue — the terminal's DIM attribute is never used, it
+can erase text on a light palette) until a probe lands. An Ok reply with no
+`nodes` array is no roster and is taken as that same failure, never as an
+empty one. Ages are words — `5m ago`, `2h21m ago`, `3d ago` — never a clock
+reading.
 Session steering dispatches `send`; Mail dispatches signed correspondence.
 Review's first queue remains the conductor-input/A2A approval queue, not mail
 editing.
@@ -299,7 +341,7 @@ visible alongside the previous successful snapshot.
 | `board` | Home/workspace composition, navigation, sidebar and shared drawing/hit-test geometry |
 | `ui` | Pure panel/detail/overlay rendering |
 | `scene` | Camera, view choice, retained world positions and the clipping painter |
-| `graphview` | Graph model (local forest plus the roster's nodes), card layout and wires over the retained scene |
+| `graphview` | Graph model (local forest plus the roster's nodes), built once per scene key and cached on `App`, card layout and wires over the retained scene |
 | `mailview` | Non-consuming local letters, signed thread grouping and legacy pair correspondence |
 | `eventview` | Bounded audit reader and full-record event rendering |
 | `logtail` | Read-only headless-session log overlay |

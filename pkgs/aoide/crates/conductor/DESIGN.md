@@ -8,11 +8,12 @@ uses bright selection; remembered selections elsewhere remain subdued.
 The single-line `𝄞 CONDUCTOR` header keeps the clef left and right-anchors the
 semantic-colored project, agent and terminal count buttons, each led by its
 identity mark (`theme::mark`, one table for every surface; README lists it).
-Home anchors its logo and groups left as one preformatted block, a blank
-band between logo and groups, and pads the continuous
-light surface around shared action and project hit rectangles, retaining
-darker exterior margins. Home groups actions and recent projects
-on one continuous light surface, with the logo outside that region.
+Home centres its block — logo, groups, recent projects — in the body at
+any terminal size, dropping the logo before it would clip a box, a blank
+band between logo and groups, and pads the continuous light surface around
+shared action and project hit rectangles, retaining darker exterior
+margins. Home groups actions and recent projects on one continuous light
+surface, with the logo outside that region.
 
 ```text
 Home: bundled logo · recent projects · new project
@@ -98,9 +99,11 @@ with their existing bounds and cache semantics.
 
 ## Graph scene
 
-The graph is a retained scene. World coordinates, the camera, the chosen view
-and the selected node's identity live in `App`, outside render, so a frame
-never reconstructs what the last one decided.
+The graph is a retained scene. World coordinates, the camera, the chosen view,
+the folds and the selected node's identity live in `App`, outside render, so
+a frame never reconstructs what the last one decided; the built model is
+cached beside them, keyed on that state and cleared when the forest's inputs
+change, so one keypress costs one build.
 
 ```text
 stage refresh ─── nodes and edges ───┐

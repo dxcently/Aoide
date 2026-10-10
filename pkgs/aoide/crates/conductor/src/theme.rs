@@ -223,6 +223,14 @@ pub fn dim() -> Style {
     Style::default()
 }
 
+/// Text that is a cache or a stale fact: the palette's muted hue (base03,
+/// dark grey without a palette) as the foreground — the one way this
+/// frontend "dims", since the terminal's DIM attribute can erase text on a
+/// light palette.
+pub fn muted(pal: &Palette) -> Style {
+    Style::default().fg(role_color(pal, Role::Muted))
+}
+
 // ── Session state → glyph + colour ──────────────────────────────────────────
 
 /// The coarse state classes the roster paints, derived once so glyph and colour

@@ -84,7 +84,8 @@ aoide conductor [--json]
 
 `board::NAV` fixes the tab order the number keys and `Tab` follow. Every
 workspace panel keeps the project tree on the left: a project folds its
-Agents, Terminals and Past groups independently; sessions attached to no
+Agents, Terminals and Past groups independently (a terminal an agent
+spawned nests under that agent in Agents; Terminals holds all-shell chains); sessions attached to no
 project gather under `Active sessions` (live only), and their ended records
 form one root-level Past node. `Ctrl-P` moves keyboard focus between the
 tree and the body; only the focused region draws a bright selection.
@@ -148,19 +149,24 @@ log, `⚙` status, `◌` past session.
 
 ## The Graph panel
 
-A retained scene: cards are fixed 32×7 rectangles at world coordinates
+A retained scene: cards are one fixed 24×5 preset (title in the top border;
+identity, role·state, activity in the rows) at world coordinates
 `App::graph.positions` keeps across refreshes, wired top-down (a parent
 centred over its children), under a camera that pans and zooms. The forest
 is `build_graph` over the local stage — projects, their sessions, spawned
 children, and one synthetic `Active sessions` root for the projectless —
 followed by one **host card per registered node** off the roster probe
-(`🖧 NODE · online|unreachable|never-pulled`, the node's name, `online · n
-session(s)` / `unreachable (last seen <age>)` / `never pulled`), its
-reported sessions flat beneath. A remote card carries no local session id,
-so the local actions pass over it; a cached row wears `last-seen` as its
+(border `🖧 NODE · online|unreachable|never-pulled`, then the node's name and
+`n session(s)` or `last seen <age>`), its
+reported sessions beneath, ranked under a same-node spawner when the row
+names one (`parentSessionId`) and flat otherwise. A remote card carries no local session id,
+so the local actions pass over it — `s` opens the composer on the far
+agent's `node/petname` mailbox (the same gated `mail send` as any letter;
+refused for a petname that is not a legal mailbox name) and `e` offers
+Details (its Mesh row) and Write letter; a cached row wears `last-seen` as its
 state and `was <state>` as its activity, dimmed. A probe that fails after a
-good one keeps the last rows, dimmed, each host card ending `probe failed
-<age>`.
+good one keeps the last rows, dimmed, each host card's last row reading
+`probe failed <age>`.
 
 | Key | Effect |
 |---|---|
@@ -168,8 +174,9 @@ good one keeps the last rows, dimmed, each host card ending `probe failed
 | `h`/`l`, `←`/`→` | previous / next sibling — likewise, no wrap |
 | `g`/`Home`, `G`/`End` | first / last drawn card |
 | `a` | Focus (the selected card's connected component; the gathering root is not a connection) ↔ All |
+| `f` | fold / unfold the selected card's children; the bottom border reads `▸ n · k awaiting` |
 | `Enter` | cue the selected local session |
-| `s` | write a letter to the selected local agent |
+| `s` | write a letter to the selected agent — local, or a far one at `node/petname` |
 | `e` / right-click | the card's context menu |
 | `p` | `session prune` |
 | Space + drag, middle drag, wheel, Shift + wheel | pan |
@@ -204,11 +211,17 @@ log invariant holds.
 
 ## Three behaviours a reader will hit
 
-- **The roster probe throttles, and is not audited.** A stale cache fetches
-  immediately on entering Mesh or Graph; otherwise a fetch fires at most
-  every ~15 s while either is visible. `r` in Mesh overrides the window. A
-  landed probe is folded into the retained graph scene like a stage
-  refresh; a failed one keeps the previous rows and says so.
+- **The roster probe throttles; the tick is not audited, `r` is.** A stale
+  cache fetches immediately on entering Mesh or Graph; otherwise a fetch
+  fires at most every ~15 s while either is visible, as a library call. `r`
+  in Mesh overrides the window through the audited dispatcher. A landed
+  probe is folded into the retained graph scene like a stage refresh; a
+  failed one — or an Ok reply with no `nodes` — keeps the previous rows,
+  muted, and says so.
+- **A stage change reaches the graph on the tick.** `poll_refresh` folds a
+  moved `sessions.json`/`hooks.json`/`projects.json` into the retained scene
+  at once, so a hook flipping an agent to `awaiting` shows on its card, fold
+  mark and readout within ~500 ms, not at the next roster probe.
 - **`session pending list`'s `id` is an array position, not a stable id** —
   resolving one entry shifts every id after it. `App::dispatch` re-lists
   synchronously before the next paint, so a second `a`/`d` in the same visit

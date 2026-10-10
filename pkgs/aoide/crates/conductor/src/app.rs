@@ -225,6 +225,15 @@ pub enum InputKind {
 #[derive(Debug, Clone)]
 pub enum ContextTarget {
     Session(SessionRecord),
+    /// A session on another node, as a Graph host card's row names it: its
+    /// node, far session id and mailbox petname. Details goes to its Mesh
+    /// row and Write letter addresses `node/petname`; nothing else — no
+    /// focus, no prune, no project — crosses the node line.
+    Remote {
+        node: String,
+        session_id: String,
+        petname: Option<String>,
+    },
     Project(String),
     History(aoide_storage::ledger::LedgerEntry),
     /// A registered node in the Mesh pane: its name plus the `allows` set the
@@ -485,6 +494,9 @@ pub struct RosterSession {
     pub petname: Option<String>,
     pub agent: String,
     pub cwd: String,
+    /// The spawner's id when it is a session on the same node — the one
+    /// edge the roster carries across the wire.
+    pub parent: Option<String>,
 }
 
 impl RosterSession {
@@ -916,6 +928,11 @@ pub struct App {
     /// and the world coordinates cards keep across refreshes. It lives here,
     /// outside render, so a frame never reconstructs what the last one decided.
     pub graph: crate::scene::SceneState,
+    /// The last graph model built, with the key it was built for — read by
+    /// `graphview::build_model`, which every key, click, extent and frame
+    /// goes through. Cleared by `sync_graph_scene`, the one place the
+    /// forest's inputs (stage, roster, retained positions) change.
+    pub graph_cache: std::cell::RefCell<Option<(crate::graphview::ModelKey, std::rc::Rc<crate::graphview::Model>)>>,
     /// Selected row in the SESSION panel (indexes [`App::dag_rows`]).
     pub dag_sel: usize,
     /// Selected row in the PROJECTS panel.
@@ -1083,6 +1100,7 @@ impl App {
             help_open: false,
             tail: None,
             graph: crate::scene::SceneState::default(),
+            graph_cache: std::cell::RefCell::new(None),
             dag_sel: 0,
             proj_sel: 0,
             projects: Vec::new(),
@@ -1283,6 +1301,7 @@ impl App {
     /// The selection is an ID, so it names the same card across the refresh —
     /// or, once that card is gone, falls back to the first one.
     pub fn sync_graph_scene(&mut self) {
+        self.graph_cache.borrow_mut().take();
         let model = crate::graphview::build_model(self);
         let placed: Vec<crate::scene::Placed> = model
             .nodes
@@ -1298,6 +1317,7 @@ impl App {
         if !ids.contains(&self.graph.selected) {
             self.graph.selected = ids.first().cloned().unwrap_or_default();
         }
+        self.graph_cache.borrow_mut().take();
     }
 
     /// Terminal-watcher bookkeeping: any session id we have never seen becomes
@@ -1360,10 +1380,12 @@ impl App {
             audit: Self::mtime(&Self::audit_path()),
         };
 
+        let mut stage_changed = false;
         if cur.projects != self.mtimes.projects {
             let p: ProjectsFile = Self::load_json(&dir.join("projects.json"));
             self.projects = p.projects;
             changed = true;
+            stage_changed = true;
         }
         if cur.history != self.mtimes.history {
             self.reload_history();
@@ -1373,11 +1395,13 @@ impl App {
             let s: SessionsFile = Self::load_json(&dir.join("sessions.json"));
             self.sessions = s.sessions;
             changed = true;
+            stage_changed = true;
         }
         if cur.hooks != self.mtimes.hooks {
             let h: HooksFile = Self::load_json(&dir.join("hooks.json"));
             self.hooks = h.hooks;
             changed = true;
+            stage_changed = true;
         }
         if cur.notes != self.mtimes.notes {
             self.palette = load_palette(&stage_notes_path(&rice_dir));
@@ -1415,6 +1439,14 @@ impl App {
             changed = true;
         }
 
+        if stage_changed {
+            // The forest's inputs moved: fold the new stage into the retained
+            // scene (new cards take slots, departed ones leave) and drop the
+            // cached model, exactly as a full reload does. A memo key could
+            // carry a stage generation instead, but the scene needs the
+            // re-placement anyway and this is the one path that does both.
+            self.sync_graph_scene();
+        }
         if changed {
             self.note_new_sessions();
             self.clamp_selection();
@@ -1515,12 +1547,15 @@ impl App {
     /// Spawn the `session --hosts` dispatch on a background thread. A no-op
     /// while a fetch is already in flight — callers (the tick, a panel
     /// switch, the manual refresh key) never need to check that themselves.
-    fn spawn_roster_fetch(&mut self) {
+    /// `audited` picks the door: a manual `r` is an operator's act and goes
+    /// through the audited dispatcher like any typed command; the tick and
+    /// a pane opening are reads and call the roster handler directly.
+    fn spawn_roster_fetch(&mut self, audited: bool) {
         if self.roster_rx.is_some() {
             return;
         }
         let (tx, rx) = mpsc::channel();
-        let roster_fn = self.roster_fn;
+        let roster_fn: RosterFn = if audited { self.dispatch_fn } else { self.roster_fn };
         std::thread::spawn(move || {
             let inv = Invocation {
                 path: vec!["session".to_string()],
@@ -1563,7 +1598,7 @@ impl App {
         // The Graph paints the roster's nodes too, so it keeps the probe
         // ticking on the same throttle; any other pane leaves the wire alone.
         if matches!(self.panel, Panel::Roster | Panel::Graph) && self.roster_stale() {
-            self.spawn_roster_fetch();
+            self.spawn_roster_fetch(false);
             changed = true; // a fresh "probing…" status is itself a repaint
         }
         changed
@@ -1605,6 +1640,7 @@ impl App {
                             petname: s["petname"].as_str().map(String::from),
                             agent: s["agent"].as_str().unwrap_or("").to_string(),
                             cwd: s["cwd"].as_str().unwrap_or("").to_string(),
+                            parent: s["parentSessionId"].as_str().map(String::from),
                         })
                         .collect(),
                 }
@@ -1663,6 +1699,20 @@ impl App {
     /// outcome itself, so the status line carries its refusal.
     pub(crate) fn absorb_roster_outcome(&mut self, outcome: Outcome) {
         let now = Instant::now();
+        // An Ok reply that carries no `nodes` array is not a roster: taking
+        // it would replace good rows with none, so it is a failure like any
+        // other — the rows stay and the fetch line says why.
+        let well_formed = outcome.status != Status::Ok
+            || outcome
+                .data
+                .as_ref()
+                .and_then(|d| d.get("nodes"))
+                .is_some_and(|n| n.is_array());
+        let outcome = if well_formed {
+            outcome
+        } else {
+            Outcome::error(outcome.command.clone(), "roster reply carried no nodes")
+        };
         if outcome.status == Status::Ok || self.roster.outcome.is_none() {
             self.roster.outcome = Some(outcome);
             self.roster.failed = None;
@@ -3035,11 +3085,36 @@ impl App {
                 folded,
             });
             if !folded {
+                // Lineage first: a session files under Agents when it or any
+                // ancestor in its spawn chain is an agent, so a terminal an
+                // agent spawned sits beneath that agent rather than torn off
+                // into Terminals. Terminals holds the chains that are shells
+                // throughout — a wrapper shell stays there while the agent it
+                // wraps heads its own tree under Agents.
+                let chain_is_shells = |s: &SessionRecord| -> bool {
+                    let mut cur = s;
+                    let mut hops = 0;
+                    while is_terminal(cur) {
+                        let Some(parent) = cur
+                            .parent_session_id
+                            .as_deref()
+                            .and_then(|p| live.iter().find(|r| r.session_id == p))
+                        else {
+                            return true;
+                        };
+                        hops += 1;
+                        if hops > live.len() {
+                            return true; // a malformed cycle of shells
+                        }
+                        cur = parent;
+                    }
+                    false
+                };
                 for terminal in [false, true] {
                     let group: Vec<_> = live
                         .iter()
                         .copied()
-                        .filter(|s| is_terminal(s) == terminal)
+                        .filter(|s| chain_is_shells(s) == terminal)
                         .collect();
                     if group.is_empty() {
                         continue;
@@ -3340,7 +3415,7 @@ impl App {
         }
         self.panel = p;
         if p == Panel::Roster && self.roster_stale() {
-            self.spawn_roster_fetch();
+            self.spawn_roster_fetch(false);
         }
         if p == Panel::Pending {
             // Three queues, one pane: the local pending list and pairing
@@ -3602,6 +3677,45 @@ impl App {
         }
     }
 
+    pub fn open_context_for_remote(
+        &mut self,
+        node: String,
+        session_id: String,
+        petname: Option<String>,
+        terminal: bool,
+        title: String,
+        x: u16,
+        y: u16,
+    ) {
+        let mut actions = vec![ContextAction::Details];
+        if petname.as_deref().is_some_and(is_mailbox_name) && !terminal {
+            actions.push(ContextAction::WriteLetter);
+        }
+        self.context_menu = Some(ContextMenu {
+            x,
+            y,
+            title,
+            target: ContextTarget::Remote {
+                node,
+                session_id,
+                petname,
+            },
+            actions,
+            selected: 0,
+        });
+    }
+
+    /// Put the Mesh cursor on a far session's row and show the pane.
+    pub fn show_remote_in_mesh(&mut self, session_id: &str) {
+        self.select_panel(Panel::Roster);
+        self.sidebar_focused = false;
+        if let Some(i) = self.roster_flat_rows().iter().position(
+            |r| matches!(r, RosterRow::Session { session, .. } if session.session_id == session_id),
+        ) {
+            self.roster_sel = i;
+        }
+    }
+
     pub fn open_context_for_session(&mut self, rec: SessionRecord, x: u16, y: u16) {
         let mut actions = vec![ContextAction::Details];
         if !is_done(&rec.state) && self.merged().iter().any(|s| s.session_id == rec.session_id) {
@@ -3703,6 +3817,14 @@ impl App {
                 ) {
                     self.dag_sel = i;
                     self.sidebar_focused = false;
+                }
+            }
+            (ContextTarget::Remote { session_id, .. }, ContextAction::Details) => {
+                self.show_remote_in_mesh(&session_id);
+            }
+            (ContextTarget::Remote { node, petname, .. }, ContextAction::WriteLetter) => {
+                if let Some(p) = petname.filter(|p| is_mailbox_name(p)) {
+                    self.open_mail_to(format!("{node}/{p}"));
                 }
             }
             (ContextTarget::History(entry), ContextAction::Details) => {
@@ -4356,7 +4478,7 @@ impl App {
     /// prompt on the selected session row ([`App::open_compose`]).
     fn handle_roster_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('r') => self.spawn_roster_fetch(),
+            KeyCode::Char('r') => self.spawn_roster_fetch(true),
             KeyCode::Char('j') | KeyCode::Down => {
                 let n = self.roster_flat_rows().len();
                 if n > 0 && self.roster_sel + 1 < n {
@@ -4426,6 +4548,7 @@ impl App {
                 crate::graphview::select_index(self, nodes.len().saturating_sub(1))
             }
             KeyCode::Char('a') => crate::graphview::toggle_view(self),
+            KeyCode::Char('f') => crate::graphview::toggle_fold(self),
             KeyCode::Enter => {
                 if let Some(id) = nodes.get(selected).and_then(|n| n.session_id.clone()) {
                     // Node → record via `merged()` (the same lookup the
@@ -4815,6 +4938,17 @@ impl App {
 /// matters since the `stop`/`stopped` vocabulary was split off `done`: a
 /// `stopped` session finished its TURN and is still very much alive, so it must
 /// stay in the `live` count.
+/// The one shape a mailbox name takes on the wire, `^[a-z0-9][a-z0-9-]*$`
+/// (CONTRACTS.md §5 — the slug predicate every mailbox and task name shares),
+/// checked before a far petname becomes a `node/petname` address: a name
+/// carrying a comma or a slash would fan a letter out to recipients the
+/// operator never picked.
+pub fn is_mailbox_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 pub fn is_terminal(rec: &SessionRecord) -> bool {
     rec.agent == "shell" || rec.kind.as_deref() == Some("shell")
 }
@@ -5172,6 +5306,93 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sidebar_files_a_spawned_terminal_under_the_agent_that_spawned_it() {
+        let agent = SessionRecord {
+            session_id: "agent-0001".into(),
+            cwd: "/p".into(),
+            agent: "claude".into(),
+            state: "working".into(),
+            ..Default::default()
+        };
+        let shell = SessionRecord {
+            session_id: "shell-0002".into(),
+            cwd: "/p".into(),
+            agent: "shell".into(),
+            parent_session_id: Some("agent-0001".into()),
+            state: "working".into(),
+            ..Default::default()
+        };
+        let grandchild = SessionRecord {
+            session_id: "agent-0003".into(),
+            cwd: "/p".into(),
+            agent: "claude".into(),
+            parent_session_id: Some("shell-0002".into()),
+            state: "idle".into(),
+            ..Default::default()
+        };
+        let loose_shell = SessionRecord {
+            session_id: "shell-0004".into(),
+            cwd: "/p".into(),
+            agent: "shell".into(),
+            state: "idle".into(),
+            ..Default::default()
+        };
+        // A wrapper shell that launched an agent stays in Terminals; the
+        // agent it wraps heads its own tree under Agents.
+        let wrapper = SessionRecord {
+            session_id: "shell-0005".into(),
+            cwd: "/p".into(),
+            agent: "shell".into(),
+            state: "idle".into(),
+            ..Default::default()
+        };
+        let wrapped = SessionRecord {
+            session_id: "agent-0006".into(),
+            cwd: "/p".into(),
+            agent: "claude".into(),
+            parent_session_id: Some("shell-0005".into()),
+            state: "working".into(),
+            ..Default::default()
+        };
+        let app = App::for_test(
+            vec![],
+            vec![agent, shell, grandchild, loose_shell, wrapper, wrapped],
+            vec![],
+        );
+        let rows = app.sidebar_rows();
+        let sections: Vec<(bool, usize)> = rows
+            .iter()
+            .filter_map(|r| match r {
+                SidebarRow::Section { terminal, count, .. } => Some((*terminal, *count)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sections, vec![(false, 4), (true, 2)], "a chain files with its first agent: {rows:?}");
+        let depth = |id: &str| {
+            rows.iter()
+                .find_map(|r| match r {
+                    SidebarRow::Session { rec, depth, .. } if rec.session_id == id => Some(*depth),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(depth("shell-0002"), depth("agent-0001") + 1, "the shell nests under its agent");
+        assert_eq!(depth("agent-0003"), depth("shell-0002") + 1, "and its own child under it");
+        let order: Vec<&str> = rows
+            .iter()
+            .filter_map(|r| match r {
+                SidebarRow::Session { rec, .. } => Some(rec.session_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec!["agent-0001", "shell-0002", "agent-0003", "agent-0006", "shell-0004", "shell-0005"]
+        );
+        assert_eq!(depth("agent-0006"), depth("agent-0001"), "a wrapped agent heads its own tree");
+    }
+
+    #[test]
     fn sidebar_keeps_empty_projects_and_inherits_owner_outside_root() {
         let project = graph::Project {
             name: "aoide".into(),
@@ -5469,6 +5690,8 @@ mod tests {
             origin: None,
             seal: None,
             sealed_issued_at: None,
+            ever_sealed: None,
+            attested_spawner: None,
             restore: None,
             extra: Map::new(),
         }
@@ -5889,6 +6112,43 @@ mod tests {
     }
 
     #[test]
+    fn a_stage_change_seen_by_the_tick_reaches_the_graph_card_at_once() {
+        with_isolated_stage(|| {
+            let dir = App::stage();
+            std::fs::create_dir_all(&dir).unwrap();
+            let write = |state: &str, stamp: std::time::SystemTime| {
+                let path = dir.join("sessions.json");
+                std::fs::write(
+                    &path,
+                    json!({ "sessions": [ { "sessionId": "agent-1", "agent": "claude",
+                        "windowAddress": "0x1", "cwd": "/x", "state": state, "startedAt": "t" } ] })
+                    .to_string(),
+                )
+                .unwrap();
+                std::fs::File::options().write(true).open(&path).unwrap().set_modified(stamp).unwrap();
+            };
+            let t0 = std::time::SystemTime::now();
+            write("working", t0);
+            let mut app = App::load(no_dispatch);
+            app.graph.view = crate::scene::View::All;
+            let card = |app: &App| {
+                crate::graphview::build_model(app)
+                    .nodes
+                    .iter()
+                    .find(|n| n.session_id.as_deref() == Some("agent-1"))
+                    .and_then(|n| n.state.clone())
+            };
+            assert_eq!(card(&app).as_deref(), Some("working"));
+
+            // The hook flips the record on disk; the next tick must show it
+            // on the card without waiting for a roster probe.
+            write("awaiting", t0 + std::time::Duration::from_secs(2));
+            assert!(app.poll_refresh(), "the tick saw the stage move");
+            assert_eq!(card(&app).as_deref(), Some("awaiting"), "the cached model was dropped with the stage");
+        });
+    }
+
+    #[test]
     fn graph_tick_keeps_the_roster_probe_ticking() {
         with_isolated_stage(|| {
             let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -5954,7 +6214,10 @@ mod tests {
         let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-        let mut app = App::for_test_with_roster(counting_roster_dispatch);
+        // `r` is an operator's act: it goes through the audited dispatcher,
+        // not the unaudited roster seam the tick uses.
+        let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+        app.roster_fn = |_: &Invocation| panic!("the manual refresh must not take the unaudited seam");
         app.panel = Panel::Roster;
         app.roster.fetched_at = Some(Instant::now()); // fresh — a tick would skip it
 
@@ -5976,14 +6239,14 @@ mod tests {
 
         let mut app = App::for_test_with_roster(counting_roster_dispatch);
         app.panel = Panel::Roster;
-        app.spawn_roster_fetch();
+        app.spawn_roster_fetch(false);
         assert!(app.roster_rx.is_some());
 
         // A second manual refresh while the first is still in flight must be
         // a no-op — `spawn_roster_fetch`'s own guard, exercised directly
         // since a real fetch here completes in well under a millisecond and
         // could otherwise race the assertion.
-        app.spawn_roster_fetch();
+        app.spawn_roster_fetch(false);
 
         let rx = app.roster_rx.take().unwrap();
         rx.recv_timeout(Duration::from_secs(2))
@@ -6056,6 +6319,13 @@ mod tests {
     #[test]
     fn a_failed_probe_keeps_the_last_good_rows_and_says_so() {
         let mut app = App::for_test(Vec::new(), Vec::new(), Vec::new());
+        let good_again = || Outcome::ok("session", "2 node(s)").with_data(json!({
+            "host": "h", "generatedAt": "t",
+            "nodes": [
+                { "name": "h", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null, "sessions": [] },
+            ],
+        }));
         let good = Outcome::ok("session", "2 node(s)").with_data(json!({
             "host": "h", "generatedAt": "t",
             "nodes": [
@@ -6084,6 +6354,16 @@ mod tests {
             "host": "h", "generatedAt": "t", "nodes": [] })));
         assert!(app.roster_probe_failed().is_none(), "a good probe clears the failure");
         assert!(app.roster_nodes().is_empty());
+
+        // An Ok reply with no nodes array is no roster: the rows stay and the
+        // fetch line names it.
+        app.absorb_roster_outcome(good_again());
+        assert_eq!(app.roster_nodes().len(), 2);
+        app.absorb_roster_outcome(Outcome::ok("session", "?").with_data(json!({ "host": "h" })));
+        assert_eq!(app.roster_nodes().len(), 2, "malformed Ok never empties the rows");
+        assert!(app.roster_status().contains("roster reply carried no nodes"), "{}", app.roster_status());
+        app.absorb_roster_outcome(Outcome::ok("session", "?"));
+        assert_eq!(app.roster_nodes().len(), 2, "an Ok with no data either");
     }
 
     #[test]

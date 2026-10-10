@@ -55,6 +55,7 @@
     screenshot = ./dendrites/screenshot.nix;
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;
+    tailscale = ./dendrites/tailscale.nix;
     vision = ./dendrites/vision.nix;
     # The wallpaper capability: a provider registry, not a plain module. Its
     # providers are the alternatives a host chooses between the way it chooses

@@ -6,6 +6,10 @@
 //! new event on a child since the last pass becomes ONE line, and that line is
 //! delivered to the child's `parentSessionId`.
 //!
+//! A second source, `hook.rs`, speaks for every other harness whose hooks
+//! write `hooks.json`; it fills the same claim section and rides the same
+//! delivery below.
+//!
 //! **The daemon's own line, never a `send`.** The send door attests the SENDER
 //! from the running process's `/proc` ancestry, so inside the resident daemon
 //! the attested sender is the daemon — never the child — which is exactly why
@@ -67,11 +71,15 @@
 //! [`SAY_MAX`] with `…`; the quoted ones are never allowed to start with `/`
 //! or `!`.
 
+mod hook;
+
 use super::common::{clean_line, clip_flat, strip_unsafe};
 use super::conduct::{channel_socket_path, wrapped_program_is_a_shell};
 use super::doorbell::{connect_for_ring, write_channel};
 use super::eidolon::{eidolon_state_from_trace, DroppedEidolon};
-use super::model::{canonical_state, load_stage, sessions_path, SessionRecord, SessionsFile};
+use super::model::{
+    canonical_state, hooks_path, load_stage, sessions_path, HooksFile, SessionRecord, SessionsFile,
+};
 use super::permit::profile_for_agent;
 use super::send::{audit_send, write_delivery, SUBMIT_KEYSTROKE_DELAY};
 use super::trace::{one_line_clip, tool_result_summary};
@@ -190,6 +198,10 @@ struct CursorEntry {
     silent_at: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     exited: bool,
+    /// The hook source's half (`hook.rs`): a hook-reporting child's last
+    /// examined phase and stamp. Never set on an entry the trace source owns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hook: Option<hook::HookCursor>,
 }
 
 /// The `serde` skip for a latch: a `false` field is never written, so every
@@ -389,12 +401,38 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         });
     }
 
+    // The daemon's live seal key, fetched ONCE per pass and BEFORE the lock (a
+    // bounded socket round trip has no business inside it), and only when some
+    // hook child could need it. `None` — no daemon answering — fails every
+    // seal check closed: the hook source then speaks for nobody.
+    let seal_key = roster
+        .iter()
+        .any(hook::tracked)
+        .then(aoide_storage::attest::daemon_seal_pubkey_hex)
+        .flatten();
+    let sealed = |rec: &SessionRecord| {
+        seal_key.as_deref().is_some_and(|key| super::identity::verify_seal_over(rec, key))
+    };
+
     // ── claim: one short critical section, read → decide → write ────────
     // The advanced cursor is written INSIDE the lock, before it is released:
     // the claim IS the write, so no second tick can decide over the old
     // cursor between this tick's decision and its file.
     let claims = aoide_storage::fs::with_stage_lock(|| {
-        let (claims, old_cursor, new_cursor) = claim_locked(&children, &tracked_ids, now_ms);
+        // The hook source (`hook.rs`) reads the roster and `hooks.json` as they
+        // are INSIDE the lock, so its recipient and its phase are one
+        // snapshot with the cursor it advances; its children's ids join the
+        // tracked set so the eidolon half keeps their entries.
+        let roster_now: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path())
+            .map(|f| f.sessions)
+            .unwrap_or_default();
+        let hooks_now: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        let hook_children = hook::gather(&roster_now, &hooks_now.hooks, &sealed);
+        let mut tracked_now = tracked_ids.clone();
+        tracked_now.extend(roster_now.iter().filter(|r| hook::tracked(r)).map(|r| r.session_id.clone()));
+
+        let (mut claims, old_cursor, mut new_cursor) = claim_locked(&children, &tracked_now, now_ms);
+        claims.lines.extend(hook::claim(&hook_children, &mut new_cursor, now_ms));
         if new_cursor != old_cursor {
             match serde_json::to_string(&new_cursor) {
                 Ok(body) => {
@@ -571,7 +609,12 @@ fn decide(child: &Child, entry: &CursorEntry, now_ms: i64) -> (Option<PingEvent>
     };
     (
         event,
-        CursorEntry { seen: tail.last().map(|r| r.id.clone()).or_else(|| entry.seen.clone()), silent_at, exited },
+        CursorEntry {
+            seen: tail.last().map(|r| r.id.clone()).or_else(|| entry.seen.clone()),
+            silent_at,
+            exited,
+            hook: None,
+        },
     )
 }
 
@@ -2153,6 +2196,159 @@ mod tests {
         let log = std::fs::read_to_string(root.join("log")).unwrap();
         assert!(log.contains("autogate-child"), "{log}");
         assert!(log.contains("delivered to `wrap-1`"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The real shape a spawned claude leaves: the hook-registered child `id`
+    /// under its HOST wrap `host` (whose pid its hook ancestry holds), which
+    /// the spawner `spawner` attested as its parent at registration; plus the
+    /// child's `hooks.json` record at `phase`. The spawner and the host are
+    /// registered by the caller (`headless_parent`); their pids are set here
+    /// (`host_pid` is the host's, the spawner takes this process's parent).
+    fn hook_child_fixture(id: &str, host: &str, spawner: &str, host_pid: u32, phase: &str, at: &str) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+        if !file.sessions.iter().any(|r| r.session_id == id) {
+            for rec in file.sessions.iter_mut().filter(|r| r.session_id == host) {
+                rec.pid = Some(host_pid);
+                rec.parent_session_id = Some(spawner.to_string());
+                rec.attested_spawner = Some(spawner.to_string());
+            }
+            for rec in file.sessions.iter_mut().filter(|r| r.session_id == spawner) {
+                rec.pid = Some(std::os::unix::process::parent_id());
+            }
+            let mut rec = session(id, "/w", phase, "2026-09-12T00:00:00Z", Some(host));
+            rec.petname = Some("fond-aspen".to_string());
+            rec.kind = Some("agent".to_string());
+            rec.hook_ancestry = vec![9001, host_pid as i32];
+            file.sessions.push(rec);
+            file.schema_version = "0".to_string();
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        set_hook_phase(id, phase, at);
+    }
+
+    fn set_hook_phase(id: &str, phase: &str, at: &str) {
+        let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        hooks.hooks.retain(|h| h.session_id != id);
+        hooks.hooks.push(crate::graph::model::HookRecord {
+            session_id: id.to_string(),
+            phase: phase.to_string(),
+            updated_at: at.to_string(),
+            ..Default::default()
+        });
+        hooks.schema_version = "0".to_string();
+        write_stage(&hooks_path(), &hooks).unwrap();
+    }
+
+    #[test]
+    fn a_hook_child_awaiting_reaches_its_spawner_once_never_its_host_wrap_a_forged_edge_or_a_rewritten_pid() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("pingback-hook-awaiting");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        // Spawner P, and the wrap W that hosts the spawned claude K — both
+        // conducted, both listening: only P may ever be written to.
+        let spawner = headless_parent("wrap-p", "claude");
+        let host = headless_parent("wrap-w", "claude");
+        // A conducted victim, and a record forged onto it: `session start
+        // --id forged --agent claude --parent wrap-victim` registers exactly
+        // this, with no evidence behind the edge.
+        let victim = headless_parent("wrap-victim", "claude");
+        // An eidolon child whose settle the first pass delivers: its trace
+        // entry must survive the hook source's later passes over the same file.
+        child_fixture(&root, "user-0001", "wrap-p", &[USER, ASSISTANT, SETTLED]);
+        let stamp = aoide_storage::time::now_iso_utc();
+        let host_pid = std::process::id();
+        hook_child_fixture("kid", "wrap-w", "wrap-p", host_pid, "working", &stamp);
+        seal_record("wrap-w", &kp);
+        seal_record("wrap-p", &kp);
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            let mut forged = session("forged", "/w", "working", "2026-09-12T00:00:00Z", Some("wrap-victim"));
+            forged.kind = Some("agent".to_string());
+            file.sessions.push(forged);
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        set_hook_phase("forged", "working", &stamp);
+
+        // First pass: both hook children are only baselined. Only the eidolon
+        // child speaks.
+        let first = spawner.try_clone().unwrap();
+        let acc = std::thread::spawn(move || read_all(first));
+        let report = pingback(&daemon_inv(), &[]);
+        let text = String::from_utf8_lossy(&acc.join().unwrap()).into_owned();
+        assert!(text.starts_with("[eidolon brave-otter] settled"), "{text:?}");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+
+        // Both enter awaiting. K's line goes to the spawner; the forged edge's
+        // goes nowhere.
+        set_hook_phase("kid", "awaiting", &stamp);
+        set_hook_phase("forged", "awaiting", &stamp);
+        let second = spawner.try_clone().unwrap();
+        let acc = std::thread::spawn(move || read_all(second));
+        let report = pingback(&daemon_inv(), &[]);
+        let bytes = acc.join().unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "[claude fond-aspen] awaiting\n\r",
+            "one line, no provenance prefix, then the target's own submit key"
+        );
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+        assert!(report.skipped.is_empty(), "{report:?}");
+        for (name, listener) in [("its own host wrap", &host), ("a forged edge's victim", &victim)] {
+            listener.set_nonblocking(true).unwrap();
+            assert!(listener.accept().is_err(), "{name} is never written to");
+        }
+
+        // The claim landed first: a second pass says nothing, and both
+        // sources' entries are in the one file.
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default());
+        let raw = std::fs::read_to_string(pingback_path()).unwrap();
+        let cursor: CursorFile = serde_json::from_str(&raw).unwrap();
+        assert_eq!(cursor["user-0001"].seen.as_deref(), Some("131"));
+        assert_eq!(cursor["user-0001"].hook, None);
+        assert!(raw.contains(r#""hook":{"phase":"awaiting","at":"#), "{raw}");
+        assert!(!cursor.contains_key("forged"), "an unattested child is never tracked: {raw}");
+
+        // A conducted record's pid no longer moves through any door, so a
+        // hand edit of `sessions.json` is the only way to reach this state.
+        // Point the host wrap at another live process the child's ancestry
+        // also names: the seal was minted over the old pid's start time, so it
+        // no longer verifies, and the child — however it cycles through
+        // phases — has nobody to tell.
+        let moved = 1u32;
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            for rec in file.sessions.iter_mut() {
+                if rec.session_id == "wrap-w" {
+                    rec.pid = Some(moved);
+                }
+                if rec.session_id == "kid" {
+                    rec.hook_ancestry = vec![9001, moved as i32];
+                }
+            }
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        set_hook_phase("kid", "working", &stamp);
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default());
+        set_hook_phase("kid", "awaiting", &stamp);
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "a rewritten pid has no recipient");
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "the spawner heard nothing more");
+
+        let log = std::fs::read_to_string(root.join("log")).unwrap();
+        assert!(log.contains("delivered to `wrap-p`"), "{log}");
+        assert!(!log.contains("wrap-w") && !log.contains("wrap-victim"), "{log}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

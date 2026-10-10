@@ -281,25 +281,58 @@ or whose presence names none, is a taught error naming which of the two it
 is, never an empty listing.
 
 **And the parent hears it.** The same tick that folds the state also reads
-the child's new records and, under the resident daemon alone, delivers ONE
-line about the child to the parent that spawned it — `[eidolon <petname>]
+what each child just did and, under the resident daemon alone, delivers ONE
+line about the child to the parent that spawned it. Two sources feed it, one
+delivery. An eidolon child is read off its trace — `[eidolon <petname>]
 settled end_turn · 90 calls · 31 min · last: "…"`, `… cancelled …`, `… died
 mid-turn …` (its eidolon record was just dropped with the turn still open),
 `… asking: "…"`, `… wrapping up · 8 calls left`, `… failing · 3 tool errors
-in a row · last: <tool label>`, `… silent 12 min · last: …`. It is not a
-send and never becomes one: the send door attests the sender from the running
+in a row · last: <tool label>`, `… silent 12 min · last: …`. Every other
+child whose harness reports through hooks (claude, kimi, pi — any agent whose
+hook writes `hooks.json`) is read off its hook phase and the stamp of its last
+hook event, which is all that file carries — `[claude <petname>] awaiting` on
+entering a permission prompt or question (the hook says no more than that:
+the tool in flight is cleared the moment the phase leaves `working`),
+`[claude <petname>] silent 12 min · last: <the tool in flight, else
+"working">` when a `working` phase has had no hook event for 12 minutes (once
+per silence; any new hook event re-arms it; a stamp more than a day old is a
+dead record, not a silence), and `[claude <petname>] settled` when a child
+last seen `working` or `awaiting` stops. The first look at a child is a
+baseline and says nothing, a child found already stopped says nothing, and a
+turn that begins and ends between two ticks is not heard. A hook child's own
+`parentSessionId` is the wrap that hosts it, never the session that spawned
+it, so this source does not write to that edge: it climbs to the wrap's own
+`parentSessionId` and speaks only when `attestedSpawner` — the parent the
+registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
+and the child's `hookAncestry` (stamped by the hook door from the hook
+process's own credentials) holds the wrap's pid. Both wraps' pids must also
+carry a verifying daemon seal when the line is delivered, because a seal
+re-derives the pid's start time: a pid reused by another process after its
+wrap died fails it, and so does a daemon that cannot be asked (nothing is
+attested, nothing is said). The stamp itself is the registering process's own
+kernel ancestry and needs no seal. A spawner that is itself an agent is
+resolved to the wrap hosting it by the same test. A forged `session start
+--parent` carries none of this and is ignored, and a child is never its own
+recipient nor its host wrap's. Two limits are known and deliberate. A detached
+`aoide spawn` that only registers after its spawner has returned has lost the
+`/proc` ancestry the stamp is read from, so it gets no stamp and its child is
+silent — never guessed. And a claude launched through another claude's Bash
+tool, with no wrap of its own in between, shares that claude's host wrap: its
+line reaches that wrap's attested spawner, an ancestor of the real launcher,
+not the launcher itself. It is not a send
+and never becomes one: the send door attests the sender from the running
 process's `/proc` ancestry, so inside the daemon the sender is the daemon and
 never the child — the line is raw-injected the doorbell's way (a live channel
 socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
-`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`),
-claimed inside one short stage-lock section before the write, so each event
-is delivered at most once. A parent that is a shell is skipped — a line
-typed into a shell would run, and the WRAP decides that (its wrapped
-program's own basename, not the `agent` label a caller chose) — as is one
-whose record is gone, not conductable, or already `done`. The ruling is the
-User's (2026-09-17): a
-parent hears the children it spawned, and nothing wider.
+`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
+for a trace; `hook` for a hook phase), claimed inside one short stage-lock
+section before the write, so each event is delivered at most once. A parent
+that is a shell is skipped — a line typed into a shell would run, and the WRAP
+decides that (its wrapped program's own basename, not the `agent` label a
+caller chose) — as is one whose record is gone, not conductable, or already
+`done`. The ruling is the User's (2026-09-17): a parent hears the children it
+spawned, and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**
 (`graph/codex_app.rs`): `kind:"app"`, because it is a task inside an app
