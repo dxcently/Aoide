@@ -25,6 +25,14 @@ picking a winner. What a body may not do is reach for another group's story:
 `desktop` and `aoideos` are deliberately disjoint (the session's platform vs the
 thing that paints it), and the host writes how they compose.
 
+## `nucleus` is a group, not a slot
+
+The floor every host carries is the aggregation named `nucleus`, whose members
+any host can deselect like any other group's. A thing that must be present
+without any selection (an option contract) is not a member: it goes in
+`modules/nucleus`, imported as an extra module. Never put behaviour in the
+contract to make it unavoidable.
+
 ## The guard is the host's, not yours
 
 Membership is `mkDefault`, and so is every provider default. A host always wins:

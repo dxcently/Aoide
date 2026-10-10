@@ -22,7 +22,7 @@ habit="(builtins.getFlake \"github:dxcently/habit/$habitRev\")"
 cases=$(cat <<'EOF'
 realRegistryResolvesAoideos         ok      "compositor,greeter,hyprland,lyra,quickshell,stylix,wallpaper:hyprland"
 realRegistryDendritesImport        ok      true
-realRegistryInventory               ok      "agents,aoideos,base,desktop"
+realRegistryInventory               ok      "agents,aoideos,desktop,nucleus"
 songDiscovery                       ok      "alpha landmine noshelf"
 songLandmineUnread                  ok      "1:true:true"
 songLandmineFires                   throws  songbook landmine: an unselected song's rice.nix was imported

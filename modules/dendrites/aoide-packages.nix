@@ -1,4 +1,4 @@
-# modules/nucleus/packages.nix — the aoide CLI on every PATH.
+# modules/dendrites/aoide-packages.nix — the aoide CLI on every PATH.
 #
 # The control plane's binaries (`aoide`, `aoided`, `lyra` — one derivation as
 # of P-A7 of the binary-split workstream) are injected into pkgs by mkHost's
@@ -8,7 +8,7 @@
 # (they ExecStart absolute store paths) — the interactive session does.
 #
 # Found live on first switch: the vm-boot test node added these to
-# systemPackages itself, masking their absence from the nucleus. The test node
+# systemPackages itself, masking their absence from the `nucleus` aggregation. The test node
 # now relies on this module instead (tests/vm-boot.nix keeps only jq).
 {
   config,

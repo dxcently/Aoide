@@ -29,10 +29,12 @@ constructor imports the files of what a host selected, and only those.
 ## Flags default off
 
 Every dendrite (and every paint feature behind a toggle) gates on its own
-`aoide.<name>.enable`, and that default is `false` unless the module is
-core plumbing discovered unconditionally (`modules/nucleus/*`, which has no
-`mkIf` guard by design — see `options.nix`'s header). A dendrite ships
-disabled; a host opts in with one line in `hosts/<host>/default.nix`.
+`aoide.<name>.enable`, and that default is `false`. The exceptions are the
+members of the `nucleus` aggregation, which are selected rather than flagged
+(a host deselects one with `habit.dendrites.<name>.enable = false`), and the
+option contract in `modules/nucleus/*`, which has no `mkIf` guard by design —
+see `options.nix`'s header. A dendrite ships disabled; a host opts in with one
+line in `hosts/<host>/default.nix`.
 
 ## Flat option assignment
 
@@ -46,8 +48,9 @@ for this reason, so the linter does not fight the style.
 
 `modules/nucleus/default.nix` names every
 file in its own directory, one line per file, in `LC_ALL=C` order, and nothing
-from outside it — the core is nothing selectable, so its own
-directory is what names it. The dendrites have no such file: the catalogue is
+from outside it — the contract is nothing selectable, so its own
+directory is what names it. What a host may deselect is not in it: the
+services are catalogue entries, members of the `nucleus` aggregation. The dendrites have no such file: the catalogue is
 the only list of them, in the `LC_ALL=C` order it is written in. Nothing walks
 the dendrite tree: a name with no catalogue line is unreachable, which is what
 shelving means.

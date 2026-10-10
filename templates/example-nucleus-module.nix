@@ -1,29 +1,26 @@
-# example-nucleus-module.nix — an ordinary platform module, with no gate.
+# example-nucleus-module.nix — an option contract every module builds against.
 #
 # Copy to:  modules/nucleus/<topic>.nix
 # Then:     add `./<topic>.nix` to modules/nucleus/default.nix's imports.
-# Replace:  <topic> and the settings.
+# Replace:  <topic> and the option.
 #
-# The nucleus is the floor: imported unconditionally on every host, not in the
-# catalogue, and it declares no toggle. Ungated is what makes it the nucleus —
-# if a host might not want it, it is a dendrite, not nucleus.
+# modules/nucleus is the contract, not the floor: imported unconditionally on
+# every host as an extra module, it declares the options (and the assertions
+# over them) that dendrites and consumers read, and configures nothing. What a
+# host carries and may deselect — a service, a package, a setting — is a
+# dendrite that is a member of the `nucleus` aggregation instead
+# (`example-dendrite.nix`, then one member line in
+# `modules/aggregations/nucleus/default.nix`).
 #
-# This is a plain NixOS module. It is evaluated in the platform pass like any
-# other, so `config`, `pkgs` and `lib` mean exactly what they always mean, and
-# nothing here can read or influence selection.
-#
-# The same shape, with an `aoide.<name>` option block, is how a capability exposes a
-# real knob a host varies — put that file in the catalogue instead, and keep the
-# option surface to what genuinely differs between machines.
-{ pkgs, ... }:
+# This is a plain NixOS module, evaluated in the platform pass, so it can
+# neither read nor influence selection.
+{ lib, ... }:
 {
-  environment.systemPackages = with pkgs; [
-    curl
-    git
-  ];
-
-  services.openssh = {
-    enable = true;
-    settings.PasswordAuthentication = false;
+  options.aoide.example = {
+    greeting = lib.mkOption {
+      type = lib.types.str;
+      default = "hello";
+      description = "What the example dendrite says; declared here so any module may read it.";
+    };
   };
 }

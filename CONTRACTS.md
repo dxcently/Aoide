@@ -27,9 +27,10 @@ list follows it.
 `song/songbook/<song>/` — each a directory's one typed scan (§2, §5) — the same
 way. `lib/walk.nix` is gone: a host imports what it selected, and the check that
 catches a stray `.nix` in a song folder reads the directory itself. `modules/nucleus/default.nix`
-names its own files in directory order: it is the unconditional core, so a layer
+names its own files in directory order: it is the unconditional option contract, so a layer
 nothing selects has no name to be reached by, and its one line per file is what
-puts them in the tree. Each of those modules
+puts them in the tree. The services every host carries are not in it: they are
+catalogue entries, members of the `nucleus` aggregation. Each of those modules
 self-gates on its own `enable`/`aoide.song` rather than being switched on from
 outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
 slot *name*, falling back to sonata — so no surface ever imports a concrete
@@ -87,10 +88,10 @@ shell's own layer:
 The lane that owns a fact sets it `mkDefault true` while it is on, so a host
 that flips it back off still wins. Every reader then reads the FACT — never the
 owning lane's own option, and never through one lane to reach another. That is
-the one place house rule 5 must hold in both directions at once: nucleus
-plumbing (`modules/nucleus/secrets.nix`) and sibling lanes alike need to know
+the one place house rule 5 must hold in both directions at once: the
+nucleus aggregation's members (`modules/dendrites/aoide-secrets.nix`) and sibling lanes alike need to know
 whether a session exists, and neither may name the lane that made one. A lane
-reading a fact is reading nucleus's own declaration rather than another
+reading a fact is reading the contract's own declaration rather than another
 module's internals; which of these names a *paint dendrite* may read is whatever
 `AGENTS.md` rule 5's list currently enumerates.
 
@@ -553,7 +554,7 @@ untracked both).
 `pkgs/` self-registers by the same walk `song/songbook/` still uses
 (`modules/` self-registers through the catalogue instead — one line per
 dendrite — and
-`modules/nucleus/` through its own `default.nix`). Drop
+`modules/nucleus/`, the option contract, through its own `default.nix`). Drop
 `pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
 nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
 four** consumers from one source:
@@ -947,7 +948,7 @@ count.
   refusing a managed or unwritable config, an unknown key, and an
   out-of-vocabulary value with a taught error apiece and nothing written in
   any of them. Nix is ONE authoring front-end
-  (`modules/nucleus/config.nix`, whole-file or nothing) that renders the
+  (`modules/dendrites/aoide-config.nix`, whole-file or nothing) that renders the
   file to a read-only store path and points `$AOIDE_CONFIG` at it — see
   §4's `config.toml` subsection below for the resolution order, the schema,
   and the intent-vs-state line.
@@ -1254,7 +1255,7 @@ main `shellbridge` service, `modules/dendrites/quickshell.nix`'s
 `aoide-quickshell` unit (the QML it starts execs `lyra`) and
 `modules/dendrites/lyra/default.nix`'s `aoide-rice-reload` unit (it runs `lyra
 reload`) — plus
-`modules/nucleus/aoided.nix`'s
+`modules/dendrites/aoided.nix`'s
 `environment.sessionVariables` (an operator's own interactive `lyra rice
 compose`) and that unit's own `Environment=` (so a restart after a switch
 picks up the new songbook instead of the login session's copy), itself gated on
@@ -1495,7 +1496,7 @@ YAML's implicit coercion and whitespace sensitivity are the opposite posture
 to the one a grants file needs. `pkgs.formats.toml` renders the nix side
 through the same format, so both worlds speak one schema.
 
-**Nix POINTS, never copies.** `modules/nucleus/config.nix`'s
+**Nix POINTS, never copies.** `modules/dendrites/aoide-config.nix`'s
 `aoide.config.settings` renders through `pkgs.formats.toml` to a read-only
 store path and `AOIDE_CONFIG` names it (exported into interactive shells via
 `environment.sessionVariables`, and into every aoide user unit via the user
@@ -5531,7 +5532,7 @@ pid, and the daemon's sweep signs whatever origin the row asserts —
 laundering a forged local class into a POSITIVE attestation, not merely
 detaching into unidentified. Both shapes are the one OQ1-A attacker;
 neither is closable without OQ1-B or an authenticated registration path.
-In the packaged cross-uid deployment (`modules/nucleus/secrets.nix` runs
+In the packaged cross-uid deployment (`modules/dendrites/aoide-secrets.nix` runs
 the broker as the `aoide-secrets` system user) the operator's daemon
 socket (`0600` inside their `0700` `$XDG_RUNTIME_DIR`) and their
 `state/stage/sessions.json` are both unreachable from the broker, so
@@ -7980,7 +7981,7 @@ session only; a spawn/infra failure on BOTH binaries backs off the retry
 cadence and is NEVER treated as a dismissal. `--popup` is refused up front
 when NEITHER `lyra` nor `zenity` resolves; `--popup`+`--json` together is
 a usage error. Deployed as the graphical-session USER unit
-`aoide-pair-watch.service` (`modules/nucleus/aoided.nix`), gated on
+`aoide-pair-watch.service` (`modules/dendrites/aoided.nix`), gated on
 `aoide.a2a.enable && aoide.a2a.pairingPopup` — the last of those DEFAULT FALSE
 (modules' own "flags default off" house rule): the unit exists whenever a2a is
 on, but the popup itself is opt-in on top of that, never assumed just because

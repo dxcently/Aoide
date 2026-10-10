@@ -31,7 +31,8 @@ files nobody selected stayed unread.
 | a machine | `example-host.nix` | `hosts/<host>/default.nix` | nothing — hosts are discovered; no `flake.nix` edit |
 | a headless machine | `example-host-headless.nix` | `hosts/<host>/default.nix` | same |
 | a person | `example-user.nix` | `users/<name>.nix` | attach from each host that wants them |
-| something every host gets | `example-nucleus-module.nix` | `modules/nucleus/<topic>.nix` | one import line in `modules/nucleus/default.nix` |
+| an option every module builds against | `example-nucleus-module.nix` | `modules/nucleus/<topic>.nix` | one import line in `modules/nucleus/default.nix` |
+| something every host gets | `example-dendrite.nix` | `modules/dendrites/<name>.nix` | one catalogue line, one member line in `modules/aggregations/nucleus/default.nix` |
 | a package nixpkgs lacks | `example-package.nix` | `pkgs/<name>/default.nix` | nothing — the package overlay provides `pkgs.<name>` |
 | a fix a capability needs everywhere | `example-override.nix` | `modules/overrides/<name>.nix` | nothing — discovery finds it; it applies where a target was selected |
 | a whole new tree | `example-default-registry.nix`, `example-default-aggregations.nix`, `example-default-overrides.nix` | `modules/default.nix`, `modules/aggregations/default.nix`, `modules/overrides/default.nix` | these three are the floor everything else plugs into |

@@ -3,8 +3,8 @@
 # Dendrite shape (CONTRACTS.md §2):
 #   - Guarded on aoide.mcfly.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
-#     see modules/aggregations/base/default.nix).
+#   - Enable with one line in hosts/ (the `nucleus` aggregation defaults it on —
+#     see modules/aggregations/nucleus/default.nix).
 #
 # What this dendrite does (ported verbatim from dxflake modules/dendrites/
 # mcfly.nix): programs.mcfly with vim key-scheme and fuzzy search. Bash

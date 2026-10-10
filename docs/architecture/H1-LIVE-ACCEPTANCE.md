@@ -73,7 +73,7 @@ If `home` is not a charter mesh yet, root it first
 
 None of this is a Nix option: core is configured by `config.toml`, charters
 and state, and `aoide.config.settings` is whole-file-or-nothing
-(`modules/nucleus/config.nix`). yomi-strix's Nix is unchanged.
+(`modules/dendrites/aoide-config.nix`). yomi-strix's Nix is unchanged.
 
 1. osaka: edit `$AOIDE_ROOT/charters/home.toml`. Change only these `address`
    values and leave every `key`, `age` and `grant` as printed:

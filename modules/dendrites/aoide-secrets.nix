@@ -1,4 +1,4 @@
-# modules/nucleus/secrets.nix — the secrets broker's own uid + system service.
+# modules/dendrites/aoide-secrets.nix — the secrets broker's own uid + system service.
 #
 # Workstream SECRETS, P-V4 (deployment; ~/.claude/plans/functional-singing-boole.md
 # "Workstream VAULT" section — still titled that in the plan's own
@@ -20,10 +20,9 @@
 # in `pkgs/aoide/crates/secrets/README.md`'s "Deployment" section instead —
 # this module is one packaging of that same binary, not a requirement of it.
 #
-# Off by default, gated on `aoide.secrets.enable` (nucleus itself carries no
-# `mkIf` guard on the whole file — same posture as the MCP façade/A2A door/
-# usage poller in `aoided.nix`, each gated on its own flag inside an
-# always-discovered file).
+# Off by default, gated on `aoide.secrets.enable` — same posture as the MCP
+# façade/A2A door/usage poller in `aoided.nix`, each gated on its own flag
+# inside a dendrite the `nucleus` aggregation selects.
 #
 # ── Division of labor: mode vs ownership ───────────────────────────────────
 # The broker (`broker::bind_socket`, P-V4 code change) chmods the socket file
@@ -45,7 +44,7 @@
 # all, and even where it did, a fast clean exit flipped a `BindsTo`d door
 # down with it (see that file's own comments). Two lessons land here on
 # purpose: this is a SYSTEM service (own uid, `/var/lib` home — a user unit
-# cannot run as a different uid without polkit gymnastics nucleus doesn't
+# cannot run as a different uid without polkit gymnastics this module doesn't
 # have), anchored to `multi-user.target` (no graphical-session dependency —
 # the secrets broker has no business caring whether a desktop session exists), and
 # `aoide secrets serve` BLOCKS forever on its accept loop (`broker::serve`'s
@@ -195,8 +194,8 @@ lib.mkMerge [
         ];
 
         # Modest hardening, mirroring aoided.nix's own idiom rather than a new
-        # style: NoNewPrivileges is the same blanket bit every other nucleus
-        # service sets. ProtectSystem=strict makes the rest of the filesystem
+        # style: NoNewPrivileges is the same blanket bit every other service of
+        # the `nucleus` aggregation sets. ProtectSystem=strict makes the rest of the filesystem
         # read-only to this unit (systemd auto-grants read-write back to
         # StateDirectory/RuntimeDirectory above, so the secrets home and socket
         # dir are unaffected) — justified because the broker's only writes are

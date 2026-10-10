@@ -9,7 +9,7 @@
 #   2. lib/aoideos.nix: a builder calling `mkDarwinHost` — nix-darwin's
 #      `darwinSystem` plus home-manager's and stylix's *darwinModules* instead
 #      of the nixosModules sets
-#   3. modules/nucleus: a launchd twin for the aoided/shellbridge user services
+#   3. modules/dendrites/aoided.nix: a launchd twin for the aoided/shellbridge user services
 #      (systemd.user.services → launchd.user.agents); `nixpkgs.hostPlatform`
 #      and `users.users.*.isNormalUser` are NixOS-only options
 #      that need a class split

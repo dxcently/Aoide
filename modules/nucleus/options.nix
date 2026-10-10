@@ -9,8 +9,9 @@
 # code review — `lib/checks.nix` has no check that inspects a lane's reads, as
 # rule 5 says.
 #
-# Discovered and applied unconditionally on every host (like dxflake's
-# nucleus — no mkIf guard). It declares options and eval-clean defaults only;
+# Applied unconditionally on every host as an extra module (no mkIf guard;
+# the services that act on these options are the `nucleus` aggregation's
+# members, not this file). It declares options and eval-clean defaults only;
 # it wires no behaviour, so an empty config evaluates cleanly.
 {
   lib,

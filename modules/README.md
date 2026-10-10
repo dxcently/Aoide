@@ -1,7 +1,7 @@
 # modules
 
 The AoideOS module tree: everything a host needs beyond the core flake's own
-`nixosModules.default`. Four directories — `nucleus/` (unconditional core),
+`nixosModules.default`. Four directories — `nucleus/` (the unconditional option contract),
 `dendrites/` (opt-in capabilities), and the two records read beside them,
 `aggregations/` (named groups of catalogue entries) and `overrides/`
 (capability-scoped fixes, applied to the hosts that selected the capability) —
@@ -18,10 +18,12 @@ the catalogue that names what can be selected.
   body imported at catalogue time. Habit's composition
   reads this record before any module graph exists and imports only what
   selection kept.
-- `nucleus/default.nix` — the unconditional core's aggregate. It names only the
+- `nucleus/default.nix` — the option contract's aggregate. It names only the
   files inside its own directory, and has no catalogue name to be found by.
   `lib/aoideos.nix` hands it to the constructor as an `extraModules` entry, and
-  `nixosModules.nucleus` exports it for a consumer's own `extraModules`.
+  `nixosModules.nucleus` exports it for a consumer's own `extraModules`. It
+  declares options and assertions and configures nothing; the services every
+  host carries are catalogue entries, members of the `nucleus` aggregation.
   Nothing imports the catalogue as a module.
 - A dendrite file is a plain module (CONTRACTS.md §2): its `aoide.<name>.*`
   options, its guard, and the flag set `lib.mkDefault true`, with its Home
@@ -36,15 +38,16 @@ omitted. `dendrites/` carries none: a dendrite's ONE line is its catalogue line,
 written in `LC_ALL=C` order, and the constructor imports the files selection
 kept.
 
-A new dendrite is a new file plus one catalogue line; a new nucleus
-module is a new file plus one line in its own directory's `default.nix`.
+A new dendrite is a new file plus one catalogue line (and one member line in
+`aggregations/nucleus` if every host carries it); a new contract file is a new
+file plus one line in `nucleus/default.nix`.
 Deleting both removes it without a trace elsewhere in the tree. `_`-prefix
 shelving is the same act short of the deletion: a `_`-prefixed file is never
 catalogued and never listed, so nothing imports it, and the `_` marks it as
 parked rather than deleted.
 
 That guarantee is scoped to the leaves relative to each other: the selected
-dendrites, the nucleus (an `extraModules` entry, which habit places after the
+dendrites, the contract (an `extraModules` entry, which habit places after the
 dendrites) and the host arrive as separate module-list entries, so a module that
 also defines an order-sensitive list option (`environment.systemPackages`, a
 `systemd.*` ordering list) interleaves with the tree's contributions at its own
@@ -57,7 +60,7 @@ draws around `song/`.
 
 ## What it consumes
 
-Nothing above itself. The catalogue plus the nucleus aggregate are the whole
+Nothing above itself. The catalogue plus the contract aggregate are the whole
 surface a host sees; the layers below never read from outside their own
 directory tree (root `AGENTS.md` house rule 5 is the one enumerated exception,
 for paint lanes reading `aoide.livery`/`aoide.arrangement`/`aoide.surfaces`

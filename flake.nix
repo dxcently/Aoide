@@ -236,7 +236,10 @@
       # by `nixosModules.nucleus` instead of being threaded through the
       # consumer's `specialArgs`.
       #
-      # `nixosModules` is the catalogue plus `nucleus`: one entry per catalogue
+      # `nixosModules` is the catalogue plus `nucleus` (the option contract; the
+      # services every host carries are catalogue entries — `aoided`,
+      # `aoide-secrets`, `melete-adapter`, `aoide-config`, `aoide-nix`,
+      # `aoide-packages` — a consumer selects from its own aggregation): one entry per catalogue
       # name, each the PATH this flake's own registry holds for that capability
       # (a plain module, or a provider set `{ providers.<p> = <path>; }`: what
       # the constructor's `registry.catalogue` takes — the same value, spelled

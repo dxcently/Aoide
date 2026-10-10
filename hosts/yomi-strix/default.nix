@@ -10,9 +10,9 @@
 { lib, pkgs, ... }:
 {
   # ── Aggregations ───────────────────────────────────────────────────────────
-  # base is the floor; desktop is the session's platform; agents is the coding
+  # nucleus is the floor; desktop is the session's platform; agents is the coding
   # agents a workstation runs; aoideos is the desktop itself, songs included.
-  habit.aggregation.base.enable = true;
+  habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
   habit.aggregation.agents.enable = true;
   habit.aggregation.aoideos.enable = true;
@@ -85,7 +85,7 @@
   zramSwap.enable = true;
 
   # ── Aoide ──────────────────────────────────────────────────────────────
-  # `aoide.enable` and `aoide.mcp.enable` are the `base` aggregation's, and
+  # `aoide.enable` and `aoide.mcp.enable` are the `nucleus` aggregation's, and
   # `aoide.song` is DERIVED from `habit.song.declared` by the
   # constructor's hook — none of the three is a line here.
   aoide.user = "khoa";

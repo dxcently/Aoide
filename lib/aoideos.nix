@@ -74,7 +74,8 @@ let
     stock = inputs.nixpkgs.legacyPackages.${system};
   };
 
-  # The nucleus module, as a CONSUMER takes it — and the ONE place Aoide's own
+  # The nucleus module (the option contract), as a CONSUMER takes it — and the
+  # ONE place Aoide's own
   # flake inputs reach a module evaluation.
   #
   # What a module reads is the module argument `aoideInputs`, and there are
@@ -150,7 +151,8 @@ in
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       overlays = [ overlay ];
 
-      # The nucleus module: core plumbing every host carries, selected by no one.
+      # The nucleus module: the option contract every host carries, selected by no
+      # one. The services are the `nucleus` aggregation's, which a host selects.
       extraModules = [ nucleusModule ];
 
       # The song fields a host module may set, and nothing else about songs.

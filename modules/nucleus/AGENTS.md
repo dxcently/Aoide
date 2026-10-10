@@ -2,83 +2,69 @@
 
 Points up to `modules/AGENTS.md` for the cross-module invariants (aggregate
 discipline, `_`-prefix shelving, the closed read whitelist) — this file
-covers only what's specific to nucleus.
+covers only what's specific to the contract.
 
 ## Invariants
 
-- **Discovered unconditionally — no `mkIf` guard.** Unlike a dendrite, a
-  nucleus file is not opt-in per host; it applies everywhere. A new nucleus
-  file is core plumbing, not a feature toggle.
+- **The contract declares and asserts; it never configures.** A file here
+  declares options or checks an invariant over them, applied unconditionally on
+  every host (no `mkIf` guard). A file that sets `environment.*`, `systemd.*`,
+  `nix.*` or any other platform option is a dendrite, a member of the `nucleus`
+  aggregation (`modules/aggregations/nucleus`), which a host can deselect. The
+  test for where a thing goes: *must it be present on a host that selected
+  nothing?* An option an unselected module may read: yes, here. Behaviour: no,
+  a member.
 - **`options.nix` is the one file every other module builds against.**
   Widening the read whitelist (`aoide.livery`/`aoide.arrangement`/
   `aoide.surfaces`) is a decision that touches root `AGENTS.md` house rule 5
   too — don't add a fourth namespace without updating both.
-- **Core options live in the core flake; nucleus declares only the paint
+- **Core options live in the core flake; the contract declares only the paint
   half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user`/
-  `sessionTarget` are
-  `pkgs/aoide/module/options.nix`'s contract now, pulled in by the nucleus module
-  (`lib/aoideos.nix`'s `nucleusModule`) — the one place that closes over Aoide's
-  own flake inputs, since neither a file here nor an `imports` list can read a
-  module argument that `_module.args` supplies. A new CORE
-  option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
+  `sessionTarget` are `pkgs/aoide/module/options.nix`'s contract now, pulled in
+  by the nucleus module (`lib/aoideos.nix`'s `nucleusModule`) — the one place
+  that closes over Aoide's own flake inputs, since neither a file here nor an
+  `imports` list can read a module argument that `_module.args` supplies. A new
+  CORE option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
   there, never here; a new PAINT option (livery, arrangement, surfaces, an
-  enable fact, a lane toggle) is added here, never there. A core door toggle whose unit
-  has not migrated yet (`mcp`, `a2a`, `usage`, `secrets`, `pairing`) stays
-  here beside its unit — core, not paint, just not yet relocated.
-- **Nucleus reads FACTS, never a lane's option.** The enable facts
-  (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`, each
-  defaulting `false`, `aoide.quickshell.config`, defaulting `null`, and
+  enable fact, a lane toggle) is added here, never there. A core door toggle
+  whose unit has not migrated yet (`mcp`, `a2a`, `usage`, `secrets`, `pairing`)
+  stays here beside the declaration of its siblings, and its unit is a member
+  dendrite (`aoided`, `aoide-secrets`).
+- **The contract reads FACTS, never a lane's option.** The enable facts
+  (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`, each defaulting
+  `false`, `aoide.quickshell.config`, defaulting `null`, and
   `aoide.wallpaper.provider` — the active provider's own name, defaulting
-  `"quickshell"`) are
-  declared here; the lane that owns one sets it with `mkDefault`. A nucleus file that needs to
-  know "is there a shell / a session here" reads the fact — never
-  `aoide.<name>.enable`, never a lane's own option. `aoide.sessionTarget` is the
-  same rule from the other side: it is core-declared
-  (`pkgs/aoide/module/options.nix`) and a painting lane sets it, so the unit
-  that anchors on it need not know which lane did.
-- **Nix authors runtime config; it never owns it (`config.nix`, task #135
-  P-C).** A CORE command's configuration lives in the portable runtime file
-  (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4) because core is
-  cargo-buildable on any Linux — `config.nix` renders that file to a
-  read-only store path and POINTS `AOIDE_CONFIG` at it, whole-file or
-  nothing. Don't add a NixOS option for a new core setting: add a
-  `config::SCHEMA` key in `aoide-storage` and let `aoide.config.settings`
-  carry it like every other key. And don't grow partial management (nix
-  owning one section, the CLI another) — two writers on one document is the
-  split-brain the point-don't-copy design exists to avoid.
+  `"quickshell"`) are declared here; the lane that owns one sets it with
+  `mkDefault`. A member dendrite or an assertion that needs to know "is there a
+  shell / a session here" reads the fact — never `aoide.<name>.enable`, never a
+  lane's own option. `aoide.sessionTarget` is the same rule from the other
+  side: it is core-declared (`pkgs/aoide/module/options.nix`) and a painting
+  lane sets it, so the unit that anchors on it need not know which lane did.
+- **An option a member sets or renders is declared here, not in the member.**
+  `aoide.config` is declared in `config-options.nix` and rendered by the
+  `aoide-config` dendrite: a consumer that deselects the member still evaluates a
+  host that sets `aoide.config.settings`, and `aoideOptions` lists the option
+  whether or not any host selects its renderer. A member file may declare
+  options of its own only when nothing outside it reads them.
 - **Changes here land by ordered lane, not by rice edit** (root `AGENTS.md`
   house rule 1 — a rice agent writes only `song/songbook/<song>/`; everything
   outside `song/`, this directory included, changes only on a lane the User
-  ordered, with that lane's scope named). A rice agent proposing a nucleus
+  ordered, with that lane's scope named). A rice agent proposing a contract
   change writes the diff and gets it reviewed/merged the normal way, same as
   any other core-structure change.
-- **`aoide.mail.adapter` has `enable` and `port` and must never grow a bind
-  option.** `aoide mail serve` binds `127.0.0.1` as a constant
-  (`pkgs/aoide/crates/server/AGENTS.md`), so the unit passes only the port.
-  The unit is ordered and restarted like `aoide-a2a` (`wantedBy`/`after`/
-  `bindsTo` `aoided.service`, `Restart=on-failure`, `RestartSec=5s`). A relay's
-  front targets `aoide.mail.adapter.port` and never `aoide.a2a.port`: an
-  unsigned loopback request that reaches the door is conduct.
-- **A user unit gets no polkit session.** Anything spawned from a
-  `systemd.user.services.*` here lands outside `session-N.scope`, so polkit
-  resolves no session for it and `allow_active` never fires — the action
-  falls through to `allow_any` and is refused for want of interactive auth.
-  A privileged action reached that way needs an explicit
-  `security.polkit.extraConfig` rule keyed on `config.aoide.user`, declared
-  in the same file as the unit (`modules/dendrites/lyra/shellbridge.nix` and
-  its power actions).
-  `pkcheck --action-id <id> --process <pid>` is the check: exit 0 is
-  authorized, exit 2 is the refusal.
 
 ## Extension points
 
-- **A new piece of core plumbing** (a new always-on service, a new option
-  namespace) is a new file here, following the existing pattern: a header
-  comment stating scope and what it reads, `mkOption`/`mkEnableOption` as
-  needed, plus one line in `default.nix`.
+- **A new option namespace** is a new file here, following the existing
+  pattern: a header comment stating scope and what it reads, `mkOption`/
+  `mkEnableOption`, plus one line in `default.nix`.
+- **A new always-on service** is not a file here: it is a dendrite, a
+  catalogue line and one member line in `modules/aggregations/nucleus/default.nix`
+  (`modules/dendrites/AGENTS.md`, "The nucleus members").
 
 ## Docs update required in the same commit
 
-- This `README.md` when a new nucleus file or option namespace is added.
+- This `README.md` when a new contract file or option namespace is added, or a
+  member of the `nucleus` aggregation is added or removed.
 - `CONTRACTS.md` — the livery schema when `options.nix`'s livery contract
   changes shape, §0 when the enable facts or `aoide.quickshell.config` do.

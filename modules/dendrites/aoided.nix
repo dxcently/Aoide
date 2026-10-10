@@ -1,4 +1,4 @@
-# modules/nucleus/aoided.nix — the AoideOS deltas for the aoided unit.
+# modules/dendrites/aoided.nix — the AoideOS deltas for the aoided unit.
 #
 # `pkgs/aoide/module/aoided.nix` owns the tmpfiles rules, the core session
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).

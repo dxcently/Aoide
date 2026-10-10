@@ -16,7 +16,7 @@
 #   - Runs the Melete harness as a systemd service, guarded by
 #     ConditionPathExists so it never crash-loops before deployment.
 #
-# Composition with modules/nucleus/melete-adapter.nix (NOT a duplicate):
+# Composition with modules/dendrites/melete-adapter.nix (NOT a duplicate):
 #   The nucleus adapter (aoide-melete-adapter.service) is the neutral-bus →
 #   Melete translation layer; it always runs when aoide.enable is set and only
 #   DISPATCHES jobs to Melete. THIS dendrite runs Melete ITSELF (the harness the

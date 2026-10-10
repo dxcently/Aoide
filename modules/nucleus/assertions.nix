@@ -7,7 +7,7 @@
 # selection (which says nothing about a hand-set option) and lands here, where the platform
 # knows.
 #
-# It reads only what nucleus is allowed to read (root AGENTS.md house rule 5):
+# It reads only what the contract is allowed to read (root AGENTS.md house rule 5):
 # the identity scalar `aoide.song` and the lane facts
 # `modules/nucleus/options.nix` declares. It declares nothing itself, so it
 # adds no option, no unit and no package — a host that trips nothing evaluates

@@ -46,7 +46,9 @@
       registry = {
         # `lib.catalogue` is the bulk view of the same paths
         # `aoide.nixosModules.<name>` spells one name at a time; `nucleus` is
-        # not a catalogue entry and is passed below as an extra module.
+        # not a catalogue entry and is passed below as an extra module: the
+        # option contract, with the services left to the consumer's own
+        # `nucleus` aggregation.
         catalogue = aoide.lib.catalogue;
         aggregations = import ./aggregations;
         overrides = { };

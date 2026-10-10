@@ -532,7 +532,7 @@ assumption:
 `flake.nix` (this repo) is the seam a consumer builds AoideOS against, and it is
 consumed ONLY through these outputs — never through a path into this tree, which
 is the reach-in the table below retires. `tests/consumer/` is the fixture that
-proves it: a stranger's flake handing over the nucleus module, selecting the shell, the songs and
+proves it: a stranger's flake handing over the nucleus module (the option contract), selecting the aoide services from its own `nucleus` aggregation, the shell, the songs and
 the theme, whose only inputs besides nixpkgs are home-manager and Aoide, with one
 host performing from its own songbook and one performing Aoide's `sonata`.
 
@@ -540,8 +540,9 @@ host performing from its own songbook and one performing Aoide's `sonata`.
 flake.nix
 ├── nixosModules.nucleus      the nucleus module: the ONE module that closes over
 │                             Aoide's own flake inputs and hands them to every
-│                             dendrite as `aoideInputs`; a consumer passes it
-│                             in `extraModules`
+│                             dendrite as `aoideInputs`, and declares the option
+│                             contract; a consumer passes it in `extraModules`
+│                             and selects the services by catalogue name
 ├── nixosModules.<name>       ONE per catalogue name (`modules/default.nix`),
 │                             each that capability's PATH — `import`ing it
 │                             yields the dendrite's plain module (or, for a

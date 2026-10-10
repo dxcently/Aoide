@@ -90,6 +90,47 @@ covers only what's specific to dendrites.
 - **`hosts/` knows dendrites; dendrites never know hosts.** No
   host-conditional logic inside a dendrite file itself.
 
+## The nucleus members
+
+`aoided`, `aoide-secrets`, `melete-adapter`, `aoide-config`, `aoide-nix` and
+`aoide-packages` are members of the `nucleus` aggregation. The rules below bind
+them in addition to the ones above.
+
+- **Nix authors runtime config; it never owns it (`aoide-config.nix`).** A CORE
+  command's configuration lives in the portable runtime file
+  (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4) because core is cargo-buildable on
+  any Linux — `aoide-config.nix` renders that file to a read-only store path and
+  POINTS `AOIDE_CONFIG` at it, whole-file or nothing. Don't add a NixOS option
+  for a new core setting: add a `config::SCHEMA` key in `aoide-storage` and let
+  `aoide.config.settings` carry it like every other key. And don't grow partial
+  management (nix owning one section, the CLI another) — two writers on one
+  document is the split-brain the point-don't-copy design exists to avoid.
+- **A member reads the contract, never another member.** `aoided` and
+  `melete-adapter` order against `aoided.service`, a unit the core module
+  defines; none reads another member's option or config, so a host may deselect
+  any one of them and still evaluate (checked by deselecting each in turn on
+  `hosts/yomi-strix`). An option a member renders for a consumer to set is
+  declared in the contract (`modules/nucleus`), not in the member.
+- **`aoide.mail.adapter` has `enable` and `port` and must never grow a bind
+  option.** `aoide mail serve` binds `127.0.0.1` as a constant
+  (`pkgs/aoide/crates/server/AGENTS.md`), so the unit passes only the port. The
+  unit is ordered and restarted like `aoide-a2a` (`wantedBy`/`after`/`bindsTo`
+  `aoided.service`, `Restart=on-failure`, `RestartSec=5s`). A relay's front
+  targets `aoide.mail.adapter.port` and never `aoide.a2a.port`: an unsigned
+  loopback request that reaches the door is conduct.
+- **A user unit gets no polkit session.** Anything spawned from a
+  `systemd.user.services.*` here lands outside `session-N.scope`, so polkit
+  resolves no session for it and `allow_active` never fires — the action falls
+  through to `allow_any` and is refused for want of interactive auth. A
+  privileged action reached that way needs an explicit
+  `security.polkit.extraConfig` rule keyed on `config.aoide.user`, declared in
+  the same file as the unit (`lyra/shellbridge.nix` and its power actions).
+  `pkcheck --action-id <id> --process <pid>` is the check: exit 0 is authorized,
+  exit 2 is the refusal.
+- **A new always-on service** is a dendrite plus its catalogue line and one
+  member line in `modules/aggregations/nucleus/default.nix`, not a file in
+  `modules/nucleus`.
+
 ## Extension points
 
 - **A new dendrite**: a new plain-module file here, and one line in

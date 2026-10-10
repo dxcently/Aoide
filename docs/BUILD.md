@@ -26,10 +26,13 @@ nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 every dendrite once by the name a host selects it with. `modules/nucleus/default.nix`
 names its own files, one line per file, in `LC_ALL=C` order. To add a capability, drop a
 file in the right layer and add its one line — the catalogue for a dendrite, that
-layer's own `default.nix` for a nucleus module:
+layer's own `default.nix` for a contract file:
 
-- `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
-- `modules/dendrites/` — opt-in features, guarded on a flag.
+- `modules/nucleus/` — the option contract, applies unconditionally (no `mkIf`):
+  options and assertions, nothing that configures the platform.
+- `modules/dendrites/` — opt-in features, guarded on a flag. What every host
+  carries (the daemon's units, the nix settings, the binaries, the command line)
+  is a dendrite too, a member of the `nucleus` aggregation.
 - a paint lane is a dendrite like any other (`compositor`, `greeter`, `stylix`,
   `lyra`) — see **Authoring a paint lane** below.
 
@@ -94,7 +97,7 @@ exec or spawn `lyra` —
 `modules/dendrites/quickshell.nix`'s `aoide-quickshell` unit (the QML it
 starts execs `lyra`), `modules/dendrites/lyra/default.nix`'s
 `aoide-rice-reload` unit (it runs `lyra reload`) — and
-`modules/nucleus/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
+`modules/dendrites/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
 `aoide.lyra.enable`, never the core-only units that exec plain
 `aoide` (a headless core carries no `pkgs.lyra-songbook` closure). Each unit
 spells it in its OWN `Environment=` as well as inheriting the login copy:
