@@ -631,9 +631,8 @@ in the message.
   file's job. No reply channel on the connection means no dispatch at all.
   The audit line carries only the action name and status, never an
   argument value. The accept loop gives every connection its own thread,
-  with no read timeout added: a client is allowed to idle (the bar's own
-  shared socket does, between human gestures), and one that does must
-  never starve another's.
+  with no read timeout added: a client is allowed to idle, and one that
+  does must never starve another's.
 - **`normalize_addr` is `pub`, not `pub(crate)`, on purpose** — `screen`
   reaches it directly rather than duplicating it. Don't narrow it back
   without checking that dependency first.
