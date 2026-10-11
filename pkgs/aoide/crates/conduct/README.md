@@ -174,7 +174,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   the same accounting `server/README.md`'s G8 line holds for `send`, and a
   daemon that stamps no pid means NO parent claim and NO ancestry stamp — never
   `std::process::id()`, which daemon-side is `aoided`, and systemd's tree is not
-  the agent's. `hookAncestry` is landed from `pid_ancestry(door_pid)` at
+  the agent's. `hookAncestry` is landed from the harness chain of `door_pid`
+  (`window::hook_chain`: the walk past shells and forwarding launchers, refused at a
+  window owner) at
   registration (a SessionStart, or the first hook event of an unknown id), when
   a window is first bound, and when a per-turn hook heals a stale chain
   (`chain_is_stale`, with or without a compositor), for the same reason. Window discovery walks the same door
@@ -569,13 +571,28 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   bind lands the door's chain in the same write, gated by `ancestry_may_move`.
   That same per-turn call heals a stale stored chain (`chain_is_stale`): when the
   record holds no live process of its own outside the hook's chain, and the
-  chain brings a live harness the stored one lacks (the hook and shell pids do
-  not count), the hook's chain lands in one locked write, whether or not a bind
-  happens. The heal needs no compositor (`ensure_session_window` is gated on the
+  chain brings a live harness the stored one lacks (both chains start at the
+  harness, so the hook and shell pids are never in them), the hook's chain lands in
+  one locked write, whether or not a bind happens. The heal needs no compositor (`ensure_session_window` is gated on the
   record not being windowless by lineage and on nothing else); the bind does,
   because `discover_window_from` answers nothing without
   `HYPRLAND_INSTANCE_SIGNATURE`. A live stored chain is never rewritten per turn.
-  The skipped pids are `session_store::hook_invocation_pids(profile, capture_shell)`: `1 + AgentProfile.hook_shell_layers` on a plain install (Claude's has one shell layer, kimi-code's and pi's none), and `1 + CAPTURE_SHELL_LAYERS` (1) under `--capture-shell`, the flag the `hooks install --capture` wrap renders into each command. A hook that is a direct child of its harness heals it only under a profile that counts no shell layer (`a_direct_child_hook_heals_its_harness_at_depth_one`, `a_direct_child_hook_heals_through_its_profiles_count`). A stored chain whose pids are dead is replaced by the next per-turn hook from its live harness, whatever wrote it. Tab-shell residual: a tab shell beneath the owner binds the window, but the heal is blocked while that shell lives outside the new chain (`lives_apart`).
+  No shell layer is counted anywhere: the harness walk (`window::hook_chain`) skips
+  every shell and forwarding launcher above the hook, whatever wrap ran it, so a
+  hook that is a direct child of its harness and one behind a compound `sh -c` or a
+  capture pipeline read the same harness. A bound turn whose stored chain is live walks
+  without the compositor and asks it nothing (`a_bound_turn_with_a_live_stored_chain_never_asks_the_compositor`).
+  The owner check runs before the plumbing verdict. A hook whose walk meets a window owner
+  before any harness has no harness, a shell owner included: it moves no chain and binds no
+  window (`a_hand_run_hook_under_a_window_owner_binds_nothing`,
+  `a_shell_that_owns_a_window_ends_the_walk_with_no_harness`). With no client list (the
+  compositor cannot be read), no owner check runs.
+  Two residuals. A hand-run hook under an `aoide conduct` wrap or a multiplexer server (tmux,
+  screen) takes that process as its harness and binds the window it sits under, since the
+  plumbing list names shells and forwarding launchers only. A hook behind `timeout`,
+  `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its harness and binds the
+  same window, and its stored chain heals once per turn, since each turn's launcher is a
+  new pid: `program_is_a_shell` reads those names, the plumbing list does not. A stored chain whose pids are dead is replaced by the next per-turn hook from its live harness, whatever wrote it. Tab-shell residual: a tab shell beneath the owner binds the window, but the heal is blocked while that shell lives outside the new chain (`lives_apart`).
   A pid-less hosted session (the hook-only shape) binds through its stored
   `hookAncestry` in `resolve_pending_session_windows` (`window_for_hook_chain`):
   the nearest chain pid that owns a client is the owner, and the session binds

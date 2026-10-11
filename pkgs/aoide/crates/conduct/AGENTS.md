@@ -780,7 +780,7 @@ in the message.
   belongs to `aoided`, and a daemon launched from inside a conducted session
   would hand every hook-registered child that session as its parent. Do not
   stamp `hookAncestry` from `std::process::id()` either — use
-  `window::hook_ancestry(door_pid)`, for the same reason — and do not give a
+  `window::hook_chain(door_pid)`, for the same reason — and do not give a
   `hook_pid: None` arm a fallback pid: no pid means `Unclaimed` and no stamp.
 - **The undying transfer is one `save_undying` call, never two.**
   `resurrect.rs`'s `resurrect_one` adds the new id and drops the old one in
@@ -1513,8 +1513,15 @@ in the message.
   time "to simplify" — the whole point is the operator finds out BEFORE the
   undying set is relied on, not after a later resurrect silently restores
   nothing.
-- **`hookAncestry` is the chain of the latest registration, bind or heal, and it
-  moves only where `session_store::ancestry_may_move` allows.** It lands
+- **`hookAncestry` is the chain of the latest registration, bind or heal, starts at
+  the hook's harness, and moves only where `session_store::ancestry_may_move` allows.**
+  `window::hook_chain` walks up from the hook's parent past every process whose
+  argv[0] basename is a shell or a forwarding launcher (`conduct`'s
+  `is_invocation_plumbing`, reading the lists `SHELL_BASENAMES` and
+  `FORWARDING_LAUNCHERS` in `conduct.rs`) and takes the first other process as the
+  harness. A process that owns a compositor client ends the walk with no harness, and
+  so does the end of the chain: the door then moves no chain and binds no window. An
+  unreadable pid counts as plumbing. It lands
   in the same locked write as three events: the registration
   (`do_hook_session_start`), a first window bind (`ensure_session_window`), and
   a per-turn heal (`ensure_session_window` again, through
@@ -1530,14 +1537,32 @@ in the message.
   The heal (`chain_is_stale`) is stricter than registration. It fires only on a
   dead→live transition: the record has a stored chain and no pid of its own (its
   pid or a stored chain pid) is alive outside the hook's chain (`lives_apart`), and
-  the hook's chain holds a live harness the stored one lacks. The skipped pids are the
-  invocation's own, the hook process and the shell layers it dies with, counted by
-  `session_store::hook_invocation_pids(profile, capture_shell)`: `1 + AgentProfile.hook_shell_layers`
-  on a plain install, `1 + CAPTURE_SHELL_LAYERS` (1) under `--capture-shell`. `hooks install --capture`
-  renders that flag into every hook command, and the door reads it off its own invocation. Under the
-  capture wrap the pipeline's shell is the one layer above the hook: each harness's own `sh -c` execs
-  the pipeline in place. Claude's profile has one shell layer, so its hook is `[hook, sh, harness, …]` (the hook command `a=$(command -v aoide) || exit 0; "$a" session hook …; exit 0` keeps `sh` as the parent). kimi-code's and pi's have none: kimi's shape is measured under `sh -c` on this box, and its harness spawn call site is unverified; pi spawns directly. `commands/hooks.rs`'s `the_rendered_hook_commands_match_their_invocation_depth` pins the depth and the `--capture-shell` flag of each rendered command, rendering each through `door_command`, and `send.rs`'s `a_capture_wrapped_door_skips_the_pipeline_shell_above_its_hook` pins the door's reading of the flag. Codex has no profile in this tree, so its shape is unpinned. A hook that is a direct child of its harness heals it only under a profile that counts no shell layer (`a_direct_child_hook_heals_its_harness_at_depth_one`, `a_direct_child_hook_heals_through_its_profiles_count`). The heal
-  runs with or without a compositor; only the bind needs one. The window owner
+  the hook's chain holds a live harness the stored one lacks. Both chains start at
+  the harness, so no shell layer is counted: the heal reads the same way under a
+  direct child, a compound `sh -c`, an exec-in-place `sh -c` and a capture pipeline
+  (`window.rs`'s `a_direct_child_hook_finds_its_harness_at_once`,
+  `a_hook_under_a_compound_sh_c_finds_its_harness_past_the_shell`,
+  `a_hook_under_an_exec_in_place_sh_c_finds_its_harness` and
+  `a_capture_pipeline_hook_finds_its_harness_past_the_pipeline_shell` pin the four).
+  The heal runs with or without a compositor; only the bind needs one. A bound turn
+  whose stored chain is live walks without the compositor and asks it nothing:
+  `ensure_session_window` reads `j/clients` only once a bind or a heal is wanted
+  (`a_bound_turn_with_a_live_stored_chain_never_asks_the_compositor`). The owner check runs
+  before the plumbing verdict: a hook whose walk meets a window owner before any harness has
+  no harness, a shell owner included, and binds nothing. With no client list (`hyprctl_clients`
+  is `None`: off Hyprland, or an unreadable request socket) no owner check runs
+  (`a_hand_run_hook_under_a_window_owner_binds_nothing`,
+  `a_shell_that_owns_a_window_ends_the_walk_with_no_harness`). Two residuals. A hand-run
+  hook under an `aoide conduct` wrap or a multiplexer server takes that process as its
+  harness and binds the window it sits under, since the plumbing list names shells and
+  forwarding launchers only. A hook behind `timeout`, `script`, `nix`, `su`, `doas` or
+  `sudo` takes that launcher as its harness and binds the same window, and its stored chain
+  heals once per turn, since each turn's launcher is a new pid (`program_is_a_shell` reads
+  those names, the plumbing list does not). Making the wrap or the server plumbing is a new
+  entry in `conduct.rs`'s lists, which changes the verdict every reader of
+  `is_invocation_plumbing` gets. Adding `timeout` to `FORWARDING_LAUNCHERS` is not a
+  one-line change: its duration is positional, and `program_is_a_shell`'s `timeout` arm
+  exists so a bare number is not read as an option. The window owner
   and systemd stay alive while any sibling runs, so their liveness is not
   evidence of the record's own process. Its consequence: a live stored chain is
   never rewritten by a per-turn hook, and no write happens per turn. Two readers

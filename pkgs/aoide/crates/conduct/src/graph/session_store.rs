@@ -165,44 +165,22 @@ pub(in crate::graph) fn ancestry_may_move(
         }
 }
 
-/// The shell layers the `--capture` wrap adds above the hook process: the one
-/// `sh -c 'tee … | aoide …'` that runs the pipeline. Measured per harness by
-/// `commands/hooks.rs`'s `the_rendered_hook_commands_match_their_invocation_depth`.
-const CAPTURE_SHELL_LAYERS: usize = 1;
-
-/// The leading pids of a hook door's chain that belong to one invocation: the
-/// `aoide` hook process itself, and each shell layer its harness runs the command
-/// under. They die with the invocation, so none of them is evidence of a live harness.
-/// A plain install's layers are [`AgentProfile::hook_shell_layers`]: Claude's chain is
-/// `[hook, sh, harness, …]`, so its harness sits at index 2, and kimi's and pi's are
-/// `[hook, harness, …]`, so theirs sit at index 1. A `--capture` install
-/// (`capture_shell`, the `--capture-shell` flag) runs the hook under one `sh -c 'tee … | aoide …'`
-/// pipeline: the harness's own `sh -c` execs that pipeline in place, so the one layer above the
-/// hook is the pipeline's `sh` (measured for Claude and kimi, `commands/hooks.rs`). Both the CLI arm and
-/// the daemon arm walk the same shape, since the daemon's door pid is the hook process.
-pub(crate) fn hook_invocation_pids(profile: &AgentProfile, capture_shell: bool) -> usize {
-    1 + if capture_shell { CAPTURE_SHELL_LAYERS } else { profile.hook_shell_layers }
-}
-
-/// Is `rec`'s stored `hookAncestry` stale against `chain`, the chain of a live
-/// per-turn hook? Stale means the record holds no live process of its own outside
-/// `chain` ([`lives_apart`] is false), and `chain` carries a live harness the stored
-/// chain does not hold. The first `invocation_pids` pids of `chain` never count, so a
-/// stored chain that already holds its live harness is not stale: its hook and shell
-/// pids are dead by the next invocation. The shared far ancestors (the window owner,
-/// systemd) are alive while any sibling runs, so their liveness is not evidence
-/// either: only a process of the record's own, outside the new chain, holds it live.
+/// Is `rec`'s stored `hookAncestry` stale against `chain`, the harness chain of a live
+/// per-turn hook ([`super::window::hook_chain`])? Stale means the record holds no live
+/// process of its own outside `chain` ([`lives_apart`] is false), and `chain` carries a
+/// live harness the stored chain does not hold. A chain starts at its harness, so the
+/// hook process and its shell layers are never in it. The shared far ancestors (the
+/// window owner, systemd) are alive while any sibling runs, so their liveness is not
+/// evidence either: only a process of the record's own, outside the new chain, holds it live.
 pub(in crate::graph) fn chain_is_stale(
     rec: &SessionRecord,
     chain: &[i32],
-    invocation_pids: usize,
     alive: impl Fn(u32) -> bool,
 ) -> bool {
     !rec.hook_ancestry.is_empty()
         && !lives_apart(rec, chain, None, &alive)
         && chain
             .iter()
-            .skip(invocation_pids)
             .any(|&p| !rec.hook_ancestry.contains(&p) && u32::try_from(p).is_ok_and(&alive))
 }
 
@@ -1880,7 +1858,6 @@ pub fn session_end(inv: &Invocation) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_protocol::agents::{CLAUDE_PROFILE, PI_PROFILE};
     use crate::graph::model::merged_sessions;
     use crate::graph::testutil::*;
     use crate::graph::manage::{project_add, view};
@@ -2296,11 +2273,6 @@ mod tests {
         move |p| pids.contains(&p)
     }
 
-    /// The invocation pids of Claude's hook shape, derived from its profile.
-    fn claude_pids() -> usize {
-        hook_invocation_pids(&CLAUDE_PROFILE, false)
-    }
-
     #[test]
     fn desktop_siblings_live_apart_are_never_superseded() {
         // Two headless claudes under one app (867785, under systemd 1454). The
@@ -2390,14 +2362,13 @@ mod tests {
     fn a_stale_chain_with_only_dead_pids_heals_and_a_live_chain_is_never_rewritten() {
         // The record's harness exited: every stored pid is dead.
         let stale = hosted("all-dead", &[DEAD, DEAD + 1, DEAD + 2], None);
-        let first = [DEAD + 3, DEAD + 4, 500, 600, 700];
-        assert!(chain_is_stale(&stale, &first, claude_pids(), live(&[500, 600, 700])));
-        // Healed: the next turn from the same harness, with new hook and shell pids,
-        // finds the stored chain live and leaves it alone.
+        let first = [500, 600, 700];
+        assert!(chain_is_stale(&stale, &first, live(&[500, 600, 700])));
+        // Healed: the next turn from the same harness finds the stored chain live and
+        // leaves it alone.
         let mut healed = stale.clone();
         healed.hook_ancestry = first.to_vec();
-        let next = [DEAD + 5, DEAD + 6, 500, 600, 700];
-        assert!(!chain_is_stale(&healed, &next, claude_pids(), live(&[500, 600, 700])));
+        assert!(!chain_is_stale(&healed, &first, live(&[500, 600, 700])));
     }
 
     #[test]
@@ -2405,15 +2376,15 @@ mod tests {
         // The desktop shape: the record's harness (DEAD+2) is dead, the window owner
         // (867785) and systemd (1454) are alive, and the live harness 1137986 runs
         // under the owner but was never recorded.
-        let stale = hosted("stale", &[DEAD, DEAD + 1, DEAD + 2, 867785, 1454], None);
-        let hook_chain = [DEAD + 3, DEAD + 4, 1137986, 867785, 1454];
+        let stale = hosted("stale", &[DEAD + 2, 867785, 1454], None);
+        let harness_chain = [1137986, 867785, 1454];
         let alive = live(&[1137986, 867785, 1454]);
-        let sibling = [DEAD + 5, DEAD + 6, 1651171, 867785, 1454];
+        let sibling = [1651171, 867785, 1454];
         let sibling_alive = live(&[1137986, 1651171, 867785, 1454]);
         assert!(superseded_by(&stale, &sibling, None, &sibling_alive), "unhealed, the sibling retires it");
-        assert!(chain_is_stale(&stale, &hook_chain, claude_pids(), &alive));
+        assert!(chain_is_stale(&stale, &harness_chain, &alive));
         let mut healed = stale.clone();
-        healed.hook_ancestry = hook_chain.to_vec();
+        healed.hook_ancestry = harness_chain.to_vec();
         assert!(!superseded_by(&healed, &sibling, None, &sibling_alive));
     }
 
@@ -2421,47 +2392,20 @@ mod tests {
     fn a_live_pid_of_the_records_own_outside_the_new_chain_blocks_the_heal() {
         // Anchored to a live pid of its own (555), which the new chain does not hold.
         let anchored = hosted("anchored", &[DEAD, DEAD + 1, DEAD + 2, 700], Some(555));
-        assert!(!chain_is_stale(&anchored, &[800, 801, 900, 700], claude_pids(), live(&[555, 700, 900])));
+        assert!(!chain_is_stale(&anchored, &[900, 700], live(&[555, 700, 900])));
         // A live process of the stored chain outside the new chain blocks it too.
         let held = hosted("held", &[DEAD, 555, 700], None);
-        assert!(!chain_is_stale(&held, &[800, 801, 900, 700], claude_pids(), live(&[555, 700, 900])));
+        assert!(!chain_is_stale(&held, &[900, 700], live(&[555, 700, 900])));
     }
 
     #[test]
     fn a_chain_brings_no_heal_without_a_live_harness_of_its_own() {
-        // Only the hook's own pids and the shared owner are alive: nothing to record.
+        // Only the shared owner is alive and recorded: nothing new to record.
         let stale = hosted("stale", &[DEAD, DEAD + 1, DEAD + 2, 700], None);
-        assert!(!chain_is_stale(&stale, &[800, 801, 700], claude_pids(), live(&[800, 801, 700])));
+        assert!(!chain_is_stale(&stale, &[700], live(&[700])));
         // A record with no stored chain follows registration, never this rule.
         let fresh = hosted("fresh", &[], None);
-        assert!(!chain_is_stale(&fresh, &[800, 801, 900], claude_pids(), live(&[900])));
-    }
-
-    /// Claude's hook shape, `[hook, sh, harness, owner, init]`: the harness sits
-    /// past the two invocation pids, and a stale record heals onto it.
-    #[test]
-    fn claudes_hook_shape_heals_its_harness_at_depth_two() {
-        let stale = hosted("claude", &[DEAD, DEAD + 1, DEAD + 2, 867785, 1454], None);
-        let chain = [DEAD + 3, DEAD + 4, 1137986, 867785, 1454];
-        assert!(chain_is_stale(&stale, &chain, claude_pids(), live(&[1137986, 867785, 1454])));
-    }
-
-    /// A direct-child hook, `[hook, harness, owner, init]` (pi's `spawn`, kimi's
-    /// `sh -c` exec): the harness sits at depth one and the heal lands on it. Before
-    /// the heal a same-depth sibling retires the live record; after it, the record
-    /// survives.
-    #[test]
-    fn a_direct_child_hook_heals_its_harness_at_depth_one() {
-        let stale = hosted("direct", &[DEAD, DEAD + 1, 867785, 1454], None);
-        let chain = [DEAD + 3, 1137986, 867785, 1454];
-        let alive = live(&[1137986, 867785, 1454]);
-        assert!(chain_is_stale(&stale, &chain, hook_invocation_pids(&PI_PROFILE, false), &alive));
-        let sibling = [DEAD + 5, 1651171, 867785, 1454];
-        let sibling_alive = live(&[1137986, 1651171, 867785, 1454]);
-        assert!(superseded_by(&stale, &sibling, None, &sibling_alive), "unhealed, the sibling retires it");
-        let mut healed = stale.clone();
-        healed.hook_ancestry = chain.to_vec();
-        assert!(!superseded_by(&healed, &sibling, None, &sibling_alive));
+        assert!(!chain_is_stale(&fresh, &[900], live(&[900])));
     }
 
     /// A chainless, pid-less record names no process, so a same-window sibling does

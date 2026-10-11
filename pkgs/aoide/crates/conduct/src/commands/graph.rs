@@ -161,7 +161,6 @@ pub fn register(r: &mut Registry) {
             args: [],
             flags: [
                 flag!("agent", "string", "Agent harness the payload comes from: claude (default), kimi, or pi."),
-                flag!("capture-shell", "bool", "Set by `hooks install --capture`: the command runs under its sh -c 'tee | aoide' wrap, so the hook's invocation depth counts that shell layer."),
             ],
             gated: false,
             implemented: true,

@@ -38,8 +38,9 @@ full node id or the bare id.
   nested terminal gets it stamped directly at spawn (`--parent
   "$AOIDE_SESSION_ID"`); a hook-registered session with no explicit parent
   instead resolves one automatically: its self-first `/proc` ancestry
-  (`hookAncestry`, landed at registration: a SessionStart, or the first hook
-  event of an unknown id, and healed by the next per-turn hook when stale) is
+  (`hookAncestry`, the chain from the harness up, landed at registration: a
+  SessionStart, or the first hook event of an unknown id, and healed by the next
+  per-turn hook when stale) is
   intersected against every live agent-kind session's own `hookAncestry`, and
   the closest
   matching ancestor wins as parent (CONTRACTS.md §4). A harness that reports
@@ -440,7 +441,13 @@ as a child of an app or terminal process, and that process owns the window.
 Two paths bind its `windowAddress`, and neither ever stamps the owner's pid on
 the session. The hook door walks the process it was given (this process on the
 CLI arm, the kernel-attested peer pid on the daemon arm), and it takes the window,
-its workspace, and that process's chain, never a pid. The window sweep ([[shellbridge]], on window events)
+its workspace, and the chain from that process's harness up (shells and launchers
+skipped), never a pid. The owner check runs before the plumbing verdict: a hook whose walk
+meets a window owner before any harness, a shell owner included, binds nothing. With no
+client list (off Hyprland, or an unreadable request socket) no owner check runs. Two residuals: a hand-run hook under an `aoide conduct` wrap
+or a multiplexer server takes that process as its harness and binds the window under it; a
+hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its
+harness and binds the same window, and its chain heals once per turn. The window sweep ([[shellbridge]], on window events)
 binds a pid-less record through its stored `hookAncestry`: the nearest chain
 pid that owns a window is the owner, and the record binds only while a process
 of its own chain, a tab shell included, stands beneath that owner right now. A chain whose processes have all exited binds nothing. The next per-turn hook from a resumed harness replaces a stale chain with its own, and the record binds on that turn. A per-turn hook heals a stored chain whose pids are dead, whatever wrote it. Tab-shell residual: a chain whose tab shell stands beneath the owner binds the window, but its heal is blocked while that shell lives outside the hook's chain, so it stays stale until the shell exits. Because nothing stamps the owner's pid, the seal never collides on

@@ -162,9 +162,7 @@ pub use self::view::session_watch;
 // shape exists to drift from the rendered one.
 pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
-pub use self::send::{CAPTURE_SHELL_FLAG, DAEMON_PEER_PID_FLAG};
-#[cfg(test)]
-pub(crate) use self::session_store::hook_invocation_pids;
+pub use self::send::DAEMON_PEER_PID_FLAG;
 // `session_hook`/`session_send`/`pending_path`: the hook door and the injection
 // door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
 // registry, `aoide-server`'s dispatch).

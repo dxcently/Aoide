@@ -49,6 +49,15 @@ backfilled on any later hook while still empty) it walks the HOOK process's
 pid-ancestry against the client list Hyprland's request socket returns (`j/clients`), the same match `conduct` uses. The
 hook process is this process on the CLI arm and the door's kernel-attested peer
 pid on the daemon arm, never `aoided` itself. Discovery yields the window only.
+The walk starts at the harness: from the hook's parent up, the first process that
+is neither a shell nor a forwarding launcher is the harness, so the shell layers a
+harness runs its hook under never count. A window owner met before any harness means
+no harness, and the door then binds nothing and stores no chain. Two residuals: a hand-run
+hook under an `aoide conduct` wrap or a multiplexer server (tmux, screen) takes that
+process as its harness, because neither is a shell or a launcher, and binds the window
+it sits under; a hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that
+launcher as its harness, because the walk reads only shells and forwarding launchers as
+plumbing, and binds the same window.
 The same `SessionStart` lands the hook chain (`hookAncestry`) on the record, so
 a plain hook-registered session (no wrapping, no PTY) still gets a
 `windowAddress` and is focus-jumpable from the roster, same as a conducted one.

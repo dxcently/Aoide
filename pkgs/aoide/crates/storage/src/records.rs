@@ -469,8 +469,11 @@ pub struct SessionRecord {
     /// Absent means "the default resolution", never "no report".
     #[serde(rename = "reportTo", default, skip_serializing_if = "Option::is_none")]
     pub report_to: Option<String>,
-    /// Up to 8 ancestor pids of the HOOK-FIRING process (a `/proc` `ppid`
-    /// walk, self-first), the chain of the harness's latest process. It lands at
+    /// Up to 8 ancestor pids of the HOOK-FIRING process's harness (a `/proc` `ppid`
+    /// walk, self-first from the harness), the chain of the harness's latest process.
+    /// The hook process and every shell or forwarding launcher beneath the harness are
+    /// skipped, so the chain starts at the harness whatever wrap ran the hook. A hook
+    /// with no harness stores nothing. It lands at
     /// registration (a SessionStart, or the first hook event of an unknown id;
     /// `graph session hook`, CONTRACTS.md §4), when a window is first bound to the
     /// session, and when a per-turn hook heals a stale chain, each in one locked
@@ -479,10 +482,7 @@ pub struct SessionRecord {
     /// new one. A chain is stale when the record holds no live process of its own
     /// outside the new chain and the new chain carries a live harness the stored
     /// one lacks. The per-turn heal moves the chain on that transition only, so a
-    /// live chain is never rewritten per turn. The first `hook_invocation_pids`
-    /// pids of the hook's chain (the hook process and its shell layers, from the
-    /// harness profile, or the capture shell under `--capture-shell`) never count as
-    /// a harness. A stored chain whose pids are dead is replaced by the next per-turn
+    /// live chain is never rewritten per turn. A stored chain whose pids are dead is replaced by the next per-turn
     /// hook from its live harness, whatever wrote it. The heal needs no compositor;
     /// the window bind does.
     /// This captures the harness process's real

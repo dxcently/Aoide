@@ -38,7 +38,6 @@
 //! The pointer and skill links are mode-independent: a `--capture` run
 //! neither duplicates nor replaces them.
 
-use crate::graph::CAPTURE_SHELL_FLAG;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, SettingsFormat};
@@ -159,7 +158,7 @@ fn events_for(profile: &AgentProfile) -> Vec<&'static str> {
 fn door_command(profile: &AgentProfile, capture: bool, event: &str) -> String {
     if capture {
         format!(
-            "sh -c 'tee -a \"${{AOIDE_ROOT:-$HOME/.aoide}}/state/{}-hooks.jsonl\" | aoide session hook --agent {} --{CAPTURE_SHELL_FLAG}'",
+            "sh -c 'tee -a \"${{AOIDE_ROOT:-$HOME/.aoide}}/state/{}-hooks.jsonl\" | aoide session hook --agent {}'",
             profile.name, profile.name
         )
     } else {
@@ -1134,109 +1133,6 @@ mod tests {
             "wrap did not carry the AOIDE_ROOT-with-fallback expansion: {cmd}"
         );
         assert!(!cmd.contains("Aoide/state"), "wrap still names the retired ~/Aoide root: {cmd}");
-    }
-
-    /// Does a rendered hook command name `--capture-shell`? The capture wrap ends that token
-    /// with a closing quote, so the split is on whitespace and the quote as well.
-    fn renders_capture_flag(command: &str) -> bool {
-        let flag = format!("--{CAPTURE_SHELL_FLAG}");
-        command.split(|c: char| c.is_whitespace() || c == '\'').any(|token| token == flag)
-    }
-
-    /// Each hook command, rendered by `door_command` and run the way its harness runs
-    /// hooks, reaches the hook process at the depth `hook_invocation_pids` counts. Claude
-    /// and kimi run the command through `sh -c`; pi's extension spawns `aoide` as argv with
-    /// no shell, so pi is a direct spawn of the rendered argv. A stand-in `aoide` on PATH
-    /// writes its own parent chain, and the depth is where this test process, the harness,
-    /// sits in it. The command measured is the one that ships, not a copied literal, and
-    /// the count takes its `capture_shell` argument from the flag that command names.
-    #[cfg(unix)]
-    #[test]
-    fn the_rendered_hook_commands_match_their_invocation_depth() {
-        use crate::graph::hook_invocation_pids;
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
-
-        let root = unique_tmp("hook-depth");
-        std::fs::create_dir_all(root.join("state")).unwrap();
-        let bin = root.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let stand_in = bin.join("aoide");
-        std::fs::write(
-            &stand_in,
-            r#"#!/bin/sh
-p=$$
-while [ "$p" -gt 1 ]; do
-  echo "$p"
-  p=$(awk '{print $4}' "/proc/$p/stat")
-done > "$AOIDE_TEST_CHAIN"
-"#,
-        )
-        .unwrap();
-        std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let chain_file = root.join("chain");
-        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-        let harness = std::process::id() as i32;
-
-        let depth = |mut cmd: Command| -> usize {
-            let _ = std::fs::remove_file(&chain_file);
-            let status = cmd
-                .env("PATH", &path)
-                .env("AOIDE_ROOT", &root)
-                .env("AOIDE_TEST_CHAIN", &chain_file)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap();
-            assert!(status.success(), "the rendered hook command failed: {status}");
-            let chain: Vec<i32> = std::fs::read_to_string(&chain_file)
-                .unwrap()
-                .lines()
-                .map(|l| l.parse().unwrap())
-                .collect();
-            chain
-                .iter()
-                .position(|&p| p == harness)
-                .unwrap_or_else(|| panic!("the harness is not in the hook's chain: {chain:?}"))
-        };
-        let through_sh = |command: &str| {
-            let mut cmd = Command::new("sh");
-            cmd.arg("-c").arg(command);
-            cmd
-        };
-
-        let event = "SessionStart";
-        let claude = agent_profile("claude").unwrap();
-        let kimi = agent_profile("kimi").unwrap();
-        let pi = agent_profile("pi").unwrap();
-        let pi_argv: Vec<String> = door_command(&pi, false, event)
-            .split_whitespace()
-            .map(String::from)
-            .collect();
-        assert_eq!(pi_argv[0], "aoide", "pi's command names aoide as its argv[0]");
-        let mut pi_direct = Command::new(&stand_in);
-        pi_direct.args(&pi_argv[1..]);
-
-        let counted = |profile: &AgentProfile, capture: bool| {
-            hook_invocation_pids(profile, renders_capture_flag(&door_command(profile, capture, event)))
-        };
-        assert!(renders_capture_flag(&door_command(&claude, true, event)), "claude's capture render names --capture-shell");
-        assert!(renders_capture_flag(&door_command(&kimi, true, event)), "kimi's capture render names --capture-shell");
-        assert!(!renders_capture_flag(&door_command(&claude, false, event)), "claude's plain render names no capture flag");
-        assert!(!renders_capture_flag(&door_command(&kimi, false, event)), "kimi's plain render names no capture flag");
-
-        let measured = [
-            ("claude plain", depth(through_sh(&door_command(&claude, false, event))), counted(&claude, false)),
-            ("claude capture", depth(through_sh(&door_command(&claude, true, event))), counted(&claude, true)),
-            ("kimi plain", depth(through_sh(&door_command(&kimi, false, event))), counted(&kimi, false)),
-            ("kimi capture", depth(through_sh(&door_command(&kimi, true, event))), counted(&kimi, true)),
-            ("pi plain", depth(pi_direct), counted(&pi, false)),
-        ];
-        let _ = std::fs::remove_dir_all(&root);
-        for (shape, measured, counted) in measured {
-            assert_eq!(measured, counted, "{shape}: the hook sits at depth {measured}, hook_invocation_pids counts {counted}");
-        }
     }
 
     #[test]

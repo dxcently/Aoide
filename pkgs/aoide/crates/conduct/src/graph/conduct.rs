@@ -223,9 +223,8 @@ pub fn program_is_a_shell(argv: &[String]) -> bool {
 
 /// [`program_is_a_shell`]'s verdict, read back off a RECORD: `shell` (the
 /// durable registration fact below) OR a `Some` restore snapshot. Not a
-/// second predicate — [`SHELL_BASENAMES`] above stays the only place
-/// shell-likeness is decided, and both fields are written by this file
-/// alone.
+/// second predicate — [`SHELL_BASENAMES`] above stays the one list of shell
+/// names, and both fields are written by this file alone.
 ///
 /// `rec.shell` is the honest primitive: `conduct` stamps it at REGISTRATION
 /// from its own argv, so it is there for the whole life of the session —
@@ -256,6 +255,24 @@ pub fn program_is_a_shell(argv: &[String]) -> bool {
 /// pre-Phase-3b visibility `conduct_socket_path` carries one screen down.
 pub fn wrapped_program_is_a_shell(rec: &SessionRecord) -> bool {
     rec.shell || rec.restore.is_some()
+}
+
+/// Whether a process is invocation plumbing rather than a harness: a shell or a
+/// forwarding launcher, by argv[0]'s basename (a leading `-` marks a login shell,
+/// `-zsh`). The hook door's harness walk reads this verdict, and this verdict reads only
+/// [`SHELL_BASENAMES`] and [`FORWARDING_LAUNCHERS`], so no other name is plumbing here.
+/// [`program_is_a_shell`] has its own arms for `timeout`, `nix`, `script`, `su`, `doas` and
+/// `sudo`: those names are not in either list, so a hook behind one of them takes that
+/// launcher as its harness.
+/// `None` (a pid whose argv cannot be read, or an empty one) is plumbing too:
+/// a process nobody can read is not a live harness.
+pub(in crate::graph) fn is_invocation_plumbing(argv: Option<&[String]>) -> bool {
+    let Some(program) = argv.and_then(|a| a.first()) else {
+        return true;
+    };
+    let base = command_basename(program);
+    let name = base.trim_start_matches('-');
+    SHELL_BASENAMES.contains(&name) || FORWARDING_LAUNCHERS.contains(&name)
 }
 
 pub(in crate::graph) fn unix_ts() -> u64 {
@@ -2189,6 +2206,19 @@ mod tests {
         assert!(!typed_capture_active(false, true));
         assert!(!typed_capture_active(false, false));
     }
+    #[test]
+    fn invocation_plumbing_is_a_shell_or_a_launcher_by_basename() {
+        let argv = |parts: &[&str]| -> Vec<String> { parts.iter().map(|s| s.to_string()).collect() };
+        assert!(is_invocation_plumbing(Some(&argv(&["/bin/sh", "-c", "x"]))));
+        assert!(is_invocation_plumbing(Some(&argv(&["-zsh"]))), "a login shell is a shell");
+        assert!(is_invocation_plumbing(Some(&argv(&["/usr/bin/env", "A=1", "claude"]))));
+        assert!(is_invocation_plumbing(Some(&argv(&["nice", "-n", "5", "claude"]))));
+        assert!(!is_invocation_plumbing(Some(&argv(&["claude", "--resume", "x"]))));
+        assert!(!is_invocation_plumbing(Some(&argv(&["node", "/x/claude"]))), "the verdict reads argv[0] only");
+        assert!(is_invocation_plumbing(None), "an unreadable pid is plumbing");
+        assert!(is_invocation_plumbing(Some(&[])), "an empty argv is plumbing");
+    }
+
     #[test]
     fn program_is_a_shell_reads_the_wrapped_argv_never_the_agent_label() {
         // The task #100 defect, table-driven: shell-likeness is a property of
