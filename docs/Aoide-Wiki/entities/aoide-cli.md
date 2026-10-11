@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-09-27
+updated: 2026-10-10
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -80,7 +80,6 @@ the groups it documents.
 | `content register/propose/ingest/query` | 4 | stub |
 | `content approve` | 1 | stub, gated |
 | `make` ([[Widget-Maker]] entry) | 1 | stub |
-| `do`, `do kit` | 2 | real — a sentence to the one command it means, printed and never run, via the `verba-volantia` classifier ([[Meta-and-Upkeep]]); `do kit` derives the classifier's training spec from the registry |
 | `onboard` | 1 | real — the clone-onboarding lane, delegates the nix half to `lyra onboard` ([[Clone-and-Run]]) |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon` | 2 | real |

@@ -281,22 +281,24 @@ by decision — no embedded database yet
   the daemon, and the stdio MCP façade have no per-door variant to drift. A
   missing file is every default, never an error (`advertise::enabled`'s own
   tolerate-missing stance); a file that EXISTS but carries an unknown key,
-  an unknown section, or a value outside its vocabulary is a LOUD error
-  naming the offence — this file carries grants, so silent tolerance of a
-  typo is the exact failure the format choice refuses (TOML, because the
-  reasoning behind a grant has to live beside it, which JSON has nowhere to
-  put; not YAML, whose implicit coercion is the opposite of failing loudly).
+  an unknown section (a retired `[verba]` table alone excepted: accepted,
+  read by nothing, never written back), or a value outside its vocabulary
+  is a LOUD error naming the offence — this file carries grants, so silent
+  tolerance of a typo is the exact failure the format choice refuses (TOML,
+  because the reasoning behind a grant has to live beside it, which JSON has
+  nowhere to put; not YAML, whose implicit coercion is the opposite of
+  failing loudly).
   `SCHEMA` is a walkable const TABLE of the SETTABLE surface — sections,
   their keys, each key's value vocabulary, and a `read` fn projecting that
   key off a typed `Config` — and `validate`, `set`, and `aoide config`'s own
   listing all walk it rather than restating it in match arms. Its closed-list
   key is `[pairing]`'s `defaultGrant`, whose vocabulary IS
   `node_store::NODE_CAPABILITIES` (the same closed set `node allow`
-  enforces, never a second list); `[upkeep]` and `[verba]` (`aoide do`'s
-  `binary` and `weightsDir`) carry free-form scalars. `set` is the only writer: it refuses a
-  managed config, an unknown key, a value outside its vocabulary, and a
-  config already on disk that does not load — each with a taught error, and
-  nothing written in any of them — then edits the file's own text through
+  enforces, never a second list); `[upkeep]` carries a free-form scalar.
+  `set` is the only writer: it refuses a managed config, an unknown key, a
+  value outside its vocabulary, and a config already on disk that does not
+  load — each with a taught error, and nothing written in any of them — then
+  edits the file's own text through
   `toml_edit` so an operator's comments survive, re-parses the result
   through the same gate the next `load` will apply, and commits it with
   `fs::atomic_write`.

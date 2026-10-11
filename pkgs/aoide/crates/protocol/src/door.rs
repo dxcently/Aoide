@@ -308,7 +308,7 @@ fn command_for<'a>(path: &[String], registry: &'a Registry) -> Option<&'a Comman
 /// registries). A typed head the running binary lacks but the other owns
 /// gets a "run it there" refusal instead of a did-you-mean.
 pub const AOIDE_ONLY_HEADS: &[&str] = &[
-    "a2a", "adapter", "conduct", "conductor", "config", "content", "context", "daemon", "do", "events", "graph",
+    "a2a", "adapter", "conduct", "conductor", "config", "content", "context", "daemon", "events", "graph",
     "hooks", "identity", "mail", "make", "melete", "mesh", "node", "project", "resurrect", "send", "session",
     "soundcheck", "spawn", "update", "usage", "workspace",
 ];

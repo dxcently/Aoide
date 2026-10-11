@@ -270,10 +270,12 @@ aoide session start --id <id> [--agent <name>] [--cwd <dir>] [--window <addr>] [
   that would cycle is refused (exit 1, `reason: "cycle"`).
 - **Output:** `data: {sessionId, agent, startedAt, inserted, file}`.
 - **Notes:** registration-time same-window agent eviction: if the NEW record is
-  an agent with a `windowAddress` shared by another live agent record, the
-  stale twin is marked `done` and pruned immediately (a terminal hosts one
-  foreground agent; conducted PTY hosts and the record's own parent are
-  excluded).
+  an agent with a `windowAddress` shared by another live agent record, an
+  older record is marked `done` and pruned immediately only when it is that
+  record's superseded twin: no live process of its own outside the new record's
+  chain, and the two chains meet at the same depth. A record with no chain is a twin only when it holds a pid. A window hosts many live
+  agents, so a live sibling is kept. Conducted PTY hosts and the record's whole
+  lineage are excluded.
 
 ### aoide session phase
 
@@ -432,7 +434,7 @@ aoide session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON o
 - **Reads:** stdin (one harness hook payload); the agent profile's event map
   (`aoide_protocol::agents`); `state/stage/{sessions,hooks}.json`; env
   `AOIDE_SESSION_ID` (threads a launching conductor as the parent),
-  `HYPRLAND_INSTANCE_SIGNATURE` + `hyprctl clients -j` + `/proc/<pid>/stat`
+  `HYPRLAND_INSTANCE_SIGNATURE` + the `j/clients` socket read + `/proc/<pid>/stat`
   ancestry walk (best-effort window/pid backfill); harness transcripts for the
   `say`/`title`/`model`/`contextTokens` refresh (claude:
   `~/.claude/projects/<munge(cwd)>/<session_id>.jsonl`).
@@ -866,7 +868,7 @@ aoide session prune [--json]
 aoide session reap [--announce] [--json]
 ```
 
-- **Reads:** `state/stage/{sessions,hooks}.json`; `hyprctl clients -j` (window
+- **Reads:** `state/stage/{sessions,hooks}.json`; the `j/clients` socket read (window
   liveness + window-owner map — skipped without `HYPRLAND_INSTANCE_SIGNATURE`,
   falling back to pid-only); `/proc/<pid>` existence, `/proc/stat` `btime`
   (boot instant), harness transcript mtimes + tails (profile-dispatched);
@@ -935,7 +937,7 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
 ```
 
 - **Reads:** env `XDG_RUNTIME_DIR` (socket dir; falls back to
-  `/run/user/1000`), `HYPRLAND_INSTANCE_SIGNATURE` + `hyprctl clients -j` +
+  `/run/user/1000`), `HYPRLAND_INSTANCE_SIGNATURE` + the `j/clients` socket read +
   `/proc` ppid-ancestry (best-effort window discovery); for conducted SHELLS a
   ~1 Hz tick reads the PTY foreground pgid (`tcgetpgrp`), `/proc/<pid>/cwd`,
   `/proc/<pid>/cmdline|comm`, and `/proc/<pid>/task/<pid>/children` (the

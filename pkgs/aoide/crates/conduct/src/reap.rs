@@ -70,7 +70,7 @@ use crate::graph::{
     canonical_state, codex_home, drop_remote_child_rows, drop_sessions, hooks_path, hyprctl_clients,
     ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
     prune_done, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
-    stage_error, DroppedEidolon,
+    stage_error, superseded_by, DroppedEidolon,
     sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
     SessionRecord,
     SessionsFile, STAGE_GRAPH_VERSION,
@@ -185,7 +185,7 @@ pub const REAP_SPAWNED_SHELL_STALE_SECS: i64 = 48 * 3600; // 48 hours (2 days)
 ///
 /// The never-false-reap guards:
 ///   * `live_addresses` is an `Option`: `None` means the compositor could not be
-///     queried (no Hyprland, hyprctl missing/failed) — the window signal is then
+///     queried (no Hyprland, no request socket, or the read failed) — the window signal is then
 ///     UNKNOWN and contributes nothing, so we never reap a windowed session we
 ///     merely failed to see. Only a `Some(live)` we actually gathered can fire it.
 ///   * Absence of evidence is never evidence of death, but STALENESS is
@@ -254,7 +254,8 @@ pub fn is_session_dead(
     window_signal || pid_signal || stale_abandoned
 }
 
-/// Gather the live windows from `hyprctl clients -j` — BOTH the normalised
+/// Gather the live windows from Hyprland's request socket (`j/clients`, the JSON
+/// `hyprctl clients -j` prints) — BOTH the normalised
 /// addresses (for the window-liveness signal and the transient-read grace)
 /// and each window's OWNING pid (for the staleness veto in
 /// [`is_session_dead`]: a record's pid equal to its window's owner is the
@@ -293,7 +294,7 @@ fn live_windows() -> Option<(HashSet<String>, HashMap<String, u32>)> {
 /// decide the window-liveness set this reap pass should actually trust.
 ///
 /// During a reload/restart (a quickshell restart, `hyprctl reload`, a nixos
-/// switch) `hyprctl clients -j` can momentarily answer SUCCESS with ZERO windows
+/// switch) Hyprland's `j/clients` can momentarily answer with ZERO windows
 /// while the terminals are in fact alive — the compositor is mid-reload. Reaping
 /// the whole windowed roster off that snapshot is exactly the transient drop this
 /// fix targets, so an EMPTY gathered set against a roster that still holds
@@ -330,14 +331,13 @@ pub(crate) fn effective_live_addresses(
 
 // ── Same-window agent dedup: retire a superseded / phantom re-registration ──
 //
-// One kitty window hosts one conducted shell + one foreground claude, and that
-// claude's `pid` field (from the window listener) is the TERMINAL's pid — shared
-// by the shell and every claude that ever ran in it. So when a session-id changes
-// (compact/resume) and the old record is never `SessionEnd`ed, it orphans as
-// `working` with a still-alive pid, and the liveness sweep above can never reap
-// it. Two "claude" rows for one terminal result — and the stale one masks `say`
-// in the Terminals merge. A terminal hosts ONE foreground agent, so this collapses
-// same-window agent duplicates down to the real one.
+// A window hosts any number of agents: one kitty window can run several conducted
+// shells, and one desktop app window runs several headless claudes. A same-window
+// record is therefore not a duplicate on its shared address alone. It is a
+// superseded twin only when no process of its own survives outside the keeper's
+// chain and the two chains meet at the same depth (`superseded_by`, the same rule
+// registration applies). A compact/resume that orphans its old record with a dead
+// pid is retired here; six live sessions in one window never are.
 
 /// Is this a top-level AGENT session (a claude), vs a shell or a synthetic
 /// sub-agent node? A conducted PTY host (`conductable` — the control-socket
@@ -373,9 +373,12 @@ fn profile_for(rec: &SessionRecord) -> &'static AgentProfile {
     agent_profile(&rec.agent).unwrap_or(&CLAUDE_PROFILE)
 }
 
-/// Among not-`done` agent records sharing one non-empty `windowAddress`, at most
-/// one is real; return the ids to RETIRE (the superseded duplicates). Pure and
-/// unit-testable: `is_recent` and `has_transcript` are injected as closures.
+/// Among not-`done` agent records sharing one non-empty `windowAddress`, return the
+/// ids to RETIRE: the superseded twins of the keeper (see [`superseded_by`]). A
+/// member is retired only when it is not in the keeper's lineage and its own
+/// processes are gone or sit at the keeper's depth; a live sibling is never
+/// retired. Pure and unit-testable: `is_recent`, `has_transcript` and `alive` are
+/// injected as closures.
 ///
 /// Keeper rank (descending): newest `startedAt` → a real on-disk transcript
 /// (`has_transcript`) → carries `say` → classified `kind=="agent"` →
@@ -397,10 +400,11 @@ fn profile_for(rec: &SessionRecord) -> &'static AgentProfile {
 /// ghost claude in this terminal" symptom. `has_transcript`/`say` still decide
 /// a tie: the one real scenario left for them is a same-instant registration
 /// race, where `startedAt` cannot tell the pair apart at all.
-fn superseded_agent_duplicates(
+pub(crate) fn superseded_agent_duplicates(
     sessions: &[SessionRecord],
     is_recent: impl Fn(&SessionRecord) -> bool,
     has_transcript: impl Fn(&SessionRecord) -> bool,
+    alive: impl Fn(u32) -> bool,
 ) -> Vec<String> {
     let mut by_window: HashMap<&str, Vec<&SessionRecord>> = HashMap::new();
     for s in sessions {
@@ -427,7 +431,7 @@ fn superseded_agent_duplicates(
             )
         };
         let keeper = group.iter().max_by(|a, b| rank(a).cmp(&rank(b))).unwrap();
-        // Defense in depth (task #89, review round 2): never retire a member
+        // Defense in depth (task #89): never retire a member
         // of the KEEPER's own lineage as a "duplicate" — the same carve-out
         // `session_store`'s registration-time eviction applies, reused here
         // via the SAME `lineage_of` (ancestors + descendants), never a
@@ -439,7 +443,10 @@ fn superseded_agent_duplicates(
         // onto a lineage-related pair.
         let keeper_lineage = lineage_of(&keeper.session_id, sessions);
         for s in group {
-            if s.session_id != keeper.session_id && !keeper_lineage.contains(&s.session_id) {
+            if s.session_id != keeper.session_id
+                && !keeper_lineage.contains(&s.session_id)
+                && superseded_by(s, &keeper.hook_ancestry, keeper.pid, &alive)
+            {
                 losers.push(s.session_id.clone());
             }
         }
@@ -463,9 +470,10 @@ fn superseded_agent_duplicates(
 /// row for that window rendered a DEAD agent, because the shared-window merge
 /// took the first agent record it saw.
 ///
-/// A terminal hosts ONE foreground agent, so the window's history is never the
-/// roster's business — only its present:
-///   * a window with a LIVE agent keeps that one; every `done` predecessor in
+/// A window may host several live agents, so the window's history is never the
+/// roster's business — only its present. Live records are never `done` and are
+/// never returned here:
+///   * a window with live agents keeps all of them; every `done` predecessor in
 ///     it is superseded outright (the roster shows what is running NOW), and
 ///   * a window with only tombstones keeps exactly the NEWEST (`startedAt`,
 ///     then the id as a stable final tiebreak) — the agent that actually just
@@ -1040,13 +1048,13 @@ pub(crate) fn decay_stopped_sessions(
 /// `session reap` — the automatic liveness sweep. Marks every DEAD (killed,
 /// orphaned) session `done` (and its hook record), then reuses [`prune_done`] to
 /// drop them + clear orphaned parent links, re-staging `graph.json` atomically.
-/// Cheap: one `hyprctl` call + a stage read, and a stage WRITE only when
+/// Cheap: one compositor read + a stage read, and a stage WRITE only when
 /// something was actually reaped. NEVER errors non-zero on "nothing to reap" and
 /// NEVER on an unavailable compositor (it falls back to pid-only liveness).
 ///
-/// `hyprctl clients -j` is gathered BEFORE the stage lock is taken, not inside
-/// it: it is a subprocess call (real wall-clock cost, and a hung `hyprctl`
-/// would otherwise hang indefinitely) that touches no stage file, so it needs
+/// The client list is gathered BEFORE the stage lock is taken, not inside it: it
+/// is a socket round trip (real wall-clock cost, bounded by its 2 s budget, so a
+/// stalled compositor cannot hang the reaper) that touches no stage file, so it needs
 /// none of the lock's atomicity — holding the lock across it would block
 /// every other stage writer (`send`, session-start/end, hook updates,
 /// …) for as long as it runs. The window-liveness signal is already treated
@@ -1500,7 +1508,7 @@ fn reap_inner(
         .collect();
 
     // Also retire superseded same-window agent duplicates (a phantom re-id whose
-    // pid is the terminal's, invisible to the liveness predicate above). Grace:
+    // process is gone, invisible to the liveness predicate above). Grace:
     // ~60s off startedAt so a just-born pair settles; keeper = the newest-started
     // one, transcript/say only tiebreaking a same-instant tie (see
     // `superseded_agent_duplicates`).
@@ -1514,7 +1522,7 @@ fn reap_inner(
         s.agent != "codex"
             && (profile_for(s).transcript.locate)(&s.session_id, Some(s.cwd.as_str()), None).is_some()
     };
-    for id in superseded_agent_duplicates(&s_file.sessions, is_recent, has_transcript) {
+    for id in superseded_agent_duplicates(&s_file.sessions, is_recent, has_transcript, proc_exists) {
         if !reaped.contains(&id) {
             reaped.push(id);
         }
@@ -2505,6 +2513,125 @@ mod tests {
         assert!(is_session_dead(&rec, None, None, |_| false, now, fresh));
     }
 
+    /// A hosted claude in window `win`, its chain the only fact a test varies.
+    fn hosted_agent(id: &str, win: &str, started: &str, chain: &[i32]) -> SessionRecord {
+        let mut r = agent(id, win, started);
+        r.hook_ancestry = chain.to_vec();
+        r
+    }
+
+    #[test]
+    fn six_live_sessions_in_one_app_window_are_never_retired() {
+        // One desktop app (867785, under systemd 1454) runs six headless claudes.
+        // Each harness is alive beneath the app, so none is a twin of another, and
+        // the newest one keeps the group's grace clock.
+        const APP: i32 = 867785;
+        const INIT: i32 = 1454;
+        let harnesses: [i32; 6] = [101, 102, 103, 104, 105, 106];
+        let sessions: Vec<SessionRecord> = harnesses
+            .iter()
+            .enumerate()
+            .map(|(i, &h)| {
+                let started = format!("2026-10-10T0{}:00:00Z", i + 1);
+                let chain = [2_000_000_000 + i as i32, 2_000_000_100 + i as i32, h, APP, INIT];
+                hosted_agent(&format!("s{i}"), "0xDESK", &started, &chain)
+            })
+            .collect();
+        let live: Vec<u32> = harnesses.iter().map(|&h| h as u32).chain([APP as u32, INIT as u32]).collect();
+        let none_recent = |_: &SessionRecord| false;
+        let no_tx = |_: &SessionRecord| false;
+        let losers = superseded_agent_duplicates(&sessions, none_recent, no_tx, |p| live.contains(&p));
+        assert!(losers.is_empty(), "six live siblings are all kept, got {losers:?}");
+    }
+
+    #[test]
+    fn a_dead_harness_is_retired_against_the_keeper() {
+        // The older claude's harness (701) died; the newer one (702) is alive under
+        // the same app, at the same depth. The dead one is the superseded twin.
+        const APP: i32 = 867785;
+        const INIT: i32 = 1454;
+        let old = hosted_agent(
+            "old",
+            "0xDESK",
+            "2026-10-10T01:00:00Z",
+            &[2_000_000_000, 2_000_000_001, 701, APP, INIT],
+        );
+        let keeper = hosted_agent(
+            "new",
+            "0xDESK",
+            "2026-10-10T02:00:00Z",
+            &[2_000_000_002, 2_000_000_003, 702, APP, INIT],
+        );
+        let live = [702_u32, APP as u32, INIT as u32];
+        let none_recent = |_: &SessionRecord| false;
+        let no_tx = |_: &SessionRecord| false;
+        let losers = superseded_agent_duplicates(
+            &[old, keeper],
+            none_recent,
+            no_tx,
+            |p| live.contains(&p),
+        );
+        assert_eq!(losers, vec!["old".to_string()]);
+    }
+
+    #[test]
+    fn a_kitty_tab_ghost_with_a_live_shell_is_kept() {
+        // Tab A's claude died, but its shell (600) is alive. The kept ghost fails
+        // safe: it lingers until the staleness band reaps it.
+        const KITTY: i32 = 700;
+        let ghost = hosted_agent(
+            "tab-a",
+            "0xKITTY",
+            "2026-10-10T01:00:00Z",
+            &[2_000_000_000, 2_000_000_001, 2_000_000_002, 600, KITTY],
+        );
+        let keeper = hosted_agent(
+            "tab-b",
+            "0xKITTY",
+            "2026-10-10T02:00:00Z",
+            &[2_000_000_003, 2_000_000_004, 800, 610, KITTY],
+        );
+        let live = [600_u32, 610, 800, KITTY as u32];
+        let none_recent = |_: &SessionRecord| false;
+        let no_tx = |_: &SessionRecord| false;
+        let losers = superseded_agent_duplicates(
+            &[ghost, keeper],
+            none_recent,
+            no_tx,
+            |p| live.contains(&p),
+        );
+        assert!(losers.is_empty(), "a live shell keeps the ghost, got {losers:?}");
+    }
+
+    #[test]
+    fn a_nested_unlinked_session_is_kept() {
+        // The older claude (500) is alive, and the newer session runs beneath it
+        // with no parent link. Same window, but it is nested, not a twin.
+        const KITTY: i32 = 700;
+        let outer = hosted_agent(
+            "outer",
+            "0xKITTY",
+            "2026-10-10T01:00:00Z",
+            &[2_000_000_000, 2_000_000_001, 500, 600, KITTY],
+        );
+        let inner = hosted_agent(
+            "inner",
+            "0xKITTY",
+            "2026-10-10T02:00:00Z",
+            &[2_000_000_002, 2_000_000_003, 900, 500, 600, KITTY],
+        );
+        let live = [500_u32, 600, 900, KITTY as u32];
+        let none_recent = |_: &SessionRecord| false;
+        let no_tx = |_: &SessionRecord| false;
+        let losers = superseded_agent_duplicates(
+            &[outer, inner],
+            none_recent,
+            no_tx,
+            |p| live.contains(&p),
+        );
+        assert!(losers.is_empty(), "the nested outer session is kept, got {losers:?}");
+    }
+
     #[test]
     fn superseded_agent_duplicates_keeps_the_real_one() {
         // The live diagnosis: one window (0xW) holds the real claude (transcript,
@@ -2513,7 +2640,9 @@ mod tests {
         let mut real = agent("efdc", "0xW", "2026-07-30T07:29:57Z");
         real.kind = Some("agent".into());
         real.say = Some("hi".into());
-        let phantom = agent("e711", "0xW", "2026-07-30T07:29:57Z");
+        // A legacy owner-pid record: its pid is the only process evidence it carries.
+        let mut phantom = agent("e711", "0xW", "2026-07-30T07:29:57Z");
+        phantom.pid = Some(2_000_000_000);
         let lone = agent("solo", "0xZ", "2026-07-30T07:29:57Z");
         let mut shell = agent("sh", "0xW", "2026-07-30T01:00:00Z");
         shell.agent = "shell".into();
@@ -2524,13 +2653,13 @@ mod tests {
         let has_tx = |s: &SessionRecord| s.session_id == "efdc"; // only the real one
 
         // The phantom is retired; the real one, the lone agent, and the shell stay.
-        let losers = superseded_agent_duplicates(&sessions, none_recent, has_tx);
+        let losers = superseded_agent_duplicates(&sessions, none_recent, has_tx, |_| false);
         assert_eq!(losers, vec!["e711".to_string()]);
 
         // Grace: if EITHER twin is still fresh, the whole group is left alone (so a
         // just-born pair is never resolved before the real one writes a transcript).
         let all_recent = |_: &SessionRecord| true;
-        assert!(superseded_agent_duplicates(&sessions, all_recent, has_tx).is_empty());
+        assert!(superseded_agent_duplicates(&sessions, all_recent, has_tx, |_| false).is_empty());
     }
 
     #[test]
@@ -2545,6 +2674,7 @@ mod tests {
         // the terminal's real current occupant.
         let mut old = agent("old-session", "0xW", "2026-08-17T07:00:00Z");
         old.kind = Some("agent".into());
+        old.pid = Some(2_000_000_000); // a legacy owner-pid record, the twin's only evidence
         old.say = Some("last thing I said before compacting".into());
         let mut fresh = agent("new-session", "0xW", "2026-08-17T08:00:00Z");
         fresh.kind = Some("agent".into());
@@ -2555,7 +2685,7 @@ mod tests {
         // Ground truth: only the OLD session has an on-disk transcript so far.
         let has_tx = |s: &SessionRecord| s.session_id == "old-session";
 
-        let losers = superseded_agent_duplicates(&sessions, none_recent, has_tx);
+        let losers = superseded_agent_duplicates(&sessions, none_recent, has_tx, |_| false);
         assert_eq!(
             losers,
             vec!["old-session".to_string()],
@@ -2563,7 +2693,7 @@ mod tests {
         );
     }
 
-    /// Defense in depth (task #89, review round 2): even if something
+    /// Defense in depth (task #89): even if something
     /// upstream still manages to stamp a shared window onto a lineage-
     /// related pair — never the healthy-roster case after this task's fix,
     /// since a windowless-by-construction nested session no longer
@@ -2580,12 +2710,13 @@ mod tests {
         nested.parent_session_id = Some("claude".into());
         let mut twin = agent("twin", "0xW", "2026-08-24T02:00:00Z"); // no lineage relation
         twin.kind = Some("agent".into());
+        twin.pid = Some(2_000_000_000); // a legacy owner-pid record, the twin's only evidence
 
         let sessions = vec![claude, nested, twin];
         let none_recent = |_: &SessionRecord| false;
         let no_tx = |_: &SessionRecord| false;
 
-        let losers = superseded_agent_duplicates(&sessions, none_recent, no_tx);
+        let losers = superseded_agent_duplicates(&sessions, none_recent, no_tx, |_| false);
         assert_eq!(
             losers,
             vec!["twin".to_string()],

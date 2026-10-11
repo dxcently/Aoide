@@ -192,20 +192,6 @@ pub fn run_cli(argv: &[String]) -> i32 {
             return Some(code);
         }
 
-        // `do` and `do kit` print ONE THING — the command a sentence means, or the
-        // training spec — and a pipeline substitutes it
-        // (`$(aoide do "…")`, `aoide do kit > templates.json`), so text mode
-        // prints the bare message like `workspace root` above. A refusal keeps
-        // its taught what/why/fix, on stderr, with nothing on stdout.
-        if (inv.path == ["do"] || inv.path == ["do", "kit"]) && !json {
-            let outcome = dispatch::dispatch(inv);
-            if outcome.status == output::Status::Ok {
-                println!("{}", outcome.message);
-                return Some(output::exit::OK);
-            }
-            return Some(protocol::door::emit(&outcome, false));
-        }
-
         // `secrets serve` is a long-running broker, launched at the entry point
         // exactly like `a2a serve`/`conductor`/`mcp serve --stdio`: dispatch
         // FIRST (records the launch through the single audit log, and gives a

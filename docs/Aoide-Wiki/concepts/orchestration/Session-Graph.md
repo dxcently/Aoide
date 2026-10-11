@@ -38,8 +38,11 @@ full node id or the bare id.
   nested terminal gets it stamped directly at spawn (`--parent
   "$AOIDE_SESSION_ID"`); a hook-registered session with no explicit parent
   instead resolves one automatically: its self-first `/proc` ancestry
-  (`hookAncestry`, stamped once at registration) is intersected against
-  every live agent-kind session's own `hookAncestry`, and the closest
+  (`hookAncestry`, the chain from the harness up, landed at registration: a
+  SessionStart, or the first hook event of an unknown id, and healed by the next
+  per-turn hook when stale) is
+  intersected against every live agent-kind session's own `hookAncestry`, and
+  the closest
   matching ancestor wins as parent (CONTRACTS.md §4). A harness that reports
   itself through the hook door is launched by a wrap, so its parent is usually
   that wrap directly, and the door resolves it the same way whichever door
@@ -162,7 +165,7 @@ should follow).
   [[shellbridge]]'s `focussession` socket verb both call this library
   function directly (`aoide-conduct::graph::window`), so the shellbridge
   socket is the only shell-reachable path left to a session jump. It first
-  **verifies the window is alive** through `hyprctl clients -j` before
+  **verifies the window is alive** through the compositor's client list (`j/clients` on Hyprland's request socket) before
   dispatching, because `focuswindow` exits 0 even for a vanished window: a
   gone terminal yields a structured `window-not-found` error with no
   dispatch. Address matching is case- and `0x`-prefix-tolerant (pure,
@@ -354,7 +357,7 @@ Left alone, the record strands `running` in the roster forever (observed:
 a session **dead** when *any* of three independent signals fires:
 
 - **window gone** — the record has a non-empty `windowAddress` that is no
-  longer among the live addresses `hyprctl clients -j` reports.
+  longer among the live addresses the compositor's client list (`j/clients`) reports.
 - **pid gone** — the record has a `pid` whose `/proc/<pid>` no longer exists.
 - **stale abandonment** — every evidence stream (`last_seen`: the max of
   transcript mtime, hook `updatedAt`, and `startedAt`) has gone silent past a
@@ -399,34 +402,59 @@ subagent-of-subagent nesting) backs both paths, so a session that dies
 rather than exiting through `session end` — loses its sub-agent
 children exactly as cleanly as an orderly exit does.
 
-The same pass also retires **same-window agent duplicates**: a compact/resume
-mints a new `session_id` for a window that already holds a live agent record,
-and the stale one's `pid` resolves to the terminal rather than the agent, so
-liveness alone can't catch it. Among not-`done` agent-kind records sharing one
-window past a short grace, the keeper ranks by newest `startedAt` first —
-compact/resume always mints its new record strictly after the old one, so
-newest-first keeps the live session even before it has written anything —
-then a real on-disk transcript, then whether it carries `say`, then
-`kind=="agent"`, then lexically-greatest `sessionId` as a final tiebreak. A
-group of one, or a group with any member still inside the grace, is left
-alone. Shells are exempt, and so is a **conducted PTY host**: an `aoide
-conduct -- <agent>` wrapper classifies as `agent` from its child's basename
-but is the HOST of the agent inside it, so `is_agent_kind` excludes any
-`conductable` record from the dedup entirely — a wrapper-of-agent (`conduct
--- kimi`) is never retired as a duplicate of the session it hosts.
+The same pass also retires **same-window agent duplicates**. A window hosts
+any number of agents: one desktop app window runs several headless claudes,
+and one kitty window can run several tabs. So a shared `windowAddress` never
+retires a record by itself. A same-window record is a superseded twin only
+when no process of its own survives outside the keeper's chain, and the two
+chains meet at the same depth. That is a compact/resume or `/clear` (the same
+harness position under a new session id), or a same-tab successor whose
+predecessor died. Among not-`done` agent-kind records sharing one window past
+a short grace, the keeper ranks by newest `startedAt` first, then a real
+on-disk transcript, then whether it carries `say`, then `kind=="agent"`, then
+lexically-greatest `sessionId` as a final tiebreak. A group of one, or a group
+with any member still inside the grace, is left alone. A member is retired
+only when it is not in the keeper's lineage and `superseded_by` holds. Shells
+are exempt, and so is a **conducted PTY host**: an `aoide conduct -- <agent>`
+wrapper classifies as `agent` from its child's basename but is the HOST of
+the agent inside it, so `is_agent_kind` excludes any `conductable` record
+from the dedup entirely — a wrapper-of-agent (`conduct -- kimi`) is never
+retired as a duplicate of the session it hosts.
 
-The registration-time half of the same rule spares the new record's **whole
-lineage** — every ancestor and descendant reachable by walking
-`parentSessionId`, not only its direct parent — since a nested `conduct`/
-`spawn` chain can legitimately land a same-window pair that are
-grandparent/grandchild, or cousins through a shared ancestor, not just
-parent/child. A same-window pair with no lineage relation at all still
-collapses instantly: the legitimate compact/resume-twin case. A nested
+The registration-time half applies the same rule the moment a new session
+appears. It spares the new record's **whole lineage**, every ancestor and
+descendant reachable by walking `parentSessionId`, not only its direct parent,
+since a nested `conduct`/`spawn` chain can legitimately land a same-window
+pair that are grandparent/grandchild, or cousins through a shared ancestor.
+A same-window record with no lineage relation and no live process of its own
+(the legitimate compact/resume-twin case) collapses instantly. A nested
 headless session is windowless by construction: the hook-time
 `windowAddress` backfill skips it outright whenever its `parentSessionId`
 chain passes through a conducted session with its own `windowAddress` still
 empty, so it can never wrongly inherit the ENCLOSING terminal's window and
 get treated as that terminal's duplicate.
+
+## Binding hosted sessions to their window
+
+A hook-only harness (a Claude Code session with no `pid` in its payload) runs
+as a child of an app or terminal process, and that process owns the window.
+Two paths bind its `windowAddress`, and neither ever stamps the owner's pid on
+the session. The hook door walks the process it was given (this process on the
+CLI arm, the kernel-attested peer pid on the daemon arm), and it takes the window,
+its workspace, and the chain from that process's harness up (shells and launchers
+skipped), never a pid. The owner check runs before the plumbing verdict: a hook whose walk
+meets a window owner before any harness, a shell owner included, binds nothing. With no
+client list (off Hyprland, or an unreadable request socket) no owner check runs. Two residuals: a hand-run hook under an `aoide conduct` wrap
+or a multiplexer server takes that process as its harness and binds the window under it; a
+hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its
+harness and binds the same window, and its chain heals once per turn. The window sweep ([[shellbridge]], on window events)
+binds a pid-less record through its stored `hookAncestry`: the nearest chain
+pid that owns a window is the owner, and the record binds only while a process
+of its own chain, a tab shell included, stands beneath that owner right now. A chain whose processes have all exited binds nothing. The next per-turn hook from a resumed harness replaces a stale chain with its own, and the record binds on that turn. A per-turn hook heals a stored chain whose pids are dead, whatever wrote it. Tab-shell residual: a chain whose tab shell stands beneath the owner binds the window, but its heal is blocked while that shell lives outside the hook's chain, so it stays stale until the shell exits. Because nothing stamps the owner's pid, the seal never collides on
+a shared app pid. A record's chain follows its latest registration, unless the
+record's own pid is alive outside the new chain. A per-turn hook heals a stale
+chain only on a dead→live transition, so a live chain is never rewritten per
+turn. So six live claudes in one app window bind to that window and are all kept.
 
 ## Interplay with the window-event listener
 
@@ -572,8 +600,8 @@ registration path** — the closer for the sweep-relaunder shape; (5)
 - `sessions.json` records carry several **additive** optional fields (no
   version bump): `parentSessionId` (spawned edge), `logPath` (a
   headless-conducted session's pty-master log — [[Conductor-Channel]]),
-  `hookAncestry` (up to 8 self-first `/proc` pids, stamped once, the
-  auto-parenting seam above), and the identity pair `origin` and
+  `hookAncestry` (up to 8 self-first `/proc` pids, the chain of the latest
+  registration, bind, or heal, the auto-parenting seam above), and the identity pair `origin` and
   `seal`/`sealedIssuedAt` (the lane's provenance and credential, above).
   The full field list — `kind`/`conductable`,
   `contextTokens`/`contextCeiling`/`tool`/`petname` and more — is CONTRACTS.md

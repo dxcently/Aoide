@@ -137,8 +137,9 @@ toast carries. A malformed line is dropped with the plain `unparseable` audit
 and no reply.
 
 **`hyprctl` must be on the service PATH, or every click fails silently.**
-Both the socket handler's `focus_window` and the window→session event
-listener shell out to `hyprctl`. A systemd user unit's default PATH is
+The socket handler's `focus_window` shells out to `hyprctl`; the
+window→session event listener reads Hyprland's request socket and needs no
+PATH. A systemd user unit's default PATH is
 minimal (coreutils/findutils/grep/sed/systemd) and excludes the compositor,
 so a unit-level `path = [ pkgs.hyprland ]` on both the `shellbridge` and
 `aoide-graph-reap` services (`modules/dendrites/lyra/shellbridge.nix`) puts
@@ -212,9 +213,11 @@ $HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). On each window lifecycle
 event it keeps `sessions.json` authoritative: an `openwindow` (re-checked on
 `movewindow`/`movewindowv2`/`windowtitle`) resolves any tracked session
 still missing its `windowAddress` by walking that session's recorded `pid`
-up the `/proc` ppid chain and matching an ancestor against `hyprctl clients
--j`, then stamping the client's canonical `0x…` address via the atomic
-graph writer. A `closewindow` clears that address off whatever session held
+up the `/proc` ppid chain and matching an ancestor against the client list (`j/clients`
+on the request socket), then stamping the client's canonical `0x…` address via the atomic
+graph writer. A pid-less hosted session (the hook-only shape) resolves the
+same way through its stored `hookAncestry`: the nearest chain pid that owns a
+client is the owner, and the session binds while any live process of its own chain, a tab shell included, stands beneath that owner. A chain whose processes have all exited binds nothing until the next per-turn hook from a live harness replaces it, and the sweep never writes a pid. A `closewindow` clears that address off whatever session held
 it. The lazy hook-time backfill alone leaves the address frequently empty
 at click time, so capturing it at window-creation time keeps the
 [[Terminal-Commander]] jump reliable. The listener reuses the same
@@ -226,8 +229,8 @@ degrades to a logged no-op with no `HYPRLAND_INSTANCE_SIGNATURE`
 A terminal killed uncatchably (SIGKILL, SUPER+Q) cannot run its own `session
 end`. The **liveness reaper** (`aoide session reap`, on a systemd user
 timer every ~12s after an initial 15s delay) sweeps the roster shellbridge
-publishes and marks such a session dead when its window is gone (per `hyprctl
-clients -j`) OR its pid's `/proc` entry is gone — never both required, never
+publishes and marks such a session dead when its window is gone (per Hyprland's
+`j/clients` request) OR its pid's `/proc` entry is gone — never both required, never
 a false reap of a live, signal-less session. See [[Session-Graph]] ("Liveness
 reaping") for the predicate.
 

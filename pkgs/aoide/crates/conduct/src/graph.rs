@@ -306,7 +306,7 @@ pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
-    lineage_of, refresh_subagent_says, refresh_transcript_fields, upsert_hook,
+    lineage_of, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };
 pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;

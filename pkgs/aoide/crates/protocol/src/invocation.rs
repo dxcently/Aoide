@@ -50,8 +50,7 @@ impl Invocation {
     }
 }
 
-/// One word quoted for a POSIX shell: bare when it is plain, else single-quoted.
-pub fn shell_word(w: &str) -> String {
+fn shell_word(w: &str) -> String {
     let plain = !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:=,@%+".contains(c));
     if plain {
         w.to_string()

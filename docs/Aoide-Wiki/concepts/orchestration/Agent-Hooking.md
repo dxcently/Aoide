@@ -45,10 +45,27 @@ so the merge cannot resurrect the warm state.
 Hooks give you edges and there is no "un-awaiting" event, so every path OUT of a permission prompt must land on a mapped event. Approve → the tool runs → `PostToolUse` clears it back to `working`. Deny with feedback → the model continues → next `PreToolUse`/`Stop`. Reply or interrupt → `UserPromptSubmit`/`Stop`. The set is closed; an `awaiting` flag cannot stick.
 
 The hook door also **discovers the session's window**: at `SessionStart` (and
-backfilled on any later hook while still empty) it walks pid-ancestry against
-`hyprctl clients -j`, the same match `conduct` uses — so a plain hook-registered
-session (no wrapping, no PTY) still gets a `windowAddress` and is
-focus-jumpable from the roster, same as a conducted one.
+backfilled on any later hook while still empty) it walks the HOOK process's
+pid-ancestry against the client list Hyprland's request socket returns (`j/clients`), the same match `conduct` uses. The
+hook process is this process on the CLI arm and the door's kernel-attested peer
+pid on the daemon arm, never `aoided` itself. Discovery yields the window only.
+The walk starts at the harness: from the hook's parent up, the first process that
+is neither a shell nor a forwarding launcher is the harness, so the shell layers a
+harness runs its hook under never count. A window owner met before any harness means
+no harness, and the door then binds nothing and stores no chain. Two residuals: a hand-run
+hook under an `aoide conduct` wrap or a multiplexer server (tmux, screen) takes that
+process as its harness, because neither is a shell or a launcher, and binds the window
+it sits under; a hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that
+launcher as its harness, because the walk reads only shells and forwarding launchers as
+plumbing, and binds the same window.
+The same `SessionStart` lands the hook chain (`hookAncestry`) on the record, so
+a plain hook-registered session (no wrapping, no PTY) still gets a
+`windowAddress` and is focus-jumpable from the roster, same as a conducted one.
+A per-turn hook keeps that chain current: when the stored chain is stale (its
+harness exited) and the hook's own chain holds a live harness the record lacks,
+the next hook records it, so a resumed harness that never fires `SessionStart`
+again still binds to its window. A stored chain whose pids are dead is healed by the next per-turn hook from its live harness, whatever wrote it. The heal runs with or without a compositor; the bind needs one. A SessionStart that was missed or refused is the residual: that record's chain stays stale until a per-turn hook from its live harness heals it. Tab-shell residual: a chain whose tab shell stands beneath the window owner binds that window, but its heal is blocked while the tab shell lives outside the hook's chain, so it stays stale until the shell exits.
+Its pid is the harness's own self-report when it sends one, and otherwise nothing. Discovery never stamps the owning app's pid. A self-report is vouched only as an ancestor of the hook process that owns no window. The owning app is an ancestor too, so ancestry alone cannot tell the harness from its app, and a self-report that owns a Hyprland client is refused (`send.rs`, `vouched_payload_pid`). The client lookup runs in the process that performs the hook action: the hook process on the CLI arm, and `aoided` on the daemon arm. The client list comes off the request socket (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`), so the lookup needs no `hyprctl` on `PATH`. Where there is no `HYPRLAND_INSTANCE_SIGNATURE` or no socket, it finds no client and keeps the self-report, so on those hosts the check is inert.
 
 ### 2. The explicit commands — anything scriptable
 
