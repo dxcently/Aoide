@@ -38,18 +38,22 @@ let
   # write at its priority. A host write the owner outranks (a `mkDefault`
   # against the owner's plain `true`) never reaches the merge: it is dropped and
   # cannot change the value.
+  inherit (import ../default.nix) catalogue;
   mkFact =
-    owner:
+    name:
+    let
+      owner = toString catalogue.${name};
+    in
     types.bool
     // {
       merge =
         loc: defs:
         let
-          # A catalogue entry may be a directory (`lyra = ./dendrites/lyra;`), so
-          # the owner's file is named with or without its `default.nix`.
+          # The owner is the file the catalogue names for `name`; an entry may be
+          # a directory (`lyra = ./dendrites/lyra;`), answered by its `default.nix`.
           fromOwnerOrDecl =
             d:
-            lib.hasSuffix owner (lib.removeSuffix "/default.nix" (toString d.file))
+            lib.removeSuffix "/default.nix" (toString d.file) == owner
             || lib.hasSuffix "/modules/nucleus/options.nix" (toString d.file);
         in
         if lib.length defs == 1 && fromOwnerOrDecl (lib.head defs) then
@@ -747,7 +751,7 @@ in
     # package it installs, is the third fact in this family.
     quickshell = {
       enable = mkOption {
-        type = mkFact "/modules/dendrites/quickshell.nix";
+        type = mkFact "quickshell";
         default = false;
         description = ''
           A fact: a Quickshell shell surface exists on this host. True exactly
@@ -774,7 +778,7 @@ in
     };
 
     stylix.enable = mkOption {
-      type = mkFact "/modules/dendrites/stylix.nix";
+      type = mkFact "stylix";
       default = false;
       description = ''
         A fact: a Stylix baked-theme fan-out exists on this host — the theme is
@@ -816,7 +820,7 @@ in
     # ── Lyra paint binary (P-A8 of the binary-split workstream) ────────────
     lyra = {
       enable = mkOption {
-        type = mkFact "/modules/dendrites/lyra";
+        type = mkFact "lyra";
         default = false;
         description = ''
           A fact: the `lyra` paint/rice binary is installed — `pkgs.aoide.rice`,
