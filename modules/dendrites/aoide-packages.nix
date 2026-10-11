@@ -17,7 +17,8 @@
   ...
 }:
 {
-  config = lib.mkIf config.aoide.enable {
+  config = {
+    aoide.enable = true;
     environment.systemPackages = [
       pkgs.aoide
       # git is load-bearing, not dev comfort: nix flake operations on the

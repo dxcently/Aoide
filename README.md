@@ -44,7 +44,7 @@ A catalogue at the centre and radial distance from it governing who may change w
 
 | Layer | Owner | What it holds |
 |---|---|---|
-| `modules/nucleus/` | upstream | The option contract and assertions every host carries. The daemon, secrets and the rest of the floor are dendrites in the `nucleus` aggregation. |
+| `modules/nucleus/` | upstream | The option contract and assertions every host carries. The daemon and the rest of the floor are dendrites in the `nucleus` aggregation; the secrets broker is one a host selects by name. |
 | `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (lyra, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
 | `song/songbook/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, livery.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
 

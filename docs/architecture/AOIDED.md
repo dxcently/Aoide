@@ -324,7 +324,7 @@ standing orchestrator:
   target when a `--to` query matches no local session and names no explicit
   node; the mail relay uses the hub as the persistent drop
   point. Both are preference, not protocol — a mesh with no hub behaves
-  exactly as today. Flags default off (house rule).
+  exactly as today. Options default off.
 
 ---
 

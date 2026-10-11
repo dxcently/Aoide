@@ -34,8 +34,8 @@
   # The baseline aggregations default these ON; each carries NixOS-only wiring or a
   # package that doesn't belong on macOS, so the template opts out explicitly
   # (no class machinery — the host just says no):
-  aoide.fonts.enable = false; # fonts.packages is a NixOS-only option
-  aoide.kitty.enable = false; # GUI terminal; nixpkgs kitty on darwin is a sore spot
+  habit.dendrites.fonts.enable = false; # fonts.packages is a NixOS-only option
+  habit.dendrites.kitty.enable = false; # GUI terminal; nixpkgs kitty on darwin is a sore spot
 
   # Also Linux/desktop-only — off by default, KEEP them off here:
   #   aoide.audio       (services.pipewire)        aoide.clipboard (systemd service)
@@ -47,6 +47,6 @@
   # aoided, the session graph, conduct, agent hooks — the headless profile,
   # same as _server.
   #
-  # aoide.melete.enable = true;
-  # aoide.mneme.enable = true;
+  # habit.dendrites.melete.enable = true;
+  # habit.dendrites.mneme.enable = true;
 }

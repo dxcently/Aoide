@@ -1708,8 +1708,8 @@ job, not this crate's: the code sets mode bits, deployment sets identity.
 
 ### The nix module (`modules/dendrites/aoide-secrets.nix`)
 
-For an Aoide-managed NixOS host: `aoide.secrets.enable = true;` (default
-`false`) provisions the `aoide-secrets`/`aoide-secrets-access` groups, the
+For an Aoide-managed NixOS host, selecting the `aoide-secrets` dendrite (a
+nucleus member, so every nucleus host has it) provisions the `aoide-secrets`/`aoide-secrets-access` groups, the
 `aoide-secrets` system user (no login shell, home `/var/lib/aoide-secrets`,
 `createHome = false` — `StateDirectory` below owns it instead), and a
 SYSTEM `aoide-secrets-serve.service` (`Type = "simple"` — `secrets serve` blocks
@@ -1718,8 +1718,8 @@ forever, so this is right from day one, no oneshot detour; anchored to
 `StateDirectory = "aoide-secrets"` (`0700`), `RuntimeDirectory = "aoide-secrets"`
 (`0750`), and `AOIDE_SECRETS_HOME`/`AOIDE_SECRETS_SOCKET` set explicitly.
 `aoide.secrets.members` (default `[]`) is the list of user names added to
-`aoide-secrets-access` — enable alone grants nobody access until a host names
-its operator here. No sudo rule is shipped; admin commands run as the secrets
+`aoide-secrets-access` — the dendrite alone grants nobody access until a host
+names its operator here. No sudo rule is shipped; admin commands run as the secrets
 user by hand (below). The service's `path` also carries `bash`+`coreutils`
 (sh/cat/mkdir/install for the built-in `file` backend's own templates — a
 systemd unit's default `PATH` carries no `sh`, so an un-hardened unit can

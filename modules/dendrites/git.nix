@@ -1,10 +1,9 @@
 # modules/dendrites/git.nix — git + gh for the aoide user.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.git.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (the `nucleus` aggregation defaults it on —
-#     see modules/aggregations/nucleus/default.nix).
+#   - Selected by the nucleus aggregation (modules/aggregations/nucleus/default.nix), or one line in hosts/.
 #
 # What this dendrite does (ported from dxflake modules/dendrites/git.nix):
 #   - programs.git with LFS, a default branch of `main`, an identity, and
@@ -15,42 +14,38 @@
 # /home/khoa/Aoide. Identity kept as the dxflake author for continuity — retune
 # per box if desired.
 
-{ config, lib, ... }:
+{ lib, ... }:
 {
-  options.aoide.git.enable = lib.mkEnableOption "git + gh for the aoide user (LFS, identity, credential helper)";
 
-  config = lib.mkMerge [
-    { aoide.git.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.git.enable {
-      habit.home = _: {
-        programs = {
-          git = {
-            enable = true;
-            lfs.enable = true;
-            signing.format = null;
-            settings = {
-              user.name = "dxcently";
-              user.email = "dxcently@gmail.com";
-              init.defaultBranch = "main";
-              core.editor = "nvim";
-              safe.directory = [
-                "/etc/nixos"
-                "/home/khoa/Aoide"
-              ];
-            };
+  config = {
+    habit.home = _: {
+      programs = {
+        git = {
+          enable = true;
+          lfs.enable = true;
+          signing.format = null;
+          settings = {
+            user.name = "dxcently";
+            user.email = "dxcently@gmail.com";
+            init.defaultBranch = "main";
+            core.editor = "nvim";
+            safe.directory = [
+              "/etc/nixos"
+              "/home/khoa/Aoide"
+            ];
           };
-          gh = {
+        };
+        gh = {
+          enable = true;
+          gitCredentialHelper = {
             enable = true;
-            gitCredentialHelper = {
-              enable = true;
-              hosts = [
-                "https://github.com"
-                "https://gist.github.com"
-              ];
-            };
+            hosts = [
+              "https://github.com"
+              "https://gist.github.com"
+            ];
           };
         };
       };
-    })
-  ];
+    };
+  };
 }

@@ -21,26 +21,27 @@ in the tree knows it was there. That line — in `modules/default.nix`'s
 catalogue — is the only place a module file is named.
 
 The repo already runs this way and did before it had a name for it. A dendrite
-is one file (or one directory) plus **one catalogue line**, and no second
-list follows it.
-`lib/pkgs.nix` discovers `pkgs/*`, and `lib/songbook.nix`'s `discover` finds
-`song/songbook/<song>/` — each a directory's one typed scan (§2, §5) — the same
-way. `lib/walk.nix` is gone: a host imports what it selected, and the check that
-catches a stray `.nix` in a song folder reads the directory itself. `modules/nucleus/default.nix`
-names its own files in directory order: it is the unconditional option contract, so a layer
-nothing selects has no name to be reached by, and its one line per file is what
-puts them in the tree. The services every host carries are not in it: they are
+is one file (or one directory) plus **one catalogue line**, and no second list
+follows it. `lib/pkgs.nix` discovers `pkgs/*`, and `lib/songbook.nix`'s
+`discover` finds `song/songbook/<song>/` — each a directory's one typed scan
+(§2, §5) — the same way. `lib/walk.nix` is gone: a host imports what it
+selected, and the check that catches a stray `.nix` in a song folder reads the
+directory itself. `modules/nucleus/default.nix` names its own files in
+directory order: it is the unconditional option contract, so a layer nothing
+selects has no name to be reached by, and its one line per file is what puts
+them in the tree. The services every host carries are not in it: they are
 catalogue entries, members of the `nucleus` aggregation. Each of those modules
-self-gates on its own `enable`/`aoide.song` rather than being switched on from
-outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
-slot *name*, falling back to sonata — so no surface ever imports a concrete
-widget (§5). Paint dendrites read only the closed namespace whitelist house
-rule 5 enumerates (`AGENTS.md` owns the list): named services, never another
-module's internals. The catalogue is also what the selection constructor reads:
-habit's composition (`inputs.habit`, exported as `lib.composition`) resolves a host's
-selection in a pass that runs before any module graph exists and imports only
-what that pass kept — a provider registry resolves to the alternative the host
-named, and a file nothing selected is never read.
+is switched on by selection alone: its body is unconditional and it reads no
+switch of its own. A widget resolves through `StagingEngine.resolveSong(song,
+slot)` — by slot *name*, falling back to sonata — so no surface ever imports a
+concrete widget (§5). Paint dendrites read only the closed namespace whitelist
+house rule 5 enumerates (`AGENTS.md` owns the list): named services, never
+another module's internals. The catalogue is also what the selection
+constructor reads: habit's composition (`inputs.habit`, exported as
+`lib.composition`) resolves a host's selection in a pass that runs before any
+module graph exists and imports only what that pass kept — a provider registry
+resolves to the alternative the host named, and a file nothing selected is
+never read.
 
 Two names for the halves, taken from **Cordis** — *A Programming Paradigm for
 Spatiotemporal Composability* (Shi, Zhang & Cui; preprint 2026-08-13,
@@ -68,32 +69,37 @@ that can be deleted.
 
 ### Enable facts — how a lane reaches nucleus
 
-A lane cannot be read (first rule above), so the one question every layer has to
-ask — *is there a shell / a session on this host?* — is answered by a FACT that
-nucleus declares once, in `modules/nucleus/options.nix`. Each `enable` fact
-defaults `false`; `aoide.quickshell.config` defaults `null`, and
+A lane cannot be read (first rule above), so the one question every layer has
+to ask — *is there a shell / a session on this host?* — is answered by a FACT
+that nucleus declares once, in `modules/nucleus/options.nix`. Each `enable`
+fact is set only by its owner: `false` unless its dendrite is selected, and that
+dendrite sets it `true`. `aoide.quickshell.config` defaults `null`, and
 `aoide.wallpaper.provider` names the active alternative by defaulting to the
 shell's own layer:
 
 | Fact | What it means | Set by |
 |---|---|---|
-| `aoide.quickshell.enable` | a Quickshell shell surface exists here | the lane that runs one (`dendrites/quickshell.nix` — the package and the `aoide-quickshell` service) |
+| `aoide.quickshell.enable` | a Quickshell shell surface exists here | its dendrite, `dendrites/quickshell.nix` (the package and the `aoide-quickshell` service), which sets it `true` |
 | `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
-| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | the lane that paints (`dendrites/lyra`) |
-| `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the stylix lane (`dendrites/stylix.nix`) |
-| `aoide.compositor.enable` | a Wayland compositor is started here | the compositor lane (`dendrites/compositor`) |
-| `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the greeter lane (`dendrites/greeter.nix`) |
+| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | its dendrite, `dendrites/lyra`, which sets it `true` |
+| `aoide.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
 | `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a song's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`), each to its own name |
 
-The lane that owns a fact sets it `mkDefault true` while it is on, so a host
-that flips it back off still wins. Every reader then reads the FACT — never the
-owning lane's own option, and never through one lane to reach another. That is
-the one place house rule 5 must hold in both directions at once: the
-nucleus aggregation's members (`modules/dendrites/aoide-secrets.nix`) and sibling lanes alike need to know
+The dendrite that owns a fact sets it `true`. The guard is `mkFact` in
+`modules/nucleus/options.nix`: it reads the winning definitions and refuses any
+whose file is neither the owner nor the nucleus default, and refuses a tie
+between the owner and a host write. So a host write that takes effect fails
+eval, whether or not a dendrite is selected (a plain or `mkForce` write, or any
+write while the owner is unselected). A host `mkDefault` that the owner outranks
+never reaches the guard: it is dropped without error and cannot change the
+value. Every reader then reads the FACT — never the owning lane's own option, and never
+through one lane to reach another. That is the one place house rule 5 must hold
+in both directions at once: the other dendrites and sibling lanes alike need to
+know
 whether a session exists, and neither may name the lane that made one. A lane
 reading a fact is reading the contract's own declaration rather than another
-module's internals; which of these names a *paint dendrite* may read is whatever
-`AGENTS.md` rule 5's list currently enumerates.
+module's internals; which of these names a *paint dendrite* may read is
+whatever `AGENTS.md` rule 5's list currently enumerates.
 
 `aoide.sessionTarget` is the same seam answering a different question — *which
 target does `aoided` anchor to?* It is declared in the core half
@@ -423,23 +429,20 @@ rather than following this one.
 # modules/dendrites/<name>.nix
 { config, lib, ... }:
 {
-  options.aoide.<name>.enable = lib.mkEnableOption "<name>";
+  options.aoide.<name>.<setting> = lib.mkOption { … };   # only what the body reads
 
-  config = lib.mkMerge [
-    { aoide.<name>.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.<name>.enable {
-      # a dendrite carries its own dependencies (narrowest scope wins)
+  config = {
+    # a dendrite carries its own dependencies (narrowest scope wins)
 
-      habit.home = { pkgs, ... }: {
-        # the user's half, if it has one
-      };
-    })
-  ];
+    habit.home = { pkgs, ... }: {
+      # the user's half, if it has one
+    };
+  };
 }
 ```
 
-The module declares the options, sets the flag `mkDefault true` and guards the
-rest, so selecting the dendrite is what turns the capability on. The
+The module declares the options its body reads, if any, and its body is
+unconditional, so selecting the dendrite is what turns the capability on. The
 constructor (habit's composition) imports the file of what a host selected and
 nothing else. A condition around `habit.home` carries down to what the half
 sets, but not to its `imports` or `options`, which habit reads before any
@@ -448,8 +451,7 @@ condition is forced and refuses under one: such a half states them in a
 
 Rules:
 
-- **Guard on `aoide.<name>.enable`** (per-feature) or an aggregation/role flag,
-  in the module itself.
+- **No switch of its own.** Selection is the switch: a dendrite declares no `aoide.<name>.enable`, and its body is unconditional.
 - **A capability with alternatives is a provider registry** — a directory
   whose file is `{ providers.<p> = <path>; }` — and its catalogue entry is the
   directory, not a provider file.
@@ -464,13 +466,13 @@ Rules:
 - Subfolders under `modules/dendrites/` are grouping only; a file inside one
   still needs its own catalogue line to be selectable.
 
-A paint dendrite is a plain module like any other, and it is what sets its fact
-`mkDefault true`. Its guard is the FACT `modules/nucleus`
-declares (`aoide.<name>.enable`), not an option it declares itself: the
-cross-lane seam exists so that a consumer can ask "is there a shell here?"
-without reading the lane that made one. What it may read is exactly what root
-`AGENTS.md` house rule 5 enumerates — by reference, never restated here, so the
-two cannot drift.
+A paint dendrite is a plain module like any other, and the ones whose fact
+another lane reads set that fact `true`. A lane reads the FACT
+`modules/nucleus` declares (`aoide.<name>.enable`), not an option another lane
+declares itself: the cross-lane seam exists so that a consumer can ask "is
+there a shell here?" without reading the lane that made one. What it may read
+is exactly what root `AGENTS.md` house rule 5 enumerates — by reference, never
+restated here, so the two cannot drift.
 
 ### Repo shape (the root is closed)
 
@@ -1502,11 +1504,11 @@ store path and `AOIDE_CONFIG` names it (exported into interactive shells via
 `environment.sessionVariables`, and into every aoide user unit via the user
 manager's `DefaultEnvironment`). Immutability IS the provenance: there is no
 marker field to lie or go stale, and the two worlds never write the same path,
-so a rebuild structurally cannot eat a CLI edit. Management is
-**whole-file-or-nothing** — `aoide.config.enable` is off by default (same
-house policy as every other door), and partial management (nix owning one
-section while the CLI owns another) is deliberately not offered: two writers
-on one document is the split-brain the design exists to avoid.
+so a rebuild structurally cannot eat a CLI edit. Management is **whole-file-or-
+nothing** — selecting `aoide-config` is the switch (it has no `enable` of its
+own), and partial management (nix owning one section while the CLI owns
+another) is deliberately not offered: two writers on one document is the split-
+brain the design exists to avoid.
 
 Schema v0 — three SETTABLE sections plus the DECLARED families, and a new
 section lands with the consumer that reads it, never ahead of one:
@@ -4270,12 +4272,13 @@ rather than in one.
 
 ### `state/usage.json` — **v0**
 
-Account/usage runtime — lives in the gitignored root-runtime `state/` dir
-(§2), NOT inside either stage tree: this is account/global state, not
-song-scoped, rehearsal, or broker-owned registry state. **State-dir resolution** mirrors the stage-dir seam above:
-`$AOIDE_STATE_DIR` when set to an **absolute** path, else `$AOIDE_ROOT/state`
-(§4's runtime-root note). Written by `aoide usage` (`aoide.usage.*`,
-`modules/nucleus/options.nix`; opt-in poller service, off by default).
+Account/usage runtime — lives in the gitignored root-runtime `state/` dir (§2),
+NOT inside either stage tree: this is account/global state, not song-scoped,
+rehearsal, or broker-owned registry state. **State-dir resolution** mirrors the
+stage-dir seam above: `$AOIDE_STATE_DIR` when set to an **absolute** path, else
+`$AOIDE_ROOT/state` (§4's runtime-root note). Written by `aoide usage`
+(`aoide.usage.*`, `modules/dendrites/aoided.nix`; opt-in poller service, off by
+default).
 
 The `local` block is a rollup computed straight off this machine's own Claude
 Code transcripts (`~/.claude/projects/**/*.jsonl`) — no network, no
@@ -5781,7 +5784,7 @@ discovered folder with no `rice.nix` is still discovered — the manifest is rig
 to see a song being written — but it can never be selected: naming it throws
 `song <n> has no rice.nix`.
 
-Each song's `rice.nix` **self-gates**, exactly like a dendrite:
+Each song's `rice.nix` **self-gates** on `config.aoide.song`:
 
 ```nix
 # song/songbook/<name>/rice.nix

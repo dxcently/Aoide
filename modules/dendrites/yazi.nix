@@ -1,10 +1,9 @@
 # modules/dendrites/yazi.nix — the yazi terminal file manager.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.yazi.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (the `nucleus` aggregation defaults it on —
-#     see modules/aggregations/nucleus/default.nix).
+#   - Selected by the nucleus aggregation (modules/aggregations/nucleus/default.nix), or one line in hosts/.
 #
 # What this dendrite does (ported verbatim from dxflake modules/dendrites/
 # yazi.nix): programs.yazi with the dxflake layout/sort settings, a `y` shell
@@ -31,9 +30,8 @@
 #
 # Openers are restricted to binaries this dendrite can see are actually
 # installed on every host that turns yazi on: `nvim` (modules/dendrites/
-# neovim.nix, aoide.neovim.enable, mkDefault true in the `nucleus` aggregation) and
-# `xdg-open` (modules/dendrites/cli.nix ships xdg-utils, aoide.cli.enable,
-# also mkDefault true). No media-player dendrite exists in this repo yet, so
+# neovim.nix, selected by the `nucleus` aggregation) and `xdg-open`
+# (modules/dendrites/cli.nix ships xdg-utils, selected by the same aggregation). No media-player dendrite exists in this repo yet, so
 # there is deliberately no mpv/imv/feh opener — xdg-open is the fallback for
 # everything that isn't plain text, per the dendrite discipline (no reading
 # another module's options, so this can't check what a host actually has a
@@ -50,143 +48,139 @@
 # least one of `url` or `mime` must be specified"), silently dropping every
 # setting in the file back to yazi's compiled presets.
 
-{ config, lib, ... }:
+{ lib, ... }:
 {
-  options.aoide.yazi.enable = lib.mkEnableOption "the yazi terminal file manager";
 
-  config = lib.mkMerge [
-    { aoide.yazi.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.yazi.enable {
-      habit.home = _: {
-        programs.yazi = {
-          enable = true;
-          enableBashIntegration = true;
-          shellWrapperName = "y";
+  config = {
+    habit.home = _: {
+      programs.yazi = {
+        enable = true;
+        enableBashIntegration = true;
+        shellWrapperName = "y";
 
-          settings = {
-            manager = {
-              ratio = [
-                0
-                1
-                1
-              ];
-              sort_by = "mtime";
-              sort_sensitive = false;
-              sort_reverse = true;
-              linemode = "size";
-              show_hidden = false;
-            };
-
-            opener = {
-              edit = [
-                {
-                  run = ''nvim "$@"'';
-                  block = true;
-                  desc = "Edit in nvim";
-                }
-              ];
-              open = [
-                {
-                  run = ''xdg-open "$@"'';
-                  orphan = true;
-                  desc = "Open (xdg-open)";
-                }
-              ];
-            };
-
-            open = {
-              prepend_rules = [
-                {
-                  mime = "text/*";
-                  use = [
-                    "edit"
-                    "open"
-                  ];
-                }
-                {
-                  mime = "image/*";
-                  use = "open";
-                }
-                {
-                  mime = "video/*";
-                  use = "open";
-                }
-                {
-                  mime = "audio/*";
-                  use = "open";
-                }
-                # Archives by mime rather than a brace-expansion name glob —
-                # yazi's glob matcher is not confirmed to support `{a,b}`
-                # alternation, and a silently-inert rule is exactly the bug
-                # this dendrite exists to fix.
-                {
-                  mime = "application/zip";
-                  use = "open";
-                }
-                {
-                  mime = "application/gzip";
-                  use = "open";
-                }
-                {
-                  mime = "application/x-tar";
-                  use = "open";
-                }
-                {
-                  mime = "application/x-bzip2";
-                  use = "open";
-                }
-                {
-                  mime = "application/x-xz";
-                  use = "open";
-                }
-                {
-                  mime = "application/x-7z-compressed";
-                  use = "open";
-                }
-                {
-                  mime = "application/vnd.rar";
-                  use = "open";
-                }
-              ];
-              append_rules = [
-                {
-                  url = "*";
-                  use = "open";
-                }
-              ];
-            };
+        settings = {
+          manager = {
+            ratio = [
+              0
+              1
+              1
+            ];
+            sort_by = "mtime";
+            sort_sensitive = false;
+            sort_reverse = true;
+            linemode = "size";
+            show_hidden = false;
           };
 
-          theme = {
-            mgr = {
-              preview_hovered = {
-                underline = false;
-              };
-              folder_offset = [
-                1
-                0
-                1
-                0
-              ];
-              preview_offset = [
-                1
-                1
-                1
-                1
-              ];
-            };
+          opener = {
+            edit = [
+              {
+                run = ''nvim "$@"'';
+                block = true;
+                desc = "Edit in nvim";
+              }
+            ];
+            open = [
+              {
+                run = ''xdg-open "$@"'';
+                orphan = true;
+                desc = "Open (xdg-open)";
+              }
+            ];
+          };
 
-            status.separator_style = {
-              fg = "red";
-              bg = "red";
-            };
+          open = {
+            prepend_rules = [
+              {
+                mime = "text/*";
+                use = [
+                  "edit"
+                  "open"
+                ];
+              }
+              {
+                mime = "image/*";
+                use = "open";
+              }
+              {
+                mime = "video/*";
+                use = "open";
+              }
+              {
+                mime = "audio/*";
+                use = "open";
+              }
+              # Archives by mime rather than a brace-expansion name glob —
+              # yazi's glob matcher is not confirmed to support `{a,b}`
+              # alternation, and a silently-inert rule is exactly the bug
+              # this dendrite exists to fix.
+              {
+                mime = "application/zip";
+                use = "open";
+              }
+              {
+                mime = "application/gzip";
+                use = "open";
+              }
+              {
+                mime = "application/x-tar";
+                use = "open";
+              }
+              {
+                mime = "application/x-bzip2";
+                use = "open";
+              }
+              {
+                mime = "application/x-xz";
+                use = "open";
+              }
+              {
+                mime = "application/x-7z-compressed";
+                use = "open";
+              }
+              {
+                mime = "application/vnd.rar";
+                use = "open";
+              }
+            ];
+            append_rules = [
+              {
+                url = "*";
+                use = "open";
+              }
+            ];
           };
         };
 
-        home.shellAliases = {
-          sy = "sudo yazi";
+        theme = {
+          mgr = {
+            preview_hovered = {
+              underline = false;
+            };
+            folder_offset = [
+              1
+              0
+              1
+              0
+            ];
+            preview_offset = [
+              1
+              1
+              1
+              1
+            ];
+          };
+
+          status.separator_style = {
+            fg = "red";
+            bg = "red";
+          };
         };
       };
-    })
-  ];
+
+      home.shellAliases = {
+        sy = "sudo yazi";
+      };
+    };
+  };
 }

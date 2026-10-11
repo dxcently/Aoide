@@ -10,7 +10,6 @@
 {
   imports = [
     ./assertions.nix
-    ./config-options.nix
     ./options.nix
   ];
 }

@@ -33,5 +33,17 @@
       assertion = config.aoide.song == null || config.aoide.lyra.enable;
       message = "aoide.song = \"${config.aoide.song}\" needs the lyra dendrite: select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host";
     }
+
+    # The three paint facts are set only by their owners (options.nix's mkFact).
+    # Forcing them here runs that guard on every host, so a host write that takes
+    # effect is an eval error whether or not a lane reads the fact.
+    {
+      assertion = lib.all lib.isBool [
+        config.aoide.quickshell.enable
+        config.aoide.lyra.enable
+        config.aoide.stylix.enable
+      ];
+      message = "aoide.{quickshell,lyra,stylix}.enable are read-only facts, set by their dendrite alone: remove the host's write";
+    }
   ];
 }

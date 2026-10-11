@@ -1,10 +1,9 @@
 # modules/dendrites/nh.nix — nh (nix-helper) rebuild wrapper.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.nh.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (the `nucleus` aggregation defaults it on —
-#     see modules/aggregations/nucleus/default.nix).
+#   - Selected by the nucleus aggregation (modules/aggregations/nucleus/default.nix), or one line in hosts/.
 #
 # What this dendrite does:
 #   - Turns on programs.nh for the aoide user (home-manager), pointed at the
@@ -15,26 +14,22 @@
 # /home/khoa/dxflake/ to /home/khoa/Aoide/ (the `ad*` alias family in bash.nix
 # drives the same target).
 
-{ config, lib, ... }:
+{ lib, ... }:
 let
   flakeDir = "/home/khoa/Aoide/";
 in
 {
-  options.aoide.nh.enable = lib.mkEnableOption "nh (nix-helper) rebuild wrapper pointed at the Aoide flake";
 
-  config = lib.mkMerge [
-    { aoide.nh.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.nh.enable {
-      habit.home = _: {
-        programs.nh = {
+  config = {
+    habit.home = _: {
+      programs.nh = {
+        enable = true;
+        clean = {
           enable = true;
-          clean = {
-            enable = true;
-            extraArgs = "--keep-since 1w --keep 10";
-          };
-          flake = flakeDir;
+          extraArgs = "--keep-since 1w --keep 10";
         };
+        flake = flakeDir;
       };
-    })
-  ];
+    };
+  };
 }

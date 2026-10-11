@@ -5,9 +5,9 @@
 # Found live on first switch: dxflake's nucleus had carried these settings and
 # the "essentials only" port dropped them, leaving a box whose own framework
 # could not evaluate itself.
-{ config, lib, ... }:
 {
-  config = lib.mkIf config.aoide.enable {
+  config = {
+    aoide.enable = true;
     nix.settings.experimental-features = [
       "nix-command"
       "flakes"

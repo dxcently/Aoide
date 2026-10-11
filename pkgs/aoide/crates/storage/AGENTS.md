@@ -1121,8 +1121,7 @@
 - This `README.md` when a new module or stage-file shape is added.
 - `CONTRACTS.md §4`/`§7` when a stage-file or node-registry wire shape
   changes — including `config.toml`'s own subsection when `config::SCHEMA`
-  gains or loses a section/key, plus `modules/nucleus/config-options.nix` and
-  `modules/dendrites/aoide-config.nix` when the nix authoring front-end's
+  gains or loses a section/key, plus `modules/dendrites/aoide-config.nix` when the nix authoring front-end's
   option shape moves with it.
 - `CONTRACTS.md §6` when `wire_auth`'s canonical string, header names, or
   pinned vectors change (P-P4).

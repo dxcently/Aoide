@@ -25,6 +25,9 @@
   habit.dendrites.qbittorrent.enable = true;
   habit.dendrites.inference.enable = true;
   habit.dendrites.tailscale.enable = true;
+  # The secrets broker is not nucleus's: this host names it, and `aoide.secrets.members`
+  # below exists only because it is selected.
+  habit.dendrites.aoide-secrets.enable = true;
 
   # ── Who paints a wallpaper pick ────────────────────────────────────────────
   # The compositor line's twin: the aggregation ships the shell's own layer as
@@ -85,9 +88,10 @@
   zramSwap.enable = true;
 
   # ── Aoide ──────────────────────────────────────────────────────────────
-  # `aoide.enable` and `aoide.mcp.enable` are the `nucleus` aggregation's, and
-  # `aoide.song` is DERIVED from `habit.song.declared` by the
-  # constructor's hook — none of the three is a line here.
+  # The `nucleus` dendrites select the core (`aoide.enable`) and the doors
+  # below exist because those dendrites are selected; `aoide.song` is DERIVED
+  # from `habit.song.declared` by the constructor's hook. None of them is a
+  # line here.
   aoide.user = "khoa";
 
   # Monitors: none declared, so Hyprland autodetects whatever is plugged in
@@ -102,7 +106,6 @@
   aoide.a2a.discoveryAdvertise = true;
   aoide.a2a.pairingPopup = true;
 
-  aoide.secrets.enable = true;
   aoide.secrets.members = [ "khoa" ];
 
   # ── SSH ────────────────────────────────────────────────────────────────

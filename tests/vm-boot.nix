@@ -108,12 +108,12 @@ let
     };
     habit.dendrites.greeter.enable = true;
 
-    # The nucleus aggregation's services, named one by one: the aggregation's
-    # command-line members are trimmed with the rest of the desktop.
-    habit.dendrites.aoide-config.enable = true;
+    # The nucleus aggregation's core services, named one by one: the aggregation's
+    # command-line members are trimmed with the rest of the desktop. The secrets
+    # broker and the config renderer are not nucleus members, so they stay
+    # unselected here, as they were off at HEAD.
     habit.dendrites.aoide-nix.enable = true;
     habit.dendrites.aoide-packages.enable = true;
-    habit.dendrites.aoide-secrets.enable = true;
     habit.dendrites.aoided.enable = true;
     habit.dendrites.melete-adapter.enable = true;
 
@@ -171,9 +171,8 @@ pkgs.testers.runNixOSTest {
           { lib, ... }:
           {
             # ── Aoide ────────────────────────────────────────────────────
-            # `aoide.compositor.enable` and `aoide.greeter.enable` are the
-            # selected lanes' own mkDefault — selection is what turns them on,
-            # and a line here would be a second answer to the same question.
+            # Selecting the `compositor` and `greeter` lanes is what turns them
+            # on; a line here would be a second answer to the same question.
             #
             # Quickshell/lyra/stylix are not SELECTED (heavy closure, and
             # quickshell cannot render on the virtual GPU), so nothing has to

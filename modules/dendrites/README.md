@@ -1,8 +1,7 @@
 # modules/dendrites
 
 Optional, additive host capabilities. A dendrite is one file (or a directory
-with `default.nix`), named once in `modules/default.nix`'s catalogue, and it
-self-gates on its own `aoide.<name>.enable`. Today's set spans desktop apps
+with `default.nix`), named once in `modules/default.nix`'s catalogue, and selecting it is what switches it on. Today's set spans desktop apps
 (firefox, obsidian, qbittorrent, kitty), CLI tooling (git, yazi, starship,
 mcfly, nh), agent and desktop AI tooling (claude-code, eidolon, kimi-code,
 pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
@@ -14,9 +13,7 @@ tailscale, audio), and **the paint lanes** — what makes a machine paint at all
 `wallpaper` (the capability that owns who paints a song's wallpaper, with the
 shell's own layer and the external engine as its two providers). A paint lane
 reads only what root `AGENTS.md` house rule 5 lists; its
-config is guarded on a FACT that the nucleus contract declares rather than on an option it
-declares itself, so a consumer can ask "is there a shell here?" without reading
-the lane that made one.
+config reads only the FACTS the nucleus contract declares, and a lane that is one sets its own fact `true`, so a consumer can ask "is there a shell here?" without reading the lane that made one.
 
 ## The shape (CONTRACTS.md §2)
 
@@ -26,19 +23,15 @@ reaches:
 
 ```
 modules/dendrites/kitty.nix
-└── { config, lib, ... }: {
-      options.aoide.kitty.enable = …;
-      config = mkMerge [
-        { aoide.kitty.enable = mkDefault true; }       # selecting it turns it on
-        (mkIf config.aoide.kitty.enable {
-          habit.home = { … };                           # the user's kitty
-        })
-      ];
+└── { lib, ... }: {
+      config = {
+        habit.home = { … };                           # the user's kitty
+      };
     }
 ```
 
 Selecting a dendrite imports its file; an unselected one is never read. A
-dendrite carries its OWN dependencies under its guard: `stylix` imports the
+dendrite carries its OWN dependencies in its body: `stylix` imports the
 Stylix NixOS module only when it is present, so no other file has to know the
 dendrite exists. A condition does not cover a home half's `imports` or
 `options` (habit refuses one that does): `neovim.nix` states its `imports` in an
@@ -112,14 +105,15 @@ Nothing here is declared in `aoide.surfaces`: `wallpaper.owner` stays
 external provider has a pick on screen; the provider's own paper surface is the
 compositor's, not an `aoide-<slot>`.
 
-## The nucleus members
+## The core-service dendrites
 
-Six dendrites are members of the `nucleus` aggregation
+Four dendrites are members of the `nucleus` aggregation
 (`modules/aggregations/nucleus`) beside the command-line members, and are what a
-host carries of the core services. They are plain modules like the rest, gated on
-the contract's `aoide.enable` and their own door flags rather than on a flag of
-their own, so none of them adds an option. The option tree they act on is the
-contract in `modules/nucleus`.
+host carries of the core services. `aoide-config` and `aoide-secrets` are
+catalogue dendrites a host selects by name, not members. They are plain modules
+like the rest: selecting one switches it on, and each of the six sets
+`aoide.enable` (the core switch). The option tree they act on is the
+contract in `modules/nucleus`; an option a member reads is declared in that member.
 
 - `aoided.nix` — carries only the AoideOS deltas for the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles rules, and
@@ -151,8 +145,9 @@ contract in `modules/nucleus`.
 - `aoide-secrets.nix` — the secrets broker's deployment: its own system user
   `aoide-secrets` + groups `aoide-secrets`/`aoide-secrets-access`, and a SYSTEM
   `aoide-secrets-serve.service` (own uid, `/var/lib` home) running `aoide
-  secrets serve`. Gated on `aoide.secrets.enable` (default `false`);
-  `aoide.secrets.members` names who joins `aoide-secrets-access`. The broker
+  secrets serve`. Selecting it switches the broker on;
+  `aoide.secrets.members` (declared here, default `[]`) names who joins
+  `aoide-secrets-access`. The broker
   binary itself stays nix-independent — see `pkgs/aoide/crates/secrets/README.md`'s
   "Deployment" section for the non-nix install path this module mirrors. Also
   declares a graphical-session USER unit, `aoide-secrets-watch.service`, running
@@ -162,14 +157,12 @@ contract in `modules/nucleus`.
   secrets-uid broker.
 - `aoide-config.nix` — nix as ONE authoring front-end for the PORTABLE runtime
   config (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4's own subsection). It
-  renders `aoide.config.settings` (declared in the contract's
-  `config-options.nix`) through `pkgs.formats.toml` to a read-only store path and
+  renders `aoide.config.settings` (declared here) through `pkgs.formats.toml` to a read-only store path and
   points `AOIDE_CONFIG` at it — for interactive shells
   (`environment.sessionVariables`) and for every aoide user unit at once (the
-  user manager's own `DefaultEnvironment`). Nix POINTS, never copies. Gated on
-  `aoide.config.enable`, default `false`, and whole-file-or-nothing: enabled, nix
-  owns the entire config and the CLI's own write refuses with a taught error
-  naming this option.
+  user manager's own `DefaultEnvironment`). Nix POINTS, never copies. Selecting it is the switch, and
+  whole-file-or-nothing: nix owns the entire config (empty unless `settings` is
+  set), and the CLI's own write refuses with a taught error naming this option.
 - `aoide-nix.nix` — flake-native nix settings (Aoide IS a flake; every rebuild/
   check/`aoide update` runs through the flake CLI).
 - `aoide-packages.nix` — puts the `aoide`/`lyra` binaries on the system `PATH`
@@ -180,16 +173,16 @@ it selects them by name from its own aggregation.
 
 ## Named seams (what it exposes)
 
-- One file per capability, each declaring `aoide.<name>.enable` (default
-  `false`) and carrying its own package/service dependencies. A paint lane
-  instead guards on the fact of the same name, declared once in
+- One file per capability, carrying its own package/service dependencies and
+  no enable flag: selection is the switch. A paint lane's cross-lane question is
+  answered by the fact of the same name, declared once in
   `modules/nucleus/options.nix`.
 - A capability with ALTERNATIVES is a provider registry: a directory whose
   `default.nix` is `{ providers.<p> = <path>; }`, each provider a plain
   module of its own (see `compositor/README.md`). The catalogue names the directory.
 - `_example.nix` — the checked-in template: shelved by its `_` prefix
   (uncatalogued, so nothing imports it), showing the plain-module shape and the
-  enable-with-one-line convention.
+  select-with-one-line convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
   to a render surface via a bridge (a CLI command, a stage file) rather
   than drawing itself — `dunst.nix` pipes through `aoide herald push` into
@@ -198,7 +191,7 @@ it selects them by name from its own aggregation.
 ## What it consumes
 
 `openai.nix` installs Codex and the local `pkgs/chatgpt-linux` package.
-`aoide.openai.enable` enables both tools. ChatGPT uses the official Linux
+Selecting it installs both tools. ChatGPT uses the official Linux
 release pinned by version and hash, with its bundled desktop runtime.
 
 `inference.nix` installs plain `ollama` and `llama-cpp` — CPU/RAM inference,
@@ -213,11 +206,11 @@ scalars and its own fact; nothing else (root `AGENTS.md` house rule 5).
 ## How it composes
 
 A host selects a dendrite by name — one line in `hosts/<host>/default.nix`
-(`aoide.<name>.enable = true`) in the full tree, or the same name in an
+(`habit.dendrites.<name>.enable = true`) in the full tree, or the same name in an
 aggregation's `members` once the constructor assembles the host. Dendrites
 know nothing about hosts; hosts know dendrites. A tool graduates from a shared
 file (e.g. `devtools.nix`) into its own dendrite the moment a host needs to
-toggle it independently. The paint lanes with more than one file carry their own
+select it independently. The paint lanes with more than one file carry their own
 directories and charters (`compositor/README.md`, `lyra/README.md`); the
 one-file lanes — `greeter.nix`, `stylix.nix`, `quickshell.nix` — are charted
 here, above.

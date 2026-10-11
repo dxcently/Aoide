@@ -14,7 +14,7 @@
 }:
 let
   lib = flake.inputs.nixpkgs.lib;
-  inputs = flake.inputs;
+  inherit (flake) inputs;
 
   # The ref's source root. A commit ref cannot see uncommitted work; `path:`
   # (the runner's default) sees exactly what is on disk.
@@ -35,7 +35,7 @@ let
   host =
     name:
     (composition.mkNixosHost {
-      nixpkgs = inputs.nixpkgs;
+      inherit (inputs) nixpkgs;
       hostName = name;
       registry = import (src + "/modules");
       host = src + "/tests/quickshell-seam/hosts/${name}.nix";

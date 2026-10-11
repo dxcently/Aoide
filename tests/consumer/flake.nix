@@ -36,7 +36,7 @@
     }:
     let
       system = "x86_64-linux";
-      lib = nixpkgs.lib;
+      inherit (nixpkgs) lib;
 
       # The exported library values are each their file's own function, still
       # unapplied: a consumer applies them with ITS lib (the constructor runs on

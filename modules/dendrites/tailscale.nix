@@ -1,6 +1,6 @@
 # modules/dendrites/tailscale.nix — the system Tailscale client.
 #
-# Dendrite shape (CONTRACTS.md §2): guarded on aoide.tailscale.enable, carries
+# Dendrite shape (CONTRACTS.md §2): selection is the switch, carries
 # its own dependency. Runs the stock NixOS `services.tailscale` daemon (kernel TUN,
 # system socket), so the host gets a `tailscale0` interface, the `tailscale`
 # CLI, and MagicDNS names that resolve for every program — not only a proxied
@@ -29,31 +29,27 @@ let
 in
 {
   options.aoide.tailscale = {
-    enable = lib.mkEnableOption "the system Tailscale client (tailscaled + CLI)";
 
     acceptRoutes = lib.mkEnableOption "accepting subnet routes advertised by other tailnet nodes";
   };
 
-  config = lib.mkMerge [
-    { aoide.tailscale.enable = lib.mkDefault true; }
-    (lib.mkIf cfg.enable {
-      services.tailscale = {
-        enable = true;
-        package = pkgs.tailscale;
-        # "client" turns on the reverse-path/forwarding sysctls Tailscale
-        # needs to accept routes; plain "none" is enough when it does not.
-        useRoutingFeatures = if cfg.acceptRoutes then "client" else "none";
-        extraSetFlags = [
-          "--operator=${config.aoide.user}"
-          "--accept-routes=${lib.boolToString cfg.acceptRoutes}"
-        ];
-      };
+  config = {
+    services.tailscale = {
+      enable = true;
+      package = pkgs.tailscale;
+      # "client" turns on the reverse-path/forwarding sysctls Tailscale
+      # needs to accept routes; plain "none" is enough when it does not.
+      useRoutingFeatures = if cfg.acceptRoutes then "client" else "none";
+      extraSetFlags = [
+        "--operator=${config.aoide.user}"
+        "--accept-routes=${lib.boolToString cfg.acceptRoutes}"
+      ];
+    };
 
-      # Only the daemon's UDP port is opened, so direct paths can form
-      # instead of relaying through DERP. The tailnet interface is NOT
-      # trusted: tailnet peers reach only what the host already exposes
-      # (sshd, which is key-only), never every local port.
-      services.tailscale.openFirewall = true;
-    })
-  ];
+    # Only the daemon's UDP port is opened, so direct paths can form
+    # instead of relaying through DERP. The tailnet interface is NOT
+    # trusted: tailnet peers reach only what the host already exposes
+    # (sshd, which is key-only), never every local port.
+    services.tailscale.openFirewall = true;
+  };
 }

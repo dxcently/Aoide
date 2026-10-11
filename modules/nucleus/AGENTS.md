@@ -26,26 +26,24 @@ covers only what's specific to the contract.
   `imports` list can read a module argument that `_module.args` supplies. A new
   CORE option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
   there, never here; a new PAINT option (livery, arrangement, surfaces, an
-  enable fact, a lane toggle) is added here, never there. A core door toggle
-  whose unit has not migrated yet (`mcp`, `a2a`, `usage`, `secrets`, `pairing`)
-  stays here beside the declaration of its siblings, and its unit is a member
-  dendrite (`aoided`, `aoide-secrets`).
+  enable fact, a lane toggle) is added here, never there. Door toggles and member
+  settings are not declared here: each lives in the member that reads it
+  (`aoided`: the doors; `aoide-secrets`: `members`; `aoide-config`: `settings`).
 - **The contract reads FACTS, never a lane's option.** The enable facts
-  (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`, each defaulting
-  `false`, `aoide.quickshell.config`, defaulting `null`, and
-  `aoide.wallpaper.provider` — the active provider's own name, defaulting
-  `"quickshell"`) are declared here; the lane that owns one sets it with
-  `mkDefault`. A member dendrite or an assertion that needs to know "is there a
+  (`aoide.{quickshell,lyra,stylix}.enable`, set only by their owner, each defaulting `false`,
+  `aoide.quickshell.config`, defaulting `null`, and `aoide.wallpaper.provider` —
+  the active provider's own name, defaulting `"quickshell"`) are declared here;
+  the dendrite that owns one sets it `true`, and no host writes it. A member dendrite or an assertion that needs to know "is there a
   shell / a session here" reads the fact — never `aoide.<name>.enable`, never a
   lane's own option. `aoide.sessionTarget` is the same rule from the other
   side: it is core-declared (`pkgs/aoide/module/options.nix`) and a painting
   lane sets it, so the unit that anchors on it need not know which lane did.
-- **An option a member sets or renders is declared here, not in the member.**
-  `aoide.config` is declared in `config-options.nix` and rendered by the
-  `aoide-config` dendrite: a consumer that deselects the member still evaluates a
-  host that sets `aoide.config.settings`, and `aoideOptions` lists the option
-  whether or not any host selects its renderer. A member file may declare
-  options of its own only when nothing outside it reads them.
+- **An option a member reads is declared in that member.**
+  `aoide.config.settings` is declared in `aoide-config.nix`, `aoide.a2a.*` in
+  `aoided.nix`, `aoide.secrets.members` in `aoide-secrets.nix`. The option exists
+  only while its member is selected, so a host that sets one without selecting
+  the member fails eval; `aoideOptions` lists it whether or not any host selects
+  the member, since it evaluates the whole catalogue.
 - **Changes here land by ordered lane, not by rice edit** (root `AGENTS.md`
   house rule 1 — a rice agent writes only `song/songbook/<song>/`; everything
   outside `song/`, this directory included, changes only on a lane the User
@@ -60,7 +58,7 @@ covers only what's specific to the contract.
   `mkEnableOption`, plus one line in `default.nix`.
 - **A new always-on service** is not a file here: it is a dendrite, a
   catalogue line and one member line in `modules/aggregations/nucleus/default.nix`
-  (`modules/dendrites/AGENTS.md`, "The nucleus members").
+  (`modules/dendrites/README.md`, "The core-service dendrites").
 
 ## Docs update required in the same commit
 

@@ -32,12 +32,12 @@
 # for what is essentially a bus participant.
 {
   config,
-  lib,
   pkgs,
   ...
 }:
 
-lib.mkIf config.aoide.enable {
+{
+  aoide.enable = true;
 
   systemd.user.services.aoide-melete-adapter = {
     description = "Aoide → Melete adapter — neutral events to Melete job dispatches";

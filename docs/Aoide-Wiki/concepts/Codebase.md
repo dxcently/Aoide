@@ -191,8 +191,8 @@ no behaviour, so an empty config evaluates. The surface:
   the song selection root `AGENTS.md` house rule 5 enumerates — no module reads
   another module's options.
 - `aoide.surfaces.<name>.owner` — the surface-ownership registry.
-- `aoide.mcp.enable`, `aoide.a2a.enable`, `aoide.usage.enable`,
-  `aoide.secrets.enable` — each off by default (house policy); `aoide.auditLog`
+- `aoide.mcp.enable`, `aoide.a2a.enable`, `aoide.usage.enable` — each off by
+  default (house policy); `aoide.auditLog`
   (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`).
 
 ## The host profile — yomi-strix is real
@@ -224,8 +224,8 @@ wallpaper all live in one process.
 
 ## The systemd user-unit map (nucleus + a dendrite)
 
-All nucleus services are user services gated on `aoide.enable`, keyed into
-`graphical-session.target`:
+The nucleus user services, keyed into `graphical-session.target`, are
+switched on by selecting their dendrite (each sets `aoide.enable`):
 
 | Unit | From | Notes |
 |---|---|---|
@@ -236,7 +236,7 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 | `aoide-mcp` | `dendrites/aoided.nix` | **gated on `aoide.mcp.enable`**; `bindsTo` aoided |
 | `aoide-a2a` | `dendrites/aoided.nix` | **gated on `aoide.a2a.enable`**; the [[A2A-Door]] serve unit |
 | `aoide-usage` + timer | `dendrites/aoided.nix` | **gated on `aoide.usage.enable`**; runs `aoide usage` on `aoide.usage.interval` |
-| `aoide-secrets-serve` | `dendrites/aoide-secrets.nix` | **gated on `aoide.secrets.enable`**; SYSTEM (not user) service, own uid `aoide-secrets`, anchored to `multi-user.target` — see [[Secrets-Broker]] |
+| `aoide-secrets-serve` | `dendrites/aoide-secrets.nix` | **present when `aoide-secrets` is selected**; SYSTEM (not user) service, own uid `aoide-secrets`, anchored to `multi-user.target` — see [[Secrets-Broker]] |
 | `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
 
 `systemd.user.tmpfiles.rules` create `${config.aoide.root}/log` (0700),
@@ -247,8 +247,8 @@ All nucleus services are user services gated on `aoide.enable`, keyed into
 systemd-tmpfiles deduplicates the shared rules declared in both
 aoided and shellbridge.
 
-Two **non-service nucleus modules** close baseline gaps, both gated on
-`aoide.enable`:
+Two **non-service nucleus modules** close baseline gaps, both switched on by
+their selection (each sets `aoide.enable`):
 
 - **`dendrites/aoide-packages.nix`** puts `pkgs.aoide` on the
   **system profile**. The units never needed this (their `ExecStart` lines are

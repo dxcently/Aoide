@@ -14,7 +14,7 @@ Aoide names its nix layer after snowflake morphology — see [[Lexicon#The froze
 
 | Layer | Morphology term | What it is |
 |---|---|---|
-| Core shared by every host | **nucleus** | `modules/nucleus/` — the `aoide.*` option contract and its assertions; the services it serves (aoided doors, secrets, config, nix, packages) are dendrites in the `nucleus` aggregation. The one contract every host inherits identically. |
+| Core shared by every host | **nucleus** | `modules/nucleus/` — the `aoide.*` option contract and its assertions; the services it serves (aoided doors, nix, packages) are dendrites in the `nucleus` aggregation; secrets and config are catalogue dendrites a host selects by name. The one contract every host inherits identically. |
 | Opt-in branches, chosen per host | **dendrites** | `modules/dendrites/` — one tree, all branches (shipped + personal); each host enables the ones it wants, by name. |
 | Named groups a host takes in one line | **aggregations** | `modules/aggregations/` — memberships over catalogue names (`nucleus`, `desktop`, `agents`, `aoideos`); inert data, no options of their own. |
 | A repair that travels with a capability | **overrides** | `modules/overrides/` — capability-scoped fixes, applied to the hosts that selected the capability; empty today. |

@@ -681,21 +681,23 @@ let
         (livery.stagePatch fixtureGeo fixtureDoc).geometry or null == {
           terminalOpacity = 1.0;
         }
-        && livery.venueDelta fixtureGeo fixtureDoc == {
-          geometry = {
-            terminalOpacity = 1.0;
+        &&
+          livery.venueDelta fixtureGeo fixtureDoc == {
+            geometry = {
+              terminalOpacity = 1.0;
+            };
           };
-        };
       geoMerged =
         (livery.stagePatch fixtureGeo fixtureDocGeo).geometry or null == {
           terminalOpacity = 1.0;
           gapsIn = 4;
         }
-        && livery.venueDelta fixtureGeo fixtureDocGeo == {
-          geometry = {
-            terminalOpacity = 1.0;
+        &&
+          livery.venueDelta fixtureGeo fixtureDocGeo == {
+            geometry = {
+              terminalOpacity = 1.0;
+            };
           };
-        };
       geoEqual =
         let
           same = fixtureBare // {
@@ -704,7 +706,8 @@ let
             };
           };
         in
-        livery.stagePatch same fixtureDocGeo == fixtureDocGeo && livery.venueDelta same fixtureDocGeo == { };
+        livery.stagePatch same fixtureDocGeo == fixtureDocGeo
+        && livery.venueDelta same fixtureDocGeo == { };
     in
     assertCheck "livery-fanout"
       (

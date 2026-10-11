@@ -24,13 +24,13 @@ modules/dendrites/compositor/
   hyprland` config, `package = null` so the binary is installed once), applies
   compositor-side livery (gaps/radius/borders/blur, the `aoide-*` layerrules,
   hyprglass, kitty rounding) at build time, and exposes the Hyprland IPC
-  socket for shellbridge to consume. Guarded on the FACT `aoide.compositor.enable`.
+  socket for shellbridge to consume. Selecting it is the switch; it sets no fact.
   The hyprglass block's two enable keys are the song's own
   `geometry.blurEnabled`, so a blur-off song is glassless in the bake exactly as
   it is after a stage.
 - **`hyprland/behaviour.nix` — the BEHAVIOUR.** Keybinds, input devices, tiling
   layout, misc quality-of-life, behavioural window rules — everything a re-rice
-  must not disturb. Its options (`aoide.hyprland.enable`, `.monitors`,
+  must not disturb. Its options (`aoide.hyprland.monitors`,
   `.scrollingMonitor`) stay a host-facing surface, which is why the catalogue
   keeps the name `hyprland` for this file while the look is reached through
   `compositor`.
@@ -38,7 +38,7 @@ modules/dendrites/compositor/
   authenticating through PAM and launching that same Hyprland session, plus the
   `systemd.services.display-manager.wantedBy` line the nixpkgs ly module omits.
   It is a separate lane because a host can want the compositor without a
-  display-manager greeter; it owns `aoide.greeter.enable`.
+  display-manager greeter; selecting it is the switch.
 
 ## What it consumes
 

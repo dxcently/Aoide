@@ -25,9 +25,9 @@ the catalogue that names what can be selected.
   declares options and assertions and configures nothing; the services every
   host carries are catalogue entries, members of the `nucleus` aggregation.
   Nothing imports the catalogue as a module.
-- A dendrite file is a plain module (CONTRACTS.md §2): its `aoide.<name>.*`
-  options, its guard, and the flag set `lib.mkDefault true`, with its Home
-  Manager half under `habit.home`. The constructor imports the file only for a
+- A dendrite file is a plain module (CONTRACTS.md §2): the `aoide.<name>.*`
+  options its body reads, its unconditional body, and its Home Manager half under
+  `habit.home`. The constructor imports the file only for a
   host that selected it.
 
 ## How the layers compose

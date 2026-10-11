@@ -1,10 +1,9 @@
 # modules/dendrites/neovim.nix — Neovim via nvf for the aoide user.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.neovim.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (the `nucleus` aggregation defaults it on —
-#     see modules/aggregations/nucleus/default.nix).
+#   - Selected by the nucleus aggregation (modules/aggregations/nucleus/default.nix), or one line in hosts/.
 #
 # What this dendrite does:
 #   - The full dxflake nvf (Neovim-Flake) stack, ported from dxflake
@@ -32,17 +31,12 @@
 #     formatter so format-on-save agrees with `nix fmt`.
 
 {
-  config,
   lib,
   ...
 }:
 {
-  options.aoide.neovim.enable = lib.mkEnableOption "Neovim via nvf (dxflake stack: rose-pine, LSP/treesitter, telescope, neo-tree)";
-
   config = lib.mkMerge [
     {
-      aoide.neovim.enable = lib.mkDefault true;
-
       # `imports` of a home half are read before any condition is, so the nvf
       # module rides a half no condition covers. Its own `programs.nvf.enable`
       # defaults off, so importing it is inert until the half below sets it.
@@ -52,14 +46,14 @@
           imports = [ aoideInputs.nvf.homeManagerModules.default ];
         };
     }
-    (lib.mkIf config.aoide.neovim.enable {
+    {
       habit.home =
         { pkgs, lib, ... }:
         {
           # nvf provides the only `nvim` in the profile (header), so the dendrite
           # that installs the editor also declares it the default — EDITOR/VISUAL
-          # for login shells, TTY, and SSH on this single-user box. Guarded by the
-          # same aoide.neovim.enable, so the editor default never outlives nvim.
+          # for login shells, TTY, and SSH on this single-user box. It shares the
+          # dendrite's selection, so the editor default never outlives nvim.
           home.sessionVariables = {
             EDITOR = "nvim";
             VISUAL = "nvim";
@@ -355,6 +349,6 @@
             };
           };
         };
-    })
+    }
   ];
 }

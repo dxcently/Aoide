@@ -30,7 +30,7 @@ a host can take a group and drop one member
 
 The four bodies today are `nucleus` (what every host carries beside the option
 contract: the daemon and its units, the secrets broker, the nix settings, the
-`aoide` binaries and the command line, plus `aoide.enable` and the stateVersion
+`aoide` binaries and the command line, plus the stateVersion
 the deleted `hosts/common` used to hold), `desktop` (a graphical session's
 platform: audio, clipboard, notifications, screenshots, network, a browser),
 `agents` (the coding agents a workstation runs) and `aoideos` (the desktop

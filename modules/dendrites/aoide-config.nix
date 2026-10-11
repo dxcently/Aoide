@@ -16,14 +16,15 @@
 # structurally cannot eat an `aoide config set` edit. The CLI reads the store
 # path fine and refuses to write it, naming the option to edit instead.
 #
-# Whole-file or nothing. Enabled, nix owns the entire config; disabled
-# (the default), `$AOIDE_ROOT/config.toml` is the operator's own editable
-# file and nothing here touches it. Partial management — nix owning one
-# section while the CLI owns another — is deliberately not offered: two
-# writers on one document is the split-brain this design exists to avoid.
+# Whole-file or nothing. Selected, nix owns the entire config; not selected,
+# `$AOIDE_ROOT/config.toml` is the operator's own editable file and nothing
+# here touches it. Selection is the switch: there is no `enable` beside it.
+# Partial management — nix owning one section while the CLI owns another — is
+# deliberately not offered: two writers on one document is the split-brain
+# this design exists to avoid.
 #
-# The `aoide.config.*` options are the contract
-# (`modules/nucleus/config-options.nix`); this dendrite is the rendering.
+# `aoide.config.settings` is declared below, beside the rendering that reads
+# it, so the option exists only while this dendrite is selected.
 {
   config,
   lib,
@@ -37,7 +38,24 @@ let
   rendered = toml.generate "aoide-config.toml" cfg.settings;
 in
 {
-  config = lib.mkIf (config.aoide.enable && cfg.enable) {
+  options.aoide.config.settings = lib.mkOption {
+    inherit (toml) type;
+    default = { };
+    example = lib.literalExpression ''{ pairing.defaultGrant = [ "read" "spawn" ]; }'';
+    description = ''
+      The whole runtime config, as an attrset rendered to TOML. The schema
+      is `aoide config`'s own (CONTRACTS.md §4's `config.toml`
+      subsection), not a second nix-side vocabulary: keys are spelled
+      exactly as they read in the file, and an unknown key or an unknown
+      capability is refused by the binary at read time rather than
+      silently ignored — `aoide config` on the host is how a rendered
+      config is verified.
+    '';
+  };
+
+  config = {
+    aoide.enable = true;
+
     # Two consumers of one path, the same "one option, two consumers" shape
     # `AOIDE_TERMINAL`/`AOIDE_ROOT` already hold in aoided.nix: an operator's
     # own `aoide config` in a shell, and every aoide user unit. The unit half
