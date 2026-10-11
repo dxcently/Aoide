@@ -971,8 +971,8 @@ fn classify_recheck(exited_ok: bool, stdout: &str, stderr: &str) -> Result<Strin
 /// not inferred — this runs on a detached thread with no tty, so
 /// `reap::with_human_gesture`'s own probe would read it as the timer.
 ///
-/// Runs on a DETACHED thread. `session reap` shells out to `hyprctl clients -j`
-/// for window liveness; that is normally instant, but a hung compositor query
+/// Runs on a DETACHED thread. `session reap` reads Hyprland's request socket
+/// (`j/clients`) for window liveness; that is normally instant, but a hung compositor query
 /// must never tie up this connection's own thread waiting on it (§3b's
 /// thread-per-connection accept loop keeps a stuck query from starving anyone
 /// else, but there is still no reason to hold it). So this SPAWNS and returns

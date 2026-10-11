@@ -469,19 +469,30 @@ pub struct SessionRecord {
     /// Absent means "the default resolution", never "no report".
     #[serde(rename = "reportTo", default, skip_serializing_if = "Option::is_none")]
     pub report_to: Option<String>,
-    /// Up to 8 ancestor pids of the HOOK-FIRING process (a `/proc` `ppid`
-    /// walk, self-first), stamped ONCE at a hook session's own
-    /// SessionStart/self-heal registration (`graph session hook`,
-    /// CONTRACTS.md §4) — never re-stamped later, since it records a birth
-    /// fact, not a live signal. This captures the harness process's real OS
-    /// ancestry regardless of shell nesting, so a LATER `wrap`/`conduct`/
-    /// `spawn` registration with no explicit `--parent` can find its true
-    /// launching agent by walking ITS OWN `/proc` ancestry and intersecting
-    /// against every live agent's `hookAncestry` — the automatic-parenting
-    /// fix (task #89) for a nested headless spawn otherwise registering as a
-    /// SIBLING of its launching agent (via a stale ambient `AOIDE_SESSION_ID`)
-    /// instead of its child. Additive/v0-safe: empty on a legacy record and
-    /// on every non-agent kind (shells/subagents never stamp it).
+    /// Up to 8 ancestor pids of the HOOK-FIRING process's harness (a `/proc` `ppid`
+    /// walk, self-first from the harness), the chain of the harness's latest process.
+    /// The hook process and every shell or forwarding launcher beneath the harness are
+    /// skipped, so the chain starts at the harness whatever wrap ran the hook. A hook
+    /// with no harness stores nothing. It lands at
+    /// registration (a SessionStart, or the first hook event of an unknown id;
+    /// `graph session hook`, CONTRACTS.md §4), when a window is first bound to the
+    /// session, and when a per-turn hook heals a stale chain, each in one locked
+    /// write. A pid-less record takes the new chain; a record anchored to a live
+    /// pid of its own keeps the stored chain while that pid is alive outside the
+    /// new one. A chain is stale when the record holds no live process of its own
+    /// outside the new chain and the new chain carries a live harness the stored
+    /// one lacks. The per-turn heal moves the chain on that transition only, so a
+    /// live chain is never rewritten per turn. A stored chain whose pids are dead is replaced by the next per-turn
+    /// hook from its live harness, whatever wrote it. The heal needs no compositor;
+    /// the window bind does.
+    /// This captures the harness process's real
+    /// OS ancestry regardless of shell nesting. A `wrap`/`conduct`/`spawn`
+    /// registration with no explicit
+    /// `--parent` finds its true launching agent by walking ITS OWN `/proc`
+    /// ancestry and intersecting it with every live agent's `hookAncestry`,
+    /// and the window sweep binds a pid-less hosted session through it. Never
+    /// a pid and never a payload claim. Additive/v0-safe: empty on a legacy
+    /// record and on every non-agent kind (shells/subagents never carry it).
     #[serde(rename = "hookAncestry", default, skip_serializing_if = "Vec::is_empty")]
     pub hook_ancestry: Vec<i32>,
     /// True for a HEADLESS `aoide conduct` wrap's own record — a PERMANENT,
@@ -489,9 +500,9 @@ pub struct SessionRecord {
     /// registration, never cleared) distinct from "`windowAddress` happens
     /// to be empty right now": a bug in window discovery or the backfill
     /// listener could otherwise stamp a stray window onto a headless wrap
-    /// (task #89, review round 2 — an unconditional discovery call did
-    /// exactly that, finding the ENCLOSING terminal's window through the
-    /// wrap's own `/proc` ancestry). `windowless_by_lineage` and
+    /// (task #89: an unconditional discovery call would find the ENCLOSING
+    /// terminal's window through the wrap's own `/proc` ancestry, so the
+    /// registration path never makes one). `windowless_by_lineage` and
     /// `resolve_pending_session_windows` both key off THIS field first, not
     /// `windowAddress` emptiness, so a headless wrap's windowlessness (and
     /// its whole hook-child subtree's) survives even a corrupted address.
@@ -667,7 +678,7 @@ pub struct SessionRecord {
     /// gate reads this field yet** — P-ID1 only mints/stores/verifies the
     /// mechanism; P-ID2 wires a verify-on-accept check into the control
     /// socket and send gate. Stamped by `aoide_conduct::graph::stamp_seal`,
-    /// change-only like `origin`/`hookAncestry` — never re-derived once set.
+    /// change-only like `origin`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seal: Option<String>,
     /// The `issuedAt` field baked into `seal`'s signed payload (LANE
@@ -874,8 +885,8 @@ mod tests {
         // serde: `headless` serialises as `true` only when set — the common
         // `false` case is skipped entirely (skip_serializing_if = "is_false"),
         // keeping every ordinary interactive record's wire form unchanged.
-        // This is the PERMANENT registration-fact flag (task #89 review round
-        // 2) that lets `windowless_by_lineage` answer true for a headless
+        // This is the PERMANENT registration-fact flag (task #89) that lets
+        // `windowless_by_lineage` answer true for a headless
         // conducted wrap's OWN record, not just its descendants' parent chain.
         let mut rec = SessionRecord {
             session_id: "s".into(),
