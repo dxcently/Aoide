@@ -155,7 +155,7 @@ let
   barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
 {
-    config = {
+  config = {
     aoide.lyra.enable = true;
     # Declare surface ownership — the stylix lane reads this and stands
     # down for `bar`.

@@ -62,7 +62,7 @@ The generic names (`exampletool`, `examplewidget`, `workspace`, `exampleuser`)
 are meant to be renamed. The stand-in options beside them
 (`programs.example.fontSize` in the aggregation, `systemd.services.example` in
 the override record) are shapes to copy; a dendrite's own packages and services
-belong inside its `aoide.<name>.enable` guard.
+go in its body, which runs whenever the dendrite is selected.
 
 ## Halves, in one paragraph
 
