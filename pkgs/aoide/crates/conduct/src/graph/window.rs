@@ -2320,6 +2320,21 @@ mod tests {
         cmd
     }
 
+    /// The binary behind the `sh` that [`sh_c`] runs, found on `PATH`. A link to it under
+    /// a launcher's name must still run a shell, which rules out a multi-call binary that
+    /// picks its applet from argv0 (the nix build sandbox's `/bin/sh` is busybox).
+    #[cfg(unix)]
+    fn path_sh() -> std::path::PathBuf {
+        let path = std::env::var_os("PATH").expect("PATH is set");
+        let sh = std::env::split_paths(&path)
+            .map(|dir| dir.join("sh"))
+            .find(|sh| sh.is_file())
+            .expect("an sh on PATH");
+        let sh = std::fs::canonicalize(sh).unwrap();
+        assert_ne!(sh.file_name().and_then(|n| n.to_str()), Some("busybox"), "a link to busybox runs its applet, not a shell");
+        sh
+    }
+
     /// Stops a stand-in hook this test started, and reaps its shell.
     #[cfg(unix)]
     fn release_stand_in(mut child: std::process::Child, pid: i32) {
@@ -2423,7 +2438,7 @@ mod tests {
             assert_walk_finds_this_process_at_depth(hook, 2);
             release_stand_in(child, hook);
 
-            let sh = std::fs::canonicalize("/bin/sh").unwrap();
+            let sh = path_sh();
             let env = dir.join("env");
             let nice = dir.join("nice");
             std::os::unix::fs::symlink(&sh, &env).unwrap();
