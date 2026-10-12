@@ -6071,11 +6071,11 @@ fn handle_mail_outbox_retry(inv: &Invocation) -> Outcome {
 /// the filing and the acking are one implementation — never a second receive
 /// path.
 ///
-/// With an argument, that ONE node is dialed, and a node this box is not
-/// paired with is refused BEFORE any dial: `unknown-node` when the name means
-/// nothing here, `unpaired-node` when it is registered but never verified —
-/// the identical two refusals `mail send`'s node branch makes, by name, for
-/// the identical reason (a poll of a stranger is not a thing this box does).
+/// With an argument, that ONE node is dialed, and a node this box cannot poll
+/// is refused BEFORE any dial. A stored record that was never verified is
+/// `unpaired-node`, the refusal `mail send`'s node branch makes. A name with no
+/// record is polled through the charter's relay line, or refused taught —
+/// what, why, and the one fix — when no charter in force gives it a relay.
 /// With no argument, every node [`crate::mail_wire::pollable_nodes`] returns
 /// is asked in turn, oldest name first; one node's failure never stops the
 /// sweep — it is reported per node and the next one is still asked.
@@ -6091,18 +6091,22 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
     let named = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
 
     let nodes = aoide_storage::node_store::load_nodes();
+    let mesh_flag = inv.flags.get("mesh").map(String::as_str);
+    // The named node is refused BEFORE any dial when it cannot be polled: an
+    // unverified record is `unpaired-node`, and a name with no record is refused
+    // taught unless the charter in force gives it a relay ([`poll_target`]).
     let targets: Vec<String> = match &named {
-        Some(name) => {
-            match nodes.iter().find(|n| n.name == *name) {
-                None => return unknown_node(inv, cmd, name, &nodes, teach::Slot::Arg(0)),
-                Some(node) if !node.verified => return teach::not_paired(cmd, name, &node.url),
-                Some(_) => vec![name.clone()],
-            }
-        }
+        Some(name) => match nodes.iter().find(|n| n.name == *name) {
+            Some(node) if !node.verified => return teach::not_paired(cmd, name, &node.url),
+            Some(_) => vec![name.clone()],
+            None => match crate::mail_wire::poll_target(name, mesh_flag) {
+                Ok(_) => vec![name.clone()],
+                Err(refusal) => return refusal.into_outcome(cmd),
+            },
+        },
         None => crate::mail_wire::pollable_nodes(),
     };
 
-    let mesh_flag = inv.flags.get("mesh").map(String::as_str);
     let mut rows: Vec<Value> = Vec::new();
     let mut filed = 0usize;
     let mut refused_total = 0usize;
@@ -10290,7 +10294,8 @@ mod tests {
 
         let unknown = handle_mail_poll(&mail_inv(&["mail", "poll"], &["stranger"]));
         assert_eq!(unknown.status, aoide_protocol::output::Status::Error);
-        assert_eq!(unknown.data.unwrap()["reason"], "unknown-node");
+        let why = unknown.data.as_ref().and_then(|d| d["refusal"]["why"].as_str()).unwrap_or_default();
+        assert!(why.contains("charter") && why.contains("pair"), "a taught refusal names the charter and the pair record: {why}");
         assert!(unknown.message.contains("stranger"), "{}", unknown.message);
 
         let unpaired = handle_mail_poll(&mail_inv(&["mail", "poll"], &["half-paired"]));

@@ -791,7 +791,14 @@
   node that does not; a box that can only receive must ask. Nothing about
   `drain_node`'s dial policy changes for it (a pass with nothing
   attemptable still dials nothing), and the sweep must never let one
-  node's `Err` stop the next. **A `poll` address is never dialled, and that
+  node's `Err` stop the next. **The relay is resolved in ONE place,
+  `poll_target` (stored record, else `charter_relay`); `poll_node` takes
+  its `PollTarget` and never resolves a relay itself, and a charter relay is
+  identity-checked by `relay_proves_charter_key` before any hand-over.** A
+  refusal is an `Err` of taught text, never `Ok` with zero filed. The one
+  silent answer left is `poll_through`'s early `Ok(default)` for a VERIFIED
+  record the charter declares `down`; a charter-only relay declared `down` is
+  refused taught by `charter_relay`. **A `poll` address is never dialled, and that
   is decided in ONE place: `spool_entry` computes the `hold` flavor itself
   from `node_store::Node::never_dialled`, so no caller can forget it (the
   ack path's literal `false` included), `drain_node` returns before the link

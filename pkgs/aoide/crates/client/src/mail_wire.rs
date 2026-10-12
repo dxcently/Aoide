@@ -902,25 +902,195 @@ pub struct PollOutcome {
     pub busy: bool,
 }
 
-pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, String> {
-    let nodes = aoide_storage::node_store::load_nodes();
-    let Some(node) = nodes.iter().find(|n| n.name == node_name) else {
-        return Ok(PollOutcome::default());
+/// The node one poll dials, the mesh it acts in, and whether that node is a
+/// charter's relay that this box holds NO record of. A relay reached
+/// that way is dialled with the charter's key and https address, and its
+/// identity is checked against that key before anything is taken over
+/// ([`relay_proves_charter_key`]).
+#[derive(Debug, Clone)]
+pub struct PollTarget {
+    pub node: Node,
+    pub mesh: String,
+    pub relay: bool,
+}
+
+/// Where a poll of `node_name` goes. A VERIFIED record answers exactly as it
+/// always has: its own key, its own grants in the mesh the poll names, verified
+/// or not. Only a name with NO record is read from the charter in force
+/// ([`charter_relay`]), so a relay that a signed charter declares needs no pair
+/// record before it can be polled. A poll with neither refuses, naming what is
+/// missing and the one fix.
+pub fn poll_target(node_name: &str, named: Option<&str>) -> Result<PollTarget, aoide_protocol::output::Refusal> {
+    if let Some(node) = aoide_storage::node_store::load_nodes().into_iter().find(|n| n.name == node_name) {
+        let mesh = crate::commands::request_mesh(&node, named, "message").map_err(|e| {
+            aoide_protocol::output::Refusal::new(
+                aoide_protocol::output::Kind::Refused,
+                format!("`{node_name}` cannot be polled"),
+                e,
+                aoide_protocol::output::Fix::Run(format!("aoide mail poll {node_name} --mesh <name>")),
+            )
+        })?;
+        return Ok(PollTarget { node, mesh, relay: false });
+    }
+    charter_relay(node_name, named)
+}
+
+/// The relay `node_name` is polled through, read from a charter alone: the
+/// mesh a send to it would name ([`send_mesh`]), and the line the same
+/// declaration gives it — its key, and an https address dialled by
+/// [`dial_node`], the resolution a drain's charter hop already uses. Refused,
+/// with the one fix, for: no charter in force declares it in a mesh this box
+/// is on; that mesh is a pair mesh (its keys are paired records); this box has
+/// no line in that mesh; the charter says `down`; or its address is not https
+/// (`poll` has no inbound address to ask, and `ssh://` needs a pair record for
+/// its tunnel).
+fn charter_relay(node_name: &str, named: Option<&str>) -> Result<PollTarget, aoide_protocol::output::Refusal> {
+    use aoide_protocol::output::{Fix, Kind, Refusal};
+    let what = format!("`{node_name}` cannot be polled");
+    let refuse = |why: String, fix: Fix| Refusal::new(Kind::Refused, what.clone(), why, fix);
+    let pair = Fix::Run(format!("aoide pair {node_name}"));
+    let charter = Fix::Run("aoide mesh charter show".to_string());
+
+    let mesh = send_mesh(node_name, named).map_err(|e| {
+        if e.data.get("reason").and_then(Value::as_str) == Some("unknown-node") {
+            refuse(
+                "no pair record of it here, and no charter in force declares it in a mesh this box is on — \
+                 a poll reaches its relay by a pair record or by the charter's line for it"
+                    .to_string(),
+                pair.clone(),
+            )
+        } else {
+            refuse(e.message, Fix::Run(format!("aoide mail poll {node_name} --mesh <name>")))
+        }
+    })?;
+    let own = match aoide_storage::identity::load_or_mint() {
+        Ok((kp, _)) => kp.info().pubkey_hex,
+        Err(e) => return Err(refuse(format!("this box's identity key cannot be read: {e}"), charter)),
     };
-    // P-CHARTER: the ONE mesh this poll acts in — the `--mesh` typed, else the
-    // sole mesh where the record holds `message`, else the home mesh; a
-    // genuine tie refuses, naming the meshes (`mail poll --mesh`). The
-    // capability-led rule is what makes a peer trusted only in `away`
-    // reachable with no flag at all (review N3). It is used for BOTH halves
-    // below: the request is SIGNED with it, and a handed-over container is
-    // verified against the mesh the letter was minted in.
-    let mesh = crate::commands::request_mesh(node, named, "message").map_err(|e| format!("mesh: {e}"))?;
+    let set = aoide_storage::routing::declarations().map_err(|r| refuse(r.detail, charter.clone()))?;
+    let declaration = match aoide_storage::routing::declaration_of(&set, &mesh) {
+        Some(Ok(declaration)) => declaration,
+        Some(Err(r)) => return Err(refuse(format!("mesh `{mesh}`'s declaration cannot be read: {}", r.detail), charter)),
+        None => return Err(refuse(format!("mesh `{mesh}` is not declared at this node"), charter)),
+    };
+    if !declaration.is_charter() {
+        return Err(refuse(
+            format!("mesh `{mesh}` is a pair mesh, whose keys are paired records, and this box holds none for `{node_name}`"),
+            pair,
+        ));
+    }
+    if aoide_storage::routing::own_name_in(&set, &mesh, &own).is_none() {
+        return Err(refuse(
+            format!("the charter of mesh `{mesh}` carries no line for this box's identity key, so it has no name there to poll as"),
+            charter,
+        ));
+    }
+    if declaration.status_of(node_name) == Some(aoide_storage::charter::STATUS_DOWN) {
+        return Err(refuse(format!("mesh `{mesh}` declares `{node_name}` down, so this box does not dial it"), charter));
+    }
+    let Some((node, _)) = dial_node(node_name, Some(&mesh)) else {
+        let why = match declaration.address_of(node_name) {
+            None => format!("mesh `{mesh}`'s charter gives `{node_name}` no address"),
+            Some(address) if matches!(aoide_storage::charter::dial_of(address), Ok(aoide_storage::charter::Dial::Poll)) => {
+                format!(
+                    "`{node_name}` is declared `poll` in mesh `{mesh}`: it has no inbound address to poll, and it is \
+                     the node that asks — its letters wait at its relay"
+                )
+            }
+            Some(address) => format!("`{node_name}` is declared at `{address}` in mesh `{mesh}`, which this box cannot poll"),
+        };
+        return Err(refuse(why, charter));
+    };
+    if node.via.is_some() {
+        return Err(refuse(
+            format!(
+                "`{node_name}` is declared at an `ssh://` address in mesh `{mesh}`, and a charter alone reaches an \
+                 https relay only — its tunnel needs a pair record"
+            ),
+            pair,
+        ));
+    }
+    if node.pubkey.is_none() {
+        return Err(refuse(format!("mesh `{mesh}`'s charter gives `{node_name}` no identity key"), charter));
+    }
+    Ok(PollTarget { node, mesh, relay: true })
+}
+
+/// The relay's identity, checked against the charter before a letter moves. Its
+/// own signed age binding (`aoide/binding`) must verify under the identity key the
+/// charter gives its line. This box sends NO binding of its own: the relay holds
+/// no record to learn one into, and the request would be refused for it. The
+/// answer of `aoide/mailPoll` itself is unsigned, so this is the one proof of who
+/// answered. A relay answering as any other key is refused, with no unsigned or
+/// unverified fallback.
+fn relay_proves_charter_key(node: &Node, mesh: &str) -> Result<(), String> {
+    let Some(key) = node.pubkey.as_deref() else {
+        return Err(format!("relay `{}` has no charter key to check its identity against", node.name));
+    };
+    let theirs: aoide_storage::seal::Binding =
+        match post_signed(node, "aoide/binding", json!({}), Some(mesh)) {
+            SignedCall::Result(result) => {
+                serde_json::from_value(result.get("binding").cloned().unwrap_or(Value::Null))
+                    .map_err(|e| format!("relay `{}` answered no readable binding: {e}", node.name))?
+            }
+            SignedCall::Refused(detail) => {
+                return Err(format!("relay `{}` refused the identity check: {detail}", node.name))
+            }
+            SignedCall::TransportFailed(reason) => {
+                return Err(format!("relay `{}` did not answer the identity check: {reason}", node.name))
+            }
+        };
+    if aoide_storage::seal::verify_binding(&theirs, Some(key)) {
+        return Ok(());
+    }
+    let msg = format!(
+        "relay `{}` answered as a key that the charter of mesh `{mesh}` does not give it — refusing to poll it",
+        node.name
+    );
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        "mail.poll.relay-key-mismatch",
+        "invalid",
+        &msg,
+    );
+    Err(msg)
+}
+
+/// A refusal as one line for a caller that reports text: what, why, and the fix.
+fn taught_text(refusal: &aoide_protocol::output::Refusal) -> String {
+    use aoide_protocol::output::Fix;
+    let fix = match &refusal.fix {
+        Fix::Run(c) | Fix::Set(c) | Fix::Wait(c) => c.as_str(),
+        Fix::None(s) => s,
+    };
+    format!("{}: {} — fix: {fix}", refusal.what, refusal.why)
+}
+
+/// Poll `node_name` once — the relay-first half of the model (MAIL.md §Wire,
+/// P-M3): a node with no inbound address asks its relay "anything waiting for
+/// me?" and receives every entry that relay spooled toward it. The relay is
+/// resolved first ([`poll_target`]): from this box's stored record, else from
+/// the charter in force. A poll with neither is `Err`, a taught refusal naming
+/// what is missing; it is never an empty answer.
+pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, String> {
+    let target = poll_target(node_name, named).map_err(|refusal| taught_text(&refusal))?;
+    poll_through(node_name, named, target)
+}
+
+/// [`poll_node`] once the node and mesh are resolved: the signed `aoide/mailPoll`
+/// and the hand-over that follows it. Split out so a test can drive the whole
+/// poll against a plain loopback door standing in for a charter's https front.
+fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Result<PollOutcome, String> {
+    let PollTarget { node, mesh, relay } = target;
     // **A node that mesh declares `down` is never polled, and nothing is filed.**
     // Not even the binding exchange below, which is a dial in its own right: its
     // own declaration says this box must not reach it (MAIL.md §Status). What is
     // spooled toward it stays spooled, and a later poll — or drain — acts on
-    // whatever the declaration says then.
-    if record_forbidden_by_declaration(&mesh, node) {
+    // whatever the declaration says then. A charter relay is never `down` here:
+    // [`charter_relay`] refused it already.
+    if !relay && record_forbidden_by_declaration(&mesh, &node) {
         return Ok(PollOutcome::default());
     }
     // **One poll of a node at a time**, taken before anything is read. Two
@@ -932,10 +1102,16 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     let Some(_poll_lock) = aoide_storage::outbox::try_take_poll_lock(node_name)? else {
         return Ok(PollOutcome { busy: true, ..PollOutcome::default() });
     };
-    // P-SEAL: publish our binding and learn theirs before taking anything
-    // over, so a node that has just published one never hands us plaintext
-    // it did not have to.
-    let _ = exchange_bindings(node, named);
+    if relay {
+        relay_proves_charter_key(&node, &mesh)?;
+    } else {
+        // P-SEAL: publish our binding and learn theirs before taking anything
+        // over, so a node that has just published one never hands us plaintext
+        // it did not have to. A charter relay gets none of this: its line's own
+        // binding is the one the sealing reads, and a relay with no record of us
+        // refuses a binding it cannot learn.
+        let _ = exchange_bindings(&node, named);
+    }
     // The calling node's own name in the mail protocol — the ADDRESS form
     // (`display::local_node_name`), the same one every envelope this box mints
     // stamps and the same one a peer's poll is answered against. A raw OS host
@@ -955,7 +1131,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         // here is offered again.
         "filed": acknowledged.clone(),
     });
-    let result = match post_signed(node, "aoide/mailPoll", params, Some(&mesh)) {
+    let result = match post_signed(&node, "aoide/mailPoll", params, Some(&mesh)) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
@@ -1323,8 +1499,45 @@ pub fn pollable_nodes() -> Vec<String> {
         })
         .map(|node| node.name)
         .collect();
+    out.extend(charter_relays());
     out.sort();
+    out.dedup();
     out
+}
+
+/// The relays a charter-only poll reaches, across every charter mesh this box is
+/// on: the sweep asks them the way it asks a paired node, so a relay with no
+/// record is not left out of `aoide mail poll`. A relay that is this box's own
+/// line in its mesh is skipped (a relay does not ask itself), and a name with a
+/// record of any kind is the record's to answer for ([`poll_target`]).
+fn charter_relays() -> Vec<String> {
+    let Ok(set) = aoide_storage::routing::declarations() else {
+        return Vec::new();
+    };
+    let Ok((kp, _)) = aoide_storage::identity::load_or_mint() else {
+        return Vec::new();
+    };
+    let own = kp.info().pubkey_hex;
+    let records = aoide_storage::node_store::load_nodes();
+    let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for loaded in &set {
+        let Ok(declaration) = &loaded.declaration else {
+            continue;
+        };
+        if !declaration.is_charter() {
+            continue;
+        }
+        let me = aoide_storage::routing::own_name_in(&set, &loaded.mesh, &own);
+        for relay in declaration.relays() {
+            if me.as_deref() == Some(relay.as_str()) || records.iter().any(|n| n.name == *relay) {
+                continue;
+            }
+            if poll_target(relay, Some(&loaded.mesh)).is_ok() {
+                out.insert(relay.clone());
+            }
+        }
+    }
+    out.into_iter().collect()
 }
 
 /// Drain `node_name`'s outbox once: every spooled, non-refused, non-`hold`/// entry, oldest first, attempted in order — stopping at the first TRANSPORT
@@ -2379,6 +2592,211 @@ mod tests {
 
         // (The sealed lane's half of the rule — the container's own mesh — is
         // pinned in `seal.rs`, where it belongs.)
+    }
+
+    /// Mint `name`'s identity under `root` and read back what a charter line and a
+    /// relay's own answer carry: the node line, the identity key, and the signed
+    /// binding. This box's own root and node name are restored afterwards.
+    fn mint_box(root: &std::path::Path, name: &str) -> (String, String, serde_json::Value) {
+        let own_root = std::env::var("AOIDE_ROOT").unwrap();
+        let own_name = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::fs::create_dir_all(root).unwrap();
+        std::env::set_var("AOIDE_ROOT", root);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", name);
+        let line = aoide_storage::charter::node_line().unwrap();
+        let key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+        let binding = serde_json::to_value(aoide_storage::seal::publish_binding().unwrap()).unwrap();
+        std::env::set_var("AOIDE_ROOT", own_root);
+        match own_name {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        (line, key, binding)
+    }
+
+    /// A relay's node line placed at `address` (the charter reads a line with no
+    /// address as `poll`).
+    fn line_at(line: &str, address: &str) -> String {
+        line.replacen(" }", &format!(", address = \"{address}\" }}"), 1)
+    }
+
+    /// This box (`opbox`) takes a `home` charter in which `relay_line` is the one
+    /// relay, and nothing else but this box and that relay is declared.
+    fn charter_with_relay(relay_line: &str) {
+        aoide_storage::charter::init("home").unwrap();
+        let own_line = aoide_storage::charter::node_line().unwrap();
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\nrelays = [\"relay\"]\n\n[nodes]\n{own_line}\n{relay_line}\n"),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+    }
+
+    /// A loopback stand-in for a relay's door: answers `aoide/binding` with
+    /// `binding` and `aoide/mailPoll` with an empty hand-over, and keeps the raw
+    /// request of every call it was sent.
+    fn relay_stand_in(binding: serde_json::Value) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let mut buf: Vec<u8> = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = stream.read(&mut chunk).unwrap_or(0);
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    let Some(head) = text.find("\r\n\r\n") else {
+                        if n == 0 { break } else { continue }
+                    };
+                    let len: usize = text[..head]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse().ok()))
+                        .unwrap_or(0);
+                    if n == 0 || buf.len() >= head + 4 + len {
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&buf).to_string();
+                log.lock().unwrap().push(text.clone());
+                let answer = if text.contains("aoide/binding") {
+                    serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": { "binding": binding } })
+                } else {
+                    serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": { "envelopes": [], "containers": [], "withheld": [] } })
+                }
+                .to_string();
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        (port, seen)
+    }
+
+    /// A relay that has no pair record here is polled through its charter line:
+    /// its key is the charter's, its address the charter's https one, and the
+    /// sweep asks it too.
+    #[test]
+    fn a_charter_relay_with_no_record_is_resolved_from_the_charter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-resolved");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, relay_key, _) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let target = poll_target("relay", None).expect("the charter names the relay");
+        assert!(target.relay, "no pair record: the relay comes from the charter");
+        assert_eq!(target.mesh, "home");
+        assert_eq!(target.node.url, "https://relay.example.net/");
+        assert_eq!(target.node.pubkey.as_deref(), Some(relay_key.as_str()), "dialled with the charter's key");
+        assert!(target.node.via.is_none(), "an https relay, with no tunnel");
+        assert!(pollable_nodes().contains(&"relay".to_string()), "the sweep asks a charter relay too");
+    }
+
+    /// No pair record and no charter line for the name: a taught refusal before
+    /// any dial, never an empty answer.
+    #[test]
+    fn a_poll_with_no_record_and_no_charter_line_is_refused_taught() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-undeclared");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, _) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let refusal = poll_target("ghost", None).expect_err("no charter names `ghost`");
+        assert_eq!(refusal.fix, aoide_protocol::output::Fix::Run("aoide pair ghost".to_string()));
+        assert!(refusal.why.contains("charter"), "{refusal:?}");
+        let err = poll_node("ghost", None).expect_err("a poll with no way to its relay is a refusal, never Ok(empty)");
+        assert!(err.contains("pair") && err.contains("charter"), "{err}");
+    }
+
+    /// The charter gives the relay a line the box cannot poll: `poll` has no
+    /// address to ask, and `ssh://` needs a pair record for its tunnel. Either
+    /// one is refused, with its reason, before any dial.
+    fn refusal_why_for(tag: &str, address: Option<&str>) -> String {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root(tag);
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, _) = mint_box(&dir.join("relay-box"), "relay");
+        let line = match address {
+            Some(address) => line_at(&relay_line, address),
+            None => relay_line,
+        };
+        charter_with_relay(&line);
+        poll_target("relay", None).expect_err("a charter relay that is not https is refused").why
+    }
+
+    #[test]
+    fn a_charter_relay_declared_poll_is_refused_taught() {
+        let why = refusal_why_for("charter-relay-poll-address", None);
+        assert!(why.contains("declared `poll`"), "{why}");
+    }
+
+    #[test]
+    fn a_charter_relay_declared_ssh_is_refused_taught() {
+        let why = refusal_why_for("charter-relay-ssh-address", Some("ssh://khoa@relay"));
+        assert!(why.contains("ssh://"), "{why}");
+    }
+
+    /// A relay whose charter key is not the key that answers at its address is
+    /// refused before a letter moves: the binding it proves itself with is signed
+    /// by another identity, so the poll is never sent.
+    #[test]
+    fn a_relay_answering_as_another_key_is_refused_before_any_letter_moves() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-impostor");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, _) = mint_box(&dir.join("relay-box"), "relay");
+        let (_, _, impostor_binding) = mint_box(&dir.join("impostor-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let mut target = poll_target("relay", None).unwrap();
+        let (port, seen) = relay_stand_in(impostor_binding);
+        target.node.url = format!("http://127.0.0.1:{port}/");
+        let err = poll_through("relay", None, target).expect_err("a key the charter does not give is refused");
+        assert!(err.contains("does not give it"), "{err}");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "the identity check alone was sent: no poll, no letter");
+        assert!(seen[0].contains("aoide/binding"), "{}", seen[0]);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.poll.relay-key-mismatch"), "the mismatch is audited: {log}");
+    }
+
+    /// The relay proves its charter key, and the poll then goes out signed. This
+    /// box sends no binding of its own on the way (the identity check's body is
+    /// empty), so the relay is never asked to learn a record it has no room for.
+    #[test]
+    fn a_charter_relay_is_polled_after_it_proves_its_key_and_no_binding_is_sent() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-polled");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, relay_binding) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let mut target = poll_target("relay", None).unwrap();
+        let (port, seen) = relay_stand_in(relay_binding);
+        target.node.url = format!("http://127.0.0.1:{port}/");
+        let outcome = poll_through("relay", None, target).expect("the relay proves its key and answers the poll");
+        assert_eq!(outcome.filed, 0, "an empty spool files nothing, and says so as an answer");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "the identity check, then the poll: {seen:?}");
+        assert!(seen[0].contains("aoide/binding") && seen[0].contains("\"params\":{}"), "{}", seen[0]);
+        assert!(seen[1].contains("aoide/mailPoll"), "{}", seen[1]);
+        let signature = aoide_storage::wire_auth::HEADER_SIGNATURE.to_ascii_lowercase();
+        assert!(seen[1].to_ascii_lowercase().contains(&signature), "the poll is signed: {}", seen[1]);
     }
 
     #[test]

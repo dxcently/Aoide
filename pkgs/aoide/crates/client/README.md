@@ -509,12 +509,28 @@ never the inbound/serve half (that's `aoide-server`).
   the second caller of `poll_node`, and the reason it exists: an empty
   outbox never dials, so `drain_node`'s poll-on-contact can never reach a
   node with nothing to send — the one receive path the relay model needs
-  most.** With no argument the command walks `pollable_nodes()`
-  (registered, `verified`, `message` in this box's own `allows` — the same
-  gate `mail send` applies, so the sendable set and the pollable set stay
-  one), reporting per node and never letting one node's failure stop the
-  sweep; with a name it dials that one, refusing `unknown-node` /
-  `unpaired-node` BEFORE any dial. Hand-over is bounded by
+  most.** The relay a poll reaches is resolved by `poll_target` first: a
+  stored record answers with its own key and grants, verified or not, exactly
+  as it always has; only a name with NO record is read from the charter in
+  force (`charter_relay`) — the mesh a send to that name would use, the
+  charter's key, and an https address dialled through `dial_node`. The named
+  `mail poll` refuses an unverified record `unpaired-node` before any dial, as
+  it always has. A charter relay is polled with no pair record, and only after
+  `relay_proves_charter_key` has checked its signed `aoide/binding` answer
+  against the charter's key: a relay answering as any other key is audited
+  (`mail.poll.relay-key-mismatch`) and refused before a letter moves. Every
+  refusal is a taught `Refusal` (what, why, fix) raised before any dial — no
+  record and no charter line, a `pair` mesh, a `down` line, a `poll` or
+  `ssh://` address, a charter with no identity key — never an empty
+  `Ok(filed = 0)`. The one silent answer is a VERIFIED record the charter
+  declares `down`: `poll_through` returns `Ok(default)` without dialling.
+  With no argument the command walks `pollable_nodes()`
+  (every verified record whose mesh grants `message`, plus every charter
+  relay of a charter mesh this box is on that has NO record here and that
+  `poll_target` accepts), reporting per node and never letting one node's
+  failure stop the sweep; with a name it refuses an unverified record
+  `unpaired-node`, and any other name takes its `poll_target` and refuses with
+  the taught text, all BEFORE any dial. Hand-over is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP` (50, the drain's own batch), which
   is safe because the acks retire what was filed and the next poll
   advances. The `PollOutcome` it returns carries all three answers the command

@@ -8656,14 +8656,23 @@ spooled them.
 two triggers, and they are the same call:
 
 - **`aoide mail poll [<node>]`** — the explicit ask. With a `<node>` it dials
-  that node alone; a name this box is not paired with is refused BEFORE any
-  dial (`unknown-node` for a name the registry has never seen,
-  `unpaired-node` for one registered but never verified — the same two
-  refusals `mail send`'s node branch makes). With no argument it asks every
-  node `mail_wire::pollable_nodes` returns: registered, `verified`, and
-  carrying `message` in THIS box's own per-mesh `grants` for it — the same gate
-  a letter has to clear to be spooled there, so "a node this box sends to" and
-  "a node this box asks" stay one set. Per node the answer reports
+  that node alone, and the node's relay is resolved BEFORE any dial
+  (`mail_wire::poll_target`): a stored record answers first, exactly as
+  before; a registered but unverified record is refused `unpaired-node` before
+  any dial, as before. With no record at all, the charter in force gives the
+  relay its key and its `https://` address (`charter_relay`, the same
+  `send_mesh` and `dial_node` resolution a send and a drain use). A name with
+  neither is refused, taught (`what`, `why`, and a `fix` naming `aoide pair
+  <node>`, or a charter that declares it); a `poll` address, an `ssh://`
+  address, a `down` declaration and a pair mesh are refused the same way. Before any letter moves, the relay must prove the
+  charter key with its own signed `aoide/binding`; a relay that answers as any
+  other key is refused and audited (`mail.poll.relay-key-mismatch`), and no
+  unsigned poll follows. With no argument it asks every node
+  `mail_wire::pollable_nodes` returns: a verified record that carries
+  `message` in THIS box's own per-mesh `grants` for it (the same gate a letter
+  has to clear to be spooled there, so "a node this box sends to" and "a node
+  this box asks" stay one set), plus every relay a charter in force names for
+  this box and has NO record here. Per node the answer reports
   `polled`/`filed` or `unreachable`/`reason`; one node's failure never stops
   the sweep, and the command's own status reports that the ASK was made
   (write-is-the-report), never the far end's outcome. This is the receive
