@@ -2177,9 +2177,10 @@ claude` is `claude`, and the A2A spawn labels its wrap with the harness it
 proved. Four readers apply it:
 the ping-back, the doorbell's PTY arm, the A2A door's inject, and the A2A door's
 spawn, which asks its argv twin `conduct.rs::wrapped_harness` (the same walk,
-read before a record exists). `aoide send` is the human's own command: it is not
-one of these readers, and this proof does not gate it. The proof is that basename, and it is stated as
-one: a symlink named `claude` that points at `bash`, or a script named `claude`
+read before a record exists). `aoide send` and `aoide spawn --prompt` are not
+among them: each types the caller's own text into the target the caller named,
+through the send gate, so the line is the caller's and this proof does not gate
+it. The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
 that execs a shell, passes it. It rejects the launchers the walk does not model
 and a label that does not match the wrap. It does not stop a same-uid process
 that names a shell after a harness; for that class the defence is inert content,

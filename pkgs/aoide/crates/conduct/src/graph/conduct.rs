@@ -311,6 +311,11 @@ fn handoff(l: &Launcher, argv: &[String], start: usize) -> Handoff {
                 Some(next) => i = next,
                 None => return Handoff::Refused,
             }
+        } else if arg == "--" {
+            // A `--` after an operand is not the program: `chrt -o 0 -- bash` skips
+            // it and runs `bash`, while `timeout 5 -- bash` runs `--`. Either way
+            // the walk does not know, so it refuses.
+            return Handoff::Refused;
         } else {
             options = false;
             if l.assignments && is_assignment(arg) {
@@ -456,8 +461,10 @@ fn walk(argv: &[String]) -> Walked {
     };
     let base = command_basename(first);
     if let Some(l) = launcher(&base) {
-        // `sudo` and `doas` answer as the command they run, so a shell is at its
-        // prompt only when it is the whole command.
+        // `sudo` and `doas` read as a shell whatever they run, so nothing is ever
+        // typed into one: a line typed before its program starts answers its own
+        // password prompt. A shell under it is at its prompt only when it is the
+        // whole command.
         let wraps = matches!(base.as_str(), "sudo" | "doas");
         return match handoff(l, argv, 1) {
             Handoff::Program(p) if wraps => {
@@ -2947,6 +2954,24 @@ mod tests {
             assert_eq!(wrapped_program_name(&argv).as_deref(), Some("bash"), "{case:?}");
             assert!(program_is_an_interactive_shell(&argv), "{case:?} sits at its prompt");
             assert_eq!(wrapped_harness(&argv), None, "{case:?} is never proven as claude");
+        }
+    }
+
+    #[test]
+    fn a_dash_dash_after_an_operand_is_refused_and_sudo_is_never_typed_into() {
+        // `chrt` skips a `--` after its priority and `timeout` runs it as the
+        // program: the walk cannot tell which, so it names nothing and reads a shell.
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in [&["chrt", "-o", "0", "--", "bash"][..], &["chrt", "-o", "0", "--", "claude"], &["timeout", "5", "--", "bash"]] {
+            let argv = owned(case);
+            assert_eq!(wrapped_program_name(&argv), None, "{case:?}");
+            assert!(program_is_a_shell(&argv), "{case:?} is never typed into");
+            assert_eq!(wrapped_harness(&argv), None, "{case:?}");
+        }
+        // A harness under `sudo` is still a `sudo`: its password prompt would read
+        // the first line typed.
+        for case in [&["sudo", "claude"][..], &["sudo", "-u", "root", "claude"], &["doas", "claude"]] {
+            assert!(program_is_a_shell(&owned(case)), "{case:?} is never typed into");
         }
     }
 

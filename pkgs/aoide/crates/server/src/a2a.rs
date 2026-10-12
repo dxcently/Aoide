@@ -2405,10 +2405,11 @@ enum SpawnAgentRefusal {
 
 /// The one judgement every spawn guard reads: the registered harness a
 /// configured `spawnAgent` runs, or why it may not run at all. A shell is refused
-/// as `Shell`, and a command the walk cannot name a program for (`env -S`, whose
-/// split string is a command line) is a shell too. Default-deny for the rest: a
-/// wrapper script, a launcher the walk does not model (`taskset`), or a name with
-/// no profile is `Unproven`, because its first turn would be typed into a pty the
+/// as `Shell`, and so is everything the walk reads as one without naming a
+/// program it proves: a launcher option its table does not list or refuses
+/// (`env -S`, `env -a`), `sudo`/`doas`, and `busybox`. Default-deny for the rest:
+/// a wrapper with another name, a launcher the walk does not model (`taskset`), or
+/// a name with no profile is `Unproven`, because its first turn would be typed into a pty the
 /// door cannot prove is a harness. The walk itself is
 /// `aoide_conduct::graph::wrapped_harness`, never a copy of it.
 fn spawn_agent_harness(agent_cmd: &str) -> Result<&'static str, SpawnAgentRefusal> {
