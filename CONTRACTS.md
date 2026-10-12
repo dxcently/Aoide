@@ -1181,9 +1181,10 @@ applied to the stage tree itself):
 `state/` is owner-only and is the privacy boundary for everything under it;
 file and subdirectory modes inside it are not relied on. Every storage write
 under it locks `state/` first, and `aoided` does the same before it binds,
-refusing to start when it cannot. A symlinked `state/` is refused by name. On
-Windows the boundary holds only for a `state/` aoide created: an existing one
-is never re-tightened.
+refusing to start when it cannot. A symlinked `state/` is refused by name, and
+so is one that would be a filesystem root, the home directory, or a parent of
+it: aoide never chmods a directory it does not own. On Windows the boundary
+holds only for a `state/` aoide created: an existing one is never re-tightened.
 
 **The runtime root (L-C2, lyra-carrier lane, task #107).** Every runtime
 tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,

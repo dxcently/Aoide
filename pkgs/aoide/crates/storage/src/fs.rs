@@ -910,6 +910,9 @@ fn write_temp_file(
     contents: &[u8],
     create_mode: Option<u32>,
 ) -> std::io::Result<()> {
+    if let Some(parent) = tmp.parent() {
+        ensure_write_dir(parent)?;
+    }
     #[cfg(unix)]
     let mut f = {
         let mut opts = std::fs::OpenOptions::new();
@@ -1358,10 +1361,32 @@ pub fn ensure_write_dir(dir: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
 }
 
+/// Why `state` cannot be an aoide state directory, if it cannot: a filesystem
+/// root, or `home` itself or one of its parents. A chmod to `0700` on any of
+/// those would lock a directory aoide does not own.
+fn shallow_state_reason(state: &std::path::Path, home: &std::path::Path) -> Option<&'static str> {
+    if state.parent().is_none() {
+        return Some("it is a filesystem root");
+    }
+    if home.starts_with(state) {
+        return Some("it is the home directory or one of its parents");
+    }
+    None
+}
+
 /// Refuses a symlinked `state/` by name, since a chmod would follow the link
 /// and change a directory the boundary does not cover. Every other failure
 /// names `state/` and keeps its kind.
 fn lock_state_dir(state: &std::path::Path) -> std::io::Result<()> {
+    if let Some(why) = shallow_state_reason(state, &aoide_protocol::aoide_home()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "{}: refusing to make state/ owner-only, {why}; point AOIDE_STATE_DIR (or AOIDE_ROOT) at a directory aoide owns, such as ~/.aoide/state",
+                state.display()
+            ),
+        ));
+    }
     if std::fs::symlink_metadata(state).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -2653,6 +2678,103 @@ mod tests {
         assert_private_file(&tmp);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 879f7b78: a temp left at the private name by a write killed between
+    /// create and rename keeps its wider mode through `O_TRUNC`, and a rename
+    /// would publish it. The leftover is removed and the temp created fresh at
+    /// `0600`, so the file over the private name is never `0644`.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_never_publishes_a_leftover_temps_wider_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("aoide-leftover-temp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("ed25519.key");
+        let leftover = target.with_extension(format!("tmp.{}", std::process::id()));
+        std::fs::write(&leftover, b"stale bytes").unwrap();
+        std::fs::set_permissions(&leftover, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        atomic_write_private(&target, b"private seed bytes").unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"private seed bytes");
+        assert_eq!(unix_mode(&target), 0o600, "the published file took the leftover's wider mode");
+        assert!(!leftover.exists(), "the leftover temp must be gone after the write");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `write_temp_file` locks a wide `state/` its temp lands in, as every
+    /// storage write does, so no temp is written around the gate.
+    #[cfg(unix)]
+    #[test]
+    fn write_temp_file_locks_a_wide_state_it_writes_into() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-temp-gate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let state = base.join("state");
+        std::fs::create_dir_all(state.join("identity")).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        write_temp_file(&state.join("identity").join("k.tmp"), b"x", Some(0o600)).unwrap();
+        assert_eq!(unix_mode(&state), 0o700, "write_temp_file left state/ wide");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The shallow-state predicate, on paths alone: nothing real is read or
+    /// changed. Components, not characters, decide a parent, so a sibling that
+    /// shares a name prefix is not one.
+    #[cfg(unix)]
+    #[test]
+    fn a_filesystem_root_or_home_or_its_parent_is_never_a_state_dir() {
+        let home = std::path::Path::new("/home/someone");
+        let why_home = Some("it is the home directory or one of its parents");
+        assert_eq!(shallow_state_reason(std::path::Path::new("/"), home), Some("it is a filesystem root"));
+        assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone"), home), why_home);
+        assert_eq!(shallow_state_reason(std::path::Path::new("/home"), home), why_home);
+        assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone/.aoide/state"), home), None);
+        assert_eq!(shallow_state_reason(std::path::Path::new("/home/someonelse"), home), None);
+        assert_eq!(shallow_state_reason(std::path::Path::new("/tmp/x/state"), home), None);
+    }
+
+    /// `lock_state_dir` on a temp `HOME`, never the real one: a state dir that
+    /// is the home directory, or its parent, is refused with its mode left
+    /// alone; a real state dir under home is still locked `0700`.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_refuses_to_chmod_home_or_its_parent_and_still_locks_a_real_state() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-shallow-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let parent = base.join("parent");
+        let home = parent.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("HOME", &home);
+
+        std::env::set_var("AOIDE_STATE_DIR", &home);
+        let err = ensure_write_dir(&home.join("x")).expect_err("the home directory must be refused");
+        assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
+        assert_eq!(unix_mode(&home), 0o755, "the home directory was chmodded");
+
+        std::env::set_var("AOIDE_STATE_DIR", &parent);
+        let err = ensure_write_dir(&parent.join("x")).expect_err("a parent of home must be refused");
+        assert!(err.to_string().contains("parents"), "the refusal must say why: {err}");
+        assert_eq!(unix_mode(&parent), 0o755, "a parent of home was chmodded");
+
+        let state = home.join(".aoide").join("state");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        ensure_write_dir(&state.join("stage")).unwrap();
+        assert_eq!(unix_mode(&state), 0o700, "a real state dir under home is not locked");
+        assert_eq!(unix_mode(&home), 0o755, "locking state/ must not touch home");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// Unix-only: a umask is a POSIX process-wide mode mask. Its Windows

@@ -500,7 +500,9 @@
   name. Never write a sensitive file as a `File::create` + post-rename
   `set_permissions` pair. The temp's mode is pinned directly, not just the
   end state, by
-  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`.
+  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`,
+  and a leftover at the temp's name is pinned by
+  `fs::tests::a_private_write_never_publishes_a_leftover_temps_wider_mode`.
 - **`fs::secure_private_dir` locks the DIRECTORY a sensitive file lives
   in, not only the file** (`identity.rs`'s `mint()` calls it on
   `identity_dir()` before writing anything into it). A `0600` file in a
@@ -514,7 +516,10 @@
   directory lies under `state/` goes through `fs::ensure_write_dir`, which
   makes `state/` `0700` before it creates anything. `aoided` does the same
   once at start, before it binds, and refuses to start if it cannot. A
-  symlinked `state/` is refused by name, since a chmod would follow it.
+  symlinked `state/` is refused by name, since a chmod would follow it. So is
+  one that is a filesystem root, the home directory, or a parent of home
+  (`fs::shallow_state_reason`): a chmod there would lock a directory aoide
+  does not own.
   Accepted gap: a raw creator outside this crate (`aoide-conduct`'s
   `graph/spawn.rs`, which makes `state/sessions/` with `create_dir_all`)
   can make a fresh `state/` wide. It stays wide until the next storage write
