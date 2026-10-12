@@ -20,13 +20,14 @@
 //!
 //! **The whole-module invariant, load-bearing:** this module never stages
 //! anything (no `git add`), never commits, never moves `HEAD`, and writes
-//! only under `refs/aoide/`. Every operation below is one of exactly five:
+//! only under `refs/aoide/`. Five operations shell out, and each is one of:
 //! `rev-parse --show-toplevel` (is this a repo / where), `hash-object -w`
 //! (store a pre-image), `hash-object` (fingerprint the current file),
 //! `cat-file blob` (read a pre-image back), `update-ref` under `refs/aoide/`
-//! (anchor). Nothing here can touch the User's branch, index, stash, or
-//! history — a revert built on this module is a working-tree restore, never
-//! a git-history operation.
+//! (anchor). The sixth, [`common_dir`], runs no process and only reads `.git`
+//! files, so it answers with `git` absent from `PATH`. Nothing here can touch
+//! the User's branch, index, stash, or history — a revert built on this module
+//! is a working-tree restore, never a git-history operation.
 //!
 //! **R2 scope only.** No CLI (`Outcome`/`Invocation` are a later layer, same
 //! boundary [`crate::edits`] draws for R1), no domain validation, no
@@ -197,6 +198,42 @@ pub fn anchor(repo: &Path, sha: &str) -> Result<(), String> {
     run_git(Some(repo), &["update-ref", &ref_name, sha])
         .map(|_| ())
         .map_err(|e| format!("{e} (anchoring {sha} in {})", repo.display()))
+}
+
+/// The git common directory of the repository `path` sits in: the `.git`
+/// directory of the main checkout, which every linked worktree of that repo
+/// shares. Walks up from `path` to the nearest `.git`; a directory is the
+/// answer, and a `.git` file's `gitdir:` is followed to its `commondir` (a
+/// linked worktree's own gitdir names the main one there). Canonical, so two
+/// worktrees of one repo compare equal. A pure read: no `git` process, no
+/// write. `None` when no `.git` is on the way up, or the one found does not
+/// resolve.
+pub fn common_dir(path: &Path) -> Option<PathBuf> {
+    let mut dir = path.canonicalize().ok()?;
+    loop {
+        let dotgit = dir.join(".git");
+        if dotgit.exists() {
+            return resolve_common_dir(&dotgit);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+}
+
+/// [`common_dir`]'s second half: `dotgit` is a `.git` directory or file.
+fn resolve_common_dir(dotgit: &Path) -> Option<PathBuf> {
+    let gitdir = if dotgit.is_dir() {
+        dotgit.to_path_buf()
+    } else {
+        let text = std::fs::read_to_string(dotgit).ok()?;
+        let target = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
+        // A relative `gitdir:` is relative to the directory holding the file.
+        dotgit.parent()?.join(target)
+    };
+    let common = match std::fs::read_to_string(gitdir.join("commondir")) {
+        Ok(text) => gitdir.join(text.trim()),
+        Err(_) => gitdir,
+    };
+    common.canonicalize().ok()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -374,5 +411,74 @@ mod tests {
             cat_file_blob(&repo, &sha).is_err(),
             "an unanchored, unreferenced blob must be reclaimed by an aggressive gc"
         );
+    }
+
+    /// A main checkout with one linked worktree, made by `git worktree add`
+    /// (a real repo, the module's test style), and the worktree's subdirectory.
+    fn main_and_worktree(tag: &str) -> (PathBuf, PathBuf) {
+        let main = init_repo(tag);
+        git_ok(&main, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let wt = main.join("wt");
+        git_ok(&main, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+        (main, wt)
+    }
+
+    #[test]
+    fn a_worktree_and_its_main_checkout_share_one_common_dir() {
+        let (main, wt) = main_and_worktree("common-dir-wt");
+        let common = main.join(".git").canonicalize().unwrap();
+        std::fs::create_dir_all(wt.join("sub")).unwrap();
+
+        assert_eq!(common_dir(&main), Some(common.clone()));
+        assert_eq!(common_dir(&wt), Some(common.clone()), "a .git file's gitdir, followed to commondir");
+        assert_eq!(common_dir(&wt.join("sub")), Some(common), "walks up from a subdirectory");
+        let _ = std::fs::remove_dir_all(&main);
+    }
+
+    #[test]
+    fn a_relative_gitdir_line_resolves_against_the_directory_holding_the_file() {
+        let root = unique_tmp("common-dir-rel");
+        let main_git = root.join("main/.git");
+        std::fs::create_dir_all(main_git.join("worktrees/wt")).unwrap();
+        std::fs::write(main_git.join("worktrees/wt/commondir"), "../..\n").unwrap();
+        let wt = root.join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: ../main/.git/worktrees/wt\n").unwrap();
+
+        assert_eq!(common_dir(&wt), Some(main_git.canonicalize().unwrap()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dangling_or_absent_git_entry_answers_none() {
+        let root = unique_tmp("common-dir-none");
+        let broken = root.join("broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join(".git"), "not a gitdir line\n").unwrap();
+        assert_eq!(common_dir(&broken), None, "a .git file naming no gitdir resolves to nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The parent's `PATH` is shared by every test thread, so the no-git proof
+    /// re-runs this test in a child whose `PATH` is empty. The parent builds the
+    /// fixture with git and hands the worktree over in `AOIDE_COMMON_DIR_WT`;
+    /// the child runs no git at all.
+    #[test]
+    fn common_dir_answers_with_git_absent_from_path() {
+        if let Some(wt) = std::env::var_os("AOIDE_COMMON_DIR_WT") {
+            let wt = PathBuf::from(wt);
+            let main = wt.parent().unwrap();
+            assert_eq!(common_dir(&wt), Some(main.join(".git").canonicalize().unwrap()));
+            return;
+        }
+        let (main, wt) = main_and_worktree("common-dir-nopath");
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "git::tests::common_dir_answers_with_git_absent_from_path", "--nocapture"])
+            .env("PATH", "")
+            .env("AOIDE_COMMON_DIR_WT", &wt)
+            .status()
+            .expect("re-run this test binary");
+        assert!(status.success(), "common_dir must answer with an empty PATH");
+        let _ = std::fs::remove_dir_all(&main);
     }
 }

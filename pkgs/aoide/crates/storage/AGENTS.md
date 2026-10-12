@@ -887,6 +887,21 @@
   origin's readers like a letter; an ordinary `receipt` never does) is a
   one-line change in one function, never a grep-and-fix across every
   caller.
+- **`mail::peek_base`/`peek_cursors` are the lock-free mailbase reads, and
+  they change nothing (SESSION-FIND B2).** A peek never calls `with_lock`, so
+  it never runs `migrate_if_needed`/`migrate_cursors_if_needed`: a legacy flat
+  `cursors.json` reads as `None` (unknown), never migrated and never as an
+  empty map. `peek_base` counts bytes up to the last newline only, the same
+  line `truncate_torn_tail` keeps, so a peek never reports a line the next
+  write would remove. `peek_cursors` drops the pseudo-reader key and omits a
+  name left with no reader. Don't route a peek through `read_base`'s locked
+  path: find takes no lock, and a peek that waits on a writer stalls the page.
+- **`git::common_dir` is the one `git.rs` function that runs no process
+  (SESSION-FIND B2).** It canonicalizes its input, walks up to the nearest
+  `.git`, and follows a file's `gitdir:` (relative to the file's own
+  directory) and that gitdir's `commondir`. Its no-git-on-`PATH` test re-runs
+  itself in a child with an empty `PATH`, because the parent's `PATH` is
+  shared by every test thread. Don't give it a `Command`.
 - **`outbox`'s two locks are never conflated (P-M2).** The crate-wide
   stage lock (`with_lock`, wrapping `fs::try_stage_lock`) guards file
   mutations only and is held for microseconds; `.bsy`
