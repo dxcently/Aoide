@@ -2649,8 +2649,12 @@ mod tests {
         assert!(take1.cover.is_some());
         assert!(!crate::cover::staged_is_pick());
 
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("sonata"))
-            .unwrap();
+        crate::cover::stage_pick(
+            std::path::Path::new("/tmp/chosen.png"),
+            Some("sonata"),
+            Some(crate::cover::POSITION_TILE),
+        )
+        .unwrap();
         let take2 = snapshot("rice.take", "stage").unwrap();
         assert!(take2.cover.is_some());
 
@@ -2665,6 +2669,8 @@ mod tests {
         assert_eq!(crate::cover::staged_path().as_deref(), Some("/tmp/chosen.png"));
         let raw = std::fs::read_to_string(stage.join("cover.json")).unwrap();
         assert!(raw.contains("\"pick\": true"), "verbatim: {raw}");
+        assert!(raw.contains("\"position\": \"tile\""), "verbatim: {raw}");
+        assert!(raw.contains("\"tile\": true"), "verbatim: {raw}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

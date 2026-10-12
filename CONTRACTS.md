@@ -1756,8 +1756,8 @@ host's bake shows otherwise. Readers must tolerate both forms.
 
 ### `song/stage/cover.json` — **v0**
 
-The live wallpaper: the image path, the song it was staged for, and whether
-the user picked it.
+The live wallpaper: the image path, the song it was staged for, whether the
+user picked it, and whether a picked still tiles.
 
 ```json
 { "path": "/home/u/.aoide/song/covers/dusk.png", "song": "dusk", "pick": true }
@@ -1788,6 +1788,26 @@ here, since this crate does not decode the file), and is the engine's own
 `%type%` when the engine reports the pick. A pick is a pick with EITHER identity;
 the marker alone, with neither, is nothing (`staged_is_pick`).
 
+**`tile` and `position` — additive in v0 — say how a still pick is laid on the
+screen.** `tile: true` repeats the picture at 1:1, one image pixel to one
+screen pixel, instead of cropping it to fill; absent is no tile, which is every
+file written before the fields existed. `position` is `"tile"` or `"fill"` only
+when `lyra cover set --position` forced one; automatic (no `--position`, or
+`--position auto`) writes none. A still tiles when its position is `tile`, or
+when it is automatic and its file name — the last path component, lowercased —
+contains `_tile`; a video and a scene carry neither field (`cover::pick_tiles`
+is the one rule). Readers take `tile` under the same rule as `path`: only while
+a pick applies (its `song` matches the staged song and `pick` is `true`), and
+only for the pick's own `path`, never for a fallback. The pattern is anchored
+with one tile centred on the screen (Qt's `Image.Tile` with its default centred
+alignment): the shell's layer (`AoideWallpaper.qml`) paints it at 1:1, and a
+preview of the desktop paints it shrunk the way it shrinks the screen it stands
+for, anchored the same way. A reader that shows FILES rather than the pick (a
+picture browser's thumbnails) may mirror the name rule for display. Only
+`cover set` decides the fields; a take, a draft and a kept pick carry them
+verbatim. An external provider lays its picks out itself and reads neither
+field.
+
 **The rule is one rule, and it is read-side: a cover applies only while its
 `song` equals the song staged right now** (`stage/livery.json`'s own `song`
 field, `commands/mode.rs`'s `current_staged_song`). A cover whose `song` names
@@ -1815,12 +1835,12 @@ Writers, and the exact shape each leaves:
 | Writer | Effect on `stage/cover.json` |
 | --- | --- |
 | `lyra rice stage <song>` | the song's derivable cover (`song/covers/<song>.{webp,png,jpg,jpeg}`, first match in that order) as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`) |
-| `lyra cover set <path\|name>` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape |
+| `lyra cover set <path\|name> [--position auto\|tile\|fill]` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape — plus, for a still, `"position"` when `--position tile` or `fill` forced it and `"tile": true` when it tiles. `--position` with a video or a `we:<id>` token is a usage refusal (`position-not-a-still`, exit 2) that writes nothing, and the registry refuses it beside `--clear` or `--from-skwd` |
 | `lyra cover set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "song": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
-| `lyra cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it. Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `song/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
+| `lyra cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `song/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
 | `lyra cover set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `coverStage` come from the marker read before the write |
 | `lyra rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `livery.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
-| `lyra rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song` and all; a take with no cover removes whatever stands |
+| `lyra rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song`, `position` and `tile` and all; a take with no cover removes whatever stands |
 | `lyra rice draft save <name>` | a verbatim copy into `song/songbook/<song>/drafts/<name>/cover.json` (§4's drafts entry; never a routing target) |
 | the lyra lane's `home.activation.aoideSeedStage` | NOTHING. It reseeds `stage/livery.json` and never touches `cover.json`; the read-side rule above is what keeps a pick off another song |
 
