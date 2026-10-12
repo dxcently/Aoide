@@ -2181,16 +2181,15 @@ outside this proof, each under its own rule. `aoide send` and `aoide spawn
 --prompt` passes `--yes`, so no human approves it); the caller is whatever process
 ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
-boot resurrect re-executes a session's recorded foreground command with
-Enter, never for `sudo`; an idle session gets its cwd only, with nothing
-typed (`resurrect.rs::restore_delivery`). The proof is that basename, and it
-is stated as one: a symlink named `claude` that points at `bash`, or a script
-named `claude`
-that execs a shell, passes it. It rejects the launchers the walk does not model
-and a label that does not match the wrap. It does not stop a same-uid process
-that names a shell after a harness; for that class the defence is inert content,
-since every line takes one pass as it is written (`wire_line`), and every shell
-metacharacter in it is made inert, with `!` and `"` among them.
+boot resurrect re-executes a session's recorded foreground command with Enter,
+never for `sudo`; an idle session gets its cwd only, with nothing typed
+(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated
+as one: a symlink named `claude` that points at `bash`, or a script named
+`claude` that execs a shell, passes it. It rejects the launchers the walk does
+not model and a label that does not match the wrap. It does not stop a same-uid
+process that names a shell after a harness; for that class the defence is inert
+content, since every line takes one pass as it is written (`wire_line`), and
+every shell metacharacter in it is made inert, with `!` and `"` among them.
 
 The refusals, in order, are `conduct.rs::auto_type_refusal`'s: a shell first
 (`agent` `""` or `shell`, a `restore` snapshot, or a `wrappedProgram` that is a
@@ -2996,6 +2995,12 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 
 A record that still carries a `typed` key inside `restore` loads with that
 key dropped; no writer emits it.
+
+`argv` and the session log (`state/sessions/<id>.log`) are a terminal record,
+like shell history: a secret written on a command line is stored with `argv`,
+here and in the ledger line, and whatever the pty echoed is in the log. The log
+holds the pty's output only, so input a program reads with echo off never
+reaches it. Both are private to the user under `state/`.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like
