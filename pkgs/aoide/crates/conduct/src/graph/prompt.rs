@@ -9,7 +9,7 @@
 //!
 //! ```text
 //! the last line has stood unchanged for QUIET   AND   it matches ONE row of ROWS
-//! AND no printable key and no Enter has landed on it
+//! AND no Enter has answered it, and no output but a typed key's echo has followed one
 //! ```
 //!
 //! **The line.** The recent output (its last [`WINDOW_BYTES`]) is read through
@@ -22,14 +22,18 @@
 //! **The episode is the line.** Its identity is its text and its row (how many
 //! newlines came before it). It begins once it has stood for [`QUIET`], and a
 //! repaint that leaves both alone (a cursor hide, a redraw) keeps it, with its
-//! clock. It ends when the text changes, when output reaches a later row, when a
-//! printable key or Enter lands on it, or when the child exits (the caller stops
-//! asking). Every other byte is only more output.
+//! clock. It ends when the text changes for any reason but the echo of a key typed
+//! onto it, when output reaches a later row, when an Enter lands on it, or when
+//! the child exits (the caller stops asking). Every other byte is only more output.
 //!
-//! **Typed input.** A printable key (it echoes into the line, or does not, for a
-//! password) or Enter answers the line the output is on. Arrows, Tab, Ctrl keys
-//! and other escape sequences do not. The bytes are classified and dropped, never
-//! kept, so typing `echo Proceed?` at a shell prompt never reads as a question.
+//! **Typed input.** Enter answers the line the output is on. A printable key does
+//! not: it holds the question while the program still waits on it, so a password
+//! typed without echo, or a key sent without its Enter, stays `awaiting`. The
+//! output that follows a key's echo is the answer, which is how a single-key
+//! prompt (`read -n1`) reads once it has taken the key; the echo itself is not.
+//! Arrows, Tab, Ctrl keys, OSC and DCS replies and mouse reports carry no key (the
+//! one tokenizer, [`typed_text`]). Typing `echo Proceed?` at a shell prompt never
+//! reads as a question: the text is held, and the echo of it is never announced.
 //!
 //! **The table is closed and conservative.** A false `awaiting` is noise, so
 //! every row is anchored to the END of the line (`Do you want to continue? [Y/n]`
@@ -40,9 +44,9 @@
 //! short enough that a human is not left waiting behind the ~1s tick.
 //!
 //! **The line is foreign text (house rule 4).** It is flattened to one line,
-//! every unsafe character stripped, its `"` turned to `'` so the delivered quote
-//! cannot be closed from inside, and cut to [`QUESTION_MAX`] keeping its END,
-//! which is where the question is. It leaves this module as the one `question` a
+//! every unsafe character stripped, and cut to [`QUESTION_MAX`] keeping its END,
+//! which is where the question is. The quote characters stay in the record; the
+//! ping-back neutralises them where it types the line. It leaves this module as the one `question` a
 //! record holds; the ping-back's cursor and its audit line copy that. Nothing
 //! else is kept: the window is memory, never written.
 //!
@@ -51,7 +55,7 @@
 //! (`shell_snapshot`: an interactive shell at its bare prompt is never
 //! `awaiting` off it; a shell given a command or a script is heard).
 
-use super::common::{strip_ansi, strip_unsafe};
+use super::common::{clip_flat, strip_ansi, strip_unsafe, typed_text};
 use std::time::{Duration, Instant};
 
 /// How long the last line must stand unchanged before it is believed to be a
@@ -176,8 +180,9 @@ fn yes(l: &str) -> bool {
 }
 
 /// `Press Enter to continue`, `Press RETURN/ENTER to continue or any other key
-/// to abort:`, `==> Press any key to continue . . .` — the phrase near the start
-/// of the line, followed by `continue`, not a sentence that mentions it.
+/// to abort:`, `==> Press any key to continue . . .` — the phrase, then at most
+/// [`PRESS_TAIL_MAX`] characters that include `continue`, ending the line. A
+/// sentence that mentions the phrase earlier on is not the prompt.
 fn press_key(l: &str) -> bool {
     ["press enter", "press return", "press any key"].iter().any(|phrase| {
         l.rfind(phrase).is_some_and(|i| {
@@ -210,14 +215,11 @@ fn row_of(line: &str) -> Option<&'static Row> {
     ROWS.iter().find(|row| (row.matches)(&lowered))
 }
 
-/// `s` as one safe line: a tab is a space, unsafe characters are gone, whitespace
-/// is flattened, and `"` is softened to `'`.
+/// `s` as one safe line, never cut: a tab is a space, unsafe characters are
+/// gone, whitespace is flattened. [`clip_flat`] does the flattening; the cut is
+/// the caller's (`clip_end`), because a match reads the whole line.
 fn flatten(s: &str) -> String {
-    strip_unsafe(&s.replace('\t', " "))
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .replace('"', "'")
+    clip_flat(&strip_unsafe(&s.replace('\t', " ").replace('"', "'")), usize::MAX)
 }
 
 /// `s` cut to `max` characters keeping its END, with a leading `…`.
@@ -254,34 +256,32 @@ fn last_line(text: &str) -> Option<(String, usize)> {
     }
 }
 
-/// Does an input chunk answer the line it lands on? A printable key or Enter
-/// does; arrows, Tab, Ctrl keys and other escape sequences do not. The bytes are
-/// classified here and dropped.
-fn answers(bytes: &[u8]) -> bool {
-    let mut i = 0;
-    while let Some(&b) = bytes.get(i) {
-        i += 1;
-        match b {
-            b'\r' | b'\n' | 0x20..=0x7e | 0x80..=0xff => return true,
-            0x1b => i = after_escape(bytes, i),
-            _ => {}
-        }
-    }
-    false
+/// What an input chunk does to the line it lands on: whether it has an Enter in
+/// it, and the printable keys it carries. The bytes are classified by the one
+/// tokenizer ([`typed_text`]) and dropped: arrows, OSC and DCS replies, mouse
+/// reports and Ctrl keys carry no key.
+fn keys(bytes: &[u8]) -> (bool, String) {
+    let text = typed_text(bytes);
+    (text.contains(['\r', '\n']), text.chars().filter(|c| !c.is_control()).collect())
 }
 
-/// The index just past the escape sequence whose ESC precedes `i`: a CSI runs to
-/// its final byte, an SS3 is three bytes, and any other escape is ESC and a key.
-fn after_escape(bytes: &[u8], i: usize) -> usize {
-    match bytes.get(i) {
-        Some(b'[') => bytes[i + 1..]
-            .iter()
-            .position(|b| (0x40..=0x7e).contains(b))
-            .map_or(bytes.len(), |p| i + 2 + p),
-        Some(b'O') => i + 2,
-        Some(_) => i + 1,
-        None => i,
-    }
+/// Is `output` only the echo of keys typed onto a question (`typed`), or the
+/// erase of one (`\b`, DEL and the space beside them)? A tty echoes a key the
+/// moment it lands, and an echo is the keys being typed, not the program
+/// answering them.
+fn is_echo(output: &[u8], typed: &str) -> bool {
+    String::from_utf8_lossy(output)
+        .chars()
+        .all(|c| c == ' ' || c == '\u{8}' || c == '\u{7f}' || typed.contains(c))
+}
+
+/// Printable keys typed onto a question and not yet answered: the question as
+/// it stood when the first key landed, and the keys themselves. While the
+/// program is still waiting, their echo keeps the question standing.
+struct Typing {
+    row: usize,
+    asked: String,
+    typed: String,
 }
 
 /// One wrapped pty's screen, as far as the rule needs: the recent output, its
@@ -296,8 +296,9 @@ pub(in crate::graph) struct PromptWatch {
     row: Option<usize>,
     /// When `line` or `row` last changed.
     since: Instant,
-    /// The row a printable key or Enter last landed on.
+    /// The row an Enter, or output past a typed key's echo, last answered.
     answered: Option<usize>,
+    typing: Option<Typing>,
 }
 
 impl PromptWatch {
@@ -309,6 +310,7 @@ impl PromptWatch {
             row: None,
             since: now,
             answered: None,
+            typing: None,
         }
     }
 
@@ -318,6 +320,13 @@ impl PromptWatch {
         self.window.extend_from_slice(bytes);
         if self.window.len() > WINDOW_BYTES {
             self.window.drain(..self.window.len() - WINDOW_BYTES);
+        }
+        if let Some(t) = self.typing.take() {
+            if is_echo(bytes, &t.typed) {
+                self.typing = Some(t);
+            } else {
+                self.answered = Some(t.row);
+            }
         }
         let (line, row) = match last_line(&screen_text(&self.window)) {
             Some((line, after)) => (line, Some(self.newlines.saturating_sub(after))),
@@ -331,16 +340,40 @@ impl PromptWatch {
     }
 
     /// Bytes written to the pty by anyone else: the human's keys, an injected send.
+    /// An Enter answers the line. A printable key only starts a pending answer on
+    /// a question, which stands until the program's own output follows the echo.
     pub(in crate::graph) fn input(&mut self, bytes: &[u8]) {
-        if answers(bytes) {
+        let (enter, printable) = keys(bytes);
+        if enter {
             self.answered = self.row;
+            self.typing = None;
+            return;
+        }
+        let Some(row) = self.row else {
+            return;
+        };
+        if printable.is_empty() || self.answered == Some(row) {
+            return;
+        }
+        match &mut self.typing {
+            Some(t) if t.row == row => t.typed.push_str(&printable),
+            _ => self.typing = Some(Typing { row, asked: self.line.clone(), typed: printable }),
         }
     }
 
-    /// The question the child is waiting on at `now`, if the rule holds.
+    /// The question the child is waiting on at `now`, if the rule holds. Keys
+    /// typed onto a line hold it: a question typed onto keeps standing at once,
+    /// since its echo is not an answer, and text typed at a prompt is never one.
     pub(in crate::graph) fn standing(&self, now: Instant) -> Option<Prompt> {
         let row = self.row?;
-        if self.answered == Some(row) || now.saturating_duration_since(self.since) < QUIET {
+        if self.answered == Some(row) {
+            return None;
+        }
+        if let Some(t) = self.typing.as_ref().filter(|t| t.row == row) {
+            let found = row_of(&t.asked)?;
+            return Some(Prompt { question: clip_end(&t.asked, QUESTION_MAX), row: found.name });
+        }
+        if now.saturating_duration_since(self.since) < QUIET {
             return None;
         }
         let found = row_of(&self.line)?;
@@ -526,17 +559,67 @@ mod tests {
     }
 
     #[test]
-    fn typed_input_ends_the_episode_even_when_nothing_is_echoed() {
+    fn a_half_typed_password_is_still_asked_until_its_enter() {
+        // Echo off: the key is typed, nothing comes back, and the program still
+        // blocks on the password. Only the Enter answers it.
         let t0 = Instant::now();
         let mut watch = PromptWatch::new(t0);
         watch.output(b"Password: ", t0);
         assert!(watch.standing(t0 + QUIET).is_some());
         watch.input(b"h");
-        assert_eq!(watch.standing(t0 + QUIET), None);
-        // The newline of the submitted answer, with and without an echo.
+        assert!(watch.standing(t0 + QUIET).is_some(), "a printable key is not an answer");
         watch.input(b"\r");
         watch.output(b"\r\n", t0 + QUIET);
         assert_eq!(watch.standing(t0 + QUIET * 3), None, "the answered line is not a question again");
+    }
+
+    #[test]
+    fn a_printable_key_sent_without_submit_leaves_the_question_standing() {
+        // `aoide send` without `--submit`: the key is echoed by the tty, and the
+        // program is still blocked. The echo is not the answer.
+        let t0 = Instant::now();
+        let mut watch = PromptWatch::new(t0);
+        watch.output(b"Overwrite? [y/N] ", t0);
+        assert!(watch.standing(t0 + QUIET).is_some());
+        watch.input(b"y");
+        watch.output(b"y", t0 + QUIET);
+        let asked = watch.standing(t0 + QUIET);
+        assert_eq!(asked.as_ref().map(|p| p.question.as_str()), Some("Overwrite? [y/N]"));
+        watch.input(b"\r");
+        assert_eq!(watch.standing(t0 + QUIET), None, "the Enter of --submit answers it");
+    }
+
+    #[test]
+    fn a_single_key_prompt_is_answered_by_the_output_that_follows_its_key() {
+        // `read -n1`: the program takes the key and prints after it. The key's
+        // echo is held; the output after it is the answer.
+        let t0 = Instant::now();
+        let mut watch = PromptWatch::new(t0);
+        watch.output(b"Continue? [y/N] ", t0);
+        assert!(watch.standing(t0 + QUIET).is_some());
+        watch.input(b"y");
+        watch.output(b"y", t0 + QUIET);
+        assert!(watch.standing(t0 + QUIET).is_some(), "the echo alone is not an answer");
+        watch.output(b"\nanswered:y\n", t0 + QUIET);
+        assert_eq!(watch.standing(t0 + QUIET * 2), None);
+    }
+
+    #[test]
+    fn terminal_replies_and_mouse_reports_do_not_answer_the_question() {
+        // OSC and DCS replies, an X10 mouse report whose payload bytes are
+        // printable, an SGR report: none is a key, so none answers.
+        let t0 = Instant::now();
+        let mut watch = PromptWatch::new(t0);
+        watch.output(b"Overwrite? [y/N] ", t0);
+        for reply in [
+            &b"\x1b]11;rgb:0/0/0\x07"[..],
+            b"\x1bP>|xterm\x1b\\",
+            b"\x1b[M#!!",
+            b"\x1b[<0;10;5M",
+        ] {
+            watch.input(reply);
+        }
+        assert!(watch.standing(t0 + QUIET).is_some(), "a terminal reply is not an answer");
     }
 
     #[test]
@@ -562,7 +645,7 @@ mod tests {
         assert_eq!(watch.standing(t0 + QUIET).unwrap().question, "Proceed? [y/N]");
         // The human types on the fresh line, echo off, then Enter.
         watch.input(b"y");
-        assert_eq!(watch.standing(t0 + QUIET), None);
+        assert!(watch.standing(t0 + QUIET).is_some(), "a typed key is not yet the answer");
         watch.input(b"\r");
         watch.output(b"\r\n", t0 + QUIET);
         assert_eq!(watch.standing(t0 + QUIET * 3), None);
@@ -602,7 +685,10 @@ mod tests {
         assert_eq!(watch.standing(t0 + QUIET).unwrap().question, "Overwrite? [y/N]");
         watch.input(b"y");
         watch.output(b"y", t0 + QUIET);
-        assert_eq!(watch.standing(t0 + QUIET * 5), None);
+        assert!(watch.standing(t0 + QUIET * 5).is_some(), "the echoed key is not submitted");
+        watch.input(b"\r");
+        watch.output(b"\n", t0 + QUIET * 5);
+        assert_eq!(watch.standing(t0 + QUIET * 9), None);
     }
 
     #[test]

@@ -1794,6 +1794,7 @@ mod tests {
             cwd: "/tmp".into(),
             state: "running".into(),
             shell: false,
+            wrapped_program: None,
             started_at: "s1".into(),
             parent_session_id: None,
             remote_parent: None,

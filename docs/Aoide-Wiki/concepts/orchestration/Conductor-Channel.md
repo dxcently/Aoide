@@ -316,16 +316,16 @@ through.
     `Session-Graph.md`'s "And the parent hears it".
 
     A third source speaks for a conducted program with neither hooks nor a
-    trace (a `codex`, an `aider`, a REPL): the wrap itself, once it has gone
-    stood on a question (`[y/N]`, a password prompt, `Press Enter`), tells its
-    spawner —
+    trace (a `codex`, an `aider`, a REPL): the wrap itself, once its screen has
+    held a question still for three seconds (`[y/N]`, a password prompt,
+    `Press Enter`), tells its spawner —
 
     ```
     [codex <petname>] asking: "Apply patch? [y/N]"
     ```
 
-    once per question, over the same attested spawner edge, with the same
-    delivery, skips and cursor file. A `sudo` password prompt is the human's and
+    once per question while it stands, over the same attested spawner edge, with
+    the same delivery, skips and cursor file. A `sudo` password prompt is the human's and
     is never announced. See `Session-Graph.md`, "Programs with no harness — the
     screen".
   - **Remote-parent — the same relation across machines.** The A2A door's

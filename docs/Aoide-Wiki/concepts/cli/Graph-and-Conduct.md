@@ -952,7 +952,8 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` (unlinked on exit and on start if
   stale); registers the session in `state/stage/sessions.json` with
   `conductable: true`, `socket`, the discovered `windowAddress`, and
-  `pid` = the conduct process itself; stamps a write-once `origin` off its
+  `pid` = the conduct process itself, and stamps `shell` and `wrappedProgram`
+  from the wrapped argv (the launcher walk's verdict and resolved program); stamps a write-once `origin` off its
   own inherited `AOIDE_SESSION_ORIGIN` env, refusing a `node:*` shape read
   there (a `node:*` value originates only at the A2A door's spawn —
   [[Session-Graph]]); the daemon's tick sweep seals the record

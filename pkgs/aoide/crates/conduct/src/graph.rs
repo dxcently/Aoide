@@ -126,6 +126,9 @@ pub use self::conduct::wrapped_program_is_a_shell;
 // `aoide-server`'s spawn arm refuses a `spawnAgent` that is a shell, and that
 // decision happens before any record exists.
 pub use self::conduct::program_is_a_shell;
+// The screen episode's one clearing write (`question` and the `sudo` lock badge
+// together), shared by the session end, the reaper and the refresh writer.
+pub(crate) use self::model::clear_screen_ask;
 pub use self::doc::{build_graph, render, resolve_graph_document};
 // `mail ring` (P-M5a-2, MAIL.md "Delivery and the doorbell"): the ring
 // itself, callable in-process by any door that has this crate (the daemon

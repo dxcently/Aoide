@@ -1258,6 +1258,7 @@ mod tests {
             cwd: cwd.into(),
             state: state.into(),
             shell: false,
+            wrapped_program: None,
             started_at: id.into(),
             parent_session_id: parent.map(str::to_string),
             remote_parent: None,

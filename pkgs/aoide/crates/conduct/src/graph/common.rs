@@ -122,10 +122,11 @@ pub(in crate::graph) fn strip_unsafe(s: &str) -> String {
 ///
 /// A tokenizer by ECMA-48's byte classes, not terminal emulation: it finds
 /// where each sequence ends and interprets none of them. CSI runs to its final
-/// byte, OSC to BEL or ST, an escape with an intermediate byte (`ESC ( B`) to
-/// its final byte, and any other two-byte escape is ESC and one byte. A
-/// sequence still open at the end of the input emits nothing. `\r` is kept so
-/// a reader can take a line's last rewrite (a progress frame) off it.
+/// byte, OSC to BEL or ST, DCS, SOS, PM and APC (`ESC P`, `ESC X`, `ESC ^`,
+/// `ESC _`) to ST alone, an escape with an intermediate byte (`ESC ( B`) to its
+/// final byte, and any other two-byte escape is ESC and one byte. A sequence
+/// still open at the end of the input emits nothing. `\r` is kept so a reader
+/// can take a line's last rewrite (a progress frame) off it.
 ///
 /// `pub` because `aoide-conductor`'s log tail renders through the same rule.
 pub fn strip_ansi(input: &str) -> String {
@@ -136,6 +137,8 @@ pub fn strip_ansi(input: &str) -> String {
         Csi,
         Osc,
         OscEsc,
+        Str,
+        StrEsc,
         EscIntermediate,
     }
     let mut out = String::with_capacity(input.len());
@@ -154,6 +157,7 @@ pub fn strip_ansi(input: &str) -> String {
             }
             (State::Esc, '[') => State::Csi,
             (State::Esc, ']') => State::Osc,
+            (State::Esc, 'P' | 'X' | '^' | '_') => State::Str,
             (State::Esc, c) if (0x20..=0x2f).contains(&(c as u32)) => State::EscIntermediate,
             (State::Esc, _) => State::Normal,
             (State::Csi, c) if (0x40..=0x7e).contains(&(c as u32)) => State::Normal,
@@ -163,11 +167,34 @@ pub fn strip_ansi(input: &str) -> String {
             (State::Osc, _) => State::Osc,
             (State::OscEsc, '\\') => State::Normal,
             (State::OscEsc, _) => State::Osc,
+            (State::Str, '\x1b') => State::StrEsc,
+            (State::Str, _) => State::Str,
+            (State::StrEsc, '\\') => State::Normal,
+            (State::StrEsc, _) => State::Str,
             (State::EscIntermediate, c) if (0x30..=0x7e).contains(&(c as u32)) => State::Normal,
             (State::EscIntermediate, _) => State::EscIntermediate,
         };
     }
     out
+}
+
+/// What a pty's INPUT says once its escape sequences are gone: the keys typed.
+/// The same tokenizer as [`strip_ansi`], with one input-only form in front of
+/// it. An X10 mouse report is `ESC [ M` and three raw bytes whose values may be
+/// printable, so the report is dropped whole, as bytes, before the text pass
+/// sees it. Output never takes this path: there `ESC [ M` is delete-line.
+pub fn typed_text(input: &[u8]) -> String {
+    let mut kept = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        if input[i..].starts_with(b"\x1b[M") {
+            i += 6;
+        } else {
+            kept.push(input[i]);
+            i += 1;
+        }
+    }
+    strip_ansi(&String::from_utf8_lossy(&kept))
 }
 
 /// A character no terminal may be handed: every [`char::is_control`]
@@ -314,6 +341,36 @@ mod tests {
         let out = clean_line(&"é".repeat(LINE_MAX + 50));
         assert_eq!(out.chars().count(), LINE_MAX);
         assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn strip_ansi_drops_a_dcs_string_only_at_its_st() {
+        // DCS payload is not text, and a BEL inside it does not end it.
+        assert_eq!(strip_ansi("a\x1bP1$r0m\x07 x\x1b\\b"), "ab");
+        assert_eq!(strip_ansi("a\x1bPq never closed"), "a");
+    }
+
+    #[test]
+    fn strip_ansi_keeps_an_output_delete_line_as_a_sequence_with_no_payload() {
+        // Output's `ESC [ M` is delete-line: the text after it is text.
+        assert_eq!(strip_ansi("x\x1b[Mtext"), "xtext");
+    }
+
+    #[test]
+    fn typed_text_drops_an_x10_mouse_report_whole_even_when_its_bytes_are_printable() {
+        // Button, column and row are raw bytes; `#`, `!`, `!` are printable.
+        assert_eq!(typed_text(b"\x1b[M#!!"), "");
+        assert_eq!(typed_text(b"y\x1b[M#!!n"), "yn");
+        // Non-UTF-8 coordinate bytes are dropped too, not read as text.
+        assert_eq!(typed_text(b"\x1b[M\xff\xfe\xfd"), "");
+    }
+
+    #[test]
+    fn typed_text_drops_osc_and_dcs_replies_and_keeps_the_keys() {
+        assert_eq!(typed_text(b"\x1b]11;rgb:0/0/0\x07"), "");
+        assert_eq!(typed_text(b"\x1bP>|xterm\x1b\\"), "");
+        assert_eq!(typed_text(b"q\x1b]10;?\x1b\\r"), "qr");
+        assert_eq!(typed_text(b"\x1b[<0;10;5M"), "", "an SGR mouse report is a CSI");
     }
 
     #[test]

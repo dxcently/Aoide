@@ -1720,8 +1720,7 @@ fn reap_inner(
             // The episode ends with the record: no screen question or lock badge
             // outlives `awaiting`. Task records are kept after done, so this is
             // what they keep.
-            s.question = None;
-            s.needs_sudo = None;
+            crate::graph::clear_screen_ask(s);
             // A managed task run reaped by liveness (never reaching its own
             // exit path) still gets an end instant and the honest `stopped`
             // outcome — but NO `exitCode`: there is no code to report, and an

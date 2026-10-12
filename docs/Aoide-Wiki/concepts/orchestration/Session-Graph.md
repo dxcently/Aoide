@@ -326,9 +326,7 @@ not the launcher itself. A wrap whose program has neither hook nor trace (a
 `codex`, an `aider`, a REPL) is read off its own screen, below: `[codex
 <petname>] asking: "Apply patch? [y/N]"`. There is no hook session under it, so
 the wrap itself plays the child and its pid must carry a verifying daemon seal;
-its attested spawner, found by the same climb, hears it. A question is heard
-once: the same one is not repeated while it stands, a different one is a new
-episode, and the next ask after an answer is heard again. It is not a send
+its attested spawner, found by the same climb, hears it. A question is heard once while it stands: the same one is not repeated, and a different one is a new episode. An answer clears that memory only on a pass that finds the record without the question, so a question answered and asked again with the same text between two passes is not heard again. There is no episode counter. It is not a send
 and never becomes one: the send door attests the sender from the running
 process's `/proc` ancestry, so inside the daemon the sender is the daemon and
 never the child — the line is raw-injected the doorbell's way (a live channel
@@ -337,11 +335,7 @@ gate, no pending entry, no provenance prefix and no rename of the parent.
 `state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
 for a trace; `hook` for a hook phase; `screen` for the question last heard),
 claimed inside one short stage-lock
-section before the write, so each event is delivered at most once. A parent
-that is a shell is skipped — a line typed into a shell would run, and the WRAP
-decides that (its wrapped program's own basename, not the `agent` label a
-caller chose) — as is one whose record is gone, not conductable, or already
-`done`. The ruling is the User's (2026-09-17): a parent hears the children it
+section before the write, so each event is delivered at most once. A parent is heard only when its wrapped program is the harness its agent names: the launcher walk's resolved program, stamped as `wrapped_program` at registration, not the `agent` label a caller chose. A shell is skipped (`shell-parent`), and so is a wrap the walk cannot name or does not resolve to its harness (`unverified-wrap`), as is one whose record is gone, not conductable, or already `done`. The ruling is the User's (2026-09-17): a parent hears the children it
 spawned, and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**
@@ -366,9 +360,9 @@ closed table.
                        ┌──────────────────────────────────┘
                        ▼
    line stood unchanged for 3 s   AND   one table row matches its END
-   AND no printable key or Enter landed on its row
-   AND child still running (the caller's fact; a shell: a command of its own
-       is in the foreground)
+      AND no Enter landed on its row, and no output has answered a typed key
+   AND child still running (the caller's fact; an interactive shell at its
+       bare prompt is never asked)
                        │
                        ▼
           state: awaiting        question: "<line, ≤ 80 chars>"
@@ -389,15 +383,7 @@ diff or a list item (`+`, `-`, `*`, `>`, `|`, `#`) matches no row.
 | `confirm`   | `continue?` `proceed?` `overwrite?`                                         |
 | `coreutils` | `rm:` / `cp:` / `mv:` / `ln:` lines ending in `?` (`rm: remove regular file 'x'?`) |
 
-The episode is the line. A repaint that leaves its text and its row alone (a
-cursor hide, a redraw of the same prompt) keeps the episode and its clock. It
-ends when the text changes, when output reaches a later row, when a printable
-key or Enter lands on its row, or when the child exits; any other output is only
-more output. A printable key (it echoes, or for a password it does not) or Enter
-answers the row. Arrows, Tab, Ctrl keys and other escape sequences do not. The
-input bytes are classified and dropped, never kept, so a half-typed command at an
-idle shell prompt never reads as a question, and a no-echo password ends its
-episode once it is typed.
+The episode is the line. A repaint that leaves its text and its row alone (a cursor hide, a redraw of the same prompt) keeps the episode and its clock. It ends when the text changes, when output reaches a later row, when Enter lands on its row, or when the child exits; any other output is only more output. A printable key does not end it by itself: the key is held as pending, and the episode ends at the first output that is not that key's echo (a single-key `read -n1` answers there), or at Enter. Until then the question stands, so a password typed and not yet submitted is still asked, and `aoide send` without `--submit` leaves it awaiting. Arrows, Tab, Ctrl keys and other escape sequences do not answer, and neither do the terminal's own replies (OSC, DCS) or X10 mouse reports. The keys are classified in memory for that one decision and never written to the record. The question is the line as it stood before the first key, so a half-typed command at an idle shell prompt never reads as one; the session log keeps the raw bytes it always kept.
 
 Three seconds is the quiet, counted from the line's last change: long enough
 that a prompt a script answers in milliseconds never flaps, short enough that a

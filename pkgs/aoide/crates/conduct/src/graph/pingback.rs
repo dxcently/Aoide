@@ -61,16 +61,19 @@
 //! already cleaned HERE, at the sender: the far renderer is another node's
 //! code, and the text it renders must be safe before it leaves.
 //!
-//! **Never a shell parent.** A line submitted into a bare shell would RUN as a
-//! command, so a target whose `agent` is `""`/`"shell"` (or names no
-//! registered harness profile) is skipped and counted, never injected into.
-//! Every child-authored fragment of a line — the quoted say, prompt and stop
-//! reason, and the unquoted tool label — is untrusted model output (house
-//! rule 4): one line, every unsafe character stripped (control, and the
-//! Unicode `Cf` marks that would reorder it invisibly — the same
-//! [`super::common::is_unsafe`] set `clean_line` strips), clipped to
-//! [`SAY_MAX`] with `…`; the quoted ones are never allowed to start with `/`
-//! or `!`.
+//! **Receptive only by a positive proof.** A line submitted into a bare shell
+//! would RUN as a command, so a target is receptive only when its resolved
+//! program IS the harness its agent names: the wrap's `wrapped_program` (the
+//! launcher walk's answer, stamped at registration) equals the agent profile's
+//! binary. Anything else is withheld and counted: a shell (`shell-parent`), a
+//! wrap the walk cannot resolve or does not model (`unverified-wrap`, e.g.
+//! `taskset -c 0 bash`, `env -S bash`). Every child-authored fragment of a line
+//! (the quoted say, prompt and stop reason, the question and the tag, and the
+//! unquoted tool label) is untrusted model output (house rule 4): one line,
+//! every unsafe character stripped (control, and the Unicode `Cf` marks that
+//! would reorder it invisibly, the same [`super::common::is_unsafe`] set
+//! `clean_line` strips), shell syntax made inert ([`inert`]), clipped to
+//! [`SAY_MAX`] with `…`; the quoted ones are never allowed to start with `/`.
 
 mod hook;
 mod prompt;
@@ -230,8 +233,9 @@ pub(crate) struct PingbackReport {
     /// `(parent id, the line delivered)` per delivery.
     pub delivered: Vec<(String, String)>,
     /// `(target id, why not)` for every candidate that was claimed but not
-    /// delivered — `no-parent-record`, `shell-parent`, `not-conductable`,
-    /// `parent-done`, `interactive-composer`, `write-failed` — and, on the
+    /// delivered — `no-parent-record`, `shell-parent`, `unverified-wrap`,
+    /// `not-conductable`, `parent-done`, `interactive-composer`,
+    /// `write-failed` — and, on the
     /// parent's own side, for every ledger row a pull could not read:
     /// `unknown-node`, `pull-failed` (the four above appear there too, judged
     /// before the far node is asked anything).
@@ -905,7 +909,32 @@ fn child_tag(petname: Option<&str>, id: &str) -> String {
 /// stop reason, and the tool label alike — never only the ones the grammar
 /// puts in quotes.
 fn clean(s: &str) -> String {
-    one_line_clip(&strip_unsafe(s), SAY_MAX)
+    one_line_clip(&inert(&strip_unsafe(s)), SAY_MAX)
+}
+
+/// Shell syntax, replaced by its fullwidth twin: it reads the same to a person
+/// and is inert to a shell. A line typed into a pty that is a shell would
+/// otherwise run `$(…)`, backticks, `;`, `|`, `&`, redirects, quotes, `!`
+/// history. The ASCII form is never written into a ping line.
+fn inert(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '$' => '＄',
+            '`' => '｀',
+            '\\' => '＼',
+            ';' => '；',
+            '|' => '｜',
+            '&' => '＆',
+            '(' => '（',
+            ')' => '）',
+            '<' => '＜',
+            '>' => '＞',
+            '"' => '＂',
+            '\'' => '＇',
+            '!' => '！',
+            c => c,
+        })
+        .collect()
 }
 
 /// `[<agent> <petname>]` — the line's own tag for a child whose harness has
@@ -919,11 +948,10 @@ fn harness_tag(agent: &str, petname: Option<&str>, id: &str) -> String {
 }
 
 /// [`clean`] as a quoted phrase: additionally never allowed to start with `/`
-/// or `!` (which would read as a command or a shell escape at a parent's
-/// prompt) — a leading space is the guard.
+/// (a slash command at a parent's prompt) — a leading space is the guard.
 fn quote(s: &str) -> String {
     let clipped = clean(s);
-    if clipped.starts_with('/') || clipped.starts_with('!') {
+    if clipped.starts_with('/') {
         format!(" {clipped}")
     } else {
         clipped
@@ -1031,7 +1059,16 @@ fn last_tool_label(tail: &[TraceRecord]) -> Option<String> {
     tail.iter()
         .rev()
         .find(|r| r.kind == "ToolResult")
-        .map(|r| clean(&tool_result_summary(r.payload.as_ref(), if is_error(r) { "! " } else { "" })))
+        .map(|r| {
+            let summary = clean(&tool_result_summary(r.payload.as_ref(), ""));
+            // The error marker is the renderer's own, never child text, so it is
+            // added after the cleaning rather than made inert with it.
+            if is_error(r) {
+                format!("! {summary}").trim_end().to_string()
+            } else {
+                summary
+            }
+        })
         .filter(|label| !label.is_empty())
 }
 
@@ -1135,23 +1172,24 @@ fn deliver(
 /// about who is a recipient. `deliver`'s own "no-parent-record" is not here:
 /// there is no record to judge in that case.
 ///
-/// Never a shell parent: a line reaching a bare shell's input is a COMMAND
-/// LINE, and it would run. A record naming no registered harness profile is
-/// the same shape `profile_for_agent` itself falls back for.
+/// Receptive only by a positive proof (house rule 4). A line reaching a bare
+/// shell's input is a COMMAND LINE, and it would run, so the shell arm reads
+/// the WRAP, never the label alone: `agent` is a caller's choice (`--agent
+/// <name>`), and `--agent pi -- bash` passes an `agent`-only test while the pty
+/// on the other end is a shell with a readline prompt.
+/// [`wrapped_program_is_a_shell`] is the same `program_is_a_shell` verdict read
+/// off the record, so the two halves cannot drift.
 ///
-/// The shell arm reads the WRAP, never the label alone (house rule 4). `agent`
-/// is a caller's choice (`--agent <name>`), so `--agent pi -- bash` — the
-/// live shape that executed a ping-back line as a command — passes an
-/// `agent`-only test while the pty on the other end is a shell with a
-/// readline prompt. [`wrapped_program_is_a_shell`] is the same
-/// `program_is_a_shell` verdict read off the record, so the two halves
-/// cannot drift.
+/// The positive arm is [`is_its_harness`]: the resolved program must be the
+/// profile's own binary. A wrap the launcher walk cannot resolve, or does not
+/// model (`taskset -c 0 claude`, `env -S claude`), has no proof, so it is
+/// withheld as `unverified-wrap` even when its label is a harness.
 fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
-    if matches!(rec.agent.as_str(), "" | "shell")
-        || agent_profile(&rec.agent).is_none()
-        || wrapped_program_is_a_shell(rec)
-    {
+    if matches!(rec.agent.as_str(), "" | "shell") || wrapped_program_is_a_shell(rec) {
         return Some("shell-parent");
+    }
+    if !is_its_harness(rec) {
+        return Some("unverified-wrap");
     }
     if !super::doc::is_conductable_now(rec) {
         return Some("not-conductable");
@@ -1160,6 +1198,16 @@ fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
         return Some("parent-done");
     }
     None
+}
+
+/// Whether the wrap's resolved program is the harness its agent profile names
+/// (the profile's first launch token, `claude` for `claude`). Read off the
+/// record's `wrapped_program`, which the launcher walk stamped at registration;
+/// `None` (no program the walk could name, or no profile) is not a harness.
+fn is_its_harness(rec: &SessionRecord) -> bool {
+    agent_profile(&rec.agent)
+        .and_then(|p| p.launch.first().copied())
+        .is_some_and(|bin| rec.wrapped_program.as_deref() == Some(bin))
 }
 
 // ── the pull (the parent's own side) ─────────────────────────────────────
@@ -1588,16 +1636,16 @@ fn reclamp(event: PingEvent) -> PingEvent {
     }
 }
 
-/// A peer-sent string, made safe for the line it becomes: [`strip_unsafe`]'s
-/// own strip (control characters and every Unicode `Cf`) clipped to this
-/// module's [`SAY_MAX`], and never free to start with `/` or `!` — the guard
+/// A peer-sent string, made safe for the line it becomes: [`clean`]'s own
+/// treatment (control characters, `Cf`, shell syntax made inert) clipped to this
+/// module's [`SAY_MAX`], and never free to start with `/` — the guard
 /// [`quote`] puts on a local fragment, applied here as well because a BARE
 /// segment (a tool label, a wrap-up bound, an exit outcome) is never quoted by
 /// [`render_line`]. Prepending a space to a QUOTED field is a no-op: `quote`
 /// cleans first, and cleaning trims.
 fn reclean(s: &str) -> String {
-    let cleaned = clip_flat(&strip_unsafe(s), SAY_MAX);
-    if cleaned.starts_with('/') || cleaned.starts_with('!') {
+    let cleaned = clip_flat(&inert(&strip_unsafe(s)), SAY_MAX);
+    if cleaned.starts_with('/') {
         format!(" {cleaned}")
     } else {
         cleaned
@@ -1860,17 +1908,19 @@ mod tests {
         let quoted = line.split('"').nth(1).unwrap();
         assert_eq!(quoted.chars().count(), SAY_MAX, "exactly SAY_MAX chars inside the quotes");
 
-        // A leading `/` or `!` is a command/escape at a parent's prompt — the
-        // quote is prefixed with a space instead.
-        for raw in ["/compact keep only records", "!rm -rf /tmp/x"] {
-            let escaped = raw.replace('"', "'");
-            let json = format!(
-                r#"{{"id":5,"parent":4,"ts_ms":1000,"kind":{{"AskUser":{{"prompt":"{escaped}","answer":null}}}}}}"#
-            );
-            let (line, _) = plan(&[USER, json.as_str()], Some("1"));
-            let line = line.unwrap();
-            assert!(line.contains(&format!("\" {raw}\"")), "leading space guards it: {line}");
-        }
+        // A leading `/` is a slash command at a parent's prompt — the quote is
+        // prefixed with a space instead.
+        let json = r#"{"id":5,"parent":4,"ts_ms":1000,"kind":{"AskUser":{"prompt":"/compact keep only records","answer":null}}}"#;
+        let (line, _) = plan(&[USER, json], Some("1"));
+        let line = line.unwrap();
+        assert!(line.contains("\" /compact keep only records\""), "leading space guards it: {line}");
+
+        // A `!` is a shell escape, so it is inert: its fullwidth twin, never
+        // the ASCII form.
+        let json = r#"{"id":5,"parent":4,"ts_ms":1000,"kind":{"AskUser":{"prompt":"!rm -rf /tmp/x","answer":null}}}"#;
+        let (line, _) = plan(&[USER, json], Some("1"));
+        let line = line.unwrap();
+        assert!(line.contains("\"！rm -rf /tmp/x\""), "{line}");
 
         // Control characters (an escape sequence an agent printed) never reach
         // the parent's composer.
@@ -1902,7 +1952,7 @@ mod tests {
         let label = r#"{"id":9,"parent":8,"ts_ms":1789603009300,"kind":{"ToolResult":{"tool_use_id":"call_p","content":"ok\u200f!rm -rf /tmp/x","is_error":true}}}"#;
         let (line, _) = plan(&[USER, ASSISTANT, RESULT_ERR, RESULT_ERR, label], Some("2"));
         let line = line.unwrap();
-        assert!(line.contains("last: ! ok!rm -rf /tmp/x"), "the mark is gone, the text stays: {line:?}");
+        assert!(line.contains("last: ! ok！rm -rf /tmp/x"), "the mark is gone, the text stays: {line:?}");
         assert!(!line.chars().any(|c| c == '\u{200f}' || c == '\u{202e}'), "{line:?}");
     }
 
@@ -1916,7 +1966,7 @@ mod tests {
         let poison = r#"{"id":9,"parent":8,"ts_ms":1789603009300,"kind":{"ToolResult":{"tool_use_id":"call_p","content":"ok\r!rm -rf /tmp/x\u0007 boom\u001b[0m","is_error":true}}}"#;
         let (line, _) = plan(&[USER, ASSISTANT, RESULT_ERR, RESULT_ERR, poison], Some("2"));
         let line = line.unwrap();
-        assert!(line.contains("failing · 3 tool errors in a row · last: ! ok!rm -rf /tmp/x boom[0m"), "{line:?}");
+        assert!(line.contains("failing · 3 tool errors in a row · last: ! ok！rm -rf /tmp/x boom[0m"), "{line:?}");
         assert!(!line.chars().any(char::is_control), "{line:?}");
 
         // The same label on the silence line.
@@ -1930,7 +1980,7 @@ mod tests {
             now_ms(),
         );
         let line = line.unwrap();
-        assert!(line.contains("silent 20 min · last: ok!rm -rf /tmp/x boom[0m"), "{line:?}");
+        assert!(line.contains("silent 20 min · last: ok！rm -rf /tmp/x boom[0m"), "{line:?}");
         assert!(!line.chars().any(char::is_control), "{line:?}");
     }
 
@@ -2101,6 +2151,7 @@ mod tests {
             None,
         );
         stamp_headless(id);
+        stamp_wrapped_program(id, Some(agent));
         listener
     }
 
@@ -2405,6 +2456,7 @@ mod tests {
             None,
             None,
         );
+        stamp_wrapped_program("wrap-1", Some("claude"));
         let channel = channel_socket_path("wrap-1");
         std::fs::create_dir_all(channel.parent().unwrap()).unwrap();
         let channel_listener = UnixListener::bind(&channel).unwrap();
@@ -2545,7 +2597,7 @@ mod tests {
         let root = setup("pingback-harness-label-arms");
 
         // Arm 1: the durable registration stamp, no capture at all — the
-        // record a shell is in the moment `stamp_shell` has run and the
+        // record a shell is in the moment `stamp_wrap` has run and the
         // first tick has not.
         let stamped = headless_parent("wrap-stamped", "pi");
         child_fixture(&root, "user-stamped", "wrap-stamped", &[USER, SETTLED]);
@@ -2585,6 +2637,81 @@ mod tests {
     }
 
     #[test]
+    fn a_question_carrying_shell_syntax_reaches_the_line_inert() {
+        // House rule 4: the question is child-authored text, and a line that
+        // lands on a shell's input would run `$(…)`. Each metacharacter arrives
+        // as its fullwidth twin; the only ASCII quotes are the line's own.
+        let json = serde_json::json!({
+            "id": 5,
+            "parent": 4,
+            "ts_ms": 1000,
+            "kind": { "AskUser": { "prompt": "ok $(touch /tmp/pwned) `id`; a|b && c > d 'e' \"f\" !g", "answer": null } }
+        })
+        .to_string();
+        let (line, _) = plan(&[USER, json.as_str()], Some("1"));
+        let line = line.unwrap();
+        for syntax in ["$(", "`", ";", "|", "&", ">", "'", "!"] {
+            assert!(!line.contains(syntax), "{syntax:?} stays out of the line: {line}");
+        }
+        assert_eq!(line.matches('"').count(), 2, "only the line's own quotes: {line}");
+        assert!(line.contains("＄（touch /tmp/pwned） ｀id｀；"), "{line}");
+    }
+
+    #[test]
+    fn a_wrap_is_receptive_only_by_a_positive_proof_of_its_harness() {
+        // House rule 4, positive form: the wrap's resolved program must be the
+        // profile's own binary. A launcher the walk does not resolve or model is
+        // withheld as `unverified-wrap`, whatever the label says.
+        let live = std::env::current_dir().unwrap().display().to_string();
+        let wrap = |agent: &str, program: Option<&str>| SessionRecord {
+            agent: agent.into(),
+            conductable: Some(true),
+            socket: Some(live.clone()),
+            wrapped_program: program.map(str::to_string),
+            ..session("wrap", "/w", "idle", "1", None)
+        };
+        assert_eq!(unreceptive(&wrap("claude", Some("claude"))), None, "the spawn shape");
+        assert_eq!(unreceptive(&wrap("claude", None)), Some("unverified-wrap"));
+        assert_eq!(unreceptive(&wrap("claude", Some("taskset"))), Some("unverified-wrap"));
+        assert_eq!(unreceptive(&wrap("claude", Some("pi"))), Some("unverified-wrap"), "another harness");
+        assert_eq!(
+            unreceptive(&SessionRecord { shell: true, ..wrap("claude", Some("bash")) }),
+            Some("shell-parent"),
+            "a shell wrap is named as one"
+        );
+        assert_eq!(unreceptive(&wrap("", Some("claude"))), Some("shell-parent"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_label_behind_a_launcher_the_walk_cannot_resolve_is_unverified() {
+        // `--agent claude -- env -S "sleep 1"`: the label is a harness and the
+        // program is not a shell, but `env -S` hands its program name to a split
+        // string the walk cannot name, so there is no proof of the harness.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let _root = setup("pingback-env-s-unverified");
+
+        let out = crate::graph::conduct::session_conduct(&conduct_invocation(
+            &["env", "-S", "sleep 1"],
+            &[("id", "env-s"), ("agent", "claude")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "env-s").unwrap();
+        assert_eq!(rec.wrapped_program, None, "the walk names no program: {rec:?}");
+        assert!(!rec.shell, "not a shell, so the reason is the missing proof: {rec:?}");
+        assert_eq!(unreceptive(rec), Some("unverified-wrap"));
+    }
+
+    #[test]
     fn a_parent_that_is_gone_not_conductable_or_done_is_a_named_skip() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
@@ -2613,6 +2740,7 @@ mod tests {
             None,
             None,
         );
+        stamp_wrapped_program("wrap-dead", Some("claude"));
         let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
         file.sessions
             .iter_mut()
@@ -2843,7 +2971,7 @@ mod tests {
         // ...and the renderer neutralizes it, exactly as the local line always
         // has: a leading space turns a command into text.
         let line = render_line("[eidolon brave-otter]", &event);
-        assert_eq!(line, "[eidolon brave-otter] asking: \" /compact now!rm -rf /\"", "{line:?}");
+        assert_eq!(line, "[eidolon brave-otter] asking: \" /compact now！rm -rf /\"", "{line:?}");
         assert!(!line.chars().any(char::is_control), "{line:?}");
     }
 
@@ -3152,8 +3280,10 @@ mod tests {
         assert!(!asking.contains('\u{7}'), "no control character survives: {asking:?}");
 
         let failing = lines[1];
-        assert!(failing.contains("last: !rm -rf /") || failing.contains("last:  !rm -rf /"),
-            "a bare segment is cleaned and its leading `!` neutralized: {failing:?}");
+        assert!(
+            failing.contains("last: ！rm -rf /"),
+            "a bare segment is cleaned and its leading `!` is inert, fullwidth: {failing:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

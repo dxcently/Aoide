@@ -2148,23 +2148,32 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
-**`shell` — the one durable answer to "is this session conducting a shell".**
-A session record MAY carry a `shell` bool, `true` only for a session whose
-wrapped command IS a shell (`aoide_conduct::graph::program_is_a_shell`: the
-program's own basename against the shell list, with `env`/`nix develop -c`/
-`setsid`/`timeout`/`nice`/… resolved to what they forward to). Written by the
-conducting process at REGISTRATION (`stamp_shell`), on both `upsert_session`
-arms, so re-registering an id as `-- env bash` sets it and re-registering it
-as a harness clears it. It exists because a line submitted into a shell RUNS
-as a command: the ping-back, the doorbell's PTY arm and the A2A door's own
-injects all refuse a record for which
-`aoide_conduct::graph::wrapped_program_is_a_shell` holds — that field OR a
-`Some` `restore` — rather than trusting the `agent` label, which is a
-caller's choice (`--agent pi -- bash` names a registered profile over a
-shell). A harness reached THROUGH a shell reads as a shell; the cost is a
-skipped auto-typing, never a line typed somewhere it would run. Absent (the
-default, skipped on serialization) means `false`, byte-identical to every
-record written before the field existed.
+**`shell` and `wrapped_program` — what a conducted wrap runs.** A session
+record MAY carry two fields, both written by the conducting process at
+REGISTRATION (`stamp_wrap`, on both `upsert_session` arms, so re-registering an
+id flips both together):
+
+- `shell` (bool), `true` only for a session whose wrapped command IS a shell
+  (`aoide_conduct::graph::program_is_a_shell`: the program's own basename
+  against the shell list, with `env`/`nix develop -c`/`setsid`/`timeout`/
+  `nice`/… resolved to what they forward to).
+- `wrappedProgram` (string), the program the same launcher walk resolves the
+  wrapped argv to, by basename (`conduct.rs::wrapped_program_name`, stored as `wrapped_program`). It is `claude` for `-- env claude`, and
+  `taskset` for `-- taskset -c 0 claude`, because a launcher the walk does not
+  model names itself. It is absent when the walk names no program: a login
+  shell, `script` with no command, `su`, a `nix` form without a `-c` payload,
+  `env -S` (whose split string swallows the program name).
+
+The ping-back is receptive only by a positive proof: the record's
+`wrappedProgram` must equal the first launch token of the profile its `agent`
+names. A shell (`shell`, or a `restore` snapshot, `wrapped_program_is_a_shell`)
+is refused as `shell-parent`; a wrap whose program is absent or is not its
+harness is refused as `unverified-wrap`. The label alone never decides it:
+`agent` is a caller's choice, and `--agent pi -- bash` names a registered
+profile over a shell. The doorbell's PTY arm and the A2A door refuse by the
+negative `wrapped_program_is_a_shell` read only. Both fields absent (the
+default, skipped on serialization) mean `false` and no program, byte-identical
+to every record written before they existed.
 
 **Additive in v0:** a session record MAY carry an optional `parentSessionId`
 (string) naming the session that spawned it — the graph's spawned-by edge. Set
@@ -2279,15 +2288,20 @@ while that line has stood unchanged for 3 seconds on a row of
 `(y,N)`, `(yes/no)`, `? (yes)`, a password or passphrase prompt, `Press Enter` /
 `Press return` / `press any key` with `continue` close after it, a trailing
 `Continue?` / `Proceed?` / `Overwrite?`, a `rm:` / `cp:` / `mv:` / `ln:` line
-ending in `?`), the child is still running, and no printable key or Enter has
-landed on that line's row. A repaint of the same text keeps it; a changed line,
-a later row, a printable key or Enter, the child exiting or the session ending
-clears it: the key disappears and the `awaiting` it set returns to `idle`. The
+ending in `?`), the child is still running, and no Enter has landed on that
+line's row and no program output has answered a typed key. A repaint of the same
+text keeps it; a changed line, a later row, Enter, output that answers a typed
+key, the child exiting or the session ending clears it: the key disappears and
+the `awaiting` it set returns to `idle`. A printable key alone does not clear
+it, so a password typed and not yet submitted is still asked. The
 `sudo` row also sets `needsSudo`, and that row is never announced to a spawner.
 The line is held in three places, each capped at 80 characters and sanitised:
 this field, the ping-back cursor's `screen` entry (`pingback.json`), and the
-audit line of a ping that carried it. Nothing else keeps screen text: the recent
-output the reader works on is memory only, and it is never logged. A non-shell
+audit line of a ping that carried it. The screen reader's own working buffer
+(the recent output it reads) is memory only. The session log
+(`state/sessions/<id>.log`) tees the same pty bytes as they pass, so the
+screen's text reaches disk there, and only there; nothing reads that file back
+into the screen. A non-shell
 session with a hook phase or a trace never carries one: the hook phase, then the
 trace, then the screen decide its `state`, and the screen only for a wrap nothing
 else speaks for. A shell's `state` is its own snapshot (foreground command, then
@@ -3578,7 +3592,10 @@ and that is news. A question that differs from the cursor's is a new episode and
 is claimed (`[<agent> <petname>] asking: "<question>"`, the question cleaned and
 quoted again as eidolon's `asking:` line is); the same question is not claimed
 again; a record that no longer holds a question while `awaiting` clears the
-key, so the next ask is heard. A question that carries `needsSudo` is never
+key, so a later ask is claimed. The limit: a question that is answered and asked
+again with the same text between two passes is one continuous question to the
+cursor, and its return is not claimed; there is no episode counter. A question
+that carries `needsSudo` is never
 claimed: it is the human's password, and the record shows only its lock badge. The child IS the wrap, with no hook session
 under it: its own pid must carry a verifying daemon seal, and the line goes to
 its `attestedSpawner` resolved by the same climb the `hook` source uses — a

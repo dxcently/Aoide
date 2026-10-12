@@ -1043,33 +1043,35 @@ in the message.
   gone, so its cursor entry leaves on that pass — so a dropped REMOTE child
   claims its trace row AND its exit on that one pass, and the ring always ends
   with exactly one `Exited`.
-  **Never a shell parent.** A target is unreceptive on either of two reads:
-  its `rec.agent` is `""`/`"shell"` or names no registered harness profile, or
-  its WRAPPED command is a shell
-  (`conduct.rs::wrapped_program_is_a_shell` = the record's durable `shell`
-  field OR a `Some` `restore`). A line submitted into a shell would RUN as a
-  command, and `agent` is only a label a caller picks: `--agent pi -- bash`
-  names a registered profile over a pty running a shell, which is how a
-  ping-back line came to be executed (N1). Both reads come from the ONE
-  predicate (`program_is_a_shell`), so they can never drift: it walks the
-  whole argv and resolves the launchers a shell actually arrives through
-  (`env bash`, `nix develop -c bash`, `setsid`/`timeout`/`nice`/`stdbuf`/
-  `chrt`/`ionice`/`nohup`/`exec`/`script`), its shell list is wider than the
-  four names the capture path began with, and `su`/`doas`/`sudo` answer shell
-  (no command of their own lands in one). `conduct` STAMPS `shell` at
-  registration from its own argv, so the durable half is there from the first
-  moment the record is visible — on both `upsert_session` arms, so
-  re-registering an id as `-- env bash` sets it and re-registering it as a
-  harness clears it. The LIMIT is argv-only: a wrapper script that execs a
-  shell (`-- ./rig.sh`) is not a shell to it and stays receptive. A false
-  POSITIVE is silent-safe and deliberately not narrowed: a harness reached
-  through a shell (`spawnAgent = "bash -lc <harness>"`) reads as a shell for
-  the whole run, costing it a ping-back, a PTY ring and every unapproved
-  remote inject — a dead lane, never a line typed where it would run. Skipped
-  and counted `shell-parent`. The same applies to `not-conductable`,
-  `parent-done` and `no-parent-record`; those four predicates live in ONE
-  function (`unreceptive`), which `deliver` itself calls, so nothing may
-  restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately
+  **Receptive only by a positive proof** (house rule 4). A line submitted into
+  a shell would RUN as a command, and `agent` is only a label a caller picks:
+  `--agent pi -- bash` names a registered profile over a pty running a shell,
+  which is how a ping-back line came to be executed (N1). So a target is
+  receptive only when its WRAPPED program is the harness its agent profile
+  names: `wrapped_program`, stamped at registration (`stamp_wrap`) from
+  `conduct.rs::wrapped_program_name` (the launcher walk's resolved program, by
+  basename), must equal the profile's first launch token. The refusals, in
+  order: `shell-parent` (the label is `""`/`"shell"`, or the wrap is a shell by
+  `conduct.rs::wrapped_program_is_a_shell`: the durable `shell` field OR a `Some`
+  `restore`); `unverified-wrap` (the walk names no program, or names one that is
+  not the harness); then `not-conductable`, `parent-done`. The walk resolves
+  what it models: the forwarding launchers (`env`, `exec`, `setsid`, `nohup`,
+  `stdbuf`, `chrt`, `ionice`, `nice`), `timeout`, `sudo`/`doas`, `script`, and
+  `nix develop|shell -c`. Every other launcher names itself, so `taskset -c 0
+  claude` is `unverified-wrap`, and so is `env -S claude` (no program name
+  survives the split string). Its costs are stated: a wrapper script (`-- ./rig.sh`)
+  and a harness binary whose basename differs from its profile's launch token
+  are withheld, where the old negative read let them through. `shell` and
+  `wrapped_program` are written together at registration on both `upsert_session`
+  arms, so re-registering an id flips both. Shell syntax in a child's text (the
+  question, the tag, the say, the prompt, the stop reason, the tool label) is made
+  inert on the way into a line (`pingback.rs::inert`: `$(…)` becomes its fullwidth
+  twin), so a line that reaches a shell still runs nothing. The positive rule is
+  the ping-back's alone: the doorbell's PTY arm and the A2A door still read the
+  negative `wrapped_program_is_a_shell`. The walk's own limit is argv only. Those
+  four predicates (`shell-parent`, `unverified-wrap`, `not-conductable`,
+  `parent-done`) live in ONE function (`unreceptive`), which `deliver` itself
+  calls, so nothing may restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately
   not this rule: that caller is a resident session steering a shell it can see
   in its own roster, no remote text rides its line, and an agent that
   hand-relays a peer's words into it is steering with its OWN authority —
@@ -2061,9 +2063,11 @@ in the message.
   `docs/architecture/MAIL.md`'s roadmap), and update MAIL.md's doorbell
   section in the same commit that does.
 - **A ring never PTY-injects into a wrap whose WRAPPED program is a shell
-  either — `shell-parent`, the same refusal the ping-back lane makes
+  either — `shell-parent`, the shell arm the ping-back lane shares
   (`conduct.rs::wrapped_program_is_a_shell`, never the `agent` label: a
-  wrap labelled from a harness profile can be conducting `bash`).** The
+  wrap labelled from a harness profile can be conducting `bash`). Unlike the
+  ping-back, this lane has no positive proof of the harness: a wrap the walk
+  cannot name is not refused here.** The
   line is submitted, so a shell would RUN it. The channel arm is exempt by
   construction — a one-way push into the harness's own MCP subprocess types
   nothing into any pty — so a shell wrap hosting a channel-connected agent

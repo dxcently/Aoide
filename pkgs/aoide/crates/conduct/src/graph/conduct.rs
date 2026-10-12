@@ -13,8 +13,8 @@
 
 use super::doc::restage_graph;
 use super::model::{
-    canonical_state, hooks_path, load_stage, sessions_path, write_stage, HooksFile,
-    RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
+    canonical_state, clear_screen_ask, hooks_path, load_stage, sessions_path, write_stage,
+    HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use super::prompt::{Prompt, PromptWatch};
 use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize};
@@ -22,7 +22,7 @@ use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild,
 use super::pty::signal_name;
 use super::session_store::{
     do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
-    stamp_attested_spawner, stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
+    stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task, stamp_wrap,
 };
 use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
 use aoide_protocol::agents::agent_profile;
@@ -76,7 +76,19 @@ fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
         "stdbuf" => matches!(arg, "-i" | "-o" | "-e"),
         "ionice" => matches!(arg, "-c" | "-n" | "-p" | "-u"),
         "chrt" => matches!(arg, "-p" | "-T" | "-P" | "-D" | "-R" | "-O" | "-b"),
-        "sudo" => matches!(arg, "-u" | "-g" | "-C" | "-p" | "-r" | "-t" | "-U"),
+        "sudo" => matches!(
+            arg,
+            "-u" | "--user"
+                | "-g" | "--group"
+                | "-C" | "--close-from"
+                | "-p" | "--prompt"
+                | "-r" | "--role"
+                | "-t" | "--type"
+                | "-U" | "--other-user"
+                | "-D" | "--chdir"
+                | "-h" | "--host"
+                | "-T" | "--command-timeout"
+        ),
         "doas" => matches!(arg, "-u" | "-C"),
         "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
         "script" => matches!(arg, "-c" | "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in"),
@@ -160,9 +172,9 @@ fn nix_shell_verdict(argv: &[String], i: usize) -> Option<bool> {
 }
 
 /// Where `script -q <typescript> [<command> …]`'s payload starts, or `None`
-/// when it carries no command of its own — then `script` runs the user's own
-/// `$SHELL`, which is a shell. (`script -c <cmd>` is caught by the option
-/// skip: it runs its argument through a shell, so both tokens are options.)
+/// when it carries no command of its own. `script -c <cmd> <file>` also gives
+/// `None`: the option skip takes `-c` and its command, and the file is the
+/// typescript. [`script_runs_a_command`] reads that `-c` off the options.
 fn script_command(argv: &[String], i: usize) -> Option<usize> {
     let mut j = skip_launcher_options(argv, i + 1, "script", true);
     if j < argv.len() {
@@ -195,9 +207,12 @@ fn script_command(argv: &[String], i: usize) -> Option<usize> {
 /// execs a shell (`-- ./rig.sh`) is NOT a shell by this predicate and stays
 /// receptive — the allowlisted names above are the whole claim.
 ///
-/// A false POSITIVE (something shell-like that is not) costs a skipped
-/// auto-typing, the silent-safe direction; a false negative is the hole this
-/// exists to close, so every unresolved case errs toward "shell".
+/// The ping-back does not trust this predicate's silence. It delivers only to a
+/// wrap whose RESOLVED program is the harness its agent names
+/// ([`wrapped_program_name`], stamped as `wrapped_program`), so a launcher this
+/// walk does not model (`taskset`, `flock`, `env -S`) is withheld there, whatever
+/// this predicate says. Here, for the forms it models, a shell answers `true`; a
+/// false POSITIVE costs a skipped auto-typing, the silent-safe direction.
 pub fn program_is_a_shell(argv: &[String]) -> bool {
     shell_verdict(argv).is_some()
 }
@@ -237,8 +252,19 @@ fn shell_verdict(argv: &[String]) -> Option<bool> {
             "nix" => return nix_shell_verdict(argv, i),
             "script" => match script_command(argv, i) {
                 Some(next) => i = next,
-                None => return Some(true),
+                // No command of its own: `script` runs the user's `$SHELL`, a
+                // shell at its prompt, unless `-c` hands it a command.
+                None => return Some(!script_runs_a_command(argv, i)),
             },
+            // `busybox sh` is the shell as one of its applets; `busybox ls` is a
+            // program, and a shell all the same (it is a `busybox`).
+            "busybox" => {
+                let applet = argv.get(i + 1).map(|a| command_basename(a)).unwrap_or_default();
+                return Some(
+                    SHELL_BASENAMES.contains(&applet.as_str())
+                        && shell_args_are_interactive(argv.get(i + 2..).unwrap_or_default()),
+                );
+            }
             // `su` is a login shell unless it is handed a command with `-c`.
             "su" => {
                 let runs_a_command = argv[i + 1..].iter().any(|a| {
@@ -265,11 +291,11 @@ fn shell_verdict(argv: &[String]) -> Option<bool> {
     None
 }
 
-/// Whether a shell's own arguments leave it at its prompt: no `-c` command
-/// string and no script operand. `bash`, `bash --norc -i` and `bash -o
-/// pipefail` sit at a prompt; `bash -c x`, `bash -lc x`, `sh ./run.sh`,
-/// `bash -- run.sh` and `bash -` (commands from stdin) run a command or a
-/// script.
+/// Whether a shell's own arguments leave it at its prompt: no `-c` or
+/// `--command` string and no script operand. `bash`, `bash --norc -i`, `bash -o
+/// pipefail`, `fish -C x`, and `bash -` (commands from stdin, on a tty) sit at a
+/// prompt; `bash -c x`, `bash -lc x`, `fish --command=x`, `sh ./run.sh` and
+/// `bash -- run.sh` run a command or a script.
 fn shell_args_are_interactive(args: &[String]) -> bool {
     let mut i = 0;
     while i < args.len() {
@@ -277,18 +303,70 @@ fn shell_args_are_interactive(args: &[String]) -> bool {
         if arg == "--" {
             return i + 1 >= args.len();
         }
+        if arg == "-" {
+            return true;
+        }
+        if arg == "--command" || arg.starts_with("--command=") {
+            return false;
+        }
         if let Some(long) = arg.strip_prefix("--") {
-            i += if matches!(long, "rcfile" | "init-file") { 2 } else { 1 };
+            i += if matches!(long, "rcfile" | "init-file" | "init-command") { 2 } else { 1 };
         } else if arg.len() > 1 && (arg.starts_with('-') || arg.starts_with('+')) {
             if arg.starts_with('-') && arg.contains('c') {
                 return false;
             }
-            i += if matches!(arg, "-o" | "+o" | "-O" | "+O") { 2 } else { 1 };
+            i += if matches!(arg, "-o" | "+o" | "-O" | "+O" | "-C") { 2 } else { 1 };
         } else {
             return false;
         }
     }
     true
+}
+
+/// Whether `script`'s own options carry `-c` or `--command`: it then runs that
+/// command through a shell, which is a command, never a prompt.
+fn script_runs_a_command(argv: &[String], i: usize) -> bool {
+    let end = skip_launcher_options(argv, i + 1, "script", true).min(argv.len());
+    argv[i + 1..end].iter().any(|a| {
+        a.starts_with("--command") || (a.starts_with('-') && !a.starts_with("--") && a.contains('c'))
+    })
+}
+
+/// The program a wrapped argv runs, by basename: the first token the launcher
+/// walk does not forward through. `None` when the walk names no program at all:
+/// `script` with no command, `su`, a `nix` form without a `-c` payload, a
+/// launcher option that eats the program name (`env -S bash`). A launcher the
+/// walk does not model names itself (`taskset`), which is never a harness.
+/// Stamped on the record at registration as `wrapped_program`; the ping-back's
+/// receptiveness reads it.
+fn wrapped_program_name(argv: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < argv.len() {
+        if is_assignment(&argv[i]) {
+            i += 1;
+            continue;
+        }
+        let base = command_basename(&argv[i]);
+        match base.as_str() {
+            b if FORWARDING_LAUNCHERS.contains(&b) => {
+                i = skip_launcher_options(argv, i + 1, b, true)
+            }
+            "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
+            "script" => i = script_command(argv, i)?,
+            "sudo" | "doas" => i = skip_launcher_options(argv, i + 1, &base, false),
+            "su" => return None,
+            "nix" => {
+                let sub = argv.get(i + 1).map(|s| command_basename(s)).unwrap_or_default();
+                if sub != "develop" && sub != "shell" {
+                    return None;
+                }
+                let at = argv.iter().skip(i + 2).position(|a| a == "-c" || a == "--command")?;
+                i = i + 2 + at + 1;
+            }
+            _ => return Some(base),
+        }
+    }
+    None
 }
 
 /// [`program_is_a_shell`]'s verdict, read back off a RECORD: `shell` (the
@@ -805,7 +883,6 @@ fn do_session_refresh(
                 continue;
             }
             let done = canonical_state(&s.state) == "done";
-            let (needs_sudo, question) = if done { (false, None) } else { (needs_sudo, question) };
             if let Some(t) = &shell {
                 if let Some(c) = t.cwd {
                     if s.cwd != c {
@@ -827,7 +904,7 @@ fn do_session_refresh(
                     s.restore = Some(t.restore.clone());
                     changed = true;
                 }
-            } else if !hooked {
+            } else if !hooked && !done {
                 let screen_state = if question.is_some() {
                     Some("awaiting")
                 } else if s.question.is_some() && canonical_state(&s.state) == "awaiting" {
@@ -840,17 +917,24 @@ fn do_session_refresh(
                     changed = true;
                 }
             }
-            // Change-only, and cleared to `None` (never written as
-            // `Some(false)`) so the key disappears the moment the prompt clears.
-            let want = if needs_sudo { Some(true) } else { None };
-            if s.needs_sudo != want {
-                s.needs_sudo = want;
-                changed = true;
-            }
-            let want = question.map(str::to_string);
-            if s.question != want {
-                s.question = want;
-                changed = true;
+            if done {
+                if s.question.is_some() || s.needs_sudo.is_some() {
+                    clear_screen_ask(s);
+                    changed = true;
+                }
+            } else {
+                // Change-only, and cleared to `None` (never written as
+                // `Some(false)`) so the key disappears the moment the prompt clears.
+                let want = if needs_sudo { Some(true) } else { None };
+                if s.needs_sudo != want {
+                    s.needs_sudo = want;
+                    changed = true;
+                }
+                let want = question.map(str::to_string);
+                if s.question != want {
+                    s.question = want;
+                    changed = true;
+                }
             }
         }
         if changed {
@@ -1597,7 +1681,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // once-only like the two above — a re-registration of the same id must
     // follow the CURRENT argv, setting it for `-- env bash` and clearing it
     // for a harness.
-    stamp_shell(&id, program_is_a_shell(&inv.args));
+    stamp_wrap(&id, program_is_a_shell(&inv.args), wrapped_program_name(&inv.args));
     // Managed task wrapper: stamp the run's own two task keys (`task` =
     // the slug AND its mailbox name, `instructionsPath` = the write-once
     // sidecar the spawner wrote). One writer — this child — so there is no
@@ -2423,6 +2507,15 @@ mod tests {
             &["su", "-"],
             &["su", "-", "khoa"],
             &["script", "-q", "/dev/null"],
+            // `-` reads commands from stdin, which on a tty is a prompt.
+            &["bash", "-"],
+            &["busybox", "sh"],
+            &["busybox", "ash"],
+            &["sudo", "--user", "root", "bash"],
+            &["sudo", "-D", "/tmp", "bash"],
+            &["sudo", "-h", "host", "bash"],
+            &["sudo", "-T", "5", "bash"],
+            &["fish", "-C", "x"],
         ];
         let runs_a_command: &[&[&str]] = &[
             &["bash", "-c", "read -p 'Overwrite? [y/N] ' x"],
@@ -2430,7 +2523,12 @@ mod tests {
             &["bash", "-ic", "x"],
             &["sh", "./run.sh"],
             &["bash", "--", "run.sh"],
-            &["bash", "-"],
+            &["script", "-c", "make", "out.log"],
+            &["fish", "--command=make"],
+            &["fish", "-c", "x"],
+            &["busybox", "sh", "-c", "x"],
+            &["busybox", "ls"],
+            &["sudo", "--user", "root", "bash", "-c", "x"],
             &["env", "bash", "-c", "x"],
             &["timeout", "60", "bash", "-c", "x"],
             &["sudo", "bash", "-c", "x"],
@@ -2449,6 +2547,35 @@ mod tests {
             assert!(!program_is_an_interactive_shell(&owned(case)), "{case:?} runs a command");
         }
     }
+    #[test]
+    fn wrapped_program_names_what_the_launcher_walk_resolves_to() {
+        // The ping-back's positive proof reads this name. A launcher the walk
+        // does not model names itself (never a harness); a form that eats or
+        // lacks the program names nothing.
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&["claude"], Some("claude")),
+            (&["/usr/bin/claude", "--resume", "x"], Some("claude")),
+            (&["env", "FOO=1", "claude"], Some("claude")),
+            (&["nice", "-n", "5", "claude"], Some("claude")),
+            (&["timeout", "600", "claude"], Some("claude")),
+            (&["sudo", "-u", "root", "claude"], Some("claude")),
+            (&["nix", "develop", "-c", "claude"], Some("claude")),
+            (&["script", "-q", "/dev/null", "claude"], Some("claude")),
+            (&["taskset", "-c", "0", "claude"], Some("taskset")),
+            (&["taskset", "-c", "0", "bash"], Some("taskset")),
+            (&["env", "-S", "bash"], None),
+            (&["script", "-c", "claude", "out.log"], None),
+            (&["su", "-", "khoa"], None),
+            (&["nix", "develop"], None),
+            (&["env"], None),
+            (&[], None),
+        ];
+        for (argv, want) in cases {
+            let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            assert_eq!(wrapped_program_name(&argv).as_deref(), *want, "wrapped_program_name({argv:?})");
+        }
+    }
+
     #[test]
     fn program_is_a_shell_reads_the_wrapped_argv_never_the_agent_label() {
         // The task #100 defect, table-driven: shell-likeness is a property of

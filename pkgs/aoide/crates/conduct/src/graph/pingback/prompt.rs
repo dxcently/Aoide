@@ -22,13 +22,16 @@
 //! ([`hook::spawner_of`](super::hook::spawner_of)). A wrap with no attested
 //! spawner (a terminal the User opened) has nobody to tell.
 //!
-//! **An episode is a question the record holds.** The cursor remembers the
-//! question it last announced: a different question is a new episode, the same
-//! one is not, and the record dropping its question (answered, or the output
-//! moved on) clears the memory, so the next ask is heard again. Unlike the hook
-//! source there is no baseline: the wrap publishes after seconds of quiet, so
-//! the first examination of a child may already find the question, and that is
-//! news. A question asked and answered between two ticks is not heard.
+//! **An episode is a question the record holds, as one pass sees it.** The
+//! cursor remembers the question it last announced. A pass that finds a
+//! different question announces it; a pass that finds the record asking nothing
+//! clears the memory, so a later ask is heard again. The limit: a question that
+//! is answered and asked again with the same text between two passes is one
+//! continuous question to the cursor, and the return is not announced. No
+//! episode counter exists; the cursor holds one question per child. Unlike the
+//! hook source there is no baseline: the wrap publishes after seconds of quiet,
+//! so the first examination of a child may already find the question, and that
+//! is news. A question asked and answered between two passes is not heard.
 //!
 //! **The `sudo` prompt is the human's.** A question that carries `needsSudo` is
 //! shown on the record (its lock badge) and never announced: the password is not

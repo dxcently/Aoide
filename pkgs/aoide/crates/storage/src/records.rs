@@ -237,12 +237,23 @@ pub struct SessionRecord {
     /// (ping-back, the doorbell's PTY arm, the A2A door) must be able to tell
     /// a shell from a harness wrap without having been there at spawn time,
     /// and a line submitted into a shell runs as a command. Written by
-    /// `stamp_shell` on both registration arms, so re-registering an id as
+    /// `stamp_wrap` on both registration arms, so re-registering an id as
     /// `-- bash` sets it and re-registering it as a harness clears it.
     /// `false` is skipped, so every record written before this field existed
     /// stays byte-identical.
     #[serde(default, skip_serializing_if = "is_false")]
     pub shell: bool,
+    /// The program the conduct launcher walk resolved the wrapped argv to, by
+    /// basename (`claude` for `aoide spawn -- env claude`), stamped at the same
+    /// registration as `shell`. A launcher the walk does not model names itself
+    /// (`taskset -c 0 claude` is `taskset`). Absent when the walk names no program
+    /// at all: a login shell with no command, `script` with no command, `su`,
+    /// a `nix` form without a `-c` payload, `env -S` (its split string swallows
+    /// the program name). The ping-back delivers only to a wrap whose program is
+    /// the harness its agent names, so an absent or foreign name is never
+    /// delivered to. `skip_serializing_if` keeps every older record identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrapped_program: Option<String>,
     #[serde(rename = "startedAt", default)]
     pub started_at: String,
     #[serde(
