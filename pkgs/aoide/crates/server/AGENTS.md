@@ -777,6 +777,19 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the origin can never tell tunnel traffic from door traffic on its own.
   Don't widen the door's detail "for symmetry" — its bytes are pinned by
   existing tests and by operators' greps.
+- **A `spawnAgent` is default-denied: it runs only as a PROVEN harness
+  (`spawn_agent_harness`).** The walk is `aoide_conduct::graph::wrapped_harness`,
+  never a copy: the walked program must be a registered profile's own launch
+  token. A shell is `shell-spawn-agent` (H1), anything unproven is
+  `unverified-spawn-agent`, and both refuse in `do_spawn`'s prologue before any
+  process starts. `spawn_inject_prompt` asks the same question on the write
+  (`skipped-shell` / `skipped-unverified`), and readiness and the submit key
+  read the PROVEN harness's name, never the configured first token (`env claude`
+  is `claude`, not `env`). The spawned wrapper's record carries `agent` `a2a`
+  (`spawn_argv` passes `--agent a2a`), so a proof keyed on the record's `agent`
+  label cannot hold for it; only `wrapped_program` can. The opening-turn tests
+  use `eidolon` (a registered harness with output-settled readiness) for the
+  "no declarable fact" branch.
 - **`do_spawn` never acks `submitted` on `cmd.spawn()`'s success alone
   (task #103).** `cmd.spawn()` only proves the WRAPPER `aoide conduct`
   process launched — it says nothing about whether that process's OWN

@@ -2581,7 +2581,8 @@ closed, and its home is the field's own doc in `storage/src/records.rs`:
 declared no readiness fact), `not-ready` (the budget ran out, nothing typed),
 `busy` (the door's opening-turn worker pool was full — nothing typed, ask
 again), `no-worker` (no worker thread could be started), `skipped-empty` /
-`skipped-shell` (nothing to type, or a shell may not be typed at),
+`skipped-shell` / `skipped-unverified` (nothing to type, a shell may not be
+typed at, or the configured command is not proven to be a registered harness),
 `no-socket` / `write-failed` (the control socket never answered, or the write
 failed — no receipt filed either way), and `unknown` (the process that owed
 the verdict died; a boot pass reconciles a stranded `pending` to this). It is
@@ -6664,15 +6665,20 @@ external A2A caller can do to aoide: task the operator's own
 already-configured agent, or steer a session already running under aoide's
 conductor, but never execute an arbitrary binary. If `spawnAgent` is empty,
 the spawn path returns `{"code": -32004, "message": "A2A spawn not
-configured"}` rather than silently doing nothing. **A `spawnAgent` that IS a
-shell is refused the same way, `-32004`, in `do_spawn`'s own prologue and
-before any process starts** (H1): the spawn's first turn is typed into the
-child's pty, a shell's stdin is a command line, and a remote peer's prompt
-would RUN. The check reads the configured ARGV through
-`aoide_conduct::graph::program_is_a_shell` — so `bash`, `bash -lc claude`
-and `env bash` are all shells — and the refusal is audited by name
-(`a2a.message/send`/`status:"shell-spawn-agent"`) rather than left for the
-caller to infer.
+configured"}` rather than silently doing nothing. The configured command is
+**default-denied**: it runs only when the launcher walk proves it is a
+registered harness, `aoide_conduct::graph::wrapped_harness` (the walked program
+must be a profile's own launch token). Two refusals, both `-32004`, both in
+`do_spawn`'s own prologue and before any process starts. A **shell**
+(`aoide_conduct::graph::program_is_a_shell`: `bash`, `bash -lc claude`,
+`env bash`) is audited `a2a.message/send`/`status:"shell-spawn-agent"` (H1): the
+first turn is typed into the child's pty, and a shell's stdin is a command
+line. **Anything else the walk does not prove** is audited
+`status:"unverified-spawn-agent"`: a wrapper script, a launcher the walk does
+not model (`taskset -c 0 claude`, `env -S claude`), or a name with no profile.
+The harness proven is the name readiness and the submit key use; `env claude`
+runs as `claude`. Its cost is stated: a harness reached through a wrapper the
+walk does not model is refused, never typed into.
 
 **Security model.** The capability is admitted **at rebuild time**, not
 per-request: setting `aoide.a2a.spawnAgent` to a non-empty command is the

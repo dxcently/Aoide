@@ -1058,8 +1058,7 @@ in the message.
   what it models: the forwarding launchers (`env`, `exec`, `setsid`, `nohup`,
   `stdbuf`, `chrt`, `ionice`, `nice`), `timeout`, `sudo`/`doas`, `script` (its
   `-c` and `--command` forms, both the separate and the `=` spelling, mean a
-  shell runs the command), and `nix develop|shell -c`. Every other launcher
-  names itself, so `taskset -c 0
+  shell runs the command), and `nix develop|shell -c`. Every other launcher names itself, so `taskset -c 0
   claude` is `unverified-wrap`, and so is `env -S claude` (no program name
   survives the split string). Its costs are stated: a wrapper script (`-- ./rig.sh`)
   and a harness binary whose basename differs from its profile's launch token
@@ -1079,7 +1078,10 @@ in the message.
   names a shell after a harness. Inert line content is the defence for that class,
   not the proof. The positive rule is
   the ping-back's alone: the doorbell's PTY arm and the A2A door still read the
-  negative `wrapped_program_is_a_shell`. The walk's own limit is argv only. Those
+  negative `wrapped_program_is_a_shell`. The argv-side positive read is
+  `conduct.rs::wrapped_harness` (the walked program IS a profile's launch token),
+  the one `aoide-server`'s `spawnAgent` gate calls; it is never a second walk.
+  The walk's own limit is argv only. Those
   four predicates (`shell-parent`, `unverified-wrap`, `not-conductable`,
   `parent-done`) live in ONE function (`unreceptive`), which `deliver` itself
   calls, so nothing may restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately

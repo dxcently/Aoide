@@ -129,10 +129,13 @@ to **rebuild time** instead.
 - **Bounded per request.** A `message/send` spawn runs **only** the configured
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door
-  returns a structured error rather than launching anything; if it is a
-  SHELL (`bash`, `bash -lc <harness>`, `env bash`), the door refuses it the
-  same way and before any process starts, because the spawn's first turn is
-  a line typed into that pty and a shell would run it. An inject steers a
+  returns a structured error rather than launching anything. The configured
+  command is default-denied: it runs only when the launcher walk proves it is a
+  registered harness (`claude`, `env claude`). A SHELL (`bash`, `bash -lc
+  <harness>`, `env bash`) is refused the same way, before any process starts,
+  because the spawn's first turn is a line typed into that pty and a shell
+  would run it. So is anything the walk cannot prove (a wrapper script,
+  `taskset -c 0 claude`, `env -S claude`). An inject steers a
   session already running under aoide's conductor, the same door `send`
   uses. A forwarded A2A message is **data**, routed through the dispatcher, never
   executed — the A2A door adds no new trust tier.

@@ -2163,6 +2163,11 @@ fn do_inject(
 /// own and the wrong one wherever the target submits on `\r` (claude, kimi):
 /// the opening turn landed in the composer and never submitted.
 ///
+/// **Only a proven harness takes the opening turn.** A configured command that
+/// is a shell is `skipped-shell`; any other that the launcher walk does not
+/// prove to be a registered harness is `skipped-unverified`. Nothing is typed in
+/// either case ([`spawn_agent_harness`]).
+///
 /// **Messaging plan P-M1, `state/mail/base.jsonl`**: because of the above,
 /// this is the SECOND (and last) mailbase-filing site in the tree, alongside
 /// `deliver_local`'s (see `aoide_storage::mail`'s module doc) — a spawned
@@ -2184,28 +2189,18 @@ fn spawn_inject_prompt(
     if prompt.is_empty() {
         return "skipped-empty";
     }
-    // Belt and braces on H1: `decide_send_action` already refuses a shell
-    // `spawnAgent` before anything starts, and this is the last gate before a
-    // REMOTE prompt becomes a line on a pty — so the write asks the same
-    // question itself instead of trusting its caller to have asked it (the
-    // same `program_is_a_shell` walk `-32004` above and the ping-back,
-    // doorbell and inject lanes all read). Silent by construction: this
-    // function's contract is best-effort, and a refusal that cannot be
-    // reported here would only be noise — the caller's own refusal is the
-    // taught one.
-    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    if aoide_conduct::graph::program_is_a_shell(&configured) {
-        return "skipped-shell";
-    }
-    // WHICH harness the configured command IS decides what readiness means
-    // (an unconfigured/unknown program has no profile and takes the hookless
-    // answer, the same fallback every other profile lookup in the tree takes)
-    // and which keystroke SUBMITS a line in it.
-    let agent = configured
-        .first()
-        .map(|program| aoide_conduct::graph::command_basename(program))
-        .unwrap_or_default();
-    let ready = aoide_conduct::graph::wait_ready(&agent, id, &launch_at, ready_budget);
+    // The last gate before a REMOTE prompt becomes a line on a pty, so it asks
+    // the same question `do_spawn`'s prologue asked instead of trusting its
+    // caller to have asked it. Silent by construction: this function's contract
+    // is best-effort, and the caller's own refusal is the taught one.
+    let agent = match spawn_agent_harness(agent_cmd) {
+        Ok(harness) => harness,
+        Err(SpawnAgentRefusal::Shell) => return "skipped-shell",
+        Err(SpawnAgentRefusal::Unproven) => return "skipped-unverified",
+    };
+    // The PROVEN harness decides what readiness means and which keystroke
+    // SUBMITS a line in it.
+    let ready = aoide_conduct::graph::wait_ready(agent, id, &launch_at, ready_budget);
     if ready == aoide_conduct::graph::Ready::NotReady {
         return "not-ready";
     }
@@ -2214,7 +2209,7 @@ fn spawn_inject_prompt(
     // unregistered). Never a byte spelled here: claude's is `\r`, and a bare
     // `\n` only inserts a newline in its composer — the exact way this door
     // used to type an opening turn that never submitted.
-    let submit_key = aoide_conduct::graph::profile_for_agent(&agent).submit_key;
+    let submit_key = aoide_conduct::graph::profile_for_agent(agent).submit_key;
     let socket = aoide_conduct::graph::conduct_socket_path(id);
     for _ in 0..300 {
         if socket.exists() {
@@ -2392,6 +2387,29 @@ fn spawn_argv(id: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
     aoide_conduct::graph::build_conduct_args(true, "a2a", id, None, task, None, None, None, &command)
 }
 
+/// Why a configured `spawnAgent` may not be typed into: a shell (the first turn
+/// would RUN as a command) or a command the walk does not prove to be a
+/// registered harness. Both refuse before any process starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpawnAgentRefusal {
+    Shell,
+    Unproven,
+}
+
+/// The one judgement every spawn guard reads: the registered harness a
+/// configured `spawnAgent` runs, or why it may not run at all. Default-deny: a
+/// wrapper script, a launcher the walk does not model (`taskset`, `env -S`), or
+/// a name with no profile is refused, because its first turn would be typed
+/// into a pty the door cannot prove is a harness. The walk itself is
+/// `aoide_conduct::graph::wrapped_harness`, never a copy of it.
+fn spawn_agent_harness(agent_cmd: &str) -> Result<&'static str, SpawnAgentRefusal> {
+    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    if aoide_conduct::graph::program_is_a_shell(&configured) {
+        return Err(SpawnAgentRefusal::Shell);
+    }
+    aoide_conduct::graph::wrapped_harness(&configured).ok_or(SpawnAgentRefusal::Unproven)
+}
+
 /// Build the spawned child's `Command`, env-sanitized, cwd-bound (when
 /// `spawn_cwd` resolves), and detached — everything up to but NOT including
 /// `.spawn()`. Split out of [`do_spawn`] so the env-clearing shape here is
@@ -2551,29 +2569,45 @@ fn do_spawn(
 ) -> Result<Value, (i64, String)> {
     // Refused FIRST and for free, the slug refusal's own shape below: a
     // `spawnAgent` that IS a shell must cost one RPC, never a process and
-    // never a line typed into a shell (H1, house rule 4). The spawn arm's
-    // first turn is written straight into the child's pty by
-    // `spawn_inject_prompt`, and a shell's stdin is a COMMAND LINE: a remote
-    // peer's prompt would RUN. The `agent` label is not the question — the
-    // configured argv is (`program_is_a_shell`, the same walk the ping-back,
-    // doorbell and inject lanes read), so `bash -lc <harness>` is the shell on
-    // its face and a launcher (`env bash`) is resolved rather than skipped.
+    // never a line typed into a shell (H1, house rule 4), and never a line typed
+    // into a pty the walk cannot prove is a harness. The spawn arm's first turn
+    // is written straight into the child's pty by `spawn_inject_prompt`, and a
+    // shell's stdin is a COMMAND LINE: a remote peer's prompt would RUN. The
+    // `agent` label is not the question — the configured argv is
+    // (`spawn_agent_harness`), so `bash -lc <harness>` is the shell on its face,
+    // `env claude` is resolved to its harness, and `taskset -c 0 claude` or a
+    // wrapper script is refused as unproven.
     // `-32004` is this door's own "spawn cannot be used as configured" family
     // (the empty-`spawnAgent` arm one layer up): nothing about the CALLER's
     // authority is wrong, so `-32005`/`-32006` would blame the wrong party.
-    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    if aoide_conduct::graph::program_is_a_shell(&configured) {
-        let msg = format!(
-            "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which is a SHELL — \
-             a remote prompt typed into it would run as a command. Set it to the harness to \
-             conduct (e.g. `claude`), not to a shell that launches one."
-        );
+    if let Err(refusal) = spawn_agent_harness(agent_cmd) {
+        let (audit_name, msg) = match refusal {
+            SpawnAgentRefusal::Shell => (
+                "shell-spawn-agent",
+                format!(
+                    "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which is a \
+                     SHELL — a remote prompt typed into it would run as a command. Set it to the \
+                     harness to conduct (e.g. `claude`), not to a shell that launches one."
+                ),
+            ),
+            SpawnAgentRefusal::Unproven => (
+                "unverified-spawn-agent",
+                format!(
+                    "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which the \
+                     launcher walk does not prove to be a registered harness ({}). A remote prompt \
+                     is typed into the harness's own pty, so only a harness named as its own \
+                     program may run: set it to the harness itself (e.g. `claude`), not a wrapper, \
+                     a launcher the walk does not model (`taskset`, `env -S`), or a script.",
+                    aoide_protocol::agents::known_agents().join(", ")
+                ),
+            ),
+        };
         let _ = audit(
             audit_log,
             Door::A2a,
             EventClass::Audit,
             "a2a.message/send",
-            "shell-spawn-agent",
+            audit_name,
             &msg,
         );
         return Err((-32004, msg));
@@ -7250,8 +7284,9 @@ mod tests {
     /// already holds — so the refusal is audited by name and no process, no
     /// session and no first-turn keystroke ever happens. The exact shell, a
     /// shell reached through a launcher, and the `bash -lc <harness>` form the
-    /// door's own comment used to call legitimate are all refused; a harness
-    /// (wrapped or not) still spawns.
+    /// door's own comment used to call legitimate are all refused. Which
+    /// harnesses DO pass is `spawn_agent_harness`'s own test; the spawn itself
+    /// is never driven here (`do_spawn` launches the test binary).
     #[test]
     fn do_spawn_refuses_a_shell_spawn_agent_before_anything_starts() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -7292,6 +7327,121 @@ mod tests {
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// Default-deny, pure: a configured command is accepted only when the launcher
+    /// walk proves it runs a registered harness, and it is accepted AS that
+    /// harness (the name readiness and the submit key use). A shell is refused as
+    /// a shell; anything the walk cannot prove is unproven.
+    #[test]
+    fn spawn_agent_harness_accepts_only_a_registered_harness_the_walk_proves() {
+        let accepted: &[(&str, &str)] = &[
+            ("claude", "claude"),
+            ("claude --dangerously-skip-permissions", "claude"),
+            ("/usr/bin/claude", "claude"),
+            ("env claude", "claude"),
+            ("nix develop -c claude", "claude"),
+        ];
+        for (configured, harness) in accepted {
+            assert_eq!(spawn_agent_harness(configured), Ok(*harness), "`{configured}` runs {harness}");
+        }
+        let refused: &[(&str, SpawnAgentRefusal)] = &[
+            ("bash", SpawnAgentRefusal::Shell),
+            ("bash -lc claude", SpawnAgentRefusal::Shell),
+            ("env bash", SpawnAgentRefusal::Shell),
+            ("taskset -c 0 claude", SpawnAgentRefusal::Unproven),
+            ("env -S claude", SpawnAgentRefusal::Unproven),
+            ("/opt/x/my-wrapper", SpawnAgentRefusal::Unproven),
+            ("no-such-agent", SpawnAgentRefusal::Unproven),
+        ];
+        for (configured, why) in refused {
+            assert_eq!(spawn_agent_harness(configured), Err(*why), "`{configured}` is refused");
+        }
+    }
+
+    /// The default-deny refusal in `do_spawn`'s prologue, for a configured command
+    /// the walk cannot prove: a launcher it does not model, a wrapper script, a
+    /// name with no profile. Audited as `unverified-spawn-agent`, and no process,
+    /// session or first-turn keystroke ever happens.
+    #[test]
+    fn do_spawn_refuses_an_unproven_spawn_agent_before_anything_starts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-unverified-spawn-agent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        let audit_log = root.join("log");
+
+        for configured in ["taskset -c 0 claude", "env -S claude", "/opt/x/my-wrapper", "no-such-agent"] {
+            let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
+                .expect_err("an unproven spawnAgent must be refused, not run");
+            assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
+            assert!(err.1.contains("aoide.a2a.spawnAgent"), "the refusal names the option: {}", err.1);
+            assert!(err.1.contains(configured), "and the value it saw: {}", err.1);
+            let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+            assert!(log.contains("unverified-spawn-agent"), "the refusal is audited by name: {log}");
+        }
+        let sessions: Vec<aoide_storage::records::SessionRecord> =
+            load_stage::<SessionsFile>(&sessions_path())
+                .map(|f| f.sessions)
+                .unwrap_or_default();
+        assert!(sessions.is_empty(), "no session may exist after a refused spawn: {sessions:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// The second guard, on the write itself: an unproven or shell `spawnAgent`
+    /// is refused before the target's socket is ever dialled, so no byte reaches
+    /// a pty the door cannot prove is a harness. Asserted by a listener that
+    /// would hold a pending connection, and has none.
+    #[test]
+    fn spawn_inject_prompt_types_nothing_into_an_unproven_or_shell_spawn_agent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-spawninject-refused-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "spawn-inject-refused";
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        for (configured, want) in [
+            ("no-such-agent", "skipped-unverified"),
+            ("taskset -c 0 claude", "skipped-unverified"),
+            ("env -S claude", "skipped-unverified"),
+            ("bash -lc claude", "skipped-shell"),
+        ] {
+            let got = spawn_inject_prompt(id, configured, "remote prompt", &now_iso_utc(), Duration::from_millis(50));
+            assert_eq!(got, want, "`{configured}`");
+        }
+        assert!(listener.accept().is_err(), "no connection was ever made to the target's socket");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
     }
 
@@ -11414,7 +11564,7 @@ mod tests {
         // The wrapper's own record, with a log that has already spoken — what
         // a hookless target's readiness is read off.
         let log = root.join("wrapper.log");
-        std::fs::write(&log, "no-such-agent$ ").unwrap();
+        std::fs::write(&log, "eidolon$ ").unwrap();
         let mut wrap = fixture_session(id, "idle", None);
         wrap.log_path = Some(log.to_string_lossy().into_owned());
         write_stage(
@@ -11427,7 +11577,7 @@ mod tests {
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
 
-        let expected = aoide_protocol::agents::CLAUDE_PROFILE.submit_key;
+        let expected = aoide_protocol::agents::agent_profile("eidolon").expect("a registered harness").submit_key;
         let acc = std::thread::spawn(move || {
             let mut conn = accept_one(&listener, "the opening turn's text-then-keystroke write");
             let mut text = Vec::new();
@@ -11444,8 +11594,8 @@ mod tests {
         });
 
         // A budget comfortably past the quiescence window the readiness wait
-        // uses for a target with no hook.
-        assert_eq!(spawn_inject_prompt(id, "no-such-agent", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this name");
+        // uses for a registered harness with no declarable fact (eidolon).
+        assert_eq!(spawn_inject_prompt(id, "eidolon", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this harness");
         let (text, submit, gap) = acc.join().unwrap();
         assert_eq!(String::from_utf8(text).unwrap(), "first turn", "the text, alone");
         assert_eq!(
@@ -11611,7 +11761,7 @@ mod tests {
         // the verdict is `not-ready`, and that is what the record ends on.
         opening_turn_worker(
             id.to_string(),
-            "no-such-agent".to_string(),
+            "eidolon".to_string(),
             "hi".to_string(),
             now_iso_utc(),
             Duration::from_millis(50),
@@ -11626,7 +11776,7 @@ mod tests {
         aoide_conduct::graph::stamp_opening_turn(id, "delivered");
         opening_turn_worker(
             id.to_string(),
-            "no-such-agent".to_string(),
+            "eidolon".to_string(),
             "hi".to_string(),
             now_iso_utc(),
             Duration::from_millis(50),

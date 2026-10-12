@@ -382,6 +382,21 @@ fn wrapped_program_name(argv: &[String]) -> Option<String> {
     None
 }
 
+/// The registered harness a conducted argv runs, by the launcher walk: the
+/// walked program must BE a profile's own launch token. `None` for everything
+/// else — a shell, a launcher the walk does not model (`taskset`, `env -S`), a
+/// wrapper script, a name with no profile. The positive half of
+/// [`program_is_a_shell`]: a caller that may only type into a harness asks for
+/// this proof, never for the mere absence of a shell.
+///
+/// `pub` for `aoide-server`'s spawn arm, which refuses a `spawnAgent` without it
+/// and then reads readiness and the submit key off the name it returns.
+pub fn wrapped_harness(argv: &[String]) -> Option<&'static str> {
+    let program = wrapped_program_name(argv)?;
+    let profile = agent_profile(&program)?;
+    (profile.launch.first().copied() == Some(program.as_str())).then_some(profile.name)
+}
+
 /// [`program_is_a_shell`]'s verdict, read back off a RECORD: `shell` (the
 /// durable registration fact below) OR a `Some` restore snapshot. Not a
 /// second predicate — [`SHELL_BASENAMES`] above stays the one list of shell
@@ -2602,6 +2617,42 @@ mod tests {
         for (argv, want) in cases {
             let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
             assert_eq!(wrapped_program_name(&argv).as_deref(), *want, "wrapped_program_name({argv:?})");
+        }
+    }
+
+    #[test]
+    fn wrapped_harness_accepts_only_a_registered_harness_the_walk_proves() {
+        // The spawn arm's positive proof. A launcher the walk forwards through
+        // resolves to the harness; a launcher it does not model, a shell, a
+        // wrapper, or a script that hands a command to `--command` names no
+        // harness at all.
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&["claude"], Some("claude")),
+            (&["claude", "--dangerously-skip-permissions"], Some("claude")),
+            (&["/usr/bin/claude", "--resume", "x"], Some("claude")),
+            (&["env", "claude"], Some("claude")),
+            (&["env", "FOO=1", "claude"], Some("claude")),
+            (&["nice", "-n", "5", "claude"], Some("claude")),
+            (&["timeout", "600", "claude"], Some("claude")),
+            (&["nix", "develop", "-c", "claude"], Some("claude")),
+            (&["script", "-q", "/dev/null", "claude"], Some("claude")),
+            (&["kimi"], Some("kimi")),
+            (&["pi"], Some("pi")),
+            (&["eidolon"], Some("eidolon")),
+            (&["bash"], None),
+            (&["bash", "-lc", "claude"], None),
+            (&["env", "bash"], None),
+            (&["env", "-S", "claude"], None),
+            (&["taskset", "-c", "0", "claude"], None),
+            (&["/opt/x/my-wrapper"], None),
+            (&["no-such-agent"], None),
+            (&["-claude"], None),
+            (&["script", "--command", "claude", "out.log"], None),
+            (&[], None),
+        ];
+        for (argv, want) in cases {
+            let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            assert_eq!(wrapped_harness(&argv), *want, "wrapped_harness({argv:?})");
         }
     }
 

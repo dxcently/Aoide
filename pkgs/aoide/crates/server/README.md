@@ -212,7 +212,7 @@ the inbound half of the two-door contract (the outbound half is
   worker's own first write — the same thread that stamps the verdict
   immediately after, so nothing can clobber a verdict back — then `delivered`
   / `delivered-unverified` / `not-ready` / `busy` /
-  `no-worker` / `skipped-shell` / `skipped-empty` / `no-socket` /
+  `no-worker` / `skipped-shell` / `skipped-unverified` / `skipped-empty` / `no-socket` /
   `write-failed`, or `unknown` when a boot pass reconciles a verdict lost with
   the process that owed it — the complete list and its meaning live on the
   field's own doc, `storage/src/records.rs`), and `tasks/get` reports it as the

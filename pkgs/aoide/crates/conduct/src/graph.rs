@@ -126,6 +126,9 @@ pub use self::conduct::wrapped_program_is_a_shell;
 // `aoide-server`'s spawn arm refuses a `spawnAgent` that is a shell, and that
 // decision happens before any record exists.
 pub use self::conduct::program_is_a_shell;
+// The positive half of the same walk: the registered harness an argv runs, for
+// the door that spawns one and must prove what it spawned. Same walk, no copy.
+pub use self::conduct::wrapped_harness;
 // The screen episode's one clearing write (`question` and the `sudo` lock badge
 // together), shared by the session end, the reaper and the refresh writer.
 pub(crate) use self::model::clear_screen_ask;

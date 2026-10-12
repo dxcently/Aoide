@@ -645,8 +645,9 @@ pub struct SessionRecord {
     /// - `busy` — the door's opening-turn worker pool was full (nothing was
     ///   typed; ask again);
     /// - `no-worker` — no worker thread could be started (nothing was typed);
-    /// - `skipped-empty` / `skipped-shell` — nothing to type, or a shell may
-    ///   not be typed at;
+    /// - `skipped-empty` / `skipped-shell` / `skipped-unverified` — nothing to
+    ///   type, a shell may not be typed at, or the configured command is not
+    ///   proven to be a registered harness (default-deny);
     /// - `no-socket` / `write-failed` — the target's control socket never
     ///   answered, or the write failed (no receipt filed in either case);
     /// - `unknown` — the process that owed a verdict died before it could
