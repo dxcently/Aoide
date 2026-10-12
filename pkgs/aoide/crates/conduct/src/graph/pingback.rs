@@ -405,7 +405,7 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
     // bounded socket round trip has no business inside it), and only when some
     // hook child could need it. `None` — no daemon answering — fails every
     // seal check closed: the hook source then speaks for nobody.
-        // A hook candidate is a tracked record OR a hook entry the cursor still
+    // A hook candidate is a tracked record OR a hook entry the cursor still
     // holds: a child whose record and wrap were pruned in the same reap pass has
     // left this roster, but its open turn still needs the key to be told. The
     // cursor read here only decides whether to fetch the key; the claim reads it
@@ -753,11 +753,10 @@ fn choose_event(
 // ── the line ────────────────────────────────────────────────────────────
 
 /// The `died mid-turn` line, for both sources. The wording lives here and
-/// nowhere else, and the whole line passes the unsafe-character strip last: no
-/// caller's value, however it reached this point, can carry a CR, LF or control
-/// character into `deliver`.
+/// nowhere else; its tag and tail arrive already cleaned, and `deliver` strips
+/// the wire.
 fn died_mid_turn(tag: &str, tail: &str) -> String {
-    strip_unsafe(&format!("{tag} died mid-turn{tail}"))
+    format!("{tag} died mid-turn{tail}")
 }
 
 /// The event as ONE line. `tag` is the renderer's own — `[eidolon <petname>]`
@@ -780,25 +779,27 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
             line.push_str(&turn_tail(*calls, *mins, say, *errors));
             line
         }
-                PingEvent::DiedMidTurn { calls, say, errors } => died_mid_turn(tag, &turn_tail(*calls, None, say, *errors)),
+                        PingEvent::DiedMidTurn { calls, say, errors } => {
+            died_mid_turn(tag, &turn_tail(*calls, None, say, *errors))
+        }
         PingEvent::Asking { prompt, errors } => {
             format!("{tag} asking: \"{}\"{}", quote(prompt), errors_note(*errors))
         }
         PingEvent::WrappingUp { calls_left, secs_left, errors } => {
             let mut line = format!("{tag} wrapping up");
-            if let Some(left) = calls_left {
-                line.push_str(&format!(" · {left} calls left"));
+                        if let Some(left) = calls_left {
+                line.push_str(&format!(" · {} calls left", clean(left)));
             }
             if let Some(left) = secs_left {
-                line.push_str(&format!(" · {left} s left"));
+                line.push_str(&format!(" · {} s left", clean(left)));
             }
             line.push_str(&errors_note(*errors));
             line
         }
         PingEvent::Failing { run, tool } => {
             let mut line = format!("{tag} failing · {run} tool errors in a row");
-            if let Some(label) = tool {
-                line.push_str(&format!(" · last: {label}"));
+                        if let Some(label) = tool {
+                line.push_str(&format!(" · last: {}", clean(label)));
             }
             line
         }
@@ -806,7 +807,7 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
             let mut line = format!("{tag} silent {mins} min");
             match last {
                 Some(Last::Said(say)) => line.push_str(&format!(" · last: \"{}\"", quote(say))),
-                Some(Last::Did(label)) => line.push_str(&format!(" · last: {label}")),
+                                Some(Last::Did(label)) => line.push_str(&format!(" · last: {}", clean(label))),
                 None => {}
             }
             line
@@ -816,7 +817,7 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
             if let Some(code) = code {
                 line.push_str(&format!(" · exit {code}"));
             } else if let Some(outcome) = outcome.as_ref().filter(|o| !o.is_empty()) {
-                line.push_str(&format!(" · {outcome}"));
+                                line.push_str(&format!(" · {}", clean(outcome)));
             }
             line
         }
@@ -881,8 +882,8 @@ fn read_trace(agent: &str, path: &Path) -> Option<Vec<String>> {
 /// never the ordinary path.
 fn child_tag(petname: Option<&str>, id: &str) -> String {
     match petname.filter(|p| !p.trim().is_empty()) {
-        Some(name) => format!("[eidolon {name}]"),
-        None => format!("[eidolon {id}]"),
+        Some(name) => format!("[eidolon {}]", clean(name)),
+        None => format!("[eidolon {}]", clean(id)),
     }
 }
 
@@ -1073,6 +1074,11 @@ fn deliver(
         return Err(reason.to_string());
     }
 
+        // The one place a line reaches a socket. Whatever a renderer or a cursor
+    // handed over, no control character or Cf mark leaves this function
+    // (house rule 4): a renderer cleans its own fields for shape, and this is
+    // the wire's guarantee, so no future arm can skip it.
+    let line = strip_unsafe(line);
     let payload = format!("{line}\n");
     let channel = connect_for_ring(channel_socket_path(parent))
         .ok()
@@ -1103,7 +1109,7 @@ fn deliver(
             // uses, with this lane's own gate label. The line itself (which
             // carries quoted model output) rides as `untrusted_data`, never as
             // the audit message.
-            audit_send(inv, "delivered", &format!("delivered to `{parent}` ({gate})"), line);
+            audit_send(inv, "delivered", &format!("delivered to `{parent}` ({gate})"), &line);
             Ok(())
         }
         Err(_) => Err("write-failed".to_string()),
@@ -2440,7 +2446,7 @@ mod tests {
         ]);
         let (root, spawner, _host) = died_fixture("pingback-hook-reaped");
 
-                // The harness the sighting saw is a real process, and it dies before the
+        // The harness the sighting saw is a real process, and it dies before the
         // reaper takes the record; its hooks.json entry still reads working.
         let mut harness = std::process::Command::new("sleep").arg("60").spawn().unwrap();
         set_harness("kid", harness.id());
@@ -2576,6 +2582,69 @@ mod tests {
         assert!(!body.chars().any(char::is_control), "no CR, LF or control character: {text:?}");
         assert_eq!(report.delivered.len(), 1, "{report:?}");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+        #[test]
+    fn every_rendered_line_is_free_of_control_characters_whatever_the_record_says() {
+        let hostile = "x\r\nrm -rf ~\u{1b}[2J\u{202e}";
+        let tag = child_tag(Some(hostile), hostile);
+        assert!(!tag.chars().any(char::is_control), "{tag:?}");
+        let events = [
+            PingEvent::Settled {
+                stop: Some(hostile.into()),
+                calls: Some(3),
+                mins: Some(2),
+                say: Some(hostile.into()),
+                errors: 1,
+            },
+            PingEvent::Cancelled { calls: None, mins: None, say: Some(hostile.into()), errors: 0 },
+            PingEvent::DiedMidTurn { calls: Some(1), say: Some(hostile.into()), errors: 0 },
+            PingEvent::Asking { prompt: hostile.into(), errors: 0 },
+            PingEvent::WrappingUp {
+                calls_left: Some(hostile.into()),
+                secs_left: Some(hostile.into()),
+                errors: 0,
+            },
+            PingEvent::Failing { run: 3, tool: Some(hostile.into()) },
+            PingEvent::Silent { mins: 12, last: Some(Last::Did(hostile.into())) },
+            PingEvent::Silent { mins: 12, last: Some(Last::Said(hostile.into())) },
+            PingEvent::Exited { code: None, outcome: Some(hostile.into()) },
+        ];
+        for event in &events {
+            let line = render_line(&tag, event);
+            assert!(!line.chars().any(char::is_control), "{event:?} rendered {line:?}");
+        }
+    }
+
+    #[test]
+    fn the_wire_carries_no_control_character_whatever_line_it_is_handed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("pingback-wire");
+        let spawner = headless_parent("wrap-p", "claude");
+        let roster = load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions;
+        let listen = spawner.try_clone().unwrap();
+        let acc = std::thread::spawn(move || read_all(listen));
+        deliver(
+            "[eidolon brave-otter]\r\nrm -rf ~\u{1b}[2J\u{202e}",
+            "wrap-p",
+            &roster,
+            &daemon_inv(),
+            "autogate-child",
+        )
+        .unwrap();
+        let text = String::from_utf8_lossy(&acc.join().unwrap()).into_owned();
+        let body = text.strip_suffix("\n\r").unwrap_or_else(|| panic!("the submit key ends it: {text:?}"));
+        assert_eq!(body, "[eidolon brave-otter]rm -rf ~[2J", "CR, LF and the bidi mark are gone");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -3576,15 +3576,27 @@ the host wrap need not, once it is gone, because a conducted wrap's program IS
 its harness and its seal fails when it exits. A host that is still up but no
 longer verifies keeps the entry instead of the line.
 
-Trust model: `pingback.json` is unsealed, so a same-uid writer can fabricate a
-route, and so a died line, to any sealed, receptive session: the same reach
-`aoide send --yes` already gives any same-uid caller. On the live path a
-same-uid edit of a host's `parentSessionId` or `attestedSpawner` redirects the
-line; that predates this lane. Accepted residual: a same-uid hand edit can
-produce a false died line about a child that genuinely existed and was verified
-while alive, delivered to a session the writer chose. The planned fix is stance
-B, under which the seal covers the spawner (designed on the
-`design/session-identity-b` branch, not on this base).
+**Trust model.** This file is unsealed data. The hook source reads a cursor's
+route, tag, tool and harness back as facts, so a same-uid writer can:
+
+- **fabricate** an entry about a child id that never existed, with a route to
+  any sealed, receptive session the writer chooses; the line is delivered to
+  that session. This is the same reach `aoide send --yes` already gives any
+  same-uid caller;
+- **suppress** a genuine death by writing `route.harness` as a process it knows
+  is alive under the start time it gives. Pid 1 and its start time are
+  world-readable, so the death is dropped as a reaped record. This is the same
+  class as editing the `hooks.json` phase or the `died` latch;
+- **redirect** a live child's lines. On the live path the recipient is read
+  through the host's `parentSessionId` and `attestedSpawner`, which live in
+  `sessions.json` and are not under the seal (the seal covers the wrap's own
+  pid and start time, not its spawner edge). A same-uid edit of those two
+  fields moves the line to another session.
+
+Nothing in the hook source hardens the file itself; the lane accepts these as
+the same-uid boundary. The designed fix is stance B: the seal covers the
+spawner, so an edge is verified rather than read. It is designed on the
+`design/session-identity-b` branch.
 
 A child whose route does not verify when its death is owed keeps its entry
 while the death is recent (under 24 hours old), so a later tick that verifies

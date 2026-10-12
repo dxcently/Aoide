@@ -74,7 +74,8 @@
 //!
 //! `pingback.json` is unsealed data: a same-uid writer can fabricate a route and
 //! so a died line to any sealed, receptive session. Every value read from it is
-//! cleaned again where it is rendered. The trust model is in `AGENTS.md`.
+//! cleaned again where it is rendered. The trust model is stated once, in
+//! `CONTRACTS.md` under `state/stage/pingback.json`.
 //!
 //! The cursor (`pingback.json`'s `hook` field) holds the canonical phase and
 //! `updatedAt` last examined, two latches — `silent` (a silence line was sent
@@ -297,7 +298,7 @@ fn gather(roster: &[SessionRecord], hooks: &[HookRecord], sealed: &impl Fn(&Sess
                 at: hook.updated_at.clone(),
                 at_secs: parse_iso_utc(&hook.updated_at),
                 last: rec.activity.as_deref().filter(|a| !a.is_empty()).map_or_else(|| "working".to_string(), clean),
-                                pid_dead: pid_dead(rec),
+                pid_dead: pid_dead(rec),
                 harness: live_harness(rec),
             })
         })
@@ -366,7 +367,7 @@ fn decide(child: &HookChild, entry: Option<&HookCursor>, now_ms: i64) -> (Option
     let route = Some(Route {
         host: child.host.clone(),
         to: child.to.clone(),
-                tag: child.tag.clone(),
+        tag: child.tag.clone(),
         last: child.last.clone(),
         harness: child.harness.clone(),
     });
@@ -484,7 +485,7 @@ mod tests {
         Route {
             host: "wrap".into(),
             to: "spawner".into(),
-                        tag: "[claude fond-aspen]".into(),
+            tag: "[claude fond-aspen]".into(),
             last: "working".into(),
             harness: None,
         }
@@ -500,7 +501,7 @@ mod tests {
             at: at.into(),
             at_secs: parse_iso_utc(at),
             last: "working".into(),
-                        pid_dead: false,
+            pid_dead: false,
             harness: None,
         }
     }
@@ -979,7 +980,8 @@ mod tests {
             let mut old = CursorFile::new();
             old.insert("K".into(), super::super::CursorEntry { hook: Some(prev), ..Default::default() });
             let mut next = CursorFile::new();
-            let lines = claim(&gone_roster, &[hook_rec("K", "working", AT)], &sealed, &old, &mut next, at_ms() + 60_000);
+            let hooks = [hook_rec("K", "working", AT)];
+            let lines = claim(&gone_roster, &hooks, &sealed, &old, &mut next, at_ms() + 60_000);
             assert_eq!(lines.len(), said, "the same start time is alive; another one is a reused pid");
         }
     }

@@ -1021,16 +1021,8 @@ in the message.
   pass as its wrap is still judged. Every value read back from the cursor is
   cleaned again where it is rendered, and the whole line passes the
   unsafe-character strip last (`died_mid_turn`).
-  **Trust model.** `pingback.json` is unsealed data, and on the live path so are
-  a host's `parentSessionId` and `attestedSpawner`. A same-uid writer can
-  fabricate a route, and so a died line, to any sealed, receptive session: the
-  same reach `aoide send --yes` already gives any same-uid caller. The same
-  writer can redirect the live path by editing a host's spawner edge; that
-  predates this lane. Accepted residual: a same-uid hand edit can produce a
-  false died line about a child that genuinely existed and was verified while
-  alive, delivered to a session the writer chose, not necessarily its real
-  spawner. The planned fix is stance B, under which the seal covers the spawner
-  (designed on the `design/session-identity-b` branch, not on this base).
+  **Trust model:** stated once, in `CONTRACTS.md` under
+  `state/stage/pingback.json`. This cursor is unsealed data.
   Known gap, not checked here: a clean session end whose record and hook entry
   are both pruned between two ticks, before any tick saw `done`, reads as died
   when the cursor last held an open phase (prune runs only on a reaping pass,
