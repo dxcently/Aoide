@@ -489,8 +489,9 @@ windowed path with its resolved argv. Rules:
   --submit`) — the session was demonstrably running it when it left — EXCEPT
   when `argv[0]`'s basename is `sudo`, which is never re-exec'd unattended
   (only the cwd restores; a privileged command popping a password prompt in
-  a terminal nobody is watching is not a restore). Idle: nothing is delivered, a terminal reopened at its own cwd already
-  being the complete answer.
+  a terminal nobody is watching is not a restore). Idle: nothing is
+  delivered; a terminal reopened at its own cwd already being the complete
+  answer.
 - The conductor gains a keybind invoking resurrect for the focused
   project (`conductor/src/commands.rs` — the TUI already maps keys onto
   typed commands).

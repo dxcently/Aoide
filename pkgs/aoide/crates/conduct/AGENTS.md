@@ -1295,8 +1295,9 @@ in the message.
 - **Shell-likeness is derived from the WRAPPED ARGV, never the display
   name (task #100, the P-C7 soak's live finding).** `session_conduct`'s
   `is_shell` — which gates the ENTIRE P-C5 refresh/capture path (cwd
-  tracking, working/idle state, foreground argv, the restore snapshot) — comes from the SAME
-  `conduct.rs::program_is_a_shell(&inv.args)` the refusal lanes read
+  tracking, working/idle state, foreground argv, the restore snapshot) —
+  comes from the SAME `conduct.rs::program_is_a_shell(&inv.args)` the refusal
+  lanes read
   (`program`'s own basename against the shell list, with the launchers a
   shell arrives through resolved first). It is NOT `agent ==
   "shell"` — `agent` is a caller-chosen label (`--agent <name>`, or the
@@ -1317,9 +1318,10 @@ in the message.
 - **Restore delivery sends only a re-exec, never a line the operator did not
   run (P-C6, durable-sessions plan).** `resurrect.rs::restore_delivery`
   returns a `session_send` flag map only for a session that was demonstrably
-  RUNNING a foreground command (`idle: false`): `--yes --submit`, so the
-  command resumes. An idle snapshot returns `None` and only its cwd restores;
-  a recorded `sudo` foreground returns `None` too. Don't add a branch that
+  RUNNING a foreground command (`idle: false`): `--yes --submit` re-runs the
+  recorded command with Enter. The old process is gone, so its argv runs
+  fresh. An idle snapshot returns `None` and only its cwd restores; a
+  recorded `sudo` foreground returns `None` too. Don't add a branch that
   delivers idle text: nothing typed in an old session is carried forward, so
   there is no stale line that could fire at boot.
 - **Restore delivery is SELF-ATTRIBUTED (`--from <new-id>`), and
@@ -1327,8 +1329,9 @@ in the message.
   halves stay, together (P-C7 live finding #2).** `send` prefixes a
   delivered payload with `from <sender>: ` for attribution; restore rides
   `send`, so the live soak's resurrected re-exec arrived as `from
-  quiet-birch (…1892): /run/…/sleep 900` — a bash syntax error. The fix keys off the ATTRIBUTED sender
-  (`resolve_sender`, i.e. `--from`), never the gate's own sender identity
+  quiet-birch (…1892): /run/…/sleep 900` — a bash syntax error. The fix keys
+  off the ATTRIBUTED sender (`resolve_sender`, i.e. `--from`), never the
+  gate's own sender identity
   (LANE IDENTITY P-ID2: a kernel-attested session, `graph/identity.rs::
   attested_sender` — the two are separate axes on purpose, module doc):
   restore is delivered from ANOTHER session's env, which is exactly how it

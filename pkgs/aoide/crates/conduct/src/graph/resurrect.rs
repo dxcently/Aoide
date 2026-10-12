@@ -61,8 +61,8 @@
 //! write:
 //! - **not idle, with a foreground `argv`** — the session was demonstrably
 //!   RUNNING something when it left. Re-exec it, `--yes --submit` and all:
-//!   the command was already in flight, so Enter resumes it rather than
-//!   starting something new. EXCEPT when `argv[0]`'s basename is
+//!   the recorded command re-runs with Enter; the old process is gone, so its
+//!   argv runs fresh. EXCEPT when `argv[0]`'s basename is
 //!   `sudo` (orchestrator ruling, open knob 5 — asked twice, unanswered,
 //!   default taken and flagged): a privileged foreground command is never
 //!   re-exec'd unattended — at best it hangs on a password prompt nobody is
@@ -484,7 +484,7 @@ fn resurrect_one(
     } else {
         match c.entry.restore.as_ref().and_then(|r| restore_delivery(door, &new_id, r)) {
             None => "none".to_string(),
-            Some(_) => {
+            Some(inv) => {
                 let ready = super::spawn::wait_ready(
                     &c.entry.agent,
                     &new_id,
@@ -494,12 +494,6 @@ fn resurrect_one(
                 if ready == super::spawn::Ready::NotReady {
                     "not-ready".to_string()
                 } else {
-                    let inv = c
-                        .entry
-                        .restore
-                        .as_ref()
-                        .and_then(|r| restore_delivery(door, &new_id, r))
-                        .expect("checked just above");
                     let inner = session_send(&inv);
                     if inner.status != Status::Ok {
                         format!("failed: {}", inner.message)
@@ -1324,7 +1318,7 @@ mod tests {
         assert!(restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none());
     }
 
-    /// The orchestrator ruling (open knob 5)    /// The orchestrator ruling (open knob 5): a recorded foreground of
+    /// The orchestrator ruling (open knob 5): a recorded foreground of
     /// `sudo …` re-execs nothing and delivers nothing — only the cwd
     /// restores. Covers both the narrow named check directly and the
     /// delivery decision that consults it.

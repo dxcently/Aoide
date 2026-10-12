@@ -2181,8 +2181,11 @@ outside this proof, each under its own rule. `aoide send` and `aoide spawn
 --prompt` passes `--yes`, so no human approves it); the caller is whatever process
 ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
-boot resurrect retypes a shell's own recorded line, never for `sudo`
-(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
+boot resurrect re-executes a session's recorded foreground command with
+Enter, never for `sudo`; an idle session gets its cwd only, with nothing
+typed (`resurrect.rs::restore_delivery`). The proof is that basename, and it
+is stated as one: a symlink named `claude` that points at `bash`, or a script
+named `claude`
 that execs a shell, passes it. It rejects the launchers the walk does not model
 and a label that does not match the wrap. It does not stop a same-uid process
 that names a shell after a harness; for that class the defence is inert content,
@@ -2990,8 +2993,9 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.
-An older record's `typed` key, written before that field was removed, is
-ignored on read and never written back.
+
+A record that still carries a `typed` key inside `restore` loads with that
+key dropped; no writer emits it.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like

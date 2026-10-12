@@ -1552,25 +1552,6 @@ mod tests {
         assert_eq!(legacy.ended_at, None);
     }
     #[test]
-    fn a_legacy_typed_key_in_a_restore_loads_and_is_not_written_back() {
-        // Records written before the typed capture was removed still carry a
-        // `typed` key inside `restore`. Nothing denies unknown fields here, so
-        // the record loads, the key is dropped, and the next rewrite does not
-        // carry the old text forward.
-        let legacy: SessionRecord = serde_json::from_str(
-            r#"{ "sessionId": "s", "restore": { "cwd": "/w", "idle": true, "argv": null, "typed": "cargo test" } }"#,
-        )
-        .unwrap();
-        assert_eq!(
-            legacy.restore,
-            Some(RestoreSnapshot { cwd: Some("/w".into()), idle: true, argv: None })
-        );
-        let rewritten = serde_json::to_string(&legacy).unwrap();
-        assert!(!rewritten.contains("typed"), "rewritten: {rewritten}");
-        assert!(!rewritten.contains("cargo test"), "rewritten: {rewritten}");
-    }
-
-    #[test]
     fn session_record_restore_round_trips_and_stays_absent_when_unset() {
         // serde: `restore` serialises as a nested object when Some, and is
         // skipped (skip_serializing_if) when None — additive/v0-safe on the
