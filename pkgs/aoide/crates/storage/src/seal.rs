@@ -648,7 +648,6 @@ pub fn learn_binding(node_name: &str, binding: &Binding) -> Result<Option<Bindin
             return if *binding == current { Ok(None) } else { Err(STALE_BINDING.to_string()) };
         }
     }
-    std::fs::create_dir_all(peer_bindings_dir()).map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(binding).map_err(|e| e.to_string())?;
     fs::atomic_write(&peer_binding_path(node_name), &(text + "\n")).map_err(|e| e.to_string())?;
     Ok(Some(binding.clone()))
@@ -1299,7 +1298,7 @@ fn record_seen(container: &Container, digest: &str) -> Result<(), String> {
         digest: digest.to_string(),
     })
     .map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(mail::mail_dir()).map_err(|e| e.to_string())?;
+    crate::fs::ensure_write_dir(&mail::mail_dir()).map_err(|e| e.to_string())?;
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)

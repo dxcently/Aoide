@@ -511,8 +511,6 @@ pub fn nodes_with_outbox() -> Result<Vec<String>, String> {
 /// lock. The one place [`write_entry`] and [`write_ack_if_absent`] both
 /// funnel their actual disk write through, so the two never drift on shape.
 fn write_entry_unlocked(node: &str, entry: &OutboxEntry) -> Result<(), String> {
-    let dir = node_dir(node);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = entry_path(node, &entry.envelope.msgid);
     let json = serde_json::to_string_pretty(entry).map_err(|e| e.to_string())?;
     atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
@@ -606,7 +604,7 @@ pub fn write_ack_if_absent(node: &str, acked_msgid: &str, entry: &OutboxEntry) -
         // is still actually there rather than trusting existence alone.
         let marker = ack_marker_path(&node, &acked_msgid);
         if let Some(parent) = marker.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+            crate::fs::ensure_write_dir(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         std::fs::write(&marker, entry.envelope.msgid.as_bytes())
             .map_err(|e| format!("{}: {e}", marker.display()))?;
@@ -924,8 +922,6 @@ fn read_filed_unlocked(node: &str) -> Result<Vec<String>, String> {
 }
 
 fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
-    let dir = node_dir(node);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = filed_path(node);
     if pending.is_empty() {
         let _ = std::fs::remove_file(&path);
@@ -1048,8 +1044,6 @@ fn write_link_state(node: &str, state: &LinkState) -> Result<(), String> {
     let node = node.to_string();
     let state = state.clone();
     with_lock(move || {
-        let dir = node_dir(&node);
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = link_path(&node);
         let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
         atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
@@ -1147,7 +1141,7 @@ pub fn try_take_poll_lock(node: &str) -> Result<Option<LinkLockGuard>, String> {
 
 fn try_take(node: &str, path: PathBuf) -> Result<Option<LinkLockGuard>, String> {
     let dir = node_dir(node);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    crate::fs::ensure_write_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)

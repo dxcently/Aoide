@@ -1178,6 +1178,10 @@ applied to the stage tree itself):
   `lyra`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
   never writes it.
 
+`state/` is owner-only and is the privacy boundary for everything under it;
+file and subdirectory modes inside it are not relied on. `aoided` refuses to
+start when it cannot make `state/` owner-only.
+
 **The runtime root (L-C2, lyra-carrier lane, task #107).** Every runtime
 tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,
 the composed `songbook/` — hangs off ONE root: `$AOIDE_ROOT` when set to an

@@ -161,7 +161,10 @@ by decision — no embedded database yet
   source what its target is. The private-file and private-directory policy is
   NOT answered here: `atomic_write_private`'s temp and `secure_private_dir`
   call `aoide_protocol::owner_only`, one implementation exposed from the leaf
-  crate rather than a second copy in this one.
+  crate rather than a second copy in this one. The state tree's privacy boundary
+  is `state/`: `fs::ensure_write_dir` locks it to `0700` before a storage write
+  creates anything under it, and `aoided` locks it at startup. Modes of the files
+  and subdirectories under it are not relied on.
   `conducting_stage_dir`'s first no-override resolution in a process also
   drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
   six core files off their pre-split `song/stage/` location, never

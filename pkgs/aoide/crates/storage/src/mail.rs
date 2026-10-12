@@ -480,7 +480,7 @@ fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 
 fn ensure_mail_dir() -> Result<(), String> {
     let dir = mail_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
+    crate::fs::ensure_write_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
 /// One-shot, idempotent `inbox.json` → typed `receipt` entries, run under

@@ -509,6 +509,13 @@
   in its OWN new subdirectory (not an existing already-secured one) calls
   this on that subdirectory the same way, before the first
   `atomic_write_private` into it.
+- **`state/` is the privacy boundary for the state tree.** `fs::ensure_write_dir`
+  makes `state/` owner-only (`0700`) before any storage write creates something
+  under it, and `aoided` does the same once at startup, which covers a tree a raw
+  creator in another crate made first. File and subdirectory modes under `state/`
+  are not relied on. Limit: on Windows the owner-only policy is attached only when
+  a call creates `state/`; an existing `state/` is never re-tightened, since that
+  strips the inherited ACEs of children already in it, and that is unverified.
 - **`ledger` is append-only and never a lookup key for live state (P-D8).**
   `append_ledger_entry` only ever opens `state/session-ledger.jsonl` in
   append mode — nothing in this crate truncates, rewrites, or prunes it;

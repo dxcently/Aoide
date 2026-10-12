@@ -1263,6 +1263,22 @@ fn stream_subscribe(events_path: &Path, req: &Value, reader: &mut BufReader<Unix
     }
 }
 
+/// `state/` is the privacy boundary for the state tree. Locked once at
+/// start, so a tree a raw creator outside storage made first is tightened too.
+/// A `state/` that cannot be made owner-only stops the daemon before it binds.
+fn tighten_state_tree() -> std::io::Result<()> {
+    let state = aoide_storage::fs::state_dir();
+    aoide_storage::fs::ensure_write_dir(&state).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!(
+                "aoided will not start: {} cannot be made owner-only (0700): {e}",
+                state.display()
+            ),
+        )
+    })
+}
+
 /// The resident daemon's own main loop (P-D2, `docs/architecture/
 /// AOIDED.md`'s "L1 — the event bus" section): bind the socket, append one
 /// `started` record to BOTH the single audit log (`log_path` — the same
@@ -1283,6 +1299,7 @@ pub fn run_loop(
     registry: &'static Registry,
     dispatch: DispatchFn,
 ) -> std::io::Result<()> {
+    tighten_state_tree()?;
     let listener = bind_socket(&socket_path)?;
 
     let _ = audit(&log_path, Door::Daemon, EventClass::Audit, "daemon", "started", "aoided resident loop online");
@@ -1610,6 +1627,28 @@ mod tests {
             unidentified.flags.get(key).unwrap().parse::<i32>().is_err(),
             "the empty stamp must not parse as a pid"
         );
+    }
+
+    /// Daemon start locks `state/` to `0700` before the socket is bound.
+    #[cfg(unix)]
+    #[test]
+    fn daemon_start_tightens_a_wide_state_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let state = std::env::temp_dir().join(format!("aoide-daemon-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let result = tighten_state_tree();
+        let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+
+        std::env::remove_var("AOIDE_STATE_DIR");
+        let _ = std::fs::remove_dir_all(&state);
+        drop(guard);
+        result.unwrap();
+        assert_eq!(mode, 0o700);
     }
 
     /// `serve_daemon` over a tempdir socket: `ping` round-trips with the

@@ -461,7 +461,7 @@ fn migrate_conducting_stage(new_dir: &std::path::Path) {
     if old_dir == new_dir || !old_dir.exists() {
         return;
     }
-    if let Err(e) = std::fs::create_dir_all(new_dir) {
+    if let Err(e) = ensure_write_dir(new_dir) {
         // Loud, not fatal: readers treat a missing file as an empty
         // registry, so a silently skipped migration would look like the
         // operator's sessions/projects vanished. Narrate the real cause.
@@ -879,7 +879,7 @@ fn atomic_write_bytes_impl(
         _ => path.to_path_buf(),
     };
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
+        ensure_write_dir(parent)?;
     }
     let tmp = target.with_extension(format!("tmp.{}", std::process::id()));
     // ONE failure path for both halves. A write that dies partway (ENOSPC inside
@@ -1343,6 +1343,59 @@ pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
+/// Create `dir` (and missing ancestors) for a write. When `dir` lies under
+/// [`state_dir`], `state/` itself is made owner-only first, so nothing under it
+/// is reachable through a wider parent. Outside the state tree this is a plain
+/// `create_dir_all`.
+pub fn ensure_write_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    let state = state_dir();
+    if dir.starts_with(&state) {
+        lock_state_dir(&state)?;
+    }
+    std::fs::create_dir_all(dir)
+}
+
+/// The owner-only half of [`ensure_write_dir`]. On unix, one stat, and a chmod
+/// only when `state/` is not already `0700`; a `state/` this call creates is
+/// made `0700` directly, so it is never wider even briefly. On Windows the
+/// owner-only policy is attached only when this call creates `state/`: an
+/// existing `state/` is left alone, because tightening a directory that already
+/// has children strips their inherited ACEs, which is not verified here.
+fn lock_state_dir(state: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let owner_only = std::fs::Permissions::from_mode(0o700);
+        match std::fs::metadata(state) {
+            Ok(meta) if meta.permissions().mode() & 0o777 == 0o700 => Ok(()),
+            Ok(_) => std::fs::set_permissions(state, owner_only),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = state.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                match std::fs::DirBuilder::new().mode(0o700).create(state) {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        std::fs::set_permissions(state, owner_only)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+    #[cfg(windows)]
+    {
+        if std::fs::metadata(state).is_ok() {
+            return Ok(());
+        }
+        if let Some(parent) = state.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        aoide_protocol::owner_only::ensure_private_dir(state)
+    }
+}
+
 /// Run `f` while holding an exclusive advisory lock on the stage directory,
 /// serialising the whole load-modify-write of the shared stage files across
 /// every writer (per-hook processes, the ~1 Hz conduct ticks, the window
@@ -1448,7 +1501,7 @@ pub fn try_stage_lock<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 /// calls against the same path.
 pub(crate) fn lock_path<T>(path: std::path::PathBuf, f: impl FnOnce() -> T) -> Result<T, String> {
     if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        let _ = ensure_write_dir(dir);
     }
     let lock = std::fs::OpenOptions::new()
         .create(true)
@@ -1747,7 +1800,7 @@ pub fn seed_if_absent(path: &std::path::Path, empty_body: &str, key: &str) -> Op
             // appeared mid-boot is never overwritten. A distinct `.seed.<pid>`
             // temp keeps it clear of `sweep_stale_temps`'s `.tmp.<pid>` pattern.
             if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                let _ = ensure_write_dir(parent);
             }
             let tmp = path.with_extension(format!("seed.{}", std::process::id()));
             let seeded = (|| -> std::io::Result<bool> {
@@ -2903,6 +2956,55 @@ mod tests {
             assert!(body.contains(name), "{name}'s content must have moved verbatim, got {body}");
         }
 
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    fn unix_mode(dir: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(dir).unwrap().permissions().mode() & 0o777
+    }
+
+    /// A storage write tightens a wide `state/`, and leaves `state/stage/` at
+    /// whatever mode it already has.
+    #[cfg(unix)]
+    #[test]
+    fn a_storage_write_tightens_a_wide_state_and_leaves_state_stage_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-state-tighten-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("AOIDE_ROOT", home.join(".aoide"));
+
+        let state = state_dir();
+        let stage = state.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        crate::stage::write_stage(&stage.join("sessions.json"), &serde_json::json!({ "v": 0 })).unwrap();
+
+        assert_eq!(unix_mode(&state), 0o700);
+        assert_eq!(unix_mode(&stage), 0o755);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A fresh storage write creates `state/` owner-only.
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_storage_write_creates_state_owner_only() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-state-fresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("AOIDE_ROOT", home.join(".aoide"));
+
+        let state = state_dir();
+        assert!(!state.exists());
+        crate::stage::write_stage(&state.join("stage").join("sessions.json"), &serde_json::json!({ "v": 0 })).unwrap();
+
+        assert_eq!(unix_mode(&state), 0o700);
         let _ = std::fs::remove_dir_all(&home);
     }
 
