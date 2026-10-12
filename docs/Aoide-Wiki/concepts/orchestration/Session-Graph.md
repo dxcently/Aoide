@@ -778,6 +778,9 @@ registry; only `SUPER+ESCAPE` (lock) still execs the dead `shell lock` form
 - [[Node-Federation]] — the wire half of key-verified identity (P-ID5)
 - [[Secrets-Broker]] — the origin gate, the credential's first policy consumer (P-ID4)
 - [[Node-Transport]] — the reaper backstop that collects a tunnel a killed session never closed
+- [Session find](../../../architecture/SESSION-FIND.md) — designed, not built:
+  `aoide session find` over this roster, the node caches and the mail
+  cursors — what each session carries, and the sessions related to one
 
 ## Managed task runs
 
