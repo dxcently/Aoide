@@ -10,6 +10,10 @@
 use aoide_protocol::state::canonical_state;
 use aoide_protocol::suggest::closest;
 use aoide_storage::addr::{resolve, LocalCandidate, Resolution};
+use aoide_storage::letter;
+use aoide_storage::mail::{Address, Cursors, Entry};
+use std::cmp::Ordering;
+use std::path::Path;
 
 /// The closed key set. A word whose text before its first colon is not one of
 /// these is refused, so a typo can never silently match nothing.
@@ -91,8 +95,8 @@ pub(crate) enum Grade {
 
 /// One session row as find sees it. A local row comes from this box's stage;
 /// a cached row from a far node's `node-cache` file, where `state` is the
-/// last-seen state. `None` on a cached row's `reads` or `cc` means the node
-/// does not publish that fact, which is not the same as an empty list.
+/// last-seen state. A cached row's `mail` is `None`: the node does not publish
+/// its mailboxes, which is not the same as having none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Row {
     pub(crate) node: String,
@@ -103,33 +107,67 @@ pub(crate) struct Row {
     pub(crate) title: Option<String>,
     pub(crate) cwd: String,
     pub(crate) agent: String,
+    pub(crate) model: Option<String>,
     pub(crate) kind: Option<String>,
     pub(crate) state: String,
     pub(crate) project: Option<String>,
     pub(crate) native_role: Option<String>,
     /// Projects this session leads.
     pub(crate) leads: Vec<String>,
+    /// A task run's report mailbox. Task runs only.
+    pub(crate) report_to: Option<String>,
+    /// The git common directory of `cwd`. Local rows only.
+    pub(crate) repo: Option<String>,
+    /// The conducted ancestor this session reads mail through: its own id when
+    /// it is a conducted wrap, else the nearest conducted ancestor. Local only.
+    pub(crate) wrap: Option<String>,
     /// The parent, as `(node, session id)`. A local parent sits on this row's
     /// own node.
     pub(crate) parent: Option<Ident>,
     pub(crate) remote_parent: Option<Ident>,
-    /// Mailboxes the session reads. `None` when the node does not publish them.
-    pub(crate) reads: Option<Vec<String>>,
-    /// Letters the session was cc'd on. `None` when the node does not publish them.
-    pub(crate) cc: Option<Vec<Cc>>,
+    /// The children this session spawned on other nodes.
+    pub(crate) remote_children: Vec<Ident>,
+    pub(crate) mail: Option<MailFacts>,
+}
+
+/// What a local session's mailboxes say. [`mail_facts`] fills it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct MailFacts {
+    pub(crate) reads: Vec<ReadMailbox>,
+    pub(crate) cc: Vec<CcLetter>,
+    pub(crate) threads: Vec<Thread>,
+}
+
+/// One mailbox the session reads: its unread count, and the wrap it reads
+/// through when that is not the session itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReadMailbox {
+    pub(crate) name: String,
+    pub(crate) unread: u64,
+    pub(crate) via: Option<String>,
+}
+
+/// A letter the session was cc'd on, as its mailbox holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CcLetter {
+    pub(crate) msgid: String,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) subject: String,
+    /// `node/name` of the sender.
+    pub(crate) from: String,
+    /// `node/name` of each To address.
+    pub(crate) to: Vec<String>,
+}
+
+/// A thread a letter in one of the session's mailboxes belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Thread {
+    pub(crate) id: String,
+    pub(crate) subject: String,
 }
 
 /// A session's identity: its node, then its session id.
 pub(crate) type Ident = (String, String);
-
-/// One letter the session was cc'd on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Cc {
-    pub(crate) sender: String,
-    pub(crate) to: Vec<String>,
-    pub(crate) subject: String,
-    pub(crate) thread_id: String,
-}
 
 /// Every row find can answer from, and the box it answers on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,6 +347,24 @@ fn resolve_ref(index: &FindIndex, reference: &str) -> Result<Option<Ident>, Find
     }
 }
 
+/// Each `parent:` value resolved once, aligned with `query.terms` (empty for
+/// every other term). An ambiguous reference is refused here, before any row.
+fn parent_idents(index: &FindIndex, query: &Query) -> Result<Vec<Vec<Option<Ident>>>, FindError> {
+    query
+        .terms
+        .iter()
+        .map(|term| match term.key {
+            Key::Parent => term.values.iter().map(|v| resolve_ref(index, v)).collect::<Result<Vec<_>, FindError>>(),
+            _ => Ok(Vec::new()),
+        })
+        .collect()
+}
+
+/// The identity a row answers to: its node and its session id.
+fn identity(row: &Row) -> Ident {
+    (row.node.clone(), row.session_id.clone())
+}
+
 /// The fields an exact-or-prefix key reads off a row. `mailbox:` reads this
 /// box's rows only: a far node's mailboxes are not published here.
 fn key_fields(row: &Row, key: Key) -> Vec<(&'static str, String)> {
@@ -336,7 +392,7 @@ fn key_fields(row: &Row, key: Key) -> Vec<(&'static str, String)> {
         Key::Mailbox if !row.local => Vec::new(),
         Key::Mailbox => {
             let mut fields: Vec<(&'static str, String)> = Vec::new();
-            fields.extend(row.reads.iter().flatten().map(|n| ("reads", n.clone())));
+            fields.extend(row.mail.iter().flat_map(|m| &m.reads).map(|r| ("reads", r.name.clone())));
             fields.extend(row.task.iter().map(|t| ("inbox", t.clone())));
             fields.extend(row.petname.iter().map(|p| ("petname", p.clone())));
             fields
@@ -359,18 +415,20 @@ fn exact_or_prefix(row: &Row, term: &Term, key: Key) -> Option<Matched> {
 /// `cc:` searches the letters the session was cc'd on: the sender, each To
 /// address and the subject take a substring; the thread id takes a prefix.
 fn cc_match(row: &Row, term: &Term) -> Option<Matched> {
-    let letters = row.cc.as_ref()?;
+    let letters = &row.mail.as_ref()?.cc;
     let mut best = None;
     for value in &term.values {
         for letter in letters {
             let word = &term.word;
-            consider(&mut best, word, "sender", &letter.sender, grade(value, &letter.sender));
+            consider(&mut best, word, "sender", &letter.from, grade(value, &letter.from));
             for to in &letter.to {
                 consider(&mut best, word, "to", to, grade(value, to));
             }
             consider(&mut best, word, "subject", &letter.subject, grade(value, &letter.subject));
-            let thread = grade(value, &letter.thread_id).filter(|g| *g != Grade::Substring);
-            consider(&mut best, word, "thread", &letter.thread_id, thread);
+            if let Some(thread) = &letter.thread_id {
+                let by_prefix = grade(value, thread).filter(|g| *g != Grade::Substring);
+                consider(&mut best, word, "thread", thread, by_prefix);
+            }
         }
     }
     best
@@ -451,6 +509,17 @@ fn label(row: &Row) -> &str {
     row.petname.as_deref().unwrap_or(&row.session_id)
 }
 
+/// The keys after the grades: local before cached, then the state's urgency,
+/// then the label, node and session id. Find and `--related` share it.
+fn tiebreak(a: &Row, b: &Row) -> Ordering {
+    b.local
+        .cmp(&a.local)
+        .then(urgency(&a.state).cmp(&urgency(&b.state)))
+        .then_with(|| label(a).cmp(label(b)))
+        .then_with(|| a.node.cmp(&b.node))
+        .then_with(|| a.session_id.cmp(&b.session_id))
+}
+
 struct Ranked<'a> {
     hit: Hit<'a>,
     weakest: Option<Grade>,
@@ -458,30 +527,19 @@ struct Ranked<'a> {
 }
 
 /// The four keys, in order: the weakest bare-word grade, then the sum of the
-/// grades (both higher first); local before cached; the state's urgency; then
-/// the label, node and session id. Terms only filter, so they never rank.
-fn order(a: &Ranked<'_>, b: &Ranked<'_>) -> std::cmp::Ordering {
+/// grades (both higher first), then [`tiebreak`]. Terms only filter, so they
+/// never rank.
+fn order(a: &Ranked<'_>, b: &Ranked<'_>) -> Ordering {
     b.weakest
         .cmp(&a.weakest)
         .then(b.sum.cmp(&a.sum))
-        .then(b.hit.row.local.cmp(&a.hit.row.local))
-        .then(urgency(&a.hit.row.state).cmp(&urgency(&b.hit.row.state)))
-        .then_with(|| label(a.hit.row).cmp(label(b.hit.row)))
-        .then_with(|| a.hit.row.node.cmp(&b.hit.row.node))
-        .then_with(|| a.hit.row.session_id.cmp(&b.hit.row.session_id))
+        .then_with(|| tiebreak(a.hit.row, b.hit.row))
 }
 
 /// Rank the rows that answer `query`. A `done` row is left out unless `all`.
 /// An ambiguous `parent:` reference is refused before any row is read.
 pub(crate) fn find<'a>(index: &'a FindIndex, query: &Query, all: bool) -> Result<Found<'a>, FindError> {
-    let parents = query
-        .terms
-        .iter()
-        .map(|term| match term.key {
-            Key::Parent => term.values.iter().map(|v| resolve_ref(index, v)).collect::<Result<Vec<_>, FindError>>(),
-            _ => Ok(Vec::new()),
-        })
-        .collect::<Result<Vec<Vec<Option<Ident>>>, FindError>>()?;
+    let parents = parent_idents(index, query)?;
     let mut ranked = Vec::new();
     for row in &index.rows {
         if !all && canonical_state(&row.state) == "done" {
@@ -502,9 +560,276 @@ pub(crate) fn find<'a>(index: &'a FindIndex, query: &Query, all: bool) -> Result
     })
 }
 
+/// `address` as `node/name`, the form find shows every sender and recipient in.
+fn address(a: &Address) -> String {
+    format!("{}/{}", a.node, a.name)
+}
+
+/// Fill each local row's [`MailFacts`] from the mailbase, with no I/O.
+/// `cursors` is `peek_cursors()`'s reader maps and `entries` is `peek_base()`'s
+/// correspondence entries. A row reads through its wrap, so a hooked child
+/// counts its wrap's marks, and an unread count is the rule `unread_for` uses.
+/// A cc'd letter is one filed to a mailbox the session reads whose Cc names that
+/// mailbox: the copy under the mailbox is the fact, since Cc is context.
+/// Remote rows keep `None`.
+pub(crate) fn mail_facts(rows: &mut [Row], cursors: &Cursors, entries: &[Entry]) {
+    for row in rows.iter_mut().filter(|r| r.local) {
+        let reader = row.wrap.clone().unwrap_or_else(|| row.session_id.clone());
+        let via = (reader != row.session_id).then(|| reader.clone());
+        let reads: Vec<ReadMailbox> = cursors
+            .iter()
+            .filter_map(|(name, readers)| {
+                let mark = readers.get(&reader)?.seq;
+                let unread = entries
+                    .iter()
+                    .filter(|e| e.envelope.header.to.name == *name && e.seq > mark)
+                    .count();
+                Some(ReadMailbox { name: name.clone(), unread: unread as u64, via: via.clone() })
+            })
+            .collect();
+        let mut facts = MailFacts { reads, ..MailFacts::default() };
+        for entry in entries {
+            let to = &entry.envelope.header.to;
+            if !facts.reads.iter().any(|r| r.name == to.name) {
+                continue;
+            }
+            let Some(content) = letter::decode(&entry.envelope.text) else { continue };
+            if let Some(id) = &content.thread_id {
+                if !facts.threads.iter().any(|t| &t.id == id) {
+                    facts.threads.push(Thread { id: id.clone(), subject: content.subject.clone() });
+                }
+            }
+            if content.cc.iter().any(|a| a.name == to.name && a.node == to.node) {
+                facts.cc.push(CcLetter {
+                    msgid: entry.envelope.msgid.clone(),
+                    thread_id: content.thread_id.clone(),
+                    subject: content.subject.clone(),
+                    from: address(&entry.envelope.header.from),
+                    to: content.to.iter().map(address).collect(),
+                });
+            }
+        }
+        row.mail = Some(facts);
+    }
+}
+
+/// The edges a row carries, read off the index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Edges {
+    pub(crate) parent: Option<Ident>,
+    pub(crate) children: Vec<Ident>,
+    pub(crate) siblings: Vec<Ident>,
+    pub(crate) wrap: Option<String>,
+    pub(crate) remote_parent: Option<Ident>,
+    pub(crate) remote_children: Vec<Ident>,
+    pub(crate) repo: Option<String>,
+}
+
+/// What a session carries beyond its own row: its mailboxes, the letters it was
+/// cc'd on, its threads, its edges. `unknown` names each mail fact the node does
+/// not publish (`mailboxes` is `reads`); a name there is never an empty list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Carries {
+    pub(crate) reads: Option<Vec<ReadMailbox>>,
+    /// The task slug and the petname: the names filed mail can reach this
+    /// session under.
+    pub(crate) inbox: Vec<String>,
+    pub(crate) report_to: Option<String>,
+    pub(crate) cc: Option<Vec<CcLetter>>,
+    pub(crate) threads: Option<Vec<Thread>>,
+    pub(crate) edges: Edges,
+    pub(crate) unknown: Vec<&'static str>,
+}
+
+/// The index's view of one row: its mail facts, its inbox, and its edges.
+pub(crate) fn carries(index: &FindIndex, row: &Row) -> Carries {
+    let me = identity(row);
+    let children = index
+        .rows
+        .iter()
+        .filter(|r| r.parent.as_ref() == Some(&me))
+        .map(identity)
+        .collect();
+    let siblings = match &row.parent {
+        Some(parent) => index
+            .rows
+            .iter()
+            .filter(|r| r.parent.as_ref() == Some(parent) && identity(r) != me)
+            .map(identity)
+            .collect(),
+        None => Vec::new(),
+    };
+    let unknown = if row.mail.is_none() { vec!["mailboxes", "cc", "threads"] } else { Vec::new() };
+    Carries {
+        reads: row.mail.as_ref().map(|m| m.reads.clone()),
+        inbox: row.task.iter().chain(&row.petname).cloned().collect(),
+        report_to: row.report_to.clone(),
+        cc: row.mail.as_ref().map(|m| m.cc.clone()),
+        threads: row.mail.as_ref().map(|m| m.threads.clone()),
+        edges: Edges {
+            parent: row.parent.clone(),
+            children,
+            siblings,
+            wrap: row.wrap.clone(),
+            remote_parent: row.remote_parent.clone(),
+            remote_children: row.remote_children.clone(),
+            repo: row.repo.clone(),
+        },
+        unknown,
+    }
+}
+
+/// One reason two rows are related: its place in the order (1 strongest), its
+/// kind, and the phrase `--related` prints for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Reason {
+    pub(crate) order: u8,
+    pub(crate) kind: &'static str,
+    pub(crate) shown: String,
+}
+
+/// A row related to the target, with every reason it has, strongest first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Related<'a> {
+    pub(crate) row: &'a Row,
+    pub(crate) reasons: Vec<Reason>,
+}
+
+/// The repo's name: the directory its `.git` common dir sits in.
+fn repo_name(common: &str) -> String {
+    Path::new(common)
+        .parent()
+        .and_then(Path::file_name)
+        .map_or_else(|| common.to_string(), |n| n.to_string_lossy().into_owned())
+}
+
+/// Every reason `r` shares with `t`, one per distinct phrase, in order. Mail
+/// reasons hold only between local rows, and so does the repo reason.
+fn reasons_between(t: &Row, r: &Row) -> Vec<Reason> {
+    let (t_id, r_id) = (identity(t), identity(r));
+    let mut out: Vec<Reason> = Vec::new();
+    let mut add = |order: u8, kind: &'static str, shown: String| out.push(Reason { order, kind, shown });
+
+    let both_local = t.local && r.local;
+    let r_is_t_wrap = both_local && t.wrap.as_deref() == Some(r.session_id.as_str());
+    let t_is_r_wrap = both_local && r.wrap.as_deref() == Some(t.session_id.as_str());
+    if t.parent.as_ref() == Some(&r_id) {
+        add(1, "lineage", if r_is_t_wrap { "parent (its wrap)" } else { "parent" }.into());
+    } else if r_is_t_wrap {
+        add(1, "lineage", "parent (its wrap)".into());
+    }
+    if r.parent.as_ref() == Some(&t_id) {
+        add(1, "lineage", if t_is_r_wrap { "child (its wrap)" } else { "child" }.into());
+    } else if t_is_r_wrap {
+        add(1, "lineage", "child (its wrap)".into());
+    }
+
+    if t.remote_parent.as_ref() == Some(&r_id) || r.remote_children.contains(&t_id) {
+        add(2, "remote lineage", "remote parent".into());
+    }
+    if r.remote_parent.as_ref() == Some(&t_id) || t.remote_children.contains(&r_id) {
+        add(2, "remote lineage", "remote child".into());
+    }
+
+    if t.parent.is_some() && t.parent == r.parent {
+        add(3, "sibling", "sibling".into());
+    }
+
+    if let (Some(a), Some(b)) = (&t.task, &r.task) {
+        if a == b {
+            add(4, "same role", format!("same role: {a}"));
+        }
+    }
+    if let (Some(a), Some(b)) = (&t.native_role, &r.native_role) {
+        if a == b {
+            add(4, "same role", format!("same role: {a}"));
+        }
+    }
+    if !t.leads.is_empty() && !r.leads.is_empty() {
+        add(4, "same role", "same role: lead".into());
+    }
+
+    if let (true, Some(tm), Some(rm)) = (both_local, &t.mail, &r.mail) {
+        for m in &tm.reads {
+            if rm.reads.iter().any(|x| x.name == m.name) {
+                add(5, "mailbox", format!("same mailbox: {}", m.name));
+            }
+        }
+        for (reports, reader) in [(&r.report_to, tm), (&t.report_to, rm)] {
+            if let Some(name) = reports {
+                if reader.reads.iter().any(|x| &x.name == name) {
+                    add(5, "mailbox", format!("reads its reports: {name}"));
+                }
+            }
+        }
+        for th in &tm.threads {
+            if rm.threads.iter().any(|x| x.id == th.id) {
+                let short: String = th.id.chars().take(4).collect();
+                add(6, "thread", format!("shared thread: \"{}\" ({short}…)", th.subject));
+            }
+        }
+    }
+
+    if t.project.is_some() && t.project == r.project {
+        add(7, "same project", format!("same project: {}", t.project.as_deref().unwrap_or_default()));
+    }
+
+    if let (true, Some(a), Some(b)) = (both_local, &t.repo, &r.repo) {
+        if a == b {
+            add(8, "same repo", format!("same repo: {}", repo_name(a)));
+        }
+    }
+
+    let mut unique: Vec<Reason> = Vec::new();
+    for reason in out {
+        if !unique.contains(&reason) {
+            unique.push(reason);
+        }
+    }
+    unique.sort_by_key(|r| r.order);
+    unique
+}
+
+/// The rows related to `target`, each with its reasons. The target never
+/// relates to itself. A `done` row is left out unless `all`, and `narrow`
+/// (a query beside `--related`) filters the related rows the way it filters
+/// find's. Rows sort by their strongest reason, then by how many reasons they
+/// have, then by [`tiebreak`].
+pub(crate) fn related<'a>(
+    index: &'a FindIndex,
+    target: &Row,
+    narrow: &Query,
+    all: bool,
+) -> Result<Vec<Related<'a>>, FindError> {
+    let parents = parent_idents(index, narrow)?;
+    let me = identity(target);
+    let mut found: Vec<Related<'a>> = Vec::new();
+    for row in &index.rows {
+        if identity(row) == me || (!all && canonical_state(&row.state) == "done") {
+            continue;
+        }
+        if answer(row, narrow, &parents).is_none() {
+            continue;
+        }
+        let reasons = reasons_between(target, row);
+        if !reasons.is_empty() {
+            found.push(Related { row, reasons });
+        }
+    }
+    found.sort_by(|a, b| {
+        let strongest = |x: &Related<'_>| x.reasons.iter().map(|r| r.order).min();
+        strongest(a)
+            .cmp(&strongest(b))
+            .then(b.reasons.len().cmp(&a.reasons.len()))
+            .then_with(|| tiebreak(a.row, b.row))
+    });
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aoide_storage::{display, letter::LetterContent, mail};
 
     /// A local row on this box (`osaka`), with mailboxes published and no cc.
     fn local(id: &str, petname: &str, state: &str) -> Row {
@@ -522,10 +847,14 @@ mod tests {
             project: None,
             native_role: None,
             leads: Vec::new(),
+            model: None,
+            report_to: None,
+            repo: None,
+            wrap: None,
             parent: None,
             remote_parent: None,
-            reads: Some(Vec::new()),
-            cc: Some(Vec::new()),
+            remote_children: Vec::new(),
+            mail: Some(MailFacts::default()),
         }
     }
 
@@ -534,8 +863,7 @@ mod tests {
         Row {
             node: node.into(),
             local: false,
-            reads: None,
-            cc: None,
+            mail: None,
             ..local(id, petname, state)
         }
     }
@@ -551,6 +879,36 @@ mod tests {
     fn run(index: &FindIndex, line: &str) -> Vec<String> {
         let found = find(index, &query(line), false).expect("the query runs");
         found.hits.iter().map(|h| h.row.session_id.clone()).collect()
+    }
+
+    fn read(name: &str) -> ReadMailbox {
+        ReadMailbox { name: name.into(), unread: 0, via: None }
+    }
+
+    /// `row` with its mailboxes and threads published, and no cc.
+    fn with_mail(mut row: Row, reads: &[&str], threads: Vec<Thread>) -> Row {
+        row.mail = Some(MailFacts {
+            reads: reads.iter().map(|n| read(n)).collect(),
+            threads,
+            ..MailFacts::default()
+        });
+        row
+    }
+
+    fn id(node: &str, session: &str) -> Ident {
+        (node.into(), session.into())
+    }
+
+    fn texts(reasons: &[Reason]) -> Vec<&str> {
+        reasons.iter().map(|r| r.shown.as_str()).collect()
+    }
+
+    fn related_ids(index: &FindIndex, target: &Row, narrow: &str, all: bool) -> Vec<String> {
+        related(index, target, &query(narrow), all)
+            .expect("the query runs")
+            .iter()
+            .map(|r| r.row.session_id.clone())
+            .collect()
     }
 
     #[test]
@@ -667,7 +1025,7 @@ mod tests {
     #[test]
     fn mailbox_matches_a_read_mailbox_its_task_inbox_or_its_petname_on_this_box_only() {
         let mut mine = local("a", "brave-otter", "idle");
-        mine.reads = Some(vec!["reviewer".into()]);
+        mine.mail = Some(MailFacts { reads: vec![read("reviewer")], ..MailFacts::default() });
         mine.task = Some("review-pr".into());
         let mut far = cached("yomi-strix", "b", "brave-otter", "idle");
         far.task = Some("review-pr".into());
@@ -682,15 +1040,17 @@ mod tests {
     #[test]
     fn cc_searches_the_sender_to_and_subject_and_a_thread_id_by_prefix() {
         let mut row = local("a", "alpha", "idle");
-        row.cc = Some(vec![Cc {
-            sender: "osaka/builder".into(),
-            to: vec!["reviewer".into()],
-            subject: "PR 41 review".into(),
-            thread_id: "3f2a9c".into(),
-        }]);
-        let mut far = cached("yomi-strix", "b", "bravo", "idle");
-        far.cc = None;
-        let idx = index(vec![row, far]);
+        row.mail = Some(MailFacts {
+            cc: vec![CcLetter {
+                msgid: "m1".into(),
+                thread_id: Some("3f2a9c".into()),
+                subject: "PR 41 review".into(),
+                from: "osaka/builder".into(),
+                to: vec!["osaka/reviewer".into()],
+            }],
+            ..MailFacts::default()
+        });
+        let idx = index(vec![row, cached("yomi-strix", "b", "bravo", "idle")]);
 
         assert_eq!(run(&idx, r#"cc:"pr 41""#), ["a"], "the subject, as a prefix");
         assert_eq!(run(&idx, "cc:review"), ["a"], "the subject, as a substring");
@@ -848,5 +1208,222 @@ mod tests {
         let found = find(&idx, &query(""), false).unwrap();
         assert_eq!(found.hits.iter().map(|h| h.row.session_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
         assert!(found.hits.iter().all(|h| h.matched.is_empty()));
+    }
+
+    #[test]
+    fn reasons_come_strongest_first_and_each_phrase_once() {
+        let mut target = local("t", "alpha", "idle");
+        target.parent = Some(id("osaka", "p"));
+        target.project = Some("aoide".into());
+        target.task = Some("review".into());
+        target.native_role = Some("review".into());
+        let mut other = local("o", "bravo", "idle");
+        other.parent = Some(id("osaka", "p"));
+        other.project = Some("aoide".into());
+        other.task = Some("review".into());
+        other.native_role = Some("review".into());
+
+        let reasons = reasons_between(&target, &other);
+        assert_eq!(texts(&reasons), ["sibling", "same role: review", "same project: aoide"]);
+        assert_eq!(reasons.iter().map(|r| r.order).collect::<Vec<_>>(), [3, 4, 7]);
+    }
+
+    #[test]
+    fn a_wrap_is_named_its_wrap_in_a_lineage_reason() {
+        let wrap = local("wrap-id", "warm-birch", "idle");
+        let mut child = local("child-id", "child", "working");
+        child.parent = Some(id("osaka", "wrap-id"));
+        child.wrap = Some("wrap-id".into());
+        assert_eq!(texts(&reasons_between(&child, &wrap)), ["parent (its wrap)"]);
+        assert_eq!(texts(&reasons_between(&wrap, &child)), ["child (its wrap)"]);
+    }
+
+    #[test]
+    fn a_remote_child_or_parent_is_a_remote_lineage_reason() {
+        let mut mine = local("mine", "alpha", "idle");
+        mine.remote_children = vec![id("yomi-strix", "far")];
+        let far = cached("yomi-strix", "far", "far", "working");
+        assert_eq!(texts(&reasons_between(&mine, &far)), ["remote child"]);
+        assert_eq!(texts(&reasons_between(&far, &mine)), ["remote parent"]);
+    }
+
+    #[test]
+    fn a_shared_mailbox_report_and_thread_need_two_local_rows() {
+        let thread = Thread { id: "ab".repeat(32), subject: "PR 41".into() };
+        let mine = with_mail(local("a", "alpha", "idle"), &["reviewer"], vec![thread.clone()]);
+        let mut theirs = with_mail(local("b", "bravo", "idle"), &["reviewer"], vec![thread]);
+        theirs.report_to = Some("reviewer".into());
+
+        assert_eq!(
+            texts(&reasons_between(&mine, &theirs)),
+            ["same mailbox: reviewer", "reads its reports: reviewer", "shared thread: \"PR 41\" (abab…)"],
+        );
+        let far = cached("yomi-strix", "c", "charlie", "idle");
+        assert!(reasons_between(&mine, &far).is_empty(), "a far node's mail is not published here");
+    }
+
+    #[test]
+    fn a_shared_repo_is_named_by_its_directory_and_holds_only_locally() {
+        let mut a = local("a", "alpha", "idle");
+        a.repo = Some("/home/k/aoide/.git".into());
+        let mut b = local("b", "bravo", "idle");
+        b.repo = Some("/home/k/aoide/.git".into());
+        assert_eq!(texts(&reasons_between(&a, &b)), ["same repo: aoide"]);
+        let mut far = cached("yomi-strix", "c", "charlie", "idle");
+        far.repo = Some("/home/k/aoide/.git".into());
+        assert!(reasons_between(&a, &far).is_empty());
+    }
+
+    #[test]
+    fn related_sorts_by_the_strongest_reason_then_the_count_then_the_tiebreak() {
+        let mut target = local("t", "alpha", "idle");
+        target.parent = Some(id("osaka", "p"));
+        target.project = Some("aoide".into());
+        let mut sibling = local("s", "sibling", "idle");
+        sibling.parent = Some(id("osaka", "p"));
+        let mut aaron = local("x", "aaron", "idle");
+        aaron.parent = Some(id("osaka", "p"));
+        let mut both = local("b", "both", "idle");
+        both.parent = Some(id("osaka", "p"));
+        both.project = Some("aoide".into());
+        let mut project_only = local("q", "only", "idle");
+        project_only.project = Some("aoide".into());
+        let idx = index(vec![project_only, sibling, aaron, both, target.clone()]);
+
+        assert_eq!(related_ids(&idx, &target, "", false), ["b", "x", "s", "q"]);
+    }
+
+    #[test]
+    fn related_leaves_out_the_target_and_done_rows_unless_all() {
+        let mut target = local("t", "alpha", "idle");
+        target.project = Some("aoide".into());
+        let mut done = local("d", "delta", "done");
+        done.project = Some("aoide".into());
+        let mut live = local("l", "lima", "idle");
+        live.project = Some("aoide".into());
+        let idx = index(vec![target.clone(), done, live]);
+
+        assert_eq!(related_ids(&idx, &target, "", false), ["l"]);
+        assert_eq!(related_ids(&idx, &target, "", true), ["l", "d"]);
+    }
+
+    #[test]
+    fn related_narrows_by_a_query_beside_the_flag() {
+        let mut target = local("t", "alpha", "idle");
+        target.project = Some("aoide".into());
+        let mut kimi = local("k", "kilo", "idle");
+        kimi.project = Some("aoide".into());
+        kimi.agent = "kimi".into();
+        let mut claude = local("c", "charlie", "idle");
+        claude.project = Some("aoide".into());
+        let idx = index(vec![target.clone(), kimi, claude]);
+
+        assert_eq!(related_ids(&idx, &target, "agent:kimi", false), ["k"]);
+    }
+
+    #[test]
+    fn carries_names_what_a_node_does_not_publish() {
+        let mut far = cached("yomi-strix", "b", "bravo", "idle");
+        far.task = Some("review-pr".into());
+        let idx = index(vec![far.clone()]);
+
+        let c = carries(&idx, &far);
+        assert_eq!(c.unknown, ["mailboxes", "cc", "threads"]);
+        assert!(c.reads.is_none() && c.cc.is_none() && c.threads.is_none());
+        assert_eq!(c.inbox, ["review-pr", "bravo"]);
+    }
+
+    #[test]
+    fn carries_reads_the_parent_children_and_siblings_off_the_index() {
+        let parent = local("p", "parent", "idle");
+        let mut first = local("c1", "first", "working");
+        first.parent = Some(id("osaka", "p"));
+        let mut second = local("c2", "second", "idle");
+        second.parent = Some(id("osaka", "p"));
+        let idx = index(vec![parent.clone(), first.clone(), second]);
+
+        assert_eq!(carries(&idx, &parent).edges.children, vec![id("osaka", "c1"), id("osaka", "c2")]);
+        let kid = carries(&idx, &first).edges;
+        assert_eq!(kid.parent, Some(id("osaka", "p")));
+        assert_eq!(kid.siblings, vec![id("osaka", "c2")]);
+        assert!(kid.children.is_empty());
+    }
+
+    #[test]
+    fn a_wrap_reads_its_mailboxes_and_unread_is_the_count_unread_for_gives() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("find-b4-unread");
+        mail::file_letter("builder", "reviewer", "one").unwrap();
+        mail::enrol_reader("reviewer", "wrap-id").unwrap();
+        mail::mark("reviewer", Some("wrap-id")).unwrap();
+        mail::file_letter("builder", "reviewer", "two").unwrap();
+        mail::file_letter("builder", "reviewer", "three").unwrap();
+        let (mark, unread) = mail::unread_for("reviewer", Some("wrap-id")).unwrap();
+        let want = unread.len() as u64;
+        assert_eq!((mark, want), (1, 2));
+
+        let mut child = local("child-id", "child", "working");
+        child.wrap = Some("wrap-id".into());
+        let wrap = local("wrap-id", "warm-birch", "idle");
+        let mut rows = vec![child, wrap];
+        mail_facts(&mut rows, &mail::peek_cursors().unwrap(), &mail::peek_base().unwrap());
+
+        let through = &rows[0].mail.as_ref().unwrap().reads;
+        assert_eq!(*through, vec![ReadMailbox { name: "reviewer".into(), unread: want, via: Some("wrap-id".into()) }]);
+        let own = &rows[1].mail.as_ref().unwrap().reads;
+        assert_eq!(*own, vec![ReadMailbox { name: "reviewer".into(), unread: want, via: None }]);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn cc_copies_and_threads_come_from_the_letters_a_row_reads() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("find-b4-cc");
+        let node = display::local_node_name();
+        let thread = "cd".repeat(32);
+        let addr = |name: &str| Address { node: node.clone(), name: name.into() };
+        let text = |cc: &str| {
+            LetterContent {
+                subject: "PR 41 review".into(),
+                to: vec![addr("reviewer")],
+                cc: vec![addr(cc)],
+                body: "b".into(),
+                thread_id: Some(thread.clone()),
+                reply_to: None,
+            }
+            .encode()
+            .expect("the letter encodes")
+        };
+        let to_qa = mail::file_letter("builder", "qa", &text("qa")).unwrap();
+        mail::file_letter("builder", "reviewer", &text("qa")).unwrap();
+        mail::enrol_reader("qa", "qa-id").unwrap();
+        mail::enrol_reader("reviewer", "rev-id").unwrap();
+
+        let mut rows = vec![
+            local("qa-id", "qa-agent", "idle"),
+            local("rev-id", "rev-agent", "idle"),
+            cached("yomi-strix", "far", "far", "idle"),
+        ];
+        mail_facts(&mut rows, &mail::peek_cursors().unwrap(), &mail::peek_base().unwrap());
+
+        let qa = rows[0].mail.clone().unwrap();
+        assert_eq!(qa.reads.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["qa"]);
+        assert_eq!(
+            qa.cc,
+            vec![CcLetter {
+                msgid: to_qa.envelope.msgid.clone(),
+                thread_id: Some(thread.clone()),
+                subject: "PR 41 review".into(),
+                from: format!("{node}/builder"),
+                to: vec![format!("{node}/reviewer")],
+            }],
+        );
+        assert_eq!(qa.threads, vec![Thread { id: thread.clone(), subject: "PR 41 review".into() }]);
+
+        let rev = rows[1].mail.clone().unwrap();
+        assert!(rev.cc.is_empty(), "the copy to reviewer names qa in cc, not reviewer");
+        assert_eq!(rev.threads.len(), 1, "a thread is found through any mailbox the row reads");
+        assert!(rows[2].mail.is_none(), "a far node's mail is not published here");
+        std::fs::remove_dir_all(&root).ok();
     }
 }

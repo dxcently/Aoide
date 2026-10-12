@@ -1494,6 +1494,19 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   document totals the same two counts across every row — the message line
   counts LIVE sessions only. A periodic refresh timer over this file is a
   later phase's concern, not this one's.
+- `graph/find.rs` (SESSION-FIND B3 and B4, pure) — the query core of
+  `aoide session find`. `split_line` and `parse` turn the conductor's line into
+  terms and bare words, `find` ranks a `FindIndex` of plain `Row`s, and
+  `related` ranks the rows that share a reason with one target. `mail_facts`
+  fills each local row's mail from the `storage::mail::peek_cursors` and
+  `peek_base` results it is given, with no I/O: a row reads through its wrap,
+  its unread count is the `unread_for` count, and a cc is a letter filed to a
+  mailbox the row reads whose Cc names that mailbox. `carries` gives a row's
+  mailboxes, cc, threads and edges, and names in `unknown` the mail facts its
+  node does not publish. Reasons (lineage, remote lineage, sibling, same role,
+  mailbox, thread, project, repo) are kept strongest first, once per phrase.
+  Nothing here reads a file or dials a node; B5's `load_index` builds the
+  index.
 - `mail_bridge` (P-M2, architect's ruling 1: "spool in storage, wire lane
   in client, bridge through conduct") — a thin, three-function passthrough
   onto `aoide_client::mail_wire`'s outbox drain and receive path, with no
