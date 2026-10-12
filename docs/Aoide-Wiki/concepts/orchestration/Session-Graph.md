@@ -312,16 +312,26 @@ already dead says nothing, and a turn that begins and ends between two ticks
 is not heard. A child the tick can no longer route (its record has left the
 roster, or its harness is dead and a wrap on its route has stopped verifying)
 cannot be asked for its recipient, so the cursor keeps the route last resolved
-for it, while both seals verified. Such a death is said over that route when
-its spawner verifies now and its host wrap is either gone (absent, `done`, or
-its pid dead) or still verifies; a live host that does not verify keeps the
-entry until it does, and the entry is dropped once the turn is a day old. A hook child's own
+for it: the host wrap and the spawner it resolved to while both seals verified,
+the harness it was seen alive as (pid and start time), and the tool in flight.
+Such a death is said over that route when the spawner verifies at the claim,
+inside the stage lock, and the host wrap is either gone (absent, or its pid
+dead) or still verifies. A harness still running under its recorded start time
+is a reaped record, not a death: its entry is dropped silently. A live host that
+does not verify keeps the entry until it verifies again, and the entry is
+dropped once the turn is a day old. A hook child's own
 `parentSessionId` is the wrap that hosts it, never the session that spawned
 it, so this source does not write to that edge: it climbs to the wrap's own
 `parentSessionId` and speaks only when `attestedSpawner` — the parent the
 registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
 and the child's `hookAncestry` (stamped by the hook door from the hook
-process's own credentials) holds the wrap's pid. On the live edge both wraps' pids must also carry a verifying daemon seal when the line is delivered, because a seal re-derives the pid's start time: a pid reused by another process after its wrap died fails it, and so does a daemon that cannot be asked (nothing is attested, nothing is said). On the gone path the host wrap is exempt once it is gone, since a conducted wrap's program is its harness and its seal fails when it exits; the spawner's seal is still required at delivery. The stamp itself is the registering process's own
+process's own credentials) holds the wrap's pid. On the live edge both wraps' pids must also carry a verifying daemon seal when
+the line is delivered, because a seal re-derives the pid's start time: a pid
+reused by another process after its wrap died fails it, and so does a daemon
+that cannot be asked (nothing is attested, nothing is said). On the gone path
+the host wrap may be gone instead (its pid dead, or no record), since a
+conducted wrap's program is its harness and its seal fails when it exits. The
+spawner's seal is checked at the claim, inside the stage lock, on both paths. The stamp itself is the registering process's own
 kernel ancestry and needs no seal. A spawner that is itself an agent is
 resolved to the wrap hosting it by the same test. A forged `session start
 --parent` carries none of this and is ignored, and a child is never its own
@@ -337,6 +347,17 @@ process's `/proc` ancestry, so inside the daemon the sender is the daemon and
 never the child — the line is raw-injected the doorbell's way (a live channel
 socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
+
+**Trust.** The hook source's cursor (`state/stage/pingback.json`) is unsealed
+data, and on the live path so are a host's `parentSessionId` and
+`attestedSpawner`. A same-uid writer can fabricate a route, and so a died line,
+to any sealed, receptive session: the same reach `aoide send --yes` already
+gives any same-uid caller. A same-uid edit of a host's spawner edge can
+redirect the live path too; that predates this lane. So the accepted residual
+is a false died line about a child that genuinely existed and was verified
+while alive, delivered to a session the writer chose. The planned fix is stance
+B, under which the seal covers the spawner (designed on the
+`design/session-identity-b` branch, not on this base).
 `state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
 for a trace; `hook` for a hook phase), claimed inside one short stage-lock
 section before the write, so each event is delivered at most once. A parent

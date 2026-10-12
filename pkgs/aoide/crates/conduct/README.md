@@ -296,10 +296,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   delivered by the same `deliver` — it adds a cursor half and four lines,
   never a second transport. The recipient is the child's SPAWNER, resolved
   through the wrap that hosts it and only over an edge the kernel attested
-  (`hook::route_of`; the climb is in `AGENTS.md`). A child whose record has
-  the tick can no longer route is judged from the route its entry kept
-  (`hook::gone`): said of while its spawner verifies and its host wrap is gone
-  or still verifies, never over a live host that does not verify. An eidolon, a
+  (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can no
+  longer route is judged from the route its entry kept (`hook::gone`): said of
+  while its spawner verifies at the claim and its host wrap is gone or still
+  verifies, never over a live host that does not verify. An eidolon, a
   remote-parented child, a shell and a
   sub-agent node are not its children.
 - **`graph::pingback`** (P-EIDOLON slice E5b, `docs/architecture/

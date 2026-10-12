@@ -1001,22 +1001,40 @@ in the message.
   a second one — or the record has left the roster; it is latched `died`
   (separate from `silent`, so a silence before a crash does not hide it), and
   a `done` phase says nothing. A child the tick cannot gather is judged by
-  `hook::gone` from its entry's `route` (written only while both seals
-  verified), and is said of only when: the turn is under 24 hours old,
-  unannounced and still open in `hooks.json`; the spawner verifies NOW
-  (`wrap_now`); and the host wrap is gone (absent, `done`, or its pid dead to
-  `pid_is_alive`) or still verifies NOW. A conducted wrap's program IS its
+  `hook::gone`, from its entry's `route` and from what the tick reads now: the
+  roster, `hooks.json`, and the seals. The route is written only while both
+  seals verified, and carries the harness the child was seen alive as (pid and
+  start time). A route whose harness still runs under that start time is a
+  reaped record, not a death, and is dropped silently. Otherwise the child is
+  said of only when: its turn is under 24 hours old, unannounced, and still
+  open in `hooks.json` (an absent hook entry counts as open); the spawner
+  verifies NOW (`wrap_now`), checked at the claim inside the stage lock; and
+  the host wrap is gone (its record absent, or its pid dead to `pid_is_alive`)
+  or still verifies NOW. A `done` record whose pid still runs is not gone: it
+  is judged by its seal like any live host. A conducted wrap's program IS its
   harness, so the wrap exits with it and its seal then fails: that is why a
-  gone host is accepted without a seal, and why the spawner's seal is still
-  required at delivery. A live host that does not verify keeps the entry, not
-  the line. A record still on the roster with its harness alive is never
-  judged here: its entry is kept while it is tracked and dropped once it is
-  not. Accepted residual: a same-uid hand edit can produce a false died line
-  about a child that genuinely existed and was verified while alive, delivered
-  to its real spawner. Known gap, not checked here: a clean session end whose
-  record and hook entry are both pruned between two ticks, before any tick
-  saw `done`, reads as died when the cursor last held an open phase (prune
-  runs only on a reaping pass, and an absent hook entry counts as open). The
+  gone host is accepted without a seal. A live host that does not verify keeps
+  the entry, not the line. A record still on the roster with its harness alive
+  is never judged here: its entry is kept while it is tracked and dropped once
+  it is not. The seal key is fetched whenever a hook candidate exists, a tracked
+  record or a hook entry the cursor still holds, so a child pruned in the same
+  pass as its wrap is still judged. Every value read back from the cursor is
+  cleaned again where it is rendered, and the whole line passes the
+  unsafe-character strip last (`died_mid_turn`).
+  **Trust model.** `pingback.json` is unsealed data, and on the live path so are
+  a host's `parentSessionId` and `attestedSpawner`. A same-uid writer can
+  fabricate a route, and so a died line, to any sealed, receptive session: the
+  same reach `aoide send --yes` already gives any same-uid caller. The same
+  writer can redirect the live path by editing a host's spawner edge; that
+  predates this lane. Accepted residual: a same-uid hand edit can produce a
+  false died line about a child that genuinely existed and was verified while
+  alive, delivered to a session the writer chose, not necessarily its real
+  spawner. The planned fix is stance B, under which the seal covers the spawner
+  (designed on the `design/session-identity-b` branch, not on this base).
+  Known gap, not checked here: a clean session end whose record and hook entry
+  are both pruned between two ticks, before any tick saw `done`, reads as died
+  when the cursor last held an open phase (prune runs only on a reaping pass,
+  and an absent hook entry counts as open). The
   hook source emits no `PingEvent` and never
   spools: a child that belongs on a ring is `remoteParent`-stamped and so is
   not its child.
