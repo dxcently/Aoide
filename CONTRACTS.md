@@ -2183,8 +2183,10 @@ process, or it is the agent whose `hookAncestry` matched; a registration made
 after the spawner returned, such as a detached spawn that was reparented to
 init first, has no ancestry left and gets no stamp), and holds the id itself
 rather than a flag: `parentSessionId` can be rewritten by a bare `session start --parent` with no evidence at all, and a
-reader trusts the edge only while `attestedSpawner == parentSessionId`. It
-exists because a detached `aoide spawn` leaves its child reparented to init, so
+reader trusts the edge only while `attestedSpawner == parentSessionId`. The
+send gate's parent and sibling autogate read it that way (stance C, below), and
+the hook door's sealed-ancestry attestation (`stamp_attested_parent`) stamps the
+same field with the parent it writes. It exists because a detached `aoide spawn` leaves its child reparented to init, so
 the ancestry cannot be re-derived later. Absent for every parent the kernel did
 not back (an explicit `--parent` or ambient `AOIDE_SESSION_ID` naming a session
 the registering process does not run beneath, and every wrap registered by
@@ -2682,13 +2684,34 @@ dispatched `session start --id <id>` is refused BEFORE it runs (taught error,
 pid that no longer verifies; a sealed record whose process merely died is
 not refused, and is not re-sealed.
 
-**Open, and not this lane's** (the same-uid trust question, identity OQ1-A /
-P-ID3, awaiting a design decision): `session end` plus `session prune` delete
-a LIVE sealed wrap's record, after which its id can be re-registered and
-sealed over another process; `session start --id C --parent X` rewrites a
-parent edge and so can forge the autogate-parent relation; and a same-uid
-process can hand-edit `sessions.json` (the hand-edit watcher reports it, and
-nothing here stops it).
+**The same-uid residual under stance C** (the User's ruling; identity OQ1-A's
+threat model). HIGH-2 and HIGH-3 are closed by two rules, both keyed on the
+daemon's live seal key:
+
+1. *A live sealed wrap is ended only by its own exit.* A conducted record whose
+   seal verifies on a live pid is refused by every door that could finish it:
+   `session end`, a `session phase` carrying a terminal token (`exit`,
+   `finished`, `complete`, `done`), the hook's `SessionEnd` arm, and `session
+   prune`, which keeps the record and names it. The reaper spares it whichever
+   liveness signal names it. Its own exit path (conduct's clean end, or the
+   reaper once the pid is gone) still ends it. The refusal names the wrap and
+   `aoide session kill --id`, which signals the process under the same seal
+   check. A dead, unsealed, or unverifiable record ends as it always has: a seal
+   nothing can verify is an unsealed one.
+2. *The autogate honours only the spawn-time edge.* A target's parent counts for
+   the parent-of-target and sibling rules only where its `attestedSpawner` names
+   that parent (§ `sessions.json`). A bare `session start --parent`, a `graph
+   link`, or any later rewrite earns no autogate: the send is held pending.
+
+**The limit, stated plainly.** A same-uid process can still hand-edit
+`sessions.json`, which the hand-edit watcher reports and nothing stops; it can
+rewrite a live record's `agent`, `cwd` or `window` through `session start`, which
+the seal does not cover; and it can kill `aoided`. A restarted daemon mints a new
+key, so the seals an earlier daemon minted stop verifying and their wraps are
+unprotected for the rest of their life (`aoide session kill` refuses them too,
+since it verifies the same seal). The planned fix is stance B, the daemon owning
+session identity; this section does not build it. Every rule that depends on a
+seal depends on the daemon that minted it.
 
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)

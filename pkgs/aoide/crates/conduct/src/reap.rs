@@ -1577,6 +1577,14 @@ fn reap_inner(
         }
     }
 
+    // Stance C (HIGH-2): the reaper ends a record only once its process is dead.
+    // A conducted wrap whose own pid still holds a verifying seal is spared
+    // whichever liveness signal (window, staleness, ghost) named it.
+    if !reaped.is_empty() {
+        let live_wraps = crate::graph::identity::live_sealed_wrap_ids(&s_file.sessions);
+        reaped.retain(|id| !live_wraps.contains(id));
+    }
+
     // The exempt idle spawned shells the waived arm just skipped — a human
     // gesture only (`spawned_shell_band.is_none()` iff `--now`); the
     // unattended pass reports nothing here (module doc's "Sweep

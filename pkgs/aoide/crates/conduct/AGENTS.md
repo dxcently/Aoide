@@ -908,6 +908,14 @@ in the message.
   accepted under the manifest's host-local, operator-authored trust model
   (the operator who writes a spec already controls their own disk), not a
   gap to close with a `canonicalize` call here.
+- **The autogate reads a parent edge only through `send.rs`'s
+  `attested_parent_of` (stance C, HIGH-3).** A target's `parentSessionId`
+  earns the parent-of-target and sibling rules only where its
+  `attestedSpawner` names the same id. A bare `session start --parent`, a
+  `graph link`, or a rewrite leaves no matching stamp and is gated like any
+  unrelated send. A new producer of parent edges must stamp the spawn-time field
+  where the kernel backs the edge (`session_conduct`, `stamp_attested_parent`),
+  or accept that its children are gated.
 - **A parent automatically hears the children it spawned, and that line is
   the DAEMON's own, never a `send` (P-EIDOLON E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice"; the User's ruling, 2026-09-17).**
@@ -1146,6 +1154,14 @@ in the message.
   routing, not sweep logic) reaches `reap_and_announce` for real and has to
   neutralize `notify-send` itself (e.g. blanking `$PATH` for that one call)
   rather than letting a test fire a real toast on the machine running it.
+- **A live sealed wrap is ended only by its own exit (stance C, HIGH-2).**
+  `session end`, a terminal `session phase` (`exit`, `finished`, `complete`,
+  `done`), the hook's `SessionEnd` arm, and `session prune` refuse a record that
+  is conductable, sealed, and whose pid is alive, judged with the daemon's live
+  key (`identity::live_sealed_wrap_ids`); the reaper spares it. The wrap's own
+  exit path (`do_session_end` from `session_conduct`) is the one legitimate end
+  and stays unrefused. A new door that can finish a record calls
+  `live_wrap_refusal_for` first, and the wrap's exit path never does.
 - **A session's exit — a clean `session end` OR a `reap` sweep — MUST
   append exactly one line to the durable session ledger, through the SAME
   shared call (P-D8, `docs/architecture/AOIDED.md`'s "L5").**

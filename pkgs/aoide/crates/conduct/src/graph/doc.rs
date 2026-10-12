@@ -882,10 +882,30 @@ pub fn prune_done_scoped(
     Vec<String>,
     Vec<String>,
 ) {
+    let live = super::identity::live_sealed_wrap_ids(&sessions);
+    prune_done_keeping(sessions, hooks, explicit, &live)
+}
+
+/// [`prune_done_scoped`] with the live-wrap set supplied by the caller. A
+/// `done` record named in `live` is never dropped (stance C, HIGH-2): its own
+/// sealed process still runs, so only that process's exit, or the reaper once
+/// the pid is gone, may end it. Every other rule here is unchanged.
+pub(crate) fn prune_done_keeping(
+    sessions: Vec<SessionRecord>,
+    hooks: Vec<HookRecord>,
+    explicit: bool,
+    live: &HashSet<String>,
+) -> (
+    Vec<SessionRecord>,
+    Vec<HookRecord>,
+    Vec<String>,
+    Vec<String>,
+) {
     let unfiled = super::taskreport::unfiled_task_runs(&sessions);
     let doomed: HashSet<&str> = sessions
         .iter()
         .filter(|s| s.state == "done")
+        .filter(|s| !live.contains(s.session_id.as_str()))
         .filter(|s| {
             let is_task_run = s.task.as_deref().is_some_and(|t| !t.is_empty());
             if !is_task_run {

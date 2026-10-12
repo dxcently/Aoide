@@ -3,7 +3,7 @@
 //! [`super::doc::restage_graph`] so the read path never drifts.
 
 use super::common::{load_inputs, require_args, stage_error};
-use super::doc::{build_graph, drop_remote_child_rows, prune_done_scoped, render, restage_graph, would_cycle};
+use super::doc::{build_graph, drop_remote_child_rows, prune_done_keeping, render, restage_graph, would_cycle};
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
     write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, STAGE_GRAPH_VERSION,
@@ -1030,7 +1030,26 @@ pub fn prune(_inv: &Invocation) -> Outcome {
         Err(e) => return stage_error("session.prune", e),
     };
 
-    let (kept_s, kept_h, removed, cleared) = prune_done_scoped(
+    // Stance C (HIGH-2): a finished record whose sealed wrap process still runs
+    // is held, not dropped. Its exit (or the reaper, once the pid is gone) ends it.
+    let live = super::identity::live_sealed_wrap_ids(&s_file.sessions);
+    let held: Vec<String> = s_file
+        .sessions
+        .iter()
+        .filter(|s| s.state == "done" && live.contains(&s.session_id))
+        .map(|s| s.session_id.clone())
+        .collect();
+    let held_note = if held.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; kept {} finished record(s) whose sealed wrap still runs ({}), they end when that process exits",
+            held.len(),
+            held.join(", ")
+        )
+    };
+
+    let (kept_s, kept_h, removed, cleared) = prune_done_keeping(
         std::mem::take(&mut s_file.sessions),
         std::mem::take(&mut h_file.hooks),
         // The user's OWN sweep: the one path allowed to drop a finished task
@@ -1038,11 +1057,15 @@ pub fn prune(_inv: &Invocation) -> Outcome {
         // the durable history — ledger, letters, transcript, sidecar — stays on
         // disk either way).
         true,
+        &live,
     );
 
     if removed.is_empty() {
-        return Outcome::ok("session.prune", "nothing to prune (no `done` sessions)")
-            .with_data(json!({ "removed": [], "clearedParents": [] }));
+        return Outcome::ok(
+            "session.prune",
+            format!("nothing to prune (no `done` sessions){held_note}"),
+        )
+        .with_data(json!({ "removed": [], "clearedParents": [], "held": held }));
     }
 
     s_file.sessions = kept_s;
@@ -1073,13 +1096,13 @@ pub fn prune(_inv: &Invocation) -> Outcome {
     Outcome::ok(
         "session.prune",
         format!(
-            "pruned {} session(s); cleared {} orphaned parent link(s)",
+            "pruned {} session(s); cleared {} orphaned parent link(s){held_note}",
             removed.len(),
             cleared.len()
         ),
     )
     .changed(changed)
-    .with_data(json!({ "removed": removed, "clearedParents": cleared }))
+    .with_data(json!({ "removed": removed, "clearedParents": cleared, "held": held }))
 }
 
 #[cfg(test)]

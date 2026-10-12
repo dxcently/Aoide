@@ -636,7 +636,9 @@ pub(in crate::graph) fn stamp_session_exit(
 /// corrupt it; (c) calls [`restage_graph`] — unlike `hookAncestry`
 /// (consumed internally only), `parentSessionId` IS a rendered edge, so a
 /// change here must reach `graph.json` immediately, not wait for some other
-/// writer to re-stage it.
+/// writer to re-stage it; and (d) it stamps `attestedSpawner` with the same
+/// parent, so the edge it just attested is the spawn-time edge the autogate
+/// reads (stance C). A bare `session start --parent` never gets that stamp.
 pub(in crate::graph) fn stamp_attested_parent(id: &str, parent: &str) {
     if parent.is_empty() || parent == id {
         return;
@@ -649,14 +651,15 @@ pub(in crate::graph) fn stamp_attested_parent(id: &str, parent: &str) {
         if would_cycle(&file.sessions, id, parent) {
             return;
         }
-        let Some(s) = file
-            .sessions
-            .iter_mut()
-            .find(|s| s.session_id == id && s.parent_session_id.as_deref() != Some(parent))
-        else {
+        let Some(s) = file.sessions.iter_mut().find(|s| {
+            s.session_id == id
+                && (s.parent_session_id.as_deref() != Some(parent)
+                    || s.attested_spawner.as_deref() != Some(parent))
+        }) else {
             return;
         };
         s.parent_session_id = Some(parent.to_string());
+        s.attested_spawner = Some(parent.to_string());
         if file.schema_version.is_empty() {
             file.schema_version = STAGE_GRAPH_VERSION.to_string();
         }
@@ -1838,6 +1841,12 @@ pub fn session_phase(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
+    if canonical_state(&phase) == "done" {
+        if let Some(message) = live_wrap_refusal_for(&id) {
+            return Outcome::error("session.phase", message)
+                .with_data(json!({ "reason": "live-sealed-wrap", "id": id }));
+        }
+    }
     do_session_phase(&id, &phase)
 }
 
@@ -1852,7 +1861,21 @@ pub fn session_end(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
+    if let Some(message) = live_wrap_refusal_for(&id) {
+        return Outcome::error("session.end", message)
+            .with_data(json!({ "reason": "live-sealed-wrap", "id": id }));
+    }
     do_session_end(&id)
+}
+
+/// Stance C (HIGH-2): the refusal a door returns when `id` names a live sealed
+/// wrap. `None` for every other record, and whenever the daemon cannot verify
+/// the seal (the record then ends as an unsealed one always has).
+pub(in crate::graph) fn live_wrap_refusal_for(id: &str) -> Option<String> {
+    let file: SessionsFile = load_stage(&sessions_path()).ok()?;
+    super::identity::live_sealed_wrap_ids(&file.sessions)
+        .contains(id)
+        .then(|| super::identity::live_wrap_refusal(id))
 }
 
 #[cfg(test)]
@@ -3803,5 +3826,233 @@ mod enduring_binding_tests {
             assert_eq!(out.status, aoide_protocol::output::Status::Error);
             assert!(out.message.contains("local-only"));
         }
+    }
+}
+
+#[cfg(test)]
+mod same_uid_stance_c {
+    use super::*;
+    use std::path::PathBuf;
+    use crate::graph::manage::prune;
+    use crate::graph::testutil::*;
+    use aoide_protocol::output::Status;
+
+    /// The world a sealed wrap lives in: a private stage and runtime dir, and
+    /// a fake daemon whose seal pubkey is `kp`'s. The caller holds `env_lock`.
+    fn seal_world(tag: &str) -> (EnvVars, aoide_storage::identity::Keypair, PathBuf) {
+        let env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET", "XDG_RUNTIME_DIR"]);
+        let stage = unique_stage(tag);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &stage);
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        (env, kp, stage)
+    }
+
+    /// A conducted wrap whose pid is this test process, sealed by the daemon.
+    fn sealed_live_wrap(id: &str, kp: &aoide_storage::identity::Keypair) {
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some("/nonexistent/wrap.sock"),
+            None,
+            Some(std::process::id()),
+        );
+        seal_record(id, kp);
+    }
+
+    /// A door call as the daemon runs it (`Door::Daemon` skips the dispatch
+    /// hop, so the handler runs in-process, as it does inside `aoided`).
+    fn door(path: &[&str], id: &str) -> aoide_protocol::Invocation {
+        let mut inv = flag_invocation(path, &[("id", id)]);
+        inv.door = aoide_protocol::Door::Daemon;
+        inv
+    }
+
+    fn record(id: &str) -> Option<SessionRecord> {
+        load_stage::<SessionsFile>(&sessions_path())
+            .ok()?
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == id)
+    }
+
+    fn set_state(id: &str, state: &str) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == id).unwrap().state = state.to_string();
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    #[test]
+    fn high2_session_end_refuses_a_live_sealed_wrap_and_keeps_its_seal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("same-uid-c-end");
+        sealed_live_wrap("wrap", &kp);
+
+        let out = session_end(&door(&["session", "end"], "wrap"));
+
+        assert_eq!(out.status, Status::Error, "a live sealed wrap is refused: {}", out.message);
+        let rec = record("wrap").expect("the record survives the refused end");
+        assert_ne!(rec.state, "done");
+        assert!(rec.seal.is_some(), "the seal survives");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn high2_end_then_prune_leaves_a_live_sealed_wrap_in_place() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("same-uid-c-chain");
+        sealed_live_wrap("wrap", &kp);
+
+        let _ = session_end(&door(&["session", "end"], "wrap"));
+        let _ = prune(&flag_invocation(&["session", "prune"], &[]));
+
+        let rec = record("wrap").expect("prune does not drop a live sealed wrap");
+        assert_ne!(rec.state, "done");
+        assert!(rec.seal.is_some(), "the seal survives end and prune");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn high2_prune_keeps_a_done_record_whose_sealed_wrap_is_still_running() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("same-uid-c-prune");
+        sealed_live_wrap("wrap", &kp);
+        set_state("wrap", "done");
+
+        let _ = prune(&flag_invocation(&["session", "prune"], &[]));
+
+        assert!(record("wrap").is_some(), "prune keeps a live sealed wrap even when its state reads done");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn high2_a_terminal_phase_does_not_finish_a_live_sealed_wrap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("same-uid-c-phase");
+        sealed_live_wrap("wrap", &kp);
+        let mut inv = door(&["session", "phase"], "wrap");
+        inv.flags.insert("phase".to_string(), "exit".to_string());
+
+        let _ = session_phase(&inv);
+
+        assert_ne!(record("wrap").unwrap().state, "done", "`exit` is the terminal vocabulary, so it must not finish a live sealed wrap");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn the_wraps_own_exit_path_still_ends_its_sealed_record() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("same-uid-c-own-exit");
+        sealed_live_wrap("wrap", &kp);
+
+        let _ = do_session_end("wrap");
+
+        assert_eq!(record("wrap").unwrap().state, "done", "the wrap's own exit path is not refused");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn an_unsealed_conducted_record_still_ends_as_today() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _kp, stage) = seal_world("same-uid-c-unsealed");
+        do_session_start(
+            "plain",
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some("/nonexistent/plain.sock"),
+            None,
+            Some(std::process::id()),
+        );
+
+        let out = session_end(&door(&["session", "end"], "plain"));
+
+        assert_eq!(out.status, Status::Ok);
+        assert_eq!(record("plain").unwrap().state, "done");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn a_seal_that_no_longer_verifies_is_unsealed_and_ends_as_today() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("same-uid-c-stale");
+        sealed_live_wrap("wrap", &kp);
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().pid = Some(4_000_000);
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let _ = session_end(&door(&["session", "end"], "wrap"));
+
+        assert_eq!(record("wrap").unwrap().state, "done", "a seal over a pid that is gone verifies nothing");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn a_prune_drops_every_done_record_except_one_named_as_a_live_sealed_wrap() {
+        let held = SessionRecord {
+            session_id: "held".into(),
+            state: "done".into(),
+            ..Default::default()
+        };
+        let gone = SessionRecord {
+            session_id: "gone".into(),
+            state: "done".into(),
+            ..Default::default()
+        };
+        let live: HashSet<String> = HashSet::from(["held".to_string()]);
+
+        let (kept, _hooks, removed, _cleared) =
+            crate::graph::doc::prune_done_keeping(vec![held, gone], vec![], true, &live);
+
+        assert_eq!(removed, vec!["gone".to_string()]);
+        let ids: Vec<&str> = kept.iter().map(|s| s.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["held"]);
+    }
+
+    #[test]
+    fn the_refusal_names_the_running_wrap_and_how_it_ends() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("same-uid-c-refusal");
+        sealed_live_wrap("wrap", &kp);
+
+        let message = live_wrap_refusal_for("wrap").expect("a live sealed wrap is refused");
+        assert!(message.contains("`wrap`"), "{message}");
+        assert!(message.contains("aoide session kill --id wrap"), "{message}");
+        assert!(live_wrap_refusal_for("unknown").is_none());
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn hook_attested_parent_is_stamped_as_the_kernel_spawner() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _kp, stage) = seal_world("same-uid-c-hook-stamp");
+        do_session_start("child", Some("claude"), Some("/w"), None, None, None, None, None, None);
+
+        stamp_attested_parent("child", "wrap");
+
+        let rec = record("child").unwrap();
+        assert_eq!(rec.parent_session_id.as_deref(), Some("wrap"));
+        assert_eq!(rec.attested_spawner.as_deref(), Some("wrap"), "a kernel-attested hook parent carries the spawn-time stamp");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn session_start_parent_is_never_stamped_as_the_spawner() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _kp, stage) = seal_world("same-uid-c-start-parent");
+
+        do_session_start("child", Some("claude"), Some("/w"), None, Some("orch"), None, None, None, None);
+
+        let rec = record("child").unwrap();
+        assert_eq!(rec.parent_session_id.as_deref(), Some("orch"));
+        assert_eq!(rec.attested_spawner, None, "an explicit --parent is a caller's word, not a kernel fact");
+        let _ = std::fs::remove_dir_all(&stage);
     }
 }

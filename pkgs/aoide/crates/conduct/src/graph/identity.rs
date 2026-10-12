@@ -35,6 +35,7 @@
 //! guard, which only ever guarded well-behaved callers of `aoide send`).
 
 use super::model::SessionRecord;
+use std::collections::HashSet;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::unix::io::AsRawFd;
 #[cfg(unix)]
@@ -304,6 +305,53 @@ pub(in crate::graph) fn is_self_originated(
         .is_some_and(|connector_session| connector_session == target_session_id)
 }
 
+/// Stance C (same-uid, HIGH-2): the conducted wraps whose OWN process still
+/// runs under a seal the daemon minted and still verifies. Only the wrap's
+/// own exit path, or the reaper once the pid is dead, may end such a record;
+/// every door and the hook's `SessionEnd` arm refuse (see [`live_wrap_refusal`]).
+///
+/// Empty when the daemon cannot answer for its key. A seal nothing can verify
+/// is an unsealed record, and an unsealed record ends as it always has.
+pub(crate) fn live_sealed_wrap_ids(sessions: &[SessionRecord]) -> HashSet<String> {
+    let any_sealed_wrap = sessions
+        .iter()
+        .any(|r| r.conductable == Some(true) && r.seal.is_some());
+    if !any_sealed_wrap {
+        return HashSet::new();
+    }
+    match aoide_storage::attest::daemon_seal_pubkey_hex() {
+        Some(key) => live_sealed_wrap_ids_with(sessions, &key),
+        None => HashSet::new(),
+    }
+}
+
+/// [`live_sealed_wrap_ids`] against a key the caller already holds: the
+/// daemon's own key inside `aoided`, or a test's. The only I/O is the `/proc`
+/// read a seal verification makes anyway.
+pub(crate) fn live_sealed_wrap_ids_with(
+    sessions: &[SessionRecord],
+    pubkey_hex: &str,
+) -> HashSet<String> {
+    sessions
+        .iter()
+        .filter(|r| r.conductable == Some(true))
+        .filter(|r| r.pid.is_some_and(aoide_storage::fs::pid_is_alive))
+        .filter(|r| verify_seal_over(r, pubkey_hex))
+        .map(|r| r.session_id.clone())
+        .collect()
+}
+
+/// The taught refusal for a live sealed wrap: what is running, and who can end
+/// it. Named so the caller can act on it without reading the design.
+pub(crate) fn live_wrap_refusal(id: &str) -> String {
+    format!(
+        "session `{id}` is a live conducted wrap sealed by aoided: its own process is still \
+         running, so it cannot be ended or finished from outside. The wrap ends its own record \
+         when that process exits. `aoide session kill --id {id}` asks the process to exit \
+         (SIGTERM, under the same seal check); a record whose process is gone is reaped normally."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,6 +379,61 @@ mod tests {
             sealed_issued_at: Some(issued_at),
             ..Default::default()
         }
+    }
+
+    // ── live_sealed_wrap_ids (stance C) ──────────────────────────────────
+
+    #[test]
+    fn live_sealed_wrap_ids_admit_only_a_conducted_wrap_whose_seal_verifies_on_a_live_pid() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let key = kp.info().pubkey_hex;
+        let me = std::process::id() as i32;
+        let mut wrap = sealed_record("wrap", me, None, &kp);
+        wrap.conductable = Some(true);
+        let plain = sealed_record("plain", me, None, &kp);
+        let mut dead = sealed_record("dead", me, None, &kp);
+        dead.conductable = Some(true);
+        dead.pid = Some(4_000_000);
+        let unsealed = SessionRecord {
+            session_id: "bare".into(),
+            conductable: Some(true),
+            pid: Some(me as u32),
+            ..Default::default()
+        };
+        let sessions = [wrap.clone(), plain, dead, unsealed];
+
+        let live = live_sealed_wrap_ids_with(&sessions, &key);
+        assert_eq!(live, HashSet::from(["wrap".to_string()]));
+
+        let other = identity::mint_ephemeral().unwrap();
+        assert!(
+            live_sealed_wrap_ids_with(&[wrap], &other.info().pubkey_hex).is_empty(),
+            "a seal another daemon minted verifies nothing here"
+        );
+    }
+
+    #[test]
+    fn a_wrap_the_compositor_has_lost_is_condemned_by_liveness_and_spared_by_its_seal() {
+        // The reaper's own composition (`reap_inner`): `is_session_dead` names the
+        // record, and `live_sealed_wrap_ids` removes it from the reap set.
+        let kp = identity::mint_ephemeral().unwrap();
+        let me = std::process::id() as i32;
+        let mut wrap = sealed_record("wrap", me, None, &kp);
+        wrap.conductable = Some(true);
+        wrap.window_address = "0xGONE".into();
+        let live: HashSet<String> = HashSet::new();
+        let owners = std::collections::HashMap::new();
+
+        assert!(crate::reap::is_session_dead(
+            &wrap,
+            Some(&live),
+            Some(&owners),
+            |_| true,
+            1_800_000_000,
+            |_| None,
+        ));
+        let key = kp.info().pubkey_hex;
+        assert!(live_sealed_wrap_ids_with(&[wrap], &key).contains("wrap"));
     }
 
     // ── verify_seal_over ──────────────────────────────────────────────────

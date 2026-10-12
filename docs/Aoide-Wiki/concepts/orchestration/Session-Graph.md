@@ -177,7 +177,8 @@ should follow).
   descendant of a dropped session cascades away with it (see "Sub-agent
   cascade" below), and children that survive get `parentSessionId` cleared
   (un-orphaned rather than dangling). Everything removed or cleared is
-  reported.
+  reported. A `done` record whose own sealed wrap process still runs is kept
+  and named in the reply (stance C, see the accounting below).
 - **`spawn`** and **`send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].
@@ -574,7 +575,11 @@ socket's accept key on kernel facts plus a verified seal, never env
 cross-uid `SO_PEERCRED` floor (P-ID3, [[shellbridge]], [[aoided]]); the
 secrets broker's `allowRemoteOrigin` gate is the credential's first policy
 consumer (P-ID4); the node wire resolves identity by verifying key, never
-claimed name (P-ID5, [[Node-Federation]]). Open, each named rather than
+claimed name (P-ID5, [[Node-Federation]]). Stance C (the same-uid ruling in
+CONTRACTS.md) closes two forgeries on that seal: a live sealed wrap is ended or
+dropped only by its own exit, or by the reaper once its pid is gone; and the
+autogate honours a parent edge only where `attestedSpawner` names it (HIGH-2,
+HIGH-3). Open, each named rather than
 implied closed: (1) **consumer-name authentication** — the seal
 authenticates the session and its class, never a self-asserted consumer
 string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker
@@ -586,7 +591,12 @@ residual); (3) **a cross-uid attestation channel** — the packaged
 `aoide-secrets` broker cannot reach the operator's daemon socket or roster,
 so the origin gate is dormant in that deployment; (4) **an authenticated
 registration path** — the closer for the sweep-relaunder shape; (5)
-**per-surface dispatch-door gates** riding the attested-caller lookup.
+**per-surface dispatch-door gates** riding the attested-caller lookup; (6) **the
+same-uid residual stance C leaves** — a same-uid process can hand-edit
+`sessions.json`, rewrite a live record's `agent`, `cwd` or `window` through
+`session start` (the seal covers none of them), or kill `aoided`, whose restart
+mints a new key that leaves the earlier seals unverifiable. Stance B, the
+daemon owning session identity, is the planned fix.
 
 ## Contracts (CONTRACTS.md §4, still v0)
 

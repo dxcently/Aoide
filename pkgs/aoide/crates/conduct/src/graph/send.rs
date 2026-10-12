@@ -47,6 +47,7 @@ use super::model::{
 use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
     clear_stale_parent, do_hook_session_start, do_session_end, do_session_phase,
+    live_wrap_refusal_for,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
     do_subagent_spawn, ensure_session_ceiling, now_iso_utc, refresh_subagent_says,
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
@@ -197,12 +198,24 @@ fn autogate_env() -> bool {
     )
 }
 
+/// The parent a gate may honour (stance C, HIGH-3): a record's
+/// `parentSessionId`, but only where `attestedSpawner` names the same id. The
+/// stamp is written where the kernel backed the edge (conduct registration,
+/// the hook door's sealed-ancestry walk); a bare `session start --parent`, a
+/// `graph link`, or any later rewrite leaves it behind, and an edge with no
+/// matching stamp is a caller's word, so it earns no autogate.
+fn attested_parent_of(rec: &SessionRecord) -> Option<&str> {
+    let parent = rec.parent_session_id.as_deref().filter(|p| !p.is_empty())?;
+    (rec.attested_spawner.as_deref() == Some(parent)).then_some(parent)
+}
+
 /// The parent-autogate rule (pure, unit-tested): the sender may freely command a
-/// child it spawned. True when the target session's `parentSessionId` equals the
-/// SENDER's own `AOIDE_SESSION_ID` — both present and non-empty. A cross-tree or
-/// unrelated send (no id, empty id, or a mismatch) is NOT autogated and stays
-/// pending. This is what lets an orchestrator steer the children it conducted
-/// without a prompt while every other send remains gated.
+/// child it spawned. True when the target's ATTESTED parent (see
+/// [`attested_parent_of`]) equals the SENDER's own kernel-attested session id —
+/// both present and non-empty. A cross-tree or unrelated send (no id, empty id,
+/// a mismatch, or a parent edge the spawn never stamped) is NOT autogated and
+/// stays pending. This is what lets an orchestrator steer the children it
+/// conducted without a prompt while every other send remains gated.
 fn sender_is_parent(sender_session: Option<&str>, target_parent: Option<&str>) -> bool {
     match (sender_session, target_parent) {
         (Some(s), Some(p)) => !s.is_empty() && s == p,
@@ -211,11 +224,12 @@ fn sender_is_parent(sender_session: Option<&str>, target_parent: Option<&str>) -
 }
 
 /// The sibling-autogate rule (pure, unit-tested): the sender and the target
-/// may freely talk to each other when they are SIBLINGS — both parented under
-/// the SAME session, and that shared parent is itself still live (not
-/// `done`). A dead/absent parent, a cross-tree pair, or either side unparented
-/// stays gated. `parent_live` is resolved by the caller against the already-
-/// loaded sessions file (no I/O here).
+/// may freely talk to each other when they are SIBLINGS — both ATTESTED under
+/// the SAME session (see [`attested_parent_of`]), and that shared parent is
+/// itself still live (not `done`). A dead/absent parent, a cross-tree pair, an
+/// unattested edge on either side, or either side unparented stays gated.
+/// `parent_live` is resolved by the caller against the already-loaded sessions
+/// file (no I/O here).
 ///
 /// Deliberately blind to whether sender == target: a self-send trivially
 /// satisfies `a == b` here too (same record, same parent field read twice)
@@ -842,7 +856,6 @@ fn deliver_local_with(
     }
     let is_conductable = super::doc::is_conductable_now(rec);
     let socket = rec.socket.clone().filter(|s| !s.is_empty());
-    let target_parent = rec.parent_session_id.clone();
     if !is_conductable {
         let message = match (rec.conductable == Some(true), socket.as_deref()) {
             (true, Some(path)) => {
@@ -881,19 +894,21 @@ fn deliver_local_with(
         (false, false) // never examined — send_gate's own precedence short-circuits first.
     } else {
         let sender = resolve_sender_id(&file.sessions);
-        let is_parent = sender_is_parent(sender.as_deref(), target_parent.as_deref());
+        let gate_parent = attested_parent_of(rec).map(str::to_string);
+        let is_parent = sender_is_parent(sender.as_deref(), gate_parent.as_deref());
         let sender_parent: Option<String> = sender
             .as_deref()
             .and_then(|sid| file.sessions.iter().find(|s| s.session_id == sid))
-            .and_then(|r| r.parent_session_id.clone());
-        let parent_live = target_parent
+            .and_then(attested_parent_of)
+            .map(str::to_string);
+        let parent_live = gate_parent
             .as_deref()
             .filter(|p| !p.is_empty())
             .and_then(|p| file.sessions.iter().find(|s| s.session_id == p))
             .map(|r| aoide_protocol::canonical_state(&r.state) != "done")
             .unwrap_or(false);
         let is_sibling =
-            siblings_share_live_parent(sender_parent.as_deref(), target_parent.as_deref(), parent_live);
+            siblings_share_live_parent(sender_parent.as_deref(), gate_parent.as_deref(), parent_live);
         (is_parent, is_sibling)
     };
     let gate = send_gate(yes, is_parent, is_sibling);
@@ -2293,7 +2308,13 @@ fn hook_for_profile_gated(
             do_subagent_end(&sub_id);
             Outcome::ok("session.hook", format!("subagent end {sub_id}"))
         }
-        HookAction::End { id } => do_session_end(&id),
+        HookAction::End { id } => match live_wrap_refusal_for(&id) {
+            Some(_) => Outcome::ok(
+                "session.hook",
+                format!("session `{id}` is a live sealed wrap; its own exit records the end"),
+            ),
+            None => do_session_end(&id),
+        },
     };
     // Publish a harness-reported context-window ceiling onto the record
     // IMMEDIATELY (every hook carries it — pi's extension reads the active
@@ -2566,7 +2587,23 @@ mod tests {
     use crate::graph::model::{hooks_path, merged_sessions, HooksFile, SessionRecord};
     use crate::graph::testutil::*;
     use aoide_test_support::{accept_one, expect_delivery, read_delivery};
-    use crate::graph::session_store::{do_hook_session_start, do_session_start, stamp_seal};
+    use crate::graph::session_store::{
+        do_hook_session_start, do_session_start, stamp_attested_spawner, stamp_seal,
+    };
+
+    #[test]
+    fn attested_parent_is_honoured_only_where_the_spawn_stamp_names_it() {
+        let rec = |parent: Option<&str>, attested: Option<&str>| SessionRecord {
+            parent_session_id: parent.map(str::to_string),
+            attested_spawner: attested.map(str::to_string),
+            ..session("c", "/w", "idle", "t", None)
+        };
+        assert_eq!(attested_parent_of(&rec(Some("p"), Some("p"))), Some("p"));
+        assert_eq!(attested_parent_of(&rec(Some("p"), None)), None, "a bare --parent edge");
+        assert_eq!(attested_parent_of(&rec(Some("p"), Some("q"))), None, "a rewritten edge");
+        assert_eq!(attested_parent_of(&rec(None, Some("p"))), None, "a stamp with no edge");
+        assert_eq!(attested_parent_of(&rec(Some(""), Some(""))), None);
+    }
 
     #[test]
     fn parent_autogate_decision_is_exact_and_guarded() {
@@ -3904,7 +3941,9 @@ mod tests {
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
 
-        // Register a conductable CHILD whose parent is the sender (`orch`).
+        // Register a conductable CHILD whose parent is the sender (`orch`),
+        // and stamp the spawn-time edge the way conduct's own registration does
+        // (`attestedSpawner`, kernel-backed): only a stamped edge autogates.
         do_session_start(
             id,
             Some("claude"),
@@ -3916,6 +3955,7 @@ mod tests {
             None,
             None,
         );
+        stamp_attested_spawner(id, Some("orch"));
 
         let acc = expect_delivery(listener, "a parent's send is DELIVERED without `--yes`");
 
@@ -4004,6 +4044,8 @@ mod tests {
             None,
             None,
         );
+        stamp_attested_spawner(target, Some("orch"));
+        stamp_attested_spawner("sib-a", Some("orch"));
 
         // (a) sender and target share a live parent, no --yes, no env autogate,
         // sender is NOT the target's parent → DELIVERED, sibling label.
@@ -4114,6 +4156,9 @@ mod tests {
             None,
         );
 
+        // The spawn-time edge, as conduct stamps it: only a stamped parent edge
+        // is one the sibling predicate may read (stance C).
+        stamp_attested_spawner(id, Some("orch"));
         let acc = expect_delivery(listener, "a self-attested sender's payload still reaches the socket");
 
         // The resolver truthfully attests the sender AS the target itself —
@@ -7311,5 +7356,117 @@ mod tests {
         let (target, _chain) = kill_target("c1", &s.sessions)
             .expect("c1 must still resolve through the wrap that hosts it");
         assert_eq!(target.session_id, "w");
+    }
+
+    /// HIGH-3 (stance C): a parent edge the caller wrote with `session start
+    /// --parent` carries no spawn-time stamp, so it earns no autogate. The
+    /// send is held pending, exactly as an unrelated send is.
+    #[test]
+    fn high3_a_bare_session_start_parent_earns_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-high3-bare-parent");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+        seal_test_session("orch", me, "local", &kp);
+
+        let id = "bare-child";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        let out = deliver_local_with(
+            &send_invocation(&["go"], &[("id", id)]),
+            id,
+            test_resolver(kp.info().pubkey_hex.clone()),
+        );
+
+        assert_eq!(
+            out.data.as_ref().unwrap()["gate"],
+            "pending",
+            "a bare --parent edge is a caller's word, not a spawn: {}",
+            out.message
+        );
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// HIGH-3, the sibling form: two bare `--parent` edges naming one live
+    /// parent are not siblings for the gate. Both sides must carry the stamp.
+    #[test]
+    fn high3_bare_sibling_edges_earn_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_CONDUCT_SIBLING_AUTOGATE",
+        ]);
+        let root = unique_stage("send-high3-bare-sibling");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_CONDUCT_SIBLING_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, None);
+        do_session_start(
+            "sib-a", Some("claude"), Some("/w"), None, Some("orch"), None, None, None, Some(me as u32),
+        );
+        seal_test_session("sib-a", me, "", &kp);
+        let target = "sib-b";
+        let socket = conduct_socket_path(target);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            target,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        let out = deliver_local_with(
+            &send_invocation(&["hey"], &[("id", target)]),
+            target,
+            test_resolver(kp.info().pubkey_hex.clone()),
+        );
+
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending", "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

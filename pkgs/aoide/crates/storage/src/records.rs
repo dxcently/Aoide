@@ -540,7 +540,9 @@ pub struct SessionRecord {
     /// rather than a flag so a later `session start --parent <other>` — which
     /// rewrites `parentSessionId` on an existing id without any evidence —
     /// can never inherit it: a reader trusts the edge only while
-    /// `attestedSpawner == parentSessionId`. It is how a detached spawn's edge
+    /// `attestedSpawner == parentSessionId`, and the send gate's autogate does
+    /// exactly that (stance C). The hook door's sealed walk stamps it too. It is
+    /// how a detached spawn's edge
     /// (`aoide spawn` leaves its child reparented to init, so no live `/proc`
     /// walk can re-derive it) stays checkable later; the ping-back's hook
     /// source speaks only for such an edge. Absent for every unconfirmed
