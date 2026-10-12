@@ -80,7 +80,7 @@ mod hook;
 mod prompt;
 
 use super::common::{clean_line, clip_flat, strip_unsafe};
-use super::conduct::{channel_socket_path, is_its_harness, wrapped_program_is_a_shell};
+use super::conduct::{auto_type_refusal, channel_socket_path, AutoTypeRefusal};
 use super::doorbell::{connect_for_ring, write_channel};
 use super::eidolon::{eidolon_state_from_trace, DroppedEidolon};
 use super::model::{
@@ -1192,20 +1192,16 @@ fn deliver(
 /// the WRAP, never the label alone: `agent` is a caller's choice (`--agent
 /// <name>`), and `--agent pi -- bash` passes an `agent`-only test while the pty
 /// on the other end is a shell with a readline prompt.
-/// [`wrapped_program_is_a_shell`] is the same `program_is_a_shell` verdict read
-/// off the record, so the two halves cannot drift.
-///
-/// The positive arm is [`is_its_harness`] (`conduct.rs`, shared with the doorbell
-/// and the A2A door): the resolved program must be the profile's own binary. A
-/// wrap the launcher walk cannot resolve, or does not model (`taskset -c 0
-/// claude`), has no proof, so it is withheld as `unverified-wrap` even when its
-/// label is a harness.
+/// [`auto_type_refusal`] is the one refusal every automatic reader makes: the
+/// `program_is_a_shell` verdict read off the record, then the positive proof
+/// ([`is_its_harness`]). A wrap the launcher walk cannot resolve, or refuses
+/// (`taskset -c 0 claude`), has no proof, so it is withheld as `unverified-wrap`
+/// even when its label is a harness.
 fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
-    if matches!(rec.agent.as_str(), "" | "shell") || wrapped_program_is_a_shell(rec) {
-        return Some("shell-parent");
-    }
-    if !is_its_harness(rec) {
-        return Some("unverified-wrap");
+    match auto_type_refusal(rec) {
+        Some(AutoTypeRefusal::Shell) => return Some("shell-parent"),
+        Some(AutoTypeRefusal::Unproven) => return Some("unverified-wrap"),
+        None => {}
     }
     if !super::doc::is_conductable_now(rec) {
         return Some("not-conductable");

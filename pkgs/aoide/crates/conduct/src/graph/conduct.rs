@@ -61,49 +61,326 @@ const SHELL_BASENAMES: &[&str] = &[
     "busybox", "elvish", "osh", "ash", "yash",
 ];
 
-/// Launchers that only FORWARD to the program after them: skipped whole,
-/// options and all, so `env bash`, `nice -n 5 bash`, `stdbuf -oL bash`,
-/// `timeout 60 bash` and `setsid bash` all resolve to `bash` rather than to
-/// their own basename.
+/// Launchers that only FORWARD to the program after them. The hook door's plumbing
+/// verdict ([`is_invocation_plumbing`]) reads this list; the walk reads each
+/// launcher's own options from [`launcher`].
 const FORWARDING_LAUNCHERS: &[&str] = &[
     "env", "exec", "setsid", "nohup", "stdbuf", "chrt", "ionice", "nice",
 ];
 
-/// Among a launcher's own options, the ones taking their value as a SEPARATE
-/// token (`nice -n 5`, `stdbuf -o L`, `timeout -k 5`) rather than attached
-/// (`stdbuf -oL`). Per LAUNCHER, never one global set: `env -i` takes no value
-/// while `stdbuf -i M` does, and a shared table would have to guess — a guess
-/// here swallows the program name and misses a shell, which is the direction
-/// this predicate must never err in. Anything else merely numeric (a
-/// priority, a duration) is skipped by [`skip_launcher_options`] too.
-fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
-    match launcher {
-        "env" => matches!(arg, "-u" | "--unset" | "-C" | "--chdir" | "-S" | "--split-string"),
-        "nice" => matches!(arg, "-n" | "--adjustment"),
-        "stdbuf" => matches!(arg, "-i" | "-o" | "-e"),
-        "ionice" => matches!(arg, "-c" | "-n" | "-p" | "-u"),
-        "chrt" => matches!(arg, "-p" | "-T" | "-P" | "-D" | "-R" | "-O" | "-b"),
-        "sudo" => matches!(
-            arg,
-            "-u" | "--user"
-                | "-g" | "--group"
-                | "-C" | "--close-from"
-                | "-p" | "--prompt"
-                | "-r" | "--role"
-                | "-t" | "--type"
-                | "-U" | "--other-user"
-                | "-D" | "--chdir"
-                | "-h" | "--host"
-                | "-T" | "--command-timeout"
-        ),
-        "doas" => matches!(arg, "-u" | "-C"),
-        "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
-        _ => false,
+/// How a launcher option takes its value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Arity {
+    /// No value: `-i`, `--ignore-environment`.
+    Flag,
+    /// A value, attached (`-n5`, `--adjustment=5`) or as the next token (`-n 5`).
+    Value,
+    /// A value only when attached (`--ignore-signal=PIPE`), never the next token.
+    Attached,
+    /// An option that names no program the walk can resolve: a command line
+    /// (`env -S`), help, version, or a mode that runs nothing (`ionice -p`). Its
+    /// presence refuses the whole launcher.
+    Refuse,
+}
+
+/// One launcher's own options, as its `--help` lists them: coreutils 9.11 (`env`,
+/// `nice`, `stdbuf`, `timeout`, `nohup`), util-linux 2.42 (`chrt`, `ionice`,
+/// `setsid`), sudo 1.9.17, bash's `exec` builtin (`help exec`), and OpenBSD's
+/// `doas(1)`, whose row is unverified here because doas is not installed.
+///
+/// DEFAULT-DENY: an option not listed is unknown, and the walk refuses the whole
+/// launcher rather than guess how many tokens it takes. A wrong arity reads a value
+/// as the program, the one error that could prove a harness the launch does not run,
+/// so nothing is inferred from a missing row. Long names match as `getopt_long`
+/// matches them: exact, else one unique prefix. Every real long option is listed, so
+/// an ambiguous prefix is ambiguous here too.
+struct Launcher {
+    short: &'static [(char, Arity)],
+    long: &'static [(&'static str, Arity)],
+    /// Operands before the program: `timeout`'s duration, `chrt`'s priority.
+    operands: usize,
+    /// `NAME=value` operands before the program, which `env` and `sudo` accept.
+    assignments: bool,
+    /// A bare `-N` is an option: `nice -5` is the adjustment.
+    numeric: bool,
+}
+
+static ENV: Launcher = Launcher {
+    short: &[
+        ('0', Arity::Flag), ('a', Arity::Value), ('C', Arity::Value), ('i', Arity::Flag),
+        ('u', Arity::Value), ('v', Arity::Flag), ('S', Arity::Refuse),
+    ],
+    long: &[
+        ("argv0", Arity::Value), ("block-signal", Arity::Attached), ("chdir", Arity::Value),
+        ("debug", Arity::Flag), ("default-signal", Arity::Attached), ("help", Arity::Refuse),
+        ("ignore-environment", Arity::Flag), ("ignore-signal", Arity::Attached),
+        ("list-signal-handling", Arity::Flag), ("null", Arity::Flag),
+        ("split-string", Arity::Refuse), ("unset", Arity::Value), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: true,
+    numeric: false,
+};
+
+static EXEC: Launcher = Launcher {
+    short: &[('a', Arity::Value), ('c', Arity::Flag), ('l', Arity::Flag)],
+    long: &[],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static NOHUP: Launcher = Launcher {
+    short: &[],
+    long: &[("help", Arity::Refuse), ("version", Arity::Refuse)],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static SETSID: Launcher = Launcher {
+    short: &[
+        ('c', Arity::Flag), ('f', Arity::Flag), ('h', Arity::Refuse), ('V', Arity::Refuse),
+        ('w', Arity::Flag),
+    ],
+    long: &[
+        ("ctty", Arity::Flag), ("fork", Arity::Flag), ("help", Arity::Refuse),
+        ("version", Arity::Refuse), ("wait", Arity::Flag),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static STDBUF: Launcher = Launcher {
+    short: &[
+        ('e', Arity::Value), ('h', Arity::Refuse), ('i', Arity::Value), ('o', Arity::Value),
+        ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("error", Arity::Value), ("help", Arity::Refuse), ("input", Arity::Value),
+        ("output", Arity::Value), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static NICE: Launcher = Launcher {
+    short: &[('n', Arity::Value)],
+    long: &[
+        ("adjustment", Arity::Value), ("help", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: true,
+};
+
+static CHRT: Launcher = Launcher {
+    short: &[
+        ('a', Arity::Refuse), ('b', Arity::Flag), ('d', Arity::Flag), ('D', Arity::Value),
+        ('e', Arity::Flag), ('f', Arity::Flag), ('h', Arity::Refuse), ('i', Arity::Flag),
+        ('m', Arity::Refuse), ('o', Arity::Flag), ('p', Arity::Refuse), ('P', Arity::Value),
+        ('r', Arity::Flag), ('R', Arity::Flag), ('T', Arity::Value), ('v', Arity::Refuse),
+        ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("all-tasks", Arity::Refuse), ("batch", Arity::Flag), ("deadline", Arity::Flag),
+        ("ext", Arity::Flag), ("fifo", Arity::Flag), ("help", Arity::Refuse),
+        ("idle", Arity::Flag), ("max", Arity::Refuse), ("other", Arity::Flag),
+        ("pid", Arity::Refuse), ("reset-on-fork", Arity::Flag), ("rr", Arity::Flag),
+        ("sched-deadline", Arity::Value), ("sched-period", Arity::Value),
+        ("sched-runtime", Arity::Value), ("verbose", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 1,
+    assignments: false,
+    numeric: false,
+};
+
+static IONICE: Launcher = Launcher {
+    short: &[
+        ('c', Arity::Value), ('h', Arity::Refuse), ('n', Arity::Value), ('p', Arity::Refuse),
+        ('P', Arity::Refuse), ('t', Arity::Flag), ('u', Arity::Refuse), ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("class", Arity::Value), ("classdata", Arity::Value), ("help", Arity::Refuse),
+        ("ignore", Arity::Flag), ("pgid", Arity::Refuse), ("pid", Arity::Refuse),
+        ("uid", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static TIMEOUT: Launcher = Launcher {
+    short: &[
+        ('f', Arity::Flag), ('k', Arity::Value), ('p', Arity::Flag), ('s', Arity::Value),
+        ('v', Arity::Flag),
+    ],
+    long: &[
+        ("foreground", Arity::Flag), ("help", Arity::Refuse), ("kill-after", Arity::Value),
+        ("preserve-status", Arity::Flag), ("signal", Arity::Value), ("verbose", Arity::Flag),
+        ("version", Arity::Refuse),
+    ],
+    operands: 1,
+    assignments: false,
+    numeric: false,
+};
+
+/// `-i`/`-s` and `-e`/`-l`/`-v` land in a shell or run a mode, so they refuse: a
+/// refused launch is heard by the screen and never proven.
+static SUDO: Launcher = Launcher {
+    short: &[
+        ('A', Arity::Flag), ('b', Arity::Flag), ('B', Arity::Flag), ('C', Arity::Value),
+        ('D', Arity::Value), ('e', Arity::Refuse), ('E', Arity::Flag), ('g', Arity::Value),
+        ('h', Arity::Refuse), ('H', Arity::Flag), ('i', Arity::Refuse), ('K', Arity::Flag),
+        ('k', Arity::Flag), ('l', Arity::Refuse), ('n', Arity::Flag), ('P', Arity::Flag),
+        ('p', Arity::Value), ('R', Arity::Value), ('s', Arity::Refuse), ('S', Arity::Flag),
+        ('T', Arity::Value), ('U', Arity::Value), ('u', Arity::Value), ('v', Arity::Refuse),
+        ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("askpass", Arity::Flag), ("background", Arity::Flag), ("bell", Arity::Flag),
+        ("chdir", Arity::Value), ("chroot", Arity::Value), ("close-from", Arity::Value),
+        ("command-timeout", Arity::Value), ("edit", Arity::Refuse), ("group", Arity::Value),
+        ("help", Arity::Refuse), ("host", Arity::Refuse), ("list", Arity::Refuse),
+        ("login", Arity::Refuse), ("non-interactive", Arity::Flag),
+        ("other-user", Arity::Value), ("preserve-env", Arity::Attached),
+        ("preserve-groups", Arity::Flag), ("prompt", Arity::Value),
+        ("remove-timestamp", Arity::Flag), ("reset-timestamp", Arity::Flag),
+        ("set-home", Arity::Flag), ("shell", Arity::Refuse), ("stdin", Arity::Flag),
+        ("user", Arity::Value), ("validate", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: true,
+    numeric: false,
+};
+
+static DOAS: Launcher = Launcher {
+    short: &[
+        ('C', Arity::Value), ('L', Arity::Refuse), ('n', Arity::Flag), ('s', Arity::Refuse),
+        ('u', Arity::Value),
+    ],
+    long: &[],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+/// The table for a launcher's basename; `None` for a name the walk does not treat
+/// as a launcher.
+fn launcher(base: &str) -> Option<&'static Launcher> {
+    Some(match base {
+        "env" => &ENV,
+        "exec" => &EXEC,
+        "nohup" => &NOHUP,
+        "setsid" => &SETSID,
+        "stdbuf" => &STDBUF,
+        "chrt" => &CHRT,
+        "ionice" => &IONICE,
+        "nice" => &NICE,
+        "timeout" => &TIMEOUT,
+        "sudo" => &SUDO,
+        "doas" => &DOAS,
+        _ => return None,
+    })
+}
+
+/// Where a launcher's argv hands off to the program it runs.
+enum Handoff {
+    /// The program's index in argv.
+    Program(usize),
+    /// No program follows: `env` alone prints the environment.
+    Nothing,
+    /// An option the table refuses or does not list.
+    Refused,
+}
+
+/// Skips a launcher's own options and operands from `start`, as getopt does: an
+/// option-looking token is an option only before the first operand, and `--` ends
+/// the options. The first token after them is the program.
+fn handoff(l: &Launcher, argv: &[String], start: usize) -> Handoff {
+    let (mut i, mut operands, mut options) = (start, l.operands, true);
+    while i < argv.len() {
+        let arg = argv[i].as_str();
+        if options && arg == "--" {
+            options = false;
+            i += 1;
+        } else if options && arg.starts_with('-') {
+            match take_option(l, arg, argv, i) {
+                Some(next) => i = next,
+                None => return Handoff::Refused,
+            }
+        } else {
+            options = false;
+            if l.assignments && is_assignment(arg) {
+                i += 1;
+            } else if operands > 0 {
+                operands -= 1;
+                i += 1;
+            } else {
+                return Handoff::Program(i);
+            }
+        }
+    }
+    Handoff::Nothing
+}
+
+/// The index past the option at `i`, or `None` when the table does not list it or
+/// refuses it.
+fn take_option(l: &Launcher, arg: &str, argv: &[String], i: usize) -> Option<usize> {
+    if let Some(long) = arg.strip_prefix("--") {
+        let (name, attached) = match long.split_once('=') {
+            Some((name, value)) => (name, Some(value)),
+            None => (long, None),
+        };
+        return match (long_arity(l, name)?, attached.is_some()) {
+            (Arity::Flag, false) | (Arity::Value, true) | (Arity::Attached, _) => Some(i + 1),
+            (Arity::Value, false) => value_follows(argv, i),
+            (Arity::Flag, true) | (Arity::Refuse, _) => None,
+        };
+    }
+    let cluster = &arg[1..];
+    if cluster.is_empty() {
+        return None;
+    }
+    if l.numeric && cluster.bytes().all(|b| b.is_ascii_digit()) {
+        return Some(i + 1);
+    }
+    for (at, c) in cluster.char_indices() {
+        match short_arity(l, c)? {
+            Arity::Flag => {}
+            Arity::Value if at + c.len_utf8() < cluster.len() => return Some(i + 1),
+            Arity::Value => return value_follows(argv, i),
+            Arity::Attached | Arity::Refuse => return None,
+        }
+    }
+    Some(i + 1)
+}
+
+/// The index past an option's separate value, when argv has one to give.
+fn value_follows(argv: &[String], i: usize) -> Option<usize> {
+    (i + 2 <= argv.len()).then_some(i + 2)
+}
+
+fn short_arity(l: &Launcher, c: char) -> Option<Arity> {
+    l.short.iter().find(|(s, _)| *s == c).map(|(_, a)| *a)
+}
+
+/// A long option's arity by name: an exact match, else the one name it prefixes.
+fn long_arity(l: &Launcher, name: &str) -> Option<Arity> {
+    if let Some((_, arity)) = l.long.iter().find(|(n, _)| *n == name) {
+        return Some(*arity);
+    }
+    let mut hits = l.long.iter().filter(|(n, _)| !name.is_empty() && n.starts_with(name));
+    match (hits.next(), hits.next()) {
+        (Some((_, arity)), None) => Some(*arity),
+        _ => None,
     }
 }
 
-/// A `VAR=value` prefix (`env FOO=bar bash`, and `env`'s own assignment
-/// form) — never a program name.
+/// A `VAR=value` operand. `env` and `sudo` take one before the program
+/// (`env FOO=bar bash`); anywhere else it is a program name, which no exec runs.
 fn is_assignment(arg: &str) -> bool {
     match arg.split_once('=') {
         Some((name, _)) => {
@@ -113,84 +390,6 @@ fn is_assignment(arg: &str) -> bool {
         }
         None => false,
     }
-}
-
-fn is_number(arg: &str) -> bool {
-    !arg.is_empty() && arg.chars().all(|c| c.is_ascii_digit() || c == '.')
-}
-
-/// Skip a launcher's own leading options: anything dashed, a dashed option's
-/// separate value ([`option_takes_its_value`]), and — when
-/// `numbers_are_options` — any bare number. Stops at the first token that
-/// could be a program.
-///
-/// The flag exists for exactly one caller shape: a bare number is a priority
-/// or a schedule argument for every forwarding launcher, but it is the
-/// DURATION itself in `timeout <duration> <cmd>`, which the caller skips as
-/// its own positional token. Skipping it twice there would step over the
-/// program name.
-fn skip_launcher_options(
-    argv: &[String],
-    mut i: usize,
-    launcher: &str,
-    numbers_are_options: bool,
-) -> usize {
-    while i < argv.len() {
-        let arg = argv[i].as_str();
-        if option_takes_its_value(launcher, arg) {
-            i += 2;
-        } else if arg.starts_with('-') || (numbers_are_options && is_number(arg)) {
-            i += 1;
-        } else {
-            break;
-        }
-    }
-    i
-}
-
-/// `nix develop|shell … -c <cmd>` / `--command[=<cmd>]`: those subcommands
-/// exist to run a command in a dev environment, so their payload is the
-/// question. With no `-c`/`--command` at all, nix opens an INTERACTIVE shell
-/// — which is this predicate's question, and "shell" is the safe answer.
-fn nix_shell_verdict(argv: &[String], i: usize) -> Option<bool> {
-    let sub = argv.get(i + 1).map(|s| command_basename(s)).unwrap_or_default();
-    if sub != "develop" && sub != "shell" {
-        return None;
-    }
-    let mut j = i + 2;
-    while j < argv.len() {
-        match argv[j].as_str() {
-            // An empty payload is a shell with nothing to run: not at a prompt.
-            "-c" | "--command" if j + 1 >= argv.len() => return Some(false),
-            "-c" | "--command" => return shell_verdict(&argv[j + 1..]),
-            // The attached form carries a whole command LINE in one token.
-            a if a.starts_with("--command=") => {
-                let words: Vec<String> = a["--command=".len()..]
-                    .split_whitespace()
-                    .map(str::to_string)
-                    .collect();
-                return shell_verdict(&words);
-            }
-            _ => j += 1,
-        }
-    }
-    Some(true)
-}
-
-/// Whether an `env` argv carries its command in a split string: `-S`/`--split-string`
-/// in any spelling. That is `-S X`, `-SX`, a short cluster with an `S` (`-iS X`),
-/// `--split-string=X`, and any unique prefix of the long name (`--sp`). The string
-/// is a whole command line, which may be a shell, so the walk cannot see past it.
-/// The scan covers the whole remainder, so an assignment cannot hide the option;
-/// a harness argument spelled the same way is refused too, the safe direction.
-fn env_splits_a_command_line(argv: &[String], i: usize) -> bool {
-    argv[i + 1..].iter().any(|a| match a.strip_prefix("--") {
-        Some(long) => {
-            let name = long.split('=').next().unwrap_or_default();
-            !name.is_empty() && "split-string".starts_with(name)
-        }
-        None => a.starts_with('-') && a.contains('S'),
-    })
 }
 
 /// Whether a conducted command IS a shell — one question, one list, one
@@ -204,10 +403,10 @@ fn env_splits_a_command_line(argv: &[String], i: usize) -> bool {
 /// because the old gate compared `agent == "shell"` and a caller is free to
 /// label a shell anything it likes). The first token alone could not answer
 /// it either: a shell is routinely reached through a launcher, so the walk
-/// below skips [`FORWARDING_LAUNCHERS`] and their options until it reaches
-/// the program that will actually exec. `su`/`doas`/`sudo` are the one
-/// resolved-TO case — with no command of their own they land in a login
-/// shell — and answering `true` there is the safe direction. A path basename
+/// below resolves each launcher's own options ([`launcher`]) until it reaches
+/// the program that will actually exec. `su` with no command lands in a login
+/// shell, and answering `true` there is the safe direction; `sudo`/`doas` with
+/// no program, or with an option the walk refuses, answer as a command runner. A path basename
 /// counts (`/usr/bin/bash`), so kitty.nix's terminal wrapper needs no
 /// special case: it always execs the resolved login shell explicitly
 /// (`$SHELL`/passwd/`/bin/sh`, `<login_shell> -l`) as the conducted command.
@@ -239,67 +438,117 @@ fn program_is_an_interactive_shell(argv: &[String]) -> bool {
     shell_verdict(argv) == Some(true)
 }
 
-/// The one walk behind both predicates. `None`: the argv is not a shell.
-/// `Some(true)`: a shell at its own prompt. `Some(false)`: a shell that runs a
-/// command or a script.
-fn shell_verdict(argv: &[String]) -> Option<bool> {
-    let mut i = 0;
-    while i < argv.len() {
-        if is_assignment(&argv[i]) {
-            i += 1;
-            continue;
-        }
-        let base = command_basename(&argv[i]);
-        match base.as_str() {
-            // `env -S`: the split string is a whole command line, which may be a
-            // shell. The walk names no program, and the shell it may be answers
-            // as one that runs a command, so its questions are heard.
-            "env" if env_splits_a_command_line(argv, i) => return Some(false),
-            b if FORWARDING_LAUNCHERS.contains(&b) => {
-                i = skip_launcher_options(argv, i + 1, &b, true)
+/// What the launcher walk finds in one argv: whether it is a shell (the answer
+/// [`shell_verdict`] gives) and the program it reaches (the answer
+/// [`wrapped_program_name`] gives). One walk for both, so the screen's silence and
+/// the proof cannot disagree about where the command goes.
+#[derive(Default)]
+struct Walked {
+    shell: Option<bool>,
+    program: Option<String>,
+}
+
+/// Walks an argv through its launchers, each resolved by its own table ([`launcher`]).
+/// A form the walk cannot resolve is `Some(false)`: heard by the screen, never proven.
+fn walk(argv: &[String]) -> Walked {
+    let Some(first) = argv.first() else {
+        return Walked::default();
+    };
+    let base = command_basename(first);
+    if let Some(l) = launcher(&base) {
+        // `sudo` and `doas` answer as the command they run, so a shell is at its
+        // prompt only when it is the whole command.
+        let wraps = matches!(base.as_str(), "sudo" | "doas");
+        return match handoff(l, argv, 1) {
+            Handoff::Program(p) if wraps => {
+                let inner = walk(&argv[p..]);
+                Walked { shell: Some(inner.shell == Some(true)), program: inner.program }
             }
-            // `timeout <duration> <cmd>`: the duration is a positional, not an
-            // option, so the options are skipped without touching bare
-            // numbers and then exactly one token goes — however the duration
-            // is spelled (`60`, `1m`, `0.5s`).
-            "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
-            "nix" => return nix_shell_verdict(argv, i),
-            // `script` runs the user's `$SHELL`: a shell at its prompt, unless
-            // `-c` hands it a command. The walk never reads past it.
-            "script" => return Some(!script_runs_a_command(argv, i)),
-            // `busybox sh` is the shell as one of its applets; `busybox ls` is a
-            // program, and a shell all the same (it is a `busybox`).
-            "busybox" => {
-                let applet = argv.get(i + 1).map(|a| command_basename(a)).unwrap_or_default();
-                return Some(
+            Handoff::Program(p) => walk(&argv[p..]),
+            Handoff::Nothing => Walked { shell: wraps.then_some(false), program: None },
+            Handoff::Refused => Walked { shell: Some(false), program: None },
+        };
+    }
+    match base.as_str() {
+        "nix" => nix_walk(argv),
+        // `script` runs `$SHELL` at its prompt unless `-c` hands it a command. util-linux
+        // permutes its options, so a `-c` anywhere after it counts; an over-match only
+        // has the screen hear a question.
+        "script" => Walked {
+            shell: Some(!argv[1..].iter().any(|a| a.starts_with('-') && a.contains('c'))),
+            program: None,
+        },
+        "su" => Walked { shell: Some(!su_runs_a_command(argv)), program: None },
+        // `busybox sh` is the shell as one of its applets; `busybox ls` is still a busybox.
+        "busybox" => {
+            let applet = argv.get(1).map(|a| command_basename(a)).unwrap_or_default();
+            Walked {
+                shell: Some(
                     SHELL_BASENAMES.contains(&applet.as_str())
-                        && shell_args_are_interactive(argv.get(i + 2..).unwrap_or_default()),
-                );
+                        && shell_args_are_interactive(argv.get(2..).unwrap_or_default()),
+                ),
+                program: Some(base.clone()),
             }
-            // `su` is a login shell unless it is handed a command with `-c`.
-            "su" => {
-                let runs_a_command = argv[i + 1..].iter().any(|a| {
-                    a.starts_with("--command")
-                        || (a.starts_with('-') && !a.starts_with("--") && a.contains('c'))
-                });
-                return Some(!runs_a_command);
+        }
+        name if SHELL_BASENAMES.contains(&name) => Walked {
+            shell: Some(shell_args_are_interactive(&argv[1..])),
+            program: Some(base.clone()),
+        },
+        _ => Walked { shell: None, program: Some(base.clone()) },
+    }
+}
+
+/// `nix develop|shell`: the payload after `-c`/`--command` is the question. Only
+/// positional installables may stand before `-c`; any dashed token is an option this
+/// walk does not list, so it refuses. With no `-c`, nix opens an interactive shell.
+fn nix_walk(argv: &[String]) -> Walked {
+    let sub = argv.get(1).map(|s| command_basename(s)).unwrap_or_default();
+    match sub.as_str() {
+        "develop" | "shell" => {}
+        // A dashed option before the subcommand is one the walk does not list.
+        _ if argv.get(1).is_some_and(|s| s.starts_with('-')) => {
+            return Walked { shell: Some(false), program: None }
+        }
+        // Any other subcommand (`build`, `run`) is a launcher the walk does not model.
+        _ => return Walked::default(),
+    }
+    let mut j = 2;
+    while j < argv.len() {
+        let a = argv[j].as_str();
+        match a {
+            // An empty payload is a shell with nothing to run: not at a prompt.
+            "-c" | "--command" if j + 1 >= argv.len() => {
+                return Walked { shell: Some(false), program: None }
             }
-            // `sudo`/`doas` run the command after their own options, or land in
-            // a login shell when given none: a shell there is at its prompt.
-            "doas" | "sudo" => {
-                let rest = argv
-                    .get(skip_launcher_options(argv, i + 1, &base, false)..)
-                    .unwrap_or_default();
-                return Some(rest.is_empty() || shell_verdict(rest) == Some(true));
+            "-c" | "--command" => return walk(&argv[j + 1..]),
+            // The attached form carries a whole command LINE in one token.
+            a if a.starts_with("--command=") => {
+                let words: Vec<String> = a["--command=".len()..]
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect();
+                return Walked { shell: walk(&words).shell, program: None };
             }
-            b => {
-                return SHELL_BASENAMES
-                    .contains(&b)
-                    .then(|| shell_args_are_interactive(&argv[i + 1..]))
-            }
+            a if a.starts_with('-') => return Walked { shell: Some(false), program: None },
+            _ => j += 1,
         }
     }
-    None
+    Walked { shell: Some(true), program: None }
+}
+
+/// Whether `su`'s argv hands it a command: `-c` or `--command` in any spelling. Any
+/// dashed token with a `c` counts, an over-match that only has the screen hear.
+fn su_runs_a_command(argv: &[String]) -> bool {
+    argv[1..].iter().any(|a| {
+        a.starts_with("--command") || (a.starts_with('-') && !a.starts_with("--") && a.contains('c'))
+    })
+}
+
+/// [`walk`]'s shell answer. `Some(true)`: a shell at its own prompt. `Some(false)`: a
+/// shell that runs a command or a script, or a form the walk refuses. `None`: not a
+/// shell.
+fn shell_verdict(argv: &[String]) -> Option<bool> {
+    walk(argv).shell
 }
 
 /// Whether a shell's own arguments leave it at its prompt: no `-c` or
@@ -334,50 +583,13 @@ fn shell_args_are_interactive(args: &[String]) -> bool {
     true
 }
 
-/// Whether `script`'s argv carries `-c` or `--command` anywhere after it: it then
-/// runs that command, never a prompt. The whole remainder is scanned, so no
-/// option-parsing guess can step over a `-c` (`-qc`, `-fc`, `--command=x`); an
-/// over-match only has the screen hear a question it could have silenced.
-fn script_runs_a_command(argv: &[String], i: usize) -> bool {
-    argv[i + 1..].iter().any(|a| a.starts_with('-') && a.contains('c'))
-}
-
-/// The program a wrapped argv runs, by basename: the first token the launcher
-/// walk does not forward through. `None` when the walk names no program at all:
-/// `script` (a shell whatever its argv), `env -S` (a command line, which names
-/// no program), `su`, a `nix` form without a `-c` payload. A launcher the walk
-/// does not model names itself (`taskset`), which is never a harness.
-/// Stamped on the record at registration as `wrapped_program`; the ping-back's
-/// receptiveness reads it.
+/// The program a wrapped argv runs, by basename: the one [`walk`] reaches. `None` when
+/// the walk names no program: `script` (a shell whatever its argv), `env -S` (a command
+/// line), `su`, a `nix` form without a `-c` payload, and any form a launcher's table
+/// refuses. A launcher the walk does not model names itself (`taskset`), which is never
+/// a harness. Stamped at registration as `wrapped_program`, the proof every reader checks.
 fn wrapped_program_name(argv: &[String]) -> Option<String> {
-    let mut i = 0;
-    while i < argv.len() {
-        if is_assignment(&argv[i]) {
-            i += 1;
-            continue;
-        }
-        let base = command_basename(&argv[i]);
-        match base.as_str() {
-            "env" if env_splits_a_command_line(argv, i) => return None,
-            b if FORWARDING_LAUNCHERS.contains(&b) => {
-                i = skip_launcher_options(argv, i + 1, b, true)
-            }
-            "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
-            "script" => return None,
-            "sudo" | "doas" => i = skip_launcher_options(argv, i + 1, &base, false),
-            "su" => return None,
-            "nix" => {
-                let sub = argv.get(i + 1).map(|s| command_basename(s)).unwrap_or_default();
-                if sub != "develop" && sub != "shell" {
-                    return None;
-                }
-                let at = argv.iter().skip(i + 2).position(|a| a == "-c" || a == "--command")?;
-                i = i + 2 + at + 1;
-            }
-            _ => return Some(base),
-        }
-    }
-    None
+    walk(argv).program
 }
 
 /// The label a wrap takes when no `--agent` names one: the program the launcher
@@ -441,24 +653,51 @@ pub fn wrapped_program_is_a_shell(rec: &SessionRecord) -> bool {
 
 /// Whether a wrap is a harness the launcher walk PROVES: its walked program
 /// (`wrapped_program`, stamped at registration) is the launch token of the profile
-/// its `agent` names. The positive half of [`wrapped_program_is_a_shell`]. A shell
-/// is never a harness, and neither is a launcher the walk does not model, a wrapper
-/// with another name, or a name with no profile: none of them has a proof. Every reader that
-/// types a line into a pty asks this one question (the ping-back, the doorbell's
-/// PTY arm, the A2A door's inject), and none restates it.
+/// its `agent` names. The positive half of [`wrapped_program_is_a_shell`]. A shell is
+/// never a harness, and neither is a launcher form the walk refuses, a wrapper with
+/// another name, or a name with no profile: none of them has a proof.
+///
+/// The AUTOMATIC readers (the ping-back, the doorbell's PTY arm, the A2A door's
+/// inject) reach this through [`auto_type_refusal`], the one place their typed
+/// lines are refused. `aoide send` is the human's own command and is not gated by
+/// this proof.
 pub fn is_its_harness(rec: &SessionRecord) -> bool {
     agent_profile(&rec.agent)
         .and_then(|p| p.launch.first().copied())
         .is_some_and(|bin| rec.wrapped_program.as_deref() == Some(bin))
 }
 
+/// Why an AUTOMATIC reader may not type a line into this wrap, or `None` when it may.
+/// The ping-back, the doorbell's PTY arm and the A2A door's inject all ask this one
+/// question and name the answer in their own audit vocabulary. A shell is named
+/// first: it is the worse fact, and a `""`/`"shell"` label is a shell whatever the
+/// walk says. A harness label alone never clears a wrap; the proof does.
+pub fn auto_type_refusal(rec: &SessionRecord) -> Option<AutoTypeRefusal> {
+    if matches!(rec.agent.as_str(), "" | "shell") || wrapped_program_is_a_shell(rec) {
+        Some(AutoTypeRefusal::Shell)
+    } else if !is_its_harness(rec) {
+        Some(AutoTypeRefusal::Unproven)
+    } else {
+        None
+    }
+}
+
+/// The two refusals [`auto_type_refusal`] gives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoTypeRefusal {
+    /// The wrap is a shell, by its label or by its walked argv.
+    Shell,
+    /// The launcher walk does not prove the wrap is its harness.
+    Unproven,
+}
+
 /// Whether a process is invocation plumbing rather than a harness: a shell or a
 /// forwarding launcher, by argv[0]'s basename (a leading `-` marks a login shell,
 /// `-zsh`). The hook door's harness walk reads this verdict, and this verdict reads only
 /// [`SHELL_BASENAMES`] and [`FORWARDING_LAUNCHERS`], so no other name is plumbing here.
-/// [`program_is_a_shell`] has its own arms for `timeout`, `nix`, `script`, `su`, `doas` and
-/// `sudo`: those names are not in either list, so a hook behind one of them takes that
-/// launcher as its harness.
+/// [`program_is_a_shell`] resolves `timeout`, `sudo`, `doas`, `nix`, `script` and `su`
+/// through its own tables and forms: those names are not in either list, so a hook
+/// behind one of them takes that launcher as its harness.
 /// `None` (a pid whose argv cannot be read, or an empty one) is plumbing too:
 /// a process nobody can read is not a live harness.
 pub(in crate::graph) fn is_invocation_plumbing(argv: Option<&[String]>) -> bool {
@@ -2550,7 +2789,6 @@ mod tests {
             &["nix", "develop", "-c", "bash"],
             &["sudo", "bash"],
             &["sudo", "-u", "root", "bash"],
-            &["sudo", "-i"],
             &["su", "-"],
             &["su", "-", "khoa"],
             &["script", "-q", "/dev/null"],
@@ -2560,7 +2798,6 @@ mod tests {
             &["busybox", "ash"],
             &["sudo", "--user", "root", "bash"],
             &["sudo", "-D", "/tmp", "bash"],
-            &["sudo", "-h", "host", "bash"],
             &["-bash"],
             &["/usr/bin/-zsh"],
             &["sudo", "-T", "5", "bash"],
@@ -2578,13 +2815,17 @@ mod tests {
             &["script", "--command", "make", "out.log"],
             &["script", "--command=make", "out.log"],
             &["script", "--command", "bash"],
-            // `-c` after the typescript operand is still script's option.
+            // util-linux script permutes its options, so a `-c` after the typescript
+            // file is still the command to run, not an operand.
             &["script", "-q", "/dev/null", "-c", "make"],
             &["env", "-S", "bash"],
             &["env", "--split-string=bash -c x"],
             &["env", "-iS", "bash"],
             &["fish", "--command=make"],
             &["fish", "-c", "x"],
+            // A launcher option the table does not list is refused: heard, never silenced.
+            &["sudo", "-i"],
+            &["sudo", "-h", "host", "bash"],
             &["busybox", "sh", "-c", "x"],
             &["busybox", "ls"],
             &["sudo", "--user", "root", "bash", "-c", "x"],
@@ -2646,6 +2887,125 @@ mod tests {
             let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
             assert_eq!(wrapped_program_name(&argv).as_deref(), *want, "wrapped_program_name({argv:?})");
         }
+    }
+
+    #[test]
+    fn a_launcher_option_the_table_does_not_list_is_refused_never_guessed() {
+        // Default-deny: an option the table does not list refuses the whole launcher.
+        // It names no program, is never proven, and is heard by the screen.
+        let refused: &[&[&str]] = &[
+            &["nix", "develop", "--impure", "-c", "claude"],
+            &["nix", "develop", "--option", "x", "y", "-c", "bash"],
+            &["nix", "--option", "x", "y", "develop", "-c", "bash"],
+            &["sudo", "-h", "host", "bash"],
+            &["sudo", "-i"],
+            &["sudo", "-s", "claude"],
+            &["ionice", "-p", "1", "claude"],
+            &["chrt", "-p", "1", "claude"],
+            &["env", "-"],
+            &["env", "-", "claude"],
+            &["nice", "-h", "claude"],
+            &["timeout", "-x", "5", "claude"],
+            &["env", "-S", "claude"],
+            &["env", "--split-string=claude"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in refused {
+            let argv = owned(case);
+            assert_eq!(wrapped_program_name(&argv), None, "{case:?} names no program");
+            assert_eq!(wrapped_harness(&argv), None, "{case:?} is never proven");
+            assert!(program_is_a_shell(&argv), "{case:?} is heard as a command runner");
+            assert!(!program_is_an_interactive_shell(&argv), "{case:?} is never silenced");
+        }
+    }
+
+    #[test]
+    fn a_value_an_option_takes_is_never_the_program() {
+        // The bypasses the review named. Each option takes its value, so the token
+        // that looks like a harness is that option's argument, and the program that
+        // runs is the shell after it. Long names are read the way getopt reads them,
+        // so an abbreviation (`--adj`, `--arg`) takes a value too.
+        let shells: &[&[&str]] = &[
+            &["env", "-a", "claude", "bash"],
+            &["env", "--argv0", "claude", "bash"],
+            &["env", "-ia", "claude", "bash"],
+            &["env", "--arg", "claude", "bash"],
+            &["nice", "--adj", "claude", "bash"],
+            &["nice", "--adjustment", "claude", "bash"],
+            &["timeout", "--sig", "KILL", "5", "bash"],
+            &["stdbuf", "--output", "L", "bash"],
+            &["stdbuf", "-o", "L", "bash"],
+            &["exec", "-a", "claude", "bash"],
+            &["ionice", "-c", "3", "bash"],
+            &["chrt", "-T", "5", "10", "bash"],
+            &["sudo", "-u", "claude", "bash"],
+            &["doas", "-u", "claude", "bash"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in shells {
+            let argv = owned(case);
+            assert_eq!(wrapped_program_name(&argv).as_deref(), Some("bash"), "{case:?}");
+            assert!(program_is_an_interactive_shell(&argv), "{case:?} sits at its prompt");
+            assert_eq!(wrapped_harness(&argv), None, "{case:?} is never proven as claude");
+        }
+    }
+
+    #[test]
+    fn the_forms_a_launcher_really_runs_are_the_ones_proven() {
+        // Controls: every form whose exec resolves to the harness is proven.
+        let proven: &[&[&str]] = &[
+            &["env", "FOO=1", "claude"],
+            &["env", "-i", "FOO=1", "claude"],
+            &["env", "-u", "FOO", "claude"],
+            &["env", "--unset=FOO", "claude"],
+            &["env", "--", "claude"],
+            &["nice", "-n", "5", "claude"],
+            &["nice", "-5", "claude"],
+            &["nice", "--adjustment=5", "claude"],
+            &["timeout", "5", "claude"],
+            &["timeout", "--kill-after=1", "5", "claude"],
+            &["stdbuf", "-oL", "claude"],
+            &["stdbuf", "--output=L", "claude"],
+            &["nix", "develop", "-c", "claude"],
+            &["nix", "develop", "nixpkgs#claude", "-c", "claude"],
+            &["chrt", "-f", "10", "claude"],
+            &["ionice", "-c", "3", "claude"],
+            &["setsid", "-w", "claude"],
+            &["exec", "-a", "x", "claude"],
+            &["nohup", "claude"],
+            &["sudo", "-E", "claude"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in proven {
+            assert_eq!(wrapped_harness(&owned(case)), Some("claude"), "{case:?} runs the harness");
+        }
+    }
+
+    #[test]
+    fn an_env_s_after_the_program_is_the_programs_own_argument() {
+        // GNU env stops reading options at its first operand (`env echo claude -S x`
+        // prints `claude -S x`), so an -S after the program is that program's argument.
+        let argv: Vec<String> = ["env", "claude", "-S", "x"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(wrapped_harness(&argv), Some("claude"));
+        assert!(!program_is_a_shell(&argv));
+    }
+
+    #[test]
+    fn an_option_after_an_assignment_is_a_program_name_as_getopt_reads_it() {
+        // The first operand ends env's options, so `-i` after `FOO=1` is the program
+        // env would try to exec: no such program, and no proof.
+        let argv: Vec<String> = ["env", "FOO=1", "-i", "claude"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(wrapped_program_name(&argv).as_deref(), Some("-i"));
+        assert_eq!(wrapped_harness(&argv), None);
+    }
+
+    #[test]
+    fn a_top_level_assignment_is_a_program_name_because_conduct_execs_argv_directly() {
+        // conduct runs argv[0] with `Command::new` and no shell, so `FOO=1 claude`
+        // names a program that does not exist. The walk does not skip it.
+        let argv: Vec<String> = ["FOO=1", "claude"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(wrapped_program_name(&argv).as_deref(), Some("FOO=1"));
+        assert_eq!(wrapped_harness(&argv), None);
     }
 
     #[test]

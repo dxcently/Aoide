@@ -247,11 +247,13 @@ pub struct SessionRecord {
     /// basename (`claude` for `aoide spawn -- env claude`), stamped at the same
     /// registration as `shell`. A launcher the walk does not model names itself
     /// (`taskset -c 0 claude` is `taskset`). Absent when the walk names no program
-    /// at all: a login shell, `script` (a shell whatever its argv), `su`, a `nix`
-    /// form without a `-c` payload, and `env -S` (a command line that names no
-    /// program). The readers type into a wrap only when its program is the harness
-    /// its agent names (`conduct.rs::is_its_harness`), so an absent or foreign name
-    /// is never typed into. `skip_serializing_if` keeps every older record identical.
+    /// at all: `script` (a shell whatever its argv), `su`, a `nix` form without a
+    /// `-c` payload, and any form the launcher's option table refuses (`env -S`, or
+    /// an option the table does not list). The automatic readers type into a wrap
+    /// only when its program is the harness its agent names
+    /// (`conduct.rs::auto_type_refusal`, which asks `is_its_harness`), so an absent
+    /// or foreign name is never typed into. `skip_serializing_if` keeps every older
+    /// record identical.
     #[serde(rename = "wrappedProgram", default, skip_serializing_if = "Option::is_none")]
     pub wrapped_program: Option<String>,
     #[serde(rename = "startedAt", default)]

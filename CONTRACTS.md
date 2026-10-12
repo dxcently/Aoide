@@ -2160,21 +2160,25 @@ id flips both together):
 - `wrappedProgram` (string), the program the same launcher walk resolves the
   wrapped argv to, by basename (`conduct.rs::wrapped_program_name`). It is `claude` for `-- env claude`, and
   `taskset` for `-- taskset -c 0 claude`, because a launcher the walk does not
-  model names itself. It is absent when the walk names no program: a login
-  shell, `script` (a shell whatever its argv), `su`, a `nix` form without a `-c`
-  payload, and `env -S`, whose split string is a whole command line that names no
-  program. A login spelling's leading `-` is dropped for a shell name only:
+  model names itself. It is absent when the walk names no program: `script` (a
+  shell whatever its argv), `su`, a `nix` form without a `-c` payload, and any
+  form a launcher's own option table refuses. The walk refuses rather than
+  guesses: an option the table does not list, `env -S` (its split string is a
+  whole command line), and `--help` all name nothing, because a wrong count of
+  option tokens would read a value as the program. A login spelling's leading `-`
+  is dropped for a shell name only:
   `-bash` names `bash`, and `-claude` names `-claude`.
 
-**A line is typed into a pty only by a positive proof, one rule for every
-reader.** The record's `wrappedProgram` must equal the first launch token of the
+**An automatic line is typed into a pty only by a positive proof, one rule for
+every automatic reader.** The record's `wrappedProgram` must equal the first launch token of the
 profile its `agent` names (`conduct.rs::is_its_harness`). A `conduct` or `spawn`
 with no `--agent` is labelled by the walked program (`default_label`), so `env
 claude` is `claude`, and the A2A spawn labels its wrap with the harness it
 proved. Four readers apply it:
 the ping-back, the doorbell's PTY arm, the A2A door's inject, and the A2A door's
 spawn, which asks its argv twin `conduct.rs::wrapped_harness` (the same walk,
-read before a record exists). The proof is that basename, and it is stated as
+read before a record exists). `aoide send` is the human's own command: it is not
+one of these readers, and this proof does not gate it. The proof is that basename, and it is stated as
 one: a symlink named `claude` that points at `bash`, or a script named `claude`
 that execs a shell, passes it. It rejects the launchers the walk does not model
 and a label that does not match the wrap. It does not stop a same-uid process
@@ -2182,19 +2186,23 @@ that names a shell after a harness; for that class the defence is inert content,
 since every line takes one pass as it is written (`wire_line`), and every shell
 metacharacter in it is made inert, with `!` and `"` among them.
 
-The refusals, in order. A shell (`shell`, or a `restore` snapshot,
-`wrapped_program_is_a_shell`) is refused as `shell-parent`. A wrap whose program
-is absent or is not its harness is refused as `unverified-wrap`. The ping-back
-also refuses by `not-conductable` and `parent-done`. The A2A inject holds the
-same two as `shell-wrapped` and `unverified-wrap`, and an unreadable stage holds
-as `unverified-wrap`. The label alone never decides it: `agent` is a caller's
-choice, and `--agent pi -- bash` names a registered profile over a shell.
+The refusals, in order, are `conduct.rs::auto_type_refusal`'s: a shell first
+(`agent` `""` or `shell`, a `restore` snapshot, or a `wrappedProgram` that is a
+shell), then a wrap the proof does not clear. Each reader names them in its own
+words. The ping-back writes `shell-parent` and `unverified-wrap`; the doorbell
+writes the same two, with `unverified-wrap` only on its headless arm; the A2A
+inject holds `shell-wrapped` and `unverified-wrap`, and an unreadable stage holds
+as `unverified-wrap`. The ping-back also refuses by `not-conductable` and
+`parent-done`. The label alone never decides it: `agent` is a caller's choice,
+and `--agent pi -- bash` names a registered profile over a shell.
 
 **One-time cost.** The proof reads the `wrappedProgram` a registration
-stamped. A wrap registered by an earlier build keeps the stamp that build wrote
-until it restarts, so until then the readers judge it by the old walk's answer.
-Both fields absent (the default, skipped on serialization) mean `false` and no
-program, byte-identical to every record written before they existed.
+stamped, so a change to the walk reaches a wrap at its next registration, and a
+wrap with no stamp is unproven until it re-registers. That is acceptable because
+a walk error needs an argv chosen by the same uid or by the operator's
+`spawnAgent`, which is the class the basename proof already accepts. Both fields
+absent (the default, skipped on serialization) mean `false` and no program,
+byte-identical to every record written before they existed.
 
 **Additive in v0:** a session record MAY carry an optional `parentSessionId`
 (string) naming the session that spawned it — the graph's spawned-by edge. Set

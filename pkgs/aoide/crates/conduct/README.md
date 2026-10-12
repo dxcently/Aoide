@@ -267,11 +267,11 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   never whether a wrap is reachable) — under
   a dedicated `.ring.lock` file (`aoide_storage::mail::with_ring_lock`) —
   never `.stage.lock`, and only the daemon's own serializer, not a second
-  policy boundary. The PTY fallback is refused for a wrap whose WRAPPED
-  program is a shell (`shell-parent`, `wrapped_program_is_a_shell`), and for a
-  wrap the walk does not prove is its harness (`unverified-wrap`,
-  `is_its_harness`, the same proof the ping-back asks): the
-  line is submitted, so a shell would RUN it. The channel arm is not that
+  policy boundary. The PTY fallback is refused by `auto_type_refusal`, the one
+  refusal the ping-back and the A2A inject make too: a wrap whose WRAPPED program is
+  a shell (`shell-parent`), and a wrap the walk does not prove is its harness
+  (`unverified-wrap`, the proof `is_its_harness` checks). The line is submitted, so
+  a shell would RUN it. The channel arm is not that
   and is still taken — it pushes into the harness's own MCP subprocess and
   types nothing — so a shell wrap hosting a channel-connected agent (the
   ordinary terminal wrap, `kitty.nix` conducting a login shell) is rung.
@@ -347,7 +347,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   (`wrapped_program_is_a_shell` = the durable `shell` stamp OR a P-C5
   `restore`), so a session labelled from a harness profile over a `bash` pty
   is refused like any other shell, launchers included (`env bash`,
-  `nix develop -c bash`, `env -S <command>`, `dash`, `nu`, `xonsh`, …). The
+  `nix develop -c bash`, `env -S <command>`, `dash`, `nu`, `xonsh`, …), and any
+  launcher form its option table refuses. The
   read is argv-only: a wrapper script that execs a shell is not seen as one, but
   it has no proof of being a harness, so it is refused as `unverified-wrap` and
   never typed into; a harness reached THROUGH a shell reads as a shell for its

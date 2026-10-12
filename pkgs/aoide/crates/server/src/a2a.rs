@@ -1941,12 +1941,10 @@ fn session_remote_parent(id: &str) -> Option<RemoteParent> {
 }
 
 /// Why the A2A door will not type a line into `id` by itself, read off its
-/// record: `shell-wrapped` when the record is conducting a SHELL
-/// (`aoide_conduct::graph::wrapped_program_is_a_shell`, the read the ping-back
-/// and doorbell lanes make), `unverified-wrap` when the launcher walk does not
-/// prove it is its harness (`aoide_conduct::graph::is_its_harness`). The same
-/// two refusals the other readers name, so the whole box agrees on which
-/// sessions a submitted line must never reach.
+/// record through [`aoide_conduct::graph::auto_type_refusal`], the one refusal
+/// the ping-back and doorbell make too: `shell-wrapped` for a SHELL,
+/// `unverified-wrap` for a wrap the launcher walk does not prove to be its harness.
+/// The whole box agrees on which sessions a submitted line must never reach.
 ///
 /// Unlike [`session_remote_parent`], an unreadable stage answers a hold, and
 /// `unverified-wrap` is the reason: this is a refusal's input, so "cannot tell"
@@ -1959,13 +1957,10 @@ fn session_inject_hold(id: &str) -> Option<&'static str> {
     match load_stage::<SessionsFile>(&sessions_path()) {
         Ok(sf) => {
             let rec = sf.sessions.iter().find(|s| s.session_id == id)?;
-            if aoide_conduct::graph::wrapped_program_is_a_shell(rec) {
-                Some("shell-wrapped")
-            } else if !aoide_conduct::graph::is_its_harness(rec) {
-                Some("unverified-wrap")
-            } else {
-                None
-            }
+            aoide_conduct::graph::auto_type_refusal(rec).map(|why| match why {
+                aoide_conduct::graph::AutoTypeRefusal::Shell => "shell-wrapped",
+                aoide_conduct::graph::AutoTypeRefusal::Unproven => "unverified-wrap",
+            })
         }
         Err(_) => Some("unverified-wrap"),
     }

@@ -447,8 +447,11 @@ its bare prompt, so a question typed or echoed there is never `awaiting`, and a
 `read -p` it runs itself goes unseen. A shell given a command or a script
 (`bash -c "apt install x"`, `sh ./run.sh`) is a program like any other, and its
 questions are heard. `script` is a shell at its prompt unless `-c` or `--command`
-appears after it, and `env -S` hands a command line to a shell, so its questions
-are heard. The argv decides which, read by the walk that classes a shell; no
+appears after it (any dashed token with a `c` counts, so the screen only ever
+hears more). A form the launcher walk refuses (`env -S`, `sudo -i`, an option its
+table does not list) is answered as a command runner, so its questions are heard
+too: where the walk cannot resolve a form, the over-match goes toward hearing,
+never toward silence. The argv decides which, read by the walk that classes a shell; no
 process is probed for it.
 
 Precedence, highest first: **hook phase, trace, screen, presence.** A non-shell

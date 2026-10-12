@@ -1050,17 +1050,19 @@ in the message.
   `conduct.rs::is_its_harness`: the record's `wrapped_program` (stamped at
   registration from `conduct.rs::wrapped_program_name`, the launcher walk's
   resolved program) must equal the first launch token of the profile its `agent`
-  names. Three readers ask that predicate, and none restates it: the ping-back
+  names. Three automatic readers ask one refusal, `conduct.rs::auto_type_refusal` (a shell
+  first, then the `is_its_harness` proof), and none restates it: the ping-back
   (`pingback.rs::unreceptive`), the doorbell's PTY arm (`doorbell.rs`), and the A2A
-  inject (`server/src/a2a.rs`). The A2A spawn asks its argv twin,
+  inject (`server/src/a2a.rs::session_inject_hold`). The A2A spawn asks its argv twin,
   `conduct.rs::wrapped_harness`, the same walk read before a record exists. The
   refusal names and their order, the proof's limits and the one-time cost live once,
-  in `CONTRACTS.md`'s `wrappedProgram` paragraph. Locally, the walk resolves what it
-  models: the forwarding launchers (`env`, `exec`, `setsid`, `nohup`, `stdbuf`,
-  `chrt`, `ionice`, `nice`), `timeout`, `sudo`/`doas`, and `nix develop|shell -c`.
-  `script` and `env -S`/`--split-string` name no program and are shells:
-  `script_runs_a_command` scans the whole remainder for a dashed `c`, and
-  `env_splits_a_command_line` for an `S`. Every other launcher names itself. `shell`
+  in `CONTRACTS.md`'s `wrappedProgram` paragraph. Locally, each launcher resolves through its own option table (`conduct.rs::launcher`),
+  and an option the table does not list refuses the whole launcher: the walk never
+  guesses how many tokens an option takes (default-deny). The tables are coreutils
+  9.11, util-linux 2.42, sudo 1.9.17 and bash's `exec`; `doas` is from its man page.
+  `script` and `su` answer by a scan for `-c`/`--command`, which only over-matches.
+  `nix` resolves `develop|shell -c`, and `env -S` refuses (its split string is a
+  command line). Every other launcher names itself. `shell`
   and `wrapped_program` are written together at registration on both
   `upsert_session` arms, so re-registering an id flips both. Shell syntax in a child's text (the
   question, the tag, the say, the prompt, the stop reason, the tool label) is made

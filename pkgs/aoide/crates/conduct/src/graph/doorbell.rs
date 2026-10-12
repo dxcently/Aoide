@@ -40,10 +40,9 @@
 //! live channel) writes directly with [`super::send::write_delivery`] — no
 //! gate, no pending queue, no provenance prefix, no title rename — and that
 //! one is followed by the target's own submit keystroke. A PTY ring is
-//! therefore refused outright for a wrap whose WRAPPED program is a shell
-//! (`shell-parent`, [`wrapped_program_is_a_shell`]), and for a wrap the launcher
-//! walk does not prove to be its harness (`unverified-wrap`,
-//! [`is_its_harness`]): the line is submitted, and a shell would RUN it. The
+//! therefore refused outright by [`auto_type_refusal`]: a shell (`shell-parent`),
+//! and a wrap the launcher walk does not prove to be its harness
+//! (`unverified-wrap`): the line is submitted, and a shell would RUN it. The
 //! channel arm is not that — nothing is typed.
 //!
 //! **Every other door forwards, never rings.** `aoide-client`'s `mail send`
@@ -57,7 +56,7 @@
 //! deliberately deferred out of this slice.
 
 use super::conduct::channel_socket_path;
-use super::conduct::{is_its_harness, wrapped_program_is_a_shell};
+use super::conduct::{auto_type_refusal, AutoTypeRefusal};
 use super::doc::is_conductable_now;
 use super::model::{load_stage, sessions_path, SessionRecord, SessionsFile};
 use super::permit::profile_for_agent;
@@ -297,10 +296,10 @@ fn ring_locked(name: &str, exclude: Option<&str>) -> RingReport {
             // harness's own MCP subprocess and types nothing into any pty, so
             // a shell wrap with a live channel is still rung. The read is the
             // same one ping-back's `unreceptive` makes
-            // (`conduct::wrapped_program_is_a_shell`): the WRAPPED program,
-            // never the `agent` label — a wrap labelled from a harness profile
-            // can still be conducting `bash`.
-            None if wrapped_program_is_a_shell(wrap) => {
+            // (`auto_type_refusal`, the ping-back's read): the WRAPPED program,
+            // never the `agent` label alone — a wrap labelled from a harness
+            // profile can still be conducting `bash`.
+            None if auto_type_refusal(wrap) == Some(AutoTypeRefusal::Shell) => {
                 report.skipped.push((wrap_id.clone(), "shell-parent".to_string()));
                 continue;
             }
@@ -308,7 +307,7 @@ fn ring_locked(name: &str, exclude: Option<&str>) -> RingReport {
             // into a wrap whose walked program is the harness its own agent names.
             // Scoped to the headless arm that types: an interactive wrap is never
             // typed into, so it keeps its own `interactive-composer` reason.
-            None if wrap.headless && !is_its_harness(wrap) => {
+            None if wrap.headless && auto_type_refusal(wrap) == Some(AutoTypeRefusal::Unproven) => {
                 report.skipped.push((wrap_id.clone(), "unverified-wrap".to_string()));
                 continue;
             }

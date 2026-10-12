@@ -117,11 +117,6 @@ pub use self::conduct::conduct_socket_path;
 // the socket the doorbell will eventually write a nudge line onto — the
 // same way `conduct_socket_path` already crosses this boundary above.
 pub use self::conduct::channel_socket_path;
-// N1 (house rule 4): `aoide-server`'s A2A door reads the target record's own
-// WRAPPED-program shape before an inject — the same read the ping-back and
-// doorbell lanes make, re-exported for the same reason
-// `conduct_socket_path` above is. One predicate, three lanes, no copy.
-pub use self::conduct::wrapped_program_is_a_shell;
 // The same predicate, for the doors that hold an ARGV rather than a record:
 // `aoide-server`'s spawn arm refuses a `spawnAgent` that is a shell, and that
 // decision happens before any record exists.
@@ -129,9 +124,9 @@ pub use self::conduct::program_is_a_shell;
 // The positive half of the same walk: the registered harness an argv runs, for
 // the door that spawns one and must prove what it spawned. Same walk, no copy.
 pub use self::conduct::wrapped_harness;
-// The same proof read off a RECORD: the ping-back, the doorbell's PTY arm and the
-// A2A door all type into a pty only when this holds. One predicate, no copy.
-pub use self::conduct::is_its_harness;
+// The one refusal every automatic reader makes (the ping-back, the doorbell's PTY
+// arm, the A2A door's inject), so the three cannot drift.
+pub use self::conduct::{auto_type_refusal, AutoTypeRefusal};
 // The screen episode's one clearing write (`question` and the `sudo` lock badge
 // together), shared by the session end, the reaper and the refresh writer.
 pub(crate) use self::model::clear_screen_ask;
