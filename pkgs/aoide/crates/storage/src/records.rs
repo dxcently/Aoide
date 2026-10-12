@@ -780,7 +780,7 @@ pub struct SessionRecord {
 }
 
 /// One hook record (`state/stage/hooks.json`, written by shellbridge).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct HookRecord {
     #[serde(rename = "sessionId", default)]
     pub session_id: String,
@@ -788,8 +788,29 @@ pub struct HookRecord {
     pub phase: String,
     #[serde(rename = "updatedAt", default)]
     pub updated_at: String,
+    /// Present only beside `phase: "died"`: how the harness went away under an
+    /// open turn, written by the wrap that hosted it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub death: Option<HookDeath>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// The fact a hook child's turn ended with: the tool in flight and how its
+/// harness exited. The wrap that hosted the harness writes it when its own child
+/// exits while the hook phase is still open. The end fields are the conducted
+/// record's own (`outcome`, `exitCode`), except that a signal is its number.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct HookDeath {
+    #[serde(rename = "lastTool", default, skip_serializing_if = "Option::is_none")]
+    pub last_tool: Option<String>,
+    /// `exit`, `signal` or `timeout`; absent when the wrap saw no status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(rename = "exitCode", default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<i32>,
 }
 
 /// `projects.json` container.

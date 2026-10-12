@@ -14,15 +14,15 @@
 use super::doc::restage_graph;
 use super::model::{
     canonical_state, clear_screen_ask, hooks_path, load_stage, sessions_path, write_stage,
-    HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
+    HookDeath, HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use super::prompt::{Prompt, PromptWatch};
 use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize};
 #[cfg(unix)]
 use super::pty::signal_name;
 use super::session_store::{
-    do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
-    stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task, stamp_wrap,
+    do_session_end, do_session_start, record_hook_deaths, set_session_log_path, stamp_headless,
+    stamp_origin, stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task, stamp_wrap,
 };
 use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
 use aoide_protocol::agents::agent_profile;
@@ -1493,6 +1493,22 @@ fn classify_end(timed_out: bool, status: Option<Ended>) -> (String, Option<Strin
     }
 }
 
+/// How a conducted child ended, as the death fact a hook child it hosted carries
+/// ([`HookDeath`]): the same discriminator `classify_end` writes onto the record,
+/// with a signal kept as its number. A wrapper's own deadline kill is `timeout`,
+/// never the child's exit, and a status the host cannot name is no status at all.
+fn hook_death_of(ended: Ended, timed_out: bool) -> HookDeath {
+    if timed_out {
+        return HookDeath { outcome: Some("timeout".into()), ..Default::default() };
+    }
+    match ended {
+        Ended::Code(code) => HookDeath { outcome: Some("exit".into()), exit_code: Some(code), ..Default::default() },
+        #[cfg(unix)]
+        Ended::Signal(signo) => HookDeath { outcome: Some("signal".into()), signal: Some(signo), ..Default::default() },
+        Ended::Unknown => HookDeath::default(),
+    }
+}
+
 /// Where the multiplex loop ended: whether the wrapper's own deadline fired,
 /// whether the DIRECT CHILD had already exited while a descendant still held
 /// the PTY slave (its own fact, never a timeout), and — for a deadline kill
@@ -2087,6 +2103,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // NO exit code — the old `code().unwrap_or(-1)` collapse is gone.
     let ended = child.ended();
     let (outcome, signal, exit_code) = classify_end(end.timed_out, Some(ended));
+    let death = hook_death_of(ended, end.timed_out);
 
     // Restore the console, close the channel and unlink the socket, resolve
     // the session — whatever happened. The terminal closes AFTER the output is
@@ -2104,6 +2121,9 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     if task.is_some() {
         stamp_session_exit(&id, exit_code, Some(&outcome), &now_iso_utc());
     }
+    // The wrap saw its own harness end: a hook child it hosts whose turn is still
+    // open is recorded as died now, before this wrap ends its own record.
+    record_hook_deaths(&id, std::process::id(), &death);
     let _ = do_session_end(&id);
 
     let changed = vec![format!("session {id}: running → done")];
@@ -2162,6 +2182,19 @@ mod tests {
     use super::*;
     use crate::graph::session_store::upsert_session;
     use crate::graph::testutil::*;
+
+    /// The death a wrap records for its own child: a signal is its number, a
+    /// deadline kill is `timeout` (the wrapper's act, not the child's exit), and a
+    /// status the host cannot name is no status.
+    #[cfg(unix)]
+    #[test]
+    fn the_wrap_names_its_childs_end_in_the_fact_a_hook_child_carries() {
+        let signal = hook_death_of(Ended::Signal(9), false);
+        assert_eq!(signal, HookDeath { outcome: Some("signal".into()), signal: Some(9), ..Default::default() });
+        assert_eq!(hook_death_of(Ended::Code(3), false), HookDeath { outcome: Some("exit".into()), exit_code: Some(3), ..Default::default() });
+        assert_eq!(hook_death_of(Ended::Signal(9), true), HookDeath { outcome: Some("timeout".into()), ..Default::default() });
+        assert_eq!(hook_death_of(Ended::Unknown, false), HookDeath::default());
+    }
 
     /// `spawn_on_pty`'s env shaping, pinned without spawning anything: the
     /// PARENT harness's session markers are removed, the aoide parent edge and

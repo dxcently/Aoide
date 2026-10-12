@@ -301,10 +301,15 @@ the tool in flight is cleared the moment the phase leaves `working`),
 per silence; any new hook event re-arms it; a stamp more than a day old is a
 dead record, not a silence), `[claude <petname>] settled` when a child last
 seen `working` or `awaiting` stops through its own hook, and `[claude
-<petname>] died mid-turn · last: <the tool in flight, else "working">` when
-that open turn ends with no hook at all: its harness process is gone (the
-first `hookAncestry` pid, probed with the reaper's own liveness probe), or its
-record has left the roster while the phase still reads open. A `done` phase is
+<petname>] died mid-turn · last: <the tool in flight, else "working">` when that
+open turn ends with its harness gone. The hosting wrap records that end itself,
+the moment its harness exits: the child's hook phase becomes `died`, with the
+tool in flight and how the process ended (`exit 1`, `signal 9`, or `timeout`),
+and the line names that status in parentheses, `… died mid-turn (exit 1) · last:
+…`. When the wrap was killed before it could write, the tick infers the death
+instead: the harness process is gone (the first `hookAncestry` pid, probed with
+the reaper's own liveness probe), or the record has left the roster while the
+phase still reads open. That inferred line carries no status. A `done` phase is
 a session ending through its own hook and says nothing. A silence before a
 death does not hide it; a death is claimed once per open turn. The first look
 at a child is a baseline and says nothing, a child found already stopped or
@@ -316,10 +321,13 @@ for it: the host wrap and the spawner it resolved to while both seals verified,
 the harness it was seen alive as (pid and start time), and the tool in flight.
 Such a death is said over that route when the spawner verifies at the claim,
 inside the stage lock, and the host wrap is either gone (absent, or its pid
-dead) or still verifies. A harness still running under its recorded start time
-is a reaped record, not a death: its entry is dropped silently. A live host that
-does not verify keeps the entry until it verifies again, and the entry is
-dropped once the turn is a day old. A hook child's own
+dead) or still verifies.
+A harness still running under its recorded start time is an orphan, not a
+death: its entry is kept, and when that harness later dies with the phase still
+open, the death is said once, as above. The entry is dropped silently when the
+phase closes, or once the turn is a day old by its last update. A live host
+that does not verify keeps the entry until it verifies again, and the day bound
+applies to that wait too. A hook child's own
 `parentSessionId` is the wrap that hosts it, never the session that spawned
 it, so this source does not write to that edge: it climbs to the wrap's own
 `parentSessionId` and speaks only when `attestedSpawner` — the parent the

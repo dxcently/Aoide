@@ -3186,6 +3186,7 @@ mod tests {
             session_id: id.into(),
             phase: "stopped".into(),
             updated_at: at.into(),
+            death: None,
             extra: Default::default(),
         };
         let mut hooks = vec![
@@ -3195,6 +3196,7 @@ mod tests {
                 session_id: "busy".into(),
                 phase: "working".into(),
                 updated_at: "2026-07-30T09:00:00Z".into(), // old, but NOT stopped
+                death: None,
                 extra: Default::default(),
             },
         ];

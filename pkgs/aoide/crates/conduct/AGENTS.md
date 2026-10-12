@@ -994,33 +994,49 @@ in the message.
   `settled` needs the cursor to have seen the child `working`/`awaiting`
   (the hour-later `stopped`→`idle` decay says nothing); `silent` is `>=` 12
   minutes and under 24 hours of `updatedAt` age on a `working` phase, latched
-  per stamp (a day-old `working` is a crashed record). `died mid-turn` is
-  claimed when the cursor last held `working`/`awaiting`, the record still
-  reads one of them, and the harness pid (`hookAncestry`'s first entry, else
-  the record's `pid`) is dead to `pid_is_alive` — the reaper's own probe, never
-  a second one — or the record has left the roster; it is latched `died`
-  (separate from `silent`, so a silence before a crash does not hide it), and
-  a `done` phase says nothing. A child the tick cannot gather is judged by
+  per stamp (a day-old `working` is a crashed record). `died mid-turn` has two
+  sources, each claimed once and latched `died` (a latch separate from `silent`,
+  so a silence before a crash does not hide it). The wrap's fact: the record
+  reads `died` with a `death` (written by `session_store::record_hook_deaths`,
+  below), and the line carries its status. The tick's inference: the record
+  still reads `working`/`awaiting` and the harness pid (`hookAncestry`'s first
+  entry, else the record's `pid`) is dead to `pid_is_alive` — the reaper's own
+  probe, never a second one — and the line carries no status. A fact is said
+  only over a cursor that last held an open phase and is not latched. A `done`
+  phase says nothing. A child the tick cannot gather is judged by
   `hook::gone`, from its entry's `route` and from what the tick reads now: the
   roster, `hooks.json`, and the seals. The route is written only while both
   seals verified, and carries the harness the child was seen alive as (pid and
-  start time). A route whose harness still runs under that start time is a
-  reaped record, not a death, and is dropped silently. Otherwise the child is
-  said of only when: its turn is under 24 hours old, unannounced, and still
-  open in `hooks.json` (an absent hook entry counts as open); the spawner
-  verifies NOW (`wrap_now`), checked at the claim inside the stage lock; and
-  the host wrap is gone (its record absent, or its pid dead to `pid_is_alive`)
-  or still verifies NOW. A `done` record whose pid still runs is not gone: it
-  is judged by its seal like any live host. A conducted wrap's program IS its
-  harness, so the wrap exits with it and its seal then fails: that is why a
-  gone host is accepted without a seal. A live host that does not verify keeps
-  the entry, not the line. A record still on the roster with its harness alive
-  is never judged here: its entry is kept while it is tracked and dropped once
-  it is not. The seal key is fetched whenever a hook candidate exists, a tracked
+  start time). A route whose harness still runs under that start time is an
+  orphan: its entry is kept silently while that harness lives. Once that
+  harness is dead, the child is said of only when: its turn is under 24 hours
+  old, unannounced, and still open in `hooks.json` (an absent hook entry counts
+  as open); the spawner verifies NOW (`wrap_now`), checked at the claim inside
+  the stage lock; and the host wrap is gone (its record absent, or its pid dead
+  to `pid_is_alive`) or still verifies NOW. A `done` record whose pid still runs
+  is not gone: it is judged by its seal like any live host. A conducted wrap's
+  program IS its harness, so the wrap exits with it and its seal then fails:
+  that is why a gone host is accepted without a seal. A live host that does not
+  verify keeps the entry, not the line. An orphan drops silently when its phase
+  closes or its turn is a day old, and an entry whose turn is already `died`
+  drops silently. A record still on the roster with its harness alive is never
+  judged here: its entry is kept while it is tracked and dropped once it is
+  not. The seal key is fetched whenever a hook candidate exists, a tracked
   record or a hook entry the cursor still holds, so a child pruned in the same
   pass as its wrap is still judged. Every value read back from the cursor is
   cleaned again where it is rendered, and the whole line passes `wire_line`
   at delivery, as every ping-back line does.
+  **The wrap writes its own child's death.** `session_store::record_hook_deaths`
+  runs from `session_conduct` (`graph/conduct.rs`) once the wrap's child has
+  ended, immediately before the wrap ends its own record. Under the stage lock
+  it writes the death of each hook child the wrap hosts: a child whose
+  `parentSessionId` is the wrap, whose `hookAncestry` holds the wrap's pid,
+  whose harness is dead, and whose hook phase still reads `working` or
+  `awaiting`. Each gets `phase: "died"`, the tool in flight as `lastTool`, and
+  the wrap's exit fact (`exit`, `signal`, or `timeout`); its session is set to
+  `idle`. A closed phase is never written. The tick reads the fact when the wrap
+  lived to write it and infers the death otherwise, never both: a `died` record
+  is not open, so the inference cannot fire over it.
   **Trust model:** stated once, in `CONTRACTS.md` under
   `state/stage/pingback.json`. This cursor is unsealed data.
   Known gap, not checked here: a clean session end whose record and hook entry

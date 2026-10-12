@@ -2148,6 +2148,20 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
+**`died` — a turn its harness ended, recorded by the wrap.** A hook record of
+a child that a conducted wrap hosts MAY carry `phase: "died"` and `death`:
+`{ lastTool?, outcome?, exitCode?, signal? }`. The wrap writes both under the
+stage lock as soon as its harness is seen to exit, and only while the child's
+phase still reads `working` or `awaiting`; a closed phase is left alone.
+`lastTool` is the tool in flight, when there was one. `outcome` is `exit`
+(with `exitCode`), `signal` (with `signal`, the signal number), or `timeout`
+(the wrap's own deadline); it is absent when the wrap could not name the end.
+The child's session record in `sessions.json` is set to `idle`, not `done`:
+`canonical_state` folds `died` to `idle` for every other reader, and a `done`
+record would be pruned by the reaper before the ping-back read the fact. A
+later hook event replaces the phase and drops `death`, so the fact is heard only
+while it is still the phase.
+
 **`shell` and `wrappedProgram` — what a conducted wrap runs.** A session
 record MAY carry two fields, both written by the conducting process at
 REGISTRATION (`stamp_wrap`, on both `upsert_session` arms, so re-registering an
@@ -3604,7 +3618,9 @@ There is no command that reads or edits it: it is a cursor, not a queue.
 
 **`hook` — additive in v0.** A hook-source child's entry is
 `{ "phase", "at", "silent"?, "died"?, "route"? }`: `phase` is the canonical
-phase (`canonical_state`) of the child's `hooks.json` record last examined, and
+phase (`canonical_state`) of the child's `hooks.json` record last examined,
+with `died` kept as its own token (a wrap's death fact, see the hooks.json
+section), and
 `at` its `updatedAt` verbatim. `silent` — absent while false — is the latch
 that the 12-minute silence line was sent for that `at`. `died` — absent while
 false — is the latch that the open turn at that `at` is accounted for: its
@@ -3624,26 +3640,33 @@ phase (a restamp of it is not another entry). `settled` is claimed when the
 cursor last held `working` or `awaiting` and the record now reads `stopped` or
 `idle` (the later `stopped`→`idle` decay says nothing). `silent` is claimed
 when the record reads `working` and its `at` is at least 12 minutes and under
-24 hours old, once per `at`. `died mid-turn` is claimed when the cursor last
-held `working` or `awaiting`, the record still reads one of them, its harness
-pid (the first `hookAncestry` entry, else its own `pid`) is gone, and `at` is
-under 24 hours old. A `done` phase is a session ending through its own hook
+24 hours old, once per `at`.
+`died mid-turn` is claimed when the cursor last held `working` or `awaiting`,
+`at` is under 24 hours old, and the latch `died` is unset. It has two sources,
+each claimed once. Either the record reads `died` with a `death` fact the wrap
+wrote, and the line carries that fact's status, `(exit N)`, `(signal N)` or
+`(timeout)`, when it names one; or the record still reads `working` or
+`awaiting` and its harness pid (the first `hookAncestry` entry, else its own
+`pid`) is gone, and the line carries no status. The tool named is the fact's
+`lastTool` when it has one, else the session's last `activity` (`working` when
+none). A `done` phase is a session ending through its own hook
 and claims nothing. `hooks.json` carries no reason for a state, so the
 `awaiting` line has none.
 
 A child the tick cannot route — its record has left the roster, or it is still
 tracked but its harness is dead and a wrap on its route no longer verifies — is
 judged from its entry and from what the tick reads (the roster, `hooks.json`,
-the seals). A route whose `harness` still runs under its recorded `start` is a
-reaped record, not a death: the entry is dropped silently. Otherwise it is said
-`died mid-turn` over `route` when its entry held an open turn that was not
-already `died`, that turn is under 24 hours old, its `hooks.json` phase (if one
-remains) still reads open, its spawner verifies at the claim (inside the stage
-lock), and its host wrap is gone (absent, or its pid dead) or still verifies.
-A `done` host whose pid still runs is judged by its seal like any live host.
-The entry then leaves the file. A child whose record is on the roster with its
-harness alive is not judged here: its entry is kept while it is tracked and
-dropped once it is not.
+the seals), in this order. An entry whose turn is already `died`, whose
+`hooks.json` phase (if one remains) reads closed, or whose `at` is a day old is
+dropped silently. A route whose `harness` still runs under its recorded `start`
+is an orphan: its entry is kept, and nothing is said while that harness lives.
+Any other route, an orphan once its harness has died included, is said of as
+`died mid-turn` over `route` when its spawner verifies at the claim (inside the
+stage lock) and its host wrap is gone (absent, or its pid dead) or still
+verifies; the entry then leaves the file. A `done` host whose pid still runs is
+judged by its seal like any live host. A child whose record is on the roster
+with its harness alive is not judged here: its entry is kept while it is
+tracked and dropped once it is not.
 
 The line goes to the child's SPAWNER, never to its `parentSessionId` (a hook
 child's own host wrap). Over a live edge the host wrap must be a conducted
@@ -3669,8 +3692,10 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
   same-uid caller;
 - **suppress** a genuine death by writing `route.harness` as a process it knows
   is alive under the start time it gives. Pid 1 and its start time are
-  world-readable, so the death is dropped as a reaped record. This is the same
-  class as editing the `hooks.json` phase or the `died` latch;
+  world-readable, so the death is kept as an orphan and is not said until the
+  turn is a day old. A same-uid writer can also write `phase: "died"` with a
+  `death` fact into a child's record, and that is said over its route. These
+  are the same class as editing the `hooks.json` phase or the `died` latch;
 - **redirect** a live child's lines. On the live path the recipient is read
   through the host's `parentSessionId` and `attestedSpawner`, which live in
   `sessions.json` and are not under the seal (the seal covers the wrap's own

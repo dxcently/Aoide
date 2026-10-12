@@ -17,11 +17,9 @@ use super::doc::{
     doomed_subagent_descendants, ledger_session_exit, prune_done, restage_graph, would_cycle,
 };
 use super::model::{
-    canonical_state, clear_screen_ask, hooks_path, load_stage, sessions_path, write_stage,
-    HooksFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
+    canonical_state, clear_screen_ask, harness_pid, hooks_path, load_stage, sessions_path,
+    write_stage, HookDeath, HookRecord, HooksFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
-#[cfg(test)]
-use super::model::HookRecord;
 use aoide_protocol::agents::AgentProfile;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
@@ -40,6 +38,7 @@ use std::collections::HashSet;
 /// (and this file's own `do_session_*`/`do_subagent_*` handlers below, which
 /// stay in root through Phase 3b) is untouched.
 pub use aoide_storage::session::{upsert_hook, upsert_session};
+use aoide_storage::session::record_death;
 pub use aoide_storage::time::now_iso_utc;
 #[cfg(test)]
 use aoide_storage::time::iso_utc_from_epoch;
@@ -1672,6 +1671,72 @@ fn do_session_phase_if_inner(id: &str, phase: &str, expected: &str) -> Outcome {
             "updatedAt": now,
             "file": hooks_path().to_string_lossy(),
         }))
+}
+
+/// The hook children a wrap hosts whose turn is still open and whose harness is
+/// gone: the ones the wrap's own child exit IS the death of. Pure over the roster
+/// and `hooks.json`, so the rule is table-testable.
+///
+/// A child is hosted when its `parentSessionId` is this wrap and its
+/// `hookAncestry` holds this wrap's pid, the same kernel edge the ping-back's
+/// route needs. Its harness must be gone, so a harness still running under a
+/// descendant that outlived the wrap is not reported dead. Each child comes with
+/// the tool in flight, read here, before `set_session_state` clears it.
+fn hosted_open_children(
+    sessions: &[SessionRecord],
+    hooks: &[HookRecord],
+    host: &str,
+    host_pid: u32,
+) -> Vec<(String, Option<String>)> {
+    let Ok(host_pid) = i32::try_from(host_pid) else { return Vec::new() };
+    sessions
+        .iter()
+        .filter(|s| s.parent_session_id.as_deref() == Some(host))
+        .filter(|s| s.hook_ancestry.contains(&host_pid))
+        .filter(|s| harness_pid(s).is_some_and(|pid| !pid_is_alive(pid)))
+        .filter(|s| {
+            hooks.iter().any(|h| {
+                h.session_id == s.session_id && matches!(canonical_state(&h.phase), "working" | "awaiting")
+            })
+        })
+        .map(|s| (s.session_id.clone(), s.activity.clone().filter(|a| !a.is_empty())))
+        .collect()
+}
+
+/// The wrap's own exit, recorded before the wrap ends its record (`session_conduct`):
+/// every child [`hosted_open_children`] names gets `phase: "died"` and the death
+/// fact `end`, carrying the tool it was in. Written under the stage lock, with the
+/// same phase-and-state pair `do_session_phase` writes. A closed phase is left
+/// exactly as it is, and when nothing is open the files are not touched at all.
+pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &HookDeath) {
+    with_stage_lock(|| {
+        let Ok(sessions) = load_stage::<SessionsFile>(&sessions_path()) else { return };
+        let Ok(mut hooks) = load_stage::<HooksFile>(&hooks_path()) else { return };
+        let doomed = hosted_open_children(&sessions.sessions, &hooks.hooks, host, host_pid);
+        if doomed.is_empty() {
+            return;
+        }
+        let now = now_iso_utc();
+        for (id, last_tool) in &doomed {
+            let fact = HookDeath { last_tool: last_tool.clone(), ..end.clone() };
+            record_death(&mut hooks.hooks, id, fact, &now);
+        }
+        if hooks.schema_version.is_empty() {
+            hooks.schema_version = STAGE_GRAPH_VERSION.to_string();
+        }
+        if let Err(e) = write_stage(&hooks_path(), &hooks) {
+            eprintln!("[aoide/conduct] hook death not recorded for `{host}`: {e}");
+            return;
+        }
+        for (id, _) in &doomed {
+            if let Err(e) = set_session_state(id, "died") {
+                eprintln!("[aoide/conduct] hook child `{id}` not set died: {e}");
+            }
+        }
+        if let Err(e) = restage_graph() {
+            eprintln!("[aoide/conduct] graph restage after hook death failed: {e}");
+        }
+    });
 }
 
 /// Core of `session end`: mark the session `done` (and its hook phase
@@ -3841,5 +3906,50 @@ mod enduring_binding_tests {
             assert_eq!(out.status, aoide_protocol::output::Status::Error);
             assert!(out.message.contains("local-only"));
         }
+    }
+}
+
+#[cfg(test)]
+mod hosted_death_tests {
+    use super::*;
+
+    /// Which hook children a wrap's own exit records as died: the hosted ones
+    /// whose turn is open and whose harness is gone, each with the tool in flight.
+    #[test]
+    fn a_wrap_records_a_death_only_for_its_own_open_harnessless_children() {
+        let me = 4242u32;
+        let hosted = |id: &str, parent: &str, ancestry: Vec<i32>, activity: Option<&str>| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", Some(parent));
+            s.hook_ancestry = ancestry;
+            s.activity = activity.map(str::to_string);
+            s
+        };
+        let dead = 999_999; // a harness that is gone
+        let sessions = vec![
+            hosted("open", "wrap", vec![dead, me as i32], Some("Bash")),
+            hosted("awaits", "wrap", vec![dead, me as i32], None),
+            hosted("closed", "wrap", vec![dead, me as i32], None),
+            hosted("alive", "wrap", vec![std::process::id() as i32, me as i32], None),
+            hosted("elsewhere", "other", vec![dead, me as i32], None),
+            hosted("unhosted", "wrap", vec![dead, 7], None),
+        ];
+        let hook = |id: &str, phase: &str| HookRecord {
+            session_id: id.into(),
+            phase: phase.into(),
+            updated_at: "2026-10-07T10:00:00Z".into(),
+            ..Default::default()
+        };
+        let hooks = [
+            hook("open", "working"),
+            hook("awaits", "awaiting"),
+            hook("closed", "stopped"),
+            hook("alive", "working"),
+            hook("elsewhere", "working"),
+            hook("unhosted", "working"),
+        ];
+        let mut found = hosted_open_children(&sessions, &hooks, "wrap", me);
+        found.sort();
+        assert_eq!(found, vec![("awaits".to_string(), None), ("open".to_string(), Some("Bash".to_string()))]);
+        assert!(hosted_open_children(&sessions, &hooks, "wrap", 1).is_empty(), "a wrap whose pid the harness never saw");
     }
 }

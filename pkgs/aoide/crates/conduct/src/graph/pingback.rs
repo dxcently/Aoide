@@ -2558,7 +2558,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reaped_record_whose_harness_still_runs_is_dropped_silently() {
+    fn an_orphan_whose_harness_still_runs_is_kept_and_silent() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -2581,7 +2581,7 @@ mod tests {
         spawner.set_nonblocking(true).unwrap();
         assert!(spawner.accept().is_err(), "the spawner heard nothing");
         let raw = std::fs::read_to_string(pingback_path()).unwrap_or_default();
-        assert!(!raw.contains("kid"), "the entry is dropped: {raw}");
+        assert!(raw.contains("kid"), "an orphan's entry is kept while its harness runs: {raw}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -1173,12 +1173,14 @@ mod tests {
                 session_id: "s1".into(),
                 phase: "working".into(),
                 updated_at: "2026-01-01T01:00:00Z".into(),
+                death: None,
                 extra: Map::new(),
             },
             HookRecord {
                 session_id: "s1".into(),
                 phase: "idle".into(),
                 updated_at: "2026-01-01T02:00:00Z".into(),
+                death: None,
                 extra: Map::new(),
             },
         ];
@@ -1358,12 +1360,14 @@ mod tests {
                 session_id: "p".into(),
                 phase: "Stop".into(),
                 updated_at: "1".into(),
+                death: None,
                 extra: Map::new(),
             },
             HookRecord {
                 session_id: "c1".into(),
                 phase: "PreToolUse".into(),
                 updated_at: "2".into(),
+                death: None,
                 extra: Map::new(),
             },
         ];
