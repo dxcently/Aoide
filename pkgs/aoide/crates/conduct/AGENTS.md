@@ -1066,7 +1066,15 @@ in the message.
   arms, so re-registering an id flips both. Shell syntax in a child's text (the
   question, the tag, the say, the prompt, the stop reason, the tool label) is made
   inert on the way into a line (`pingback.rs::inert`: `$(…)` becomes its fullwidth
-  twin), so a line that reaches a shell still runs nothing. The positive rule is
+  twin), and every line takes one more pass as it is written
+  (`pingback.rs::wire_line`, the only place `deliver` shapes the bytes). That pass is
+  the backstop for a field that skipped its own cleaning. Its one carve-out is the
+  renderer's own `"` and the `!` of the `! ` error marker. The proof is the launcher
+  walk's BASENAME, and that is all it is: a symlink named `claude` to `bash`, or a
+  script named `claude` that execs a shell, passes it. It rejects unmodeled launchers
+  and a label that does not match the wrap; it does NOT stop a same-uid process that
+  names a shell after a harness. Inert line content is the defence for that class,
+  not the proof. The positive rule is
   the ping-back's alone: the doorbell's PTY arm and the A2A door still read the
   negative `wrapped_program_is_a_shell`. The walk's own limit is argv only. Those
   four predicates (`shell-parent`, `unverified-wrap`, `not-conductable`,

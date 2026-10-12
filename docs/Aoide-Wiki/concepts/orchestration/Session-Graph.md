@@ -326,17 +326,36 @@ not the launcher itself. A wrap whose program has neither hook nor trace (a
 `codex`, an `aider`, a REPL) is read off its own screen, below: `[codex
 <petname>] asking: "Apply patch? [y/N]"`. There is no hook session under it, so
 the wrap itself plays the child and its pid must carry a verifying daemon seal;
-its attested spawner, found by the same climb, hears it. A question is heard once while it stands: the same one is not repeated, and a different one is a new episode. An answer clears that memory only on a pass that finds the record without the question, so a question answered and asked again with the same text between two passes is not heard again. There is no episode counter. It is not a send
-and never becomes one: the send door attests the sender from the running
-process's `/proc` ancestry, so inside the daemon the sender is the daemon and
-never the child — the line is raw-injected the doorbell's way (a live channel
-socket, else the control socket with the wrap's own submit key), with no
+its attested spawner, found by the same climb, hears it. A question is heard
+once while it stands: the same one is not repeated, and a different one is a
+new episode. An answer clears that memory only on a pass that finds the record
+without the question, so a question answered and asked again with the same text
+between two passes is not heard again. There is no episode counter.
+
+It is not a send and never becomes one: the send door attests the sender from
+the running process's `/proc` ancestry, so inside the daemon the sender is the
+daemon and never the child — the line is raw-injected the doorbell's way (a live
+channel socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
-`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
-for a trace; `hook` for a hook phase; `screen` for the question last heard),
-claimed inside one short stage-lock
-section before the write, so each event is delivered at most once. A parent is heard only when its wrapped program is the harness its agent names: the launcher walk's resolved program, stamped as `wrappedProgram` at registration, not the `agent` label a caller chose. A shell is skipped (`shell-parent`), and so is a wrap the walk cannot name or does not resolve to its harness (`unverified-wrap`), as is one whose record is gone, not conductable, or already `done`. The ruling is the User's (2026-09-17): a parent hears the children it
-spawned, and nothing wider.
+`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt` for a
+trace; `hook` for a hook phase; `screen` for the question last heard), claimed
+inside one short stage-lock section before the write, so each event is delivered
+at most once.
+
+A parent is heard only on a positive proof: its wrapped program, the launcher
+walk's resolved basename stamped as `wrappedProgram` at registration, must be the
+harness its agent names. A shell is skipped (`shell-parent`). So is a wrap the
+walk cannot name or does not resolve to its harness (`unverified-wrap`), and one
+whose record is gone, not conductable, or already `done`. The proof is a
+basename, and it is stated as one: a symlink named `claude` that points at
+`bash`, or a script named `claude` that execs a shell, passes it. The proof
+rejects the launchers the walk does not model and a label that does not match
+the wrap. It does not stop a same-uid process that names a shell after a
+harness. For that class the defence is inert content: every line takes one pass
+as it is written (`wire_line`), so `$(…)` in any field cannot run.
+
+The ruling is the User's (2026-09-17): a parent hears the children it spawned,
+and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**
 (`graph/codex_app.rs`): `kind:"app"`, because it is a task inside an app
@@ -383,7 +402,31 @@ diff or a list item (`+`, `-`, `*`, `>`, `|`, `#`) matches no row.
 | `confirm`   | `continue?` `proceed?` `overwrite?`                                         |
 | `coreutils` | `rm:` / `cp:` / `mv:` / `ln:` lines ending in `?` (`rm: remove regular file 'x'?`) |
 
-The episode is the line. A repaint that leaves its text and its row alone (a cursor hide, a redraw of the same prompt) keeps the episode and its clock. It ends when the text changes, when output reaches a later row, when Enter lands on its row, or when the child exits; any other output is only more output. A printable key does not end it by itself: the key is held as pending, and the episode ends at the first output that is not that key's echo (a single-key `read -n1` answers there), or at Enter. Until then the question stands, so a password typed and not yet submitted is still asked, and `aoide send` without `--submit` leaves it awaiting. Arrows, Tab, Ctrl keys and other escape sequences do not answer, and neither do the terminal's own replies (OSC, DCS) or X10 mouse reports. The keys are classified in memory for that one decision and never written to the record. The question is the line as it stood before the first key, so a half-typed command at an idle shell prompt never reads as one; the session log keeps the raw bytes it always kept.
+The episode is the line. A repaint that leaves its text and its row alone (a
+cursor hide, a redraw of the same prompt) keeps the episode and its clock. It
+ends when the text changes, when output reaches a later row, when Enter lands on
+its row, or when the child exits; any other output is only more output.
+
+A printable key does not end it by itself. A key holds the question until its
+Enter, or until real program output follows it. The key's echo is not output: it
+is the typed characters, with carriage returns and escape sequences ignored, so a
+line editor's redraw of the key is still an echo. Output that is not an echo
+answers the question at once, which is how a single-key `read -n1` reads when it
+prints after its key. Line reads (`read -p`, a `y/N` in `apt`, `rm -i`, `git`)
+hold until their Enter, which is the common shape.
+
+Two costs are stated plainly. A single-key reader that echoes its key and then
+goes silent stays `awaiting` until its next output: a stale state, which the
+ping-back never repeats. And an echo split across two reads is read as output,
+so it answers the question. A false `idle` would drop the ping-back, the sudo
+badge and the dock state, so the rule errs toward a stale `awaiting`.
+
+Arrows, Tab, Ctrl keys and other escape sequences do not answer, and neither do
+the terminal's own replies (OSC, DCS) or X10 mouse reports. The keys are
+classified in memory for that one decision and never written to the record. The
+question is the line as it stood before the first key, so a half-typed command at
+an idle shell prompt never reads as one; the session log keeps the raw bytes it
+always kept.
 
 Three seconds is the quiet, counted from the line's last change: long enough
 that a prompt a script answers in milliseconds never flaps, short enough that a

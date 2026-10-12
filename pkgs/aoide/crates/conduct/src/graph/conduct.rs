@@ -35,12 +35,14 @@ use serde_json::json;
 use std::path::PathBuf;
 
 /// The command's basename (the agent-name default), e.g. `/usr/bin/claude` →
-/// `claude`.
+/// `claude`. A login shell's spelling carries a leading `-` (`-bash`, `-zsh`):
+/// it names the same program, so the `-` is dropped.
 fn command_basename(program: &str) -> String {
-    std::path::Path::new(program)
+    let base = std::path::Path::new(program)
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| program.to_string())
+        .unwrap_or_else(|| program.to_string());
+    base.strip_prefix('-').map(str::to_string).unwrap_or(base)
 }
 
 /// The shell basenames [`program_is_a_shell`] resolves to — the ONE list, in
@@ -91,7 +93,12 @@ fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
         ),
         "doas" => matches!(arg, "-u" | "-C"),
         "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
-        "script" => matches!(arg, "-c" | "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in"),
+        // `-c` takes the command, and in a cluster (`-qc CMD`) the `c` that ends
+        // the cluster takes the next argument, as getopt reads it.
+        "script" => {
+            matches!(arg, "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in")
+                || (arg.starts_with('-') && !arg.starts_with("--") && arg.ends_with('c'))
+        }
         _ => false,
     }
 }
@@ -2514,6 +2521,8 @@ mod tests {
             &["sudo", "--user", "root", "bash"],
             &["sudo", "-D", "/tmp", "bash"],
             &["sudo", "-h", "host", "bash"],
+            &["-bash"],
+            &["/usr/bin/-zsh"],
             &["sudo", "-T", "5", "bash"],
             &["fish", "-C", "x"],
         ];
@@ -2524,6 +2533,8 @@ mod tests {
             &["sh", "./run.sh"],
             &["bash", "--", "run.sh"],
             &["script", "-c", "make", "out.log"],
+            &["script", "-qc", "make", "out.log"],
+            &["script", "-qfc", "make", "out.log"],
             &["fish", "--command=make"],
             &["fish", "-c", "x"],
             &["busybox", "sh", "-c", "x"],
@@ -2565,6 +2576,8 @@ mod tests {
             (&["taskset", "-c", "0", "bash"], Some("taskset")),
             (&["env", "-S", "bash"], None),
             (&["script", "-c", "claude", "out.log"], None),
+            (&["script", "-qc", "claude", "out.log"], None),
+            (&["-bash"], Some("bash")),
             (&["su", "-", "khoa"], None),
             (&["nix", "develop"], None),
             (&["env"], None),
@@ -2585,6 +2598,9 @@ mod tests {
         // conduct — the old `agent == "shell"` gate missed exactly this case.
         let cases: &[(&[&str], bool)] = &[
             (&["bash"], true),
+            // A login shell's spelling (`-bash`) is the same shell.
+            (&["-bash"], true),
+            (&["script", "-qc", "make", "out.log"], true),
             (&["zsh"], true),
             (&["fish"], true),
             (&["sh"], true),

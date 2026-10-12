@@ -917,23 +917,41 @@ fn clean(s: &str) -> String {
 /// otherwise run `$(…)`, backticks, `;`, `|`, `&`, redirects, quotes, `!`
 /// history. The ASCII form is never written into a ping line.
 fn inert(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            '$' => '＄',
-            '`' => '｀',
-            '\\' => '＼',
-            ';' => '；',
-            '|' => '｜',
-            '&' => '＆',
-            '(' => '（',
-            ')' => '）',
-            '<' => '＜',
-            '>' => '＞',
-            '"' => '＂',
-            '\'' => '＇',
-            '!' => '！',
-            c => c,
-        })
+    s.chars().map(inert_char).collect()
+}
+
+fn inert_char(c: char) -> char {
+    match c {
+        '$' => '＄',
+        '`' => '｀',
+        '\\' => '＼',
+        ';' => '；',
+        '|' => '｜',
+        '&' => '＆',
+        '(' => '（',
+        ')' => '）',
+        '<' => '＜',
+        '>' => '＞',
+        '"' => '＂',
+        '\'' => '＇',
+        '!' => '！',
+        c => c,
+    }
+}
+
+/// The one line-level pass a ping line takes on its way to a parent's pty, in
+/// [`deliver`], whatever arm built it. Every shell metacharacter becomes inert,
+/// so a field that skipped its own [`clean`] (a raw number, a bare label) still
+/// cannot carry it. Two ASCII marks are left as they are: the `"` around a quoted
+/// field and the `!` of the `! ` error marker, both written by the renderer. A
+/// field that was cleaned has neither (`inert` maps both), so they are the
+/// renderer's. A raw field can still carry them, and a ping line's target is a
+/// harness composer, never a bare shell (`shell-parent` refuses one), so neither
+/// starts a command there. Keeping them is the price of an unchanged line format.
+fn wire_line(line: &str) -> String {
+    strip_unsafe(line)
+        .chars()
+        .map(|c| if c == '"' || c == '!' { c } else { inert_char(c) })
         .collect()
 }
 
@@ -972,7 +990,7 @@ fn str_field(payload: Option<&Value>, key: &str) -> String {
 fn numeric_field(payload: Option<&Value>, key: &str) -> Option<String> {
     match payload?.get(key)? {
         Value::Number(n) => Some(n.to_string()),
-        Value::String(s) if !s.trim().is_empty() => Some(one_line_clip(s, SAY_MAX)),
+        Value::String(s) if !s.trim().is_empty() => Some(clean(s)),
         _ => None,
     }
 }
@@ -1129,6 +1147,7 @@ fn deliver(
         return Err(reason.to_string());
     }
 
+    let line = wire_line(line);
     let payload = format!("{line}\n");
     let channel = connect_for_ring(channel_socket_path(parent))
         .ok()
@@ -1159,7 +1178,7 @@ fn deliver(
             // uses, with this lane's own gate label. The line itself (which
             // carries quoted model output) rides as `untrusted_data`, never as
             // the audit message.
-            audit_send(inv, "delivered", &format!("delivered to `{parent}` ({gate})"), line);
+            audit_send(inv, "delivered", &format!("delivered to `{parent}` ({gate})"), &line);
             Ok(())
         }
         Err(_) => Err("write-failed".to_string()),
@@ -2709,6 +2728,84 @@ mod tests {
         assert_eq!(rec.wrapped_program, None, "the walk names no program: {rec:?}");
         assert!(!rec.shell, "not a shell, so the reason is the missing proof: {rec:?}");
         assert_eq!(unreceptive(rec), Some("unverified-wrap"));
+    }
+
+    /// Every arm of the ping line, built from hostile fields: the raw text a field
+    /// carries before its own cleaning, and the bare labels the renderer never
+    /// quotes.
+    fn hostile_events() -> Vec<PingEvent> {
+        let hostile = "$(touch /tmp/pwned) `id`; a | b && c > d < e \\ f 'g' \"h\" !i";
+        let h = || Some(hostile.to_string());
+        vec![
+            PingEvent::Settled { stop: h(), calls: Some(3), mins: Some(2), say: h(), errors: 1 },
+            PingEvent::Cancelled { calls: None, mins: None, say: h(), errors: 0 },
+            PingEvent::DiedMidTurn { calls: Some(1), say: h(), errors: 0 },
+            PingEvent::Asking { prompt: hostile.to_string(), errors: 2 },
+            PingEvent::WrappingUp { calls_left: h(), secs_left: None, errors: 0 },
+            PingEvent::WrappingUp { calls_left: None, secs_left: h(), errors: 0 },
+            PingEvent::Failing { run: 3, tool: h() },
+            PingEvent::Silent { mins: 12, last: Some(Last::Said(hostile.to_string())) },
+            PingEvent::Silent { mins: 12, last: Some(Last::Did(hostile.to_string())) },
+            PingEvent::Exited { code: Some(1), outcome: h() },
+        ]
+    }
+
+    /// The shell metacharacters a ping line must not carry. `"` and `!` are not
+    /// in it: see [`wire_line`] for why the renderer's own two survive.
+    fn live_syntax(line: &str) -> Vec<char> {
+        line.chars().filter(|c| "$`;|&()<>\\'".contains(*c)).collect()
+    }
+
+    #[test]
+    fn every_arm_with_hostile_fields_renders_no_live_shell_syntax() {
+        for event in hostile_events() {
+            let wired = wire_line(&render_line("[eidolon brave-otter]", &event));
+            assert_eq!(live_syntax(&wired), Vec::<char>::new(), "{event:?} → {wired:?}");
+        }
+    }
+
+    #[test]
+    fn a_number_field_sent_as_text_is_cleaned_like_every_other_field() {
+        // The journal may spell a count as a string; that spelling takes the same
+        // cleaning as any text field, not a bare clip.
+        let json = r#"{"id":120,"parent":119,"ts_ms":1789606380000,"kind":{"TurnBudget":{"calls_left":"$(touch x) 5"}}}"#;
+        let (line, _) = plan(&[USER, json], None);
+        let line = line.unwrap();
+        assert!(line.contains("＄（touch x） 5 calls left"), "{line:?}");
+        assert!(live_syntax(&line).is_empty(), "{line:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_bytes_deliver_writes_carry_no_live_shell_syntax() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pingback-wire-bytes");
+        // A receptive harness parent with a live channel: the channel arm is the
+        // one `deliver` writes through, so its bytes are what a composer reads.
+        let _pty = headless_parent("wrap-1", "claude");
+        let channel = channel_socket_path("wrap-1");
+        std::fs::create_dir_all(channel.parent().unwrap()).unwrap();
+
+        for event in hostile_events() {
+            let line = render_line("[eidolon brave-otter]", &event);
+            let listener = UnixListener::bind(&channel).unwrap();
+            let acc = std::thread::spawn(move || read_all(listener));
+            let roster: SessionsFile = load_stage(&sessions_path()).unwrap();
+            deliver(&line, "wrap-1", &roster.sessions, &daemon_inv(), "autogate-child").unwrap();
+            let bytes = acc.join().unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            assert_eq!(live_syntax(&text), Vec::<char>::new(), "{event:?} wrote {text:?}");
+            let _ = std::fs::remove_file(&channel);
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

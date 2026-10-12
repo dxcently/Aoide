@@ -2166,7 +2166,13 @@ id flips both together):
 
 The ping-back is receptive only by a positive proof: the record's
 `wrappedProgram` must equal the first launch token of the profile its `agent`
-names. A shell (`shell`, or a `restore` snapshot, `wrapped_program_is_a_shell`)
+names. The proof is that basename, and it is stated as one: a symlink named
+`claude` that points at `bash`, or a script named `claude` that execs a shell,
+passes it. It rejects the launchers the walk does not model and a label that
+does not match the wrap. It does not stop a same-uid process that names a shell
+after a harness; for that class the defence is inert content, since every line
+takes one pass as it is written (`wire_line`) and every shell metacharacter in
+it is made inert. A shell (`shell`, or a `restore` snapshot, `wrapped_program_is_a_shell`)
 is refused as `shell-parent`; a wrap whose program is absent or is not its
 harness is refused as `unverified-wrap`. The label alone never decides it:
 `agent` is a caller's choice, and `--agent pi -- bash` names a registered
@@ -2293,7 +2299,11 @@ line's row and no program output has answered a typed key. A repaint of the same
 text keeps it; a changed line, a later row, Enter, output that answers a typed
 key, the child exiting or the session ending clears it: the key disappears and
 the `awaiting` it set returns to `idle`. A printable key alone does not clear
-it, so a password typed and not yet submitted is still asked. The
+it, so a password typed and not yet submitted is still asked. An echoed key
+holds the question until its Enter or real program output: the echo is not
+output. A single-key reader that echoes its key and then goes silent stays
+`awaiting` until its next output (a stale state, never a repeated announcement),
+and an echo split across two reads is read as output and answers the question. The
 `sudo` row also sets `needsSudo`, and that row is never announced to a spawner.
 The line is held in three places, each capped at 80 characters and sanitised:
 this field, the ping-back cursor's `screen` entry (`pingback.json`), and the

@@ -27,13 +27,17 @@
 //! the child exits (the caller stops asking). Every other byte is only more output.
 //!
 //! **Typed input.** Enter answers the line the output is on. A printable key does
-//! not: it holds the question while the program still waits on it, so a password
-//! typed without echo, or a key sent without its Enter, stays `awaiting`. The
-//! output that follows a key's echo is the answer, which is how a single-key
-//! prompt (`read -n1`) reads once it has taken the key; the echo itself is not.
-//! Arrows, Tab, Ctrl keys, OSC and DCS replies and mouse reports carry no key (the
-//! one tokenizer, [`typed_text`]). Typing `echo Proceed?` at a shell prompt never
-//! reads as a question: the text is held, and the echo of it is never announced.
+//! not answer it: it holds the question until its Enter, or until real program
+//! output follows it. An echo is not output. It is the typed characters, with
+//! carriage returns and ESC sequences ignored, so a line editor's `\ry\x1b[K` is
+//! still one. A single-key prompt (`read -n1`) reads once it prints after its
+//! key. Two costs are stated plainly. A single-key reader that echoes its key and
+//! then goes silent stays `awaiting` until its next output: a stale state, never
+//! a repeated announcement. And an echo split across two reads is read as output,
+//! so it answers the question. Arrows, Tab, Ctrl keys, OSC and DCS replies and
+//! mouse reports carry no key (the one tokenizer, [`typed_text`]). Typing `echo
+//! Proceed?` at a shell prompt never reads as a question: the text is held, and
+//! the echo of it is never announced.
 //!
 //! **The table is closed and conservative.** A false `awaiting` is noise, so
 //! every row is anchored to the END of the line (`Do you want to continue? [Y/n]`
@@ -268,11 +272,13 @@ fn keys(bytes: &[u8]) -> (bool, String) {
 /// Is `output` only the echo of keys typed onto a question (`typed`), or the
 /// erase of one (`\b`, DEL and the space beside them)? A tty echoes a key the
 /// moment it lands, and an echo is the keys being typed, not the program
-/// answering them.
+/// answering them. A line editor echoes by redrawing from the start of the line,
+/// so the carriage return and the escape sequences it writes around the key are
+/// part of the echo: [`strip_ansi`] removes the sequences, and `\r` is skipped.
 fn is_echo(output: &[u8], typed: &str) -> bool {
-    String::from_utf8_lossy(output)
+    strip_ansi(&String::from_utf8_lossy(output))
         .chars()
-        .all(|c| c == ' ' || c == '\u{8}' || c == '\u{7f}' || typed.contains(c))
+        .all(|c| matches!(c, '\r' | ' ' | '\u{8}' | '\u{7f}') || typed.contains(c))
 }
 
 /// Printable keys typed onto a question and not yet answered: the question as
@@ -602,6 +608,47 @@ mod tests {
         assert!(watch.standing(t0 + QUIET).is_some(), "the echo alone is not an answer");
         watch.output(b"\nanswered:y\n", t0 + QUIET);
         assert_eq!(watch.standing(t0 + QUIET * 2), None);
+    }
+
+    #[test]
+    fn a_single_key_reader_that_echoes_and_goes_silent_stays_awaiting_until_its_output() {
+        // The stated cost, pinned: `read -n1` echoes its key and then prints
+        // nothing. The echo is not output, so the question stands however long the
+        // silence, until the program's next output. A stale state, never a repeated
+        // announcement.
+        let t0 = Instant::now();
+        let mut watch = PromptWatch::new(t0);
+        watch.output(b"Continue? [y/N] ", t0);
+        watch.input(b"y");
+        watch.output(b"y", t0 + QUIET);
+        assert!(
+            watch.standing(t0 + QUIET * 10).is_some(),
+            "the echo is not an answer, however quiet it goes"
+        );
+        watch.output(b"\nanswered:y\n", t0 + QUIET * 10);
+        assert_eq!(watch.standing(t0 + QUIET * 12), None, "the next output answers it");
+    }
+
+    #[test]
+    fn an_echo_redrawn_with_a_carriage_return_and_an_erase_is_still_an_echo() {
+        // A line editor echoes `y` by redrawing the line's end: CR, the key, then
+        // `ESC [ K`. That redraw is the echo, so it is not the program answering:
+        // the question holds until the Enter, or until real output follows.
+        let t0 = Instant::now();
+        let mut held = PromptWatch::new(t0);
+        held.output(b"Overwrite? [y/N] ", t0);
+        held.input(b"y");
+        held.output(b"\ry\x1b[K", t0 + QUIET);
+        assert!(held.standing(t0 + QUIET + QUIET / 2).is_some(), "the redraw is not an answer");
+        held.input(b"\r");
+        assert_eq!(held.standing(t0 + QUIET * 3), None, "the Enter answers it");
+
+        let mut answered = PromptWatch::new(t0);
+        answered.output(b"Overwrite? [y/N] ", t0);
+        answered.input(b"y");
+        answered.output(b"\ry\x1b[K", t0 + QUIET);
+        answered.output(b"\nwrote 3 files\n", t0 + QUIET * 2);
+        assert_eq!(answered.standing(t0 + QUIET * 4), None, "output after the redraw answers it");
     }
 
     #[test]
