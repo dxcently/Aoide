@@ -9,8 +9,8 @@ The User's ruling: find agent sessions across every agent, and for specific
 ones, and see what each carries — its primitives, roles, mailboxes and cc's.
 `aoide session find <query>` answers that from a bare terminal; the
 conductor's `/` page renders the same answer and holds no logic of its own.
-Find returns facts and the reason each one matched. It never routes, sends,
-rings, pulls or writes.
+Find returns facts. Each row says why it matched (`matched` in `--json`). It
+never routes, sends, rings, pulls or writes.
 
 "Across all agents and for specific ones" reads two ways, and both are in
 scope: every harness (claude, kimi, codex threads, eidolon, pi, shells) or one
@@ -164,8 +164,8 @@ match). An unknown key, an empty value or an unclosed quote is a taught error
 naming the keys. A literal `"` in a word is refused as well: the shell or the
 query line strips the quotes, and the fix runs the word without them.
 `session:<id>` is refused with the bare id as the fix, since a session is found
-by its id as a bare word. A query over 64 words, or a term over 256
-alternatives, is refused with its cap named. `mailbox:` and `cc:` never match a
+by its id as a bare word. A query over 64 words, or one with more than
+256 alternatives in all its terms, is refused with its cap named. `mailbox:` and `cc:` never match a
 remote row, and the line `mail is not published by <node>` says why.
 
 A bare word grades against each field — **exact** (the whole field, or a whole
@@ -218,8 +218,11 @@ probes every node live on every call.
 
 `--related <ref>` resolves one session (like `send --to`, `node/<rest>` for a
 cached row) and returns every other row that shares a fact with it, each with
-every reason it has. Reasons are derived per call and never stored: they are
-not `graph.json` edges and not §22's typed edges.
+every reason it has. A far session answers only under its node's name: a bare
+far petname is refused with the `node/name` form, and a name no row holds by
+petname or id is refused with the bare name to find. Reasons are derived per
+call and never stored: they are not `graph.json` edges and not §22's typed
+edges.
 
 | Order | Reason | Holds when | Shown as |
 |---|---|---|---|
@@ -241,10 +244,10 @@ else; a far row's task of the same slug is shown as that node's claim, not
 taken as a shared role.
 
 A related row sorts local before far, then by its strongest reason, then by how
-many distinct reasons it has, then by find's keys 2–4. A query beside `--related` narrows the related
-rows (`--related brave-otter agent:claude`). The target never relates to
-itself, `done` rows need `--all`, and the mail reasons (5, 6) hold only between
-local rows.
+many distinct reasons it has, then by find's keys 2–4. A query beside
+`--related` narrows the related rows (`--related brave-otter agent:claude`). The
+target never relates to itself, `done` rows need `--all`, and the mail reasons
+(5, 6) hold only between local rows.
 
 ## Output
 
@@ -291,22 +294,28 @@ facts in `data`:
                    "mailboxes": { "reads": [{ "name", "unread", "via" }], "inbox": [], "reportTo" },
                    "cc":        [{ "msgid", "threadId", "subject", "from", "to": [] }],
                    "threads":   [],
-                   "edges":     { "parent", "children", "siblings", "wrap",
-                                  "remoteParent", "remoteChildren", "repo" } },
+                   "edges":     { "parent", "childrenCount", "siblingsCount", "wrap",
+                                  "remoteParent", "remoteChildrenCount", "repo" } },
                  "unknown": ["mailboxes", "cc", "threads"],
                  "matched": [{ "term", "field", "value", "how": "exact" | "prefix" | "substring" }] }],
   "related":  [{ "node", "sessionId", "reasons": [{ "kind", "detail" }] }] }
 ```
 
-`unknown` rides on remote rows; `related` rides with `--related`. An absent
+`sessions` and `related` ride only with `--json`: the human form builds no row
+JSON. `unknown` rides on remote rows; `related` rides with `--related`. The
+`children`, `siblings` and `remoteChildren` lists ride only on the `--related`
+target, at most 20 each; each `…Count` key is the full size on every row.
+`cacheAge` is the cache's age in seconds, `null` for this box's rows. An absent
 key, a key named in `unknown`, and an empty list are three different answers:
-not recorded, not published to this box, recorded as none. Titles, subjects and sender names are text other sessions and nodes wrote.
-Every such field, in the human rows and in `--json`, has its control, format
-and bidi characters stripped (Decision 10); the human form also flattens
-whitespace and clips to one line. A far row's fields are that node's claims,
-and the header above the rows says so with each node's cache age. A consumer
-treats every such string as data (house rule 4). The human cc line names the newest
-letter and counts the rest; `--json` carries them all.
+not recorded, not published to this box, recorded as none. Titles, subjects
+and sender names are text other sessions and nodes wrote. Every such field, in
+the human rows and in `--json`, has its control, format and bidi characters
+stripped (Decision 10). In the human form each field also flattens its
+whitespace and clips to 200 characters, and a row clips to 240, so one row is
+one terminal line. A far row's fields are that node's claims, and the header
+above the rows says so with each node's cache age. A consumer treats every such
+string as data (house rule 4). The human cc line names the newest letter and
+counts the rest; `--json` carries them all.
 
 Find writes nothing, takes no lock, never reaches the daemon and never dials a
 node — `session trace`'s posture. A row is a fact, never a recommendation:
@@ -549,13 +558,15 @@ alternative would have given, and what the chosen call costs.
     strong far match can sit below a weak local one. The scope line still names
     every node, and `--all` still lists everything.
 
-12. **Cross-node reasons come from this box's own records only.** A far node's
-    claims about a row on another node (its parent, its task, its project, its
-    remote links) never make a reason. The alternative, trust a far node's
-    `remoteChildren` or `remoteParent` as it publishes them, lets a far node
-    link itself to this box's sessions and show as related. Cost: a remote link
-    this box never recorded is invisible here, and a far row sharing a task with
-    a local row is not related to it.
+12. **Cross-node reasons come from this box's own records, or from one node's
+    claims about its own rows.** A far node's claims about a row on another node
+    (its parent, its task, its project, its remote links) never make a reason,
+    and no far row's remote parent makes a parent of a local session. Two rows
+    on one far node may share a reason that node vouches for, since it published
+    both. The alternative, trust a far node's `remoteChildren` or `remoteParent`
+    as it publishes them, lets a far node link itself to this box's sessions and
+    show as related. Cost: a remote link this box never recorded is invisible
+    here, and a far row sharing a task with a local row is not related to it.
 
 ## How it sits with other work
 

@@ -779,9 +779,10 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
   `scope`, `sessions` (carries, `unknown`, `matched`) and `related`.
 - **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
   refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
-  over 64 words or a term over 256 alternatives, each with its fix. An ambiguous
-  `parent:` reference, or a `--related`
-  name that no row or cache holds, is a refusal listing the candidates.
+  over 64 words, or one with more than 256 alternatives in all its terms, each
+  with its fix. An ambiguous `parent:` reference, or a `--related` name that no
+  row or cache holds, is a refusal listing the candidates. A far session named
+  without its node is refused with the `node/name` form.
 
 ### aoide session trace
 
