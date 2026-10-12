@@ -7540,7 +7540,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The grant side keeps verifying (LANE SAME-UID ruling A): a spawn-time
+    /// The grant side keeps verifying: a spawn-time
     /// stamp earns the autogate only while the daemon's key verifies the
     /// parent's seal. A restarted daemon's key verifies nothing, so the send is
     /// held pending.

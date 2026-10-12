@@ -423,10 +423,10 @@ fn seal_keypair() -> &'static Keypair {
 /// not a security hole. Returns `(seal_hex, issued_at, pid_starttime)` —
 /// LANE IDENTITY P-ID2: `issued_at` is part of the signed payload with no live
 /// fact a verifier can re-derive it from, so every caller stamps it alongside
-/// the seal (`SessionRecord::sealed_issued_at`'s own doc). LANE SAME-UID
-/// ruling A: `pid_starttime` is the same value in plain text, stamped with the
-/// seal as `sealedPidStarttime`, the field the refusal predicate reads. A
-/// degraded `0` never matches a live read, so it protects nothing.
+/// the seal (`SessionRecord::sealed_issued_at`'s own doc).
+/// `pid_starttime` is the same value in plain text: `stamp_seal` writes it as
+/// `sealedPidStarttime` beside `sealedBootId`, the fields the refusal predicate
+/// reads. A degraded `0` never matches a live read, so it protects nothing.
 pub(crate) fn mint_seal(session_id: &str, pid: i32, origin_class: &str) -> (String, i64, u64) {
     let pid_starttime = aoide_conduct::graph::pid_starttime(pid).unwrap_or(0);
     let issued_at = aoide_protocol::audit::now_secs() as i64;
@@ -473,31 +473,6 @@ fn seal_freshly_registered_session(inv: &Invocation, outcome: &aoide_protocol::o
     let origin_class = rec.origin.clone().unwrap_or_default();
     let (seal, issued_at, pid_starttime) = mint_seal(id, pid as i32, &origin_class);
     aoide_conduct::graph::stamp_seal(id, &seal, issued_at, pid_starttime);
-}
-
-/// Refuse a dispatched `session start --id <id>` BEFORE it runs when the record
-/// is a protected live conducted wrap (`aoide_conduct::graph::
-/// is_protected_live_wrap`, LANE SAME-UID ruling A). Its own process still
-/// runs under the starttime it was sealed over, so its record is not rewritten
-/// from outside. The verdict reads no daemon key, so a restart does not lift
-/// it. A record whose process is gone, or whose pid was reused, is not
-/// protected: the start proceeds and nothing is re-sealed.
-fn session_start_refusal(inv: &Invocation) -> Option<String> {
-    if inv.path.len() != 2 || inv.path[0] != "session" || inv.path[1] != "start" {
-        return None;
-    }
-    let id = inv.flags.get("id")?;
-    let file: aoide_storage::records::SessionsFile =
-        aoide_storage::stage::load_stage(&aoide_storage::stage::sessions_path()).ok()?;
-    let rec = file.sessions.iter().find(|s| &s.session_id == id)?;
-    if !aoide_conduct::graph::is_protected_live_wrap(rec) {
-        return None;
-    }
-    Some(format!(
-        "session `{id}` is a live conducted wrap: its own process is still running, so its \
-         record cannot be restarted from outside. Its own exit ends it, and `aoide session kill \
-         --id {id}` asks the process to exit. A new registration needs a new session id"
-    ))
 }
 
 /// LANE IDENTITY P-ID2 (`CONTRACTS.md`'s identity section): mint+stamp a
@@ -1145,21 +1120,6 @@ fn handle_conn(
                 // door-specific policy lives here (module doc).
                 match invocation_from_dispatch_request(&req, door_pid) {
                     Ok(inv) => {
-                        if let Some(refusal) = session_start_refusal(&inv) {
-                            FeedWriter::new(events_path.to_path_buf(), EVENTS_CAP_BYTES, 0o600).append(&json!({
-                                "v": 0,
-                                "ts": aoide_protocol::audit::now_secs(),
-                                "class": serde_json::to_value(EventClass::Audit).unwrap_or_else(|_| json!("audit")),
-                                "kind": "seal_refused",
-                                "source": "aoided",
-                                "payload": { "sessionId": inv.flags.get("id") },
-                            }));
-                            let outcome = aoide_protocol::output::Outcome::error("session.start", refusal);
-                            if write_json_line(&mut writer, &json!({"outcome": outcome})).is_err() {
-                                return;
-                            }
-                            continue;
-                        }
                         let outcome = dispatch(&inv);
                         // task #92: this handler may have just written stage
                         // files via the SAME `do_session_*` code the CLI
@@ -2084,56 +2044,11 @@ mod tests {
         restore_stage(&stage, saved);
     }
 
-    /// A live conducted wrap is refused a dispatched `session start` whatever key
-    /// sealed it. The daemon restarted and its key verifies nothing now, but the
-    /// refusal reads the plaintext starttime, so the start is still refused.
-    #[test]
-    fn a_live_sealed_wrap_is_refused_a_start_even_after_a_key_change() {
-        let (_guard, stage, saved) = isolated_stage();
-        let me = std::process::id() as i32;
-        let starttime = aoide_conduct::graph::pid_starttime(me).unwrap();
-        let identity = SealedIdentity {
-            session_id: "w".to_string(),
-            pid: me,
-            pid_starttime: starttime,
-            origin_class: "local".to_string(),
-            issued_at: 1_700_000_000,
-        };
-        let restarted = aoide_storage::identity::mint_ephemeral().unwrap();
-        let stale_seal = sealed_id::mint_seal(&restarted, &identity);
-        let sf = aoide_storage::records::SessionsFile {
-            schema_version: "0".to_string(),
-            sessions: vec![aoide_storage::records::SessionRecord {
-                session_id: "w".to_string(),
-                agent: "claude".to_string(),
-                state: "idle".to_string(),
-                started_at: "2026-01-01T00:00:00Z".to_string(),
-                pid: Some(me as u32),
-                origin: Some("local".to_string()),
-                conductable: Some(true),
-                seal: Some(stale_seal.clone()),
-                sealed_issued_at: Some(1_700_000_000),
-                sealed_pid_starttime: Some(starttime),
-                ..Default::default()
-            }],
-        };
-        aoide_storage::stage::write_stage(&aoide_storage::stage::sessions_path(), &sf).unwrap();
-
-        assert!(
-            !sealed_id::verify_seal(&seal_keypair().info().pubkey_hex, &identity, &stale_seal),
-            "the restarted daemon's key verifies nothing"
-        );
-        assert!(session_start_refusal(&dispatch_invocation("w")).is_some());
-
-        restore_stage(&stage, saved);
-    }
-
     /// A repointed record (its pid now names another live process) is not
     /// protected: its starttime is not the sealed one. A dispatched `session
-    /// start` is not refused, and it is never re-sealed. A record that is not a
-    /// conducted wrap, or whose process died, is not refused either.
+    /// start` never re-seals it, whatever the record now holds.
     #[test]
-    fn a_repointed_or_unconducted_sealed_record_is_not_refused_and_never_resealed() {
+    fn a_repointed_or_unconducted_sealed_record_is_never_resealed() {
         let (_guard, stage, saved) = isolated_stage();
         let me = std::process::id() as i32;
         let other = aoide_storage::attest::pid_ancestry(me).get(1).copied().expect("a parent") as u32;
@@ -2166,20 +2081,16 @@ mod tests {
         let inv = dispatch_invocation("w");
 
         write(me as u32, Some(true));
-        assert!(session_start_refusal(&inv).is_some(), "a live conducted wrap is refused");
         seal_freshly_registered_session(&inv, &ok);
         assert_eq!(load().seal.as_deref(), Some(seal.as_str()), "an unchanged seal is left alone");
 
         write(other, Some(true));
-        assert_eq!(session_start_refusal(&inv), None, "a reused pid does not inherit the protection");
         seal_freshly_registered_session(&inv, &ok);
         assert_eq!(load().seal.as_deref(), Some(seal.as_str()), "no fresh seal over the new pid");
 
         write(me as u32, None);
-        assert_eq!(session_start_refusal(&inv), None, "a record that is not a conducted wrap");
 
         write(2_000_000_000, Some(true));
-        assert_eq!(session_start_refusal(&inv), None, "a wrap whose process simply died");
         seal_freshly_registered_session(&inv, &ok);
         assert_eq!(load().seal.as_deref(), Some(seal.as_str()));
 

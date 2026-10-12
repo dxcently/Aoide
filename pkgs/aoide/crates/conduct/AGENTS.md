@@ -1182,18 +1182,19 @@ in the message.
   neutralize `notify-send` itself (e.g. blanking `$PATH` for that one call)
   rather than letting a test fire a real toast on the machine running it.
 - **A protected live wrap is ended only by its own exit, and nothing reads the
-  daemon key on that path.** The one predicate is
-  `identity::is_protected_live_wrap`: `conductable`, a `seal`, a live pid, and
-  the plaintext `sealedPidStarttime` equal to that pid's current starttime.
-  `session end`, a terminal `session phase` (`exit`, `finished`, `complete`,
-  `done`), the hook's `SessionEnd` arm, `session prune`, the reaper's spare, and
-  a dispatched `session start --id` (`aoide-server`'s `session_start_refusal`,
-  through `aoide_conduct::graph::is_protected_live_wrap`) all refuse such a
-  record. `identity::live_sealed_wrap_ids` is the set the doors and the reaper
+  daemon key on that path.** The predicate is
+  `identity::is_protected_live_wrap`, stated once in `CONTRACTS.md`'s identity
+  section. Every refusal asks it: `session end`, a terminal `session phase`, the
+  hook's `SessionEnd` arm, `session prune`, and the reaper's spare. The start
+  door (`session_store`'s `session_start`, after the daemon hop) lets a
+  same-fields start through as a no-op, and refuses a start that would change a
+  field. `identity:: live_sealed_wrap_ids` is the set the doors and the reaper
   test. The wrap's own exit path (`do_session_end` from `session_conduct`) is
-  the one legitimate end and stays unrefused. A new door that can finish a
-  record calls `live_wrap_refusal_for` first, and the wrap's exit path never
-  does. The grant side (`send.rs`'s `real_attested_*`, `actions.rs`'s
+  the one legitimate end and stays unrefused. A new door that can finish or
+  re-register a record asks the same predicate first, and the wrap's own exit
+  path never does. The hook door's SessionStart (`do_hook_session_start`) does
+  not ask it yet: that path is open, as CONTRACTS.md's residuals state. The
+  grant side (`send.rs`'s `real_attested_*`, `actions.rs`'s
   `terminate_verified`, `pingback.rs`) still verifies the seal, and must.
 - **A session's exit — a clean `session end` OR a `reap` sweep — MUST
   append exactly one line to the durable session ledger, through the SAME

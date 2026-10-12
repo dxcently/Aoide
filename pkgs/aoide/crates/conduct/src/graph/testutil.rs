@@ -85,6 +85,7 @@ pub(crate) fn session(
         seal: None,
         sealed_issued_at: None,
         sealed_pid_starttime: None,
+        sealed_boot_id: None,
         ever_sealed: None,
         attested_spawner: None,
         restore: None,
@@ -538,6 +539,19 @@ pub(crate) fn fake_seal_daemon(pubkey_hex: &str) -> PathBuf {
     path
 }
 
+/// The pid of a child that was spawned and reaped: no live process holds it.
+pub(crate) fn reaped_pid() -> u32 {
+    let mut child = if cfg!(windows) {
+        std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn()
+    } else {
+        std::process::Command::new("true").spawn()
+    }
+    .expect("spawn a child to reap");
+    let pid = child.id();
+    child.wait().expect("reap the child");
+    pid
+}
+
 /// Put the daemon's seal over a roster record's CURRENT pid, as the daemon's
 /// tick does for every live pid-carrying session.
 pub(crate) fn seal_record(id: &str, kp: &aoide_storage::identity::Keypair) {
@@ -556,6 +570,7 @@ pub(crate) fn seal_record(id: &str, kp: &aoide_storage::identity::Keypair) {
     rec.seal = Some(aoide_storage::sealed_id::mint_seal(kp, &identity));
     rec.sealed_issued_at = Some(issued_at);
     rec.sealed_pid_starttime = Some(pid_starttime);
+    rec.sealed_boot_id = aoide_storage::attest::boot_id();
     rec.ever_sealed = Some(true);
     write_stage(&sessions_path(), &file).unwrap();
 }

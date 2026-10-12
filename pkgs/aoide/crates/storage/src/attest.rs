@@ -140,6 +140,49 @@ pub fn pid_starttime(pid: i32) -> Option<u64> {
     aoide_protocol::win_proc::start_time(pid as u32)
 }
 
+/// The starttime of `pid` when it names a live process, read from ONE
+/// `/proc/<pid>/stat` read, so the state and the starttime come from the same
+/// instant. A zombie (exited, not yet reaped) is `None`: `kill(pid, 0)` still
+/// answers for it, but it runs nothing.
+#[cfg(unix)]
+pub fn live_pid_starttime(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after = &stat[stat.rfind(')')? + 1..];
+    let mut fields = after.split_whitespace();
+    if matches!(fields.next()?, "Z" | "X") {
+        return None;
+    }
+    fields.nth(18)?.parse().ok()
+}
+
+/// The Windows arm: liveness is asked by the same probe `pid_is_alive` uses,
+/// because a process that has exited but is still held open still answers
+/// `GetProcessTimes`.
+#[cfg(windows)]
+pub fn live_pid_starttime(pid: i32) -> Option<u64> {
+    aoide_protocol::win_proc::is_alive(pid as u32)
+        .then(|| aoide_protocol::win_proc::start_time(pid as u32))
+        .flatten()
+}
+
+/// The kernel's boot id, the fact that separates this boot's processes from a
+/// previous boot's: `/proc` starttimes count clock ticks since boot, so a pid
+/// and starttime from a previous boot can match a live process now. `None`
+/// where it cannot be read, and then no record is protected. Windows starttimes
+/// are absolute `FILETIME`s, unique per process instance, so one fixed value
+/// stands in for the boot there.
+#[cfg(unix)]
+pub fn boot_id() -> Option<String> {
+    let id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let id = id.trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+#[cfg(windows)]
+pub fn boot_id() -> Option<String> {
+    Some("windows".to_string())
+}
+
 // ── seal verification over a live record ─────────────────────────────────
 
 /// Reconstruct the exact [`SealedIdentity`] `rec.seal` was signed over and

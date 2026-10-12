@@ -336,8 +336,3 @@ pub use self::window::normalize_addr;
 /// credential's `pidStarttime` field — re-exported here rather than a
 /// second implementation one crate up.
 pub use self::window::pid_starttime;
-
-/// LANE SAME-UID ruling A: the one refusal predicate, `aoide-server`'s
-/// dispatched `session start` refusal asks it directly (`identity.rs`'s own
-/// doc has the rule).
-pub use self::identity::is_protected_live_wrap;

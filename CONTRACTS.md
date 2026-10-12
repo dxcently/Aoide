@@ -2728,11 +2728,13 @@ brute-forcing every plausible mint instant, which P-ID1's own original test
 suite did as a test-only expedient before this field existed. `seal` and
 `sealedIssuedAt` share ONE lifecycle — always `Some` together, always `None`
 together. `sealedPidStarttime` (number, additive) is the `pidStarttime` above
-in plain text, stamped in the SAME call as `seal`. It is the protection fact
-for a conducted wrap (see "Same-uid processes and the live sealed wrap"
-below). It is not authenticated, so a same-uid writer can set or clear it. A
-record with a `seal` but no `sealedPidStarttime` predates the field, and is
-never protected.
+in plain text, and `sealedBootId` (string, additive) is the kernel's boot id at
+seal time (`/proc/sys/kernel/random/boot_id`). Both are stamped in the SAME call
+as `seal`. They are the protection fact for a conducted wrap (see "Same-uid
+processes and the live sealed wrap" below). Neither is authenticated, so a
+same-uid writer can set or clear them. A record that lacks either one predates
+the field, or had no readable boot id, and is never protected. Nothing
+backfills them.
 **`sessionId`/`originClass` ride VERBATIM — no trim, no case-folding**
 (review fix: the original shape copied `wire_auth::canonical_string`'s
 trim+lowercase wholesale, but `sessionId` is the session store's own
@@ -2769,71 +2771,104 @@ sealed id>` is refused: a conducted id is born once, and a restart registers a
 fresh id. Sealing happens once per record: `everSealed` (bool, additive,
 set by `stamp_seal`, never cleared) bars the daemon — both the tick and the
 dispatched-`session start` path — from sealing a record that ever carried a
-seal, so a seal that goes missing can never be re-minted over another pid. A
-dispatched `session start --id <id>` is refused BEFORE it runs (taught error,
-`seal_refused` event on the events feed) when the record is a protected live
-wrap (below). A record whose pid was reused, whose process has ended, or that
-is not a conducted wrap is not refused, and is not re-sealed.
+seal, so a seal that goes missing can never be re-minted over another pid.
+A `session start --id <id>` on a protected live wrap (below) is decided by the
+start door itself, after the daemon hop, so no daemon, daemon key or
+`AOIDE_DAEMON_SOCKET` decides it. A start that would change no stored field
+answers ok and writes nothing. A start that would change one is refused. A
+record whose pid was reused, whose process has ended, or that is not a conducted
+wrap is not refused, and is not re-sealed.
 
-**Same-uid processes and the live sealed wrap.** A same-uid process runs any
-command the operator can, so the rules here do not rest on file permissions.
-They rest on `/proc` and on one plaintext field, `sealedPidStarttime`. A record
-is a *protected live wrap* only when all five hold. `identity::
-is_protected_live_wrap` is the one predicate that decides it, and every refusal
-below asks it:
+**Same-uid processes and the live sealed wrap.** The rules in this section are
+read by the CLI's own doors. They are not a boundary against a process that runs
+as the operator. Assume an infected agent is already on the box and in the
+mesh: it can run any command the operator can, and nothing below stops it.
+
+A record is a *protected live wrap* only when all six hold.
+`identity::is_protected_live_wrap` is the one predicate that decides it, and
+every refusal below asks it:
 
 ```
 conductable == true
 seal present
-pid alive
 sealedPidStarttime present and nonzero
-sealedPidStarttime == the live pid's current starttime
+sealedBootId == this boot's id (/proc/sys/kernel/random/boot_id)
+pid alive: /proc/<pid>/stat state is not Z or X (read with the starttime)
+sealedPidStarttime == the live pid's current starttime (field 22)
 ```
 
 No key, no daemon socket, and no signature check sit on this path. A daemon
 restart, or an `AOIDE_DAEMON_SOCKET` that answers nothing, cannot lift it. It
 holds while the process with that pid and start time lives, whatever the daemon
-can verify. Two rules hold, each on the doors named:
+can verify. A zombie (exited, not yet reaped) is not alive, and a record from an
+earlier boot is never protected.
+
+Platform: the predicate works on Linux, and on Windows through its own arm. On
+other unixes `pid_starttime` is `None`, so nothing is protected there.
+
+Three rules hold, each on the doors named:
 
 1. *A protected live wrap is ended only by its own exit.* `session end`, a
    `session phase` carrying a terminal token (`exit`, `finished`, `complete`,
    `done`), and `session prune` refuse it with a taught error that names the
    wrap and `aoide session kill --id`; prune keeps the record and reports it as
    held. The hook's `SessionEnd` arm answers `ok` and leaves the record to its
-   own exit. The reaper spares it whichever liveness signal named it. A
-   dispatched `session start --id` on it is refused. The wrap's own exit path,
-   and the reaper once the pid is gone, end it. A record that is dead, unsealed,
-   not conducted, or whose starttime does not match ends as it always has.
-2. *The autogate reads only the spawn-time edge.* A target's parent counts for the
-   parent-of-target and sibling rules only where its `attestedSpawner` names that
-   parent (§ `sessions.json`). A bare `session start --parent`, a `graph link`, or
-   a moved edge earns no autogate: the send is held pending. The hook door attests
-   nothing, and it never moves a conducted wrap's edge.
+   own exit. The reaper spares it whichever liveness signal named it. The wrap's
+   own exit path, and the reaper once the pid is gone, end it. A record that is
+   dead, unsealed, not conducted, or whose starttime or boot does not match ends
+   as it always has.
+2. *A protected live wrap is re-registered only as it is.* The start door
+   applies a `session start --id` on it to a copy of the roster. A start that
+   would change no stored field answers `ok` and writes nothing, so a harness
+   hook may send its own registration again (`--agent`, `--cwd`) and keep the
+   seal and the starttime. A start that would change a field is refused. The
+   door passes only `agent`, `cwd`, `window` and `parent` to the record, so
+   those are the fields a start can change. The daemon route and the direct
+   route run the same check.
+3. *The autogate reads only the spawn-time edge.* A target's parent counts for
+   the parent-of-target and sibling rules only where its `attestedSpawner` names
+   that parent (§ `sessions.json`). A bare `session start --parent`, a `graph
+   link`, or a moved edge earns no autogate: the send is held pending. The hook
+   door attests nothing, and it never moves a conducted wrap's edge.
 
-**Who can set the marker.** `sealedPidStarttime` is written in one place,
-`stamp_seal`, by the daemon's mint, and no CLI verb reaches it. A hand edit of
-`sessions.json` is a different matter. It can give ANY live same-uid process's
-record `conductable`, a `seal`, and that process's current starttime, and that
-record is then protected from end, prune, phase, and start until the process
-exits. It can also clear the fields and unprotect a live wrap. Neither is
-stopped. The marker is unkeyed by design: the seal's key is the grant side's
-concern, not this one's. Hand edits are the domain of the daemon-owned session
-identity (stance B, below), which is not built.
+**Who can set the marker.** `sealedPidStarttime` and `sealedBootId` are written
+in one place, `stamp_seal`, from the daemon's tick and from the dispatched
+`session start` mint. No CLI verb reaches them. A hand edit of `sessions.json`
+does: it can give ANY live same-uid process's record `conductable`, a `seal`,
+that process's starttime, and this boot's id, and that record is then protected
+from end, prune, phase, and start until the process exits. It can also clear
+the fields and unprotect a live wrap. Neither is stopped. The marker is unkeyed
+by design: the seal's key is the grant side's concern, not this one's.
+
+The seal proves one thing: `aoided` saw pid P at starttime S when it minted. It
+does not prove where the wrap came from. The tick seals every unsealed,
+pid-bearing, live record it finds, including one a hand wrote, so a hand-edited
+roster is NOT a barrier. The real fix is the daemon-owned session identity
+(stance B), specified in `docs/architecture/SESSION-IDENTITY.md` on branch
+`design/session-identity-b`. That file is not in this tree, and it is not built.
 
 **The accepted loss.** A protected wrap whose seal no longer verifies, because
 `aoided` restarted and minted a new key, stays protected. It ends only when its
 process exits. Its `aoide session kill` and its autogate still verify the seal,
-so they refuse it until it registers again.
+so they refuse it until it registers again. A legacy record, with no
+`sealedPidStarttime` or no `sealedBootId`, is never protected. Nothing backfills
+it.
 
-**What a same-uid process can still do.** These are the residuals of the rules
-above. The daemon checks none of them.
+**What a same-uid process can still do.** None of these is stopped. The daemon
+checks none of them, and an infected agent can do each one.
 
+- Signal the wrap's own process. `SIGKILL` ends a wrap whatever its record says:
+  the marker protects the record, not the process.
 - Hand-edit `sessions.json`, as described above. The hand-edit watcher reports
-  it; nothing stops it. `parentSessionId` and `attestedSpawner` are not under the
-  seal, which covers only `sessionId`, `pid`, start time, `origin`, and
+  it; nothing stops it. `parentSessionId` and `attestedSpawner` are not under
+  the seal, which covers only `sessionId`, `pid`, start time, `origin`, and
   `issuedAt`.
-- Rewrite a live record's `agent`, `cwd`, or `window` through `session start` on
-  a record that is not protected. The seal covers none of them.
+- Rewrite a record that is not protected through `session start`. The seal
+  covers none of `agent`, `cwd`, or `window`.
+- Rewrite a protected wrap's `agent`, `cwd`, or `window` through the hook door's
+  SessionStart registration (`session hook`). That path is
+  `do_hook_session_start`, which does not run the start door's check, so a
+  changed field lands on the wrap. This is not closed.
 - Name a different daemon. The grant side (`session kill`, the autogate, the
   broker's origin gate) reads its key from the caller's `AOIDE_DAEMON_SOCKET`.
   Pointed at a socket that answers nothing, those grants refuse, which is fail
@@ -2842,10 +2877,13 @@ above. The daemon checks none of them.
 - Keep a window-gone wrap live. This is the cost of the reaper rule: a wrap whose
   window has vanished, but whose process still lives, stays live and deliverable
   until that process exits.
+- Speak in the mesh. The grant side gates sends (`send.rs`). A send it admits
+  carries whatever text its sender chose, and nothing here limits that text.
 
-A daemon-owned session identity is the planned change for the hand edits above.
-It is not built. The protection rule no longer depends on the daemon; the grant
-rules still do.
+This is an accident guard for the cooperating CLI paths. It stops a process that
+is not hostile, or a bug, from ending or rewriting a live wrap by mistake. It is
+not a containment boundary against an infected agent on the box. The protection
+rule no longer depends on the daemon; the grant rules still do.
 
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)

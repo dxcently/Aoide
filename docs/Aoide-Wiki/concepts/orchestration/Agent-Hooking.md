@@ -80,6 +80,11 @@ aoide session phase --id "$ID" --phase awaiting
 aoide session end   --id "$ID"
 ```
 
+A `session start` on a protected live wrap (CONTRACTS.md's identity section)
+answers ok and writes nothing when it changes no field, so a hook may send its
+registration again. A start that would change `--agent`, `--cwd`, `--window` or
+`--parent` on that wrap is refused.
+
 Canonical state vocabulary and how the desktop renders it:
 
 | state | glyph | treatment |

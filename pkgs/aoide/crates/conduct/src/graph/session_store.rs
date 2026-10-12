@@ -975,9 +975,10 @@ pub fn stamp_remote_parent(id: &str, parent: &aoide_storage::records::RemotePare
 /// [`stamp_origin`]'s own doc names.
 ///
 /// `pid_starttime` is the value the seal was minted over, written in plain text
-/// as `sealedPidStarttime` in the same change (LANE SAME-UID ruling A). The
-/// refusal predicate reads that plaintext, not the signature, so it is the one
-/// fact that must land with the seal.
+/// as `sealedPidStarttime`, and the boot id is written as `sealedBootId`, both in
+/// the same change. The refusal predicate reads those, not the signature, so
+/// they must land with the seal. A record that carries a seal, or ever did, is
+/// never stamped again.
 pub fn stamp_seal(id: &str, seal: &str, issued_at: i64, pid_starttime: u64) {
     if seal.is_empty() {
         return;
@@ -990,11 +991,12 @@ pub fn stamp_seal(id: &str, seal: &str, issued_at: i64, pid_starttime: u64) {
         if let Some(s) = file
             .sessions
             .iter_mut()
-            .find(|s| s.session_id == id && s.seal.as_deref() != Some(seal))
+            .find(|s| s.session_id == id && s.seal.is_none() && s.ever_sealed != Some(true))
         {
             s.seal = Some(seal.to_string());
             s.sealed_issued_at = Some(issued_at);
             s.sealed_pid_starttime = Some(pid_starttime);
+            s.sealed_boot_id = aoide_storage::attest::boot_id();
             s.ever_sealed = Some(true);
             if file.schema_version.is_empty() {
                 file.schema_version = STAGE_GRAPH_VERSION.to_string();
@@ -1822,6 +1824,11 @@ fn do_session_end_inner(id: &str) -> Outcome {
 /// stage-write bytes, just run in the daemon's process — and falls back to
 /// the direct write below byte-identically when nothing answers
 /// (`aoide_client::daemon::daemon_dispatch`'s own contract).
+///
+/// A start on a protected live wrap is decided here, after that hop, with no
+/// daemon, daemon key or `AOIDE_DAEMON_SOCKET` involved: a start that changes no
+/// stored field is an ok no-op that writes nothing, and one that would change a
+/// field is refused (see [`live_wrap_start`]).
 pub fn session_start(inv: &Invocation) -> Outcome {
     if let Some(outcome) = aoide_client::daemon::daemon_dispatch(inv) {
         return outcome;
@@ -1830,16 +1837,57 @@ pub fn session_start(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
-    do_session_start(
-        &id,
-        inv.flags.get("agent").map(String::as_str),
-        inv.flags.get("cwd").map(String::as_str),
-        inv.flags.get("window").map(String::as_str),
-        inv.flags.get("parent").map(String::as_str),
-        None,
-        None,
-        None,
-        None,
+    let agent = inv.flags.get("agent").map(String::as_str);
+    let cwd = inv.flags.get("cwd").map(String::as_str);
+    let window = inv.flags.get("window").map(String::as_str);
+    let parent = inv.flags.get("parent").map(String::as_str);
+    if let Some(outcome) = live_wrap_start(&id, agent, cwd, window, parent) {
+        return outcome;
+    }
+    do_session_start(&id, agent, cwd, window, parent, None, None, None, None)
+}
+
+/// The start door's verdict on a protected live wrap (`identity::
+/// is_protected_live_wrap`). The start is applied to a copy of the roster: if
+/// no stored field of the wrap would change, it answers ok and writes nothing,
+/// so the seal and the plaintext starttime are kept. If any field would change,
+/// it is refused. `None` for every other record.
+fn live_wrap_start(
+    id: &str,
+    agent: Option<&str>,
+    cwd: Option<&str>,
+    window: Option<&str>,
+    parent: Option<&str>,
+) -> Option<Outcome> {
+    let file: SessionsFile = load_stage(&sessions_path()).ok()?;
+    let rec = file.sessions.iter().find(|s| s.session_id == id)?;
+    if !super::identity::is_protected_live_wrap(rec) {
+        return None;
+    }
+    let mut after = file.sessions.clone();
+    upsert_session(&mut after, id, agent, cwd, window, parent, None, None, None, None, "");
+    let stored = after
+        .iter()
+        .find(|s| s.session_id == id)
+        .and_then(|s| serde_json::to_value(s).ok());
+    if stored != serde_json::to_value(rec).ok() {
+        return Some(
+            Outcome::error("session.start", super::identity::live_wrap_refusal(id))
+                .with_data(json!({ "reason": "live-sealed-wrap", "id": id })),
+        );
+    }
+    Some(
+        Outcome::ok(
+            "session.start",
+            format!("re-started session `{id}` (no field changed; startedAt preserved)"),
+        )
+        .with_data(json!({
+            "sessionId": id,
+            "agent": rec.agent,
+            "startedAt": rec.started_at,
+            "inserted": false,
+            "file": sessions_path().to_string_lossy(),
+        })),
     )
 }
 
@@ -1885,9 +1933,9 @@ pub fn session_end(inv: &Invocation) -> Outcome {
     do_session_end(&id)
 }
 
-/// The refusal a door returns when `id` names a live sealed
-/// wrap. `None` for every other record, and whenever the daemon cannot verify
-/// the seal (the record then ends as an unsealed one always has).
+/// The refusal a door returns when `id` names a protected live wrap
+/// (`identity::is_protected_live_wrap`). `None` for every other record. It reads
+/// no daemon key, so it answers the same with a daemon or without one.
 pub(in crate::graph) fn live_wrap_refusal_for(id: &str) -> Option<String> {
     let file: SessionsFile = load_stage(&sessions_path()).ok()?;
     super::identity::live_sealed_wrap_ids(&file.sessions)
@@ -4041,12 +4089,134 @@ mod live_sealed_wrap_guards {
         let (_env, kp, stage) = seal_world("live-wrap-dead-pid");
         sealed_live_wrap("wrap", &kp);
         let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
-        file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().pid = Some(4_000_000);
+        file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().pid = Some(reaped_pid());
         write_stage(&sessions_path(), &file).unwrap();
 
         let _ = session_end(&door(&["session", "end"], "wrap"));
 
         assert_eq!(record("wrap").unwrap().state, "done", "a dead pid is never protected");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The start door refuses a protected wrap with no daemon to ask, so a dead
+    /// `AOIDE_DAEMON_SOCKET` leaves the record exactly as it was.
+    #[test]
+    fn a_live_sealed_wrap_is_refused_a_start_with_a_dead_daemon_socket() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-start-dead-socket");
+        sealed_live_wrap("wrap", &kp);
+        std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-aoided.sock"));
+        let before = serde_json::to_value(record("wrap").unwrap()).unwrap();
+
+        let inv = flag_invocation(
+            &["session", "start"],
+            &[("id", "wrap"), ("agent", "codex"), ("cwd", "/elsewhere")],
+        );
+        let out = session_start(&inv);
+
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(
+            serde_json::to_value(record("wrap").unwrap()).unwrap(),
+            before,
+            "the record is unchanged"
+        );
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The harness hook's own `session start` (agent and cwd, as the hook doc
+    /// sends them) on a protected wrap changes nothing: it answers ok, writes no
+    /// byte, and keeps the seal and the plaintext starttime.
+    #[test]
+    fn a_same_fields_start_on_a_protected_wrap_is_a_no_op() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-start-no-op");
+        sealed_live_wrap("wrap", &kp);
+        std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-aoided.sock"));
+        let bytes = std::fs::read(sessions_path()).unwrap();
+        let sealed = record("wrap").unwrap();
+
+        let inv = flag_invocation(
+            &["session", "start"],
+            &[("id", "wrap"), ("agent", "claude"), ("cwd", "/w")],
+        );
+        let out = session_start(&inv);
+
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "the roster is byte-identical");
+        assert_eq!(record("wrap").unwrap().seal, sealed.seal);
+        assert_eq!(record("wrap").unwrap().sealed_pid_starttime, sealed.sealed_pid_starttime);
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A start that would change any stored field of a protected wrap is
+    /// refused, one field at a time, and the record is kept as it was.
+    #[test]
+    fn a_start_that_would_change_a_field_of_a_protected_wrap_is_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-start-changed");
+        sealed_live_wrap("wrap", &kp);
+        std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-aoided.sock"));
+        let before = serde_json::to_value(record("wrap").unwrap()).unwrap();
+
+        for (flag, value) in [
+            ("agent", "codex"),
+            ("cwd", "/elsewhere"),
+            ("window", "0xOTHER"),
+            ("parent", "some-parent"),
+        ] {
+            let inv = flag_invocation(&["session", "start"], &[("id", "wrap"), (flag, value)]);
+            let out = session_start(&inv);
+            assert_eq!(out.status, Status::Error, "{flag}: {}", out.message);
+            assert_eq!(
+                serde_json::to_value(record("wrap").unwrap()).unwrap(),
+                before,
+                "a refused {flag} change leaves the record unchanged"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The daemon runs this same door (`Door::Daemon`), so a restart with a new
+    /// key does not lift the refusal of a dispatched start.
+    #[test]
+    fn a_live_sealed_wrap_is_refused_a_start_after_the_daemon_restarts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-start-restart");
+        sealed_live_wrap("wrap", &kp);
+        let restarted = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&restarted.info().pubkey_hex));
+        let before = serde_json::to_value(record("wrap").unwrap()).unwrap();
+
+        let mut inv = flag_invocation(&["session", "start"], &[("id", "wrap"), ("agent", "codex")]);
+        inv.door = aoide_protocol::Door::Daemon;
+        let out = session_start(&inv);
+
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(
+            serde_json::to_value(record("wrap").unwrap()).unwrap(),
+            before,
+            "the record is unchanged"
+        );
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A seal is stamped once. A stamp never replaces a seal, and never seals a
+    /// record that ever carried one, even after its seal went missing.
+    #[test]
+    fn stamp_seal_never_replaces_a_seal_or_reseals_an_ever_sealed_record() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("stamp-once");
+        sealed_live_wrap("wrap", &kp);
+        let first = record("wrap").unwrap().seal.unwrap();
+
+        stamp_seal("wrap", "replacement-seal", 2, 99);
+        assert_eq!(record("wrap").unwrap().seal, Some(first), "a seal is never replaced");
+
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().seal = None;
+        write_stage(&sessions_path(), &file).unwrap();
+        stamp_seal("wrap", "fresh-seal", 3, 7);
+        assert_eq!(record("wrap").unwrap().seal, None, "an ever-sealed record is never re-sealed");
         let _ = std::fs::remove_dir_all(&stage);
     }
 

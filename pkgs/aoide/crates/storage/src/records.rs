@@ -730,11 +730,9 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub sealed_issued_at: Option<i64>,
-    /// The `pidStarttime` the seal was minted over, in plain text (LANE SAME-UID
-    /// ruling A, `docs/architecture/CONTRACTS.md`'s identity section). Written
-    /// in the SAME call as `seal` and `sealedIssuedAt`. This is the protection
-    /// fact: a conducted wrap stays protected while its live pid's starttime
-    /// equals this value (`identity::is_protected_live_wrap`). It is not
+    /// The `pidStarttime` the seal was minted over, in plain text, written in
+    /// the same call as `seal`. `identity::is_protected_live_wrap` reads this
+    /// value, not the signature, together with `sealedBootId`. It is not
     /// authenticated: any same-uid writer of `sessions.json` can set or clear
     /// it. Absent on every record sealed before this field existed, and such a
     /// record is never protected (no backfill).
@@ -744,6 +742,16 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub sealed_pid_starttime: Option<u64>,
+    /// The kernel's boot id at seal time (`attest::boot_id`), written in the
+    /// same call. A starttime counts ticks since boot, so a record sealed in an
+    /// earlier boot is never protected. Absent when no boot id was readable at
+    /// seal time, and such a record is never protected either.
+    #[serde(
+        rename = "sealedBootId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sealed_boot_id: Option<String>,
     /// Set by `stamp_seal` the first time a seal lands, and never cleared: the
     /// daemon never mints a seal over a record that has EVER carried one, so a
     /// seal that goes missing (hand edit, a bug) can never be laundered into a
@@ -1514,19 +1522,19 @@ mod tests {
         assert_eq!(legacy.seal, None);
     }
     #[test]
-    fn session_record_sealed_pid_starttime_round_trips_and_stays_absent_when_unset() {
-        // LANE SAME-UID ruling A: the plaintext starttime serialises under its
-        // camelCase name when set, is skipped when None, and a record sealed
-        // before the field existed parses to None (never protected).
+    fn session_record_sealed_identity_fields_round_trip_and_stay_absent_when_unset() {
         let rec = SessionRecord {
             session_id: "s".into(),
             sealed_pid_starttime: Some(4_242),
+            sealed_boot_id: Some("boot".into()),
             ..Default::default()
         };
         let json = serde_json::to_string(&rec).unwrap();
         assert!(json.contains("\"sealedPidStarttime\":4242"), "serialised: {json}");
+        assert!(json.contains("\"sealedBootId\":\"boot\""), "serialised: {json}");
         let back: SessionRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(back.sealed_pid_starttime, Some(4_242));
+        assert_eq!(back.sealed_boot_id.as_deref(), Some("boot"));
 
         let bare = SessionRecord {
             session_id: "s".into(),
@@ -1534,10 +1542,12 @@ mod tests {
         };
         let bare_json = serde_json::to_string(&bare).unwrap();
         assert!(!bare_json.contains("sealedPidStarttime"), "serialised: {bare_json}");
+        assert!(!bare_json.contains("sealedBootId"), "serialised: {bare_json}");
         let legacy: SessionRecord =
             serde_json::from_str(r#"{ "sessionId": "s", "seal": "ab", "sealedIssuedAt": 1 }"#)
                 .unwrap();
         assert_eq!(legacy.sealed_pid_starttime, None);
+        assert_eq!(legacy.sealed_boot_id, None);
     }
     #[test]
     fn session_record_petname_round_trips_and_stays_absent_when_unset() {

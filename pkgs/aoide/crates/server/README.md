@@ -136,8 +136,8 @@ the inbound half of the two-door contract (the outbound half is
   `pid` (today, only `session_conduct`'s own direct registration does — the
   bare wire path does not), it mints a seal and stamps it, with that
   starttime as `sealedPidStarttime`, via `aoide_conduct::graph::stamp_seal`.
-  The refusal `session_start_refusal` reads `is_protected_live_wrap` (the
-  plaintext starttime and the seal's presence), never the signature. **This
+  The start door (`aoide_conduct::graph::session_start`) decides a start on a
+  protected wrap, and it never reads the signature. **This
   is honest scaffolding, not a security boundary**: the pid sealed over is
   whatever the record already carries, not yet a peercred-verified
   CONNECTING pid. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s

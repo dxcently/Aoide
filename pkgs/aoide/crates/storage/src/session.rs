@@ -186,6 +186,7 @@ pub fn upsert_session(
             seal: None,
             sealed_issued_at: None,
             sealed_pid_starttime: None,
+            sealed_boot_id: None,
             ever_sealed: None,
             attested_spawner: None,
             // Stamped later by the PTY tick's `conduct_refresh_shell`

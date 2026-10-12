@@ -178,22 +178,20 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   its whole secrecy claim is "this process is still alive, and `ptrace`
   against it is blocked" (Yama `ptrace_scope>=1`), which a disk copy would
   destroy outright.
-- **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for
-  a successful `session start` dispatch whose record already carries a
-  `pid`, and it seals a record ONCE.** A record that already carries a
-  `seal`, or ever did (`everSealed`), is never sealed again — by this
-  function or by the `seal_unsealed_live_sessions` tick. Both stamp the
-  plaintext `sealedPidStarttime` in the same call as the seal. `session_start_
-  refusal` refuses a dispatched `session start` BEFORE it runs when the record
-  is a protected live conducted wrap (`aoide_conduct::graph::
-  is_protected_live_wrap`, the one predicate; taught error + `seal_refused`
-  event). It reads no daemon key, so a restart does not lift it. A record that
-  is not a conducted wrap, whose pid was reused, or whose process merely died
-  is not refused. Never refuse after mutating, and never add a path that re-mints
-  over a record that has ever been sealed; the pid it mints over is the
-  record's OWN `pid`
-  field (kept immutable by `aoide_storage::session::pid_may_move`), not a
-  peercred-verified connecting pid.
+- **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for a
+  successful `session start` dispatch whose record already carries a `pid`, and
+  it seals a record ONCE.** A record that already carries a `seal`, or ever did
+  (`everSealed`), is never sealed again — by this function or by the
+  `seal_unsealed_live_sessions` tick. Both stamp the plaintext
+  `sealedPidStarttime` and `sealedBootId` in the same call as the seal. The
+  start door (`aoide_conduct::graph::session_start`) decides a start on a
+  protected live wrap, after the daemon hop: a same-fields start is a no-op, and
+  a start that would change a field is refused. The decision is the door's,
+  not this crate's, and no key is read. Never refuse after mutating, and never
+  add a path that re-mints over a record that has ever been sealed; the pid it
+  mints over is the record's OWN `pid` field (kept immutable by
+  `aoide_storage::session::pid_may_move`), not a peercred-verified connecting
+  pid.
 - **Request-line reads on the daemon socket go through
   `daemon::read_capped_line` (a hand-rolled `fill_buf`/`consume` loop),
   never `BufReader::read_line` (P-D4, closing a P-D2-flagged gap).**

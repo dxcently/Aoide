@@ -75,8 +75,11 @@ central registry, no single point of failure):
    socket:      "…/session-<id>.sock"
    title:       "<chat title / current task>"
    origin:      "local"-class | "node:<name>"  (write-once; node:* only from the A2A door)
-   seal + sealedIssuedAt + sealedPidStarttime:  the daemon-sealed session credential,
-                           and the plaintext starttime that protects a wrap (see [[Session-Graph]])
+   seal + sealedIssuedAt + sealedPidStarttime + sealedBootId:
+                           the daemon-sealed session credential, and the
+                           plaintext fields that protect a wrap (see
+                           [[Session-Graph]] and CONTRACTS.md's identity
+                           section)
 ```
 
 The wrap process is the natural owner: it already holds the `Child`, already

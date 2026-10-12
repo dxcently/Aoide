@@ -305,31 +305,34 @@ pub(in crate::graph) fn is_self_originated(
         .is_some_and(|connector_session| connector_session == target_session_id)
 }
 
-/// THE refusal predicate (LANE SAME-UID ruling A). A conducted wrap is
-/// protected while its own process still runs under the starttime its record
-/// was sealed over: `conductable`, a seal, a live pid, and the plaintext
-/// `sealedPidStarttime` equal to that pid's current starttime. Every refusal
-/// asks this and nothing else: `session end`/`phase`/`prune`, the hook's
-/// `SessionEnd` arm, the reaper's spare, and a dispatched `session start`.
+/// THE refusal predicate. A conducted wrap is protected while its own process
+/// still runs under the starttime and boot its record was sealed over:
+/// `conductable`, a seal, a nonzero plaintext `sealedPidStarttime` equal to the
+/// live pid's starttime, and a `sealedBootId` equal to this boot's. Every
+/// refusal asks this and nothing else: `session end`/`phase`/`prune`/`start`,
+/// the hook's `SessionEnd` arm, and the reaper's spare.
 ///
 /// No key, no socket, no signature. A daemon restart or an unreachable
-/// `AOIDE_DAEMON_SOCKET` cannot switch it off. A reused pid cannot inherit it,
-/// because its starttime differs. Not authenticated: a same-uid writer of
-/// `sessions.json` can set or clear these fields. The seal's signature is a
-/// grant-side check only (`verify_seal_over`), never read here.
+/// `AOIDE_DAEMON_SOCKET` cannot lift it. A reused pid cannot inherit it (its
+/// starttime differs), and a zombie is not alive. Not authenticated: a
+/// same-uid writer of `sessions.json` can set or clear these fields. The
+/// seal's signature is a grant-side check only (`verify_seal_over`), never
+/// read here.
 pub fn is_protected_live_wrap(rec: &SessionRecord) -> bool {
-    let (Some(pid), Some(sealed_starttime)) = (rec.pid, rec.sealed_pid_starttime) else {
+    let (Some(pid), Some(sealed_starttime), Some(sealed_boot)) =
+        (rec.pid, rec.sealed_pid_starttime, rec.sealed_boot_id.as_deref())
+    else {
         return false;
     };
     rec.conductable == Some(true)
         && rec.seal.is_some()
         && sealed_starttime != 0
-        && aoide_storage::fs::pid_is_alive(pid)
-        && aoide_storage::attest::pid_starttime(pid as i32) == Some(sealed_starttime)
+        && aoide_storage::attest::boot_id().as_deref() == Some(sealed_boot)
+        && aoide_storage::attest::live_pid_starttime(pid as i32) == Some(sealed_starttime)
 }
 
 /// The protected conducted wraps among `sessions` (see
-/// [`is_protected_live_wrap`]). Used by the door, prune, and reaper refusals.
+/// [`is_protected_live_wrap`]). Used by the doors and the reaper.
 pub(crate) fn live_sealed_wrap_ids(sessions: &[SessionRecord]) -> HashSet<String> {
     sessions
         .iter()
@@ -343,9 +346,10 @@ pub(crate) fn live_sealed_wrap_ids(sessions: &[SessionRecord]) -> HashSet<String
 pub(crate) fn live_wrap_refusal(id: &str) -> String {
     format!(
         "session `{id}` is a live conducted wrap: its own process is still running, so it \
-         cannot be ended or finished from outside. The wrap ends its own record when that \
-         process exits. `aoide session kill --id {id}` asks the process to exit (SIGTERM, only \
-         under a seal the daemon can verify); a record whose process is gone is reaped normally."
+         cannot be ended, finished, or restarted from outside. The wrap ends its own record \
+         when that process exits. `aoide session kill --id {id}` asks the process to exit \
+         (SIGTERM, only under a seal the daemon can verify); a record whose process is gone \
+         is reaped normally."
     )
 }
 
@@ -355,6 +359,7 @@ mod tests {
     use crate::graph::window::{pid_ancestry, pid_starttime};
     use aoide_storage::identity;
     use aoide_storage::sealed_id::SealedIdentity;
+    use crate::graph::testutil::reaped_pid;
 
     fn sealed_record(session_id: &str, pid: i32, origin: Option<&str>, kp: &identity::Keypair) -> SessionRecord {
         let starttime = pid_starttime(pid).expect("test pids must be real, live pids");
@@ -375,6 +380,7 @@ mod tests {
             seal: Some(seal),
             sealed_issued_at: Some(issued_at),
             sealed_pid_starttime: Some(starttime),
+            sealed_boot_id: aoide_storage::attest::boot_id(),
             ..Default::default()
         }
     }
@@ -390,7 +396,7 @@ mod tests {
         let plain = sealed_record("plain", me, None, &kp);
         let mut dead = sealed_record("dead", me, None, &kp);
         dead.conductable = Some(true);
-        dead.pid = Some(4_000_000);
+        dead.pid = Some(reaped_pid());
         let unsealed = SessionRecord {
             session_id: "bare".into(),
             conductable: Some(true),
@@ -454,9 +460,67 @@ mod tests {
         unsealed.seal = None;
         let mut dead = sealed_record("dead", me, None, &kp);
         dead.conductable = Some(true);
-        dead.pid = Some(4_000_000);
+        dead.pid = Some(reaped_pid());
         assert!(!is_protected_live_wrap(&unsealed));
         assert!(!is_protected_live_wrap(&dead));
+    }
+
+    /// A starttime counts clock ticks since boot, so a record sealed in an
+    /// earlier boot can name a live process of this one. The boot id tells them
+    /// apart.
+    #[test]
+    fn a_wrap_sealed_in_an_earlier_boot_is_not_protected() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let me = std::process::id() as i32;
+        let mut wrap = sealed_record("wrap", me, None, &kp);
+        wrap.conductable = Some(true);
+        assert!(is_protected_live_wrap(&wrap), "control: this boot's record is protected");
+        wrap.sealed_boot_id = Some("an-earlier-boot".to_string());
+        assert!(!is_protected_live_wrap(&wrap));
+    }
+
+    /// No readable boot id at seal time leaves the field absent, and an absent
+    /// boot id protects nothing.
+    #[test]
+    fn a_wrap_with_no_boot_id_is_not_protected() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let me = std::process::id() as i32;
+        let mut wrap = sealed_record("wrap", me, None, &kp);
+        wrap.conductable = Some(true);
+        wrap.sealed_boot_id = None;
+        assert!(!is_protected_live_wrap(&wrap));
+    }
+
+    /// A child that exited and was never reaped is a zombie: `kill(pid, 0)`
+    /// still answers for it, but it runs nothing, so it is not protected.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_exited_but_unreaped_wrap_is_not_protected() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id() as i32;
+        let mut wrap = sealed_record("zombie", pid, None, &kp);
+        wrap.conductable = Some(true);
+        assert!(is_protected_live_wrap(&wrap), "control: the live child is protected");
+
+        child.kill().unwrap();
+        wait_until_zombie(pid);
+        assert!(!is_protected_live_wrap(&wrap), "a zombie runs nothing");
+
+        child.wait().unwrap();
+        assert!(!is_protected_live_wrap(&wrap), "and a reaped pid is gone");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wait_until_zombie(pid: i32) {
+        for _ in 0..500 {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            if stat.rsplit_once(')').is_some_and(|(_, after)| after.trim_start().starts_with('Z')) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("pid {pid} never became a zombie");
     }
 
     #[test]
