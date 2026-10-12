@@ -945,9 +945,9 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   shell or not, also reads its own pty output for a last line that has stood
   still on one row of a small closed table (`[y/N]`, a password prompt,
   `Press Enter`, …) — pure text, no `/proc` — and publishes it as
-  `state: awaiting` plus a `question` line; a shell counts only while a command
-  of its own is in the foreground ([[Session-Graph]], "Programs with no harness —
-  the screen").
+  `state: awaiting` plus a `question` line; an interactive shell at its bare
+  prompt is silenced, while a shell given `-c` or a script is heard
+  ([[Session-Graph]], "Programs with no harness — the screen").
 - **Writes:** binds the per-session control socket
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` (unlinked on exit and on start if
   stale); registers the session in `state/stage/sessions.json` with

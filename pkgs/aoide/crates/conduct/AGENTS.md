@@ -1484,11 +1484,15 @@ in the message.
     parent is paged for. The `sudo` row is the only row that also raises
     `needsSudo`; a shell's foreground-is-`sudo` check (`sudo_awaiting`) holds
     that badge on its own.
-  - **A shell's screen counts only with a command of its own in the
-    foreground.** `shell_snapshot` drops the prompt when `fg <= 0` or
-    `fg == shell_pid`, so a shell's own `read -p` at its bare prompt is not
-    heard; a `read` in a child command is. This is decided by the foreground
-    tick a shell already has, not a new probe.
+  - **A shell's screen is silenced only for an interactive shell at its bare
+    prompt.** `program_is_an_interactive_shell` reads the wrapped argv: no `-c`
+    string and no script operand. For such a shell `shell_snapshot` drops the
+    prompt when `fg <= 0` or `fg == shell_pid`, so its own `read -p` is not
+    heard. A shell given `-c` or a script (`bash -c "apt install x"`,
+    `sh ./run.sh`) shares its process group with the command it runs, so the
+    foreground pgid cannot tell that command's question from the prompt; its
+    questions are heard like any program's. The decision reads argv only; no
+    `/proc` probe is added.
   - **Precedence is hook phase > trace > screen > presence.** The wrap is
     watched only when it is a shell or its label has no `agent_profile`
     (`watch_prompts` at the `conduct_multiplex` call). `do_session_refresh`

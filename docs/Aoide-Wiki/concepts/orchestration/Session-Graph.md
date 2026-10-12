@@ -407,11 +407,13 @@ an agent's question, so it is shown and never announced to a spawner. A plain
 shell's own `sudo` shows at once, off the process table (`sudo_awaiting`); under
 a wrapper (`sh -c`, `make`) the screen shows it after the 3-second quiet.
 
-A shell's screen counts only while a command of its own is in the foreground. At
-its bare prompt the shell is never `awaiting` off what it printed, so a `read -p`
-that the shell runs itself goes unseen, while a `read` inside a child command is
-seen. The foreground-command tick that already runs for a shell decides this;
-nothing else probes the process.
+A shell's screen counts by what the shell was given. An interactive shell (no
+`-c` string and no script: `bash`, `bash --norc -i`, `sudo bash`) is silenced at
+its bare prompt, so a question typed or echoed there is never `awaiting`, and a
+`read -p` it runs itself goes unseen. A shell given a command or a script
+(`bash -c "apt install x"`, `sh ./run.sh`) is a program like any other, and its
+questions are heard. The argv decides which, read by the walk that classes a
+shell; no process is probed for it.
 
 Precedence, highest first: **hook phase, trace, screen, presence.** A non-shell
 session whose harness is an agent with a profile (claude, kimi, pi, eidolon) is

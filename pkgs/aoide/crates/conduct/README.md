@@ -308,9 +308,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   printable key or Enter has landed on that row, the wrap's tick writes
   `state: awaiting` and that one capped, sanitised line as the record's
   `question` through `do_session_refresh`. A changed line, a later row, or a key
-  takes both back. The `sudo` row also raises `needsSudo`. A shell's screen
-  counts only while a command of its own is in the foreground, and a non-shell
-  session with a hook phase or a trace is never touched.
+  takes both back. The `sudo` row also raises `needsSudo`. An interactive
+  shell's screen is silenced at its bare prompt; a shell given a command or a
+  script is heard. A non-shell session with a hook phase or a trace is never
+  touched.
 - **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape
   stripper: the screen source reads its window through it, and
   `aoide-conductor`'s log tail renders through it.

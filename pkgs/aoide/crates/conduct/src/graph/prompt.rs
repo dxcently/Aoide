@@ -48,7 +48,8 @@
 //!
 //! Pure text over the pty: no `/proc`, no per-host branch. This module reads any
 //! child; deciding whether a shell's own screen speaks for it is the caller's
-//! (`shell_snapshot`: a shell at its bare prompt is never `awaiting` off it).
+//! (`shell_snapshot`: an interactive shell at its bare prompt is never
+//! `awaiting` off it; a shell given a command or a script is heard).
 
 use super::common::{strip_ansi, strip_unsafe};
 use std::time::{Duration, Instant};
@@ -588,8 +589,8 @@ mod tests {
     #[test]
     fn a_builtin_read_at_a_shell_prompt_reads_as_a_question_to_the_watch() {
         // `read -p 'Overwrite? [y/N] ' x` runs in the shell's own process. The
-        // watch reads the line; the shell gate in `shell_snapshot` decides whether
-        // the shell's own bare prompt may speak for it.
+        // watch reads the line; `shell_snapshot` decides whether an interactive
+        // shell's bare prompt may speak for it (it may not).
         let t0 = Instant::now();
         let mut watch = PromptWatch::new(t0);
         watch.output(b"khoa@osaka:~$ ", t0);

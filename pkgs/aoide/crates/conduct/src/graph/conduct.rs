@@ -76,6 +76,8 @@ fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
         "stdbuf" => matches!(arg, "-i" | "-o" | "-e"),
         "ionice" => matches!(arg, "-c" | "-n" | "-p" | "-u"),
         "chrt" => matches!(arg, "-p" | "-T" | "-P" | "-D" | "-R" | "-O" | "-b"),
+        "sudo" => matches!(arg, "-u" | "-g" | "-C" | "-p" | "-r" | "-t" | "-U"),
+        "doas" => matches!(arg, "-u" | "-C"),
         "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
         "script" => matches!(arg, "-c" | "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in"),
         _ => false,
@@ -132,27 +134,29 @@ fn skip_launcher_options(
 /// exist to run a command in a dev environment, so their payload is the
 /// question. With no `-c`/`--command` at all, nix opens an INTERACTIVE shell
 /// — which is this predicate's question, and "shell" is the safe answer.
-fn nix_runs_a_shell(argv: &[String], i: usize) -> bool {
+fn nix_shell_verdict(argv: &[String], i: usize) -> Option<bool> {
     let sub = argv.get(i + 1).map(|s| command_basename(s)).unwrap_or_default();
     if sub != "develop" && sub != "shell" {
-        return false;
+        return None;
     }
     let mut j = i + 2;
     while j < argv.len() {
         match argv[j].as_str() {
-            "-c" | "--command" => return j + 1 >= argv.len() || program_is_a_shell(&argv[j + 1..]),
+            // An empty payload is a shell with nothing to run: not at a prompt.
+            "-c" | "--command" if j + 1 >= argv.len() => return Some(false),
+            "-c" | "--command" => return shell_verdict(&argv[j + 1..]),
             // The attached form carries a whole command LINE in one token.
             a if a.starts_with("--command=") => {
                 let words: Vec<String> = a["--command=".len()..]
                     .split_whitespace()
                     .map(str::to_string)
                     .collect();
-                return program_is_a_shell(&words);
+                return shell_verdict(&words);
             }
             _ => j += 1,
         }
     }
-    true
+    Some(true)
 }
 
 /// Where `script -q <typescript> [<command> …]`'s payload starts, or `None`
@@ -195,6 +199,25 @@ fn script_command(argv: &[String], i: usize) -> Option<usize> {
 /// auto-typing, the silent-safe direction; a false negative is the hole this
 /// exists to close, so every unresolved case errs toward "shell".
 pub fn program_is_a_shell(argv: &[String]) -> bool {
+    shell_verdict(argv).is_some()
+}
+
+/// Whether a conducted command is a shell at its OWN prompt: no `-c` command
+/// string and no script operand (`bash`, `bash --norc -i`, `sudo bash`). A
+/// shell that runs a command or a script (`bash -c "apt install x"`,
+/// `sh ./run.sh`) is a program like any other, and its questions are heard.
+///
+/// Only the prompt case is silenced by the screen (`shell_snapshot`): a `bash
+/// -c` child shares the shell's process group, so the foreground pgid cannot
+/// tell its question from the bare prompt.
+fn program_is_an_interactive_shell(argv: &[String]) -> bool {
+    shell_verdict(argv) == Some(true)
+}
+
+/// The one walk behind both predicates. `None`: the argv is not a shell.
+/// `Some(true)`: a shell at its own prompt. `Some(false)`: a shell that runs a
+/// command or a script.
+fn shell_verdict(argv: &[String]) -> Option<bool> {
     let mut i = 0;
     while i < argv.len() {
         if is_assignment(&argv[i]) {
@@ -211,16 +234,61 @@ pub fn program_is_a_shell(argv: &[String]) -> bool {
             // numbers and then exactly one token goes — however the duration
             // is spelled (`60`, `1m`, `0.5s`).
             "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
-            "nix" => return nix_runs_a_shell(argv, i),
+            "nix" => return nix_shell_verdict(argv, i),
             "script" => match script_command(argv, i) {
                 Some(next) => i = next,
-                None => return true,
+                None => return Some(true),
             },
-            "su" | "doas" | "sudo" => return true,
-            b => return SHELL_BASENAMES.contains(&b),
+            // `su` is a login shell unless it is handed a command with `-c`.
+            "su" => {
+                let runs_a_command = argv[i + 1..].iter().any(|a| {
+                    a.starts_with("--command")
+                        || (a.starts_with('-') && !a.starts_with("--") && a.contains('c'))
+                });
+                return Some(!runs_a_command);
+            }
+            // `sudo`/`doas` run the command after their own options, or land in
+            // a login shell when given none: a shell there is at its prompt.
+            "doas" | "sudo" => {
+                let rest = argv
+                    .get(skip_launcher_options(argv, i + 1, &base, false)..)
+                    .unwrap_or_default();
+                return Some(rest.is_empty() || shell_verdict(rest) == Some(true));
+            }
+            b => {
+                return SHELL_BASENAMES
+                    .contains(&b)
+                    .then(|| shell_args_are_interactive(&argv[i + 1..]))
+            }
         }
     }
-    false
+    None
+}
+
+/// Whether a shell's own arguments leave it at its prompt: no `-c` command
+/// string and no script operand. `bash`, `bash --norc -i` and `bash -o
+/// pipefail` sit at a prompt; `bash -c x`, `bash -lc x`, `sh ./run.sh`,
+/// `bash -- run.sh` and `bash -` (commands from stdin) run a command or a
+/// script.
+fn shell_args_are_interactive(args: &[String]) -> bool {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if arg == "--" {
+            return i + 1 >= args.len();
+        }
+        if let Some(long) = arg.strip_prefix("--") {
+            i += if matches!(long, "rcfile" | "init-file") { 2 } else { 1 };
+        } else if arg.len() > 1 && (arg.starts_with('-') || arg.starts_with('+')) {
+            if arg.starts_with('-') && arg.contains('c') {
+                return false;
+            }
+            i += if matches!(arg, "-o" | "+o" | "-O" | "+O") { 2 } else { 1 };
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// [`program_is_a_shell`]'s verdict, read back off a RECORD: `shell` (the
@@ -823,25 +891,27 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
 /// prompt" (idle); anything else is a command running in the foreground
 /// (working, its command captured as `activity`).
 ///
-/// `prompt` is the screen's verdict (`prompt.rs`), from `conduct_multiplex`. The
-/// screen speaks for a shell only while a command of its own is in the
-/// foreground: at its bare prompt the shell is never `awaiting` off what it
-/// printed. So a `read -p` or `select` that the shell runs itself goes unseen,
-/// because the process table cannot tell it from the prompt; a `read` inside a
-/// child command is seen. When [`sudo_awaiting`] (the process table's witness)
-/// or the screen says so, `state` is FORCED to `awaiting` regardless of the
-/// idle/working computation above — a prompt needs the user NOW — and
-/// `needs_sudo` is set when either witness was the `sudo` prompt.
+/// `prompt` is the screen's verdict (`prompt.rs`), from `conduct_multiplex`.
+/// An INTERACTIVE shell (`interactive`, see `program_is_an_interactive_shell`)
+/// is never `awaiting` off what it printed at its bare prompt: its own `read -p`
+/// or `select` shares the shell's process, which the process table cannot tell
+/// from the prompt, so it goes unseen. A shell that runs a command or a script
+/// (`bash -c "…"`) has no prompt to silence, and its question is heard. When
+/// [`sudo_awaiting`] (the process table's witness) or the screen says so,
+/// `state` is FORCED to `awaiting` regardless of the idle/working computation
+/// above — a prompt needs the user NOW — and `needs_sudo` is set when either
+/// witness was the `sudo` prompt.
 fn shell_snapshot(
     fg: i32,
     shell_pid: i32,
+    interactive: bool,
     prompt: Option<&Prompt>,
     comm_of: impl Fn(i32) -> Option<String>,
     command_of: impl Fn(i32) -> Option<String>,
     children_of: impl Fn(i32) -> Option<bool>,
 ) -> (&'static str, Option<String>, bool, Option<String>) {
     let at_prompt = fg <= 0 || fg == shell_pid;
-    let prompt = prompt.filter(|_| !at_prompt);
+    let prompt = prompt.filter(|_| !(interactive && at_prompt));
     let (mut state, activity) = if at_prompt {
         // At the bare prompt: idle, but label the row with the shell PROCESS
         // itself (e.g. `bash`) so the terminal roster is never blank.
@@ -907,6 +977,7 @@ fn conduct_refresh_shell(
     id: &str,
     pty: &Pty,
     shell_pid: i32,
+    interactive: bool,
     prompt: Option<&Prompt>,
     typed: Option<String>,
 ) {
@@ -915,6 +986,7 @@ fn conduct_refresh_shell(
     let (state, activity, needs_sudo, question) = shell_snapshot(
         fg,
         shell_pid,
+        interactive,
         prompt,
         proc_comm,
         proc_command,
@@ -1078,6 +1150,7 @@ fn conduct_multiplex(
     child: &mut PtyChild,
     id: &str,
     is_shell: bool,
+    interactive: bool,
     watch_prompts: bool,
     read_stdin: bool,
     sink: &mut OutputSink,
@@ -1113,7 +1186,7 @@ fn conduct_multiplex(
     };
     if is_shell {
         let typed = typed_buf.as_ref().and_then(|b| b.typed());
-        conduct_refresh_shell(id, pty, shell_pid, None, typed); // stamp initial cwd/state now.
+        conduct_refresh_shell(id, pty, shell_pid, interactive, None, typed); // stamp initial cwd/state now.
     }
 
     let mut timed_out = false;
@@ -1191,7 +1264,7 @@ fn conduct_multiplex(
                 .and_then(|w| w.standing(std::time::Instant::now()));
             if is_shell {
                 let typed = typed_buf.as_ref().and_then(|b| b.typed());
-                conduct_refresh_shell(id, pty, shell_pid, standing.as_ref(), typed);
+                conduct_refresh_shell(id, pty, shell_pid, interactive, standing.as_ref(), typed);
             } else if standing != published {
                 let question = standing.as_ref().map(|p| p.question.as_str());
                 do_session_refresh(id, None, standing.as_ref().is_some_and(Prompt::sudo), question);
@@ -1622,6 +1695,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         &mut child,
         &id,
         is_shell,
+        program_is_an_interactive_shell(&inv.args),
         // The screen speaks for a shell, and for a wrap whose harness has no
         // hook or trace profile to speak for itself. A harness that reports
         // through hooks or a trace is never touched by it.
@@ -2069,6 +2143,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             100,
             100,
+            true,
             None,
             |_| Some("bash".to_string()),
             |_| panic!("command_of should not be consulted at the bare prompt"),
@@ -2085,6 +2160,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             200,
             100,
+            true,
             None,
             |_| Some("cargo".to_string()),
             |pid| {
@@ -2106,6 +2182,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             300,
             100,
+            true,
             None,
             |_| Some("sudo".to_string()),
             |_| Some("sudo nixos-rebuild switch".to_string()),
@@ -2127,6 +2204,7 @@ mod tests {
         let (state, activity, needs_sudo, _) = shell_snapshot(
             300,
             100,
+            true,
             None,
             |_| Some("sudo".to_string()),
             |_| Some("sudo nixos-rebuild switch".to_string()),
@@ -2146,6 +2224,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             200,
             100,
+            true,
             Some(&ask),
             |_| Some("cp".to_string()),
             |_| Some("cp -i a b".to_string()),
@@ -2155,11 +2234,12 @@ mod tests {
         assert_eq!(activity.as_deref(), Some("cp -i a b"));
         assert!(!needs_sudo);
         assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
-        // The shell's own `read -p` runs in the shell process: at its bare prompt
-        // the screen does not speak for the shell, so it is not heard.
+        // An interactive shell's own `read -p` runs in the shell process: at its
+        // bare prompt the screen does not speak for the shell, so it is not heard.
         let (state, _, needs_sudo, question) = shell_snapshot(
             100,
             100,
+            true,
             Some(&ask),
             |_| Some("bash".to_string()),
             |_| panic!("command_of should not be consulted at the bare prompt"),
@@ -2175,17 +2255,36 @@ mod tests {
         let comm = |pid: i32| Some(if pid == 200 { "make" } else { "bash" }.to_string());
         let sudo = asking("[sudo] password for khoa:", true);
         let (state, _, needs_sudo, question) =
-            shell_snapshot(200, 100, Some(&sudo), comm, |_| None, |_| None);
+            shell_snapshot(200, 100, true, Some(&sudo), comm, |_| None, |_| None);
         assert_eq!(state, "awaiting");
         assert!(needs_sudo);
         assert_eq!(question.as_deref(), Some("[sudo] password for khoa:"));
         // Any other row is a question, not the human's sudo password.
         let other = asking("Password:", false);
-        let (state, _, needs_sudo, _) = shell_snapshot(200, 100, Some(&other), comm, |_| None, |_| None);
+        let (state, _, needs_sudo, _) = shell_snapshot(200, 100, true, Some(&other), comm, |_| None, |_| None);
         assert_eq!((state, needs_sudo), ("awaiting", false));
         // At the bare prompt the sudo row is not the shell's question either.
-        let (state, _, needs_sudo, _) = shell_snapshot(100, 100, Some(&sudo), comm, |_| None, |_| None);
+        let (state, _, needs_sudo, _) = shell_snapshot(100, 100, true, Some(&sudo), comm, |_| None, |_| None);
         assert_eq!((state, needs_sudo), ("idle", false));
+    }
+    #[test]
+    fn shell_snapshot_hears_the_question_of_a_shell_that_runs_a_command() {
+        // `bash -c "read -p …"`: the shell is the program, so its own read sits at
+        // fg == shell_pid. Not interactive, so the bare-prompt guard is off.
+        let ask = asking("Overwrite? [y/N]", false);
+        let (state, activity, needs_sudo, question) = shell_snapshot(
+            100,
+            100,
+            false,
+            Some(&ask),
+            |_| Some("bash".to_string()),
+            |_| panic!("command_of should not be consulted at the bare prompt"),
+            |_| panic!("children_of should not be consulted when fg isn't sudo"),
+        );
+        assert_eq!(state, "awaiting");
+        assert_eq!(activity.as_deref(), Some("bash"));
+        assert!(!needs_sudo);
+        assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
     }
     #[test]
     fn cwd_for_prefers_foreground_process_then_falls_back_to_shell() {
@@ -2305,6 +2404,51 @@ mod tests {
         assert!(is_invocation_plumbing(Some(&[])), "an empty argv is plumbing");
     }
 
+    #[test]
+    fn an_interactive_shell_is_one_at_its_own_prompt_and_no_command_runner() {
+        // The bare-prompt guard's question. A shell given `-c` or a script runs a
+        // command, so its questions are heard; a bare shell sits at a prompt.
+        let at_prompt: &[&[&str]] = &[
+            &["bash"],
+            &["/bin/bash", "--norc", "-i"],
+            &["bash", "-l"],
+            &["sh"],
+            &["bash", "-o", "pipefail"],
+            &["env", "bash"],
+            &["nix", "develop"],
+            &["nix", "develop", "-c", "bash"],
+            &["sudo", "bash"],
+            &["sudo", "-u", "root", "bash"],
+            &["sudo", "-i"],
+            &["su", "-"],
+            &["su", "-", "khoa"],
+            &["script", "-q", "/dev/null"],
+        ];
+        let runs_a_command: &[&[&str]] = &[
+            &["bash", "-c", "read -p 'Overwrite? [y/N] ' x"],
+            &["bash", "-lc", "apt install x"],
+            &["bash", "-ic", "x"],
+            &["sh", "./run.sh"],
+            &["bash", "--", "run.sh"],
+            &["bash", "-"],
+            &["env", "bash", "-c", "x"],
+            &["timeout", "60", "bash", "-c", "x"],
+            &["sudo", "bash", "-c", "x"],
+            &["sudo", "apt", "install"],
+            &["su", "-c", "x", "khoa"],
+            &["nix", "develop", "-c", "bash", "-c", "x"],
+            &["nix", "develop", "-c", "make"],
+            &["claude"],
+            &["cargo", "test"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in at_prompt {
+            assert!(program_is_an_interactive_shell(&owned(case)), "{case:?} sits at its prompt");
+        }
+        for case in runs_a_command {
+            assert!(!program_is_an_interactive_shell(&owned(case)), "{case:?} runs a command");
+        }
+    }
     #[test]
     fn program_is_a_shell_reads_the_wrapped_argv_never_the_agent_label() {
         // The task #100 defect, table-driven: shell-likeness is a property of
@@ -4115,8 +4259,9 @@ mod tests {
     /// GATED on Unix with its reason: the children are POSIX programs
     /// (`sh -c`, `awk`) and the answer goes through the Unix-domain inbox.
     ///
-    /// `heard` false is a question the screen does not speak for (a shell's own
-    /// bare prompt): the record must stay off `awaiting` through the whole wait.
+    /// `heard` false is an interactive shell at its own prompt: the question is
+    /// typed there and never submitted, and the record must stay off `awaiting`
+    /// through the whole wait.
     #[cfg(unix)]
     fn a_blocked_child_is_asking_until_answered(
         tag: &str,
@@ -4164,11 +4309,17 @@ mod tests {
         if !heard {
             // The session must be recorded first, or the negative proves nothing.
             let recorded = wait_for_record(tag, std::time::Duration::from_secs(10), |_| true);
+            // Typed at the bare prompt and never submitted: on the screen, not asked.
+            use std::io::Write as _;
+            let mut door = std::os::unix::net::UnixStream::connect(conduct_socket_path(tag))
+                .expect("the session's inbox is bound once it is recorded");
+            door.write_all(b"Proceed? [y/N] ").unwrap();
+            drop(door);
             // Past QUIET plus a tick: a heard question would be awaiting by now.
             let seen = wait_for_record(tag, std::time::Duration::from_secs(8), |r| r.state == "awaiting");
             reap(&mut conducting);
             assert!(recorded.is_some(), "the session was never recorded");
-            assert!(seen.is_none(), "the shell's own bare prompt was heard as a question");
+            assert!(seen.is_none(), "the interactive shell's bare prompt was heard as a question");
             let _ = std::fs::remove_dir_all(&root);
             return;
         }
@@ -4206,16 +4357,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A shell's own `read` builtin asks from the shell process itself, with no
-    /// foreground command: that is the bare prompt, so the screen's question is
-    /// not heard (`shell_snapshot`). The same question from a child command is
-    /// heard; see `a_harnessless_program_blocked_on_a_question_is_asking_until_answered`.
+    /// A shell given a command string runs it, and its `read` is a question like
+    /// any program's: the screen hears it even though the shell's own process
+    /// is the foreground group (`shell_snapshot`).
     #[cfg(unix)]
     #[test]
-    fn a_shell_blocked_in_its_own_read_is_never_heard() {
+    fn a_shell_running_a_command_string_is_heard() {
         a_blocked_child_is_asking_until_answered(
-            "screen-shell-read",
-            &["sh", "-c", "printf 'Overwrite? [y/N] '; read x; sleep 4"],
+            "screen-bash-c-read",
+            &["bash", "-c", "read -p 'Overwrite? [y/N] ' x; sleep 4"],
+            "worker",
+            true,
+            true,
+        );
+    }
+
+    /// An interactive shell at its own prompt: a question typed there is on the
+    /// screen but is not asked, because its `read` would share the prompt's
+    /// process (`shell_snapshot`).
+    #[cfg(unix)]
+    #[test]
+    fn an_interactive_shell_at_its_own_prompt_is_never_asked() {
+        a_blocked_child_is_asking_until_answered(
+            "screen-interactive-bash",
+            &["bash", "--norc", "--noprofile", "-i"],
             "worker",
             true,
             false,

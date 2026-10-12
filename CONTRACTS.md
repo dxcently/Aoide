@@ -2291,8 +2291,8 @@ output the reader works on is memory only, and it is never logged. A non-shell
 session with a hook phase or a trace never carries one: the hook phase, then the
 trace, then the screen decide its `state`, and the screen only for a wrap nothing
 else speaks for. A shell's `state` is its own snapshot (foreground command, then
-screen, while a command of its own is foreground), whatever hook records it
-holds. Readers tolerate its absence and round-trip fields they do not know.
+screen), whatever hook records it holds; the screen is silenced only for an
+interactive shell at its bare prompt. Readers tolerate its absence and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
