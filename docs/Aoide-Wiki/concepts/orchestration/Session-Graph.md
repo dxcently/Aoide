@@ -335,7 +335,7 @@ gate, no pending entry, no provenance prefix and no rename of the parent.
 `state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
 for a trace; `hook` for a hook phase; `screen` for the question last heard),
 claimed inside one short stage-lock
-section before the write, so each event is delivered at most once. A parent is heard only when its wrapped program is the harness its agent names: the launcher walk's resolved program, stamped as `wrapped_program` at registration, not the `agent` label a caller chose. A shell is skipped (`shell-parent`), and so is a wrap the walk cannot name or does not resolve to its harness (`unverified-wrap`), as is one whose record is gone, not conductable, or already `done`. The ruling is the User's (2026-09-17): a parent hears the children it
+section before the write, so each event is delivered at most once. A parent is heard only when its wrapped program is the harness its agent names: the launcher walk's resolved program, stamped as `wrappedProgram` at registration, not the `agent` label a caller chose. A shell is skipped (`shell-parent`), and so is a wrap the walk cannot name or does not resolve to its harness (`unverified-wrap`), as is one whose record is gone, not conductable, or already `done`. The ruling is the User's (2026-09-17): a parent hears the children it
 spawned, and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**

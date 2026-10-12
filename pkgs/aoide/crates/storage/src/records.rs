@@ -252,7 +252,7 @@ pub struct SessionRecord {
     /// the program name). The ping-back delivers only to a wrap whose program is
     /// the harness its agent names, so an absent or foreign name is never
     /// delivered to. `skip_serializing_if` keeps every older record identical.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "wrappedProgram", default, skip_serializing_if = "Option::is_none")]
     pub wrapped_program: Option<String>,
     #[serde(rename = "startedAt", default)]
     pub started_at: String,

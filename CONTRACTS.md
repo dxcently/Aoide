@@ -2148,7 +2148,7 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
-**`shell` and `wrapped_program` — what a conducted wrap runs.** A session
+**`shell` and `wrappedProgram` — what a conducted wrap runs.** A session
 record MAY carry two fields, both written by the conducting process at
 REGISTRATION (`stamp_wrap`, on both `upsert_session` arms, so re-registering an
 id flips both together):
@@ -2158,7 +2158,7 @@ id flips both together):
   against the shell list, with `env`/`nix develop -c`/`setsid`/`timeout`/
   `nice`/… resolved to what they forward to).
 - `wrappedProgram` (string), the program the same launcher walk resolves the
-  wrapped argv to, by basename (`conduct.rs::wrapped_program_name`, stored as `wrapped_program`). It is `claude` for `-- env claude`, and
+  wrapped argv to, by basename (`conduct.rs::wrapped_program_name`). It is `claude` for `-- env claude`, and
   `taskset` for `-- taskset -c 0 claude`, because a launcher the walk does not
   model names itself. It is absent when the walk names no program: a login
   shell, `script` with no command, `su`, a `nix` form without a `-c` payload,
