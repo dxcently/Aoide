@@ -824,12 +824,19 @@ count.
   never does is reported `not-ready` and typed at by nothing), its `restore`
   snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
-  running re-execs with `--yes --submit` (never for a recorded `sudo …` or a
-  shell-form argv such as `sh -c …`, which only restore the cwd; the words
-  are POSIX-quoted, so the typed line re-parses to the recorded argv); an idle session's clean unsubmitted
-  `typed` line preloads with `--yes` and permanently no `--submit`,
-  so it sits in the new prompt until a human presses Enter; idle with no
-  `typed` delivers nothing. Also the command core the daemon's own boot-time
+  running re-execs with `--yes --submit`, unless its recorded argv is refused
+  by `resurrect.rs::restore_argv_refusal` (the one list), which restores the
+  cwd only. The refusals: a leading `NAME=value` word (`A=1 sudo x`); a control,
+  bidi or invisible character, a newline or U+FFFD in any word; a line over
+  4096 bytes; a privilege program anywhere in its launcher chain (`sudo`,
+  `doas`, `su`, `pkexec`, `run0`); a shell-form argv such as `sh -c …`. The
+  words are POSIX-quoted (`shell_join`), so the typed line re-parses to the
+  recorded argv for an argv that passes. A same-uid process can rewrite its
+  own `/proc` cmdline, so the refusals judge the text typed, not the process
+  it names. An idle session's clean unsubmitted `typed` line preloads with
+  `--yes` and permanently no `--submit`, so it sits in the new prompt until a
+  human presses Enter; idle with no `typed` delivers nothing. Also the command
+  core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -2185,7 +2192,10 @@ outside this proof, each under its own rule. `aoide send` and `aoide spawn
 ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
 boot resurrect retypes a recorded command's shell-quoted words, never for `sudo`
-or a shell-form argv (`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
+or a privilege program or a shell-form argv
+(`resurrect.rs::restore_argv_refusal`).
+The proof is that basename, and it is stated as one: a symlink named `claude`
+that points at `bash`, or a script named `claude`
 that execs a shell, passes it. It rejects the launchers the walk does not model
 and a label that does not match the wrap. It does not stop a same-uid process
 that names a shell after a harness; for that class the defence is inert content,
@@ -2356,8 +2366,9 @@ is idle at its bare prompt by the process-group check alone. `restore.idle` is
 the same verdict, computed once per tick, so the two never disagree. The one
 accepted loss: a `&` background child under a command shell keeps it `working`
 for as long as that child lives; a launcher the operator typed that holds the
-pid (`sudo`, `doas`, `su`) reads `working` through the same arm, its prompts
-still `awaiting` by sudo's witness and the screen's password row. Readers
+pid (`sudo`, `doas`, `su -c`) reads `working` through the same arm, its prompts
+still `awaiting` by sudo's witness and the screen's password row. A bare `su`
+is an interactive shell and reads idle at its prompt. Readers
 tolerate its absence and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)

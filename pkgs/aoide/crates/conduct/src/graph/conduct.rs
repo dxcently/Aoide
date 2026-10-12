@@ -61,6 +61,13 @@ const SHELL_BASENAMES: &[&str] = &[
     "busybox", "elvish", "osh", "ash", "yash",
 ];
 
+/// The programs that take a privilege or a login in place of the operator: the
+/// one list. `sudo` and `doas` also wrap a command, which the walk reads as a
+/// shell whatever it runs ([`walk`]); `su`, `pkexec` and `run0` ask for a
+/// password on the pty. [`runs_a_privilege_program`] reads it for the restore
+/// refusals. Basename match only, so `sudoedit` and other names are not listed.
+pub(in crate::graph) const PRIVILEGE_PROGRAMS: &[&str] = &["sudo", "doas", "su", "pkexec", "run0"];
+
 /// Launchers that only FORWARD to the program after them. The hook door's plumbing
 /// verdict ([`is_invocation_plumbing`]) reads this list; the walk reads each
 /// launcher's own options from [`launcher`].
@@ -464,8 +471,9 @@ fn walk(argv: &[String]) -> Walked {
         // `sudo` and `doas` read as a shell whatever they run, so no automatic
         // reader types into one: a line typed before its program starts answers
         // its own password prompt. A shell under it is at its prompt only when it is the
-        // whole command.
-        let wraps = matches!(base.as_str(), "sudo" | "doas");
+        // whole command. Of the privilege programs only these two are
+        // launchers.
+        let wraps = PRIVILEGE_PROGRAMS.contains(&base.as_str());
         return match handoff(l, argv, 1) {
             Handoff::Program(p) if wraps => {
                 let inner = walk(&argv[p..]);
@@ -492,13 +500,13 @@ fn walk(argv: &[String]) -> Walked {
             Walked {
                 shell: Some(
                     SHELL_BASENAMES.contains(&applet.as_str())
-                        && shell_args_are_interactive(argv.get(2..).unwrap_or_default()),
+                        && shell_args_are_interactive(&applet, argv.get(2..).unwrap_or_default()),
                 ),
                 program: Some(base.clone()),
             }
         }
         name if SHELL_BASENAMES.contains(&name) => Walked {
-            shell: Some(shell_args_are_interactive(&argv[1..])),
+            shell: Some(shell_args_are_interactive(name, &argv[1..])),
             program: Some(base.clone()),
         },
         _ => Walked { shell: None, program: Some(base.clone()) },
@@ -558,12 +566,46 @@ fn shell_verdict(argv: &[String]) -> Option<bool> {
     walk(argv).shell
 }
 
+/// Whether a conducted argv runs a [`PRIVILEGE_PROGRAMS`] program anywhere
+/// along
+/// its launcher chain: `doas bash`, `env pkexec x`, `nice su -l`, `nix develop
+/// -c
+/// run0 x`. The same tables [`walk`] reads name the launchers, so a launcher
+/// the
+/// walk does not list (`busybox su`) is not seen here either.
+pub(in crate::graph) fn runs_a_privilege_program(argv: &[String]) -> bool {
+    let Some(first) = argv.first() else {
+        return false;
+    };
+    let base = command_basename(first);
+    if PRIVILEGE_PROGRAMS.contains(&base.as_str()) {
+        return true;
+    }
+    if base == "nix" {
+        if let Some(line) = argv.iter().find_map(|a| a.strip_prefix("--command=")) {
+            let words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+            return runs_a_privilege_program(&words);
+        }
+        let payload = argv
+            .iter()
+            .position(|a| matches!(a.as_str(), "-c" | "--command"))
+            .map(|j| &argv[j + 1..]);
+        return payload.is_some_and(runs_a_privilege_program);
+    }
+    match launcher(&base).map(|l| handoff(l, argv, 1)) {
+        Some(Handoff::Program(p)) => runs_a_privilege_program(&argv[p..]),
+        _ => false,
+    }
+}
+
 /// Whether a shell's own arguments leave it at its prompt: no `-c` or
 /// `--command` string and no script operand. `bash`, `bash --norc -i`, `bash -o
 /// pipefail`, `fish -C x`, and `bash -` (commands from stdin, on a tty) sit at a
 /// prompt; `bash -c x`, `bash -lc x`, `fish --command=x`, `sh ./run.sh` and
-/// `bash -- run.sh` run a command or a script.
-fn shell_args_are_interactive(args: &[String]) -> bool {
+/// `bash -- run.sh` run a command or a script. `-C` takes a value only in fish
+/// (`fish -C x` runs `x` first); for bash, sh and dash it is noclobber, so
+/// `bash -C run.sh` runs the script.
+fn shell_args_are_interactive(shell: &str, args: &[String]) -> bool {
     let mut i = 0;
     while i < args.len() {
         let arg = args[i].as_str();
@@ -582,7 +624,8 @@ fn shell_args_are_interactive(args: &[String]) -> bool {
             if arg.starts_with('-') && arg.contains('c') {
                 return false;
             }
-            i += if matches!(arg, "-o" | "+o" | "-O" | "+O" | "-C") { 2 } else { 1 };
+            let takes_value = matches!(arg, "-o" | "+o" | "-O" | "+O") || (arg == "-C" && shell == "fish");
+            i += if takes_value { 2 } else { 1 };
         } else {
             return false;
         }
@@ -1260,7 +1303,8 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
     }
 }
 
-/// Whether a process's comm names a shell. Native Windows comm carries the host's
+/// Whether a process's comm names a shell. Native Windows comm carries the
+/// host's
 /// `.exe` suffix; folding it here lets the one list answer on both hosts.
 fn comm_is_a_shell(comm: &str) -> bool {
     let name = comm.to_ascii_lowercase();
@@ -1277,8 +1321,10 @@ fn comm_is_a_shell(comm: &str) -> bool {
 /// INTERACTIVE shell stops there: its prompt is the process group alone. A
 /// COMMAND shell (`bash -c …`, `sh ./run.sh`) has no prompt, so it is working
 /// while its command runs. The command runs in one of two shapes, and both are
-/// checked: a live child (`sh -c 'make; true'`), or an exec-optimized shell whose
-/// pid became the command itself and so is no longer a shell (`sh -c 'sleep 30'`
+/// checked: a live child (`sh -c 'make; true'`), or an exec-optimized shell
+/// whose
+/// pid became the command itself and so is no longer a shell (`sh -c 'sleep
+/// 30'`
 /// leaves `sleep` on the shell's pid). A fact that cannot be read answers as an
 /// idle shell, as it always has.
 fn shell_at_prompt(
@@ -1300,8 +1346,10 @@ fn shell_at_prompt(
     comm_of(shell_pid).is_none_or(|comm| comm_is_a_shell(&comm))
 }
 
-/// The process a shell that is not idle is running: the foreground group leader,
-/// or the shell's own pid when no foreground group answers (a command shell with
+/// The process a shell that is not idle is running: the foreground group
+/// leader,
+/// or the shell's own pid when no foreground group answers (a command shell
+/// with
 /// children, or on a host with no foreground group at all).
 fn running_pid(fg: i32, shell_pid: i32) -> i32 {
     if fg > 0 {
@@ -1366,7 +1414,8 @@ fn shell_snapshot(
 /// `argv` is `None` while idle (no process to capture) and RAW (uncollapsed,
 /// unclipped) `/proc/<pid>/cmdline` of [`running_pid`] otherwise — never
 /// `proc_command`'s DISPLAY label, which would re-exec the wrong or a truncated
-/// binary. `typed` is gated to `idle` HERE, structurally, rather than trusted to
+/// binary. `typed` is gated to `idle` HERE, structurally, rather than trusted
+/// to
 /// the caller: a shell mid-command has no prompt line to reconstruct, so any
 /// `typed` the caller passes while working is dropped.
 fn restore_snapshot(
@@ -2739,7 +2788,8 @@ mod tests {
     }
     #[test]
     fn shell_at_prompt_is_working_for_a_command_shell_that_has_a_child() {
-        // `sh -c 'sleep 30; true'`: the shell stays alive with `sleep` as its child.
+        // `sh -c 'sleep 30; true'`: the shell stays alive with `sleep` as its
+        // child.
         assert!(!shell_at_prompt(
             100,
             100,
@@ -2753,31 +2803,44 @@ mod tests {
     }
     #[test]
     fn shell_at_prompt_is_working_for_a_command_shell_that_exec_d_its_command() {
-        // `sh -c 'sleep 30'`: bash exec-optimizes, so pid 100 IS `sleep`, with no
+        // `sh -c 'sleep 30'`: bash exec-optimizes, so pid 100 IS `sleep`, with
+        // no
         // children. It is no longer a shell, so it is working.
         assert!(!shell_at_prompt(100, 100, false, |_| Some("sleep".to_string()), |_| Some(false)));
     }
     #[test]
     fn shell_at_prompt_is_idle_for_a_command_shell_that_is_still_a_shell_with_no_child() {
         assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| Some(false)));
-        // A fact that cannot be read answers as an idle shell, as it always has.
+        // A fact that cannot be read answers as an idle shell, as it always
+        // has.
         assert!(shell_at_prompt(100, 100, false, |_| None, |_| None));
         assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| None));
-        // Native Windows: comm carries `.exe`, and a host with no foreground group
+        // Native Windows: comm carries `.exe`, and a host with no foreground
+        // group
         // answers 0, so the bare test is the pid's own process name.
         assert!(shell_at_prompt(0, 100, false, |_| Some("bash.exe".to_string()), |_| Some(false)));
     }
+    /// F5, current behaviour, pending a User ruling: a command that runs only
+    /// builtins (`sh -c 'while :; do :; done'`) has no child and never execs,
+    /// so it reads idle. Pinned so a change to it is a deliberate one.
+    #[test]
+    fn a_builtin_only_command_loop_reads_idle_today() {
+        assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| Some(false)));
+    }
     #[test]
     fn shell_at_prompt_is_working_while_a_foreground_command_holds_the_terminal() {
-        // A foreground group that is not the shell: working, and neither fact is probed.
+        // A foreground group that is not the shell: working, and neither fact
+        // is probed.
         assert!(!shell_at_prompt(200, 100, false, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
         assert!(!shell_at_prompt(200, 100, true, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
-        // A host with no foreground group that still has a live child (Windows).
+        // A host with no foreground group that still has a live child
+        // (Windows).
         assert!(!shell_at_prompt(0, 100, false, |_| Some("cmd.exe".to_string()), |_| Some(true)));
     }
     #[test]
     fn shell_snapshot_a_working_command_shell_labels_its_own_command() {
-        // Working off its children (fg is the shell): the activity is the shell's
+        // Working off its children (fg is the shell): the activity is the
+        // shell's
         // own conducted command line, read off the shell's pid.
         let (state, activity, needs_sudo, _) = shell_snapshot(
             100,
@@ -2955,8 +3018,15 @@ mod tests {
             &["/usr/bin/-zsh"],
             &["sudo", "-T", "5", "bash"],
             &["fish", "-C", "x"],
+            // `-C` takes a value only in fish. bash, sh and dash read it as
+            // noclobber.
+            &["bash", "-C"],
         ];
         let runs_a_command: &[&[&str]] = &[
+            // F3: `bash -C run.sh` runs a script; `-C` is no value-taker for
+            // bash.
+            &["bash", "-C", "run.sh"],
+            &["sh", "-C", "run.sh"],
             &["bash", "-c", "read -p 'Overwrite? [y/N] ' x"],
             &["bash", "-lc", "apt install x"],
             &["bash", "-ic", "x"],
@@ -5205,7 +5275,8 @@ mod tests {
 
     /// One real `aoide conduct --headless` session under its own stage, for the
     /// state tests below. Field order is drop order: the env is restored before
-    /// the lock is released, and `Drop` kills and removes only what this started.
+    /// the lock is released, and `Drop` kills and removes only what this
+    /// started.
     #[cfg(unix)]
     struct LiveSession {
         tag: String,

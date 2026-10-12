@@ -1087,19 +1087,13 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   command core in-process without ever risking its own tick on a
   headless box.
   **Post-spawn restore delivery (P-C6):** once a terminal candidate's spawn
-  actually registers, `restore_delivery` decides what — if anything — lands
-  in the new pty, through `send::session_send` in-process, never a
-  direct socket write. Working (`idle: false`) with a foreground `argv`
-  re-execs it (`--yes --submit`) — EXCEPT when `argv[0]`'s basename is
-  `sudo` (`is_sudo_argv`, the orchestrator's ruling on durable-sessions
-  plan open knob 5): a privileged command is never re-exec'd unattended, so
-  only the cwd restores. A shell-form `argv` (`sh -c …`) is refused the same
-  way, and the re-typed words are POSIX-quoted (`shell_join`). Idle (`idle: true`) with a clean `typed` line
-  preloads it (`--yes`, and — permanently — no `--submit`): the text sits
-  in the new prompt until a human presses Enter, never running itself. Idle
-  with no `typed` delivers nothing; a terminal reopened at its own cwd is
-  already the complete answer. See AGENTS.md for why the two branches are
-  never unified behind a shared boolean parameter.
+  actually registers, `restore_delivery` decides what, if anything, lands in
+  the new pty, through `send::session_send` in-process. A working session's
+  recorded argv re-execs (`--yes --submit`) unless `restore_argv_refusal`
+  refuses it; an idle session's clean `typed` line preloads (`--yes`, never
+  `--submit`). A refused argv restores its cwd only. The refusals are listed
+  once, in CONTRACTS.md's restore paragraph. See AGENTS.md for why the two
+  branches are never unified behind a shared boolean parameter.
   **Bare-manifest mode (U2, command-defrag lane U):** `resurrect` with NONE
   of `--project`/`--all`/`--id` walks up from cwd
   (`aoide_storage::manifest::walk_up`) for the nearest `.aoide/

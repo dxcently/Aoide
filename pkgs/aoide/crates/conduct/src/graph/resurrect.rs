@@ -62,12 +62,13 @@
 //! - **not idle, with a foreground `argv`** — the session was demonstrably
 //!   RUNNING something when it left. Re-exec it, `--yes --submit` and all:
 //!   the never-auto-run rule below covers the typed-but-unsubmitted case,
-//!   not a command already in flight. EXCEPT when `argv[0]`'s basename is
-//!   `sudo` (orchestrator ruling, open knob 5 — asked twice, unanswered,
-//!   default taken and flagged): a privileged foreground command is never
-//!   re-exec'd unattended — at best it hangs on a password prompt nobody is
-//!   watching, at worst it silently re-runs something destructive. The cwd
-//!   still restores; nothing is delivered.
+//!   not a command already in flight. EXCEPT when [`restore_argv_refusal`]
+//!   refuses the argv: a privilege program anywhere in its launcher chain
+//!   (`sudo`, `doas`, `su`, `pkexec`, `run0`) is never re-exec'd unattended —
+//!   at best it hangs on a password prompt nobody is watching, at worst it
+//!   silently re-runs something destructive. Likewise a shell-form argv, an
+//!   assignment prefix, a control or invisible byte, and an over-long line.
+//!   The cwd still restores; nothing is delivered.
 //! - **idle, with a clean `typed` line** — preload it with `--yes` and,
 //!   deliberately, NEVER `--submit`. The text sits in the new prompt until a
 //!   human presses Enter. **This is the whole safety invariant this phase
@@ -165,8 +166,8 @@
 //! ordinary-revive case to protect here, every manifest-mode spawn already
 //! came from an explicit, operator-authored declaration.
 
-use super::common::{require_flag, stage_error};
-use super::conduct::{program_is_a_shell, program_is_an_interactive_shell};
+use super::common::{is_unsafe, require_flag, stage_error};
+use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
 use super::send::session_send;
 use super::session_store::{stamp_origin, stamp_resumed_from};
@@ -298,15 +299,53 @@ fn stored_login_shell() -> Option<String> {
     None
 }
 
-/// The narrow, named check behind the sudo refusal (orchestrator ruling,
-/// durable-sessions plan open knob 5): match ONLY `argv[0]`'s basename being
-/// exactly `sudo`, nothing cleverer — no `doas`/`pkexec` guessing, no
-/// argument inspection.
-fn is_sudo_argv(argv: &[String]) -> bool {
-    argv.first()
-        .and_then(|a| std::path::Path::new(a).file_name())
-        .and_then(|n| n.to_str())
-        == Some("sudo")
+/// The longest line a restore re-types, in bytes. A longer recorded argv is
+/// refused, never clipped: a clipped line is wrong text, not a short one.
+const RESTORE_LINE_MAX: usize = 4096;
+
+/// Why a recorded foreground argv is never re-typed, or `None` when it may be.
+/// Pure. Each refusal names what the typed line would have done:
+/// - a leading `NAME=value` word is a shell assignment, and the word after it
+///   is hidden from every check below (`A=1 sudo x`), so the whole argv is
+///   refused rather than checked past it;
+/// - a control, bidi or invisible character, a newline or U+FFFD (a lossy
+///   decode of non-UTF-8 bytes): readline reads `^A` as an edit key and a
+///   newline as Enter, and quoting does not contain either;
+/// - a line over [`RESTORE_LINE_MAX`];
+/// - a privilege program anywhere in its launcher chain (`sudo`, `doas`, `su`,
+///   `pkexec`, `run0`): at best it waits on a password prompt nobody watches;
+/// - a shell-form argv (`sh -c …`): its command sits inside the quotes, where
+///   no program check can see it.
+///
+/// Reading argv is not proof of what will run: a same-uid process can rewrite
+/// its own `/proc` cmdline, so these refusals judge the typed text, not the
+/// process.
+fn restore_argv_refusal(argv: &[String]) -> Option<&'static str> {
+    if argv.first().is_some_and(|a| a.contains('=')) {
+        return Some("an assignment prefix");
+    }
+    if argv.iter().any(|w| w.contains('\u{fffd}') || w.chars().any(is_unsafe)) {
+        return Some("a control or invisible character");
+    }
+    if shell_join(argv).len() > RESTORE_LINE_MAX {
+        return Some("a line over 4096 bytes");
+    }
+    if runs_a_privilege_program(argv) {
+        return Some("a privilege program");
+    }
+    if program_is_a_shell(argv) && !program_is_an_interactive_shell(argv) {
+        return Some("a shell-form argv");
+    }
+    None
+}
+
+/// The refusal a restore's recorded foreground gets, or `None`. An idle session
+/// has no foreground argv to refuse, so `None` for it.
+fn restore_refused_because(restore: &RestoreSnapshot) -> Option<&'static str> {
+    if restore.idle {
+        return None;
+    }
+    restore.argv.as_deref().and_then(restore_argv_refusal)
 }
 
 /// What, if anything, to deliver into a freshly-resurrected terminal once it
@@ -318,14 +357,10 @@ fn is_sudo_argv(argv: &[String]) -> bool {
 fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreSnapshot) -> Option<Invocation> {
     if !restore.idle {
         // Branch one — demonstrably RUNNING something when the session
-        // left. Re-exec it, Enter and all: never for `sudo` (`is_sudo_argv`)
-        // — an unattended password prompt in a terminal nobody is watching
-        // is not a restore. Never for a shell-form argv (`sh -c …`): its
-        // command sits inside the quotes, where `is_sudo_argv` cannot see a
-        // `sudo`, so the session restores its cwd only.
+        // left. Re-exec it, Enter and all: refused for any argv that
+        // `restore_argv_refusal` names, so the session restores its cwd only.
         let argv = restore.argv.as_ref()?;
-        let shell_form = program_is_a_shell(argv) && !program_is_an_interactive_shell(argv);
-        if is_sudo_argv(argv) || shell_form {
+        if restore_argv_refusal(argv).is_some() {
             return None;
         }
         let mut flags = BTreeMap::new();
@@ -339,8 +374,10 @@ fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreS
         flags.insert("submit".to_string(), "true".to_string());
         return Some(Invocation {
             path: vec!["send".to_string()],
-            // Each word POSIX-quoted (`shell_join`), so the typed line re-parses to
-            // the recorded argv: `grep "a b" f` re-runs as `grep 'a b' f`.
+            // Each word POSIX-quoted (`shell_join`): `grep "a b" f` re-runs as
+            // `grep 'a b' f`. The line re-parses to the recorded argv only for
+            // an
+            // argv that passed `restore_argv_refusal` above.
             args: vec![shell_join(argv)],
             flags,
             door,
@@ -517,6 +554,9 @@ fn resurrect_one(
     // branch fired.
     let restore_result = if !registered {
         "skipped-unregistered".to_string()
+    } else if let Some(why) = c.entry.restore.as_ref().and_then(restore_refused_because) {
+        changed.push(format!("session {new_id}: restore refused — {why}"));
+        format!("refused: {why}")
     } else {
         match c.entry.restore.as_ref().and_then(|r| restore_delivery(door, &new_id, r)) {
             None => "none".to_string(),
@@ -1392,14 +1432,14 @@ mod tests {
 
     /// The orchestrator ruling (open knob 5): a recorded foreground of
     /// `sudo …` re-execs nothing and delivers nothing — only the cwd
-    /// restores. Covers both the narrow named check directly and the
-    /// delivery decision that consults it.
+    /// restores. Covers both the privilege check directly and the delivery
+    /// decision that consults it.
     #[test]
     fn sudo_foreground_is_never_reexeced() {
-        assert!(is_sudo_argv(&["sudo".to_string(), "reboot".to_string()]));
-        assert!(is_sudo_argv(&["/usr/bin/sudo".to_string(), "-i".to_string()]), "basename match must see through a full path");
-        assert!(!is_sudo_argv(&["sudo-ish".to_string()]), "must match the exact basename, nothing cleverer");
-        assert!(!is_sudo_argv(&[]));
+        assert!(runs_a_privilege_program(&["sudo".to_string(), "reboot".to_string()]));
+        assert!(runs_a_privilege_program(&["/usr/bin/sudo".to_string(), "-i".to_string()]), "basename match must see through a full path");
+        assert!(!runs_a_privilege_program(&["sudo-ish".to_string()]), "must match the exact basename, nothing cleverer");
+        assert!(!runs_a_privilege_program(&[]));
 
         let restore = RestoreSnapshot {
             cwd: Some("/home/khoa/Aoide".into()),
@@ -1414,7 +1454,7 @@ mod tests {
     }
 
     /// A recorded shell-form argv (`sh -c …`, `bash -lc …`) is never re-typed.
-    /// Its command sits inside the quotes, where `is_sudo_argv` cannot see a
+    /// Its command sits inside the quotes, where no program check can see a
     /// `sudo`, and the join that flattens it would mangle it. Its session gets
     /// its cwd only, as an idle one does.
     #[test]
@@ -1437,8 +1477,133 @@ mod tests {
         }
     }
 
+    fn busy_restore(argv: &[&str]) -> RestoreSnapshot {
+        RestoreSnapshot {
+            cwd: Some("/home/khoa/Aoide".into()),
+            idle: false,
+            argv: Some(argv.iter().map(|s| s.to_string()).collect()),
+            typed: None,
+        }
+    }
+
+    /// F1: a control byte, an invisible format mark, U+FFFD (a lossy decode of
+    /// non-UTF-8 bytes) or a newline in any word is never re-typed. Quoting
+    /// does not contain them: readline reads `^A` as an edit key, and a newline
+    /// submits the line early.
+    #[test]
+    fn a_control_or_invisible_byte_in_a_recorded_argv_is_never_re_typed() {
+        for word in ["\u{1}echo OUT", "a\u{1b}b", "a\u{7f}b", "a\u{202e}b", "a\u{fffd}b", "a\nb", "a\rb", "a\tb"] {
+            let restore = busy_restore(&["echo", word]);
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{word:?} must not be re-typed"
+            );
+        }
+    }
+
+    /// F1: the re-typed line is capped at 4096 bytes, and refused above it.
+    #[test]
+    fn a_re_typed_line_is_capped_at_4096_bytes() {
+        let fits = "x".repeat(4091);
+        let over = "x".repeat(4092);
+        let line = |word: &str| {
+            restore_delivery(aoide_protocol::Door::Daemon, "new-id", &busy_restore(&["echo", word]))
+                .map(|inv| inv.args[0].len())
+        };
+        assert_eq!(line(&fits), Some(4096), "a line of exactly 4096 bytes is typed");
+        assert_eq!(line(&over), None, "a line of 4097 bytes is refused");
+    }
+
+    /// F1 at the keystroke level: `bash --norc --noprofile -i` on a real pty,
+    /// fed what `restore_delivery` would type for the hostile argv. The
+    /// refusal means nothing is typed, so the payload never runs; the canary
+    /// line proves the shell read input after the (absent) argv line.
+    #[cfg(unix)]
+    #[test]
+    fn a_hostile_argv_never_reaches_an_interactive_shell_as_keystrokes() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let restore = busy_restore(&["echo", "\u{1}echo OUT$((6*7))ZZ #"]);
+        let typed = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).map(|inv| inv.args[0].clone());
+        assert!(typed.is_none(), "the hostile argv must be refused, not typed");
+
+        let args: Vec<String> = ["--norc", "--noprofile", "-i"].iter().map(|s| s.to_string()).collect();
+        let (mut child, mut pty) = crate::graph::pty::spawn_on_pty("bash", &args, "resurrect-f1", None, None)
+            .expect("bash starts on a pty");
+        if let Some(line) = typed {
+            pty.write(format!("{line}\r").as_bytes());
+        }
+        pty.write(b"echo CANARY$((1+1))\r");
+        let mut out = Vec::new();
+        let mut buf = [0u8; 8192];
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline && !String::from_utf8_lossy(&out).contains("CANARY2") {
+            while pty.has_output() {
+                match pty.read(&mut buf) {
+                    Ok(n) if n > 0 => out.extend_from_slice(&buf[..n]),
+                    _ => break,
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        child.kill();
+        let _ = child.wait_for(std::time::Duration::from_secs(3));
+        pty.close();
+        let text = String::from_utf8_lossy(&out).into_owned();
+        assert!(text.contains("CANARY2"), "the shell never read the canary line: {text:?}");
+        assert!(!text.contains("OUT42ZZ"), "the recorded argv ran as keystrokes: {text:?}");
+    }
+
+    /// F2: a leading `NAME=value` word is a shell assignment, and it must not
+    /// hide the `sudo` or the shell behind it from the refusals.
+    #[test]
+    fn an_assignment_prefix_never_hides_a_privilege_or_a_shell_form() {
+        for argv in [
+            vec!["A=1", "sudo", "-n", "true"],
+            vec!["A=1", "B=2", "bash", "-c", "x"],
+            vec!["env", "A=1", "sudo", "x"],
+        ] {
+            let restore = busy_restore(&argv);
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{argv:?} must not be re-typed"
+            );
+        }
+    }
+
+    /// F6: a privilege program is never re-typed, bare or wrapped: `doas`,
+    /// `su`,
+    /// `pkexec` and `run0` ask for a password on the pty, and an interactive
+    /// `doas bash` or `su` would hand a root shell to an unattended line.
+    /// `doas apt x` is refused by the shell-form test already; it is pinned
+    /// here so the refusal cannot quietly go.
+    #[test]
+    fn a_privilege_program_is_never_re_typed() {
+        for argv in [
+            vec!["doas", "bash"],
+            vec!["doas", "-u", "root", "zsh"],
+            vec!["su"],
+            vec!["su", "bash"],
+            vec!["su", "-l", "khoa"],
+            vec!["pkexec", "x"],
+            vec!["run0", "x"],
+            vec!["doas", "apt", "x"],
+            vec!["env", "pkexec", "x"],
+            vec!["nice", "su", "-l"],
+        ] {
+            let restore = busy_restore(&argv);
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{argv:?} must not be re-typed"
+            );
+        }
+    }
+
     /// The re-exec line re-parses to the recorded argv: a word with a space, a
-    /// quote, a glob or a `$` stays one word, and a plain word stays bare.
+    /// quote, a glob or a `$` stays one word, and a plain word stays bare. It
+    /// is checked through `sh -c`, which is the POSIX re-parse only. An
+    /// interactive shell's readline reads control bytes as edit keys, which
+    /// this test does not cover; `a_hostile_argv_never_reaches_an_interactive_
+    /// shell_as_keystrokes` covers that, and the refusal keeps such an argv out.
     #[cfg(unix)]
     #[test]
     fn a_re_exec_line_re_parses_to_the_recorded_argv() {

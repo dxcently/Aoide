@@ -1311,12 +1311,9 @@ in the message.
   has already overwritten. Don't recompute it inside either snapshot.
 - **A command shell is decided by `shell_at_prompt`, never the pgid alone.**
   `bash -c "sleep 30"` exec-optimizes, so the conducted pid becomes `sleep`
-  and the pgid check reads it at the prompt. `shell_at_prompt` adds two
-  reads for a command shell only (`!interactive`): a live child
-  (`proc_has_children`), or a comm that is no longer a shell name
-  (`comm_is_a_shell`, `.exe` folded). Interactive shells return on the pgid
-  check and read nothing more. The accepted loss is stated once, in
-  CONTRACTS.md's shell-state paragraph.
+  and the pgid check reads it at the prompt. An interactive shell is the pgid
+  check alone; keep it that way. The reads and their order are CONTRACTS.md's
+  shell-state paragraph.
 - **`proc_argv` and `proc_command` are deliberately two functions, never
   merged (P-C5).** `proc_command` is a DISPLAY label — it basename-
   collapses `argv[0]` and truncates at 48 chars — built for the roster's
@@ -1424,23 +1421,12 @@ in the message.
   one for claude/pi, so this is a delay, not a behavior change, for either.
   Don't reintroduce `payload.push_str(submit_key)` before the write — that
   is the exact regression this invariant guards against.
-- **A recorded foreground of `sudo …` is never re-exec'd (P-C6, orchestrator
-  ruling on durable-sessions plan open knob 5).** `resurrect.rs::
-  is_sudo_argv` is the one, narrow, named check — `argv[0]`'s basename
-  exactly `sudo`, nothing cleverer (no `doas`/`pkexec` guessing, no argument
-  inspection) — `restore_delivery` consults before ever building a re-exec
-  invocation. Re-running a privileged command unattended at boot is not a
-  restore: at best it hangs forever on a password prompt nobody is
-  watching, at worst it silently re-runs something destructive. The cwd
-  still restores; only the delivery is refused.
-- **A shell-form argv is never re-typed (`sh -c …`, `bash ./run.sh`).**
-  `restore_delivery` refuses it with the same `None` as `sudo`: its command
-  sits inside the quotes, where `is_sudo_argv` cannot see a `sudo`. The test
-  is `program_is_a_shell && !program_is_an_interactive_shell`, the existing
-  predicates, so an interactive shell's own argv still delivers as before.
-  Re-typed words are `shell_join`'s POSIX quoting (`spawn.rs`, the one quoter).
-  Its `=` bare-set edge is accepted: a first word `NAME=value` would parse as
-  an assignment. It is not a realistic program name.
+- **A recorded foreground argv is re-typed only when `restore_argv_refusal`
+  clears it (P-C6).** The refusals are listed once, in CONTRACTS.md's restore
+  paragraph. A new refusal goes in that function with its test, never into a
+  second list beside it. `PRIVILEGE_PROGRAMS` is the one list of privilege
+  programs. `shell_join`'s bare-safe set keeps `=` (`spawn`'s `{cmd}` needs
+  it); the assignment refusal is what keeps a restore from reading it.
 - **The terminal candidate arm is gated on `entry.restore.is_some()`, never
   on `agent == "shell"` (P-C6).** `resolve_candidate` tries the harness arm
   first (`AgentProfile.resume_args`, unchanged) and only falls to the
