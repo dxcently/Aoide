@@ -161,8 +161,12 @@ Case folds on both sides (`str::to_lowercase`), except `parent:`, whose ref
 goes verbatim to `storage::addr::resolve` (case-sensitive by its own contract;
 an ambiguous ref is a taught error listing the candidates, never a first
 match). An unknown key, an empty value or an unclosed quote is a taught error
-naming the keys. `mailbox:` and `cc:` never match a remote row, and the line
-`mail is not published by <node>` says why.
+naming the keys. A literal `"` in a word is refused as well: the shell or the
+query line strips the quotes, and the fix runs the word without them.
+`session:<id>` is refused with the bare id as the fix, since a session is found
+by its id as a bare word. A query over 64 words, or a term over 256
+alternatives, is refused with its cap named. `mailbox:` and `cc:` never match a
+remote row, and the line `mail is not published by <node>` says why.
 
 A bare word grades against each field — **exact** (the whole field, or a whole
 cwd component) > **prefix** > **substring** — and takes its best field's grade

@@ -778,7 +778,9 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
   each with its reasons. `--json` carries the same facts in `data`: `query`,
   `scope`, `sessions` (carries, `unknown`, `matched`) and `related`.
 - **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
-  refusal naming the keys. An ambiguous `parent:` reference, or a `--related`
+  refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
+  over 64 words or a term over 256 alternatives, each with its fix. An ambiguous
+  `parent:` reference, or a `--related`
   name that no row or cache holds, is a refusal listing the candidates.
 
 ### aoide session trace

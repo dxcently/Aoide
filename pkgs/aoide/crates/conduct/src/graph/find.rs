@@ -266,14 +266,29 @@ pub(crate) fn split_line(line: &str) -> Result<Vec<String>, FindError> {
     Ok(words)
 }
 
+/// A query takes at most this many words, and a term at most this many
+/// alternatives.
+const WORDS_MAX: usize = 64;
+const ALTERNATIVES_MAX: usize = 256;
+
 /// Words to a query. A word with a colon is a term: the text before its first
 /// colon is the key, and the rest is comma-separated alternatives. Any other
 /// word is a bare word. Whitespace-only words are no word.
 pub(crate) fn parse(words: &[String]) -> Result<Query, FindError> {
     let words: Vec<String> = words.iter().filter(|w| !w.trim().is_empty()).cloned().collect();
+    if words.len() > WORDS_MAX {
+        return Err(FindError {
+            what: format!("the query has {} words", words.len()),
+            why: format!("a query takes at most {WORDS_MAX} words"),
+            fix: format!("aoide session find <query of at most {WORDS_MAX} words>"),
+        });
+    }
     let mut terms = Vec::new();
     let mut bare = Vec::new();
     for word in &words {
+        if word.contains('"') {
+            return Err(quoted(word));
+        }
         match word.split_once(':') {
             Some((key, values)) => terms.push(term(word, key, values)?),
             None => bare.push(word.clone()),
@@ -282,8 +297,34 @@ pub(crate) fn parse(words: &[String]) -> Result<Query, FindError> {
     Ok(Query { words, terms, bare })
 }
 
+/// The shell or the query line strips the quotes that group a value's spaces,
+/// so the fix is the word without them, in single quotes.
+fn quoted(word: &str) -> FindError {
+    let bare = word.replace('"', "");
+    FindError {
+        what: format!("`{word}` has a literal quote"),
+        why: "quotes group a value's spaces; here single quotes do that".to_string(),
+        fix: format!("aoide session find '{}'", bare.replace('\'', "'\\''")),
+    }
+}
+
+/// The graph names a session `session:<id>`. Find takes the bare id as a bare
+/// word, so the fix is the id when it is one clean word.
+fn session_prefix(word: &str, values: &str) -> FindError {
+    let id = values.trim();
+    let one_word = !id.is_empty() && !id.contains(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '\'');
+    FindError {
+        what: format!("`{word}` looks a session up by key"),
+        why: "a session is found by its id as a bare word".to_string(),
+        fix: format!("aoide session find {}", if one_word { id } else { "<id>" }),
+    }
+}
+
 fn term(word: &str, key: &str, values: &str) -> Result<Term, FindError> {
     let folded = key.trim().to_ascii_lowercase();
+    if folded == "session" {
+        return Err(session_prefix(word, values));
+    }
     let Some(key) = Key::ALL.into_iter().find(|k| k.name() == folded) else {
         let names = Key::ALL.map(Key::name);
         let fix = match closest(&folded, names, 1).first() {
@@ -304,6 +345,13 @@ fn term(word: &str, key: &str, values: &str) -> Result<Term, FindError> {
         });
     }
     let values: Vec<String> = values.split(',').map(|v| v.trim().to_string()).collect();
+    if values.len() > ALTERNATIVES_MAX {
+        return Err(FindError {
+            what: format!("`{word}` has {} alternatives", values.len()),
+            why: format!("a term takes at most {ALTERNATIVES_MAX} alternatives"),
+            fix: format!("aoide session find {}:<at most {ALTERNATIVES_MAX} comma-separated values>", key.name()),
+        });
+    }
     if values.iter().any(String::is_empty) {
         return Err(FindError {
             what: format!("`{word}` has an empty alternative"),
@@ -1630,6 +1678,43 @@ mod tests {
         for word in ["state:", "state: ", "state:a,,b", "state:a,"] {
             assert!(parse(&[word.to_string()]).is_err(), "{word:?} must be refused");
         }
+    }
+
+    #[test]
+    fn a_query_of_sixty_four_words_parses_and_sixty_five_are_refused() {
+        let words: Vec<String> = (0..64).map(|i| format!("w{i}")).collect();
+        assert_eq!(parse(&words).expect("the cap parses").words.len(), 64);
+        let mut over = words;
+        over.push("w64".to_string());
+        let err = parse(&over).expect_err("65 words are refused");
+        assert_eq!(err.what, "the query has 65 words");
+        assert_eq!(err.fix, "aoide session find <query of at most 64 words>");
+    }
+
+    #[test]
+    fn a_term_of_two_hundred_fifty_six_alternatives_parses_and_two_hundred_fifty_seven_are_refused() {
+        let values: Vec<String> = (0..256).map(|i| format!("v{i}")).collect();
+        assert!(parse(&[format!("state:{}", values.join(","))]).is_ok());
+        let over = format!("state:{},extra", values.join(","));
+        let err = parse(&[over]).expect_err("257 alternatives are refused");
+        assert!(err.what.ends_with("has 257 alternatives"), "{err:?}");
+        assert_eq!(err.fix, "aoide session find state:<at most 256 comma-separated values>");
+    }
+
+    #[test]
+    fn a_literal_quote_is_refused_with_the_word_taught_without_its_quotes() {
+        let err = parse(&[r#"cc:"pr 41""#.to_string()]).expect_err("a literal quote is refused");
+        assert_eq!(err.fix, "aoide session find 'cc:pr 41'");
+        let bare = parse(&[r#""two words""#.to_string()]).expect_err("a quoted bare word is refused");
+        assert_eq!(bare.fix, "aoide session find 'two words'");
+    }
+
+    #[test]
+    fn a_session_prefixed_id_is_refused_with_the_bare_id_as_the_fix() {
+        let err = parse(&["session:abcd".to_string()]).expect_err("session: is refused");
+        assert_eq!(err.fix, "aoide session find abcd");
+        let many = parse(&["session:a,b".to_string()]).expect_err("a list of ids is refused");
+        assert_eq!(many.fix, "aoide session find <id>");
     }
 
     #[test]
