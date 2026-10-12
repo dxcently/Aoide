@@ -251,7 +251,7 @@ fn migrate_dir(old: &std::path::Path, new: &std::path::Path) {
         return;
     }
     let Some(parent) = new.parent() else { return };
-    if let Err(e) = std::fs::create_dir_all(parent) {
+    if let Err(e) = ensure_write_dir(parent) {
         eprintln!(
             "aoide: cannot create {} ({e}) — {} stays at the pre-L-C2 root",
             parent.display(),
@@ -283,7 +283,7 @@ fn migrate_file(old: &std::path::Path, new: &std::path::Path) {
         return;
     }
     let Some(parent) = new.parent() else { return };
-    if let Err(e) = std::fs::create_dir_all(parent) {
+    if let Err(e) = ensure_write_dir(parent) {
         eprintln!(
             "aoide: cannot create {} ({e}) — {} stays at the pre-L-C2 root",
             parent.display(),
@@ -313,7 +313,7 @@ fn migrate_file(old: &std::path::Path, new: &std::path::Path) {
 /// second way — both callers want the SAME semantics (unconditional, no
 /// byte-diff/merge — the destination is always known-absent going in).
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
+    ensure_write_dir(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
@@ -1188,6 +1188,9 @@ fn strip_verbatim_prefix(path: &str) -> std::borrow::Cow<'_, str> {
 /// just made before returning, so the caller's next attempt is a fresh one
 /// rather than a taught "stale sidecar" refusal about this process's own file.
 pub fn create_new_private(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        ensure_write_dir(parent)?;
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -1258,6 +1261,9 @@ pub fn create_new_private(path: &std::path::Path) -> std::io::Result<std::fs::Fi
 /// it), and it is stated here because the shorter claim — "the same
 /// discipline" — is only true of the create branch.
 pub fn open_private_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    if let Some(parent) = path.parent() {
+        ensure_write_dir(parent)?;
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -1323,29 +1329,26 @@ pub fn open_private_append(path: &std::path::Path) -> std::io::Result<std::fs::F
 pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        std::fs::create_dir_all(dir)?;
+        ensure_write_dir(dir)?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
     }
-    // The Windows half keeps the same two promises in the only order that
-    // has no window: the ANCESTORS are created the ordinary way (their mode
-    // is not this function's business on either host), and the leaf gets its
-    // policy attached AT creation, then read back — `ensure_private_dir`
-    // tightens an existing directory that is not private yet, which is what
-    // this call means on a second mint, and refuses (never silently accepts)
-    // one whose policy the filesystem would not honor.
+    // Windows: the ancestors go through `ensure_write_dir` (their mode is not
+    // this function's business), and the leaf gets its policy attached AT
+    // creation, then read back. `ensure_private_dir` tightens an existing
+    // directory that is not private yet, and refuses one whose policy the
+    // filesystem would not honor.
     #[cfg(windows)]
     {
         if let Some(parent) = dir.parent() {
-            std::fs::create_dir_all(parent)?;
+            ensure_write_dir(parent)?;
         }
         aoide_protocol::owner_only::ensure_private_dir(dir)
     }
 }
 
-/// Create `dir` (and missing ancestors) for a write. When `dir` lies under
-/// [`state_dir`], `state/` itself is made owner-only first, so nothing under it
-/// is reachable through a wider parent. Outside the state tree this is a plain
+/// Create `dir` and its missing ancestors for a write. A `dir` under
+/// [`state_dir`] locks `state/` owner-only first; anywhere else it is a plain
 /// `create_dir_all`.
 pub fn ensure_write_dir(dir: &std::path::Path) -> std::io::Result<()> {
     let state = state_dir();
@@ -1355,13 +1358,33 @@ pub fn ensure_write_dir(dir: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
 }
 
-/// The owner-only half of [`ensure_write_dir`]. On unix, one stat, and a chmod
-/// only when `state/` is not already `0700`; a `state/` this call creates is
-/// made `0700` directly, so it is never wider even briefly. On Windows the
-/// owner-only policy is attached only when this call creates `state/`: an
-/// existing `state/` is left alone, because tightening a directory that already
-/// has children strips their inherited ACEs, which is not verified here.
+/// Refuses a symlinked `state/` by name, since a chmod would follow the link
+/// and change a directory the boundary does not cover. Every other failure
+/// names `state/` and keeps its kind.
 fn lock_state_dir(state: &std::path::Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(state).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "{}: state/ is a symlink; aoide keeps its private state in a real directory",
+                state.display()
+            ),
+        ));
+    }
+    owner_only_state(state).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("{}: state/ cannot be made owner-only (0700): {e}", state.display()),
+        )
+    })
+}
+
+/// Unix: chmod `0700` when wider, and a `state/` this call creates is made
+/// `0700` directly, never wider even briefly. Windows: the owner-only policy is
+/// attached only when this call creates `state/`. An existing `state/` is never
+/// re-tightened, since that would strip the inherited ACEs of children already
+/// in it, which is not verified here.
+fn owner_only_state(state: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -1437,13 +1460,16 @@ pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
         return f();
     }
     let dir = stage_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(dir.join(".stage.lock"))
-        .ok();
+    // The lock file is a write like any other: when `state/` cannot be locked
+    // it is not created, and `f` runs unlocked as the best-effort path says.
+    let lock = ensure_write_dir(&dir).ok().and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(dir.join(".stage.lock"))
+            .ok()
+    });
     let held = lock.as_ref().map(lock_exclusive).unwrap_or(false);
     // RAII so an unwind inside `f` clears the flag with the fd, never after it:
     // declared AFTER `lock`, so it drops BEFORE it. On an unwind that is the
@@ -1501,7 +1527,7 @@ pub fn try_stage_lock<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 /// calls against the same path.
 pub(crate) fn lock_path<T>(path: std::path::PathBuf, f: impl FnOnce() -> T) -> Result<T, String> {
     if let Some(dir) = path.parent() {
-        let _ = ensure_write_dir(dir);
+        ensure_write_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     let lock = std::fs::OpenOptions::new()
         .create(true)
@@ -1760,7 +1786,9 @@ fn rename_no_replace(from: &std::path::Path, to: &std::path::Path) -> std::io::R
 /// from the roster/DAG until they happened to re-emit. Preserving a valid file
 /// keeps live sessions across the restart window; a missing/half-written/corrupt
 /// file still gets the empty v0 shape so the bridge always comes up sane. Returns
-/// the written path when it (re)seeded, `None` when it preserved an existing one.
+/// the written path when it (re)seeded, `None` when it preserved an existing one
+/// or could not create the file's directory (narrated to stderr; nothing is
+/// written).
 ///
 /// The file-ABSENT path is race-safe: on a fresh boot a concurrent `graph session
 /// start` can land a populated roster BETWEEN our read and our write, so we seed
@@ -1800,7 +1828,10 @@ pub fn seed_if_absent(path: &std::path::Path, empty_body: &str, key: &str) -> Op
             // appeared mid-boot is never overwritten. A distinct `.seed.<pid>`
             // temp keeps it clear of `sweep_stale_temps`'s `.tmp.<pid>` pattern.
             if let Some(parent) = path.parent() {
-                let _ = ensure_write_dir(parent);
+                if let Err(e) = ensure_write_dir(parent) {
+                    eprintln!("aoide: cannot create {} ({e}) — {} not seeded", parent.display(), path.display());
+                    return None;
+                }
             }
             let tmp = path.with_extension(format!("seed.{}", std::process::id()));
             let seeded = (|| -> std::io::Result<bool> {
@@ -3006,6 +3037,172 @@ mod tests {
 
         assert_eq!(unix_mode(&state), 0o700);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// `/tmp` is root-owned and sticky: writable by this user, and a chmod by
+    /// anyone else is refused. The probe is a chmod to the mode `/tmp` already
+    /// has, so it changes nothing; `None` skips where this user can chmod it
+    /// (root can).
+    #[cfg(unix)]
+    fn tmp_is_writable_but_not_chmodable() -> Option<std::path::PathBuf> {
+        let dir = std::path::PathBuf::from("/tmp");
+        let meta = std::fs::metadata(&dir).ok().filter(std::fs::Metadata::is_dir)?;
+        std::fs::set_permissions(&dir, meta.permissions()).err().map(|_| dir)
+    }
+
+    /// Every creator that can make `state/` on a fresh tree leaves it `0700`.
+    /// One case per creator, each on its own fresh tree, so a creator that
+    /// bypasses [`ensure_write_dir`] fails by name.
+    #[cfg(unix)]
+    #[test]
+    fn every_creator_makes_state_owner_only_on_a_fresh_tree() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-state-creators-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        type Creator = fn(&std::path::Path) -> std::io::Result<()>;
+        let cases: [(&str, Creator); 9] = [
+            ("create_new_private", |s| create_new_private(&s.join("a.json")).map(drop)),
+            ("open_private_append", |s| open_private_append(&s.join("b.log")).map(drop)),
+            ("secure_private_dir", |s| secure_private_dir(&s.join("identity"))),
+            ("atomic_write_private", |s| atomic_write_private(&s.join("identity").join("k"), b"x")),
+            ("ensure_write_dir", |s| ensure_write_dir(&s.join("x").join("y"))),
+            ("copy_dir_recursive", |s| {
+                let src = s.parent().unwrap().join("copy-src");
+                std::fs::create_dir_all(&src)?;
+                copy_dir_recursive(&src, &s.join("copy"))
+            }),
+            ("lock_path", |s| {
+                lock_path(s.join("stage").join(".stage.lock"), || ())
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            }),
+            ("seed_if_absent", |s| {
+                match seed_if_absent(&s.join("sessions.json"), "{\"sessions\":[]}", "sessions") {
+                    Some(_) => Ok(()),
+                    None => Err(std::io::Error::new(std::io::ErrorKind::Other, "not seeded")),
+                }
+            }),
+            ("with_stage_lock", |s| {
+                std::env::set_var("AOIDE_STAGE_DIR", s.join("stage"));
+                with_stage_lock(|| ());
+                Ok(())
+            }),
+        ];
+        // Every case runs, so one run names each creator that fails, not only the first.
+        let mut failures = Vec::new();
+        for (name, creator) in cases {
+            let home = base.join(name);
+            let _ = std::fs::remove_dir_all(&home);
+            std::env::set_var("AOIDE_ROOT", home.join(".aoide"));
+            let state = state_dir();
+            assert!(!state.exists(), "{name}: the fixture must start with no state/");
+            match creator(&state) {
+                Err(e) => failures.push(format!("{name} failed on a fresh tree: {e}")),
+                Ok(()) => {
+                    let mode = unix_mode(&state);
+                    if mode != 0o700 {
+                        failures.push(format!("{name} left state/ at {mode:o}"));
+                    }
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(failures.is_empty(), "creators that do not lock state/ first:\n{}", failures.join("\n"));
+    }
+
+    /// The private file creators write into a directory that may already exist
+    /// under a wide `state/` (a raw creator made it first), and the write locks
+    /// `state/` before it lands.
+    #[cfg(unix)]
+    #[test]
+    fn private_creates_lock_a_wide_state_they_write_into() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-state-private-wide-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("AOIDE_ROOT", home.join(".aoide"));
+
+        let state = state_dir();
+        let sessions = state.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        create_new_private(&sessions.join("a.instructions.md")).unwrap();
+        assert_eq!(unix_mode(&state), 0o700, "create_new_private left state/ wide");
+
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        open_private_append(&sessions.join("b.log")).unwrap();
+        assert_eq!(unix_mode(&state), 0o700, "open_private_append left state/ wide");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A creator under a `state/` it cannot lock creates nothing and fails
+    /// (`lock_path`, `seed_if_absent`), or runs unlocked without its lock file
+    /// (`with_stage_lock`). `/tmp` is the fixture because it is writable: the
+    /// lock file's directory exists and could take the write, so a discarded
+    /// lock error would show as a created file. The `state/` is `/tmp`
+    /// itself, and nothing outside this test's own subdirectory is touched.
+    #[cfg(unix)]
+    #[test]
+    fn a_state_it_cannot_lock_takes_no_lock_file_and_no_seed() {
+        let Some(tmp) = tmp_is_writable_but_not_chmodable() else {
+            eprintln!("skipped: /tmp is absent, or this user can chmod it");
+            return;
+        };
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = tmp.join(format!("aoide-state-refuse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let stage = base.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", &tmp);
+        let lock = stage.join(".stage.lock");
+
+        let result = lock_path(lock.clone(), || ());
+        let err = result.expect_err("lock_path must refuse a state/ it cannot lock");
+        assert!(err.contains("owner-only"), "the refusal must say why: {err}");
+        assert!(!lock.exists(), "lock_path created its lock file under an unlocked state/");
+
+        let path = stage.join("sessions.json");
+        assert!(
+            seed_if_absent(&path, "{\"sessions\":[]}", "sessions").is_none(),
+            "seed_if_absent must not seed under a state/ it cannot lock"
+        );
+        assert!(!path.exists(), "seed_if_absent wrote its file under an unlocked state/");
+
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let ran = std::cell::Cell::new(false);
+        with_stage_lock(|| ran.set(true));
+        assert!(ran.get(), "with_stage_lock runs its closure unlocked, as its best-effort contract says");
+        assert!(!lock.exists(), "with_stage_lock created its lock file under an unlocked state/");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `state/` that is a symlink is refused by name, and the link's target
+    /// is never chmodded: a chmod would follow the link to a directory the
+    /// boundary does not cover.
+    #[cfg(unix)]
+    #[test]
+    fn ensure_write_dir_refuses_a_symlinked_state_by_name() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-state-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let target = base.join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let state = base.join("state");
+        std::os::unix::fs::symlink(&target, &state).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let err = ensure_write_dir(&state.join("stage")).expect_err("a symlinked state/ must be refused");
+        assert!(err.to_string().contains("state/ is a symlink"), "the refusal must name the link: {err}");
+        assert_eq!(unix_mode(&target), 0o755, "the link's target must not be chmodded");
+        assert!(!target.join("stage").exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

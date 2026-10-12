@@ -77,7 +77,7 @@ fn migrate_carry_to_undying() {
         return;
     }
     if let Some(parent) = new_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
+        if let Err(e) = crate::fs::ensure_write_dir(parent) {
             eprintln!(
                 "aoide: cannot create {} ({e}) — undying marks remain at {}",
                 parent.display(),

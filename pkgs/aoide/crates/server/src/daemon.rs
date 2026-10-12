@@ -1263,20 +1263,14 @@ fn stream_subscribe(events_path: &Path, req: &Value, reader: &mut BufReader<Unix
     }
 }
 
-/// `state/` is the privacy boundary for the state tree. Locked once at
-/// start, so a tree a raw creator outside storage made first is tightened too.
-/// A `state/` that cannot be made owner-only stops the daemon before it binds.
+/// Locks `state/` owner-only (`0700`) before the socket is bound, so a tree a
+/// raw creator outside storage made first is tightened too; a symlinked or
+/// unlockable `state/` stops the daemon here. On Windows the boundary holds
+/// only for a `state/` aoide created: an existing one is never re-tightened.
 fn tighten_state_tree() -> std::io::Result<()> {
     let state = aoide_storage::fs::state_dir();
-    aoide_storage::fs::ensure_write_dir(&state).map_err(|e| {
-        std::io::Error::new(
-            e.kind(),
-            format!(
-                "aoided will not start: {} cannot be made owner-only (0700): {e}",
-                state.display()
-            ),
-        )
-    })
+    aoide_storage::fs::ensure_write_dir(&state)
+        .map_err(|e| std::io::Error::new(e.kind(), format!("aoided will not start: {e}")))
 }
 
 /// The resident daemon's own main loop (P-D2, `docs/architecture/
@@ -1629,12 +1623,15 @@ mod tests {
         );
     }
 
-    /// Daemon start locks `state/` to `0700` before the socket is bound.
+    /// Daemon start locks `state/` to `0700` before the socket is bound. The
+    /// prior `AOIDE_STATE_DIR` is restored, never removed: `env_lock`'s floor
+    /// is what the background `run_loop` threads of other tests write under.
     #[cfg(unix)]
     #[test]
     fn daemon_start_tightens_a_wide_state_dir() {
         use std::os::unix::fs::PermissionsExt;
         let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let prior = std::env::var("AOIDE_STATE_DIR").ok();
         let state = std::env::temp_dir().join(format!("aoide-daemon-state-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&state);
         std::fs::create_dir_all(&state).unwrap();
@@ -1644,11 +1641,73 @@ mod tests {
         let result = tighten_state_tree();
         let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
 
-        std::env::remove_var("AOIDE_STATE_DIR");
+        match &prior {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        let restored = std::env::var("AOIDE_STATE_DIR").ok();
         let _ = std::fs::remove_dir_all(&state);
         drop(guard);
         result.unwrap();
         assert_eq!(mode, 0o700);
+        assert_eq!(restored, prior, "the test must leave AOIDE_STATE_DIR as it found it");
+    }
+
+    /// `candidate` when this process cannot chmod it. Probed with a chmod to
+    /// the mode it already has: a no-op for the owner (and for root), refused
+    /// for anyone else, so the probe never changes a mode. `None` skips a test.
+    #[cfg(unix)]
+    fn unchmodable_dir(candidate: &str) -> Option<PathBuf> {
+        let dir = PathBuf::from(candidate);
+        let meta = std::fs::metadata(&dir).ok().filter(std::fs::Metadata::is_dir)?;
+        std::fs::set_permissions(&dir, meta.permissions()).err().map(|_| dir)
+    }
+
+    /// `run_loop` refuses to start when `state/` cannot be made owner-only, and
+    /// binds no socket: the lock is its first step, not a warning. The
+    /// `recv_timeout` is what makes a regression fail instead of hang, since a
+    /// `run_loop` that ignored the refusal would tick forever.
+    #[cfg(unix)]
+    #[test]
+    fn run_loop_refuses_to_start_when_state_cannot_be_locked() {
+        let Some(unlockable) = unchmodable_dir("/tmp") else {
+            eprintln!("skipped: /tmp is absent, or this user can chmod it");
+            return;
+        };
+        let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let prior = std::env::var("AOIDE_STATE_DIR").ok();
+        std::env::set_var("AOIDE_STATE_DIR", &unlockable);
+        let socket_path = short_tmp("refuse").with_extension("sock");
+        let events_path = short_tmp("refuse-events").with_extension("jsonl");
+        let log_path = short_tmp("refuse-log");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (sp, ep, lp) = (socket_path.clone(), events_path.clone(), log_path.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(run_loop(sp, ep, lp, test_registry(), noop_dispatch));
+        });
+        let outcome = rx.recv_timeout(Duration::from_secs(5));
+
+        match &prior {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        let bound = socket_path.exists();
+        let _ = std::fs::remove_file(&socket_path);
+        let _ = std::fs::remove_file(&events_path);
+        let _ = std::fs::remove_file(&log_path);
+        drop(guard);
+
+        match outcome {
+            Ok(Err(e)) => {
+                let msg = e.to_string();
+                assert!(msg.contains("state/"), "the refusal must name state/: {msg}");
+                assert!(msg.contains(&*unlockable.to_string_lossy()), "the refusal must name the path: {msg}");
+                assert!(!bound, "no socket may be bound when state/ is refused");
+            }
+            Ok(Ok(())) => panic!("run_loop returned Ok, but it only ever returns on an error"),
+            Err(_) => panic!("run_loop did not refuse a state/ it cannot lock (socket bound: {bound})"),
+        }
     }
 
     /// `serve_daemon` over a tempdir socket: `ping` round-trips with the
