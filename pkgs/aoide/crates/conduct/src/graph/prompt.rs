@@ -31,13 +31,15 @@
 //! output follows it. An echo is not output. It is the typed characters, with
 //! carriage returns and ESC sequences ignored, so a line editor's `\ry\x1b[K` is
 //! still one. A single-key prompt (`read -n1`) reads once it prints after its
-//! key. Two costs are stated plainly. A single-key reader that echoes its key and
-//! then goes silent stays `awaiting` until its next output: a stale state, never
-//! a repeated announcement. And an echo split across two reads is read as output,
-//! so it answers the question. Arrows, Tab, Ctrl keys, OSC and DCS replies and
-//! mouse reports carry no key (the one tokenizer, [`typed_text`]). Typing `echo
-//! Proceed?` at a shell prompt never reads as a question: the text is held, and
-//! the echo of it is never announced.
+//! key. A read that cuts an escape sequence or a multi-byte character holds the
+//! cut bytes for the next read ([`judged_len`]), so an echo is judged whole.
+//! One cost is stated plainly: a single-key reader that echoes its key and then
+//! goes silent stays `awaiting` until its next output. That is a stale state,
+//! never a repeated announcement, and it is the cheaper error, since a false
+//! `idle` would drop the ping-back, the sudo badge and the dock state. Arrows,
+//! Tab, Ctrl keys, OSC and DCS replies and mouse reports carry no key (the one
+//! tokenizer, [`typed_text`]). Typing `echo Proceed?` at a shell prompt never
+//! reads as a question: the text is held, and the echo of it is never announced.
 //!
 //! **The table is closed and conservative.** A false `awaiting` is noise, so
 //! every row is anchored to the END of the line (`Do you want to continue? [Y/n]`
@@ -59,7 +61,7 @@
 //! (`shell_snapshot`: an interactive shell at its bare prompt is never
 //! `awaiting` off it; a shell given a command or a script is heard).
 
-use super::common::{clip_flat, strip_ansi, strip_unsafe, typed_text};
+use super::common::{clip_flat, strip_ansi, strip_ansi_open, strip_unsafe, typed_text};
 use std::time::{Duration, Instant};
 
 /// How long the last line must stand unchanged before it is believed to be a
@@ -80,6 +82,10 @@ const PRESS_TAIL_MAX: usize = 48;
 /// The most text that may follow `password for ` / `passphrase for `: a user
 /// name or a key path.
 const FOR_TAIL_MAX: usize = 80;
+/// The most bytes a read holds back for the next one. An escape sequence or a
+/// character is far shorter; a longer open tail is judged where it stands, so
+/// the held bytes never grow with the output.
+const HELD_MAX: usize = 64;
 
 /// One question a wrapped program is waiting on, as the wrap publishes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +287,25 @@ fn is_echo(output: &[u8], typed: &str) -> bool {
         .all(|c| matches!(c, '\r' | ' ' | '\u{8}' | '\u{7f}') || typed.contains(c))
 }
 
+/// How much of `bytes` can be judged now. A multi-byte character cut at the end,
+/// and an escape sequence still open at the end, are left for the next read to
+/// finish, so a key's echo is judged whole however the reads fall. A tail over
+/// [`HELD_MAX`] is not held.
+fn judged_len(bytes: &[u8]) -> usize {
+    let valid = match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        Err(_) => return bytes.len(),
+    };
+    let (_, open) = strip_ansi_open(&String::from_utf8_lossy(&bytes[..valid]));
+    let cut = open.unwrap_or(valid);
+    if bytes.len() - cut > HELD_MAX {
+        bytes.len()
+    } else {
+        cut
+    }
+}
+
 /// Printable keys typed onto a question and not yet answered: the question as
 /// it stood when the first key landed, and the keys themselves. While the
 /// program is still waiting, their echo keeps the question standing.
@@ -305,6 +330,9 @@ pub(in crate::graph) struct PromptWatch {
     /// The row an Enter, or output past a typed key's echo, last answered.
     answered: Option<usize>,
     typing: Option<Typing>,
+    /// The bytes at the end of the last read that [`judged_len`] held back: the
+    /// start of a sequence or a character the next read finishes.
+    held: Vec<u8>,
 }
 
 impl PromptWatch {
@@ -317,6 +345,7 @@ impl PromptWatch {
             since: now,
             answered: None,
             typing: None,
+            held: Vec::new(),
         }
     }
 
@@ -327,8 +356,11 @@ impl PromptWatch {
         if self.window.len() > WINDOW_BYTES {
             self.window.drain(..self.window.len() - WINDOW_BYTES);
         }
+        let mut judged = std::mem::take(&mut self.held);
+        judged.extend_from_slice(bytes);
+        self.held = judged.split_off(judged_len(&judged));
         if let Some(t) = self.typing.take() {
-            if is_echo(bytes, &t.typed) {
+            if is_echo(&judged, &t.typed) {
                 self.typing = Some(t);
             } else {
                 self.answered = Some(t.row);
@@ -627,6 +659,32 @@ mod tests {
         );
         watch.output(b"\nanswered:y\n", t0 + QUIET * 10);
         assert_eq!(watch.standing(t0 + QUIET * 12), None, "the next output answers it");
+    }
+
+    #[test]
+    fn an_escape_split_across_two_reads_is_judged_whole_so_the_echo_still_holds() {
+        // The redraw `\ry` then `ESC [ K`, cut after the ESC. Judged by itself the
+        // second read would be `[K`, which is output and would answer the question.
+        let t0 = Instant::now();
+        let mut watch = PromptWatch::new(t0);
+        watch.output(b"Overwrite? [y/N] ", t0);
+        watch.input(b"y");
+        watch.output(b"\ry\x1b", t0);
+        watch.output(b"[K", t0);
+        assert!(watch.standing(t0 + QUIET * 2).is_some(), "the erase is part of the echo");
+    }
+
+    #[test]
+    fn a_character_split_across_two_reads_is_judged_whole_so_the_echo_still_holds() {
+        // A typed `é` is two bytes; a read that ends after the first must not make
+        // its echo a stray byte, which is output.
+        let t0 = Instant::now();
+        let mut watch = PromptWatch::new(t0);
+        watch.output(b"Overwrite? [y/N] ", t0);
+        watch.input("é".as_bytes());
+        watch.output(b"\r\xc3", t0);
+        watch.output(b"\xa9", t0);
+        assert!(watch.standing(t0 + QUIET * 2).is_some(), "the echo of a whole character");
     }
 
     #[test]

@@ -36,13 +36,18 @@ use std::path::PathBuf;
 
 /// The command's basename (the agent-name default), e.g. `/usr/bin/claude` →
 /// `claude`. A login shell's spelling carries a leading `-` (`-bash`, `-zsh`):
-/// it names the same program, so the `-` is dropped.
+/// it names the same shell, so that `-` is dropped. Only a shell name drops it:
+/// `-claude` names no harness, and stays `-claude`, so it never passes the
+/// ping-back's proof for `claude`.
 fn command_basename(program: &str) -> String {
     let base = std::path::Path::new(program)
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| program.to_string());
-    base.strip_prefix('-').map(str::to_string).unwrap_or(base)
+    base.strip_prefix('-')
+        .filter(|shell| SHELL_BASENAMES.contains(shell))
+        .map(str::to_string)
+        .unwrap_or(base)
 }
 
 /// The shell basenames [`program_is_a_shell`] resolves to — the ONE list, in
@@ -2578,6 +2583,10 @@ mod tests {
             (&["script", "-c", "claude", "out.log"], None),
             (&["script", "-qc", "claude", "out.log"], None),
             (&["-bash"], Some("bash")),
+            // A login-looking spelling of a harness is not the harness: only a
+            // shell name loses its `-`.
+            (&["-claude"], Some("-claude")),
+            (&["/usr/bin/-claude"], Some("-claude")),
             (&["su", "-", "khoa"], None),
             (&["nix", "develop"], None),
             (&["env"], None),
@@ -2600,6 +2609,7 @@ mod tests {
             (&["bash"], true),
             // A login shell's spelling (`-bash`) is the same shell.
             (&["-bash"], true),
+            (&["-claude"], false),
             (&["script", "-qc", "make", "out.log"], true),
             (&["zsh"], true),
             (&["fish"], true),

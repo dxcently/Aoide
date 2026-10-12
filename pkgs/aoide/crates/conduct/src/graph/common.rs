@@ -130,6 +130,14 @@ pub(in crate::graph) fn strip_unsafe(s: &str) -> String {
 ///
 /// `pub` because `aoide-conductor`'s log tail renders through the same rule.
 pub fn strip_ansi(input: &str) -> String {
+    strip_ansi_open(input).0
+}
+
+/// [`strip_ansi`], and the byte offset of the ESC that opens a sequence still
+/// open at the end of `input`, if there is one. A reader that judges one chunk
+/// of output by itself holds the bytes from that offset, so a sequence split
+/// across two reads is judged whole.
+pub(in crate::graph) fn strip_ansi_open(input: &str) -> (String, Option<usize>) {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum State {
         Normal,
@@ -143,7 +151,11 @@ pub fn strip_ansi(input: &str) -> String {
     }
     let mut out = String::with_capacity(input.len());
     let mut state = State::Normal;
-    for ch in input.chars() {
+    let mut opened = 0;
+    for (at, ch) in input.char_indices() {
+        if state == State::Normal && ch == '\x1b' {
+            opened = at;
+        }
         state = match (state, ch) {
             (State::Normal, '\x1b') => State::Esc,
             (State::Normal, '\n' | '\t' | '\r') => {
@@ -175,7 +187,8 @@ pub fn strip_ansi(input: &str) -> String {
             (State::EscIntermediate, _) => State::EscIntermediate,
         };
     }
-    out
+    let open = (state != State::Normal).then_some(opened);
+    (out, open)
 }
 
 /// What a pty's INPUT says once its escape sequences are gone: the keys typed.

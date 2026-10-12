@@ -63,9 +63,10 @@
 //!
 //! **Receptive only by a positive proof.** A line submitted into a bare shell
 //! would RUN as a command, so a target is receptive only when its resolved
-//! program IS the harness its agent names: the wrap's `wrapped_program` (the
-//! launcher walk's answer, stamped at registration) equals the agent profile's
-//! binary. Anything else is withheld and counted: a shell (`shell-parent`), a
+//! program's BASENAME is the harness its agent names: the wrap's
+//! `wrapped_program` (the launcher walk's answer, stamped at registration, by
+//! basename) equals the agent profile's binary. The proof is that basename and
+//! no more. Anything else is withheld and counted: a shell (`shell-parent`), a
 //! wrap the walk cannot resolve or does not model (`unverified-wrap`, e.g.
 //! `taskset -c 0 bash`, `env -S bash`). Every child-authored fragment of a line
 //! (the quoted say, prompt and stop reason, the question and the tag, and the
@@ -940,19 +941,15 @@ fn inert_char(c: char) -> char {
 }
 
 /// The one line-level pass a ping line takes on its way to a parent's pty, in
-/// [`deliver`], whatever arm built it. Every shell metacharacter becomes inert,
-/// so a field that skipped its own [`clean`] (a raw number, a bare label) still
-/// cannot carry it. Two ASCII marks are left as they are: the `"` around a quoted
-/// field and the `!` of the `! ` error marker, both written by the renderer. A
-/// field that was cleaned has neither (`inert` maps both), so they are the
-/// renderer's. A raw field can still carry them, and a ping line's target is a
-/// harness composer, never a bare shell (`shell-parent` refuses one), so neither
-/// starts a command there. Keeping them is the price of an unchanged line format.
+/// [`deliver`], whatever arm built it, with no exception. Every shell
+/// metacharacter, and `!` (history expansion) and `"` (the quote), becomes its
+/// fullwidth twin, so a field that skipped its own [`clean`] (a raw number, a
+/// bare label) cannot carry one. The renderer's own quotes and its `! ` error
+/// marker are ASCII in the render and reach the wire as their twins too: the
+/// canonical wire form is the twin, and no mark is carved out. A harness
+/// composer shows the twin as the mark it stands for.
 fn wire_line(line: &str) -> String {
-    strip_unsafe(line)
-        .chars()
-        .map(|c| if c == '"' || c == '!' { c } else { inert_char(c) })
-        .collect()
+    inert(&strip_unsafe(line))
 }
 
 /// `[<agent> <petname>]` — the line's own tag for a child whose harness has
@@ -2485,7 +2482,7 @@ mod tests {
         let report = pingback(&daemon_inv(), &[]);
         let bytes = acc.join().unwrap();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), "[eidolon brave-otter] asking: \"Overwrite?\"\n");
+        assert_eq!(String::from_utf8_lossy(&bytes), "[eidolon brave-otter] asking: ＂Overwrite?＂\n");
         assert_eq!(report.delivered.len(), 1, "{report:?}");
         pty.set_nonblocking(true).unwrap();
         assert!(
@@ -2750,10 +2747,10 @@ mod tests {
         ]
     }
 
-    /// The shell metacharacters a ping line must not carry. `"` and `!` are not
-    /// in it: see [`wire_line`] for why the renderer's own two survive.
+    /// The characters a ping line never carries on the wire: every shell
+    /// metacharacter, and `!` and `"`, which [`wire_line`] makes fullwidth too.
     fn live_syntax(line: &str) -> Vec<char> {
-        line.chars().filter(|c| "$`;|&()<>\\'".contains(*c)).collect()
+        line.chars().filter(|c| "$`;|&()<>\\'!\"".contains(*c)).collect()
     }
 
     #[test]
@@ -2765,6 +2762,15 @@ mod tests {
     }
 
     #[test]
+    fn the_wire_pass_writes_every_bang_and_quote_as_its_twin() {
+        // A raw field skips its own cleaning, so the wire pass takes the marks
+        // itself. The renderer's own quote and `! ` marker are ASCII in the render
+        // and take the same twin on the wire, with no carve-out.
+        assert_eq!(wire_line("!e \"x\""), "！e ＂x＂");
+        assert_eq!(wire_line("! ok"), "！ ok");
+    }
+
+    #[test]
     fn a_number_field_sent_as_text_is_cleaned_like_every_other_field() {
         // The journal may spell a count as a string; that spelling takes the same
         // cleaning as any text field, not a bare clip.
@@ -2772,7 +2778,7 @@ mod tests {
         let (line, _) = plan(&[USER, json], None);
         let line = line.unwrap();
         assert!(line.contains("＄（touch x） 5 calls left"), "{line:?}");
-        assert!(live_syntax(&line).is_empty(), "{line:?}");
+        assert!(live_syntax(&wire_line(&line)).is_empty(), "{line:?}");
     }
 
     #[cfg(unix)]

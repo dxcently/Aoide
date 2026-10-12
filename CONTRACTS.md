@@ -2162,7 +2162,9 @@ id flips both together):
   `taskset` for `-- taskset -c 0 claude`, because a launcher the walk does not
   model names itself. It is absent when the walk names no program: a login
   shell, `script` with no command, `su`, a `nix` form without a `-c` payload,
-  `env -S` (whose split string swallows the program name).
+  `env -S` (whose split string swallows the program name). A login spelling's
+  leading `-` is dropped for a shell name only: `-bash` names `bash`, and
+  `-claude` names `-claude`.
 
 The ping-back is receptive only by a positive proof: the record's
 `wrappedProgram` must equal the first launch token of the profile its `agent`
@@ -2171,8 +2173,8 @@ names. The proof is that basename, and it is stated as one: a symlink named
 passes it. It rejects the launchers the walk does not model and a label that
 does not match the wrap. It does not stop a same-uid process that names a shell
 after a harness; for that class the defence is inert content, since every line
-takes one pass as it is written (`wire_line`) and every shell metacharacter in
-it is made inert. A shell (`shell`, or a `restore` snapshot, `wrapped_program_is_a_shell`)
+takes one pass as it is written (`wire_line`), and every shell metacharacter in
+it is made inert, with `!` and `"` among them. A shell (`shell`, or a `restore` snapshot, `wrapped_program_is_a_shell`)
 is refused as `shell-parent`; a wrap whose program is absent or is not its
 harness is refused as `unverified-wrap`. The label alone never decides it:
 `agent` is a caller's choice, and `--agent pi -- bash` names a registered
@@ -2302,9 +2304,11 @@ the `awaiting` it set returns to `idle`. A printable key alone does not clear
 it, so a password typed and not yet submitted is still asked. An echoed key
 holds the question until its Enter or real program output: the echo is not
 output. A single-key reader that echoes its key and then goes silent stays
-`awaiting` until its next output (a stale state, never a repeated announcement),
-and an echo split across two reads is read as output and answers the question. The
-`sudo` row also sets `needsSudo`, and that row is never announced to a spawner.
+`awaiting` until its next output (a stale state, never a repeated announcement).
+A read that cuts an escape sequence or a multi-byte character holds those bytes
+for the next read, so a split echo never answers. A second question printed on
+the same row after an answered one is never announced. The `sudo` row also sets
+`needsSudo`, and that row is never announced to a spawner.
 The line is held in three places, each capped at 80 characters and sanitised:
 this field, the ping-back cursor's `screen` entry (`pingback.json`), and the
 audit line of a ping that carried it. The screen reader's own working buffer

@@ -352,7 +352,10 @@ basename, and it is stated as one: a symlink named `claude` that points at
 rejects the launchers the walk does not model and a label that does not match
 the wrap. It does not stop a same-uid process that names a shell after a
 harness. For that class the defence is inert content: every line takes one pass
-as it is written (`wire_line`), so `$(…)` in any field cannot run.
+as it is written (`wire_line`), which makes every shell metacharacter, and `!`
+and `"`, its fullwidth twin, so `$(…)` or `!e` in any field cannot run. The
+leading `-` of a login spelling is dropped for a shell name only: `-bash` is
+`bash`, and `-claude` stays `-claude`, which is not the harness.
 
 The ruling is the User's (2026-09-17): a parent hears the children it spawned,
 and nothing wider.
@@ -415,11 +418,17 @@ answers the question at once, which is how a single-key `read -n1` reads when it
 prints after its key. Line reads (`read -p`, a `y/N` in `apt`, `rm -i`, `git`)
 hold until their Enter, which is the common shape.
 
-Two costs are stated plainly. A single-key reader that echoes its key and then
+One cost is stated plainly. A single-key reader that echoes its key and then
 goes silent stays `awaiting` until its next output: a stale state, which the
-ping-back never repeats. And an echo split across two reads is read as output,
-so it answers the question. A false `idle` would drop the ping-back, the sudo
-badge and the dock state, so the rule errs toward a stale `awaiting`.
+ping-back never repeats. A split echo does not answer the question. A read that
+cuts an escape sequence or a multi-byte character holds the cut bytes for the
+next read, so the echo is judged whole. The rule errs toward a stale `awaiting`,
+since a false `idle` would drop the ping-back, the sudo badge and the dock state.
+
+A second question printed on the same row after an answered one is never
+announced. The row is already answered, so the new question reads as the same
+line: sequential `read -n1` prompts on one line (`Continue? [y/N] Again? [y/N] `)
+are heard for the first only.
 
 Arrows, Tab, Ctrl keys and other escape sequences do not answer, and neither do
 the terminal's own replies (OSC, DCS) or X10 mouse reports. The keys are

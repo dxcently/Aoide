@@ -1068,8 +1068,9 @@ in the message.
   inert on the way into a line (`pingback.rs::inert`: `$(…)` becomes its fullwidth
   twin), and every line takes one more pass as it is written
   (`pingback.rs::wire_line`, the only place `deliver` shapes the bytes). That pass is
-  the backstop for a field that skipped its own cleaning. Its one carve-out is the
-  renderer's own `"` and the `!` of the `! ` error marker. The proof is the launcher
+  the backstop for a field that skipped its own cleaning. It takes `!` and `"` with
+  no carve-out, so the renderer's own quote and `! ` marker reach the wire as their
+  fullwidth twins. The proof is the launcher
   walk's BASENAME, and that is all it is: a symlink named `claude` to `bash`, or a
   script named `claude` that execs a shell, passes it. It rejects unmodeled launchers
   and a label that does not match the wrap; it does NOT stop a same-uid process that
