@@ -2161,27 +2161,37 @@ id flips both together):
   wrapped argv to, by basename (`conduct.rs::wrapped_program_name`). It is `claude` for `-- env claude`, and
   `taskset` for `-- taskset -c 0 claude`, because a launcher the walk does not
   model names itself. It is absent when the walk names no program: a login
-  shell, `script` with no command, `su`, a `nix` form without a `-c` payload,
-  `env -S` (whose split string swallows the program name). A login spelling's
-  leading `-` is dropped for a shell name only: `-bash` names `bash`, and
-  `-claude` names `-claude`.
+  shell, `script` (a shell whatever its argv), `su`, a `nix` form without a `-c`
+  payload, and `env -S`, whose split string is a whole command line that names no
+  program. A login spelling's leading `-` is dropped for a shell name only:
+  `-bash` names `bash`, and `-claude` names `-claude`.
 
-The ping-back is receptive only by a positive proof: the record's
-`wrappedProgram` must equal the first launch token of the profile its `agent`
-names. The proof is that basename, and it is stated as one: a symlink named
-`claude` that points at `bash`, or a script named `claude` that execs a shell,
-passes it. It rejects the launchers the walk does not model and a label that
-does not match the wrap. It does not stop a same-uid process that names a shell
-after a harness; for that class the defence is inert content, since every line
-takes one pass as it is written (`wire_line`), and every shell metacharacter in
-it is made inert, with `!` and `"` among them. A shell (`shell`, or a `restore` snapshot, `wrapped_program_is_a_shell`)
-is refused as `shell-parent`; a wrap whose program is absent or is not its
-harness is refused as `unverified-wrap`. The label alone never decides it:
-`agent` is a caller's choice, and `--agent pi -- bash` names a registered
-profile over a shell. The doorbell's PTY arm and the A2A door refuse by the
-negative `wrapped_program_is_a_shell` read only. Both fields absent (the
-default, skipped on serialization) mean `false` and no program, byte-identical
-to every record written before they existed.
+**A line is typed into a pty only by a positive proof, one rule for every
+reader.** The record's `wrappedProgram` must equal the first launch token of the
+profile its `agent` names (`conduct.rs::is_its_harness`). Four readers apply it:
+the ping-back, the doorbell's PTY arm, the A2A door's inject, and the A2A door's
+spawn, which asks its argv twin `conduct.rs::wrapped_harness` (the same walk,
+read before a record exists). The proof is that basename, and it is stated as
+one: a symlink named `claude` that points at `bash`, or a script named `claude`
+that execs a shell, passes it. It rejects the launchers the walk does not model
+and a label that does not match the wrap. It does not stop a same-uid process
+that names a shell after a harness; for that class the defence is inert content,
+since every line takes one pass as it is written (`wire_line`), and every shell
+metacharacter in it is made inert, with `!` and `"` among them.
+
+The refusals, in order. A shell (`shell`, or a `restore` snapshot,
+`wrapped_program_is_a_shell`) is refused as `shell-parent`. A wrap whose program
+is absent or is not its harness is refused as `unverified-wrap`. The ping-back
+also refuses by `not-conductable` and `parent-done`. The A2A inject holds the
+same two as `shell-wrapped` and `unverified-wrap`, and an unreadable stage holds
+as `unverified-wrap`. The label alone never decides it: `agent` is a caller's
+choice, and `--agent pi -- bash` names a registered profile over a shell.
+
+**One-time cost (R2).** The proof reads the `wrappedProgram` a registration
+stamped. A wrap registered by an earlier build keeps the stamp that build wrote
+until it restarts, so until then the readers judge it by the old walk's answer.
+Both fields absent (the default, skipped on serialization) mean `false` and no
+program, byte-identical to every record written before they existed.
 
 **Additive in v0:** a session record MAY carry an optional `parentSessionId`
 (string) naming the session that spawned it — the graph's spawned-by edge. Set
@@ -6671,14 +6681,15 @@ registered harness, `aoide_conduct::graph::wrapped_harness` (the walked program
 must be a profile's own launch token). Two refusals, both `-32004`, both in
 `do_spawn`'s own prologue and before any process starts. A **shell**
 (`aoide_conduct::graph::program_is_a_shell`: `bash`, `bash -lc claude`,
-`env bash`) is audited `a2a.message/send`/`status:"shell-spawn-agent"` (H1): the
-first turn is typed into the child's pty, and a shell's stdin is a command
-line. **Anything else the walk does not prove** is audited
+`env bash`, `env -S claude`) is audited `a2a.message/send`/`status:"shell-spawn-agent"`
+(H1): the first turn is typed into the child's pty, and a shell's stdin is a
+command line. **Anything else the walk does not prove** is audited
 `status:"unverified-spawn-agent"`: a wrapper script, a launcher the walk does
-not model (`taskset -c 0 claude`, `env -S claude`), or a name with no profile.
-The harness proven is the name readiness and the submit key use; `env claude`
-runs as `claude`. Its cost is stated: a harness reached through a wrapper the
-walk does not model is refused, never typed into.
+not model (`taskset -c 0 claude`), or a name with no profile. The proven harness
+is the name readiness, the submit key and the spawned wrap's `--agent` label
+use, so the wrap's own record passes the same proof every reader applies; `env
+claude` runs as `claude`. Its cost is stated: a harness reached through a wrapper
+the walk does not model is refused, never typed into.
 
 **Security model.** The capability is admitted **at rebuild time**, not
 per-request: setting `aoide.a2a.spawnAgent` to a non-empty command is the

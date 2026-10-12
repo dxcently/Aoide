@@ -130,15 +130,12 @@ to **rebuild time** instead.
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door
   returns a structured error rather than launching anything. The configured
-  command is default-denied: it runs only when the launcher walk proves it is a
-  registered harness (`claude`, `env claude`). A SHELL (`bash`, `bash -lc
-  <harness>`, `env bash`) is refused the same way, before any process starts,
-  because the spawn's first turn is a line typed into that pty and a shell
-  would run it. So is anything the walk cannot prove (a wrapper script,
-  `taskset -c 0 claude`, `env -S claude`). An inject steers a
-  session already running under aoide's conductor, the same door `send`
-  uses. A forwarded A2A message is **data**, routed through the dispatcher, never
-  executed — the A2A door adds no new trust tier.
+  command is default-denied: it runs only as a proven harness (`claude`,
+  `env claude`), and the rule is stated once in `CONTRACTS.md` (the spawnAgent
+  paragraph). An inject steers a session already running under aoide's
+  conductor, the same door `send` uses, and types only into a wrap the launcher
+  walk proves is its harness. A forwarded A2A message is **data**, routed
+  through the dispatcher, never executed — the A2A door adds no new trust tier.
 - **A spawn's child is the local wrapper, always headless.** The door has no
   terminal to hand a child, so its spawn is `conduct --spawned --headless`,
   built by the ONE argv builder a local `aoide spawn` uses

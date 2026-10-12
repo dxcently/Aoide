@@ -1940,25 +1940,34 @@ fn session_remote_parent(id: &str) -> Option<RemoteParent> {
     sf.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.remote_parent.clone())
 }
 
-/// Whether `id`'s record is conducting a SHELL — the same read the ping-back
-/// and doorbell lanes make (`aoide_conduct::graph::wrapped_program_is_a_shell`,
-/// the record-side half of `program_is_a_shell`), so the whole box agrees
-/// on which sessions a submitted line must never reach.
+/// Why the A2A door will not type a line into `id` by itself, read off its
+/// record: `shell-wrapped` when the record is conducting a SHELL
+/// (`aoide_conduct::graph::wrapped_program_is_a_shell`, the read the ping-back
+/// and doorbell lanes make), `unverified-wrap` when the launcher walk does not
+/// prove it is its harness (`aoide_conduct::graph::is_its_harness`). The same
+/// two refusals the other readers name, so the whole box agrees on which
+/// sessions a submitted line must never reach.
 ///
-/// Unlike [`session_remote_parent`], an unreadable stage answers **true**:
-/// this is a refusal's input, so "cannot tell" takes the safe arm — the same
-/// fail-safe direction `should_deliver_now(ConnOrigin::Unknown, _)` already
-/// takes one screen up. An unknown id (no record) answers `false` and is
-/// unreachable anyway: `decide_send_action` resolves through
-/// [`session_ref_lookup`] first, and a missing record is its own `Error` arm.
-fn session_wrapped_is_a_shell(id: &str) -> bool {
+/// Unlike [`session_remote_parent`], an unreadable stage answers a hold, and
+/// `unverified-wrap` is the reason: this is a refusal's input, so "cannot tell"
+/// takes the safe arm, the same fail-safe direction
+/// `should_deliver_now(ConnOrigin::Unknown, _)` takes one screen up. An unknown
+/// id (no record) answers `None` and is unreachable anyway: `decide_send_action`
+/// resolves through [`session_ref_lookup`] first, and a missing record is its
+/// own `Error` arm.
+fn session_inject_hold(id: &str) -> Option<&'static str> {
     match load_stage::<SessionsFile>(&sessions_path()) {
-        Ok(sf) => sf
-            .sessions
-            .iter()
-            .find(|s| s.session_id == id)
-            .is_some_and(aoide_conduct::graph::wrapped_program_is_a_shell),
-        Err(_) => true,
+        Ok(sf) => {
+            let rec = sf.sessions.iter().find(|s| s.session_id == id)?;
+            if aoide_conduct::graph::wrapped_program_is_a_shell(rec) {
+                Some("shell-wrapped")
+            } else if !aoide_conduct::graph::is_its_harness(rec) {
+                Some("unverified-wrap")
+            } else {
+                None
+            }
+        }
+        Err(_) => Some("unverified-wrap"),
     }
 }
 
@@ -2334,13 +2343,12 @@ fn poll_bounded_exit(
 /// always because ITS OWN attempt to exec the configured agent
 /// (`aoide-conduct::graph::pty::spawn_on_pty`) failed, since that
 /// function's own "spawn FIRST" discipline means a failed exec there returns
-/// almost instantly with no session ever registered. Names the configured
-/// program (never the full command line — no flag values, no env, no
-/// secrets) and the observed exit status only.
-fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitStatus) -> String {
-    let program = agent_cmd.split_whitespace().next().unwrap_or(agent_cmd);
+/// almost instantly with no session ever registered. Names the PROVEN harness
+/// the configured command runs (never the full command line — no flag values,
+/// no env, no secrets) and the observed exit status only.
+fn spawn_died_immediately_message(harness: &str, status: std::process::ExitStatus) -> String {
     format!(
-        "the configured agent (`{program}`) exited immediately after launch ({status}) — \
+        "the configured agent (`{harness}`) exited immediately after launch ({status}) — \
          it is likely missing from this unit's PATH, or the configured spawnAgent command line is wrong"
     )
 }
@@ -2382,9 +2390,13 @@ fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitSta
 /// addressed to its own slug (Q5's ruling). Pure — the split of the configured
 /// agent command is the same `split_whitespace` the pre-S10 argv did, so what
 /// runs is byte-identical.
-fn spawn_argv(id: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
+///
+/// `--agent` is the PROVEN `harness` (`spawn_agent_harness`), never a fixed
+/// label: the wrap's record carries it, and the ping-back, doorbell and inject
+/// readers type into the wrap only when its walked program is that harness.
+fn spawn_argv(id: &str, harness: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
     let command: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    aoide_conduct::graph::build_conduct_args(true, "a2a", id, None, task, None, None, None, &command)
+    aoide_conduct::graph::build_conduct_args(true, harness, id, None, task, None, None, None, &command)
 }
 
 /// Why a configured `spawnAgent` may not be typed into: a shell (the first turn
@@ -2397,10 +2409,12 @@ enum SpawnAgentRefusal {
 }
 
 /// The one judgement every spawn guard reads: the registered harness a
-/// configured `spawnAgent` runs, or why it may not run at all. Default-deny: a
-/// wrapper script, a launcher the walk does not model (`taskset`, `env -S`), or
-/// a name with no profile is refused, because its first turn would be typed
-/// into a pty the door cannot prove is a harness. The walk itself is
+/// configured `spawnAgent` runs, or why it may not run at all. A shell is refused
+/// as `Shell`, and a command the walk cannot name a program for (`env -S`, whose
+/// split string is a command line) is a shell too. Default-deny for the rest: a
+/// wrapper script, a launcher the walk does not model (`taskset`), or a name with
+/// no profile is `Unproven`, because its first turn would be typed into a pty the
+/// door cannot prove is a harness. The walk itself is
 /// `aoide_conduct::graph::wrapped_harness`, never a copy of it.
 fn spawn_agent_harness(agent_cmd: &str) -> Result<&'static str, SpawnAgentRefusal> {
     let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
@@ -2580,38 +2594,41 @@ fn do_spawn(
     // `-32004` is this door's own "spawn cannot be used as configured" family
     // (the empty-`spawnAgent` arm one layer up): nothing about the CALLER's
     // authority is wrong, so `-32005`/`-32006` would blame the wrong party.
-    if let Err(refusal) = spawn_agent_harness(agent_cmd) {
-        let (audit_name, msg) = match refusal {
-            SpawnAgentRefusal::Shell => (
-                "shell-spawn-agent",
-                format!(
-                    "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which is a \
-                     SHELL — a remote prompt typed into it would run as a command. Set it to the \
-                     harness to conduct (e.g. `claude`), not to a shell that launches one."
+    let harness = match spawn_agent_harness(agent_cmd) {
+        Ok(harness) => harness,
+        Err(refusal) => {
+            let (audit_name, msg) = match refusal {
+                SpawnAgentRefusal::Shell => (
+                    "shell-spawn-agent",
+                    format!(
+                        "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which \
+                         reads as a SHELL — a remote prompt typed into it would run as a command. Set \
+                         it to the harness to conduct (e.g. `claude`), not to a shell that launches one."
+                    ),
                 ),
-            ),
-            SpawnAgentRefusal::Unproven => (
-                "unverified-spawn-agent",
-                format!(
-                    "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which the \
-                     launcher walk does not prove to be a registered harness ({}). A remote prompt \
-                     is typed into the harness's own pty, so only a harness named as its own \
-                     program may run: set it to the harness itself (e.g. `claude`), not a wrapper, \
-                     a launcher the walk does not model (`taskset`, `env -S`), or a script.",
-                    aoide_protocol::agents::known_agents().join(", ")
+                SpawnAgentRefusal::Unproven => (
+                    "unverified-spawn-agent",
+                    format!(
+                        "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which the \
+                         launcher walk does not prove to be a registered harness ({}). A remote prompt \
+                         is typed into the harness's own pty, so only a harness named as its own \
+                         program may run: set it to the harness itself (e.g. `claude`), not a wrapper, \
+                         a launcher the walk does not model (`taskset`), or a script.",
+                        aoide_protocol::agents::known_agents().join(", ")
+                    ),
                 ),
-            ),
-        };
-        let _ = audit(
-            audit_log,
-            Door::A2a,
-            EventClass::Audit,
-            "a2a.message/send",
-            audit_name,
-            &msg,
-        );
-        return Err((-32004, msg));
-    }
+            };
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                audit_name,
+                &msg,
+            );
+            return Err((-32004, msg));
+        }
+    };
     // Refused FIRST and for free: an unusable slug must cost one RPC, never a
     // process — nothing below these lines has run when either fires.
     let task = match spawn_task_slug(task) {        Ok(task) => task,
@@ -2657,7 +2674,7 @@ fn do_spawn(
     let aoide_bin = std::env::current_exe()
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
-    let argv = spawn_argv(&id, agent_cmd, task);
+    let argv = spawn_argv(&id, harness, agent_cmd, task);
     // This launch's start instant, taken BEFORE the child exists: the worker's
     // readiness wait reads only a harness `SessionStart` stamped at or after
     // it, so a leftover child record from a previous run of a reused id cannot
@@ -2692,7 +2709,7 @@ fn do_spawn(
                 SPAWN_LIVENESS_ATTEMPTS,
                 SPAWN_LIVENESS_INTERVAL,
             ) {
-                let msg = spawn_died_immediately_message(agent_cmd, status);
+                let msg = spawn_died_immediately_message(harness, status);
                 let _ = audit(
                     audit_log,
                     Door::A2a,
@@ -3221,27 +3238,29 @@ fn message_send(
             // however well they proved who they are. A shell's input is a
             // command line, and `--agent <harness> -- bash` is a record that
             // names a harness while running a shell — the door therefore reads
-            // the WRAP (house rule 4, `wrapped_program_is_a_shell`), exactly
-            // as the ping-back and doorbell lanes do, rather than the `agent`
-            // label it was handed. Paid only where it can matter: a decision
+            // the WRAP (house rule 4), exactly as the ping-back and doorbell
+            // lanes do, rather than the `agent` label it was handed. A wrap the
+            // walk does not prove to be its harness is held the same way
+            // (`unverified-wrap`). Paid only where it can matter: a decision
             // that was going to pend anyway is left alone, and its audit line
             // is not written.
             let door_delivers = should_deliver_now(eff_origin, deliver_match || remote_parent_hit);
-            let shell_target = door_delivers && session_wrapped_is_a_shell(&session_id);
-            if shell_target {
+            let hold = if door_delivers { session_inject_hold(&session_id) } else { None };
+            if let Some(reason) = hold {
+                let why = match reason {
+                    "shell-wrapped" => "is conducting a shell — a submitted line would RUN in it as a command",
+                    _ => "is not proven to be its harness by the launcher walk, so a submitted line is held",
+                };
                 let _ = audit(
                     audit_log,
                     Door::A2a,
                     EventClass::Audit,
                     "a2a.message/send",
-                    "shell-wrapped",
-                    &format!(
-                        "holding for a human: `{session_id}` is conducting a shell — a submitted \
-                         line would RUN in it as a command"
-                    ),
+                    reason,
+                    &format!("holding for a human: `{session_id}` {why}"),
                 );
             }
-            let deliver_now = door_delivers && !shell_target;
+            let deliver_now = door_delivers && hold.is_none();
             // The `from` attribution rides ONLY the QUEUED path (P-P3
             // decision 7: "pending-queue entries a node's send creates").
             // `session_send`'s own `from` mechanism ALSO prefixes an
@@ -7282,9 +7301,10 @@ mod tests {
     /// H1: a `spawnAgent` that IS a shell is refused at the ACT boundary, in
     /// `do_spawn`'s own prologue — the shape the illegal-slug refusal beside it
     /// already holds — so the refusal is audited by name and no process, no
-    /// session and no first-turn keystroke ever happens. The exact shell, a
-    /// shell reached through a launcher, and the `bash -lc <harness>` form the
-    /// door's own comment used to call legitimate are all refused. Which
+    /// session and no first-turn keystroke ever happens. Refused: the exact shell,
+    /// a shell reached through a launcher, `bash -lc <harness>` (a shell that runs
+    /// the harness, so a line typed into it runs as a command), and `env -S
+    /// <harness>` (a command line whose program the walk cannot name). Which
     /// harnesses DO pass is `spawn_agent_harness`'s own test; the spawn itself
     /// is never driven here (`do_spawn` launches the test binary).
     #[test]
@@ -7302,7 +7322,7 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         let audit_log = root.join("log");
 
-        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash"] {
+        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash", "env -S claude"] {
             let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
                 .expect_err("a shell spawnAgent must be refused, not run");
             assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
@@ -7350,8 +7370,9 @@ mod tests {
             ("bash", SpawnAgentRefusal::Shell),
             ("bash -lc claude", SpawnAgentRefusal::Shell),
             ("env bash", SpawnAgentRefusal::Shell),
+            ("env -S claude", SpawnAgentRefusal::Shell),
+            ("env --split-string=claude", SpawnAgentRefusal::Shell),
             ("taskset -c 0 claude", SpawnAgentRefusal::Unproven),
-            ("env -S claude", SpawnAgentRefusal::Unproven),
             ("/opt/x/my-wrapper", SpawnAgentRefusal::Unproven),
             ("no-such-agent", SpawnAgentRefusal::Unproven),
         ];
@@ -7379,7 +7400,7 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         let audit_log = root.join("log");
 
-        for configured in ["taskset -c 0 claude", "env -S claude", "/opt/x/my-wrapper", "no-such-agent"] {
+        for configured in ["taskset -c 0 claude", "/opt/x/my-wrapper", "no-such-agent"] {
             let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
                 .expect_err("an unproven spawnAgent must be refused, not run");
             assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
@@ -7430,7 +7451,7 @@ mod tests {
         for (configured, want) in [
             ("no-such-agent", "skipped-unverified"),
             ("taskset -c 0 claude", "skipped-unverified"),
-            ("env -S claude", "skipped-unverified"),
+            ("env -S claude", "skipped-shell"),
             ("bash -lc claude", "skipped-shell"),
         ] {
             let got = spawn_inject_prompt(id, configured, "remote prompt", &now_iso_utc(), Duration::from_millis(50));
@@ -8087,13 +8108,13 @@ mod tests {
         };
 
         assert_eq!(
-            args_of(&spawn_argv("a2a-11-1790", "claude --dangerously-skip-permissions", None)),
+            args_of(&spawn_argv("a2a-11-1790", "claude", "claude --dangerously-skip-permissions", None)),
             vec![
                 "conduct",
                 "--spawned",
                 "--headless",
                 "--agent",
-                "a2a",
+                "claude",
                 "--id",
                 "a2a-11-1790",
                 "--",
@@ -8104,13 +8125,13 @@ mod tests {
              untouched (still `split_whitespace`, never a shell)"
         );
         assert_eq!(
-            args_of(&spawn_argv("a2a-11-1791", "claude", Some("fix-flaky"))),
+            args_of(&spawn_argv("a2a-11-1791", "claude", "claude", Some("fix-flaky"))),
             vec![
                 "conduct",
                 "--spawned",
                 "--headless",
                 "--agent",
-                "a2a",
+                "claude",
                 "--id",
                 "a2a-11-1791",
                 "--task",
@@ -8157,9 +8178,9 @@ mod tests {
         .into_iter()
         .collect();
 
-        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", None)), expected);
+        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", "claude", None)), expected);
         assert_eq!(
-            env_of(&spawn_argv("a2a-11-2", "claude", Some("fix-flaky"))),
+            env_of(&spawn_argv("a2a-11-2", "claude", "claude", Some("fix-flaky"))),
             expected,
             "S10 adds an argv flag and no environment at all"
         );
@@ -8930,10 +8951,15 @@ mod tests {
     // calls) with a real `UnixListener` standing in for the target session's
     // control socket, exactly like `conduct::graph::send`'s own gate tests.
 
+    /// A conducted harness wrap: labelled `claude`, and the launcher walk resolved
+    /// `claude` (`wrapped_program`), so it carries the proof every pty writer asks.
+    /// A test that needs another shape sets it after this.
     fn conductable_session(id: &str, socket: &std::path::Path) -> SessionRecord {
         let mut rec = fixture_session(id, "working", None);
         rec.conductable = Some(true);
         rec.socket = Some(socket.to_string_lossy().into_owned());
+        rec.agent = "claude".to_string();
+        rec.wrapped_program = Some("claude".to_string());
         rec
     }
 
@@ -9299,10 +9325,11 @@ mod tests {
     }
 
     #[test]
-    fn spawn_died_immediately_message_names_the_program_never_the_full_command_line() {
+    fn spawn_died_immediately_message_names_the_proven_harness_never_the_command_line() {
         let status = exit_one_status(); // exit code 1
-        let msg = spawn_died_immediately_message("claude --dangerously-skip-permissions", status);
-        assert!(msg.contains("`claude`"), "names the configured binary: {msg}");
+        let harness = spawn_agent_harness("claude --dangerously-skip-permissions").unwrap();
+        let msg = spawn_died_immediately_message(harness, status);
+        assert!(msg.contains("`claude`"), "names the proven harness: {msg}");
         assert!(
             !msg.contains("--dangerously-skip-permissions"),
             "never echoes flag values back — taught, not a raw command dump: {msg}"
@@ -11324,6 +11351,90 @@ mod tests {
         let log = std::fs::read_to_string(&audit_log).unwrap();
         assert!(log.contains("shell-wrapped"), "the refusal is named, never silent: {log}");
         assert!(log.contains("is conducting a shell"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// The inject's positive proof: a target labelled `claude` whose walk names
+    /// no program, or names another launcher, is held as `unverified-wrap` and
+    /// nothing is written to it. A target the walk proves is delivered.
+    #[test]
+    fn a_target_the_walk_does_not_prove_is_held_and_a_proven_one_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-unverified-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        // Every label is `claude`; only the walked program differs.
+        let walks = [("proven-target", Some("claude")), ("none-target", None), ("taskset-target", Some("taskset"))];
+        let mut records = Vec::new();
+        let mut listeners = Vec::new();
+        for (id, walked) in walks {
+            let socket = aoide_conduct::graph::conduct_socket_path(id);
+            std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+            listeners.push((id, UnixListener::bind(&socket).unwrap()));
+            let mut rec = conductable_session(id, &socket);
+            rec.agent = "claude".to_string();
+            rec.wrapped_program = walked.map(str::to_string);
+            records.push(rec);
+        }
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".to_string(), sessions: records }).unwrap();
+        let audit_log = root.join("log");
+        let listener_for = |id: &str| listeners.iter().find(|(i, _)| *i == id).unwrap().1.try_clone().unwrap();
+
+        let acc = expect_delivery(listener_for("proven-target"), "the walk-proven harness target is DELIVERED");
+        let result = message_send(
+            &json!({ "message": { "parts": [{ "kind": "text", "text": "proven hello" }], "contextId": "proven-target" } }),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        );
+        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "proven hello\r");
+        assert_eq!(result.unwrap()["id"], "proven-target");
+
+        for id in ["none-target", "taskset-target"] {
+            let listener = listener_for(id);
+            listener.set_nonblocking(true).unwrap();
+            let held = message_send(
+                &json!({ "message": { "parts": [{ "kind": "text", "text": "held" }], "contextId": id } }),
+                &audit_log,
+                "",
+                "",
+                ConnOrigin::Loopback,
+                "",
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(held["status"]["state"], "submitted", "{held}");
+            assert!(listener.accept().is_err(), "`{id}` is never written to");
+        }
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("unverified-wrap"), "the refusal is named, never silent: {log}");
+        assert!(log.contains("is not proven to be its harness"), "{log}");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
