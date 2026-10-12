@@ -166,10 +166,11 @@
 //! came from an explicit, operator-authored declaration.
 
 use super::common::{require_flag, stage_error};
+use super::conduct::{program_is_a_shell, program_is_an_interactive_shell};
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
 use super::send::session_send;
 use super::session_store::{stamp_origin, stamp_resumed_from};
-use super::spawn::session_spawn;
+use super::spawn::{session_spawn, shell_join};
 use aoide_protocol::agents::agent_profile;
 use aoide_protocol::output::{Outcome, Status};
 use aoide_protocol::Invocation;
@@ -319,9 +320,12 @@ fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreS
         // Branch one — demonstrably RUNNING something when the session
         // left. Re-exec it, Enter and all: never for `sudo` (`is_sudo_argv`)
         // — an unattended password prompt in a terminal nobody is watching
-        // is not a restore.
+        // is not a restore. Never for a shell-form argv (`sh -c …`): its
+        // command sits inside the quotes, where `is_sudo_argv` cannot see a
+        // `sudo`, so the session restores its cwd only.
         let argv = restore.argv.as_ref()?;
-        if is_sudo_argv(argv) {
+        let shell_form = program_is_a_shell(argv) && !program_is_an_interactive_shell(argv);
+        if is_sudo_argv(argv) || shell_form {
             return None;
         }
         let mut flags = BTreeMap::new();
@@ -335,7 +339,9 @@ fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreS
         flags.insert("submit".to_string(), "true".to_string());
         return Some(Invocation {
             path: vec!["send".to_string()],
-            args: vec![argv.join(" ")],
+            // Each word POSIX-quoted (`shell_join`), so the typed line re-parses to
+            // the recorded argv: `grep "a b" f` re-runs as `grep 'a b' f`.
+            args: vec![shell_join(argv)],
             flags,
             door,
         });
@@ -1405,6 +1411,59 @@ mod tests {
             restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
             "a recorded sudo foreground must never be re-exec'd"
         );
+    }
+
+    /// A recorded shell-form argv (`sh -c …`, `bash -lc …`) is never re-typed.
+    /// Its command sits inside the quotes, where `is_sudo_argv` cannot see a
+    /// `sudo`, and the join that flattens it would mangle it. Its session gets
+    /// its cwd only, as an idle one does.
+    #[test]
+    fn a_recorded_shell_command_string_is_never_reexeced() {
+        for argv in [
+            vec!["sh", "-c", "sudo apt install x"],
+            vec!["sh", "-c", "sleep 30; true"],
+            vec!["bash", "-lc", "make"],
+        ] {
+            let restore = RestoreSnapshot {
+                cwd: Some("/home/khoa/Aoide".into()),
+                idle: false,
+                argv: Some(argv.iter().map(|s| s.to_string()).collect()),
+                typed: None,
+            };
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{argv:?} must not be re-typed"
+            );
+        }
+    }
+
+    /// The re-exec line re-parses to the recorded argv: a word with a space, a
+    /// quote, a glob or a `$` stays one word, and a plain word stays bare.
+    #[cfg(unix)]
+    #[test]
+    fn a_re_exec_line_re_parses_to_the_recorded_argv() {
+        let argv: Vec<String> = ["grep", "a b", "f", "it's", "x*y", "$HOME", ""].iter().map(|s| s.to_string()).collect();
+        let restore = RestoreSnapshot {
+            cwd: Some("/home/khoa/Aoide".into()),
+            idle: false,
+            argv: Some(argv.clone()),
+            typed: None,
+        };
+        let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
+            .expect("a working restore with argv must construct a send");
+        let line = &inv.args[0];
+        assert_eq!(line, "grep 'a b' f 'it'\\''s' 'x*y' '$HOME' ''");
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("set -- {line}; for a in \"$@\"; do printf '[%s]\\n' \"$a\"; done"))
+            .output()
+            .expect("sh runs");
+        let words: Vec<String> = String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(|l| l[1..l.len() - 1].to_string())
+            .collect();
+        assert_eq!(words, argv, "the typed line must re-parse to the recorded argv");
     }
 
     #[test]

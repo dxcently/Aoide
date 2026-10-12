@@ -824,8 +824,9 @@ count.
   never does is reported `not-ready` and typed at by nothing), its `restore`
   snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
-  running re-execs with `--yes --submit` (never for a recorded `sudo …`,
-  which only restores the cwd); an idle session's clean unsubmitted
+  running re-execs with `--yes --submit` (never for a recorded `sudo …` or a
+  shell-form argv such as `sh -c …`, which only restore the cwd; the words
+  are POSIX-quoted, so the typed line re-parses to the recorded argv); an idle session's clean unsubmitted
   `typed` line preloads with `--yes` and permanently no `--submit`,
   so it sits in the new prompt until a human presses Enter; idle with no
   `typed` delivers nothing. Also the command core the daemon's own boot-time
@@ -2183,8 +2184,8 @@ outside this proof, each under its own rule. `aoide send` and `aoide spawn
 --prompt` passes `--yes`, so no human approves it); the caller is whatever process
 ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
-boot resurrect retypes a shell's own recorded line, never for `sudo`
-(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
+boot resurrect retypes a recorded command's shell-quoted words, never for `sudo`
+or a shell-form argv (`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
 that execs a shell, passes it. It rejects the launchers the walk does not model
 and a label that does not match the wrap. It does not stop a same-uid process
 that names a shell after a harness; for that class the defence is inert content,
@@ -2347,7 +2348,17 @@ session with a hook phase or a trace never carries one: the hook phase, then the
 trace, then the screen decide its `state`, and the screen only for a wrap nothing
 else speaks for. A shell's `state` is its own snapshot (foreground command, then
 screen), whatever hook records it holds; the screen is silenced only for an
-interactive shell at its bare prompt. Readers tolerate its absence and round-trip fields they do not know.
+interactive shell at its bare prompt. A command shell (`bash -c …`,
+`sh ./run.sh`) has no prompt, so it reads `working` while its command runs: it
+has a live child (`sh -c 'make; true'`), or it exec-optimized into the command
+and its pid no longer names a shell (`sh -c 'sleep 30'`). An interactive shell
+is idle at its bare prompt by the process-group check alone. `restore.idle` is
+the same verdict, computed once per tick, so the two never disagree. The one
+accepted loss: a `&` background child under a command shell keeps it `working`
+for as long as that child lives; a launcher the operator typed that holds the
+pid (`sudo`, `doas`, `su`) reads `working` through the same arm, its prompts
+still `awaiting` by sudo's witness and the screen's password row. Readers
+tolerate its absence and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
@@ -2981,14 +2992,18 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 
 - `cwd` — the shell's live working directory at the last tick (`None` when
   unreadable).
-- `idle` — whether the pty's foreground process group was the bare shell
-  itself, the SAME predicate `state` is derived from. Kept as its own field
+- `idle` — the shell's `shell_at_prompt` verdict: the pty's foreground process
+  group is the bare shell (or none), and for a command shell nothing runs
+  under it (no live child, and its pid still a shell). The SAME predicate
+  `state` is derived from. Kept as its own field
   rather than read back off `state` later: the reap sweep overwrites `state`
   to `"done"` BEFORE its ledger write (`reap.rs`'s own ordering, `session
   reap`), so idleness would otherwise be unrecoverable by the time the
   ledger line is written.
-- `argv` — RAW, uncollapsed, unclipped `argv` off `/proc/<fg>/cmdline`
-  (`proc_argv`) while a foreground command runs; `None` while idle. Never
+- `argv` — RAW, uncollapsed, unclipped `argv` off `/proc/<pid>/cmdline`
+  (`proc_argv`) of the running process while not idle: the foreground group
+  leader, or the shell's own pid when a command shell runs under itself, which
+  records the shell's own command line (`sh -c …`). `None` while idle. Never
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.

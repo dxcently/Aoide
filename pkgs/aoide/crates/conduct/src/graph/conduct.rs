@@ -439,7 +439,7 @@ pub fn program_is_a_shell(argv: &[String]) -> bool {
 /// Only the prompt case is silenced by the screen (`shell_snapshot`): a `bash
 /// -c` child shares the shell's process group, so the foreground pgid cannot
 /// tell its question from the bare prompt.
-fn program_is_an_interactive_shell(argv: &[String]) -> bool {
+pub(in crate::graph) fn program_is_an_interactive_shell(argv: &[String]) -> bool {
     shell_verdict(argv) == Some(true)
 }
 
@@ -1260,13 +1260,63 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
     }
 }
 
+/// Whether a process's comm names a shell. Native Windows comm carries the host's
+/// `.exe` suffix; folding it here lets the one list answer on both hosts.
+fn comm_is_a_shell(comm: &str) -> bool {
+    let name = comm.to_ascii_lowercase();
+    let stem: &str = name.strip_suffix(".exe").unwrap_or(&name);
+    SHELL_BASENAMES.contains(&stem)
+}
+
+/// The one predicate `state` and `restore.idle` are both read off. It is
+/// evaluated once per tick in [`conduct_refresh_shell`] and passed to both
+/// snapshots, so the two can never disagree.
+///
+/// A conducted shell is at its own prompt when no foreground command holds its
+/// terminal (`fg <= 0` or `fg == shell_pid`) and nothing runs under it. An
+/// INTERACTIVE shell stops there: its prompt is the process group alone. A
+/// COMMAND shell (`bash -c …`, `sh ./run.sh`) has no prompt, so it is working
+/// while its command runs. The command runs in one of two shapes, and both are
+/// checked: a live child (`sh -c 'make; true'`), or an exec-optimized shell whose
+/// pid became the command itself and so is no longer a shell (`sh -c 'sleep 30'`
+/// leaves `sleep` on the shell's pid). A fact that cannot be read answers as an
+/// idle shell, as it always has.
+fn shell_at_prompt(
+    fg: i32,
+    shell_pid: i32,
+    interactive: bool,
+    comm_of: impl Fn(i32) -> Option<String>,
+    children_of: impl Fn(i32) -> Option<bool>,
+) -> bool {
+    if fg > 0 && fg != shell_pid {
+        return false;
+    }
+    if interactive {
+        return true;
+    }
+    if children_of(shell_pid) == Some(true) {
+        return false;
+    }
+    comm_of(shell_pid).is_none_or(|comm| comm_is_a_shell(&comm))
+}
+
+/// The process a shell that is not idle is running: the foreground group leader,
+/// or the shell's own pid when no foreground group answers (a command shell with
+/// children, or on a host with no foreground group at all).
+fn running_pid(fg: i32, shell_pid: i32) -> i32 {
+    if fg > 0 {
+        fg
+    } else {
+        shell_pid
+    }
+}
+
 /// Pure resolution of a conducted shell's (state, activity, needs_sudo,
-/// question) from the pty foreground pgid and the screen. Injected lookups make
-/// it unit-testable. Real caller passes (proc_comm, proc_command,
-/// proc_has_children). The shell (spawned under `setsid`) is its own process
-/// group leader, so a foreground pgid equal to the shell pid means "at the bare
-/// prompt" (idle); anything else is a command running in the foreground
-/// (working, its command captured as `activity`).
+/// question) from the shell's `idle` verdict ([`shell_at_prompt`]) and the
+/// screen. Injected lookups make it unit-testable. Real caller passes
+/// (proc_comm, proc_command, proc_has_children). An idle shell is labelled with
+/// its own process name; a working one with the command it runs
+/// ([`running_pid`]), as `activity`.
 ///
 /// `prompt` is the screen's verdict (`prompt.rs`), from `conduct_multiplex`.
 /// An INTERACTIVE shell (`interactive`, see `program_is_an_interactive_shell`)
@@ -1278,25 +1328,26 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
 /// `state` is FORCED to `awaiting` regardless of the idle/working computation
 /// above — a prompt needs the user NOW — and `needs_sudo` is set when either
 /// witness was the `sudo` prompt.
+#[allow(clippy::too_many_arguments)]
 fn shell_snapshot(
     fg: i32,
     shell_pid: i32,
+    idle: bool,
     interactive: bool,
     prompt: Option<&Prompt>,
     comm_of: impl Fn(i32) -> Option<String>,
     command_of: impl Fn(i32) -> Option<String>,
     children_of: impl Fn(i32) -> Option<bool>,
 ) -> (&'static str, Option<String>, bool, Option<String>) {
-    let at_prompt = fg <= 0 || fg == shell_pid;
-    let prompt = prompt.filter(|_| !(interactive && at_prompt));
-    let (mut state, activity) = if at_prompt {
+    let prompt = prompt.filter(|_| !(interactive && idle));
+    let (mut state, activity) = if idle {
         // At the bare prompt: idle, but label the row with the shell PROCESS
         // itself (e.g. `bash`) so the terminal roster is never blank.
         ("idle", comm_of(shell_pid))
     } else {
         // A foreground command is running: its cmdline (e.g. `nvim notes.md`,
         // `cargo test`) — the file being edited / the process at work.
-        ("working", command_of(fg))
+        ("working", command_of(running_pid(fg, shell_pid)))
     };
     let fg_is_sudo = fg > 0 && comm_of(fg).as_deref() == Some("sudo");
     let children = if fg_is_sudo { children_of(fg) } else { None };
@@ -1307,30 +1358,29 @@ fn shell_snapshot(
     (state, activity, needs_sudo, prompt.map(|p| p.question.clone()))
 }
 
-/// Pure resolution of a conducted shell's P-C5 restore snapshot from the pty
-/// foreground pgid — mirrors [`shell_snapshot`]'s shape exactly (injected
-/// `argv_of` lookup, pure, unit-tested). `idle` reuses the SAME `fg <= 0 ||
-/// fg == shell_pid` predicate `shell_snapshot` computes for `state` — kept as
-/// its own field here rather than read back off `state` later, since the
-/// reap sweep overwrites `state` to `"done"` before its ledger write.
-/// `argv` is `None` while idle (no foreground process to capture) and RAW
-/// (uncollapsed, unclipped) `/proc/<fg>/cmdline` otherwise — never
-/// `proc_command`'s DISPLAY label, which would re-exec the wrong or a
-/// truncated binary. `typed` is gated to `idle` HERE, structurally, rather
-/// than trusted to the caller: a shell mid-command has no prompt line to
-/// reconstruct, so any `typed` the caller passes while working is dropped.
+/// Pure resolution of a conducted shell's P-C5 restore snapshot — mirrors
+/// [`shell_snapshot`]'s shape exactly (injected `argv_of` lookup, pure,
+/// unit-tested). `idle` is the SAME [`shell_at_prompt`] verdict `state` is
+/// derived from, passed in rather than recomputed, and kept as its own field:
+/// the reap sweep overwrites `state` to `"done"` before its ledger write.
+/// `argv` is `None` while idle (no process to capture) and RAW (uncollapsed,
+/// unclipped) `/proc/<pid>/cmdline` of [`running_pid`] otherwise — never
+/// `proc_command`'s DISPLAY label, which would re-exec the wrong or a truncated
+/// binary. `typed` is gated to `idle` HERE, structurally, rather than trusted to
+/// the caller: a shell mid-command has no prompt line to reconstruct, so any
+/// `typed` the caller passes while working is dropped.
 fn restore_snapshot(
     fg: i32,
     shell_pid: i32,
+    idle: bool,
     cwd: Option<String>,
     typed: Option<String>,
     argv_of: impl Fn(i32) -> Option<Vec<String>>,
 ) -> RestoreSnapshot {
-    let idle = fg <= 0 || fg == shell_pid;
     RestoreSnapshot {
         cwd,
         idle,
-        argv: if idle { None } else { argv_of(fg) },
+        argv: if idle { None } else { argv_of(running_pid(fg, shell_pid)) },
         typed: if idle { typed } else { None },
     }
 }
@@ -1359,17 +1409,19 @@ fn conduct_refresh_shell(
     typed: Option<String>,
 ) {
     let fg = pty.foreground_pgid();
+    let idle = shell_at_prompt(fg, shell_pid, interactive, proc_comm, proc_has_children);
     let cwd = cwd_for(fg, shell_pid, proc_cwd);
     let (state, activity, needs_sudo, question) = shell_snapshot(
         fg,
         shell_pid,
+        idle,
         interactive,
         prompt,
         proc_comm,
         proc_command,
         proc_has_children,
     );
-    let restore = restore_snapshot(fg, shell_pid, cwd.clone(), typed, proc_argv);
+    let restore = restore_snapshot(fg, shell_pid, idle, cwd.clone(), typed, proc_argv);
     let facts = ShellFacts { cwd: cwd.as_deref(), activity: activity.as_deref(), state, restore };
     do_session_refresh(id, Some(facts), needs_sudo, question.as_deref());
 }
@@ -2521,6 +2573,7 @@ mod tests {
             100,
             100,
             true,
+            true,
             None,
             |_| Some("bash".to_string()),
             |_| panic!("command_of should not be consulted at the bare prompt"),
@@ -2537,6 +2590,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             200,
             100,
+            false,
             true,
             None,
             |_| Some("cargo".to_string()),
@@ -2559,6 +2613,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             300,
             100,
+            false,
             true,
             None,
             |_| Some("sudo".to_string()),
@@ -2581,6 +2636,7 @@ mod tests {
         let (state, activity, needs_sudo, _) = shell_snapshot(
             300,
             100,
+            false,
             true,
             None,
             |_| Some("sudo".to_string()),
@@ -2601,6 +2657,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             200,
             100,
+            false,
             true,
             Some(&ask),
             |_| Some("cp".to_string()),
@@ -2617,6 +2674,7 @@ mod tests {
             100,
             100,
             true,
+            true,
             Some(&ask),
             |_| Some("bash".to_string()),
             |_| panic!("command_of should not be consulted at the bare prompt"),
@@ -2632,16 +2690,16 @@ mod tests {
         let comm = |pid: i32| Some(if pid == 200 { "make" } else { "bash" }.to_string());
         let sudo = asking("[sudo] password for khoa:", true);
         let (state, _, needs_sudo, question) =
-            shell_snapshot(200, 100, true, Some(&sudo), comm, |_| None, |_| None);
+            shell_snapshot(200, 100, false, true, Some(&sudo), comm, |_| None, |_| None);
         assert_eq!(state, "awaiting");
         assert!(needs_sudo);
         assert_eq!(question.as_deref(), Some("[sudo] password for khoa:"));
         // Any other row is a question, not the human's sudo password.
         let other = asking("Password:", false);
-        let (state, _, needs_sudo, _) = shell_snapshot(200, 100, true, Some(&other), comm, |_| None, |_| None);
+        let (state, _, needs_sudo, _) = shell_snapshot(200, 100, false, true, Some(&other), comm, |_| None, |_| None);
         assert_eq!((state, needs_sudo), ("awaiting", false));
         // At the bare prompt the sudo row is not the shell's question either.
-        let (state, _, needs_sudo, _) = shell_snapshot(100, 100, true, Some(&sudo), comm, |_| None, |_| None);
+        let (state, _, needs_sudo, _) = shell_snapshot(100, 100, true, true, Some(&sudo), comm, |_| None, |_| None);
         assert_eq!((state, needs_sudo), ("idle", false));
     }
     #[test]
@@ -2652,6 +2710,7 @@ mod tests {
         let (state, activity, needs_sudo, question) = shell_snapshot(
             100,
             100,
+            true,
             false,
             Some(&ask),
             |_| Some("bash".to_string()),
@@ -2662,6 +2721,91 @@ mod tests {
         assert_eq!(activity.as_deref(), Some("bash"));
         assert!(!needs_sudo);
         assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
+    }
+    #[test]
+    fn comm_is_a_shell_folds_case_and_the_windows_suffix() {
+        assert!(comm_is_a_shell("sh"));
+        assert!(comm_is_a_shell("bash.exe"));
+        assert!(comm_is_a_shell("ZSH"));
+        assert!(!comm_is_a_shell("sleep"));
+        assert!(!comm_is_a_shell("sudo"));
+    }
+    #[test]
+    fn shell_at_prompt_is_the_process_group_alone_for_an_interactive_shell() {
+        // An interactive shell at its own prompt is idle whatever sits beneath
+        // it: neither the child table nor the comm is consulted.
+        assert!(shell_at_prompt(100, 100, true, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
+        assert!(shell_at_prompt(0, 100, true, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
+    }
+    #[test]
+    fn shell_at_prompt_is_working_for_a_command_shell_that_has_a_child() {
+        // `sh -c 'sleep 30; true'`: the shell stays alive with `sleep` as its child.
+        assert!(!shell_at_prompt(
+            100,
+            100,
+            false,
+            |_| Some("sh".to_string()),
+            |pid| {
+                assert_eq!(pid, 100);
+                Some(true)
+            }
+        ));
+    }
+    #[test]
+    fn shell_at_prompt_is_working_for_a_command_shell_that_exec_d_its_command() {
+        // `sh -c 'sleep 30'`: bash exec-optimizes, so pid 100 IS `sleep`, with no
+        // children. It is no longer a shell, so it is working.
+        assert!(!shell_at_prompt(100, 100, false, |_| Some("sleep".to_string()), |_| Some(false)));
+    }
+    #[test]
+    fn shell_at_prompt_is_idle_for_a_command_shell_that_is_still_a_shell_with_no_child() {
+        assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| Some(false)));
+        // A fact that cannot be read answers as an idle shell, as it always has.
+        assert!(shell_at_prompt(100, 100, false, |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| None));
+        // Native Windows: comm carries `.exe`, and a host with no foreground group
+        // answers 0, so the bare test is the pid's own process name.
+        assert!(shell_at_prompt(0, 100, false, |_| Some("bash.exe".to_string()), |_| Some(false)));
+    }
+    #[test]
+    fn shell_at_prompt_is_working_while_a_foreground_command_holds_the_terminal() {
+        // A foreground group that is not the shell: working, and neither fact is probed.
+        assert!(!shell_at_prompt(200, 100, false, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
+        assert!(!shell_at_prompt(200, 100, true, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
+        // A host with no foreground group that still has a live child (Windows).
+        assert!(!shell_at_prompt(0, 100, false, |_| Some("cmd.exe".to_string()), |_| Some(true)));
+    }
+    #[test]
+    fn shell_snapshot_a_working_command_shell_labels_its_own_command() {
+        // Working off its children (fg is the shell): the activity is the shell's
+        // own conducted command line, read off the shell's pid.
+        let (state, activity, needs_sudo, _) = shell_snapshot(
+            100,
+            100,
+            false,
+            false,
+            None,
+            |_| Some("sh".to_string()),
+            |pid| {
+                assert_eq!(pid, 100);
+                Some("sh -c 'sleep 30; true'".to_string())
+            },
+            |_| panic!("children_of is not consulted when fg isn't sudo"),
+        );
+        assert_eq!(state, "working");
+        assert_eq!(activity.as_deref(), Some("sh -c 'sleep 30; true'"));
+        assert!(!needs_sudo);
+    }
+    #[test]
+    fn restore_snapshot_a_command_shell_with_no_foreground_group_records_its_own_argv() {
+        const SHELL_PID: i32 = 100;
+        let argv = vec!["sh".to_string(), "-c".to_string(), "sleep 30; true".to_string()];
+        let snap = restore_snapshot(0, SHELL_PID, false, None, None, |pid| {
+            assert_eq!(pid, SHELL_PID);
+            Some(argv.clone())
+        });
+        assert!(!snap.idle);
+        assert_eq!(snap.argv, Some(argv));
     }
     #[test]
     fn cwd_for_prefers_foreground_process_then_falls_back_to_shell() {
@@ -2723,6 +2867,7 @@ mod tests {
         let snap = restore_snapshot(
             SHELL_PID,
             SHELL_PID,
+            true,
             Some("/home/khoa/Aoide".to_string()),
             Some("cargo test".to_string()),
             |_| panic!("argv_of should not be consulted at the bare prompt"),
@@ -2740,6 +2885,7 @@ mod tests {
         let snap = restore_snapshot(
             FG_PID,
             SHELL_PID,
+            false,
             Some("/home/khoa/Aoide".to_string()),
             // A stale typed buffer from before the foreground command started
             // — must be dropped, never leak through while a command runs.
@@ -5054,6 +5200,142 @@ mod tests {
             "awk",
             false,
             true,
+        );
+    }
+
+    /// One real `aoide conduct --headless` session under its own stage, for the
+    /// state tests below. Field order is drop order: the env is restored before
+    /// the lock is released, and `Drop` kills and removes only what this started.
+    #[cfg(unix)]
+    struct LiveSession {
+        tag: String,
+        root: PathBuf,
+        child: std::process::Child,
+        _env: EnvVars,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    #[cfg(unix)]
+    impl LiveSession {
+        fn start(tag: &str, argv: &[&str]) -> Self {
+            let lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let env = EnvVars::save(&[
+                "AOIDE_STAGE_DIR",
+                "AOIDE_STATE_DIR",
+                "XDG_RUNTIME_DIR",
+                "AOIDE_AUDIT_LOG",
+                "AOIDE_SESSION_ID",
+            ]);
+            let root = unique_stage(tag);
+            let stage = root.join("stage");
+            let state = root.join("state");
+            std::fs::create_dir_all(&stage).unwrap();
+            std::env::set_var("AOIDE_STAGE_DIR", &stage);
+            std::env::set_var("AOIDE_STATE_DIR", &state);
+            std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+            std::env::set_var("XDG_RUNTIME_DIR", &root);
+            std::env::remove_var("AOIDE_SESSION_ID");
+            let child = std::process::Command::new(built_aoide_bin())
+                .args(["conduct", "--headless", "--id", tag, "--agent", "worker", "--"])
+                .args(argv)
+                .env("AOIDE_STAGE_DIR", &stage)
+                .env("AOIDE_STATE_DIR", &state)
+                .env("AOIDE_AUDIT_LOG", root.join("log"))
+                .env("XDG_RUNTIME_DIR", &root)
+                .env_remove("AOIDE_SESSION_ID")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("aoide conduct starts");
+            LiveSession { tag: tag.to_string(), root, child, _env: env, _lock: lock }
+        }
+
+        fn wait_for(&self, budget: std::time::Duration, ready: impl Fn(&SessionRecord) -> bool) -> Option<SessionRecord> {
+            wait_for_record(&self.tag, budget, ready)
+        }
+
+        /// Writes `bytes` into the session's inbox, the way `aoide send` does.
+        fn type_bytes(&self, bytes: &[u8]) {
+            use std::io::Write as _;
+            let mut door = std::os::unix::net::UnixStream::connect(conduct_socket_path(&self.tag))
+                .expect("the session's inbox is bound while it runs");
+            door.write_all(bytes).unwrap();
+        }
+
+        fn wait_exit(&mut self) -> std::process::ExitStatus {
+            self.child.wait().expect("conduct returns")
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for LiveSession {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// A command shell reads WORKING for as long as its command runs, and
+    /// reads `done` once the command has ended. Run for two shapes: a leaf
+    /// command that the shell exec-optimizes away (its pid becomes the command,
+    /// with no children), and a command followed by another step (the shell
+    /// stays alive with the command as its child).
+    #[cfg(unix)]
+    fn a_command_shell_reads_working_until_its_command_ends(tag: &str, argv: &[&str]) {
+        let mut session = LiveSession::start(tag, argv);
+        let Some(working) = session.wait_for(std::time::Duration::from_secs(30), |r| r.state == "working") else {
+            panic!("the command shell never read working while its command ran");
+        };
+        assert!(
+            working.restore.as_ref().is_some_and(|r| !r.idle),
+            "a working command shell must not snapshot as idle: {:?}",
+            working.restore
+        );
+        let status = session.wait_exit();
+        assert!(status.success(), "conduct exited {status:?}");
+        assert!(
+            session.wait_for(std::time::Duration::from_secs(10), |r| r.state == "done").is_some(),
+            "the command ended but the record never left working"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_shell_that_became_its_command_reads_working_while_it_runs() {
+        a_command_shell_reads_working_until_its_command_ends("sb-exec-leaf", &["sh", "-c", "sleep 3"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_shell_with_a_child_command_reads_working_while_it_runs() {
+        a_command_shell_reads_working_until_its_command_ends("sb-child", &["sh", "-c", "sleep 3; true"]);
+    }
+
+    /// An interactive shell reads idle at its own prompt, and a command typed
+    /// there reads working for as long as it runs. Its bare-prompt rule is the
+    /// process-group check alone, which this change leaves as it was.
+    #[cfg(unix)]
+    #[test]
+    fn an_interactive_shell_is_idle_at_its_prompt_and_working_while_its_command_runs() {
+        let session = LiveSession::start("sb-interactive", &["bash", "--norc", "--noprofile", "-i"]);
+        assert!(
+            session.wait_for(std::time::Duration::from_secs(10), |r| r.state == "idle").is_some(),
+            "an interactive shell never read idle at its prompt"
+        );
+        assert!(
+            session.wait_for(std::time::Duration::from_millis(2500), |r| r.state != "idle").is_none(),
+            "an interactive shell at its own prompt must stay idle"
+        );
+        session.type_bytes(b"sleep 3\n");
+        assert!(
+            session.wait_for(std::time::Duration::from_secs(15), |r| r.state == "working").is_some(),
+            "a command typed at the interactive prompt never read working"
+        );
+        assert!(
+            session.wait_for(std::time::Duration::from_secs(15), |r| r.state == "idle").is_some(),
+            "the interactive shell never returned to idle after its command"
         );
     }
 }

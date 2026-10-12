@@ -390,8 +390,9 @@ fn shell_quote(s: &str) -> String {
 }
 
 /// Join `argv` into ONE POSIX shell command-line string — the "one slot"
-/// substitution a quoted `{cmd}` placeholder needs.
-fn shell_join(argv: &[String]) -> String {
+/// substitution a quoted `{cmd}` placeholder needs, and the line a resurrect
+/// re-types. `pub(in crate::graph)`: the one quoter, not a second one.
+pub(in crate::graph) fn shell_join(argv: &[String]) -> String {
     argv.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")
 }
 

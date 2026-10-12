@@ -314,6 +314,11 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   shell's screen is silenced at its bare prompt; a shell given a command or a
   script is heard. A non-shell session with a hook phase or a trace is never
   touched.
+- **`shell_at_prompt`** is the one idle verdict a conducted shell's `state` and
+  `restore.idle` are both read off. An interactive shell is idle at its bare
+  prompt (the pgid check); a command shell (`bash -c …`) is working while it
+  has a child, or once it exec'd into its command (see AGENTS.md and
+  CONTRACTS.md, the shell-state paragraph).
 - **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape
   stripper: the screen source reads its window through it, and
   `aoide-conductor`'s log tail renders through it.
@@ -1088,7 +1093,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   re-execs it (`--yes --submit`) — EXCEPT when `argv[0]`'s basename is
   `sudo` (`is_sudo_argv`, the orchestrator's ruling on durable-sessions
   plan open knob 5): a privileged command is never re-exec'd unattended, so
-  only the cwd restores. Idle (`idle: true`) with a clean `typed` line
+  only the cwd restores. A shell-form `argv` (`sh -c …`) is refused the same
+  way, and the re-typed words are POSIX-quoted (`shell_join`). Idle (`idle: true`) with a clean `typed` line
   preloads it (`--yes`, and — permanently — no `--submit`): the text sits
   in the new prompt until a human presses Enter, never running itself. Idle
   with no `typed` delivers nothing; a terminal reopened at its own cwd is

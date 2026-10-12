@@ -1303,11 +1303,20 @@ in the message.
   from `state` (P-C5).** `reap.rs`'s sweep assigns `s.state = "done"`
   BEFORE calling `ledger_session_exit` — by the time the ledger line is
   written, the pre-exit idle/working state is already gone from `state`.
-  `restore_snapshot` computes `idle` off the SAME `fg <= 0 || fg ==
-  shell_pid` predicate `shell_snapshot` uses for `state`, but stores it
-  independently, so a later reader (the ledger, and eventually a resurrect
-  consumer) never has to reconstruct it from a field the reap path has
-  already overwritten.
+  `idle` is `shell_at_prompt`'s verdict, computed ONCE per tick in
+  `conduct_refresh_shell` and handed to both `shell_snapshot` (for `state`)
+  and `restore_snapshot` (for the field), so the two cannot disagree. It is
+  stored independently, so a later reader (the ledger, and eventually a
+  resurrect consumer) never has to reconstruct it from a field the reap path
+  has already overwritten. Don't recompute it inside either snapshot.
+- **A command shell is decided by `shell_at_prompt`, never the pgid alone.**
+  `bash -c "sleep 30"` exec-optimizes, so the conducted pid becomes `sleep`
+  and the pgid check reads it at the prompt. `shell_at_prompt` adds two
+  reads for a command shell only (`!interactive`): a live child
+  (`proc_has_children`), or a comm that is no longer a shell name
+  (`comm_is_a_shell`, `.exe` folded). Interactive shells return on the pgid
+  check and read nothing more. The accepted loss is stated once, in
+  CONTRACTS.md's shell-state paragraph.
 - **`proc_argv` and `proc_command` are deliberately two functions, never
   merged (P-C5).** `proc_command` is a DISPLAY label — it basename-
   collapses `argv[0]` and truncates at 48 chars — built for the roster's
@@ -1424,6 +1433,14 @@ in the message.
   restore: at best it hangs forever on a password prompt nobody is
   watching, at worst it silently re-runs something destructive. The cwd
   still restores; only the delivery is refused.
+- **A shell-form argv is never re-typed (`sh -c …`, `bash ./run.sh`).**
+  `restore_delivery` refuses it with the same `None` as `sudo`: its command
+  sits inside the quotes, where `is_sudo_argv` cannot see a `sudo`. The test
+  is `program_is_a_shell && !program_is_an_interactive_shell`, the existing
+  predicates, so an interactive shell's own argv still delivers as before.
+  Re-typed words are `shell_join`'s POSIX quoting (`spawn.rs`, the one quoter).
+  Its `=` bare-set edge is accepted: a first word `NAME=value` would parse as
+  an assignment. It is not a realistic program name.
 - **The terminal candidate arm is gated on `entry.restore.is_some()`, never
   on `agent == "shell"` (P-C6).** `resolve_candidate` tries the harness arm
   first (`AgentProfile.resume_args`, unchanged) and only falls to the
@@ -1493,7 +1510,8 @@ in the message.
   - **A shell's screen is silenced only for an interactive shell at its bare
     prompt.** `program_is_an_interactive_shell` reads the wrapped argv: no `-c`
     string and no script operand. For such a shell `shell_snapshot` drops the
-    prompt when `fg <= 0` or `fg == shell_pid`, so its own `read -p` is not
+    prompt when the shell is idle (`interactive && idle`, which for an
+    interactive shell is the pgid check alone), so its own `read -p` is not
     heard. A shell given `-c` or a script (`bash -c "apt install x"`,
     `sh ./run.sh`) shares its process group with the command it runs, so the
     foreground pgid cannot tell that command's question from the prompt; its
