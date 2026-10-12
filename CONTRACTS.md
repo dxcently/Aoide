@@ -824,19 +824,22 @@ count.
   never does is reported `not-ready` and typed at by nothing), its `restore`
   snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
-  running re-execs with `--yes --submit`, unless its recorded argv is refused
-  by `resurrect.rs::restore_argv_refusal` (the one list), which restores the
-  cwd only. The refusals: a leading `NAME=value` word (`A=1 sudo x`); a control,
-  bidi or invisible character, a newline or U+FFFD in any word; a line over
-  4096 bytes; a privilege program anywhere in its launcher chain (`sudo`,
-  `doas`, `su`, `pkexec`, `run0`); a shell-form argv such as `sh -c …`. The
-  words are POSIX-quoted (`shell_join`), so the typed line re-parses to the
-  recorded argv for an argv that passes. A same-uid process can rewrite its
-  own `/proc` cmdline, so the refusals judge the text typed, not the process
-  it names. An idle session's clean unsubmitted `typed` line preloads with
-  `--yes` and permanently no `--submit`, so it sits in the new prompt until a
-  human presses Enter; idle with no `typed` delivers nothing. Also the command
-  core the daemon's own boot-time
+  running is TYPED at the prompt, never submitted (`--yes`, no `--submit`),
+  unless `resurrect.rs::restore_argv_refusal` (the one list) refuses its
+  recorded argv, which restores the cwd only. The refusals: a leading
+  `NAME=value` word (`A=1 sudo x`); a control, bidi or invisible character, a
+  newline or U+FFFD in any word (a control byte, `\r` included, would act as
+  Enter at the prompt); a line over 4096 bytes; a privilege program anywhere in
+  its launcher chain (`sudo`, `doas`, `su`, `pkexec`, `run0`); a shell-form
+  argv such as `sh -c …`. The words are POSIX-quoted (`shell_join`), so the
+  typed line re-parses to the recorded argv for an argv that passes. Never
+  submitted, because an argv is attacker-choosable: a same-uid process can
+  rewrite its own `/proc` cmdline, and reading argv cannot prove that nothing
+  in it waits on a password prompt, so the human who reads the line presses
+  Enter. An idle session's clean unsubmitted `typed` line is typed the same way
+  (`--yes`, no `--submit`) and sits in the new prompt until a human presses
+  Enter; idle with no `typed` delivers nothing. Also the command core the
+  daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -2359,16 +2362,35 @@ trace, then the screen decide its `state`, and the screen only for a wrap nothin
 else speaks for. A shell's `state` is its own snapshot (foreground command, then
 screen), whatever hook records it holds; the screen is silenced only for an
 interactive shell at its bare prompt. A command shell (`bash -c …`,
-`sh ./run.sh`) has no prompt, so it reads `working` while its command runs: it
-has a live child (`sh -c 'make; true'`), or it exec-optimized into the command
-and its pid no longer names a shell (`sh -c 'sleep 30'`). An interactive shell
-is idle at its bare prompt by the process-group check alone. `restore.idle` is
-the same verdict, computed once per tick, so the two never disagree. The one
-accepted loss: a `&` background child under a command shell keeps it `working`
-for as long as that child lives; a launcher the operator typed that holds the
-pid (`sudo`, `doas`, `su -c`) reads `working` through the same arm, its prompts
-still `awaiting` by sudo's witness and the screen's password row. A bare `su`
-is an interactive shell and reads idle at its prompt. Readers
+`sh ./run.sh`) has no prompt, so its idle verdict is `shell_at_prompt`'s
+ordered reads, the first that answers ending it: a foreground command holds
+the terminal, working; an interactive shell at its bare prompt, idle by the
+process-group check alone; a live child (`sh -c 'make; true'`), working; the
+shell's executable differs from the file its program name resolves to, read
+before the spawn, working (`sh -c 'sleep 30'` exec-optimizes, whatever comm
+the command renames itself to; `sh -c 'exec bash'` reads working by design);
+the shell's CPU time
+(`utime + stime`) rose since the previous tick, working (a builtin-only loop
+such as `while :; do :; done`); comm names no shell, working; otherwise idle.
+The executable and CPU facts are the wrap's own memory, read from
+`/proc/<pid>` on Linux; elsewhere those two reads are skipped and the comm
+read decides. A fact that cannot be read is no evidence either way, so the
+reads after it still decide. The comm read is the last one, not a second
+exec test: it is what keeps a launcher the operator typed (`sudo`, `doas`,
+`su -c`), which execs nothing and at its password prompt has no child and
+burns no CPU, reading working. An interactive shell is idle at its bare prompt
+by the process-group check alone. `restore.idle` is the same verdict, computed
+once per tick, so the two never disagree. The accepted losses: a `&`
+background child under a command shell keeps it `working` for as long as
+that child lives; a command shell started under an exec launcher (`env`,
+`nice`, `timeout`) reads `working` from its first tick, because the
+launcher's file is its baseline, and a command shell is running a command
+anyway, so the error is toward `working`; a command shell blocked in a
+builtin `read` has no child and
+burns no CPU, so it reads idle, and the screen's prompt detection is what hears
+it. A bare `su` is an interactive shell and reads idle at its prompt. A
+password prompt is still `awaiting`: by sudo's own witness for `sudo`, and by
+the screen's password row for `doas` and `su`. Readers
 tolerate its absence and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)

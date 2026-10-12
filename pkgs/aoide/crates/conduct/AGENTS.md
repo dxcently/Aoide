@@ -1314,6 +1314,12 @@ in the message.
   and the pgid check reads it at the prompt. An interactive shell is the pgid
   check alone; keep it that way. The reads and their order are CONTRACTS.md's
   shell-state paragraph.
+- **The executable baseline is read BEFORE the spawn, from the program's name
+  (`program_exe`, `execvp`'s own resolution), never from the child after it.**
+  A read after the spawn can land after the shell has exec'd its command, and
+  then the command's file is the baseline and an exec reads idle: the race the
+  `prctl` rename e2e test lost under load. The CPU sample is taken on every
+  tick. Don't move either read into `shell_at_prompt`.
 - **`proc_argv` and `proc_command` are deliberately two functions, never
   merged (P-C5).** `proc_command` is a DISPLAY label — it basename-
   collapses `argv[0]` and truncates at 48 chars — built for the roster's
@@ -1352,19 +1358,16 @@ in the message.
   no typed line, ever; don't "helpfully" instantiate the buffer anyway and
   rely on `restore_snapshot`'s idle-gate to hide it — the buffer must not
   exist for a session that structurally cannot have a prompt to reconstruct.
-- **A restored terminal's preloaded line NEVER runs itself (P-C6, durable-
-  sessions plan) — the consumption-side twin of `typed`'s own capture-side
-  refusal above, and this crate's single most important resurrect
-  invariant.** `resurrect.rs::restore_delivery` hardcodes two branches, each
-  building its OWN `session_send` flag map inline, and MUST NEVER be
-  collapsed into one "deliver" helper parameterized by a `submit: bool`: the
-  re-exec branch (a demonstrably RUNNING foreground command) carries `--yes
-  --submit`; the preload branch (an idle session's clean `typed` line)
-  carries `--yes` and PERMANENTLY omits `submit` from its flag map. A shared
-  boolean parameter is exactly the shape that lets a later refactor add
-  `--submit` to the preload branch by changing one call site's argument —
-  don't introduce one. A stale `rm -rf` sitting in `typed` and firing itself
-  at boot, unattended, is the failure this separation exists to prevent.
+- **A restored line is NEVER submitted (P-C6, durable-sessions plan) — the
+  consumption-side twin of `typed`'s own capture-side refusal above, and this
+  crate's single most important resurrect invariant.**
+  `resurrect.rs::restore_delivery` builds ONE flag map, with `--yes` and no
+  `submit`, for both sources of the line: a busy session's recorded argv and
+  an idle session's clean `typed` line. Don't add `submit` to it. An argv is
+  attacker-choosable, and reading one cannot prove what it will do (a password
+  prompt, a destructive command); the human who reads the typed line presses
+  Enter. A stale `rm -rf` sitting in `typed`, or a rewritten argv, firing
+  itself at boot unattended is the failure this prevents.
 - **Restore delivery is SELF-ATTRIBUTED (`--from <new-id>`), and
   `send.rs`'s self-attribution rule delivers such bytes verbatim — both
   halves stay, together (P-C7 live finding #2).** `send` prefixes a

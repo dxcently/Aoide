@@ -1303,9 +1303,101 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
     }
 }
 
+/// The identity of the file a process runs: the device and inode its
+/// `/proc/<pid>/exe` names. Two reads of the same identity are the same
+/// executable, whatever the process has renamed itself to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExeId {
+    dev: u64,
+    ino: u64,
+}
+
+/// What a conducted shell's wrap remembers between ticks. The wrap records it
+/// itself, from the process table; the shell never reports it.
+#[derive(Debug)]
+struct ShellWatch {
+    /// The executable the program name resolves to, read BEFORE the spawn (see
+    /// [`program_exe`]). A later, different identity means the shell exec'd
+    /// into its command.
+    exe_at_spawn: Option<ExeId>,
+    /// `utime + stime` at the previous tick. A rise since then means the shell
+    /// itself is running, with no child to show for it.
+    cpu_at_last_tick: Option<u64>,
+}
+
+impl ShellWatch {
+    fn new(exe_at_spawn: Option<ExeId>) -> Self {
+        Self { exe_at_spawn, cpu_at_last_tick: None }
+    }
+}
+
+/// The executable a program name starts, resolved the way `execvp` resolves
+/// it: a name with a `/` is itself, and a bare name is the first `PATH` entry
+/// holding a file of that name. It is read BEFORE the spawn. A read after the
+/// spawn can land after the shell has exec'd its command, and then the
+/// command's own file would be taken for the shell's: `sh -c 'exec python3 …'`
+/// would read idle.
+#[cfg(target_os = "linux")]
+fn program_exe(program: &str) -> Option<ExeId> {
+    use std::os::unix::fs::MetadataExt;
+    let candidates: Vec<std::path::PathBuf> = if program.contains('/') {
+        vec![program.into()]
+    } else {
+        std::env::var("PATH")
+            .ok()?
+            .split(':')
+            .map(|dir| std::path::Path::new(if dir.is_empty() { "." } else { dir }).join(program))
+            .collect()
+    };
+    candidates.iter().find_map(|path| {
+        let meta = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
+        Some(ExeId { dev: meta.dev(), ino: meta.ino() })
+    })
+}
+
+/// Non-Linux hosts have no `/proc/<pid>/exe` to compare with, so there is no
+/// baseline to read here.
+#[cfg(not(target_os = "linux"))]
+fn program_exe(_program: &str) -> Option<ExeId> {
+    None
+}
+
+/// The executable identity of `pid`, or `None` when this host cannot read it.
+#[cfg(target_os = "linux")]
+fn proc_exe(pid: i32) -> Option<ExeId> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(format!("/proc/{pid}/exe")).ok()?;
+    Some(ExeId { dev: meta.dev(), ino: meta.ino() })
+}
+
+/// Non-Linux hosts have no `/proc/<pid>/exe`: the executable check is skipped
+/// there, and the comm check is the whole exec test.
+#[cfg(not(target_os = "linux"))]
+fn proc_exe(_pid: i32) -> Option<ExeId> {
+    None
+}
+
+/// `utime + stime` of `pid` in clock ticks, from `/proc/<pid>/stat`. `None`
+/// on a host with no such file, and the CPU check is skipped there.
+#[cfg(target_os = "linux")]
+fn proc_cpu_ticks(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after the parenthesised comm, which may hold spaces. State is
+    // field 3, so utime (14) and stime (15) sit at indexes 11 and 12.
+    let fields: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
+    let utime: u64 = fields.get(11)?.parse().ok()?;
+    let stime: u64 = fields.get(12)?.parse().ok()?;
+    Some(utime + stime)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn proc_cpu_ticks(_pid: i32) -> Option<u64> {
+    None
+}
+
 /// Whether a process's comm names a shell. Native Windows comm carries the
-/// host's
-/// `.exe` suffix; folding it here lets the one list answer on both hosts.
+/// host's `.exe` suffix; folding it here lets the one list answer on both
+/// hosts.
 fn comm_is_a_shell(comm: &str) -> bool {
     let name = comm.to_ascii_lowercase();
     let stem: &str = name.strip_suffix(".exe").unwrap_or(&name);
@@ -1316,24 +1408,43 @@ fn comm_is_a_shell(comm: &str) -> bool {
 /// evaluated once per tick in [`conduct_refresh_shell`] and passed to both
 /// snapshots, so the two can never disagree.
 ///
-/// A conducted shell is at its own prompt when no foreground command holds its
-/// terminal (`fg <= 0` or `fg == shell_pid`) and nothing runs under it. An
-/// INTERACTIVE shell stops there: its prompt is the process group alone. A
-/// COMMAND shell (`bash -c …`, `sh ./run.sh`) has no prompt, so it is working
-/// while its command runs. The command runs in one of two shapes, and both are
-/// checked: a live child (`sh -c 'make; true'`), or an exec-optimized shell
-/// whose
-/// pid became the command itself and so is no longer a shell (`sh -c 'sleep
-/// 30'`
-/// leaves `sleep` on the shell's pid). A fact that cannot be read answers as an
-/// idle shell, as it always has.
+/// The reads run in this order, and the first that answers ends it:
+/// 1. a foreground command holds the terminal (`fg` names neither `<= 0` nor
+///    the shell): working;
+/// 2. an interactive shell at its own prompt: idle, the process group alone;
+/// 3. a live child (`sh -c 'make; true'`): working;
+/// 4. the shell's executable changed since spawn: working. An exec-optimized
+///    command (`sh -c 'sleep 30'`) is caught here, whatever comm it renames
+///    itself to. So is `sh -c 'exec bash'`, which reads working by design;
+/// 5. CPU time rose since the last tick: working. This catches a command that
+///    runs only builtins (`sh -c 'while :; do :; done'`);
+/// 6. comm names no shell: working. This is the launcher the operator typed
+///    (`sudo`, `doas`, `su -c`) holding the pid. It execs nothing, and at its
+///    password prompt it has no child and burns no CPU, so only its name says
+///    it is busy. Reading it idle would let the typed buffer capture the
+///    password;
+/// 7. otherwise idle.
+///
+/// A fact that cannot be read answers as an idle shell, as it always has. An
+/// unreadable executable or CPU sample is no evidence either way, so the reads
+/// after it still decide. The CPU sample is taken on every call, so a tick
+/// that returns early still moves the baseline forward.
+#[allow(clippy::too_many_arguments)]
 fn shell_at_prompt(
     fg: i32,
     shell_pid: i32,
     interactive: bool,
+    watch: &mut ShellWatch,
     comm_of: impl Fn(i32) -> Option<String>,
     children_of: impl Fn(i32) -> Option<bool>,
+    exe_of: impl Fn(i32) -> Option<ExeId>,
+    cpu_of: impl Fn(i32) -> Option<u64>,
 ) -> bool {
+    let cpu = cpu_of(shell_pid);
+    let cpu_rose = matches!((cpu, watch.cpu_at_last_tick), (Some(now), Some(then)) if now > then);
+    if cpu.is_some() {
+        watch.cpu_at_last_tick = cpu;
+    }
     if fg > 0 && fg != shell_pid {
         return false;
     }
@@ -1341,6 +1452,13 @@ fn shell_at_prompt(
         return true;
     }
     if children_of(shell_pid) == Some(true) {
+        return false;
+    }
+    let exec_changed = matches!(
+        (exe_of(shell_pid), watch.exe_at_spawn),
+        (Some(now), Some(at_spawn)) if now != at_spawn
+    );
+    if exec_changed || cpu_rose {
         return false;
     }
     comm_of(shell_pid).is_none_or(|comm| comm_is_a_shell(&comm))
@@ -1454,11 +1572,21 @@ fn conduct_refresh_shell(
     pty: &Pty,
     shell_pid: i32,
     interactive: bool,
+    watch: &mut ShellWatch,
     prompt: Option<&Prompt>,
     typed: Option<String>,
 ) {
     let fg = pty.foreground_pgid();
-    let idle = shell_at_prompt(fg, shell_pid, interactive, proc_comm, proc_has_children);
+    let idle = shell_at_prompt(
+        fg,
+        shell_pid,
+        interactive,
+        watch,
+        proc_comm,
+        proc_has_children,
+        proc_exe,
+        proc_cpu_ticks,
+    );
     let cwd = cwd_for(fg, shell_pid, proc_cwd);
     let (state, activity, needs_sudo, question) = shell_snapshot(
         fg,
@@ -1628,6 +1756,7 @@ fn conduct_multiplex(
     child: &mut PtyChild,
     id: &str,
     is_shell: bool,
+    shell_exe: Option<ExeId>,
     interactive: bool,
     watch_prompts: bool,
     read_stdin: bool,
@@ -1645,6 +1774,9 @@ fn conduct_multiplex(
     // wait gets a ~1s timeout and the tick fires on the elapsed clock. Agents
     // also wake to observe child exit when a descendant keeps the PTY open.
     let shell_pid = child.id();
+    // The shell's CPU memory, and the executable it was started as (read before
+    // the spawn, see `program_exe`).
+    let mut shell_watch = ShellWatch::new(shell_exe);
     const WAIT_TIMEOUT_MS: i32 = 1000;
     let tick_period = std::time::Duration::from_millis(950);
     let mut last_tick = std::time::Instant::now();
@@ -1664,7 +1796,7 @@ fn conduct_multiplex(
     };
     if is_shell {
         let typed = typed_buf.as_ref().and_then(|b| b.typed());
-        conduct_refresh_shell(id, pty, shell_pid, interactive, None, typed); // stamp initial cwd/state now.
+        conduct_refresh_shell(id, pty, shell_pid, interactive, &mut shell_watch, None, typed); // stamp initial cwd/state now.
     }
 
     let mut timed_out = false;
@@ -1742,7 +1874,7 @@ fn conduct_multiplex(
                 .and_then(|w| w.standing(std::time::Instant::now()));
             if is_shell {
                 let typed = typed_buf.as_ref().and_then(|b| b.typed());
-                conduct_refresh_shell(id, pty, shell_pid, interactive, standing.as_ref(), typed);
+                conduct_refresh_shell(id, pty, shell_pid, interactive, &mut shell_watch, standing.as_ref(), typed);
             } else if standing != published {
                 let question = standing.as_ref().map(|p| p.question.as_str());
                 do_session_refresh(id, None, standing.as_ref().is_some_and(Prompt::sudo), question);
@@ -1973,6 +2105,8 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         None => None,
     };
 
+    // The program's own executable, read before the spawn (see `program_exe`).
+    let shell_exe = program_exe(&program);
     // Spawn FIRST: a failed exec must register no session (parity with `wrap`).
     let (mut child, mut pty) = match spawn_on_pty(&program, &inv.args[1..], &id, ws, task.as_ref()) {
         Ok(v) => v,
@@ -2173,6 +2307,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         &mut child,
         &id,
         is_shell,
+        shell_exe,
         program_is_an_interactive_shell(&inv.args),
         // The screen speaks for a shell, and for a wrap whose harness has no
         // hook or trace profile to speak for itself. A harness that reports
@@ -2783,59 +2918,92 @@ mod tests {
     fn shell_at_prompt_is_the_process_group_alone_for_an_interactive_shell() {
         // An interactive shell at its own prompt is idle whatever sits beneath
         // it: neither the child table nor the comm is consulted.
-        assert!(shell_at_prompt(100, 100, true, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
-        assert!(shell_at_prompt(0, 100, true, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
+        assert!(shell_at_prompt(100, 100, true, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(shell_at_prompt(0, 100, true, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_working_for_a_command_shell_that_has_a_child() {
         // `sh -c 'sleep 30; true'`: the shell stays alive with `sleep` as its
         // child.
-        assert!(!shell_at_prompt(
-            100,
-            100,
-            false,
-            |_| Some("sh".to_string()),
-            |pid| {
+        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sh".to_string()), |pid| {
                 assert_eq!(pid, 100);
                 Some(true)
-            }
-        ));
+            }, |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_working_for_a_command_shell_that_exec_d_its_command() {
         // `sh -c 'sleep 30'`: bash exec-optimizes, so pid 100 IS `sleep`, with
         // no
         // children. It is no longer a shell, so it is working.
-        assert!(!shell_at_prompt(100, 100, false, |_| Some("sleep".to_string()), |_| Some(false)));
+        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_idle_for_a_command_shell_that_is_still_a_shell_with_no_child() {
-        assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| Some(false)));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
         // A fact that cannot be read answers as an idle shell, as it always
         // has.
-        assert!(shell_at_prompt(100, 100, false, |_| None, |_| None));
-        assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| None, |_| None, |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sh".to_string()), |_| None, |_| None, |_| None));
         // Native Windows: comm carries `.exe`, and a host with no foreground
         // group
         // answers 0, so the bare test is the pid's own process name.
-        assert!(shell_at_prompt(0, 100, false, |_| Some("bash.exe".to_string()), |_| Some(false)));
+        assert!(shell_at_prompt(0, 100, false, &mut ShellWatch::new(None), |_| Some("bash.exe".to_string()), |_| Some(false), |_| None, |_| None));
     }
-    /// F5, current behaviour, pending a User ruling: a command that runs only
-    /// builtins (`sh -c 'while :; do :; done'`) has no child and never execs,
-    /// so it reads idle. Pinned so a change to it is a deliberate one.
+    /// R3 (F5): a command that runs only builtins has no child and never
+    /// execs, so its CPU time is the only sign it is busy. A rise between
+    /// ticks reads working; a flat tick reads idle again. The first tick has no
+    /// sample.
     #[test]
-    fn a_builtin_only_command_loop_reads_idle_today() {
-        assert!(shell_at_prompt(100, 100, false, |_| Some("sh".to_string()), |_| Some(false)));
+    fn a_builtin_only_command_loop_reads_working_while_its_cpu_time_rises() {
+        let mut watch = ShellWatch::new(None);
+        let cpu = |ticks: u64| move |_: i32| Some(ticks);
+        let read = |watch: &mut ShellWatch, ticks: u64| {
+            shell_at_prompt(100, 100, false, watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, cpu(ticks))
+        };
+        assert!(read(&mut watch, 10), "the first tick has no sample to rise from");
+        assert!(!read(&mut watch, 40), "CPU rose between ticks: the loop is running");
+        assert!(read(&mut watch, 40), "flat CPU: the loop has ended, so idle again");
+        assert!(read(&mut watch, 40), "still flat");
+    }
+    /// R3: a tick whose CPU cannot be read keeps the last sample, so the next
+    /// readable tick compares against the last reading it actually had.
+    #[test]
+    fn an_unreadable_cpu_tick_keeps_the_last_sample() {
+        let mut watch = ShellWatch::new(None);
+        assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| Some(5)));
+        assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(!shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| Some(9)));
+    }
+    /// R2 (F4): a process that exec'd into another program is working, whatever
+    /// name it gives itself: a `prctl` rename to `bash` changes comm, not the
+    /// executable. The same executable reads idle, and an unreadable executable
+    /// falls back to the name, as it always did.
+    #[test]
+    fn an_exec_is_read_by_the_executable_not_the_name() {
+        let at_spawn = Some(ExeId { dev: 1, ino: 10 });
+        let mut watch = ShellWatch::new(at_spawn);
+        assert!(
+            !shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| Some(ExeId { dev: 1, ino: 11 }), |_| None),
+            "an exec'd process renamed to bash is working"
+        );
+        let mut watch = ShellWatch::new(at_spawn);
+        assert!(
+            shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| at_spawn, |_| None),
+            "the shell itself, still its own executable, is idle"
+        );
+        let mut watch = ShellWatch::new(None);
+        assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(!shell_at_prompt(100, 100, false, &mut watch, |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_working_while_a_foreground_command_holds_the_terminal() {
         // A foreground group that is not the shell: working, and neither fact
         // is probed.
-        assert!(!shell_at_prompt(200, 100, false, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
-        assert!(!shell_at_prompt(200, 100, true, |_| panic!("comm is not probed"), |_| panic!("children are not probed")));
+        assert!(!shell_at_prompt(200, 100, false, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(!shell_at_prompt(200, 100, true, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
         // A host with no foreground group that still has a live child
         // (Windows).
-        assert!(!shell_at_prompt(0, 100, false, |_| Some("cmd.exe".to_string()), |_| Some(true)));
+        assert!(!shell_at_prompt(0, 100, false, &mut ShellWatch::new(None), |_| Some("cmd.exe".to_string()), |_| Some(true), |_| None, |_| None));
     }
     #[test]
     fn shell_snapshot_a_working_command_shell_labels_its_own_command() {
@@ -5382,6 +5550,62 @@ mod tests {
     #[test]
     fn a_command_shell_with_a_child_command_reads_working_while_it_runs() {
         a_command_shell_reads_working_until_its_command_ends("sb-child", &["sh", "-c", "sleep 3; true"]);
+    }
+
+    /// R2 (F4), end to end: the child execs `python3`, which renames itself
+    /// `bash` with `prctl(PR_SET_NAME)`. Its comm now names a shell and its
+    /// executable does not, so the shell reads working. Skipped, with a printed
+    /// reason, where python3 is not on PATH.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_shell_whose_exec_renames_itself_bash_reads_working() {
+        if !python3_on_path() {
+            eprintln!("skipped: python3 is not on PATH, so nothing here can rename itself with prctl");
+            return;
+        }
+        a_command_shell_reads_working_until_its_command_ends(
+            "sb-rename",
+            &["sh", "-c", "exec python3 -c 'import ctypes,time; ctypes.CDLL(None).prctl(15, b\"bash\", 0, 0, 0); time.sleep(6)'"],
+        );
+    }
+
+    /// R2 (F4): the baseline is the file a program name starts, resolved the
+    /// way `execvp` resolves it: a bare name is the first `PATH` file of that
+    /// name.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn program_exe_resolves_a_name_the_way_execvp_does() {
+        use std::os::unix::fs::MetadataExt;
+        assert!(program_exe("/no/such/program/anywhere").is_none());
+        let sh = program_exe("sh").expect("sh is on PATH");
+        let on_path = std::env::var("PATH")
+            .expect("PATH is set")
+            .split(':')
+            .map(|dir| std::path::Path::new(dir).join("sh"))
+            .find(|p| p.is_file())
+            .expect("a sh file is on PATH");
+        let meta = std::fs::metadata(on_path).expect("the sh file reads");
+        assert_eq!(sh, ExeId { dev: meta.dev(), ino: meta.ino() });
+    }
+
+    /// R3 (F5), end to end: a loop of builtins, with no child and no exec,
+    /// reads working while its CPU time rises. A million iterations outlast the
+    /// ticks that must see the rise.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_shell_running_only_builtins_reads_working_while_it_burns_cpu() {
+        a_command_shell_reads_working_until_its_command_ends(
+            "sb-builtin",
+            &["sh", "-c", "i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done"],
+        );
+    }
+
+    #[cfg(unix)]
+    fn python3_on_path() -> bool {
+        std::process::Command::new("python3")
+            .args(["-c", "import ctypes"])
+            .output()
+            .is_ok_and(|o| o.status.success())
     }
 
     /// An interactive shell reads idle at its own prompt, and a command typed

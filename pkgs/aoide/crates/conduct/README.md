@@ -316,9 +316,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   touched.
 - **`shell_at_prompt`** is the one idle verdict a conducted shell's `state` and
   `restore.idle` are both read off. An interactive shell is idle at its bare
-  prompt (the pgid check); a command shell (`bash -c …`) is working while it
-  has a child, or once it exec'd into its command (see AGENTS.md and
-  CONTRACTS.md, the shell-state paragraph).
+  prompt (the pgid check); a command shell (`bash -c …`) is working while a
+  child runs, once it has exec'd into its command, or while its CPU time
+  rises. The wrap keeps the executable and CPU memory for it (see AGENTS.md
+  and CONTRACTS.md, the shell-state paragraph).
 - **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape
   stripper: the screen source reads its window through it, and
   `aoide-conductor`'s log tail renders through it.
@@ -1089,9 +1090,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   **Post-spawn restore delivery (P-C6):** once a terminal candidate's spawn
   actually registers, `restore_delivery` decides what, if anything, lands in
   the new pty, through `send::session_send` in-process. A working session's
-  recorded argv re-execs (`--yes --submit`) unless `restore_argv_refusal`
-  refuses it; an idle session's clean `typed` line preloads (`--yes`, never
-  `--submit`). A refused argv restores its cwd only. The refusals are listed
+  recorded argv is typed at its prompt (`--yes`, never `--submit`) unless
+  `restore_argv_refusal` refuses it; an idle session's clean `typed` line is
+  preloaded the same way. Nothing a restore delivers is submitted. A refused
+  argv restores its cwd only. The refusals are listed
   once, in CONTRACTS.md's restore paragraph. See AGENTS.md for why the two
   branches are never unified behind a shared boolean parameter.
   **Bare-manifest mode (U2, command-defrag lane U):** `resurrect` with NONE
