@@ -248,7 +248,28 @@ fn resolve_common_dir(dotgit: &Path) -> Option<PathBuf> {
 }
 
 /// `path`'s text when it is a regular file, read to at most [`GIT_FILE_CAP`]
-/// bytes. Absent, or anything but a regular file, is `None`.
+/// bytes. Absent, a symlink, or anything but a regular file is `None`. The open
+/// refuses a symlink (`O_NOFOLLOW`) and cannot block on a FIFO (`O_NONBLOCK`),
+/// and the file's kind is judged on the open descriptor, so nothing swapped in
+/// after a path check can be read.
+#[cfg(unix)]
+fn read_git_file(path: &Path) -> Option<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(GIT_FILE_CAP).read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+#[cfg(not(unix))]
 fn read_git_file(path: &Path) -> Option<String> {
     use std::io::Read;
     if !std::fs::symlink_metadata(path).ok()?.is_file() {
@@ -554,5 +575,55 @@ mod tests {
         assert_eq!(common_dir(&dir), None, "the gitdir line sits past the cap, so the file is no git file");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&real);
+    }
+
+    /// `read_git_file` on its own thread, answered within five seconds. A
+    /// regression that blocks in the open reads as a timeout.
+    fn read_within_five_seconds(path: PathBuf) -> Option<Option<String>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(read_git_file(&path));
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5)).ok()
+    }
+
+    #[test]
+    fn a_fifo_with_no_writer_is_refused_without_blocking_the_open() {
+        let dir = unique_tmp("git-file-fifo");
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("commondir");
+        assert!(Command::new("mkfifo").arg(&fifo).status().expect("mkfifo runs").success());
+
+        assert_eq!(read_within_five_seconds(fifo), Some(None), "an open of a writerless FIFO must not wait");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fifo_with_a_writer_and_data_is_not_read_as_a_git_file() {
+        use std::io::Write;
+        let dir = unique_tmp("git-file-fifo-data");
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join(".git");
+        assert!(Command::new("mkfifo").arg(&fifo).status().expect("mkfifo runs").success());
+        // Opened read-write, so a writer is present and a reader's open cannot
+        // wait, and the pipe holds a gitdir line a reader would otherwise get.
+        let mut writer = std::fs::OpenOptions::new().read(true).write(true).open(&fifo).unwrap();
+        writer.write_all(b"gitdir: /somewhere\n").unwrap();
+
+        assert_eq!(read_within_five_seconds(fifo), Some(None), "a FIFO is no git file, whatever it holds");
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_symlink_is_not_read_as_a_git_file() {
+        let dir = unique_tmp("git-file-symlink");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("target"), "gitdir: /somewhere\n").unwrap();
+        std::os::unix::fs::symlink(dir.join("target"), dir.join("link")).unwrap();
+
+        assert_eq!(read_git_file(&dir.join("link")), None, "an open that follows a symlink would read its target");
+        assert!(read_git_file(&dir.join("target")).is_some(), "the file it names reads on its own");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
