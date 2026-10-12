@@ -1076,7 +1076,6 @@ mod tests {
         Node {
             name: name.to_string(),
             url: format!("http://{name}/"),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1181,7 +1180,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "nodeb-renamed".into(),
             url: "http://nodeb/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

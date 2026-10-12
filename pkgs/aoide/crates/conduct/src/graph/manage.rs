@@ -1115,7 +1115,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "yomi-strix".into(),
             url: "http://yomi-strix:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1407,7 +1406,6 @@ mod tests {
         aoide_storage::node_store::Node {
             name: name.into(),
             url: format!("http://{name}.invalid:8710/"),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

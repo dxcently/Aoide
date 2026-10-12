@@ -281,19 +281,15 @@
   this box writes there is the REFUSAL (`narrowed`) — never copy the charter
   into `grants` at accept time, which would make every later charter version
   silently re-grant what an operator turned off.
-- **`autogated_node_addr`/`autogated_node_token` return the MATCHED record,
-  and a match is never a trust decision.** They answer only "which `autogate`
-  record does this address/bearer resolve to" (registry order, the same
-  tie-break `resolve_node` uses), so the door can ask its second question —
-  whether that record earns a `held-door` audit under its HOME mesh's rules
-  (`aoide-server::a2a::rail_admits`, which reads the charter and
-  `Node::narrowed` the door already reads). **Don't fold a grant, a charter or
-  a `verified` check into these folds:** the door's #50 guard exemption asks
-  "did the rail match" as `.is_some()` on the record, and narrowing the MATCH
-  would answer a charter-unlisted caller with the guard's synthetic
-  `submitted` Task (no delivery, no queue entry) instead of the PENDING entry
-  the rail's ruling asks for. `Node.autogate`'s own field doc carries the same
-  statement.
+- **`resolve_node` returns the MATCHED record, and a match is never a trust
+  decision.** It answers only "which registered node does this bearer or
+  address resolve to": the `Token` rung first (a presented bearer against a
+  node's own `tokenFile`), then the `Addr` rung, registry order within each.
+  The door decides what the match admits: an address match admits nothing once
+  a door-wide token is configured, and only the `Signature` rung may spawn
+  (`aoide-server::a2a`). **Don't fold a grant, a charter or a `verified` check
+  into `resolve_node`:** it is a lookup, and every admission question is asked
+  of its result by the door.
 - **`config::SCHEMA` is the ONE place a config key is described — walk it,
   never restate it in a match arm.** The table carries each key's name,
   `ValueKind` vocabulary, summary, and a `read` fn projecting it off a typed
@@ -530,7 +526,7 @@
   `Node.verified` (P-P2).** `node add` never sets either field; a caller
   wanting to record a verified key relationship goes through this function,
   which touches only `pubkey`/`verified`/`url` on an existing entry and
-  leaves `autogate`/`tokenFile`/`bearerSecret`/`hub` untouched — don't widen
+  leaves `tokenFile`/`bearerSecret`/`hub` untouched — don't widen
   it to a general-purpose node editor, and don't set those two fields via a
   raw `Node { .. }` literal anywhere outside `node_store.rs` itself.
   **Its `grant` parameter is the caller's, and this module never resolves
@@ -554,7 +550,7 @@
   all when the ceremony resolved an actual via; a re-pair that named none
   leaves a previously-recorded `via` (e.g. one `aoide pair`'s hostname arm set) exactly
   as it was, the same untouched-unless-named stance `upsert_paired_node`
-  itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`grants`.
+  itself holds for `tokenFile`/`bearerSecret`/`hub`/`grants`.
 - **`node_store::set_node_address` is the ONE write site for `Node.url` after
   registration, and writes `via` with it** (the two are one address). It is never
   called from a ceremony. `Node::declared` is never saved: a declaration's key

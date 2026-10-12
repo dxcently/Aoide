@@ -19,7 +19,6 @@ fn paired(name: &str, url: &str, via: Option<&str>) -> Node {
     Node {
         name: name.to_string(),
         url: url.to_string(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,

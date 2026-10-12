@@ -12,7 +12,7 @@ use std::path::Path;
 
 /// Flags of these commands that take no value, for re-quoting a line.
 const BOOLS: &[&str] = &[
-    "all-names", "autogate", "clear", "hold", "no-verify", "popup", "reread", "refused", "replace", "yes",
+    "all-names", "clear", "hold", "no-verify", "popup", "reread", "refused", "replace", "yes",
 ];
 
 /// Where in the invocation the mistyped name sits.

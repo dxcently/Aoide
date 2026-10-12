@@ -1323,7 +1323,6 @@ mod tests {
                 ..aoide_storage::node_store::Node {
                     name: "laptop".to_string(),
                     url: String::new(),
-                    autogate: false,
                     token_file: None,
                     bearer_secret: None,
                     hub: false,

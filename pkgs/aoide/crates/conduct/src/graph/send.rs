@@ -1244,10 +1244,8 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// door would reject outright.
 /// The RECEIVING node's own `message_send` Inject arm
 /// (`aoide-server::a2a::message_send` → `do_inject`) is where the real gate
-/// lives: it decides deliver-now vs. hold-pending off ITS OWN node-trust
-/// config (`should_deliver_now`/autogate — CONTRACTS.md §6), unconditionally
-/// forcing `submit=true` on its side regardless of what this caller's
-/// `--submit` flag says. So `--submit`/`--yes` are ACCEPTED but UNUSED
+/// lives: every inject it receives parks for a human, whatever this caller's
+/// `--submit` flag says (CONTRACTS.md §6). So `--submit`/`--yes` are ACCEPTED but UNUSED
 /// here — there is nothing on this side left for them to gate — and NOT
 /// silently: [`ignored_remote_flags`] collects whichever of them was
 /// actually passed and both delivery-attempt arms below fold a note into
@@ -1268,9 +1266,10 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
 /// `--parent` (`aoide_client::commands::resolve_remote_parent`), because `send`
 /// has no `--parent` flag and the parent steering a child it spawned is exactly
 /// the caller the spawn path stamped into that child's `remoteParent`. The
-/// receiving door reads the claim as `remote_parent_match`, and a network door
-/// holds the send for a human whatever the claim says. The env is never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1
-/// closes), so no daemon and no sealed ancestry simply means no claim.
+/// receiving door reads the claim only to stamp a spawn it admits, and a
+/// network door parks the send for a human whatever the claim says. The env is
+/// never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1 closes),
+/// so no daemon and no sealed ancestry simply means no claim.
 ///
 /// `Err` is the resolver's own "this node would sign a claim the far door
 /// refuses" case, and the two callers answer it differently because they were
@@ -1278,10 +1277,10 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
 /// a parentage gets one or hears why). A `send` DROPS the claim and sends
 /// anyway, naming the reason on one warning line: it was never asked for a
 /// parentage — the claim is a label the far door may audit, not the request —
-/// and the door's Inject arm reads a malformed claim as a non-match, never as a
-/// refusal (`a2a.rs`'s own `remote_parent_match`), so an unruly id costs this
-/// send its audit label and nothing else. Neither path lets one reach the wire: the one that
-/// refuses never signs, the other signs nothing.
+/// and the door applies a malformed claim only to a spawn, so an inject carrying
+/// one proceeds as one with none (`a2a.rs`'s `claimed_remote_parent`). An
+/// unruly id costs this send its audit label and nothing else. Neither path lets
+/// one reach the wire: the one that refuses never signs, the other signs nothing.
 fn remote_parent_claim() -> Result<Option<String>, String> {
     aoide_client::commands::resolve_remote_parent(None)
 }
@@ -4648,7 +4647,6 @@ mod tests {
         aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -5141,12 +5139,12 @@ mod tests {
 
     /// The ruling on S5's client half: an UNRULY attested id does not refuse
     /// the send. `node spawn` would — its caller named a parentage — but a
-    /// `send --to` was never asked for one: the claim is an autogate shortcut,
-    /// and the door's Inject arm reads a malformed claim as a non-match
-    /// (`remote_parent_match`), never as a refusal. So the send goes out with
-    /// NO claim (the same delivery it gets today with no daemon to attest
-    /// against) and names the reason on one warning line, rather than failing
-    /// a send that works.
+    /// `send --to` was never asked for one: the claim is a label, and the door
+    /// applies a malformed claim only to a spawn, so an inject carrying one
+    /// proceeds as one with none (`claimed_remote_parent`). So the send goes
+    /// out with NO claim (the same delivery it gets today with no daemon to
+    /// attest against) and names the reason on one warning line, rather than
+    /// failing a send that works.
     /// GATED on Unix with its reason (see [`install_capturing_curl`]): the
     /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch — the
     /// subject (an unruly claim degrades to no claim) is host-neutral.

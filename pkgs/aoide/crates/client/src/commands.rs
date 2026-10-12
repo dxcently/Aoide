@@ -839,7 +839,7 @@ pub use aoide_protocol::wire::gen_message_id;
 // registry lives in `state/nodes.json` (`aoide_storage::node_store`) —
 // external registry-style state, not song-scoped rehearsal state.
 
-/// `node add <name> <url> [--autogate]` — verify the node by fetching its
+/// `node add <name> <url>` — verify the node by fetching its
 /// AgentCard first, then register `name` → `url`. A duplicate `name` is
 /// rejected cleanly — CONTRACTS.md §7's explicit stance (a node's local
 /// nickname should never be silently repointed at a different URL by a
@@ -878,7 +878,6 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
         )
         .with_fields(json!({ "reason": "transport-conflict", "name": name, "url": url, "via": via_spec }));
     }
-    let autogate = inv.flag_present("autogate");
     // **A `poll` address is the design's third transport member, and it names
     // the ABSENCE of an inbound one** (`docs/architecture/HTTPS-MESH-API.md`
     // "Transports and relays"): the node connects out and asks, so there is no
@@ -950,7 +949,6 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
     let node = aoide_storage::node_store::Node {
         name: name.clone(),
         url: url.clone(),
-        autogate,
         token_file,
         bearer_secret,
         hub: false,
@@ -968,8 +966,7 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
     Outcome::ok(
         cmd,
         format!(
-            "registered node `{name}` → {url}{} ({} total)",
-            if autogate { " (autogate)" } else { "" },
+            "registered node `{name}` → {url} ({} total)",
             nodes.len()
         ),
     )
@@ -1722,11 +1719,11 @@ pub fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, S
 /// cannot accept as a `remoteParent.sessionId` (over the length bound, a
 /// stray character), and shipping one only turns a local, immediately-fixable
 /// mistake into the door's own answer one round trip and one signature later —
-/// `-32602` on its spawn arm, a lost autogate on its inject one (P-RSA S5).
+/// `-32602` on its spawn arm, and nothing on its inject one (P-RSA S5).
 /// So an unruly claim is refused at THIS function, before anything is signed
 /// or sent — and the refusal reaches the caller only when the caller asked
 /// for a parentage: `node spawn` fails the call outright, while `send`, which
-/// never asked for one and treats the claim as an autogate shortcut, DROPS it
+/// never asked for one and treats the claim as a hint, DROPS it
 /// and names the reason on one warning line rather than failing
 /// (`aoide_conduct::graph::send`'s `remote_parent_claim`). `None` (no parent
 /// at all) is a legal answer either way.
@@ -1970,7 +1967,7 @@ fn handle_node_pull(inv: &Invocation) -> Outcome {
 }
 
 /// `node status` — each registered node's full registry row (name/url/
-/// autogate/tokenFile/bearerSecret/hub/pubkey/verified/allows/addedAt — the
+/// tokenFile/bearerSecret/hub/pubkey/verified/allows/addedAt — the
 /// same shape `node list` used to be the only place emitting, folded in
 /// here so `node list` has nothing left to say `node status --json` doesn't
 /// already say, command-defrag lane task #101) plus its last-pull outcome
@@ -2029,9 +2026,8 @@ pub fn register_nodes(r: &mut Registry) {
             arg!("url", "string", true, "The node's A2A door URL (e.g. http://host:8710/)."),
         ],
         flags: [
-            flag!("autogate", "bool", "Mark this node autogate: its inbound message/send parks for a human like any other, and the audit records the rail as one that would deliver."),
             flag!("no-verify", "bool", "Skip the AgentCard fetch entirely and register the node unverified — for a node that serves no AgentCard (a plain A2A client endpoint). `verified` stays false either way; a card fetch was never identity, only reachability."),
-            flag!("token-file", "string", "Path to a file holding the shared secret this node must present (Authorization: Bearer <token>) to be identified as this node — required for --autogate to survive a proxy/tunnel, where every caller's address looks the same.", value: "path"),
+            flag!("token-file", "string", "Path to a file holding the shared secret this node must present (Authorization: Bearer <token>) to be identified as this node — how this node is told apart behind a proxy/tunnel, where every caller's address looks the same.", value: "path"),
             flag!("bearer-secret", "string", "Name of a secret, resolved fresh on every outbound call through the local secrets broker, THIS instance presents as Authorization: Bearer <value> when calling this node's own A2A door. Absent = no bearer sent (today's behavior).", value: "secret"),
             flag!("via", "string", "An ssh://[user@]host[:port] transport marker — cross-box calls to this node dial through an internal ssh tunnel to this target instead of the node's own url directly. Absent = direct dial (today's behavior).", value: "ssh-url"),
         ],
@@ -3780,8 +3776,8 @@ pub(crate) fn commit_outbound(
     // (review fix, P-S4 follow-up) — a plain re-pair with no `--via` must
     // LEAVE a previously-recorded via (e.g. one earlier `pair` set)
     // exactly as it was, the same "untouched unless this call names a change"
-    // stance `upsert_paired_node` itself already holds for `autogate`/
-    // `tokenFile`/`bearerSecret`/`hub`/`allows` on re-pairing; calling
+    // stance `upsert_paired_node` itself already holds for `tokenFile`/
+    // `bearerSecret`/`hub`/`allows` on re-pairing; calling
     // `set_node_via` unconditionally with `None` would silently WIPE that
     // marker as a side effect of an unrelated re-pair, never a deliberate
     // clear.
@@ -6383,7 +6379,6 @@ mod tests {
         aoide_storage::node_store::Node {
             name: "yomi-strix".to_string(),
             url: "http://yomi-strix:8710/".to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: bearer_secret.map(str::to_string),
             hub: false,
@@ -7743,7 +7738,6 @@ mod tests {
             let mut node = aoide_storage::node_store::Node {
                 name: "relay".to_string(),
                 url: "https://aoide.necoconeco.net/".to_string(),
-                autogate: false,
                 token_file: None,
                 bearer_secret: None,
                 hub: false,
@@ -9592,7 +9586,6 @@ mod tests {
         aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -9842,7 +9835,6 @@ mod tests {
         let peer = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -9889,7 +9881,6 @@ mod tests {
         let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

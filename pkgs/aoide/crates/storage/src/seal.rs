@@ -3342,7 +3342,6 @@ mod review_fix_tests {
             let row = node_store::Node {
                 name: node.to_string(),
                 url: "ssh://self".to_string(),
-                autogate: false,
                 token_file: None,
                 bearer_secret: None,
                 hub: false,
@@ -3451,7 +3450,6 @@ mod review_fix_tests {
         let record = |node: &str, key: String| node_store::Node {
             name: node.to_string(),
             url: "ssh://self".to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

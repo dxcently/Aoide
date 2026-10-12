@@ -1538,7 +1538,6 @@ mod tests {
             nodes.push(crate::node_store::Node {
                 name: me.to_string(),
                 url: "http://p/".to_string(),
-                autogate: false,
                 token_file: None,
                 bearer_secret: None,
                 hub: false,

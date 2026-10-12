@@ -1818,7 +1818,6 @@ mod tests {
         Node {
             name: name.to_string(),
             url: "http://127.0.0.1:1".to_string(), // nothing listens here
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2352,7 +2351,6 @@ mod tests {
         let mut twin = aoide_storage::node_store::Node {
             name: "twomesh".to_string(),
             url: "http://127.0.0.1:1/".to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -3222,7 +3220,6 @@ mod tests {
         let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

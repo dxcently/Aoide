@@ -353,14 +353,16 @@ there is no fallback by design.
 
 ## Legacy escapes
 
-The door-wide bearer (`aoide.a2a.tokenFile`/`aoide.a2a.bearerSecret`) and
-a node's own `tokenFile` are legacy escapes for an UNPAIRED caller: they
-authenticate the read arms (`tasks/get`, the AgentCard GET,
-`aoide/graphSummary`) and answer Inject's autogate question, and nothing
-else — the door-wide bearer alone never resolves a node identity, and
-neither rung reaches Spawn. A bare address match (`NodeRung::Addr`)
-resolves a node identity for attribution only — Inject's `from` field,
-the autogate question — since it carries no possession proof. `aoide pair`
+The door-wide bearer (`aoide.a2a.tokenFile`/`aoide.a2a.bearerSecret`) and a
+node's own `tokenFile` are legacy escapes for an UNPAIRED caller. The door-wide
+bearer authenticates the read arms (`tasks/get`, the AgentCard GET,
+`aoide/graphSummary`) and is the token a `contextId` Inject is tested against,
+and it never resolves a node identity. A node's own `tokenFile` resolves that
+node, so its Inject is never answered with the uniform response; it reaches
+neither the read arms nor Spawn. A bare address match (`NodeRung::Addr`)
+resolves a node identity for attribution only, and admits nothing once a
+door-wide token is configured, since it carries no possession proof.
+`aoide pair`
 authenticates a node without any pre-shared secret. Spec:
 `CONTRACTS.md` §6 "Legacy escapes".
 

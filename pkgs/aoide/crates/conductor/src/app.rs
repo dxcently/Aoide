@@ -679,7 +679,6 @@ pub struct NodeTrustRow {
     /// The last pull's recorded error, when the cache carries one.
     pub error: Option<String>,
     pub hub: bool,
-    pub autogate: bool,
     /// The effective home mesh the CLI reported (`node status --json`'s
     /// `data.homeMesh`) — the default [`NodeTrustRow::acted_mesh`] answers
     /// with, so this pane never restates the rule with a literal of its own.
@@ -2468,7 +2467,6 @@ impl App {
                 state: n["state"].as_str().unwrap_or("").to_string(),
                 error: n["error"].as_str().map(String::from),
                 hub: n["hub"].as_bool().unwrap_or(false),
-                autogate: n["autogate"].as_bool().unwrap_or(false),
                 home_mesh: data.get("homeMesh").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 url: n["url"].as_str().unwrap_or("").to_string(),
             })
@@ -7007,10 +7005,10 @@ mod tests {
                 .with_data(json!({ "nodes": [
                     { "name": "osaka", "verified": true, "grants": { "home": ["read", "spawn"] },
                       "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
-                      "autogate": true, "error": Value::Null },
+                      "error": Value::Null },
                     { "name": "box", "verified": false, "grants": {},
                       "state": "never-pulled", "url": "http://box:8710/", "hub": true,
-                      "autogate": false, "error": "unreachable" },
+                      "error": "unreachable" },
                 ] })),
             "node.allow" => Outcome::ok("node.allow", "capability updated"),
             "node.remove" => Outcome::ok("node.remove", "node unregistered"),
@@ -8183,10 +8181,10 @@ mod tests {
                 "nodes": [
                     { "name": "osaka", "verified": true, "grants": { "home": ["read", "spawn"] },
                       "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
-                      "autogate": true, "error": Value::Null },
+                      "error": Value::Null },
                     { "name": "yomi", "verified": false, "grants": {},
                       "state": "never-pulled", "url": "http://yomi:8710/", "hub": false,
-                      "autogate": false, "error": Value::Null },
+                      "error": Value::Null },
                 ],
             })),
         );

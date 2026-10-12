@@ -56,7 +56,6 @@ there is no "this node may spawn, that one may not."
    Commands:
    `aoide node allow <name> <cap> on|off` — idempotent, reports
    exactly what changed. Unknown capability strings are refused.
-   `autogate` stays its own field (landed semantics, not churned).
    Default for a PAIRED (verified) node: `config.toml`'s `[pairing]
    defaultGrant`, itself `["read"]` — `spawn` is an explicit widening,
    either standing (`aoide config set pairing.defaultGrant read,spawn`) or
@@ -73,9 +72,8 @@ there is no "this node may spawn, that one may not."
 6. **The spawn gate flips hard.** Spawning requires an identified
    (paired) node whose `allows` contains `"spawn"`. The door-wide
    bearer alone no longer reaches the spawn arm; the refusal is a
-   taught error naming the pairing ceremony. (Inject keeps its
-   existing gate — the pending queue + autogate; one gate per
-   question.)
+   taught error naming the pairing ceremony. (Inject parks in
+   the pending queue for a human; one gate per question.)
 7. **Audit identity everywhere the call touches.** The resolved node
    name is stamped on audit lines, pending-queue entries, and the
    spawned session's record (`origin: "node:<name>"`, additive),
@@ -376,24 +374,23 @@ nodes:
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where
   secrets are still compared).
-- **Loopback earns nothing by its address, and a verified signature earns
-  nothing at the door either.** A loopback-terminating transport hop (an ssh
-  `-L` forward is the case that motivates this) delivers a remote node's
-  request from ITS OWN end's loopback, so the observed origin classifies as
-  loopback exactly like a genuinely local caller. The door therefore parks
-  every Inject in `state/stage/pending.json` whatever the origin, and whether
-  or not the request is signed (CONTRACTS.md §6). The signature, the
-  `autogate` flag, the mesh the request SIGNED for and the remote-parent rule
-  below feed only the audit: the `held-door` line records which rail would
-  have delivered.
+- **Loopback earns nothing by its address, and no signature delivers.** A
+  loopback-terminating transport hop (an ssh `-L` forward is the case that
+  motivates this) forwards a remote node's request in from ITS OWN end's
+  loopback, so the observed origin classifies as loopback exactly like a
+  genuinely local caller. The door therefore parks every Inject in
+  `state/stage/pending.json` whatever the origin, and whether or not the
+  request is signed (CONTRACTS.md §6). A verified signature admits a request
+  to the queue and names its sender; it never delivers.
 - **A remote parent's steer waits for a human, and the tunnel is its
-  production shape.** The Inject arm matches the `metadata["aoide/from"]`
-  claim against the target record's `remoteParent`: the caller must have
-  signed with a paired node's key this door verified, that key must equal the
-  record's stored `remoteParent.key`, and the claim must equal its stored
-  `remoteParent.sessionId`. A match is a rail that would deliver, and the
-  `held-door` line says so; the send still parks in `pending.json` for the
-  approver, tunneled or not.
+  production shape.** An Inject from a remote parent parks in `pending.json`
+  for the approver, tunneled or not, and no `aoide/from` claim changes that.
+  The claim is honoured only on the signature rung: a spawn stamps the
+  verified caller's session as the child's `remoteParent`, with `node` and
+  `key` from the verified signature and `sessionId` from the claim. The
+  ping-back history gate then reads that key. A signed node holding `read`
+  may read the child's history only when its key equals the stored
+  `remoteParent.key`.
 - **Identity IS the key; the name is a label (#63 P-ID5).**
   `X-Aoide-Node` carries the caller's own self name
   (`aoide_storage::display::local_host_name()`), the same value the
@@ -757,10 +754,9 @@ forward is a pipe, not a party to the protocol.
   tunneled connection reaches the far door's socket as loopback, because that
   is what a forward is, so the observed address says nothing about the
   sender. The door parks every Inject in `pending.json`, tunneled or not and
-  signed or not; no signature, `autogate` flag or remote-parent claim changes
-  that (CONTRACTS.md §6). Those rails survive only as the `held-door` audit
-  verdict. `via`/`--via` are safe to use against a real node for that reason:
-  what arrives is queued for a human, never typed.
+  signed or not; no signature or remote-parent claim changes that
+  (CONTRACTS.md §6). `via`/`--via` are safe to use against a real node for
+  that reason: what arrives is queued for a human, never typed.
 
 ## Mesh declaration
 

@@ -921,7 +921,6 @@ fn two_mesh_door(
     let record = |node: &str, key: String, mesh: &str| aoide_storage::node_store::Node {
         name: node.to_string(),
         url: "ssh://self".to_string(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,

@@ -305,9 +305,8 @@ Remote reach composes what already exists:
   for a human (`a2a.rs` `decide_send_action`, `do_inject`, and the spawn's
   opening turn in `opening_turn_worker`). Bearer auth is the
   landing-in-parallel bearer lane on the existing token surface
-  (`a2a.rs:348` `token_authorized`, `node_store.rs:196` `token_bytes_eq`,
-  `:216` `autogated_node_token`); this workstream consumes it, never
-  reimplements it.
+  (`a2a.rs` `token_authorized`, `node_store.rs` `token_bytes_eq`); this
+  workstream consumes it, never reimplements it.
 
 ### The hub option
 

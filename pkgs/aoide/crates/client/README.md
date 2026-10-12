@@ -340,10 +340,10 @@ never the inbound/serve half (that's `aoide-server`).
   a special case of it.
   Every tunneled request reaches the far door as `ConnOrigin::Loopback`
   (`aoide-server::a2a::classify_origin`). Loopback earns nothing by its
-  address: the door parks every A2A send in `pending.json` whether it arrives
-  tunneled or direct, signed or not, and a human or the conductor approves it
-  there (CONTRACTS.md §6). The signature and the `autogate` rail feed only the
-  audit verdict.
+  address: the door parks every admitted Inject in `pending.json` whether it
+  arrives tunneled or direct, and a human or the conductor approves it there
+  (CONTRACTS.md §6). A verified signature proves a node's identity; it never
+  skips the queue.
   **`mail_wire`'s drain (P-M2) is the one deliberate exception to "this
   crate never closes a tunnel itself."** A rarely-contacted outbox target
   should not accumulate a standing forward just because a background daemon

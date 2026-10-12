@@ -206,7 +206,7 @@ verb reach directly, not something shelled out to.
 
 ### The `node` group — aoide-to-aoide federation
 
-`add <name> <url> [--autogate] [--no-verify] [--via ssh://…] [--token-file
+`add <name> <url> [--no-verify] [--via ssh://…] [--token-file
 <path>] [--bearer-secret <name>]` / `remove <name>` / `pull [<name>]` /
 `status` register
 OTHER aoide instances as **nodes** and fold their resolved session graphs
@@ -232,7 +232,7 @@ reachability is out of scope for this v0.
   being unreachable never aborts the others, and a failed pull marks the
   cache `stale` with a reason rather than deleting it.
 - **`node status`** — the human line stays a terse count; `--json` carries
-  the full registry row per node (name/url/autogate/tokenFile/bearerSecret/
+  the full registry row per node (name/url/tokenFile/bearerSecret/
   hub/pubkey/verified/allows/addedAt) plus its `fresh`/`stale`/`never-pulled`
   classification (the same one the graph fold itself uses) and
   `fetchedAt`/`lastError` — the deep per-node detail view.

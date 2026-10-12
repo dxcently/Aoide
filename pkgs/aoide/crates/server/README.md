@@ -6,11 +6,12 @@ the inbound half of the two-door contract (the outbound half is
 `aoide-client`).
 
 The A2A door (`a2a.rs`) never approves a gated send, and it never delivers
-one. Every inbound inject is held in `pending.json`, whoever the caller is:
-loopback, a token, a signed node, an IP autogate, and a remote parent all park
-the same way. Where an autogate rail would have delivered, the door writes a
-`held-door` audit line. A spawn's opening turn is held the same way, verdict
-`held-pending`. The gate that decides this is `aoide_conduct::graph::
+one. Every inbound inject the door admits is held in `pending.json` for a
+human, whoever the caller is. Admission is decided by identity, never by
+address: with a door-wide token configured, a caller that presents neither that
+token nor a node identity (its own bearer, or a verified signature) gets the
+uniform answer and nothing queues. A spawn's opening turn is held the same way,
+verdict `held-pending`. The gate that decides this is `aoide_conduct::graph::
 door_can_approve`; CONTRACTS.md's pending-queue section has the table.
 
 ## Named seams (what it exposes)
@@ -366,17 +367,15 @@ door_can_approve`; CONTRACTS.md's pending-queue section has the table.
   consumer has to re-find the record by name to reach its key (LOW-1: a second
   lookup could pair this request's name with a key that never verified
   anything); when present, `message_send` resolves EXCLUSIVELY against it, never
-  falling back to `aoide_storage::node_store:: resolve_node`'s own two-rung
+  falling back to `aoide_storage::node_store::resolve_node`'s own two-rung
   ladder (a node's own `token_file` — `NodeRung::Token` — else the TCP origin
-  against a node's `url` — `NodeRung::Addr`, the SAME identification the door's
-  `autogated_node_addr`/`autogated_node_token` already fold, just unfiltered by
-  `autogate` and narrowed to one named node) even on a registry-lookup miss.
-  Neither the `Addr` nor the (now-insufficient) `Token` resolution reaches Spawn
-  any more — a bare TCP-source-IP-vs-`url` match carries no possession proof,
-  and a bare shared-secret token is replayable and identical across every
-  request the true node or an impersonator ever sends; both rungs still resolve
-  a node identity for attribution/origin-stamping purposes below, just never for
-  Spawn. A caller resolved via `Token` to a genuinely paired node gets a taught
+  against a node's `url` — `NodeRung::Addr`), even on a registry-lookup miss.
+  Neither the `Addr` nor the `Token` resolution reaches Spawn — a bare
+  TCP-source-IP-vs-`url` match carries no possession proof, and a bare
+  shared-secret token is replayable and identical across every request the true
+  node or an impersonator ever sends; both rungs still resolve a node identity
+  for attribution below, just never for Spawn. A caller resolved via `Token` to
+  a genuinely paired node gets a taught
   `-32006` telling it plainly to sign requests (its aoide is too old, or is
   failing to sign); a `Signature`-resolved node missing the `spawn` capability
   gets the exact `node allow` fix; every other shape gets the original "pair
@@ -405,49 +404,27 @@ door_can_approve`; CONTRACTS.md's pending-queue section has the table.
   it. Neither of these closes the FILE: a hand-crafted `sessions.json`/ledger
   line is still a readable, unflagged string on disk — sealing that is
   P-ID1/P-ID2, still open. The Inject arm's own `resolved_node` (a SEPARATE
-  lookup from Spawn's) answers two questions. Its Signature-rung
-  `claimed_identity` is what makes a remote-parent match (S5, CONTRACTS.md §6) a
-  `held-door` audit verdict, and its `from` attribution rides `do_inject`'s
-  `--from` flag onto the `pending.json` entry that every inject writes. Neither
-  question delivers anything. A shell target needs no check of its own at this
-  door, because nothing here types into a session; the shell refusal that guards
-  the local ping-back and doorbell is conduct's `auto_type_refusal`. **The two
-  UNSIGNED autogate rails answer to the charter too (A3 review finding 4).**
-  `message_send`'s Inject arm carries three autogate rails; the two with no
-  request signature behind them — a source ADDRESS resolving to an `autogate`
-  record's `url`, or a presented bearer matching that record's own `tokenFile` —
-  name no mesh, so `rail_admits` judges the MATCHED record by its HOME mesh
-  (`home_mesh_fallible`: the same name an unnamed request resolves to, but READ
-  rather than guessed): a charter governing home requires the record `verified`
-  and its key on the line with `message` (minus `Node::narrowed[home]`); a
-  charter-shaped home whose operator key is undecidable admits nothing; a
-  `config.toml` that will not LOAD admits nothing either (review F6 —
-  `home_mesh()` answers the built-in default there, which would judge the send
-  by the wrong mesh); a pair-mesh home keeps the record's own `autogate` flag as
-  the whole rule. **The grant lookup answers an unreadable config the same
-  way**: `effective_mesh` is fallible, an unnamed request's grant is
-  `Grant::none()` when the config will not load, and
+  lookup from Spawn's) answers one question: its `from` attribution rides
+  `do_inject`'s `--from` flag onto the `pending.json` entry that every inject
+  writes. Attribution is not a gate, and no `aoide/from` claim changes whether
+  an Inject parks. A shell target needs no check of its own at this door,
+  because nothing here types into a session; the shell refusal that guards the
+  local ping-back and doorbell is conduct's `auto_type_refusal`. **The grant
+  lookup refuses an unreadable config**: `effective_mesh` is fallible, an
+  unnamed request's grant is `Grant::none()` when the config will not load, and
   `spawn`/`mailDeposit`/`mailPoll`/`binding` refuse with `-32010` naming the
   file (`mesh_or_refusal`) rather than naming a guessed mesh. A request that
   NAMED its mesh never reads the config, and a caller that consults no grant (an
-  unsigned loopback inject, an ordinary `tasks/get`) is untouched. The match and
-  the verdict are two booleans: `autogate_match` still exempts the caller from
-  the #50 uniform guard, and `deliver_match` decides only whether the
-  `held-door` line is written. A record the charter does not answer for is
-  therefore held PENDING (queued, attributed `node:<name>`), never answered with
-  the guard's synthetic `submitted` Task and never refused. `verified` is asked
-  only of a record that claims a charter LINE, since `aoide node add --autogate`
-  writes `verified: false` and requiring it in a pair mesh would delete the rail
-  rather than harden it. **`tasks/get` reads a session's watch frame (P-RSA S6,
-  CONTRACTS.md §6).** `params.metadata["aoide/frame"]` asks for the frame the
-  local `session watch` renders; it rides as one `data` artifact, and is
-  answered only for a caller that resolved through the SIGNATURE rung to a
-  `verified` node whose grant in the request's mesh includes `read`
-  (`output_read_admitted`, with `may_message`/`may_spawn`'s shape one capability
-  over). Unsigned, bearer and address rungs are refused with the SAME text
-  whether the session exists or not — the gate is no existence oracle — while
-  the remote-parent KEY match is deliberately not required to READ (the
-  held-door audit of a steer and the ping-back history still need it).
+  unsigned loopback inject, an ordinary `tasks/get`) is untouched. **`tasks/get`
+  reads a session's watch frame (P-RSA S6, CONTRACTS.md §6).**
+  `params.metadata["aoide/frame"]` asks for the frame the local `session watch`
+  renders; it rides as one `data` artifact, and is answered only for a caller
+  that resolved through the SIGNATURE rung to a `verified` node whose grant in
+  the request's mesh includes `read` (`output_read_admitted`, with
+  `may_message`/`may_spawn`'s shape one capability over). Unsigned, bearer and
+  address rungs are refused with the SAME text whether the session exists or not
+  — the gate is no existence oracle. A frame needs no `remoteParent` key; only
+  the ping-back history below does.
   `watch_frame` is conduct's existing `gather` with `raw = false`; the frame
   leaves through `Frame::for_wire` (this box's paths and the suggested command
   struck) and the door clamps the tail to 200 lines, each letter's body to 40

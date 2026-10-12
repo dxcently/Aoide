@@ -110,14 +110,12 @@
   the SPAWN path's business alone (the User's ruling, 2026-09-25):** `node spawn` fails
   the call it was asked to make, while `send --to` DROPS the claim, sends
   unclaimed and names the reason on one warning line (`not claiming parent:
-  <reason>`) — `send` never named a parentage, the claim is an autogate
-  shortcut rather than the request, and the door's Inject arm reads a
-  malformed claim as a non-match, never as a refusal, so an unruly id costs
-  that send its autogate and nothing else. Don't "restore" a refusal on the
-  send path. `remote_child_row` holds the far node's
-  ack id to that predicate too: it is a string this node did not mint and
-  cannot vouch for. `build_message_send_body` is the one writer of the key;
-  the claim rides inside the signed body, so never add it to headers or
+  <reason>`) — `send` never named a parentage, and the door's Inject arm never
+  reads the claim at all, so an unruly id costs that send its claim and nothing
+  else. Don't "restore" a refusal on the send path. `remote_child_row` holds
+  the far node's ack id to that predicate too: it is a string this node did not
+  mint and cannot vouch for. `build_message_send_body` is the one writer of the
+  key; the claim rides inside the signed body, so never add it to headers or
   the top-level `params.metadata`.
 - **Forwarded event text from `adapter` is untrusted data**, same as root
   `AGENTS.md` house rule 4 — an adapter never lets forwarded text execute as
@@ -550,15 +548,11 @@
   one-shot, self-contained shape first — being merely "called less often"
   than `pull_node_live`/`send_message_to_node`/`spawn_on_node` is not that.
 - **A tunneled request is safe against a real node, not merely possible.**
-  Every request delivered through an ssh forward reaches the far A2A door
-  as `ConnOrigin::Loopback` (`aoide-server::a2a::classify_origin`). The far
-  door parks every send regardless, so the tunnel is only reachability: this
-  module makes the tunnel work, and `aoide-server` keeps a verified per-request
-  signature from riding Loopback's standing (`origin_for_inject`, CONTRACTS.md
-  §6). A like-for-like signature-rung autogate decides the `held-door` audit
-  for a node the operator already marked autogate. `--via`/`Node.via` are
-  safe to recommend for
-  a real cross-box pair.
+  Every request delivered through an ssh forward reaches the far A2A door as
+  `ConnOrigin::Loopback` (`aoide-server::a2a::classify_origin`). The far door
+  parks every Inject it admits, whatever the origin, so the tunnel is only
+  reachability: this module makes the tunnel work. `--via`/`Node.via` are safe
+  to recommend for a real cross-box pair.
 - **The self-pair guard (`discover::is_self_target`) runs BEFORE the
   proceed-confirm and BEFORE the ceremony, in `pair_via_hostname`, never
   inside `run_pair_request` (P-S1).** `run_pair_request` is shared with
@@ -595,15 +589,7 @@
     row is also where a paired record in a charter mesh is REPORTED inert
     (`CharterRow::inert`) — the record's own grant entry is not what the door
     reads there, and an operator must not have to infer that from the door's
-    code. **An `autogate` record is inert as a grant and not as a whole**: the
-    door's unsigned address/token rail still resolves it, judged by the
-    record's HOME mesh (`aoide-server::a2a::rail_admits`), so
-    `CharterRow::autogated` names those records on the HOME mesh's row (and
-    nowhere else — a rail carries no signed mesh, so another mesh's charter
-    has no say over it) and `render_charter` prints them with what this charter
-    decides: line with `message` ⇒ delivered, otherwise held PENDING. Don't
-    drop that line back to a bare `inert` list: it was the surface calling such
-    a record untrusted when its rail was still live.
+    code.
   - **`Node` gains no field for this.** A mesh's shape lives entirely in
     `config.toml`'s `[mesh.*]`; the live registry (`node_store::Node`) is
     read, never written, by this comparison, and never grows a

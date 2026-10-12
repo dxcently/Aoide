@@ -294,9 +294,10 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   the pre-token-open behavior). Per request: `state/stage/sessions.json`
   (task/session state), `state/nodes.json` (signed-request verification —
   the signature tried against every `verified` node's stored pubkey — and
-  the autogate rails: by caller address, by an autogate-marked node's own
-  `tokenFile`, or by the resolved signed node's `autogate` flag; read fresh
-  off disk per request). The `aoide-a2a` systemd unit
+  node identity: a bearer matched against a node's own `tokenFile`, or an
+  address matched against a node's `url`, which names the caller for
+  attribution and proves nothing; read fresh off disk per request).
+  The `aoide-a2a` systemd unit
   (`modules/nucleus/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
   `AOIDE_A2A_NODE_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
@@ -322,9 +323,10 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     `$AOIDE_AUDIT_LOG` passed down). The prompt is queued in `pending.json` as
     the spawned session's opening turn, attributed `node:<name>`, and is never
     typed; an empty prompt queues nothing. Every inject parks in `pending.json`,
-    loopback included. The autogate rails still run and write a `held-door`
-    audit line when they would have delivered; once a token is configured, a
-    caller that did not present it is never audited that way. Spawn answers to
+    loopback included, and no network send is delivered. Once a door token is
+    configured, a `contextId` send from a caller that proved neither that token
+    nor a node identity gets the uniform synthetic `submitted` Task and queues
+    nothing. Spawn answers to
     pairing alone: the caller must resolve on the Signature rung — a verified
     per-request signature against some `verified` node's stored pubkey — with
     `spawn` among the caller's grants IN THE MESH ITS REQUEST NAMES; every
@@ -364,7 +366,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
 ### aoide node add
 
 ```
-aoide node add <name> <url|poll> [--autogate] [--no-verify]
+aoide node add <name> <url|poll> [--no-verify]
                [--via ssh://[user@]host[:port]]
                [--token-file <path>] [--bearer-secret <name>] [--json]
 ```
@@ -386,14 +388,14 @@ aoide node add <name> <url|poll> [--autogate] [--no-verify]
 - **Writes:** inserts into `state/nodes.json` (v0, atomic write). A duplicate
   name is rejected cleanly (`reason: duplicate-name`, exit 1) — a nickname is
   never silently repointed.
-- **Output:** `"registered node \`<name>\` → <url>[ (autogate)] (<n> total)"`,
-  data `{node: {name, url, autogate, tokenFile?, bearerSecret?, addedAt}, count}`.
-- **Notes:** `--autogate` marks the node for audit: its inbound `message/send`
-  on this instance's A2A door writes a `held-door` line when its rails match,
-  and the send still parks in `pending.json`,
-  matched by caller address or by the per-node `--token-file` secret (the form
-  that survives a reverse proxy/tunnel, where every caller's address is the
-  proxy's) — that is what THIS node must present TO us. `--bearer-secret
+- **Output:** `"registered node \`<name>\` → <url> (<n> total)"`,
+  data `{node: {name, url, tokenFile?, bearerSecret?, addedAt}, count}`.
+- **Notes:** `--token-file` is the secret THIS node must present TO us as
+  `Authorization: Bearer`. It is how the door identifies the node behind a
+  reverse proxy or tunnel, where every caller's address is the proxy's; the
+  caller's address alone proves nothing. An inbound `message/send` that
+  presents it is attributed `node:<name>` and parks in `pending.json`.
+  `--bearer-secret
   <name>` is the mirror direction: a secret this instance resolves through
   the [[Secrets-Broker|secrets broker]] (consumer `a2a-client`, fresh on
   every request, never cached) and presents as `Authorization: Bearer
@@ -450,7 +452,7 @@ aoide node status [--json]
 
 - **Reads:** `state/nodes.json` plus each node's `state/node-cache/<name>.json`.
 - **Output:** the human line stays a terse `"<n> node(s) registered"`; `--json`
-  carries the full row per node — `{nodes: [{name, url, autogate, tokenFile?,
+  carries the full row per node — `{nodes: [{name, url, tokenFile?,
   bearerSecret?, hub, pubkey?, verified, grants, addedAt, state, fetchedAt,
   error}], homeMesh}` (`grants` is a map of mesh → capability set, P-CHARTER;
   `homeMesh` is `[pairing] homeMesh`, so a `--json`-only consumer never has to
@@ -498,7 +500,7 @@ aoide node hub <name> [--clear]
   `cleared` / `no-op`; the human message names the prior holder on a move
   (`"hub moved from <old> to <new>"`).
 - **Notes:** the hub is a last-resort address-resolution preference, not a
-  trust or autogate grant — resolution reaches for it only when nothing
+  trust grant — resolution reaches for it only when nothing
   else matches, never shadowing a real registered name. See
   [[Node-Federation]].
 
@@ -827,12 +829,8 @@ aoide mesh [--json]
   `"charter"`/`"paired"`, and each `CharterRow` is
   `{"mesh", "declared", "version", "operator", "operatorKey", "trust",
   "trusted", "highWater", "rekeyed": [{"node", "from", "to", "version",
-  "at"}], "inert": [...], "autogated": [...], "nodes"}` where `operator` is
-  the `SHA256:` fingerprint and `operatorKey` the bare hex. `autogated`
-  names this box's records whose unsigned address/token rail answers by THIS
-  charter — populated on the HOME mesh's row only (`[pairing] homeMesh`: the
-  rail carries no signed mesh, so no other mesh judges it) and empty
-  elsewhere.
+  "at"}], "inert": [...], "nodes"}` where `operator` is
+  the `SHA256:` fingerprint and `operatorKey` the bare hex.
 - **Notes:** unlike `node list`'s roster above, this reads only what a
   human explicitly named in `[mesh.<name>]` — an unregistered or
   undeclared node never appears as a row, only in `undeclared`. Drift is
