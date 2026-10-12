@@ -1341,13 +1341,15 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   daemon key. `identity::live_sealed_wrap_ids` is the set it yields.
   `session_store::live_wrap_refusal_for` is the refusal every finishing door
   (`session end`, a terminal `session phase`, the hook's `SessionEnd` arm) asks
-  first. The start door (`live_wrap_start`) and the hook's SessionStart
-  (`live_wrap_hook_start`, in `do_hook_session_start`) apply the start rule
-  before any write, and the hook's refusal is audited.
+  first, and so does `graph link` as the child. The start door
+  (`live_wrap_start`) and the hook's SessionStart (`live_wrap_hook_start`, in
+  `do_hook_session_start`) apply the start rule before any write, and the
+  hook's refusal is audited on the door it arrived on.
   `doc.rs::prune_done_keeping` keeps such a record out of every prune, and
-  `reap_inner` spares it. The autogate reads a parent edge only through
-  `send.rs`'s `attested_parent_of`, which needs `attestedSpawner` to name the
-  same id. Only `conduct` registration writes that stamp, and
+  `reap_inner` spares it. `doc.rs::drop_sessions` keeps a protected
+  survivor's edge when its spawner is dropped. The autogate reads a parent edge
+  only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner`
+  to name the same id. Only `conduct` registration writes that stamp, and
   `SessionRecord::set_parent_session` drops it whenever the edge moves. The
   residuals are listed in `CONTRACTS.md`.
 - **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**

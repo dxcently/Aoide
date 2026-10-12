@@ -211,6 +211,7 @@ pub(in crate::graph) fn do_session_start(
 /// the move is gated by [`ancestry_may_move`]. A protected live wrap is decided
 /// by [`live_wrap_hook_start`] first.
 pub(in crate::graph) fn do_hook_session_start(
+    door: aoide_protocol::Door,
     id: &str,
     agent: Option<&str>,
     cwd: Option<&str>,
@@ -224,7 +225,9 @@ pub(in crate::graph) fn do_hook_session_start(
         let conducted = load_stage::<SessionsFile>(&sessions_path())
             .is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id && conducted_wrap(s)));
         let parent = parent.filter(|_| !conducted);
-        if let Some(outcome) = live_wrap_hook_start(id, agent, cwd, window, parent, pid, ancestry) {
+        if let Some(outcome) =
+            live_wrap_hook_start(door, id, agent, cwd, window, parent, ancestry)
+        {
             return outcome;
         }
         do_session_start_inner(
@@ -236,20 +239,17 @@ pub(in crate::graph) fn do_hook_session_start(
 /// The hook door's SessionStart on a protected live wrap (`identity::
 /// is_protected_live_wrap`), decided before any write. A start that would change
 /// agent, cwd, window or parent is refused, writes nothing, and appends an audit
-/// line: the hook discards its outcome at one call site, so the line is the only
-/// trace there. A start that changes none of them writes nothing, except the
-/// hook chain. [`ancestry_may_move`] allows that move on a wrap whose own process
-/// sits in its harness's chain, the normal case, and the chain is how a harness
-/// re-binds its window, not an identity field, so it stays writable. `None` for
-/// every other record, and for a protected wrap whose chain may move (the full
-/// path below writes it).
+/// line on `door`: the hook discards its outcome at one call site, so the line is
+/// the only trace there. A start that changes none of them answers ok and writes
+/// no identity field. `None` for every other record, and for a protected wrap
+/// whose hook chain may move: that move goes through the full path below.
 fn live_wrap_hook_start(
+    door: aoide_protocol::Door,
     id: &str,
     agent: Option<&str>,
     cwd: Option<&str>,
     window: Option<&str>,
     parent: Option<&str>,
-    pid: Option<u32>,
     ancestry: &[i32],
 ) -> Option<Outcome> {
     let file: SessionsFile = load_stage(&sessions_path()).ok()?;
@@ -257,19 +257,10 @@ fn live_wrap_hook_start(
     if !super::identity::is_protected_live_wrap(rec) {
         return None;
     }
-    let mut after = file.sessions.clone();
-    upsert_session(&mut after, id, agent, cwd, window, parent, None, None, None, pid, "");
-    let stored = after.iter().find(|s| s.session_id == id)?;
-    let unchanged = matches!(
-        (serde_json::to_value(stored), serde_json::to_value(rec)),
-        (Ok(a), Ok(b)) if a == b
-    );
-    if !unchanged {
-        audit_refused_wrap_hook_start(id, &identity_fields_changed(rec, stored));
-        return Some(
-            Outcome::error("session.start", super::identity::live_wrap_refusal(id))
-                .with_data(json!({ "reason": "live-sealed-wrap", "id": id })),
-        );
+    let changed = start_changes(rec, agent, cwd, window, parent);
+    if !changed.is_empty() {
+        audit_refused_wrap_hook_start(door, id, &changed.join(", "));
+        return Some(live_wrap_refused(id, &changed));
     }
     if !ancestry.is_empty()
         && rec.hook_ancestry != ancestry
@@ -277,44 +268,66 @@ fn live_wrap_hook_start(
     {
         return None;
     }
-    Some(
-        Outcome::ok(
-            "session.start",
-            format!("re-started session `{id}` (no field changed; startedAt preserved)"),
-        )
-        .with_data(json!({
-            "sessionId": id,
-            "agent": rec.agent,
-            "startedAt": rec.started_at,
-            "inserted": false,
-            "file": sessions_path().to_string_lossy(),
-        })),
-    )
+    Some(live_wrap_unchanged(id, rec))
 }
 
-/// The identity fields a refused start would have changed, for the audit line.
-fn identity_fields_changed(before: &SessionRecord, after: &SessionRecord) -> String {
-    let names: Vec<&str> = [
-        ("agent", before.agent != after.agent),
-        ("cwd", before.cwd != after.cwd),
-        ("window", before.window_address != after.window_address),
-        ("parent", before.parent_session_id != after.parent_session_id),
-    ]
-    .into_iter()
-    .filter_map(|(name, changed)| changed.then_some(name))
-    .collect();
-    if names.is_empty() {
-        "its stored record".to_string()
-    } else {
-        names.join(", ")
+/// The identity fields a start would change on a protected wrap, by name: each
+/// one the start supplies and the record holds differently. A field the start
+/// does not carry changes nothing, since `upsert_session` keeps the stored value.
+/// Only these four are compared, so a start never refuses over `kind` or any
+/// other stored field.
+fn start_changes(
+    rec: &SessionRecord,
+    agent: Option<&str>,
+    cwd: Option<&str>,
+    window: Option<&str>,
+    parent: Option<&str>,
+) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    if agent.is_some_and(|a| a != rec.agent) {
+        changed.push("agent");
     }
+    if cwd.is_some_and(|c| c != rec.cwd) {
+        changed.push("cwd");
+    }
+    if window.is_some_and(|w| w != rec.window_address) {
+        changed.push("window");
+    }
+    if parent.is_some_and(|p| rec.parent_session_id.as_deref() != Some(p)) {
+        changed.push("parent");
+    }
+    changed
 }
 
-/// Append the audit line for a refused hook start on a protected wrap.
-fn audit_refused_wrap_hook_start(id: &str, fields: &str) {
+/// The ok answer to a start that changes no identity field of a protected wrap.
+/// Nothing is written.
+fn live_wrap_unchanged(id: &str, rec: &SessionRecord) -> Outcome {
+    Outcome::ok(
+        "session.start",
+        format!("re-started session `{id}` (no field changed; startedAt preserved)"),
+    )
+    .with_data(json!({
+        "sessionId": id,
+        "agent": rec.agent,
+        "startedAt": rec.started_at,
+        "inserted": false,
+        "file": sessions_path().to_string_lossy(),
+    }))
+}
+
+/// The refusal of a start that would change an identity field of a protected
+/// wrap. `fields` names them.
+fn live_wrap_refused(id: &str, fields: &[&str]) -> Outcome {
+    Outcome::error("session.start", super::identity::live_wrap_refusal(id))
+        .with_data(json!({ "reason": "live-sealed-wrap", "id": id, "fields": fields }))
+}
+
+/// Append the audit line for a refused hook start on a protected wrap, on the
+/// door the hook arrived on.
+fn audit_refused_wrap_hook_start(door: aoide_protocol::Door, id: &str, fields: &str) {
     let _ = aoide_protocol::audit::audit(
         &aoide_protocol::audit::default_audit_log(),
-        aoide_protocol::audit::Door::Cli,
+        door,
         aoide_protocol::audit::EventClass::Audit,
         "session.start",
         "error",
@@ -1920,8 +1933,8 @@ fn do_session_end_inner(id: &str) -> Outcome {
 ///
 /// A start on a protected live wrap is decided here, after that hop, with no
 /// daemon, daemon key or `AOIDE_DAEMON_SOCKET` involved: a start that changes no
-/// stored field is an ok no-op that writes nothing, and one that would change a
-/// field is refused (see [`live_wrap_start`]).
+/// identity field (agent, cwd, window, parent) is an ok no-op that writes
+/// nothing, and one that would change one is refused (see [`live_wrap_start`]).
 pub fn session_start(inv: &Invocation) -> Outcome {
     if let Some(outcome) = aoide_client::daemon::daemon_dispatch(inv) {
         return outcome;
@@ -1934,17 +1947,20 @@ pub fn session_start(inv: &Invocation) -> Outcome {
     let cwd = inv.flags.get("cwd").map(String::as_str);
     let window = inv.flags.get("window").map(String::as_str);
     let parent = inv.flags.get("parent").map(String::as_str);
-    if let Some(outcome) = live_wrap_start(&id, agent, cwd, window, parent) {
-        return outcome;
-    }
-    do_session_start(&id, agent, cwd, window, parent, None, None, None, None)
+    with_stage_lock(|| {
+        if let Some(outcome) = live_wrap_start(&id, agent, cwd, window, parent) {
+            return outcome;
+        }
+        do_session_start_inner(&id, agent, cwd, window, parent, None, None, None, None, &[])
+    })
 }
 
 /// The start door's verdict on a protected live wrap (`identity::
-/// is_protected_live_wrap`). The start is applied to a copy of the roster: if
-/// no stored field of the wrap would change, it answers ok and writes nothing,
-/// so the seal and the plaintext starttime are kept. If any field would change,
-/// it is refused. `None` for every other record.
+/// is_protected_live_wrap`). A start that changes none of agent, cwd, window or
+/// parent answers ok and writes nothing, so the seal and the plaintext starttime
+/// are kept. One that would change any of them is refused. `None` for every
+/// other record. The caller holds the stage lock, so the verdict and the write
+/// see the same roster.
 fn live_wrap_start(
     id: &str,
     agent: Option<&str>,
@@ -1957,31 +1973,11 @@ fn live_wrap_start(
     if !super::identity::is_protected_live_wrap(rec) {
         return None;
     }
-    let mut after = file.sessions.clone();
-    upsert_session(&mut after, id, agent, cwd, window, parent, None, None, None, None, "");
-    let stored = after
-        .iter()
-        .find(|s| s.session_id == id)
-        .and_then(|s| serde_json::to_value(s).ok());
-    if stored != serde_json::to_value(rec).ok() {
-        return Some(
-            Outcome::error("session.start", super::identity::live_wrap_refusal(id))
-                .with_data(json!({ "reason": "live-sealed-wrap", "id": id })),
-        );
+    let changed = start_changes(rec, agent, cwd, window, parent);
+    if !changed.is_empty() {
+        return Some(live_wrap_refused(id, &changed));
     }
-    Some(
-        Outcome::ok(
-            "session.start",
-            format!("re-started session `{id}` (no field changed; startedAt preserved)"),
-        )
-        .with_data(json!({
-            "sessionId": id,
-            "agent": rec.agent,
-            "startedAt": rec.started_at,
-            "inserted": false,
-            "file": sessions_path().to_string_lossy(),
-        })),
-    )
+    Some(live_wrap_unchanged(id, rec))
 }
 
 /// `session phase --id <id> --phase <phase>` — UPSERT the live hook phase.
@@ -2307,7 +2303,7 @@ mod tests {
         // test process's own ancestry — the ancestry walk below has no fake
         // `/proc` to read from, so the mechanism is exercised with genuine pids.
         let my_ancestry = crate::graph::window::pid_ancestry(std::process::id() as i32);
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "claude", Some("claude"), Some("/w"), Some("0xWIN"), Some("term-wrap"), None,
             &[DEAD, DEAD + 1, my_ancestry[1], my_ancestry[2]],
         );
@@ -2413,7 +2409,7 @@ mod tests {
         // member, never every same-window occupant.
         // The resumed twin is the same harness position under a new id: its
         // chain shares claude's depth (the desktop-sibling dead-process case).
-        let out2 = do_hook_session_start(
+        let out2 = do_hook_session_start(aoide_protocol::Door::Cli,
             "claude-resumed", Some("claude"), Some("/w"), Some("0xWIN"), None, None,
             &[DEAD + 2, DEAD + 3, my_ancestry[1], my_ancestry[2]],
         );
@@ -2617,7 +2613,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         do_session_start("x", Some("claude"), Some("/w"), Some("0xW"), None, None, None, None, None);
-        do_hook_session_start("y", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD, DEAD + 1]);
+        do_hook_session_start(aoide_protocol::Door::Cli, "y", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD, DEAD + 1]);
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert!(
             s.sessions.iter().any(|r| r.session_id == "x" && r.state != "done"),
@@ -2647,7 +2643,7 @@ mod tests {
         for (i, child) in children.iter().enumerate() {
             let i = i as i32;
             let chain = [DEAD + i, DEAD + 100 + i, child.id() as i32, me];
-            do_hook_session_start(
+            do_hook_session_start(aoide_protocol::Door::Cli,
                 &format!("h{i}"), Some("claude"), Some("/w"), Some("0xW"), None, None, &chain,
             );
         }
@@ -2677,11 +2673,11 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "before", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD, DEAD + 1, a[1], a[2]],
         );
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "after", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD + 2, DEAD + 3, a[1], a[2]],
         );
@@ -2707,11 +2703,11 @@ mod tests {
         // The old claude's process (DEAD+4) is gone; the shell (a[1]) and the
         // window's own process (a[2]) are the same, at the same depth.
         let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "old-tab", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD, DEAD + 1, DEAD + 4, a[1], a[2]],
         );
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "new-tab", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD + 2, DEAD + 3, DEAD + 5, a[1], a[2]],
         );
@@ -2737,11 +2733,11 @@ mod tests {
         // The outer claude's harness is a[1] (alive, at depth 2). The new session
         // runs beneath it: the same harness sits at depth 4 in the new chain.
         let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "outer", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD, DEAD + 1, a[1], a[2]],
         );
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "inner", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD + 2, DEAD + 3, DEAD + 5, DEAD + 6, a[1], a[2]],
         );
@@ -2767,7 +2763,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let a = crate::graph::window::pid_ancestry(std::process::id() as i32);
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "h", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD, DEAD + 1, a[1], a[2]],
         );
@@ -2784,25 +2780,25 @@ mod tests {
         assert_eq!(chain_of(), vec![DEAD, DEAD + 1, a[1], a[2]]);
 
         // A resumed run that shares the harness moves the chain.
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "h", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD + 2, DEAD + 3, a[1], a[2]],
         );
         assert_eq!(chain_of(), vec![DEAD + 2, DEAD + 3, a[1], a[2]]);
 
         // Pid-less: the latest SessionStart's chain wins, even though a[1] is alive.
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "h", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD + 4, DEAD + 5],
         );
         assert_eq!(chain_of(), vec![DEAD + 4, DEAD + 5], "a pid-less record follows its latest SessionStart");
 
         // Anchored to a[1], alive: a registration whose chain drops a[1] is refused.
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "anchored", Some("claude"), Some("/w"), Some("0xA"), None, Some(a[1] as u32),
             &[DEAD, a[1], a[2]],
         );
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "anchored", Some("claude"), Some("/w"), Some("0xA"), None, None,
             &[DEAD + 6, DEAD + 7],
         );
@@ -4030,7 +4026,7 @@ mod enduring_binding_tests {
 mod live_sealed_wrap_guards {
     use super::*;
     use std::path::PathBuf;
-    use crate::graph::manage::prune;
+    use crate::graph::manage::{link, prune};
     use crate::graph::testutil::*;
     use aoide_protocol::output::Status;
 
@@ -4087,6 +4083,23 @@ mod live_sealed_wrap_guards {
     fn set_state(id: &str, state: &str) {
         let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
         file.sessions.iter_mut().find(|s| s.session_id == id).unwrap().state = state.to_string();
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    /// Clears a record's `kind`, as a legacy record has none (`upsert_session`
+    /// backfills it on the next touch).
+    fn clear_kind(id: &str) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == id).unwrap().kind = None;
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    /// Sets `id`'s spawn edge the way a spawn does: the parent and its stamp.
+    fn set_spawn_edge(id: &str, parent: &str) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter_mut().find(|s| s.session_id == id).unwrap();
+        rec.set_parent_session(Some(parent.to_string()));
+        rec.attested_spawner = Some(parent.to_string());
         write_stage(&sessions_path(), &file).unwrap();
     }
 
@@ -4241,6 +4254,7 @@ mod live_sealed_wrap_guards {
         let out = session_start(&inv);
 
         assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert!(out.message.contains("no field changed"), "the no-op answer: {}", out.message);
         assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "the roster is byte-identical");
         assert_eq!(record("wrap").unwrap().seal, sealed.seal);
         assert_eq!(record("wrap").unwrap().sealed_pid_starttime, sealed.sealed_pid_starttime);
@@ -4285,12 +4299,13 @@ mod live_sealed_wrap_guards {
         sealed_live_wrap("wrap", &kp);
         let bytes = std::fs::read(sessions_path()).unwrap();
 
-        let out = do_hook_session_start("wrap", Some("claude"), Some("/w"), Some("0xOTHER"), None, None, &[]);
+        let out = do_hook_session_start(aoide_protocol::Door::Daemon, "wrap", Some("claude"), Some("/w"), Some("0xOTHER"), None, None, &[]);
 
         assert_eq!(out.status, Status::Error, "{}", out.message);
         assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "the roster is byte-identical");
         let audit = std::fs::read_to_string(stage.join("audit.log")).expect("the refusal is audited");
         assert!(audit.contains("live-sealed-wrap") && audit.contains("window"), "{audit}");
+        assert!(audit.contains("\"door\":\"daemon\""), "the line names the door the hook arrived on: {audit}");
         let _ = std::fs::remove_dir_all(&stage);
     }
 
@@ -4303,7 +4318,7 @@ mod live_sealed_wrap_guards {
         sealed_live_wrap("wrap", &kp);
         let bytes = std::fs::read(sessions_path()).unwrap();
 
-        let out = do_hook_session_start("wrap", Some("claude"), Some("/w"), None, None, None, &[]);
+        let out = do_hook_session_start(aoide_protocol::Door::Cli, "wrap", Some("claude"), Some("/w"), None, None, None, &[]);
 
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         assert!(out.message.contains("no field changed"), "the no-op answer: {}", out.message);
@@ -4321,7 +4336,7 @@ mod live_sealed_wrap_guards {
         sealed_live_wrap("wrap", &kp);
         let me = std::process::id() as i32;
 
-        let out = do_hook_session_start("wrap", Some("claude"), Some("/w"), None, None, None, &[me]);
+        let out = do_hook_session_start(aoide_protocol::Door::Cli, "wrap", Some("claude"), Some("/w"), None, None, None, &[me]);
 
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         let rec = record("wrap").unwrap();
@@ -4339,7 +4354,7 @@ mod live_sealed_wrap_guards {
         let (_env, _kp, stage) = seal_world("hook-start-plain");
         do_session_start("plain", Some("claude"), Some("/w"), None, None, None, None, None, None);
 
-        let out = do_hook_session_start("plain", Some("claude"), Some("/w2"), Some("0xW"), None, None, &[]);
+        let out = do_hook_session_start(aoide_protocol::Door::Cli, "plain", Some("claude"), Some("/w2"), Some("0xW"), None, None, &[]);
 
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         let rec = record("plain").unwrap();
@@ -4524,7 +4539,7 @@ mod live_sealed_wrap_guards {
         );
 
         stamp_attested_parent("victim", "wrap");
-        do_hook_session_start("victim", Some("claude"), Some("/w"), None, Some("wrap"), None, &[]);
+        do_hook_session_start(aoide_protocol::Door::Cli, "victim", Some("claude"), Some("/w"), None, Some("wrap"), None, &[]);
         clear_stale_parent("victim");
 
         let rec = record("victim").unwrap();
@@ -4547,6 +4562,123 @@ mod live_sealed_wrap_guards {
         let rec = record("child").unwrap();
         assert_eq!(rec.parent_session_id.as_deref(), Some("orch"));
         assert_eq!(rec.attested_spawner, None, "an explicit --parent is a caller's word, not a kernel fact");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// `graph link` would re-parent the wrap, and the set drops its spawn stamp.
+    /// A protected wrap's edge is never set there; a plain child still links.
+    #[test]
+    fn graph_link_refuses_to_re_parent_a_protected_wrap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-link");
+        sealed_live_wrap("wrap", &kp);
+        do_session_start("plain", Some("claude"), Some("/p"), None, None, None, None, None, None);
+        do_session_start("other", Some("claude"), Some("/o"), None, None, None, None, None, None);
+        let before = std::fs::read(sessions_path()).unwrap();
+
+        let out = link(&invocation(&["graph", "link"], &["wrap", "other"]));
+
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert!(out.message.contains("cannot be"), "the taught refusal: {}", out.message);
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), before, "the roster is byte-identical");
+        assert_eq!(record("wrap").unwrap().parent_session_id, None);
+
+        let plain = link(&invocation(&["graph", "link"], &["plain", "other"]));
+        assert_eq!(plain.status, Status::Ok, "{}", plain.message);
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A start that changes no identity field is a no-op on a record with no
+    /// `kind`, the field `upsert_session` would backfill. Neither door refuses
+    /// it and neither writes it.
+    #[test]
+    fn a_same_fields_start_on_a_kindless_protected_wrap_is_a_no_op() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-kindless");
+        sealed_live_wrap("wrap", &kp);
+        clear_kind("wrap");
+        std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-aoided.sock"));
+        let bytes = std::fs::read(sessions_path()).unwrap();
+
+        let cli = session_start(&flag_invocation(
+            &["session", "start"],
+            &[("id", "wrap"), ("agent", "claude"), ("cwd", "/w")],
+        ));
+        assert_eq!(cli.status, Status::Ok, "{}", cli.message);
+        assert!(cli.message.contains("no field changed"), "{}", cli.message);
+
+        let hook = do_hook_session_start(
+            aoide_protocol::Door::Cli, "wrap", Some("claude"), Some("/w"), None, None, None, &[],
+        );
+        assert_eq!(hook.status, Status::Ok, "{}", hook.message);
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "neither start writes the record");
+        assert_eq!(record("wrap").unwrap().kind, None);
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// `session bind` on a protected wrap: the first bind writes the enduring
+    /// id, a different one is refused with the roster byte-identical, and the
+    /// bound one again is a no-op.
+    #[test]
+    fn a_protected_wrap_takes_its_first_enduring_binding_and_refuses_another() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-bind");
+        sealed_live_wrap("wrap", &kp);
+        let bind = |key: &str| {
+            let mut inv = flag_invocation(&["session", "bind"], &[("id", "wrap"), ("agent-id", key)]);
+            inv.door = aoide_protocol::Door::Daemon;
+            session_bind(&inv)
+        };
+
+        let first = bind("alpha");
+        assert_eq!(first.status, Status::Ok, "{}", first.message);
+        assert_eq!(record("wrap").unwrap().enduring_agent_id.as_deref(), Some("alpha"));
+        let bytes = std::fs::read(sessions_path()).unwrap();
+
+        let other = bind("beta");
+        assert_eq!(other.status, Status::Error, "{}", other.message);
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "a refused rebind writes nothing");
+
+        let same = bind("alpha");
+        assert_eq!(same.status, Status::Ok, "{}", same.message);
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "the same binding is a no-op");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The reaper prunes a finished spawner. A protected survivor keeps its edge
+    /// and spawn stamp, since it is alive; a plain child's edge is cleared as
+    /// before. The survivor's parent is then a missing record, which the readers
+    /// treat as no parent.
+    #[test]
+    fn a_reaped_spawner_keeps_a_protected_survivors_edge_and_clears_a_plain_childs() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-reap-edge");
+        let _hypr = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        std::fs::create_dir_all(stage.join("aoide")).unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-aoided.sock"));
+
+        do_session_start("spawner", Some("shell"), Some("/s"), None, None, None, None, None, None);
+        set_state("spawner", "done");
+        sealed_live_wrap("wrap", &kp);
+        set_spawn_edge("wrap", "spawner");
+        do_session_start("plain", Some("claude"), Some("/p"), None, None, None, None, None, None);
+        set_spawn_edge("plain", "spawner");
+        do_session_start("dead", Some("claude"), Some("/d"), None, None, None, None, None, Some(999_999_999));
+        let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        upsert_hook(&mut hooks.hooks, "plain", "working", &now_iso_utc());
+        write_stage(&hooks_path(), &hooks).unwrap();
+
+        let out = crate::reap::reap(&flag_invocation(&["session", "reap"], &[]));
+
+        assert_ne!(out.status, Status::Error, "{}", out.message);
+        assert!(record("spawner").is_none(), "the finished spawner is pruned");
+        let wrap = record("wrap").expect("the protected survivor is kept");
+        assert_eq!(wrap.parent_session_id.as_deref(), Some("spawner"), "its edge is kept");
+        assert_eq!(wrap.attested_spawner.as_deref(), Some("spawner"), "its spawn stamp is kept");
+        let plain = record("plain").expect("the plain child is kept");
+        assert_eq!(plain.parent_session_id, None, "a plain child's edge is cleared");
+        assert_eq!(plain.attested_spawner, None);
         let _ = std::fs::remove_dir_all(&stage);
     }
 }

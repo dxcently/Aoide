@@ -146,9 +146,15 @@ pub fn pid_starttime(pid: i32) -> Option<u64> {
 /// answers for it, but it runs nothing.
 #[cfg(unix)]
 pub fn live_pid_starttime(pid: i32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after = &stat[stat.rfind(')')? + 1..];
-    let mut fields = after.split_whitespace();
+    live_starttime_of_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+/// [`live_pid_starttime`]'s parse, over one `/proc/<pid>/stat` line. The comm
+/// sits in parentheses and may hold any byte, `)` included, so the fields start
+/// after the LAST `)`: a process named `x) Z 1 2` is not a zombie.
+#[cfg(unix)]
+fn live_starttime_of_stat(stat: &str) -> Option<u64> {
+    let mut fields = stat[stat.rfind(')')? + 1..].split_whitespace();
     if matches!(fields.next()?, "Z" | "X") {
         return None;
     }
@@ -455,6 +461,19 @@ mod tests {
         let chain = pid_ancestry(me);
         assert_eq!(chain.first(), Some(&me), "the walk is self-first");
         assert!(chain.len() <= 64, "the walk is bounded");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_starttime_reads_past_a_comm_that_looks_like_a_state() {
+        // The comm is `x) Z 1 2`: the last `)` closes it, the state is S, and
+        // field 22 (after the state) is the starttime.
+        let live = "4242 (x) Z 1 2) S 1 4242 4242 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 98765 0";
+        assert_eq!(live_starttime_of_stat(live), Some(98765));
+        let zombie = "4242 (x) Z 1 2) Z 1 4242 4242 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 98765 0";
+        assert_eq!(live_starttime_of_stat(zombie), None, "a real Z state is not alive");
+        let exited = "4242 (x) Z 1 2) X 1 4242 4242 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 98765 0";
+        assert_eq!(live_starttime_of_stat(exited), None, "a real X state is not alive");
     }
 
     #[test]

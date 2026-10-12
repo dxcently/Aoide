@@ -2729,7 +2729,8 @@ suite did as a test-only expedient before this field existed. `seal` and
 `sealedIssuedAt` share ONE lifecycle — always `Some` together, always `None`
 together. `sealedPidStarttime` (number, additive) is the `pidStarttime` above
 in plain text, and `sealedBootId` (string, additive) is the kernel's boot id at
-seal time (`/proc/sys/kernel/random/boot_id`). Both are stamped in the SAME call
+seal time (`/proc/sys/kernel/random/boot_id`; the constant `windows` on Windows,
+see "Platform" below). Both are stamped in the SAME call
 as `seal`. They are the protection fact for a conducted wrap (see "Same-uid
 processes and the live sealed wrap" below). Neither is authenticated, so a
 same-uid writer can set or clear them. A record that lacks either one predates
@@ -2772,12 +2773,10 @@ fresh id. Sealing happens once per record: `everSealed` (bool, additive,
 set by `stamp_seal`, never cleared) bars the daemon — both the tick and the
 dispatched-`session start` path — from sealing a record that ever carried a
 seal, so a seal that goes missing can never be re-minted over another pid.
-A `session start --id <id>` on a protected live wrap (below) is decided by the
-start door itself, after the daemon hop, so no daemon, daemon key or
-`AOIDE_DAEMON_SOCKET` decides it. A start that would change no stored field
-answers ok and writes nothing. A start that would change one is refused. A
-record whose pid was reused, whose process has ended, or that is not a conducted
-wrap is not refused, and is not re-sealed.
+A `session start --id <id>` on a protected live wrap is decided by the start
+door itself, after the daemon hop, by rule 2 below, so no daemon, daemon key or
+`AOIDE_DAEMON_SOCKET` decides it. A record whose pid was reused, whose process
+has ended, or that is not a conducted wrap is not refused, and is not re-sealed.
 
 **Same-uid processes and the live sealed wrap.** The rules in this section are
 read by the CLI's own doors. They are not a boundary against a process that runs
@@ -2804,7 +2803,12 @@ can verify. A zombie (exited, not yet reaped) is not alive, and a record from an
 earlier boot is never protected.
 
 Platform: the predicate works on Linux, and on Windows through its own arm. On
-other unixes `pid_starttime` is `None`, so nothing is protected there.
+other unixes `pid_starttime` is `None`, so nothing is protected there. On
+Windows `sealedBootId` is the constant `windows` (`attest::boot_id`), so that
+clause always holds and is not a boot check. The Windows starttime is the
+process's absolute creation `FILETIME`, unique per process instance, so an
+earlier boot's value cannot match a live process; the starttime clause carries
+the check there. Rated low.
 
 Three rules hold, each on the doors named:
 
@@ -2818,30 +2822,68 @@ Three rules hold, each on the doors named:
    dead, unsealed, not conducted, or whose starttime or boot does not match ends
    as it always has.
 2. *A protected live wrap is re-registered only as it is.* The start door
-   applies a `session start --id` on it to a copy of the roster. A start that
-   would change no stored field answers `ok` and writes nothing, so a harness
-   hook may send its own registration again (`--agent`, `--cwd`) and keep the
-   seal and the starttime. A start that would change `agent`, `cwd`, `window` or
-   `parent` is refused. The harness hook's SessionStart (`session hook`) follows
-   the same rule in `do_hook_session_start`: a refused hook start writes nothing
-   and appends an audit line with reason `live-sealed-wrap`, because the hook
-   discards its outcome at one call site. The hook chain (`hookAncestry`) is not
-   an identity field. Where `ancestry_may_move` allows it, a hook start on a
-   protected wrap still writes the chain through the full path, which leaves its
-   identity fields as they were. The chain is how a harness re-binds its window,
-   and a wrap's own process usually sits in its harness's chain. The daemon
-   route and the direct route run the same check.
+   (`session start --id`) and the harness hook's SessionStart (`session hook`,
+   `do_hook_session_start`) compare four fields of the wrap: `agent`, `cwd`,
+   `window` and `parent`. A start that supplies none of them differently answers
+   `ok` and writes none of them, so a harness may register again (`--agent`,
+   `--cwd`) and keep the seal and the starttime. A start that would change one
+   is refused with reason `live-sealed-wrap` and writes nothing. A refused hook
+   start also appends an audit line on the door the hook arrived on, since the
+   hook discards its outcome at one call site. The daemon route and the direct
+   route run the same check. `session bind` follows the same shape for
+   `enduringAgentId`: the first bind writes it, the same value is a no-op, and a
+   different value is refused as `conflicting-binding`, as on every record.
+
+   A same-fields hook SessionStart still writes these, and nothing else on the
+   roster: `sessionStartAt`, stamped on every SessionStart, which is the
+   readiness fact a spawned wrap's first turn waits on (`wait_ready`);
+   `harnessSessionId` and `contextCeiling`, each change-only and present when
+   the payload carries it; and `hookAncestry` when `ancestry_may_move` allows
+   the move, through the full path, which also backfills a missing `kind`. Its
+   phase lives in `hooks.json`. It never writes `pid`, the seal, the starttime,
+   the boot id, `parentSessionId` or `attestedSpawner`.
+
+   The hook chain is not an identity field, and the check above does not read
+   it. A wrap's own process usually sits in its harness's chain, so the chain is
+   empty until a first hook fills it, and that fill is the need. Two readers see
+   the chain. Window binding reads the hook process's own ancestry and fills
+   only an empty window, so a stored chain cannot re-bind it. The ping-back host
+   lookup (`pingback/hook.rs`, `host_wrap`) reads a child's chain to decide
+   whether its parent is its host, and it does not filter conducted records, so
+   a set chain on a protected child decides whether that child's trace reaches
+   its spawner. Fill-only (a set chain never changes) would close that. It is
+   not built: the User has it on the docket.
+
+   `window` counts as a change even from empty. A protected wrap stored with no
+   window therefore refuses a hook that discovers one, and the refusal is
+   audited, and the chain is not filled by that start. Conduct registers a
+   headless wrap with no window, so a headless wrap under a windowed spawner can
+   reach this. Filling an empty window is open for the User's ruling, with
+   fill-only.
 3. *The autogate reads only the spawn-time edge.* A target's parent counts for
    the parent-of-target and sibling rules only where its `attestedSpawner` names
    that parent (§ `sessions.json`). A bare `session start --parent`, a `graph
-   link`, or a moved edge earns no autogate: the send is held pending. The hook
-   door attests nothing, and it never moves a conducted wrap's edge.
+   link`, or a moved edge earns no autogate: the send is held pending. `graph
+   link` refuses a protected wrap as its child, with reason `live-sealed-wrap`.
+   The hook door attests nothing, and it never moves a conducted wrap's edge.
+   A prune or a reap that drops the spawner leaves a protected survivor's
+   `parentSessionId` and `attestedSpawner` in place, since the survivor is
+   alive. The pruned id then names no record, and every reader treats that as no
+   parent: graph placement falls back to project anchoring, the ping-back to it
+   fails as `no-parent-record`, and the autogate needs a sender with that id,
+   which no longer runs. The residual: a new registration under the same id
+   would match the stale stamp, and nothing stops it.
 
 **Who can set the marker.** `sealedPidStarttime` and `sealedBootId` are written
-in one place, `stamp_seal`, from the daemon's tick and from the dispatched
-`session start` mint. No CLI verb reaches them. A hand edit of `sessions.json`
-does: it can give ANY live same-uid process's record `conductable`, a `seal`,
-that process's starttime, and this boot's id, and that record is then protected
+in one place, `stamp_seal`. Two callers reach it: the daemon's tick, and the
+daemon's mint after a successful dispatched `session start`
+(`seal_freshly_registered_session`, `server/src/daemon.rs`). So a CLI `session
+start`, routed through the daemon, can seal a record that carries a pid and no
+seal. The mint does not set `conductable`, and the predicate needs it, so only a
+conduct registration or a hand edit makes a protected wrap. A hand edit of
+`sessions.json` can do all of it: it can give ANY live same-uid process's
+record `conductable`, a `seal`, that process's starttime, and this boot's id,
+and that record is then protected
 from end, prune, phase, and start until the process exits. It can also clear
 the fields and unprotect a live wrap. Neither is stopped. The marker is unkeyed
 by design: the seal's key is the grant side's concern, not this one's.
@@ -2879,13 +2921,17 @@ checks none of them, and an infected agent can do each one.
 - Keep a window-gone wrap live. This is the cost of the reaper rule: a wrap whose
   window has vanished, but whose process still lives, stays live and deliverable
   until that process exits.
+- Set a protected child's hook chain (`hookAncestry`). The chain does not move
+  the protection, but it decides whether the child's ping-back host resolves
+  (rule 2). A set chain is writable until the User rules on fill-only.
 - Speak in the mesh. The grant side gates sends (`send.rs`). A send it admits
   carries whatever text its sender chose, and nothing here limits that text.
 
 This is an accident guard for the cooperating CLI paths. It stops a process that
 is not hostile, or a bug, from ending or rewriting a live wrap by mistake. It is
-not a containment boundary against an infected agent on the box. The protection
-rule no longer depends on the daemon; the grant rules still do.
+not a containment boundary against an infected agent on the box. The
+predicate reads no daemon state. The grant rules (`session kill`, the autogate,
+the broker's origin gate) read the daemon's key.
 
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)

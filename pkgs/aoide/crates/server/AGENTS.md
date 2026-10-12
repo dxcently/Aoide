@@ -185,8 +185,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `seal_unsealed_live_sessions` tick. Both stamp the plaintext
   `sealedPidStarttime` and `sealedBootId` in the same call as the seal. The
   start door (`aoide_conduct::graph::session_start`) decides a start on a
-  protected live wrap, after the daemon hop: a same-fields start is a no-op, and
-  a start that would change a field is refused. The decision is the door's,
+  protected live wrap, after the daemon hop: a start that changes none of agent,
+  cwd, window or parent is a no-op, and one that would change any of them is
+  refused. The decision is the door's,
   not this crate's, and no key is read. Never refuse after mutating, and never
   add a path that re-mints over a record that has ever been sealed; the pid it
   mints over is the record's OWN `pid` field (kept immutable by

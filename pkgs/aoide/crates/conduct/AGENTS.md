@@ -1185,10 +1185,13 @@ in the message.
   daemon key on that path.** The predicate is
   `identity::is_protected_live_wrap`, stated once in `CONTRACTS.md`'s identity
   section. Every refusal asks it: `session end`, a terminal `session phase`, the
-  hook's `SessionEnd` arm, `session prune`, and the reaper's spare. The start
-  door (`session_store`'s `session_start`, after the daemon hop) and the hook
-  door's SessionStart (`do_hook_session_start`) both ask it before any write,
-  and a refused hook start is audited. `identity::live_sealed_wrap_ids` is the
+  hook's `SessionEnd` arm, `session prune`, the reaper's spare, and `graph
+  link` (as the child). The start door (`session_store`'s `session_start`,
+  after the daemon hop) and the hook door's SessionStart
+  (`do_hook_session_start`) both ask it before any write, and a refused hook
+  start is audited on the door the hook arrived on. `drop_sessions` keeps a
+  protected survivor's `parentSessionId` and `attestedSpawner` when its
+  spawner is dropped. `identity::live_sealed_wrap_ids` is the
   set the doors and the reaper test. The wrap's own exit path (`do_session_end`
   from `session_conduct`) is the one legitimate end and stays unrefused. A new
   door that can finish or re-register a record asks the same predicate first,
@@ -1558,7 +1561,8 @@ in the message.
   execs a real terminal running the same `aoide conduct`, and a windowed
   worker terminal is abandoned exactly as readily as a headless one.
   `parentSessionId` is worse than wrong — `graph/doc.rs` clears a child's
-  parent edge when the parent leaves the roster, so it is empty at
+  parent edge when the parent leaves the roster (a protected live wrap keeps
+  it, CONTRACTS rule 3), so it is empty at
   precisely the moment a shell becomes leftover, and a predicate keyed on
   it would match only shells whose agent is still alive. `spawned` is
   stamped once by `stamp_spawned` inside the child `spawn` re-execs and

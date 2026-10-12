@@ -951,13 +951,18 @@ fn set_lead(name: &str, lead: Option<&str>) -> Outcome {
     })
 }
 
-/// `graph link <child> <parent>` — set the spawned-by edge on the child.
+/// `graph link <child> <parent>` — set the spawned-by edge on the child. A
+/// protected live wrap's edge is never set here (CONTRACTS, rule 3).
 pub fn link(inv: &Invocation) -> Outcome {
     let args = match require_args(inv, &["child", "parent"]) {
         Ok(a) => a,
         Err(e) => return e,
     };
     let (child, parent) = (args[0].clone(), args[1].clone());
+    if let Some(message) = super::session_store::live_wrap_refusal_for(&child) {
+        return Outcome::error("graph.link", message)
+            .with_data(json!({ "reason": "live-sealed-wrap", "id": child }));
+    }
     if child == parent {
         return Outcome::error(
             "graph.link",
