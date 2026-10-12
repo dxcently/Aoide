@@ -426,9 +426,9 @@
   `aoide-conduct`), and the secrets broker's per-secret `allowRemoteOrigin`
   origin gate (P-ID4, in `aoide-secrets`) — that policy logic never moves
   here.
-- **`wire_auth::canonical_string`'s five-field order, NUL-separator, and
-  lowercased/trimmed style are the wire contract, not an implementation
-  detail (P-P4) — pinned by
+- **`wire_auth::canonical_string`'s field order (five, plus the mesh as a
+  sixth when named), NUL-separator, and lowercased/trimmed style are the wire
+  contract, not an implementation detail (P-P4) — pinned by
   `tests::canonical_string_stability_vectors_never_drift`, mirroring
   `pairing::derive_sas`'s own pinning discipline.** A change to the field
   order, the separator, the case-folding, or the digest algorithm breaks

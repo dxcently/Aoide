@@ -5287,8 +5287,10 @@ fn mail_method_of(body: &[u8]) -> Option<&'static str> {
 /// What the door answers a mail method with BEFORE dispatch, when this host's
 /// declarations will not load — or that it should keep the refusal it has.
 enum PreDispatch {
-    /// The refused `config-invalid` result.
-    Unloadable(String),
+    /// The refused `config-invalid` result. `governed` is true only when the
+    /// request verified under the charter [`aoide_storage::charter::governing`]
+    /// accepts for its mesh: only then is the answer signed.
+    Unloadable { detail: String, governed: bool },
     /// A JSON-RPC error instead: a nonce this request reused.
     Error(i64, String),
     /// Leave the door's own `-32007` standing.
@@ -5301,7 +5303,8 @@ enum PreDispatch {
 /// under the key the charter IN FORCE for that mesh gives THAT node. `Keep` in
 /// every other case — a genuinely bad signature, a name the charter does not
 /// carry, a pair mesh (its keys need no declaration and would have resolved) —
-/// which leaves the door's own `-32007` standing.
+/// which leaves the door's own `-32007` standing. `Unloadable` carries
+/// `governed`, which decides whether the caller may sign that answer.
 ///
 /// **A verified request still CONSUMES its nonce** (`nonce_is_replay`, keyed
 /// exactly as the ladder keys it: the signer's lowercase key hex plus the nonce),
@@ -5311,6 +5314,12 @@ enum PreDispatch {
 /// them, and a `mailPoll` retires and hands over entries. The audit line is the
 /// method's own; nothing about the load error goes on the wire.
 fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path) -> PreDispatch {
+    // Only POST is a signed request (`verify_signed_request`). This arm is
+    // reached for every -32007 refusal, so it repeats that gate: a method
+    // spelled `ANSWER` must never reach the canonical string below.
+    if req.method != "POST" {
+        return PreDispatch::Keep;
+    }
     let Some(refusal) = aoide_storage::routing::declarations().err() else {
         return PreDispatch::Keep;
     };
@@ -5363,9 +5372,17 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
         );
         return PreDispatch::Error(-32009, message);
     }
+    // Signed only under the charter this node GOVERNS for the mesh: in force,
+    // parsed, naming this mesh, and under a trusted operator. The raw read
+    // above trusts nothing, so a charter this node would not honour, or one
+    // with no operator key to decide it, gets the same taught word unsigned,
+    // and the client refuses it.
+    let governed = aoide_storage::charter::governing(mesh)
+        .and_then(|c| c.nodes.get(node).map(|l| l.key.clone()))
+        .is_some_and(|key| aoide_storage::wire_auth::verify_signature_hex(&key, canonical.as_bytes(), signature));
     let detail = format!("{CONFIG_INVALID}: {refusal}");
     let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
-    PreDispatch::Unloadable(CONFIG_INVALID_DETAIL.to_string())
+    PreDispatch::Unloadable { detail: CONFIG_INVALID_DETAIL.to_string(), governed }
 }
 
 fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
@@ -5885,8 +5902,8 @@ fn write_http_response_with<W: Write>(w: &mut W, status: u16, body: &[u8], extra
 /// path stay unsigned even when their signature verified, so the door's key
 /// signs nothing a client does not check. The signature covers the request's
 /// own signature and nonce, the status and the exact body bytes; a key that
-/// will not load leaves the answer unsigned and audited, and the client
-/// refuses an unsigned answer.
+/// will not load, or is not on disk, leaves the answer unsigned and audited,
+/// and the client refuses an unsigned answer.
 fn answer_headers(req: &HttpRequest, status: u16, body: &[u8], audit_log: &Path) -> Vec<(&'static str, String)> {
     if req.method != "POST" || req.path != "/" {
         return Vec::new();
@@ -5894,10 +5911,23 @@ fn answer_headers(req: &HttpRequest, status: u16, body: &[u8], audit_log: &Path)
     let (Some(request_signature), Some(request_nonce)) = (req.signed_signature.as_deref(), req.signed_nonce.as_deref()) else {
         return Vec::new();
     };
-    match aoide_storage::identity::load_or_mint() {
-        Ok((kp, _)) => {
+    // Load only: answering a request must never mint this box's identity. A
+    // missing key is an unsigned answer, audited, like a key that will not load.
+    match aoide_storage::identity::load_existing() {
+        Ok(Some(kp)) => {
             let signature = aoide_storage::wire_auth::sign_answer(&kp, request_signature, request_nonce, status, body);
             vec![(aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE, signature)]
+        }
+        Ok(None) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.answer-unsigned",
+                "absent",
+                "no identity key is on disk, so this answer goes out unsigned",
+            );
+            Vec::new()
         }
         Err(e) => {
             let _ = audit(
@@ -6018,15 +6048,24 @@ static NONCE_CACHE: Mutex<VecDeque<(String, String)>> = Mutex::new(VecDeque::new
 /// lock in this workspace (`pairing.rs`'s `PARK_LOCK` precedent): a panic
 /// inside one caller must never wedge every OTHER signed request behind a
 /// poisoned lock forever.
+///
+/// Both halves are keyed in the form the signature covers.
+/// `wire_auth::canonical_string` trims and lowercases the nonce before it
+/// signs it, so a captured request whose nonce header has only its case
+/// changed still verifies. Keying the raw text would admit that copy as a
+/// fresh nonce and run the request a second time, signed answer included.
+/// One normalisation, here, covers every caller.
 fn nonce_is_replay(key: &str, nonce: &str) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    let nonce = nonce.trim().to_ascii_lowercase();
     let mut cache = NONCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if cache.iter().any(|(p, n)| p == key && n == nonce) {
+    if cache.iter().any(|(p, n)| *p == key && *n == nonce) {
         return true;
     }
     if cache.len() >= NONCE_CACHE_CAP {
         cache.pop_front();
     }
-    cache.push_back((key.to_string(), nonce.to_string()));
+    cache.push_back((key, nonce));
     false
 }
 
@@ -6152,6 +6191,16 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
             ),
         );
     };
+
+    // Domain separation (relay-proof): an answer's signature covers the string
+    // `answer\0…`, and a request's covers its own method first. Canonical
+    // strings fold the method's case, so any token spelling `ANSWER` would
+    // otherwise build the answer's tag. Only POST is a signed request, so
+    // every other method is refused before a signature is looked at. An
+    // unsigned GET of the card returns `Unsigned` above, untouched.
+    if req.method != "POST" {
+        return SignedRequestOutcome::Refused(-32007, "a signed request must be a POST".to_string());
+    }
 
     // Wire-format validity only — the VALUE never selects a record below.
     if !aoide_storage::node_store::valid_node_name(node_name) {
@@ -6995,15 +7044,16 @@ fn handle_connection(
             if code == -32007 {
                 if let Some(method) = mail_method_of(&req.body) {
                     match mail_unloadable_declaration(&req, method, audit_log) {
-                        PreDispatch::Unloadable(detail) => {
+                        PreDispatch::Unloadable { detail, governed } => {
                             let body_val = JsonRpcResponse::ok(
                                 request_id(&req.body),
                                 json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }),
                             );
                             let body = serde_json::to_vec(&body_val).unwrap_or_default();
-                            // Signed: `mail_unloadable_declaration` checked this request's
-                            // signature under the charter key and consumed its nonce.
-                            let extra = answer_headers(&req, 200, &body, audit_log);
+                            // Signed only when `mail_unloadable_declaration` verified the request
+                            // under the charter this node governs. An ungoverned charter gets the
+                            // same word, unsigned, and the client refuses it.
+                            let extra = if governed { answer_headers(&req, 200, &body, audit_log) } else { Vec::new() };
                             return write_http_response_with(&mut writer, 200, &body, &extra);
                         }
                         PreDispatch::Error(err, message) => {
@@ -10231,6 +10281,18 @@ mod tests {
         assert!(!nonce_is_replay(&tag, "n1"), "first use of a fresh (node, nonce) pair is never a replay");
         assert!(nonce_is_replay(&tag, "n1"), "the SAME pair, reused, is a replay");
         assert!(!nonce_is_replay(&tag, "n2"), "a DIFFERENT nonce for the SAME node tag is not a replay");
+    }
+
+    #[test]
+    fn nonce_is_replay_is_blind_to_letter_case_and_surrounding_space() {
+        // The signature folds the nonce (`canonical_string`), so the cache must
+        // fold it too: every spelling of one nonce is one nonce, and so is every
+        // spelling of one key.
+        let tag = unique_nonce("case-node");
+        assert!(!nonce_is_replay(&tag, "AbC123"), "the first spelling is recorded");
+        assert!(nonce_is_replay(&tag, "abc123"), "the lower-case spelling is the same nonce");
+        assert!(nonce_is_replay(&tag, " ABC123 "), "and surrounding space is not a new nonce");
+        assert!(nonce_is_replay(&tag.to_uppercase(), "abc123"), "and the key's case does not split the namespace");
     }
 
     // ── P-P5b (`node spawn`) — the real signed wire round trip ──────────────
@@ -19785,6 +19847,37 @@ mod tests {
         adapter_cleanup(&root, saved);
     }
 
+    /// The nonce is single-use in any letter case (relay-proof review, HIGH).
+    /// The signature folds a nonce's case, so a captured request whose nonce
+    /// header is upper-cased still verifies. The replay cache must key it the
+    /// same way, or that copy runs a second time with a signed answer.
+    #[test]
+    fn a_replayed_request_with_its_nonce_upper_cased_is_refused_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("nonce-case-replay");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let nonce = unique_nonce("NonceCase");
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None);
+        let first = send_raw(port, &request);
+        assert_answer_signed_for(&request, &first, &kp);
+
+        // The captured request, byte for byte, except the nonce header's case.
+        let replay = String::from_utf8(request.clone()).unwrap().replacen(
+            &format!("{}: {nonce}", aoide_storage::wire_auth::HEADER_NONCE),
+            &format!("{}: {}", aoide_storage::wire_auth::HEADER_NONCE, nonce.to_uppercase()),
+            1,
+        );
+        let second = send_raw(port, replay.as_bytes());
+        let second_body: Value = serde_json::from_str(second.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(second_body["error"]["code"], -32009, "the upper-cased copy is a replay: {second_body}");
+        assert_eq!(aoide_test_support::raw_header(&second, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{second}");
+        adapter_cleanup(&root, saved);
+    }
+
     #[test]
     fn an_unsigned_request_and_the_card_carry_no_answer_signature() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -19802,31 +19895,71 @@ mod tests {
         adapter_cleanup(&root, saved);
     }
 
+    /// Only POST is a signed request: a signed GET is refused before it is
+    /// verified, so the door signs nothing about it. The unsigned card GET
+    /// is served as before, and it is never signed either.
     #[test]
-    fn a_verified_card_get_is_still_never_signed() {
+    fn a_signed_get_is_refused_and_the_card_stays_unsigned() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, saved) = adapter_root("answer-card-signed");
         let port = free_loopback_port();
         raise_mail_adapter(port, Path::new("/dev/null"));
 
         let kp = setup_signed_node_with_allows("box-b", &["message"]);
-        let request = raw_request(
-            "127.0.0.1",
-            "GET",
-            "/.well-known/agent-card.json",
-            b"",
-            Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-card-signed"))),
-            None,
+        let signed = send_raw(
+            port,
+            &raw_request(
+                "127.0.0.1",
+                "GET",
+                "/.well-known/agent-card.json",
+                b"",
+                Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-card-signed"))),
+                None,
+            ),
         );
-        let card = send_raw(port, &request);
+        let refused: Value = serde_json::from_str(signed.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(refused["error"]["code"], -32007, "{signed}");
+        assert_eq!(aoide_test_support::raw_header(&signed, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{signed}");
 
+        let card = send_raw(port, &raw_request("127.0.0.1", "GET", "/.well-known/agent-card.json", b"", None, None));
         assert!(card.starts_with("HTTP/1.1 200"), "{card}");
         assert_eq!(aoide_test_support::raw_header(&card, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{card}");
         adapter_cleanup(&root, saved);
     }
 
+    /// Domain separation (relay-proof, review finding 3): a request whose method
+    /// is spelled `ANSWER` carries a valid signature over the `answer\0…`
+    /// form. It is refused before verification, so it spends no nonce: the
+    /// same nonce sent as a POST is then admitted and answered.
     #[test]
-    fn a_config_invalid_answer_to_a_verified_mail_request_is_signed() {
+    fn a_signed_request_whose_method_is_answer_is_refused_before_verification() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-method-tag");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let nonce = unique_nonce("answer-method-tag");
+        let as_answer = send_raw(
+            port,
+            &raw_request("127.0.0.1", "ANSWER", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None),
+        );
+        let refused: Value = serde_json::from_str(as_answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(refused["error"]["code"], -32007, "{as_answer}");
+        assert_eq!(aoide_test_support::raw_header(&as_answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{as_answer}");
+
+        let post = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None);
+        let as_post = send_raw(port, &post);
+        assert_answer_signed_for(&post, &as_post, &kp);
+        adapter_cleanup(&root, saved);
+    }
+
+    /// A config-invalid answer to a verified mail request, whose charter is in
+    /// force but was never signed for this node (no `.sig`, no operator to decide
+    /// it): nothing governs the charter, so the taught word goes out UNSIGNED.
+    #[test]
+    fn a_config_invalid_answer_without_a_governing_charter_is_unsigned() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&[
             "AOIDE_ROOT",
@@ -19844,6 +19977,7 @@ mod tests {
         std::fs::write(&in_force, format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n")).unwrap();
         // A declaration set that will not load: the mail methods read config-invalid.
         std::fs::write(root.join("receiver").join("config.toml"), "[mesh.home.status]\nnobody = \"down\"\n").unwrap();
+        assert!(aoide_storage::charter::governing("home").is_none(), "nothing signed or trusted governs this charter");
 
         let kp = aoide_storage::identity::load_or_mint().unwrap().0;
         let port = free_loopback_port();
@@ -19861,7 +19995,105 @@ mod tests {
 
         let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
         assert_eq!(answer_body["result"]["reason"], "config-invalid", "{answer_body}");
-        assert_answer_signed_for(&request, &answer, &kp);
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The config-invalid answer stays UNSIGNED even when the charter is one the
+    /// operator signed and this node accepted. The config-invalid word only comes
+    /// from `config::load` failing, and `charter::governing` reads that same
+    /// config (its operator line) before it will name any charter. So no
+    /// config-invalid answer can be governed. This pins that consequence.
+    #[test]
+    fn a_config_invalid_answer_is_unsigned_even_under_an_accepted_charter() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_STATE_DIR",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_CONFIG",
+            "AOIDE_A2A_NODE_NAME",
+        ]);
+        let root = aoide_test_support::unique_tmp("answer-config-invalid-governed");
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let op_line = aoide_storage::charter::node_line().unwrap();
+        charter_machine(&root, "receiver", "receiverbox");
+        let receiver_line = aoide_storage::charter::node_line().unwrap();
+
+        charter_machine(&root, "operator", "opbox");
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{op_line}\n{receiver_line}\n"),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
+        let sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+
+        charter_machine(&root, "receiver", "receiverbox");
+        let config = root.join("receiver").join("config.toml");
+        std::fs::write(&config, format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator)).unwrap();
+        assert_eq!(aoide_storage::charter::accept(&bytes, &sig).unwrap().charter.version, 1);
+        std::fs::write(
+            &config,
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n\n[mesh.home.status]\nnobody = \"down\"\n", init.operator),
+        )
+        .unwrap();
+        assert!(aoide_storage::routing::declarations().is_err(), "the declarations will not load");
+        let refusal = aoide_storage::charter::governing_refusal("home").unwrap_err();
+        assert_eq!(refusal.reason, aoide_storage::charter::CONFIG_UNREADABLE, "governing reads the same unloadable config: {refusal:?}");
+
+        let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &root.join("receiver").join("log"));
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request(
+            "127.0.0.1",
+            "POST",
+            "/",
+            body,
+            Some((&kp, "receiverbox", epoch_now(), &unique_nonce("answer-config-invalid-accepted"))),
+            Some("home"),
+        );
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(answer_body["result"]["reason"], "config-invalid", "{answer_body}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The answer path only LOADS the box's identity. With no key on disk, a
+    /// verified request is answered unsigned, audited, and no key file appears.
+    /// The signer's key is a node on file with the key held only in memory.
+    #[test]
+    fn an_answer_with_no_identity_on_disk_is_unsigned_and_mints_no_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-no-identity");
+        let port = free_loopback_port();
+        let audit_log = root.join("log");
+        raise_mail_adapter(port, &audit_log);
+
+        let signer = aoide_storage::identity::mint_ephemeral().unwrap();
+        let mut node = fixture_node("box-b", "http://node/", false);
+        node.verified = true;
+        node.pubkey = Some(signer.info().pubkey_hex);
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let answer = send_raw(
+            port,
+            &raw_request("127.0.0.1", "POST", "/", body, Some((&signer, "box-b", epoch_now(), &unique_nonce("answer-no-identity"))), None),
+        );
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert!(answer_body.get("result").is_some(), "the request verified and was answered: {answer}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        assert!(!aoide_storage::identity::identity_dir().join("ed25519.key").exists(), "and the answer minted no key");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("a2a.answer-unsigned"), "the unsigned answer is audited: {log}");
+        adapter_cleanup(&root, saved);
     }
 }

@@ -7232,8 +7232,9 @@ unsigned/token/addr ladder.
 exact bytes the signature covers, following P-P2's `derive_sas`/
 `derive_commit` field-hashing style verbatim (no reason found to diverge):
 five fields — `method`, `path`, `timestamp`, `nonce`, and the request
-body's SHA-256 digest (hex) — each trimmed and lowercased, NUL-separated
-(`\x00`) after EVERY field including the last:
+body's SHA-256 digest (hex) — and a sixth, the mesh (`X-Aoide-Mesh`, P-CHARTER),
+when the request names one. Each field is trimmed and lowercased and
+NUL-separated (`\x00`) after EVERY field including the last:
 
 ```
 canonical = lower(trim(method))    || 0x00
@@ -7241,7 +7242,12 @@ canonical = lower(trim(method))    || 0x00
          || lower(trim(timestamp)) || 0x00
          || lower(trim(nonce))     || 0x00
          || lower(hex(SHA256(body))) || 0x00
+         || [ lower(trim(mesh)) || 0x00 ]     (present when the request names a mesh)
 ```
+
+A request whose method is not `POST` is never verified: the door refuses it
+`-32007` first (`verify_signed_request`), so no method spelling reaches this
+string.
 
 The signature itself is `ed25519_dalek::Signer::sign` over these bytes
 directly (EdDSA hashes its own message internally via SHA-512 — wrapping
@@ -7283,11 +7289,14 @@ answer = "answer"                   || 0x00
 ```
 
 The signature (`ed25519` over `answer`, hex, 128 chars) rides one response
-header, `X-Aoide-Answer-Signature`. Requests never sign the word `answer` (they
-sign `POST`), and an answer's status sits where a request's ISO timestamp
-sits, so neither form verifies as the other. Freshness is inherited from the
-request: its signature already covers the request's timestamp, and its nonce
-is single-use at the door. Pinned by
+header, `X-Aoide-Answer-Signature`. No request signs the word `answer`: a signed
+request is a `POST`, and every other method is refused before its signature is
+checked. An answer's status sits where a request's ISO timestamp sits, so
+neither form verifies as the other. Freshness is inherited from the request:
+its signature already covers the request's timestamp, and its nonce is
+single-use at the door in any letter case. The replay cache keys the nonce as
+the signature folds it (trimmed and lowercased), so a captured request whose
+nonce is upper-cased is a replay. Pinned by
 `aoide-storage::wire_auth::tests::answer_string_stability_vector_never_drifts`
 for the request signature `"ab" * 64`, nonce `abcd1234`, status `200`, body
 `{}`:
@@ -7300,13 +7309,16 @@ answer_string("ab"*64, "abcd1234", 200, b"{}")
 
 **Which answers the door signs.** The door signs an answer only when the
 request's own signature verified, and only for a JSON-RPC `POST /`
-(`a2a.rs`, `answer_headers`). The `config-invalid` answer is signed too: its
-signature was checked under the charter key and its nonce consumed first.
-Everything else is unsigned, and each write site says why in a comment there:
-an unparsed or unsigned request, the card GET even when it verified, every
-refusal (`-32007`, `-32008`, and the replay `-32009`), the busy 503s, and the
-SSE stream. A door whose identity key will not load answers unsigned and
-audits `a2a.answer-unsigned`; a client refuses an unsigned answer.
+(`a2a.rs`, `answer_headers`). The `config-invalid` answer is signed only when
+the request verified under the charter `charter::governing` accepts for its
+mesh. That function reads the same `config.toml` whose failure produces
+`config-invalid`, so that answer is never signed in practice. Everything else
+is unsigned, and each write site says why in a comment there: an unparsed or
+unsigned request, every GET (the card included, even one carrying a valid
+signature), every refusal (`-32007`, `-32008`, and the replay `-32009`), the
+busy 503s, and the SSE stream. A door whose identity key is not on disk, or
+will not load, answers unsigned and audits `a2a.answer-unsigned`, and never
+mints a key to answer. A client refuses an unsigned answer.
 
 **Identity IS the key; the name is a label (#63 P-ID5).** The resolved
 `Node` is the one whose stored `pubkey` verifies the signature — the

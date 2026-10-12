@@ -620,15 +620,22 @@ the inbound half of the two-door contract (the outbound half is
 - **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
   verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
   `wire_auth::answer_string` over the request's own signature and nonce, the
-  status and the exact body bytes (`answer_headers`). The `config-invalid`
-  answer above is signed too, because its signature was checked under the
-  charter key and its nonce consumed. Everything else is unsigned, and each
-  write site says why in a comment there: an unparsed or unsigned request, the
-  card GET even when it verified, every refusal (`-32007`, `-32008`, and the
-  replay `-32009`), the busy 503s, and the SSE stream. The door's key signs
-  nothing an unverified sender chose. A key that will not load leaves the
-  answer unsigned and audited (`a2a.answer-unsigned`), and the client refuses
-  it.
+  status and the exact body bytes (`answer_headers`). A signed request is a
+  POST and nothing else: any other method is refused `-32007` before its
+  signature is checked. The `config-invalid` answer above is signed only when
+  the request verified under the charter `charter::governing` accepts. That
+  function reads the same config that failed to load, so the answer is never
+  signed in practice. Everything else is unsigned, and each write site says
+  why in a comment there: an unparsed or unsigned request, every GET (the card
+  included), every refusal (`-32007`, `-32008`, and the replay `-32009`), the
+  busy 503s, and the SSE stream. The door's key signs nothing an unverified
+  sender chose. A key that is not on disk, or will not load, leaves the answer
+  unsigned and audited (`a2a.answer-unsigned`), and the answer path never mints
+  one (`identity::load_existing`). The client refuses an unsigned answer.
+- **Nonces are single-use in any letter case.** `nonce_is_replay` keys both the
+  pubkey and the nonce trimmed and lowercased, the form `canonical_string`
+  signs. A captured request whose nonce header is upper-cased is therefore a
+  replay, not a fresh nonce.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

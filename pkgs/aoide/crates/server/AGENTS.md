@@ -705,7 +705,10 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   VERIFYING PUBKEY, never a node name (#63 P-ID5): `X-Aoide-Node` is
   outside the canonical string, so a name-keyed cache would let a captured
   request replay under a shared-key twin's name — don't "simplify" the key
-  back to a name. `handle_connection`
+  back to a name. Both halves are keyed trimmed and lowercased, the form
+  `canonical_string` signs (`nonce_is_replay`): a nonce's letter case is not
+  part of its identity, so keying the raw text would let an upper-cased copy
+  of a captured request run again. `handle_connection`
   calls `verify_signed_request` exactly ONCE per connection, strictly
   before both the streaming and the plain-JSON-RPC dispatch branches —
   don't duplicate that call inside `route`/`stream_task`/`handle_jsonrpc`;
@@ -737,10 +740,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 - **The door signs only what it verified, and only a JSON-RPC POST to `/`
   (relay-proof).** `answer_headers` is the one place an answer is signed, and
   `handle_connection` calls it from two sites: the final write, gated on
-  `verified.is_some()`, and the `config-invalid` arm, whose signature
-  `mail_unloadable_declaration` checked under the charter key. Don't widen
-  either gate to a refusal, a replay (`-32009`), an unsigned or unparsed
-  request, the card GET, a busy 503, or an SSE event. Each of those is a write
+  `verified.is_some()`, and the `config-invalid` arm, which signs only when
+  `mail_unloadable_declaration` verified the request under the charter that
+  `charter::governing` accepts (`PreDispatch::Unloadable { governed }`). That
+  arm is never governed in practice, because `governing` reads the config
+  whose failure produces it. Don't widen either gate to a refusal, a replay
+  (`-32009`), an unsigned or unparsed request, any GET (the card included), a
+  busy 503, or an SSE event. Each of those is a write
   site a replayed or unsigned request can reach, and a signature there is a
   signing oracle for the door's identity key. Every write site in `a2a.rs`
   carries a one-line comment saying whether it is signed and why; a new write
