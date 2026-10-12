@@ -290,7 +290,7 @@ pub(crate) fn export(dir: Option<&Path>) -> Result<Report, String> {
     let node = aoide_storage::display::local_host_name();
     let threads = threads(entries);
     let names = stems(&threads, &dir)?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    aoide_storage::fs::ensure_write_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut report = Report { threads: 0, written: 0, unchanged: 0, dir };
     for (thread, stem) in threads.iter().zip(&names) {
         let note = note(thread, &node);
@@ -306,4 +306,43 @@ pub(crate) fn export(dir: Option<&Path>) -> Result<Report, String> {
         }
     }
     Ok(report)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// An export into a `state/` left wide leaves it owner-only. This pins the
+    /// outcome, not the routing: `mail::read_base` locks `state/` before the
+    /// export makes its notes directory, so the test passes with or without
+    /// the `ensure_write_dir` call (checked by reverting it).
+    #[test]
+    fn export_locks_a_wide_state_its_notes_dir_is_under() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let base = std::env::temp_dir().join(format!("aoide-export-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let state = base.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let saved_state = std::env::var_os("AOIDE_STATE_DIR");
+        let saved_home = std::env::var_os("HOME");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("HOME", base.join("home"));
+
+        let result = export(Some(&state.join("notes")));
+
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        result.expect("an export of an empty mail tree runs");
+        let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "the export left state/ at {mode:o}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

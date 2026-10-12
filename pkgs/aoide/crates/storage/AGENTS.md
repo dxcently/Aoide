@@ -511,23 +511,14 @@
   `state/` locks `state/` first. A future sensitive file in its OWN new
   subdirectory calls this on that subdirectory the same way, before the
   first `atomic_write_private` into it.
-- **`state/` is the privacy boundary for the state tree, and modes inside
-  it are not relied on** (CONTRACTS.md §4). Every storage creator whose
-  directory lies under `state/` goes through `fs::ensure_write_dir`, which
-  makes `state/` `0700` before it creates anything. `aoided` does the same
-  once at start, before it binds, and refuses to start if it cannot. A
-  symlinked `state/` is refused by name, since a chmod would follow it. So is
-  one that is a filesystem root, the home directory, or a parent of home
-  (`fs::shallow_state_reason`): a chmod there would lock a directory aoide
-  does not own.
+- **`state/` is the privacy boundary for the state tree** (CONTRACTS.md §4
+  states what the lock checks and what it does not cover). Every storage
+  creator whose directory lies under `state/` goes through
+  `fs::ensure_write_dir`, which locks `state/` before it creates anything.
   Accepted gap: a raw creator outside this crate (`aoide-conduct`'s
-  `graph/spawn.rs`, which makes `state/sessions/` with `create_dir_all`)
-  can make a fresh `state/` wide. It stays wide until the next storage write
-  or daemon start; in that spawn path the very next call, `create_new_private`,
-  locks it. On Windows the owner-only policy is attached only when a call
-  creates `state/`. An existing `state/` is never re-tightened, since that
-  would strip the inherited ACEs of children already in it, which is not
-  verified.
+  `graph/spawn.rs`, which makes `state/sessions/` with `create_dir_all`) can
+  make a fresh `state/` wide until the next storage write or daemon start;
+  in that spawn path the very next call, `create_new_private`, locks it.
 - **`ledger` is append-only and never a lookup key for live state (P-D8).**
   `append_ledger_entry` only ever opens `state/session-ledger.jsonl` in
   append mode — nothing in this crate truncates, rewrites, or prunes it;

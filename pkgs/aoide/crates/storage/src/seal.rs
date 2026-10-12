@@ -2235,6 +2235,25 @@ mod tests {
         assert_eq!(check_purpose_board(&c).unwrap_err(), PURPOSE_MISMATCH);
     }
 
+    /// `record_admitted` appends to `mail/containers.jsonl` under a `state/` it
+    /// locks first: a `state/` left wide is owner-only after the append.
+    #[cfg(unix)]
+    #[test]
+    fn record_admitted_locks_a_wide_state_it_appends_into() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("seal-record-locks");
+        let state = crate::fs::state_dir();
+        std::fs::create_dir_all(mail::mail_dir()).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        record_admitted(&sample_container(), "digest-1").unwrap();
+
+        let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "record_admitted left state/ at {mode:o}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn sample_container() -> Container {
         Container {
             v: CONTAINER_VERSION,

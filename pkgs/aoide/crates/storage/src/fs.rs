@@ -259,19 +259,24 @@ fn migrate_dir(old: &std::path::Path, new: &std::path::Path) {
         );
         return;
     }
-    if std::fs::rename(old, new).is_ok() {
-        return;
+    if std::fs::rename(old, new).is_err() {
+        let tmp = new.with_extension(format!("migrate-tmp.{}", std::process::id()));
+        if copy_dir_recursive(old, &tmp).is_ok() && std::fs::rename(&tmp, new).is_ok() {
+            let _ = std::fs::remove_dir_all(old);
+        } else {
+            let _ = std::fs::remove_dir_all(&tmp);
+            eprintln!(
+                "aoide: could not migrate {} to {} — staying at the pre-L-C2 root",
+                old.display(),
+                new.display()
+            );
+            return;
+        }
     }
-    let tmp = new.with_extension(format!("migrate-tmp.{}", std::process::id()));
-    if copy_dir_recursive(old, &tmp).is_ok() && std::fs::rename(&tmp, new).is_ok() {
-        let _ = std::fs::remove_dir_all(old);
-    } else {
-        let _ = std::fs::remove_dir_all(&tmp);
-        eprintln!(
-            "aoide: could not migrate {} to {} — staying at the pre-L-C2 root",
-            old.display(),
-            new.display()
-        );
+    // The rename made `new` with the legacy tree's mode, and nothing locked it
+    // first. When `new` is `state/`, this locks it before anything reads it.
+    if let Err(e) = ensure_write_dir(new) {
+        eprintln!("aoide: {e} — the migrated tree is at {}", new.display());
     }
 }
 
@@ -1361,87 +1366,188 @@ pub fn ensure_write_dir(dir: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
 }
 
-/// Why `state` cannot be an aoide state directory, if it cannot: a filesystem
-/// root, or `home` itself or one of its parents. A chmod to `0700` on any of
-/// those would lock a directory aoide does not own.
-fn shallow_state_reason(state: &std::path::Path, home: &std::path::Path) -> Option<&'static str> {
+/// The directory `state/` may never be, judged on the paths it is given:
+/// [`lock_state_dir`] passes both canonical, so a symlink cannot name one of
+/// these by another spelling. A filesystem root, or the home directory or one
+/// of its parents: a chmod there would lock a directory aoide does not own.
+fn shallow_state_reason(state: &std::path::Path, home: Option<&std::path::Path>) -> Option<&'static str> {
     if state.parent().is_none() {
         return Some("it is a filesystem root");
     }
-    if home.starts_with(state) {
+    if home.is_some_and(|home| home.starts_with(state)) {
         return Some("it is the home directory or one of its parents");
     }
     None
 }
 
-/// Refuses a symlinked `state/` by name, since a chmod would follow the link
-/// and change a directory the boundary does not cover. Every other failure
-/// names `state/` and keeps its kind.
+/// The home directory the shallow rule protects, or `None` when neither
+/// `$AOIDE_USER` nor a non-empty `$HOME` names one. On Unix [`aoide_home`]
+/// then answers the literal `/home/khoa` (its fallback, kept for the audit log
+/// and the root default, which depend on it), a guess about some other
+/// machine's home, so the guard does not use it. With no home to name, the
+/// root, relative and `..` rules still apply, and nothing else.
+fn guard_home() -> Option<std::path::PathBuf> {
+    let named = |var: &str| std::env::var_os(var).is_some_and(|v| !v.is_empty());
+    if cfg!(unix) && !named("AOIDE_USER") && !named("HOME") {
+        return None;
+    }
+    Some(aoide_protocol::aoide_home())
+}
+
+/// `path` with its longest existing prefix resolved through `canonicalize`,
+/// so every symlink on that prefix is followed, and the components below it,
+/// which do not exist yet, appended as written. Only ever given an absolute
+/// path with no `..`: [`lock_state_dir`] refuses both before it asks.
+fn resolve_nearest(path: &std::path::Path) -> std::path::PathBuf {
+    let mut missing = Vec::new();
+    let mut prefix = path;
+    loop {
+        if let Ok(real) = prefix.canonicalize() {
+            return missing.iter().rev().fold(real, |acc, part| acc.join(part));
+        }
+        match (prefix.parent(), prefix.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name);
+                prefix = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// `(dev, ino)` of `/` and of the home directory with each of its parents:
+/// the objects [`owner_only_state`] will not change once it has opened one.
+#[cfg(unix)]
+fn shallow_identities(home: Option<&std::path::Path>) -> Vec<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    home.into_iter()
+        .flat_map(|home| home.ancestors())
+        .chain(std::iter::once(std::path::Path::new("/")))
+        .filter_map(|dir| std::fs::metadata(dir).ok())
+        .map(|meta| (meta.dev(), meta.ino()))
+        .collect()
+}
+
+/// Locks `state/` owner-only, or refuses, naming the path and the reason. A
+/// `state` that is relative, has a `..` in it, or is shallow is refused before
+/// anything is created or changed; the symlink and permission cases are
+/// decided by [`owner_only_state`] on the object it opens.
 fn lock_state_dir(state: &std::path::Path) -> std::io::Result<()> {
-    if let Some(why) = shallow_state_reason(state, &aoide_protocol::aoide_home()) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "{}: refusing to make state/ owner-only, {why}; point AOIDE_STATE_DIR (or AOIDE_ROOT) at a directory aoide owns, such as ~/.aoide/state",
-                state.display()
-            ),
+    if !state.is_absolute() {
+        return Err(refused(
+            state,
+            "its path is relative; set AOIDE_ROOT or AOIDE_STATE_DIR to an absolute path, such as ~/.aoide",
         ));
     }
-    if std::fs::symlink_metadata(state).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "{}: state/ is a symlink; aoide keeps its private state in a real directory",
-                state.display()
-            ),
+    if state.components().any(|part| part == std::path::Component::ParentDir) {
+        return Err(refused(state, "its path has a `..` in it; name the directory itself, such as ~/.aoide/state"));
+    }
+    let home = guard_home().map(|home| resolve_nearest(&home));
+    if let Some(why) = shallow_state_reason(&resolve_nearest(state), home.as_deref()) {
+        return Err(refused(
+            state,
+            &format!("{why}; point AOIDE_STATE_DIR (or AOIDE_ROOT) at a directory aoide owns, such as ~/.aoide/state"),
         ));
     }
-    owner_only_state(state).map_err(|e| {
-        std::io::Error::new(
-            e.kind(),
-            format!("{}: state/ cannot be made owner-only (0700): {e}", state.display()),
-        )
+    owner_only_state(state, home.as_deref())
+}
+
+/// The one refusal a state lock returns: the path, the reason, and the fix.
+fn refused(state: &std::path::Path, why: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("{}: refusing to make state/ owner-only, {why}", state.display()),
+    )
+}
+
+/// A lock the OS would not make, with its kind kept. A permission refusal
+/// names the one fix an owner can make without aoide.
+fn unlockable(state: &std::path::Path, e: std::io::Error) -> std::io::Error {
+    let hint = if e.kind() == std::io::ErrorKind::PermissionDenied {
+        "; chown it to you or point AOIDE_ROOT elsewhere"
+    } else {
+        ""
+    };
+    std::io::Error::new(
+        e.kind(),
+        format!("{}: state/ cannot be made owner-only (0700): {e}{hint}", state.display()),
+    )
+}
+
+/// Unix: opens `state` (see [`open_state`]), refuses the object it opened if it
+/// is a shallow one (the path checks ran on names, and a name can be swapped
+/// between those checks and this open), and chmods that object to `0700` when
+/// it is wider. Windows: the owner-only policy is attached only when this call
+/// creates `state/`. An existing `state/` is never re-tightened, since that
+/// would strip the inherited ACEs of children already in it, which is not
+/// verified here.
+#[cfg(unix)]
+fn owner_only_state(state: &std::path::Path, home: Option<&std::path::Path>) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let dir = open_state(state)?;
+    let meta = dir.metadata().map_err(|e| unlockable(state, e))?;
+    if shallow_identities(home).contains(&(meta.dev(), meta.ino())) {
+        return Err(refused(state, "it resolves to the filesystem root, the home directory or one of its parents"));
+    }
+    if meta.mode() & 0o777 != 0o700 {
+        dir.set_permissions(std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| unlockable(state, e))?;
+    }
+    Ok(())
+}
+
+/// Opens `state` as a read-only directory without following a link at its
+/// last component (`O_NOFOLLOW`), and creates it `0700` first when absent. A
+/// link fails `ELOOP` and anything that is not a directory `ENOTDIR`; both are
+/// the symlink refusal. The chmod acts on this descriptor, never on the name.
+#[cfg(unix)]
+fn open_state(state: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let open = || {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(state)
+    };
+    let opened = match open() {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = state.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| unlockable(state, e))?;
+            }
+            match std::fs::DirBuilder::new().mode(0o700).create(state) {
+                Ok(()) => {}
+                // A racing creator's directory is opened as it is; the open decides.
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(unlockable(state, e)),
+            }
+            open()
+        }
+        other => other,
+    };
+    opened.map_err(|e| match e.raw_os_error() {
+        Some(libc::ELOOP) | Some(libc::ENOTDIR) => refused(
+            state,
+            "state/ is a symlink, or not a directory; aoide keeps its private state in a real directory, so replace it with one or point AOIDE_ROOT elsewhere",
+        ),
+        _ => unlockable(state, e),
     })
 }
 
-/// Unix: chmod `0700` when wider, and a `state/` this call creates is made
-/// `0700` directly, never wider even briefly. Windows: the owner-only policy is
-/// attached only when this call creates `state/`. An existing `state/` is never
-/// re-tightened, since that would strip the inherited ACEs of children already
-/// in it, which is not verified here.
-fn owner_only_state(state: &std::path::Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        let owner_only = std::fs::Permissions::from_mode(0o700);
-        match std::fs::metadata(state) {
-            Ok(meta) if meta.permissions().mode() & 0o777 == 0o700 => Ok(()),
-            Ok(_) => std::fs::set_permissions(state, owner_only),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(parent) = state.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                match std::fs::DirBuilder::new().mode(0o700).create(state) {
-                    Ok(()) => Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                        std::fs::set_permissions(state, owner_only)
-                    }
-                    Err(e) => Err(e),
-                }
-            }
-            Err(e) => Err(e),
-        }
+#[cfg(windows)]
+fn owner_only_state(state: &std::path::Path, _home: Option<&std::path::Path>) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(state).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(refused(
+            state,
+            "state/ is a symlink; aoide keeps its private state in a real directory, so replace it with one or point AOIDE_ROOT elsewhere",
+        ));
     }
-    #[cfg(windows)]
-    {
-        if std::fs::metadata(state).is_ok() {
-            return Ok(());
-        }
-        if let Some(parent) = state.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        aoide_protocol::owner_only::ensure_private_dir(state)
+    if std::fs::metadata(state).is_ok() {
+        return Ok(());
     }
+    if let Some(parent) = state.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| unlockable(state, e))?;
+    }
+    aoide_protocol::owner_only::ensure_private_dir(state).map_err(|e| unlockable(state, e))
 }
 
 /// Run `f` while holding an exclusive advisory lock on the stage directory,
@@ -2731,7 +2837,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_filesystem_root_or_home_or_its_parent_is_never_a_state_dir() {
-        let home = std::path::Path::new("/home/someone");
+        let home = Some(std::path::Path::new("/home/someone"));
         let why_home = Some("it is the home directory or one of its parents");
         assert_eq!(shallow_state_reason(std::path::Path::new("/"), home), Some("it is a filesystem root"));
         assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone"), home), why_home);
@@ -2739,6 +2845,9 @@ mod tests {
         assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone/.aoide/state"), home), None);
         assert_eq!(shallow_state_reason(std::path::Path::new("/home/someonelse"), home), None);
         assert_eq!(shallow_state_reason(std::path::Path::new("/tmp/x/state"), home), None);
+        // With no home to name, the root is still refused and nothing else is.
+        assert_eq!(shallow_state_reason(std::path::Path::new("/"), None), Some("it is a filesystem root"));
+        assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone"), None), None);
     }
 
     /// `lock_state_dir` on a temp `HOME`, never the real one: a state dir that
@@ -2774,6 +2883,166 @@ mod tests {
         ensure_write_dir(&state.join("stage")).unwrap();
         assert_eq!(unix_mode(&state), 0o700, "a real state dir under home is not locked");
         assert_eq!(unix_mode(&home), 0o755, "locking state/ must not touch home");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A path this test asserts is absent before it runs, and removes after, so
+    /// a refusal that failed to hold cannot leave a directory in the working
+    /// directory behind.
+    struct Scratch(std::path::PathBuf);
+    impl Scratch {
+        fn absent(path: &str) -> Self {
+            assert!(!std::path::Path::new(path).exists(), "{path} exists in the working directory before the test");
+            Scratch(path.into())
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A `..` in the state path is refused by name, before anything resolves.
+    /// The directory it climbs to is the parent of `HOME`, which keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn a_dot_dot_state_path_is_refused_and_never_chmods_what_it_names() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-dotdot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let parent = base.join("parent");
+        let home = parent.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("AOIDE_STATE_DIR", home.join(".."));
+
+        let err = ensure_write_dir(&home.join("..").join("x")).expect_err("a .. state path must be refused");
+        assert!(err.to_string().contains("`..`"), "the refusal must name the .. : {err}");
+        assert_eq!(unix_mode(&parent), 0o755, "the directory a .. state path names was chmodded");
+        assert_eq!(unix_mode(&home), 0o755, "home was chmodded through a .. state path");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `HOME` reached through a symlink is protected by its real path: a state
+    /// dir spelled as the real directory is refused as the home directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_home_is_refused_by_its_real_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-home-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real-home");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = base.join("link-home");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        std::env::set_var("HOME", &link);
+        std::env::set_var("AOIDE_STATE_DIR", &real);
+
+        let err = ensure_write_dir(&real.join("x")).expect_err("the real path of a symlinked HOME must be refused");
+        assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
+        assert_eq!(unix_mode(&real), 0o755, "the symlinked home was chmodded through its real path");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// An empty `HOME` is no home: `guard_home` answers `None` for it and for an
+    /// unset one. With no home, a relative default root is refused before
+    /// anything is created in the working directory, and `/` still is.
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_home_is_no_home_and_a_relative_default_root_writes_nowhere() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        std::env::set_var("HOME", "");
+        assert!(guard_home().is_none(), "an empty HOME must count as unset");
+        std::env::remove_var("HOME");
+        assert!(guard_home().is_none(), "an unset HOME must not fall back to a guessed home");
+        std::env::set_var("HOME", "/home/someone");
+        assert_eq!(guard_home(), Some(std::path::PathBuf::from("/home/someone")));
+
+        std::env::set_var("HOME", "");
+        let _scratch = Scratch::absent(".aoide");
+        let err = ensure_write_dir(&state_dir().join("stage")).expect_err("a relative default state must be refused");
+        assert!(err.to_string().contains("relative"), "the refusal must say why: {err}");
+        assert!(!std::path::Path::new(".aoide").exists(), "a relative state/ was created in the working directory");
+
+        std::env::remove_var("HOME");
+        std::env::set_var("AOIDE_STATE_DIR", "/");
+        let err = ensure_write_dir(std::path::Path::new("/x")).expect_err("/ must be refused with HOME unset");
+        assert!(err.to_string().contains("filesystem root"), "the refusal must say why: {err}");
+    }
+
+    /// The lock refuses a relative state path itself. A relative
+    /// `AOIDE_STATE_DIR` is ignored, so the state lands under `AOIDE_ROOT`.
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_state_path_is_refused_and_a_relative_override_is_ignored() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let _scratch = Scratch::absent("rel");
+        let err = lock_state_dir(std::path::Path::new("rel")).expect_err("a relative state/ must be refused");
+        assert!(err.to_string().contains("relative"), "the refusal must say why: {err}");
+        assert!(!std::path::Path::new("rel").exists(), "a relative state/ was created in the working directory");
+
+        let base = std::env::temp_dir().join(format!("aoide-rel-override-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("root");
+        std::env::set_var("AOIDE_STATE_DIR", "rel");
+        std::env::set_var("AOIDE_ROOT", &root);
+        assert_eq!(state_dir(), root.join("state"), "a relative AOIDE_STATE_DIR must be ignored");
+        ensure_write_dir(&state_dir().join("stage")).unwrap();
+        assert_eq!(unix_mode(&root.join("state")), 0o700);
+        assert!(!std::path::Path::new("rel").exists(), "the ignored override was created in the working directory");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `state/` that is a symlink is refused at the open, which never follows
+    /// the last component. The path checks read through the link to its target,
+    /// and the target keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_state_is_refused_at_the_open_and_its_target_is_never_chmodded() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-state-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let target = base.join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = base.join("state");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        std::env::set_var("HOME", base.join("home"));
+
+        let err = lock_state_dir(&link).expect_err("a symlinked state/ must be refused at the open");
+        assert!(err.to_string().contains("state/ is a symlink"), "the refusal must name the link: {err}");
+        assert_eq!(unix_mode(&target), 0o755, "the link's target was chmodded");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The object [`owner_only_state`] opens is checked by identity as well as by
+    /// name. Called directly, past the path checks, on the home directory, it is
+    /// refused and keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn owner_only_state_refuses_a_shallow_object_by_its_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let base = std::env::temp_dir().join(format!("aoide-identity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let err = owner_only_state(&home, Some(&home)).expect_err("the home directory must be refused by identity");
+        assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
+        assert_eq!(unix_mode(&home), 0o755, "the home directory was chmodded past the path checks");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -3163,13 +3432,19 @@ mod tests {
 
     /// `/tmp` is root-owned and sticky: writable by this user, and a chmod by
     /// anyone else is refused. The probe is a chmod to the mode `/tmp` already
-    /// has, so it changes nothing; `None` skips where this user can chmod it
-    /// (root can).
+    /// has, so it changes nothing. `Err` names why the refusal cannot be
+    /// provoked here: `/tmp` is absent, or this user can chmod it (root can).
     #[cfg(unix)]
-    fn tmp_is_writable_but_not_chmodable() -> Option<std::path::PathBuf> {
+    fn tmp_is_writable_but_not_chmodable() -> Result<std::path::PathBuf, &'static str> {
         let dir = std::path::PathBuf::from("/tmp");
-        let meta = std::fs::metadata(&dir).ok().filter(std::fs::Metadata::is_dir)?;
-        std::fs::set_permissions(&dir, meta.permissions()).err().map(|_| dir)
+        let meta = std::fs::metadata(&dir)
+            .ok()
+            .filter(std::fs::Metadata::is_dir)
+            .ok_or("/tmp is absent or not a directory")?;
+        match std::fs::set_permissions(&dir, meta.permissions()) {
+            Err(_) => Ok(dir),
+            Ok(()) => Err("this user can chmod /tmp (root can), so no unlockable state/ can be made here"),
+        }
     }
 
     /// Every creator that can make `state/` on a fresh tree leaves it `0700`.
@@ -3184,8 +3459,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
 
         type Creator = fn(&std::path::Path) -> std::io::Result<()>;
-        let cases: [(&str, Creator); 9] = [
+        let cases: [(&str, Creator); 13] = [
             ("create_new_private", |s| create_new_private(&s.join("a.json")).map(drop)),
+            ("edits::append", |_| {
+                crate::edits::append(&crate::edits::EditLine::default())
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            }),
+            ("outbox::try_take_poll_lock", |_| {
+                crate::outbox::try_take_poll_lock("node-a")
+                    .map(drop)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            }),
+            ("migrate_dir", |s| {
+                let old = s.parent().unwrap().join("legacy");
+                std::fs::create_dir_all(old.join("sub"))?;
+                migrate_dir(&old, s);
+                Ok(())
+            }),
+            ("migrate_file", |s| {
+                let old = s.parent().unwrap().join("legacy.log");
+                std::fs::create_dir_all(s.parent().unwrap())?;
+                std::fs::write(&old, b"x")?;
+                migrate_file(&old, &s.join("moved.log"));
+                Ok(())
+            }),
             ("open_private_append", |s| open_private_append(&s.join("b.log")).map(drop)),
             ("secure_private_dir", |s| secure_private_dir(&s.join("identity"))),
             ("atomic_write_private", |s| atomic_write_private(&s.join("identity").join("k"), b"x")),
@@ -3268,9 +3565,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_state_it_cannot_lock_takes_no_lock_file_and_no_seed() {
-        let Some(tmp) = tmp_is_writable_but_not_chmodable() else {
-            eprintln!("skipped: /tmp is absent, or this user can chmod it");
-            return;
+        let tmp = match tmp_is_writable_but_not_chmodable() {
+            Ok(tmp) => tmp,
+            Err(why) => {
+                eprintln!("skipped a_state_it_cannot_lock_takes_no_lock_file_and_no_seed: {why}");
+                return;
+            }
         };
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = MigrationEnvGuard::capture_and_clear();

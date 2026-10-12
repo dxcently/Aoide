@@ -1493,6 +1493,26 @@ mod tests {
         }
     }
 
+    /// The ack marker is written under a `state/` that may be wide, and the
+    /// write locks it before the first byte lands.
+    #[cfg(unix)]
+    #[test]
+    fn write_ack_if_absent_locks_a_wide_state_it_writes_into() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("write-ack-locks");
+        let state = crate::fs::state_dir();
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let ack = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T00:00:00Z"));
+        assert!(write_ack_if_absent("there", "acked-msgid", &ack).unwrap());
+
+        let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "write_ack_if_absent left state/ at {mode:o}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn write_ack_if_absent_spools_once_while_pending_then_again_after_delivery() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());

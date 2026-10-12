@@ -1268,9 +1268,7 @@ fn stream_subscribe(events_path: &Path, req: &Value, reader: &mut BufReader<Unix
 /// unlockable `state/` stops the daemon here. On Windows the boundary holds
 /// only for a `state/` aoide created: an existing one is never re-tightened.
 fn tighten_state_tree() -> std::io::Result<()> {
-    let state = aoide_storage::fs::state_dir();
-    aoide_storage::fs::ensure_write_dir(&state)
-        .map_err(|e| std::io::Error::new(e.kind(), format!("aoided will not start: {e}")))
+    aoide_storage::fs::ensure_write_dir(&aoide_storage::fs::state_dir())
 }
 
 /// The resident daemon's own main loop (P-D2, `docs/architecture/
@@ -1671,7 +1669,9 @@ mod tests {
     #[test]
     fn run_loop_refuses_to_start_when_state_cannot_be_locked() {
         let Some(unlockable) = unchmodable_dir("/tmp") else {
-            eprintln!("skipped: /tmp is absent, or this user can chmod it");
+            eprintln!(
+                "skipped run_loop_refuses_to_start_when_state_cannot_be_locked: /tmp is absent, or this user can chmod it (root can), so no unlockable state/ can be made here"
+            );
             return;
         };
         let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

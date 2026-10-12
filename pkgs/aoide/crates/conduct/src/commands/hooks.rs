@@ -762,7 +762,7 @@ fn hooks_install(inv: &Invocation) -> Outcome {
     // default at hook-fire time in its own shell (see `door_command`), so a
     // later host with a different `$AOIDE_ROOT` still resolves correctly.
     if capture {
-        let _ = std::fs::create_dir_all(aoide_storage::fs::state_dir());
+        let _ = aoide_storage::fs::ensure_write_dir(&aoide_storage::fs::state_dir());
     }
     // The skill links, after the settings merge (a skill refusal must not
     // block the hook wiring, and the report below carries both outcomes).
@@ -1181,10 +1181,24 @@ mod tests {
         std::env::set_var("KIMI_CODE_HOME", home.join("kimi"));
         std::env::set_var("HOME", &home);
         std::env::set_var("AOIDE_ROOT", &aoide_root);
+        // A `state/` a raw creator left wide: the capture dir is made through
+        // `ensure_write_dir`, which locks it first.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::create_dir_all(aoide_root.join("state")).unwrap();
+            std::fs::set_permissions(aoide_root.join("state"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
 
         hooks_install(&install_inv("kimi", true));
 
         assert!(aoide_root.join("state").is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(aoide_root.join("state")).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "the capture install left state/ at {mode:o}");
+        }
         assert!(!home.join("Aoide/state").exists());
         assert!(!home.join(".aoide/state").exists());
 
