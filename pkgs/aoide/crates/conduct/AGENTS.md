@@ -1900,14 +1900,14 @@ in the message.
   presence value. A LIVE host's own sessions (the `Ok(graph)` arm) never
   pass through this gate — their presence is `session_presence`'s ordinary
   online-host classification, verbatim.
-- **`SessionView`'s `title`/`model`/`kind`/`parent` are additive and
+- **`SessionView`'s `title`/`model`/`kind`/`parent`/`task` are additive and
   independently absent — never defaulted, inferred, or resolved across a
   host boundary.** `build_local_node` fills them from `SessionRecord`'s own
-  `title`/`model`/`kind` plus `resolved_parent` (bare session id, matching
-  `session_id`, never node-scoped); `sessions_from_graph` fills them from a
-  remote node's own graph document — `title`/`model`/`role` (published back
-  under this struct's `kind` name) and the `spawned` edge whose `to` is
-  this session, `from` stripped of its `session:` prefix. A node that
+  `title`/`model`/`kind`/`task` plus `resolved_parent` (bare session id,
+  matching `session_id`, never node-scoped); `sessions_from_graph` fills them
+  from a remote node's own graph document — `title`/`model`/`role` (published
+  back under this struct's `kind` name)/`task`, and the `spawned` edge whose
+  `to` is this session, `from` stripped of its `session:` prefix. A node that
   didn't publish a given key leaves the matching field `None`; nothing
   here fills a gap from another field, another session, or another host.
   `effective_project` stays out of this list on purpose — remote rows

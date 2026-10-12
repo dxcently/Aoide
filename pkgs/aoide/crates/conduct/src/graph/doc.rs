@@ -142,6 +142,12 @@ pub fn build_graph(
         if let Some(pn) = &s.petname {
             node["petname"] = json!(pn);
         }
+        // The managed run's slug (`SessionRecord.task`, the name its inbox is
+        // filed under). Rides only when a run carries a non-empty one, so an
+        // ordinary session stays byte-for-byte as before (SESSION-FIND B1).
+        if let Some(t) = s.task.as_deref().filter(|t| !t.is_empty()) {
+            node["task"] = json!(t);
+        }
         // The native harness's own thread-role label (root order seq 404) —
         // `subagent`/`guardian_review`/… verbatim off `SessionRecord.
         // native_role`, rides only when the native harness published one.
@@ -1686,6 +1692,29 @@ mod tests {
         assert_eq!(node_a["nativeRole"], json!("subagent"));
         assert_eq!(node_a["role"], json!("app"), "kind stays app, never reclassified");
         assert!(node_b.get("nativeRole").is_none());
+    }
+    #[test]
+    fn the_graph_session_node_carries_task_only_when_a_run_set_one() {
+        // SESSION-FIND B1: a managed run publishes its slug as `task`; an
+        // ordinary session and an empty slug publish no key at all, so an
+        // untasked node's document is what it was before this key existed.
+        let tasked = SessionRecord {
+            session_id: "a".into(),
+            task: Some("review-pr".into()),
+            ..Default::default()
+        };
+        let untasked = SessionRecord { session_id: "b".into(), ..Default::default() };
+        let empty = SessionRecord {
+            session_id: "c".into(),
+            task: Some(String::new()),
+            ..Default::default()
+        };
+        let doc = build_graph(&[], &[tasked, untasked, empty], &[]);
+        let nodes = doc["nodes"].as_array().unwrap();
+        let node = |id: &str| nodes.iter().find(|n| n["id"] == format!("session:{id}")).unwrap();
+        assert_eq!(node("a")["task"], json!("review-pr"));
+        assert!(node("b").get("task").is_none());
+        assert!(node("c").get("task").is_none());
     }
     #[test]
     fn graph_json_publishes_effective_project_on_a_child_outside_its_cwd_anchor() {

@@ -159,6 +159,11 @@ pub(super) struct SessionView {
     /// absent discipline as `title`/`model`; `kind` above is untouched by it
     /// either way (a nested app child still reads `kind:"app"`).
     pub(super) native_role: Option<String>,
+    /// The managed run's slug (`SessionRecord.task` / the node's own `task`
+    /// key, `doc.rs`). Same absent-stays-absent discipline as `title`: a
+    /// local row reads the record, a remote row reads the far document, and
+    /// neither fills it from a mailbox, a role or another session.
+    pub(super) task: Option<String>,
     /// The parent this session was spawned by on ANOTHER node
     /// (`SessionRecord.remote_parent`, CONTRACTS.md §4) — a local row reads the
     /// record, a remote row reads the node's own published `remoteParent`
@@ -324,6 +329,7 @@ pub(super) fn build_local_node(sessions: &[SessionRecord], hooks: &[HookRecord],
                 kind: s.kind.clone(),
                 parent,
                 native_role: s.native_role.clone(),
+                task: s.task.clone().filter(|t| !t.is_empty()),
                 remote_parent,
                 remote_children,
             }
@@ -385,6 +391,7 @@ pub(super) fn sessions_from_graph(graph: &Value, host: &str) -> Vec<SessionView>
                 kind: n["role"].as_str().map(String::from),
                 parent,
                 native_role: n["nativeRole"].as_str().map(String::from),
+                task: n["task"].as_str().filter(|t| !t.is_empty()).map(String::from),
                 // Both cross-machine fields are published by the far node's own
                 // projection (it resolved the names against ITS `nodes.json`),
                 // so they are read back verbatim — re-resolving here would mean
@@ -1552,8 +1559,8 @@ mod tests {
             error: None,
             stale: false,
             sessions: vec![
-                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: true, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
-                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: true, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
             ],
         }];
         let rendered = render_nodes(&nodes);
@@ -1576,7 +1583,7 @@ mod tests {
                 cwd: "/x".into(), project: None,
                 effective_project: None,
                 exempt: true,
-                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
+                title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new(),
             }],
         }];
         let rendered = render_groups(&groups);
@@ -1612,7 +1619,7 @@ mod tests {
                 cwd: "/y".to_string(), project: None,
                 effective_project: None,
                 exempt: false,
-                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
+                title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new(),
             }],
         };
         (vec![local_node, mesh_node], locals)
@@ -1704,9 +1711,9 @@ mod tests {
             error: None,
             stale: false,
             sessions: vec![
-                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/z/nowhere".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
-                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/zeta/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
-                SessionView { session_id: "s3".into(), label: "l3".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/alpha/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/z/nowhere".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/zeta/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s3".into(), label: "l3".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/alpha/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
             ],
         }];
         let projects = vec![project("zeta", "/proj/zeta"), project("alpha", "/proj/alpha")];
@@ -1740,7 +1747,7 @@ mod tests {
                 cwd: "/home/k/Aoide/pkgs/aoide".into(), project: None,
                 effective_project: None,
                 exempt: false,
-                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
+                title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new(),
             }],
         }];
         let projects = vec![project("aoide", "/home/k/Aoide")];
@@ -1871,6 +1878,36 @@ mod tests {
         let missing = child_json_of(&nodes);
         assert_eq!(missing["fold"], "not pulled");
         assert_eq!(missing["subtree"], json!([]), "no fold, no rows under it");
+    }
+
+    // ── task: a run's slug reaches SessionView from the record or the document ──
+
+    #[test]
+    fn task_reaches_a_local_row_and_a_cached_document_only_when_set() {
+        let _env = Env::set_up("task-view");
+        let run = SessionRecord { task: Some("review-pr".to_string()), ..session("s1", "/x", "idle", "1", None) };
+        let empty = SessionRecord { task: Some(String::new()), ..session("s2", "/x", "idle", "2", None) };
+        let bare = session("s3", "/x", "idle", "3", None);
+        let node = build_local_node(&[run, empty, bare], &[], &[], &[], "sakaki");
+        let local_task = |id: &str| node.sessions.iter().find(|s| s.session_id == id).unwrap().task.clone();
+        assert_eq!(local_task("s1").as_deref(), Some("review-pr"));
+        assert_eq!(local_task("s2"), None, "an empty slug is no task");
+        assert_eq!(local_task("s3"), None);
+
+        let graph = json!({
+            "schemaVersion": "0",
+            "nodes": [
+                { "id": "session:r1", "kind": "session", "state": "working", "cwd": "/x", "agent": "claude", "task": "review-pr" },
+                { "id": "session:r2", "kind": "session", "state": "idle", "cwd": "/x", "agent": "claude", "task": "" },
+                { "id": "session:r3", "kind": "session", "state": "idle", "cwd": "/x", "agent": "claude" },
+            ],
+            "edges": [],
+        });
+        let remote = sessions_from_graph(&graph, "yomi-strix");
+        let remote_task = |id: &str| remote.iter().find(|s| s.session_id == id).unwrap().task.clone();
+        assert_eq!(remote_task("r1").as_deref(), Some("review-pr"));
+        assert_eq!(remote_task("r2"), None);
+        assert_eq!(remote_task("r3"), None);
     }
 
     // ── session_roster_with: the full pipeline, injected pull, real local stage I/O ──

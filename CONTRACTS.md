@@ -3390,9 +3390,10 @@ lead was ever named.
 }
 ```
 
-A session node MAY carry the sessions.json `petname` and `nativeRole` fields
-above, present under the same rule; its `role` key still comes from `kind`
-alone.
+A session node MAY carry the sessions.json `petname`, `nativeRole` and `task`
+fields above, present under the same rule; its `role` key still comes from
+`kind` alone. `task` is a managed run's slug, and rides only when it is
+non-empty, so an ordinary session's node carries no `task` key.
 A project node MAY likewise carry the projects.json `hosts` array above,
 present under the same rule (non-empty only) — `{ "id": "project:aoide", …,
 "hosts": [ { "name": "chiyo", "roots": ["/srv/khoa/Aoide"] } ] }`; a

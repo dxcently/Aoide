@@ -1475,9 +1475,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   that exact string), everything else folds to `last-seen` (the cache
   carries a `fetchedAt`) or `unknown` (it doesn't); a LIVE host's own
   sessions are never rewritten. `SessionView` additionally carries
-  `title`/`model`/`kind`/`parent` — local from the record's own fields
+  `title`/`model`/`kind`/`parent`/`task` — local from the record's own fields
   plus `resolved_parent`, remote from the node's graph document (`title`/
-  `model`/`role`→`kind`, and the `spawned` edge's `from` minus its
+  `model`/`role`→`kind`/`task`, and the `spawned` edge's `from` minus its
   `session:` prefix) — absent stays absent, nothing defaulted, inferred,
   or cross-host-resolved; `effectiveProject` stays absent on every remote
   row, unchanged. `node_list.rs::mesh_path` (beside `graph::pending_path`/
