@@ -427,12 +427,11 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
             .map(|f| f.sessions)
             .unwrap_or_default();
         let hooks_now: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
-        let hook_children = hook::gather(&roster_now, &hooks_now.hooks, &sealed);
         let mut tracked_now = tracked_ids.clone();
         tracked_now.extend(roster_now.iter().filter(|r| hook::tracked(r)).map(|r| r.session_id.clone()));
 
         let (mut claims, old_cursor, mut new_cursor) = claim_locked(&children, &tracked_now, now_ms);
-        claims.lines.extend(hook::claim(&hook_children, &mut new_cursor, now_ms));
+        claims.lines.extend(hook::claim(&roster_now, &hooks_now.hooks, &sealed, &old_cursor, &mut new_cursor, now_ms));
         if new_cursor != old_cursor {
             match serde_json::to_string(&new_cursor) {
                 Ok(body) => {
@@ -2220,7 +2219,8 @@ mod tests {
             let mut rec = session(id, "/w", phase, "2026-09-12T00:00:00Z", Some(host));
             rec.petname = Some("fond-aspen".to_string());
             rec.kind = Some("agent".to_string());
-            rec.hook_ancestry = vec![9001, host_pid as i32];
+            // The harness is this process: alive for the whole test.
+            rec.hook_ancestry = vec![std::process::id() as i32, host_pid as i32];
             file.sessions.push(rec);
             file.schema_version = "0".to_string();
             write_stage(&sessions_path(), &file).unwrap();
@@ -2349,6 +2349,104 @@ mod tests {
         let log = std::fs::read_to_string(root.join("log")).unwrap();
         assert!(log.contains("delivered to `wrap-p`"), "{log}");
         assert!(!log.contains("wrap-w") && !log.contains("wrap-victim"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The fixtures both death tests share: a spawner `wrap-p` and the host
+    /// `wrap-w` that runs the hook child `kid` (`fond-aspen`), every wrap
+    /// sealed, the child's harness this process, and the first pass spent on
+    /// the baseline.
+    fn died_fixture(tag: &str) -> (PathBuf, UnixListener, UnixListener) {
+        let root = setup(tag);
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        let spawner = headless_parent("wrap-p", "claude");
+        let host = headless_parent("wrap-w", "claude");
+        let stamp = aoide_storage::time::now_iso_utc();
+        hook_child_fixture("kid", "wrap-w", "wrap-p", std::process::id(), "working", &stamp);
+        seal_record("wrap-w", &kp);
+        seal_record("wrap-p", &kp);
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the baseline says nothing");
+        (root, spawner, host)
+    }
+
+    /// One pass, and what the spawner read off its socket during it.
+    fn heard_by(spawner: &UnixListener) -> (String, PingbackReport) {
+        let listen = spawner.try_clone().unwrap();
+        let acc = std::thread::spawn(move || read_all(listen));
+        let report = pingback(&daemon_inv(), &[]);
+        (String::from_utf8_lossy(&acc.join().unwrap()).into_owned(), report)
+    }
+
+    #[test]
+    fn a_hook_child_whose_harness_dies_inside_its_live_host_is_reported_once_to_its_spawner() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-died");
+
+        // The harness is gone: its pid is one this test has already reaped.
+        let reaped = {
+            let mut harness = std::process::Command::new("true").spawn().unwrap();
+            let pid = harness.id();
+            harness.wait().unwrap();
+            pid
+        };
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            for rec in file.sessions.iter_mut().filter(|r| r.session_id == "kid") {
+                rec.hook_ancestry = vec![reaped as i32, std::process::id() as i32];
+            }
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        let (text, report) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r", "one line to the spawner");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+        assert!(report.skipped.is_empty(), "{report:?}");
+
+        // Once: the next pass says nothing, and the spawner is not written again.
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default());
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "the spawner heard nothing more");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hook_child_reaped_mid_turn_is_reported_once_through_the_route_it_was_last_seen_on() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-reaped");
+
+        // The reaper takes the record; its hooks.json entry still reads working.
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.retain(|r| r.session_id != "kid");
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        let (text, report) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "exactly once");
+        let raw = std::fs::read_to_string(pingback_path()).unwrap_or_default();
+        assert!(!raw.contains("kid"), "the entry leaves with its child: {raw}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

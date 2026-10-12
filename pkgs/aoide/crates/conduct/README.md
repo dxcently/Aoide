@@ -290,13 +290,17 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
 - **`graph::pingback::hook`** is the ping-back's second source, for every
   other registered harness whose hooks write `hooks.json` (claude, kimi, pi):
   a local-parented child's canonical hook phase and `updatedAt` become
-  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …` and `…
-  settled`, claimed in the SAME stage-lock section as the trace source into
-  the entry's `hook` field of `pingback.json`, and delivered by the same
-  `deliver` — it adds a cursor half and three lines, never a second transport.
-  The recipient is the child's SPAWNER, resolved through the wrap that hosts
-  it and only over an edge the kernel attested (`hook::recipient`; the climb
-  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell and a
+  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …`, `… settled`
+  and `… died mid-turn · last: …`, claimed in the SAME stage-lock section as
+  the trace source into the entry's `hook` field of `pingback.json`, and
+  delivered by the same `deliver` — it adds a cursor half and four lines,
+  never a second transport. The recipient is the child's SPAWNER, resolved
+  through the wrap that hosts it and only over an edge the kernel attested
+  (`hook::route_of`; the climb is in `AGENTS.md`). A child whose record has
+  the tick can no longer route is judged from the route its entry kept
+  (`hook::gone`): said of while its spawner verifies and its host wrap is gone
+  or still verifies, never over a live host that does not verify. An eidolon, a
+  remote-parented child, a shell and a
   sub-agent node are not its children.
 - **`graph::pingback`** (P-EIDOLON slice E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice") is where a parent hears the children it

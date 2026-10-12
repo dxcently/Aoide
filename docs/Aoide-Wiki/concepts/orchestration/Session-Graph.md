@@ -299,20 +299,29 @@ the tool in flight is cleared the moment the phase leaves `working`),
 `[claude <petname>] silent 12 min · last: <the tool in flight, else
 "working">` when a `working` phase has had no hook event for 12 minutes (once
 per silence; any new hook event re-arms it; a stamp more than a day old is a
-dead record, not a silence), and `[claude <petname>] settled` when a child
-last seen `working` or `awaiting` stops. The first look at a child is a
-baseline and says nothing, a child found already stopped says nothing, and a
-turn that begins and ends between two ticks is not heard. A hook child's own
+dead record, not a silence), `[claude <petname>] settled` when a child last
+seen `working` or `awaiting` stops through its own hook, and `[claude
+<petname>] died mid-turn · last: <the tool in flight, else "working">` when
+that open turn ends with no hook at all: its harness process is gone (the
+first `hookAncestry` pid, probed with the reaper's own liveness probe), or its
+record has left the roster while the phase still reads open. A `done` phase is
+a session ending through its own hook and says nothing. A silence before a
+death does not hide it; a death is claimed once per open turn. The first look
+at a child is a baseline and says nothing, a child found already stopped or
+already dead says nothing, and a turn that begins and ends between two ticks
+is not heard. A child the tick can no longer route (its record has left the
+roster, or its harness is dead and a wrap on its route has stopped verifying)
+cannot be asked for its recipient, so the cursor keeps the route last resolved
+for it, while both seals verified. Such a death is said over that route when
+its spawner verifies now and its host wrap is either gone (absent, `done`, or
+its pid dead) or still verifies; a live host that does not verify keeps the
+entry until it does, and the entry is dropped once the turn is a day old. A hook child's own
 `parentSessionId` is the wrap that hosts it, never the session that spawned
 it, so this source does not write to that edge: it climbs to the wrap's own
 `parentSessionId` and speaks only when `attestedSpawner` — the parent the
 registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
 and the child's `hookAncestry` (stamped by the hook door from the hook
-process's own credentials) holds the wrap's pid. Both wraps' pids must also
-carry a verifying daemon seal when the line is delivered, because a seal
-re-derives the pid's start time: a pid reused by another process after its
-wrap died fails it, and so does a daemon that cannot be asked (nothing is
-attested, nothing is said). The stamp itself is the registering process's own
+process's own credentials) holds the wrap's pid. On the live edge both wraps' pids must also carry a verifying daemon seal when the line is delivered, because a seal re-derives the pid's start time: a pid reused by another process after its wrap died fails it, and so does a daemon that cannot be asked (nothing is attested, nothing is said). On the gone path the host wrap is exempt once it is gone, since a conducted wrap's program is its harness and its seal fails when it exits; the spawner's seal is still required at delivery. The stamp itself is the registering process's own
 kernel ancestry and needs no seal. A spawner that is itself an agent is
 resolved to the wrap hosting it by the same test. A forged `session start
 --parent` carries none of this and is ignored, and a child is never its own

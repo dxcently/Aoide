@@ -3519,28 +3519,64 @@ eidolon record leaves the roster drops out of this file on the same pass.
 There is no command that reads or edits it: it is a cursor, not a queue.
 
 **`hook` — additive in v0.** A hook-source child's entry is
-`{ "phase", "at", "silent"? }`: `phase` is the canonical phase
-(`canonical_state`) of the child's `hooks.json` record last examined, `at` its
-`updatedAt` verbatim, and `silent` — absent while false — the latch that the
-12-minute silence line was sent for that `at`. A hook event is a `phase` or
-`at` that differs from the cursor's; it re-arms `silent`. The decision over it:
-the first examination of a child (no `hook` yet) is a baseline and claims
-nothing; `awaiting` is claimed on ENTERING that phase (a restamp of it is not
-another entry); `settled` when the cursor last held `working` or `awaiting`
-and the record now reads `stopped` or `idle` (the later `stopped`→`idle` decay
-says nothing); `silent` when the record reads `working` and its `at` is at
-least 12 minutes and under 24 hours old. `hooks.json` carries no reason for a
-state, so the `awaiting` line has none. The line goes to the child's SPAWNER,
-never to its `parentSessionId` (a hook child's own host wrap): the host wrap
-must be a conducted wrap whose pid is in the child's `hookAncestry` and whose
-daemon seal verifies against the live daemon key (a seal re-derives the
-pid's start time, so a pid reused by another process after its wrap died, or
-a pid hand-edited into `sessions.json`, fails it, and an unreachable daemon
-fails every check closed), and its `parentSessionId` counts only while it
-equals its `attestedSpawner` (§ `sessions.json`); a conducted spawner is
-sealed too. A child with no such recipient is not tracked and has no entry. A
-reader that does not know `hook` ignores it. A child whose session leaves the
-roster drops out on the same pass.
+`{ "phase", "at", "silent"?, "died"?, "route"? }`: `phase` is the canonical
+phase (`canonical_state`) of the child's `hooks.json` record last examined, and
+`at` its `updatedAt` verbatim. `silent` — absent while false — is the latch
+that the 12-minute silence line was sent for that `at`. `died` — absent while
+false — is the latch that the open turn at that `at` is accounted for: its
+death was announced, or it was already dead when first examined. A hook event
+is a `phase` or `at` that differs from the cursor's, and clears both latches.
+`route` — `{ "host", "to", "tag", "last" }` — is the edge last resolved while
+the child was live: the host wrap whose seal carried it, the spawner it is
+said to, the rendered `[<agent> <petname>]` tag, and the tool in flight
+(`"working"` when there is none).
+
+The decision over it: the first examination of a child (no `hook` yet) is a
+baseline and claims nothing, and a child whose harness is already dead while
+its turn is open is latched `died`. `awaiting` is claimed on ENTERING that
+phase (a restamp of it is not another entry). `settled` is claimed when the
+cursor last held `working` or `awaiting` and the record now reads `stopped` or
+`idle` (the later `stopped`→`idle` decay says nothing). `silent` is claimed
+when the record reads `working` and its `at` is at least 12 minutes and under
+24 hours old, once per `at`. `died mid-turn` is claimed when the cursor last
+held `working` or `awaiting`, the record still reads one of them, its harness
+pid (the first `hookAncestry` entry, else its own `pid`) is gone, and `at` is
+under 24 hours old. A `done` phase is a session ending through its own hook
+and claims nothing. `hooks.json` carries no reason for a state, so the
+`awaiting` line has none.
+
+A child the tick cannot route — its record has left the roster, or it is still
+tracked but its harness is dead and a wrap on its route no longer verifies — is
+judged from its entry alone: it is said `died mid-turn` over `route` when its
+entry held an open turn that was not already `died`, that turn is under 24
+hours old, its `hooks.json` phase (if one remains) still reads open, its
+spawner verifies now, and its host wrap is gone (absent, `done`, or its pid
+dead) or still verifies now. The entry then leaves the file. A child whose
+record is on the roster with its harness alive is not judged here: its entry
+is kept while it is tracked and dropped once it is not.
+
+The line goes to the child's SPAWNER, never to its `parentSessionId` (a hook
+child's own host wrap). Over a live edge the host wrap must be a conducted
+wrap whose pid is in the child's `hookAncestry` and whose daemon seal verifies
+against the live daemon key; the spawner is its `parentSessionId` only while
+that equals its `attestedSpawner` (§ `sessions.json`), and a conducted spawner
+is sealed too. A seal re-derives the pid's start time, so a pid reused by
+another process after its wrap died, or a pid hand-edited into
+`sessions.json`, fails it, and an unreachable daemon fails every check closed.
+A `route` is written only while both wraps it names verify, the same test a
+live edge passes. On the gone path the spawner must still verify at delivery;
+the host wrap need not, once it is gone, because a conducted wrap's program IS
+its harness and its seal fails when it exits. A host that is still up but no
+longer verifies keeps the entry instead of the line.
+
+Accepted residual: a same-uid hand edit can produce a false died line about a
+child that genuinely existed and was verified while alive, delivered to its
+real spawner.
+
+A child whose route does not verify when its death is owed keeps its entry
+while the death is recent (under 24 hours old), so a later tick that verifies
+it still says it; past that the entry is dropped. A child that never had a
+recipient has no entry. A reader that does not know `hook` ignores it.
 
 ### `state/stage/remote-children.json` — **v0**
 
