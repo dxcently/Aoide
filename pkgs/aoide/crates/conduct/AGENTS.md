@@ -1927,6 +1927,16 @@ in the message.
   `resolved_parent` never sees a remote field: that separation is the whole
   point of the second field (the autogate grant and sibling rule in
   `send.rs` read `parentSessionId`), so do not "unify" them.
+- **`graph::find` answers from its index alone (SESSION-FIND B3).** The
+  matcher reads `Row`s and nothing else: no file, no lock, no node dialled,
+  and nothing written. It never infers a session from a name. A `parent:`
+  reference resolves through `storage::addr::resolve` with the `send --to`
+  rule, case-sensitive, and an ambiguous one is a refusal listing its
+  candidates, never the first match. `mailbox:` and `cc:` read a row only when
+  it is local (`mailbox:` by `key_fields`, `cc:` by a `None` `cc` on a cached
+  row), so a far node's unpublished mail facts never match. Terms filter and
+  only bare words rank; the four sort keys are the order, and nothing else
+  reorders a result.
 - **Every string `who.rs` prints off a pulled document goes through
   `common::clean_line`** (`shown`/`endpoint` — control characters and the bidi
   formatting marks stripped, flattened, clipped to `common::LINE_MAX`), in the
