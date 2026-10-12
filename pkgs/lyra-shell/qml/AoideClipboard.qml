@@ -1,9 +1,10 @@
 // AoideClipboard.qml — the cliphist clipboard-backend for the Grimoire.
 //
-// Entries are display-only metadata. Copying accepts only a validated numeric
-// cliphist identifier; clipboard contents never become a command. Image
-// thumbnails are decoded through the fixed-path lyra-clipboard-preview helper
-// (never by a shell command built from user data).
+// Entries are display-only metadata. Copying and image thumbnails call the
+// system's own `cliphist` and `wl-copy` from PATH, and accept only a validated
+// numeric cliphist identifier. Each `sh -c` script is a constant and the id
+// reaches it as a positional argument: clipboard contents never become a
+// command or shell source.
 
 import QtQuick
 import Quickshell
@@ -62,11 +63,12 @@ QtObject {
         return { format: fmt, width: w, height: h, metadata: meta }
     }
 
-    // Start decoding a preview image for one validated numeric id. Returns
-    // the fixed cache file URL on success, or an empty string on failure.
-    // Never constructs a shell command from clipboard data — the helper only
-    // accepts a numeric id.
-    function requestPreview(id) {
+    // Start decoding the preview image for one numeric cliphist id into
+    // previewPath(id). imageStates[id] goes "loading", then "ready" or
+    // "error". Anything but digits is refused before a process exists.
+    function requestPreview(value) {
+        var id = "" + value
+        if (!/^[0-9]+$/.test(id)) return
         var st = root.imageStates[id]
         if (!st || st.state === "error" || st.state === "none") {
             if (!st) {
@@ -81,10 +83,12 @@ QtObject {
         }
     }
 
-    // The runtime cache path atomically written by lyra-clipboard-preview.
+    // Thumbnails are cached per id under the user's XDG cache, so they last
+    // as long as the history does. The decoder writes here; previewPath reads.
+    readonly property string previewDir: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/aoide-clipboard/previews"
+
     function previewPath(id) {
-        var cache = Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")
-        return "file://" + cache + "/aoide-clipboard/previews/" + id
+        return "file://" + root.previewDir + "/" + id
     }
 
     function refresh() {
@@ -100,18 +104,25 @@ QtObject {
     function copyById(value) {
         var id = "" + value
         if (!/^[0-9]+$/.test(id)) return false
-        // Deliberately pass only the validated identifier. Never pass preview
-        // text, and never construct a shell command from clipboard contents.
-        Quickshell.execDetached(["lyra-clipboard-copy", id])
+        // Only the validated identifier is passed, as $1 of a constant
+        // script; never preview text, never a command built from contents.
+        Quickshell.execDetached(["sh", "-c", "cliphist decode \"$1\" | wl-copy", "sh", id])
         return true
     }
 
     // Factory for one-shot preview decoders — each instance decodes exactly
-    // one numeric id and self-destructs.
+    // one numeric id and self-destructs. The script is a constant; the id and
+    // the cache dir arrive as $1 and $2. It writes a temp file and renames it,
+    // so the launcher never reads a partial image, and keeps the cache
+    // owner-only (umask 077, dir mode 700).
     property Component previewFactory: Component {
         Process {
             property string clipId: ""
-            command: ["lyra-clipboard-preview", clipId]
+            command: ["sh", "-c",
+                "set -e; umask 077; mkdir -p \"$2\"; chmod 700 \"$2\"; "
+                + "t=\"$2/.tmp.$1.$$\"; trap 'rm -f \"$t\"' EXIT; "
+                + "cliphist decode \"$1\" > \"$t\"; mv -f \"$t\" \"$2/$1\"",
+                "sh", clipId, root.previewDir]
             onExited: function (exitCode, exitStatus) {
                 var st = root.imageStates[clipId]
                 if (st) {

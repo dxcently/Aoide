@@ -3,11 +3,14 @@
 # Dendrite shape: guarded on aoide.clipboard.enable, carries its own
 # dependencies, and keeps clipboard data in the user's XDG cache rather than
 # in the repository — cliphist's DEFAULT db path (~/.cache/cliphist/db),
-# which is persistent across reboots (the earlier XDG_RUNTIME_DIR override
-# was volatile: wiped on every reboot/logout). The provider records text and
-# image MIME data via cliphist. Display is handled by the Grimoire launcher
-# (AoideLauncher.qml), which reads the clipboard backend (AoideClipboard.qml)
-# and renders entries as a dedicated chapter — no separate picker surface.
+# persistent across reboots. The lane is the watcher: it records text and
+# image MIME data via cliphist and installs cliphist and wl-clipboard.
+# Display is the Grimoire launcher's (the song's `launcher` slot), which reads
+# the clipboard backend (pkgs/lyra-shell/qml/AoideClipboard.qml) and renders
+# entries as a dedicated chapter — no separate picker surface. That backend
+# copies and previews by calling the system's `cliphist` and `wl-copy` from
+# PATH itself, so it works the same on a host that runs its own watcher and
+# never selects this lane.
 
 {
   config,
@@ -16,51 +19,6 @@
   ...
 }:
 let
-  clipboardCopy = pkgs.writeShellScriptBin "lyra-clipboard-copy" ''
-    # Accept only the numeric cliphist identifier. Clipboard contents never
-    # become shell source or an interpolated command argument.
-    if [ "$#" -ne 1 ]; then
-      echo "usage: lyra-clipboard-copy <cliphist-id>" >&2
-      exit 2
-    fi
-    set -o pipefail
-    case "$1" in
-      ""|*[!0-9]*)
-        echo "cliphist id must be numeric" >&2
-        exit 2
-        ;;
-    esac
-    # cliphist's default DB path (~/.cache/cliphist/db) — persistent.
-    ${pkgs.cliphist}/bin/cliphist decode "$1" | ${pkgs.wl-clipboard}/bin/wl-copy
-  '';
-
-  clipboardPreview = pkgs.writeShellScriptBin "lyra-clipboard-preview" ''
-    # Decode a single cliphist image entry to a private runtime preview file.
-    # Only accepts a numeric cliphist id — clipboard payloads are never
-    # interpolated into shell source or a command argument.
-    if [ "$#" -ne 1 ]; then
-      echo "usage: lyra-clipboard-preview <cliphist-id>" >&2
-      exit 2
-    fi
-    set -o pipefail
-    case "$1" in
-      ""|*[!0-9]*)
-        echo "cliphist id must be numeric" >&2
-        exit 2
-        ;;
-    esac
-    # Persistent preview cache — thumbnails keyed by cliphist id, so they
-    # survive reboots as long as the history does.
-    CACHE="''${XDG_CACHE_HOME:-$HOME/.cache}/aoide-clipboard/previews"
-    mkdir -p "$CACHE"
-    chmod 700 "$CACHE" 2>/dev/null || true
-    # Write to a temp file then atomically rename so QML never reads a
-    # partial image.
-    TMP="$CACHE/.tmp.$1.$$"
-    ${pkgs.cliphist}/bin/cliphist decode "$1" > "$TMP"
-    mv -f "$TMP" "$CACHE/$1"
-  '';
-
   # Dual watcher wrapper: one text watcher + one image watcher, both piping
   # into cliphist store.  A single `wl-paste --watch` (typeless) does not
   # reliably capture image offers when the source also offers text — cliphist
@@ -97,8 +55,6 @@ in
       environment.systemPackages = [
         pkgs.cliphist
         pkgs.wl-clipboard
-        clipboardCopy
-        clipboardPreview
         clipboardWatch
       ];
 
