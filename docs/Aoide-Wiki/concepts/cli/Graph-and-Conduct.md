@@ -759,6 +759,28 @@ aoide session pending deny <id> [--json]
 - **Output:** `data: {id, sessionId}`. A malformed or out-of-range id fails
   cleanly, leaving the entry untouched.
 
+### aoide session find
+
+```
+aoide session find [<query>…] [--related <ref>] [--all] [--json]
+```
+
+- **Reads:** `state/stage/{sessions,hooks,projects}.json`, every registered
+  node's cache (`state/node-cache/<name>.json`), the mailbase peeked without a
+  lock (`mail::peek_cursors`, `mail::peek_base`), and each local cwd's git
+  common dir. A far node's cache is read, never refreshed.
+- **Writes:** nothing. No lock, no daemon dispatch, no node is dialled.
+- **Output:** one line per row, then `N of M · scope: …`. The scope line names
+  where each node's rows came from: `stage`, a `cache` with its age (`(stale)`
+  past the five-minute TTL), or `never pulled`. A cached row reads
+  `was <state>`. `--related <ref>` prints the target's carries (agent, where,
+  role, mailboxes, cc, edges), then the sessions that share a reason with it,
+  each with its reasons. `--json` carries the same facts in `data`: `query`,
+  `scope`, `sessions` (carries, `unknown`, `matched`) and `related`.
+- **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
+  refusal naming the keys. An ambiguous `parent:` reference, or a `--related`
+  name that no row or cache holds, is a refusal listing the candidates.
+
 ### aoide session trace
 
 ```

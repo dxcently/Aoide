@@ -1,17 +1,27 @@
-//! The query core of `aoide session find` (`docs/architecture/SESSION-FIND.md`,
-//! slice B3): the grammar, the matcher and the order, all pure. `split_line`
-//! turns the conductor's line into the words a shell's argv would hold, `parse`
-//! splits those words into terms and bare words, and `find` ranks a
-//! [`FindIndex`] of plain rows. No file is read, no lock is taken, no node is
-//! dialled and nothing is written; B5's `load_index` builds the index.
-//!
-//! Reachable from its own tests only until the command registers it (B5).
+//! The query core and the handler of `aoide session find`
+//! (`docs/architecture/SESSION-FIND.md`). The grammar, the matcher, the order,
+//! the related reasons and the mail facts are pure: `split_line` turns the
+//! conductor's line into the words a shell's argv would hold, `parse` splits
+//! those words into terms and bare words, `find` ranks a [`FindIndex`] of plain
+//! rows, and `related`, `carries` and `mail_facts` answer what a row carries.
+//! [`load_index`] reads the stage, each node's cache and the mailbase, and
+//! [`session_find`] renders the answer. Nothing here probes a node, takes a
+//! lock or writes a file.
 
+use super::common::{clean_line, load_inputs};
+use super::doorbell::conducted_ancestor;
+use super::model::{merged_sessions, HookRecord, Project, SessionRecord};
+use super::who::{build_local_node, cached_node, glyph, project_of, session_presence, SessionView};
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::state::canonical_state;
 use aoide_protocol::suggest::closest;
+use aoide_protocol::Invocation;
 use aoide_storage::addr::{resolve, LocalCandidate, Resolution};
 use aoide_storage::letter;
-use aoide_storage::mail::{Address, Cursors, Entry};
+use aoide_storage::mail::{self, Address, Cursors, Entry};
+use aoide_storage::node_store::{self, Node, NodeCacheEntry};
+use aoide_storage::{display, git, time};
+use serde_json::{json, Map, Value};
 use std::cmp::Ordering;
 use std::path::Path;
 
@@ -206,6 +216,8 @@ pub(crate) struct Found<'a> {
 /// The conductor's query line as the words a shell would pass. Spaces separate
 /// words. A `"…"` pair keeps its spaces and loses its quotes wherever it sits:
 /// `cc:"pr 41"` is the one word `cc:pr 41`. An unclosed quote is refused.
+/// Test-only until the conductor's `/` page reads a line (SESSION-FIND T1).
+#[cfg(test)]
 pub(crate) fn split_line(line: &str) -> Result<Vec<String>, FindError> {
     let mut words = Vec::new();
     let mut word = String::new();
@@ -826,10 +838,539 @@ pub(crate) fn related<'a>(
     Ok(found)
 }
 
+/// Everything [`load_index`] reads off disk, gathered as values so the join is
+/// pure and a test builds one by hand.
+pub(crate) struct Inputs {
+    pub(crate) host: String,
+    pub(crate) nodes: Vec<Node>,
+    pub(crate) projects: Vec<Project>,
+    pub(crate) sessions: Vec<SessionRecord>,
+    pub(crate) hooks: Vec<HookRecord>,
+    /// Aligned with `nodes`: each registered node's last pull, if it has one.
+    pub(crate) caches: Vec<Option<NodeCacheEntry>>,
+    /// `None` when the mailbase cannot be read or `cursors.json` is the legacy
+    /// shape: every local row's mail facts are then unknown, never empty.
+    pub(crate) mail: Option<(Cursors, Vec<Entry>)>,
+    pub(crate) now_epoch: i64,
+}
+
+/// Where one node's rows came from: this box's `stage`, a node's `cache`, or
+/// `never-pulled` when no pull has ever landed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Scope {
+    pub(crate) node: String,
+    pub(crate) source: &'static str,
+    pub(crate) fetched_at: Option<String>,
+    pub(crate) fresh: Option<bool>,
+}
+
+/// The index, the scope it was read under, and the clock it was read at.
+pub(crate) struct Loaded {
+    pub(crate) index: FindIndex,
+    pub(crate) scope: Vec<Scope>,
+    pub(crate) now_epoch: i64,
+}
+
+/// A local session's row: its roster fields, the wrap it reads mail through,
+/// its git common dir, and its report mailbox from the record.
+fn local_row(sv: &SessionView, rec: Option<&SessionRecord>, merged: &[SessionRecord], projects: &[Project], host: &str) -> Row {
+    Row {
+        node: host.to_string(),
+        local: true,
+        session_id: sv.session_id.clone(),
+        petname: sv.petname.clone(),
+        task: sv.task.clone(),
+        title: sv.title.clone(),
+        cwd: sv.cwd.clone(),
+        agent: sv.agent.clone(),
+        model: sv.model.clone(),
+        kind: sv.kind.clone(),
+        state: sv.state.clone(),
+        project: project_of(sv, projects),
+        native_role: sv.native_role.clone(),
+        leads: projects
+            .iter()
+            .filter(|p| p.lead.as_deref() == Some(sv.session_id.as_str()))
+            .map(|p| p.name.clone())
+            .collect(),
+        report_to: rec.and_then(|r| r.report_to.clone()),
+        repo: git::common_dir(Path::new(&sv.cwd)).map(|p| p.display().to_string()),
+        wrap: conducted_ancestor(&sv.session_id, merged),
+        parent: sv.parent.as_ref().map(|p| (host.to_string(), p.clone())),
+        remote_parent: sv.remote_parent.as_ref().map(|rp| (rp.node.clone(), rp.session_id.clone())),
+        remote_children: sv.remote_children.iter().map(|c| (c.node.clone(), c.session_id.clone())).collect(),
+        mail: None,
+    }
+}
+
+/// A cached session's row, as its node last published it. Its mail is never
+/// read here: the node does not publish its mailboxes.
+fn remote_row(node: &str, sv: &SessionView, projects: &[Project]) -> Row {
+    Row {
+        node: node.to_string(),
+        local: false,
+        session_id: sv.session_id.clone(),
+        petname: sv.petname.clone(),
+        task: sv.task.clone(),
+        title: sv.title.clone(),
+        cwd: sv.cwd.clone(),
+        agent: sv.agent.clone(),
+        model: sv.model.clone(),
+        kind: sv.kind.clone(),
+        state: sv.state.clone(),
+        project: project_of(sv, projects),
+        native_role: sv.native_role.clone(),
+        leads: Vec::new(),
+        report_to: None,
+        repo: None,
+        wrap: None,
+        parent: sv.parent.as_ref().map(|p| (node.to_string(), p.clone())),
+        remote_parent: sv.remote_parent.as_ref().map(|rp| (rp.node.clone(), rp.session_id.clone())),
+        remote_children: sv.remote_children.iter().map(|c| (c.node.clone(), c.session_id.clone())).collect(),
+        mail: None,
+    }
+}
+
+/// The index, the scope and the mail facts, joined from [`Inputs`]. Each node's
+/// rows come from its last cache, and a node with no cache is in the scope and
+/// in no row.
+pub(crate) fn build_index(input: Inputs) -> Loaded {
+    let merged = merged_sessions(&input.sessions, &input.hooks);
+    let local = build_local_node(&input.sessions, &input.hooks, &input.projects, &input.nodes, &input.host);
+    let mut rows: Vec<Row> = local
+        .sessions
+        .iter()
+        .map(|sv| {
+            let rec = merged.iter().find(|r| r.session_id == sv.session_id);
+            local_row(sv, rec, &merged, &input.projects, &input.host)
+        })
+        .collect();
+    let mut scope = vec![Scope { node: input.host.clone(), source: "stage", fetched_at: None, fresh: None }];
+    for (node, cache) in input.nodes.iter().zip(&input.caches) {
+        match cache {
+            Some(entry) => {
+                let (sessions, stale) = cached_node(&node.name, entry, input.now_epoch);
+                rows.extend(sessions.iter().map(|sv| remote_row(&node.name, sv, &input.projects)));
+                scope.push(Scope {
+                    node: node.name.clone(),
+                    source: "cache",
+                    fetched_at: entry.fetched_at.clone(),
+                    fresh: Some(!stale),
+                });
+            }
+            None => scope.push(Scope { node: node.name.clone(), source: "never-pulled", fetched_at: None, fresh: None }),
+        }
+    }
+    let nodes = input.nodes.iter().map(|n| n.name.clone()).collect();
+    let mut index = FindIndex { host: input.host, nodes, rows };
+    if let Some((cursors, entries)) = &input.mail {
+        mail_facts(&mut index.rows, cursors, entries);
+    }
+    Loaded { index, scope, now_epoch: input.now_epoch }
+}
+
+/// Read this box's stage, every registered node's cache and the mailbase, and
+/// join them. Reads files only: no node is dialled, no lock is taken, and the
+/// mail is peeked (`peek_cursors`, `peek_base`), never read through a cursor.
+fn load_index(host: &str) -> Result<Loaded, Outcome> {
+    let (p, s, h) = load_inputs("session find")?;
+    let nodes = node_store::load_nodes();
+    let caches = nodes.iter().map(|n| node_store::load_node_cache(&n.name)).collect();
+    let mail = match (mail::peek_cursors(), mail::peek_base()) {
+        (Some(cursors), Ok(entries)) => Some((cursors, entries)),
+        _ => None,
+    };
+    let now_epoch = time::parse_iso_utc(&time::now_iso_utc()).unwrap_or(0);
+    Ok(build_index(Inputs {
+        host: host.to_string(),
+        nodes,
+        projects: p.projects,
+        sessions: s.sessions,
+        hooks: h.hooks,
+        caches,
+        mail,
+        now_epoch,
+    }))
+}
+
+/// `aoide session find [<query>…] [--related <ref>] [--all] [--json]` on this box.
+pub fn session_find(inv: &Invocation) -> Outcome {
+    session_find_with(inv, &display::local_host_name())
+}
+
+/// [`session_find`] with this box's name passed in, so a test never reads it.
+pub(crate) fn session_find_with(inv: &Invocation, host: &str) -> Outcome {
+    let cmd = "session find";
+    let query = match parse(&inv.args) {
+        Ok(q) => q,
+        Err(e) => return refused(cmd, Kind::Usage, e),
+    };
+    let loaded = match load_index(host) {
+        Ok(loaded) => loaded,
+        Err(outcome) => return outcome,
+    };
+    let all = inv.flag_present("all");
+    let answer = match inv.flags.get("related") {
+        Some(reference) => related_view(&loaded, reference, &query, all),
+        None => list_view(&loaded, &query, all),
+    };
+    match answer {
+        Ok((text, data)) => Outcome::ok(cmd, text).with_data(data),
+        Err(e) => refused(cmd, Kind::Refused, e),
+    }
+}
+
+/// A taught refusal from a [`FindError`]: what, why, and the fix.
+fn refused(cmd: &str, kind: Kind, e: FindError) -> Outcome {
+    Outcome::refuse(cmd, kind, e.what, e.why, Fix::Set(e.fix))
+}
+
+fn list_view(loaded: &Loaded, query: &Query, all: bool) -> Result<(String, Value), FindError> {
+    let found = find(&loaded.index, query, all)?;
+    let mut lines: Vec<String> = found.hits.iter().map(|h| list_line(h.row)).collect();
+    lines.push(format!(
+        "{} of {} · {}",
+        found.hits.len(),
+        found.total,
+        scope_line(&loaded.scope, loaded.now_epoch)
+    ));
+    let sessions: Vec<Value> = found
+        .hits
+        .iter()
+        .map(|h| row_json(&loaded.index, h.row, Some(&h.matched)))
+        .collect();
+    let data = json!({
+        "query": query_json(query),
+        "scope": scope_json(&loaded.scope),
+        "sessions": sessions,
+    });
+    Ok((lines.join("\n"), data))
+}
+
+fn related_view(loaded: &Loaded, reference: &str, narrow: &Query, all: bool) -> Result<(String, Value), FindError> {
+    let not_found = |why: &str| FindError {
+        what: format!("no session `{reference}`"),
+        why: why.to_string(),
+        fix: "name one that `aoide session find` lists".to_string(),
+    };
+    let ident = resolve_ref(&loaded.index, reference)?.ok_or_else(|| not_found("no session on this box or in a node's cache has that name"))?;
+    let target = loaded
+        .index
+        .rows
+        .iter()
+        .find(|r| identity(r) == ident)
+        .ok_or_else(|| not_found("its node's cache does not hold it; pull that node first"))?;
+    let found = related(&loaded.index, target, narrow, all)?;
+
+    let mut lines = carry_lines(&loaded.index, target);
+    lines.push(format!("related ({})", found.len()));
+    for r in &found {
+        lines.push(related_line(loaded, r));
+    }
+    if found.is_empty() {
+        lines.push("  none".to_string());
+    }
+    lines.push(scope_line(&loaded.scope, loaded.now_epoch));
+
+    let related_json: Vec<Value> = found
+        .iter()
+        .map(|r| {
+            json!({
+                "node": r.row.node,
+                "sessionId": r.row.session_id,
+                "reasons": r.reasons.iter().map(|x| json!({"kind": x.kind, "detail": x.shown})).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let data = json!({
+        "query": query_json(narrow),
+        "scope": scope_json(&loaded.scope),
+        "sessions": [row_json(&loaded.index, target, None)],
+        "related": related_json,
+    });
+    Ok((lines.join("\n"), data))
+}
+
+/// Minutes, hours or days, as the scope line shows a cache's age.
+fn age(secs: i64) -> String {
+    match secs {
+        s if s < 60 => "<1m".to_string(),
+        s if s < 3600 => format!("{}m", s / 60),
+        s if s < 86_400 => format!("{}h{:02}m", s / 3600, s % 3600 / 60),
+        s => format!("{}d{}h", s / 86_400, s % 86_400 / 3600),
+    }
+}
+
+fn scope_line(scope: &[Scope], now: i64) -> String {
+    let parts: Vec<String> = scope
+        .iter()
+        .map(|s| {
+            let node = clean_line(&s.node);
+            match s.source {
+                "stage" => format!("{node} stage"),
+                "cache" => {
+                    let ago = s
+                        .fetched_at
+                        .as_deref()
+                        .and_then(time::parse_iso_utc)
+                        .map_or_else(|| "?".to_string(), |t| age(now - t));
+                    let stale = if s.fresh == Some(false) { " (stale)" } else { "" };
+                    format!("{node} cache {ago}{stale}")
+                }
+                _ => format!("{node} never pulled"),
+            }
+        })
+        .collect();
+    format!("scope: {}", parts.join(" · "))
+}
+
+fn short_id(row: &Row) -> String {
+    let n = row.session_id.chars().count();
+    let tail: String = row.session_id.chars().skip(n.saturating_sub(4)).collect();
+    format!("…{tail}")
+}
+
+/// One list row: the roster's glyph (a cached row is `·`), the label, the short
+/// id, then node, agent, state (`was` for a cached row), task and cwd.
+fn list_line(row: &Row) -> String {
+    let (mark, state) = if row.local {
+        (glyph(session_presence(&row.state)), row.state.clone())
+    } else {
+        ("·", format!("was {}", row.state))
+    };
+    format!(
+        "{mark} {} ({})  {}  {}  {}  {}  {}",
+        clean_line(label(row)),
+        short_id(row),
+        clean_line(&row.node),
+        clean_line(&row.agent),
+        clean_line(&state),
+        clean_line(row.task.as_deref().unwrap_or("")),
+        clean_line(&row.cwd),
+    )
+}
+
+fn related_line(loaded: &Loaded, r: &Related<'_>) -> String {
+    let reasons: Vec<&str> = r.reasons.iter().map(|x| x.shown.as_str()).collect();
+    let cache = if r.row.local {
+        String::new()
+    } else {
+        loaded
+            .scope
+            .iter()
+            .find(|s| s.node == r.row.node && s.source == "cache")
+            .and_then(|s| s.fetched_at.as_deref().and_then(time::parse_iso_utc))
+            .map(|t| format!("   cache {}", age(loaded.now_epoch - t)))
+            .unwrap_or_default()
+    };
+    format!(
+        "  {} ({})   {}   {}{}",
+        clean_line(label(r.row)),
+        short_id(r.row),
+        clean_line(&r.row.node),
+        clean_line(&reasons.join(" · ")),
+        cache,
+    )
+}
+
+/// The target block of `--related`: its agent, where, role, mailboxes, cc and
+/// edges, each line naming what the node did not publish.
+fn carry_lines(index: &FindIndex, row: &Row) -> Vec<String> {
+    let c = carries(index, row);
+    let place = if row.local { "stage" } else { "cache" };
+    let mut lines = vec![format!("{} ({}) · {} · {place}", clean_line(label(row)), short_id(row), clean_line(&row.node))];
+    let dash = "—".to_string();
+    let or_dash = |v: Option<&str>| clean_line(v.unwrap_or(&dash));
+    lines.push(format!(
+        "  {:<10} {} · {} · {} · {}",
+        "agent",
+        clean_line(&row.agent),
+        or_dash(row.model.as_deref()),
+        or_dash(row.kind.as_deref()),
+        clean_line(&row.state),
+    ));
+    let repo = row.repo.as_deref().map(repo_name);
+    lines.push(format!(
+        "  {:<10} {} · project {} · repo {}",
+        "where",
+        clean_line(&row.cwd),
+        or_dash(row.project.as_deref()),
+        or_dash(repo.as_deref()),
+    ));
+    let mut role = Vec::new();
+    if let Some(t) = &row.task {
+        role.push(format!("task {}", clean_line(t)));
+    }
+    if let Some(n) = &row.native_role {
+        role.push(format!("native role {}", clean_line(n)));
+    }
+    if !row.leads.is_empty() {
+        role.push(format!("leads {}", clean_line(&row.leads.join(", "))));
+    }
+    lines.push(format!("  {:<10} {}", "role", if role.is_empty() { dash.clone() } else { role.join(" · ") }));
+
+    let not_published = if row.local { "unknown on this box".to_string() } else { format!("not published by {}", clean_line(&row.node)) };
+    let mailboxes = match &c.reads {
+        None => not_published.clone(),
+        Some(reads) if reads.is_empty() => dash.clone(),
+        Some(reads) => reads
+            .iter()
+            .map(|m| {
+                let via = m.via.as_deref().map(|v| format!(" — via wrap {}", clean_line(v))).unwrap_or_default();
+                format!("reads {} ({} unread){via}", clean_line(&m.name), m.unread)
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
+    lines.push(format!("  {:<10} {}", "mailboxes", mailboxes));
+    if !c.inbox.is_empty() {
+        lines.push(format!("  {:<10} inbox {}", "", clean_line(&c.inbox.join(", "))));
+    }
+    if let Some(to) = &c.report_to {
+        lines.push(format!("  {:<10} reports to {}", "", clean_line(to)));
+    }
+    let cc = match (&c.cc, &c.threads) {
+        (Some(letters), Some(threads)) => match letters.last() {
+            None => dash.clone(),
+            Some(newest) => format!(
+                "{} letters on {} threads · newest \"{}\" from {}",
+                letters.len(),
+                threads.len(),
+                clean_line(&newest.subject),
+                clean_line(&newest.from),
+            ),
+        },
+        _ => not_published,
+    };
+    lines.push(format!("  {:<10} {}", "cc", cc));
+    let e = &c.edges;
+    let mut edges = Vec::new();
+    if let Some((_, id)) = &e.parent {
+        edges.push(format!("parent {}", clean_line(id)));
+    }
+    if let Some((node, id)) = &e.remote_parent {
+        edges.push(format!("↑ {}/{}", clean_line(node), clean_line(id)));
+    }
+    if !e.children.is_empty() {
+        edges.push(format!("{} children", e.children.len()));
+    }
+    if !e.siblings.is_empty() {
+        edges.push(format!("{} sibling(s)", e.siblings.len()));
+    }
+    if !e.remote_children.is_empty() {
+        edges.push(format!("↓ {} remote", e.remote_children.len()));
+    }
+    lines.push(format!("  {:<10} {}", "edges", if edges.is_empty() { dash } else { edges.join(" · ") }));
+    lines
+}
+
+fn grade_name(g: Grade) -> &'static str {
+    match g {
+        Grade::Exact => "exact",
+        Grade::Prefix => "prefix",
+        Grade::Substring => "substring",
+    }
+}
+
+fn ident_json(id: &Ident) -> Value {
+    json!({ "node": id.0, "sessionId": id.1 })
+}
+
+fn query_json(q: &Query) -> Value {
+    json!({
+        "words": q.words,
+        "terms": q.terms.iter().map(|t| json!({ "key": t.key.name(), "values": t.values })).collect::<Vec<_>>(),
+    })
+}
+
+fn scope_json(scope: &[Scope]) -> Value {
+    Value::Array(
+        scope
+            .iter()
+            .map(|s| {
+                let mut o = json!({ "node": s.node, "source": s.source });
+                if let Some(fetched) = &s.fetched_at {
+                    o["fetchedAt"] = json!(fetched);
+                }
+                if let Some(fresh) = s.fresh {
+                    o["fresh"] = json!(fresh);
+                }
+                o
+            })
+            .collect(),
+    )
+}
+
+/// A row's carries. A fact the node does not publish is an absent key, never
+/// an empty list: `mailboxes.reads`, `cc` and `threads` are omitted when
+/// [`Carries`] holds `None`.
+fn carries_json(c: &Carries, row: &Row) -> Value {
+    let mut mailboxes = Map::new();
+    if let Some(reads) = &c.reads {
+        mailboxes.insert(
+            "reads".into(),
+            json!(reads.iter().map(|m| json!({ "name": m.name, "unread": m.unread, "via": m.via })).collect::<Vec<_>>()),
+        );
+    }
+    mailboxes.insert("inbox".into(), json!(c.inbox));
+    mailboxes.insert("reportTo".into(), json!(c.report_to));
+    let mut out = json!({
+        "agent": row.agent,
+        "model": row.model,
+        "kind": row.kind,
+        "cwd": row.cwd,
+        "project": row.project,
+        "title": row.title,
+        "petname": row.petname,
+        "role": { "task": row.task, "nativeRole": row.native_role, "leads": row.leads },
+        "mailboxes": Value::Object(mailboxes),
+        "edges": {
+            "parent": c.edges.parent.as_ref().map(ident_json),
+            "children": c.edges.children.iter().map(ident_json).collect::<Vec<_>>(),
+            "siblings": c.edges.siblings.iter().map(ident_json).collect::<Vec<_>>(),
+            "wrap": c.edges.wrap,
+            "remoteParent": c.edges.remote_parent.as_ref().map(ident_json),
+            "remoteChildren": c.edges.remote_children.iter().map(ident_json).collect::<Vec<_>>(),
+            "repo": c.edges.repo,
+        },
+    });
+    if let Some(letters) = &c.cc {
+        out["cc"] = json!(letters
+            .iter()
+            .map(|l| json!({ "msgid": l.msgid, "threadId": l.thread_id, "subject": l.subject, "from": l.from, "to": l.to }))
+            .collect::<Vec<_>>());
+    }
+    if let Some(threads) = &c.threads {
+        out["threads"] = json!(threads.iter().map(|t| json!({ "id": t.id, "subject": t.subject })).collect::<Vec<_>>());
+    }
+    out
+}
+
+fn row_json(index: &FindIndex, row: &Row, matched: Option<&Vec<Matched>>) -> Value {
+    let c = carries(index, row);
+    let mut out = json!({
+        "node": row.node,
+        "sessionId": row.session_id,
+        "label": label(row),
+        "source": if row.local { "stage" } else { "cache" },
+        "state": row.state,
+        "presence": if row.local { session_presence(&row.state) } else { "last-seen" },
+        "carries": carries_json(&c, row),
+        "unknown": c.unknown,
+    });
+    if let Some(ms) = matched {
+        out["matched"] = json!(ms
+            .iter()
+            .map(|m| json!({ "term": m.term, "field": m.field, "value": m.value, "how": grade_name(m.how) }))
+            .collect::<Vec<_>>());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_storage::{display, letter::LetterContent, mail};
+    use aoide_storage::letter::LetterContent;
 
     /// A local row on this box (`osaka`), with mailboxes published and no cc.
     fn local(id: &str, petname: &str, state: &str) -> Row {
@@ -1425,5 +1966,212 @@ mod tests {
         assert_eq!(rev.threads.len(), 1, "a thread is found through any mailbox the row reads");
         assert!(rows[2].mail.is_none(), "a far node's mail is not published here");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    use crate::graph::model::{write_stage, SessionsFile};
+    use crate::graph::testutil::{flag_invocation, invocation, session, unique_stage, EnvVars};
+    use aoide_protocol::output::Status;
+    use aoide_storage::node_store::{node_cache_dir, node_cache_path, nodes_path, save_nodes};
+    use aoide_storage::stage::sessions_path;
+
+    /// A fresh state, stage and runtime directory. The caller holds the env lock.
+    fn isolated(tag: &str) -> (std::path::PathBuf, EnvVars) {
+        let guard = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage(tag);
+        for sub in ["stage", "state", "state/mail", "state/sessions", "run"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+        (root, guard)
+    }
+
+    fn node(name: &str, url: &str) -> Node {
+        serde_json::from_value(json!({ "name": name, "url": url })).unwrap()
+    }
+
+    fn cache_entry(name: &str, fetched: &str, graph: Value) -> NodeCacheEntry {
+        serde_json::from_value(json!({ "name": name, "fetchedAt": fetched, "graph": graph })).unwrap()
+    }
+
+    /// One idle kimi session on a far node, with a task so it can share a role.
+    fn quiet_graph(task: Option<&str>) -> Value {
+        let mut quiet = json!({
+            "id": "session:quiet", "kind": "session", "state": "idle",
+            "cwd": "/far/aoide", "agent": "kimi", "petname": "quiet-fern",
+        });
+        if let Some(t) = task {
+            quiet["task"] = json!(t);
+        }
+        json!({ "schemaVersion": "0", "nodes": [quiet], "edges": [] })
+    }
+
+    const NOW: &str = "2026-10-12T12:00:00Z";
+
+    fn now_epoch() -> i64 {
+        time::parse_iso_utc(NOW).unwrap()
+    }
+
+    fn empty_inputs(host: &str) -> Inputs {
+        Inputs {
+            host: host.into(),
+            nodes: Vec::new(),
+            projects: Vec::new(),
+            sessions: Vec::new(),
+            hooks: Vec::new(),
+            caches: Vec::new(),
+            mail: None,
+            now_epoch: now_epoch(),
+        }
+    }
+
+    #[test]
+    fn every_node_is_in_the_scope_with_its_cache_age_and_freshness() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root, _env) = isolated("find-b5-scope");
+        let mut inputs = empty_inputs("osaka");
+        inputs.nodes = vec![
+            node("yomi-strix", "http://127.0.0.1:9"),
+            node("sakaki", "http://127.0.0.1:9"),
+            node("kiwi", "http://127.0.0.1:9"),
+        ];
+        inputs.caches = vec![
+            Some(cache_entry("yomi-strix", "2026-10-12T09:46:00Z", quiet_graph(None))),
+            None,
+            Some(cache_entry("kiwi", "2026-10-12T11:59:30Z", json!({}))),
+        ];
+        let loaded = build_index(inputs);
+        assert_eq!(
+            scope_line(&loaded.scope, loaded.now_epoch),
+            "scope: osaka stage · yomi-strix cache 2h14m (stale) · sakaki never pulled · kiwi cache <1m",
+        );
+        assert_eq!(loaded.index.nodes, ["yomi-strix", "sakaki", "kiwi"]);
+    }
+
+    #[test]
+    fn a_cached_session_is_a_was_row_whose_mail_is_unknown_not_empty() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root, _env) = isolated("find-b5-was");
+        let mut inputs = empty_inputs("osaka");
+        inputs.nodes = vec![node("yomi-strix", "http://127.0.0.1:9")];
+        inputs.caches = vec![Some(cache_entry("yomi-strix", "2026-10-12T11:59:30Z", quiet_graph(None)))];
+        let loaded = build_index(inputs);
+
+        let row = loaded.index.rows.iter().find(|r| r.session_id == "quiet").expect("the cached session is a row");
+        assert!(!row.local && row.mail.is_none());
+        assert_eq!(
+            list_line(row),
+            "· quiet-fern (…uiet)  yomi-strix  kimi  was idle    /far/aoide",
+        );
+        let v = row_json(&loaded.index, row, None);
+        assert_eq!(v["source"], "cache");
+        assert_eq!(v["unknown"], json!(["mailboxes", "cc", "threads"]));
+        assert!(v["carries"]["mailboxes"].get("reads").is_none(), "unknown is an absent key, not an empty list");
+        assert!(v["carries"].get("cc").is_none() && v["carries"].get("threads").is_none());
+    }
+
+    #[test]
+    fn a_bad_word_is_a_taught_usage_refusal_before_any_file_is_read() {
+        let out = session_find_with(&invocation(&["session", "find"], &["agnt:kimi"]), "osaka");
+        assert_eq!(out.status, Status::Usage);
+        assert!(out.message.contains("agnt"), "{out:?}");
+        let refusal = &out.data.as_ref().expect("a refusal carries its data")["refusal"];
+        assert_eq!(refusal["fix"]["set"], "did you mean `agent:kimi`?");
+    }
+
+    #[test]
+    fn related_refuses_a_name_no_row_or_cache_holds() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root, _env) = isolated("find-b5-unknown-ref");
+        let loaded = build_index(empty_inputs("osaka"));
+        let err = related_view(&loaded, "nobody", &query(""), false).unwrap_err();
+        assert!(err.what.contains("nobody"), "{err:?}");
+    }
+
+    #[test]
+    fn related_shows_the_target_its_reasons_and_a_remote_mate_with_its_cache_age() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("find-b5-related");
+        let mut mine = session("brave-id", &root.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
+        mine.task = Some("review-pr".into());
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![mine], ..Default::default() }).unwrap();
+        let mut inputs = empty_inputs("osaka");
+        inputs.sessions = load_stage_sessions();
+        inputs.nodes = vec![node("yomi-strix", "http://127.0.0.1:9")];
+        inputs.caches = vec![Some(cache_entry("yomi-strix", "2026-10-12T11:59:30Z", quiet_graph(Some("review-pr"))))];
+        let loaded = build_index(inputs);
+
+        let (text, data) = related_view(&loaded, "brave-id", &query(""), false).expect("the target is a row");
+        assert!(text.contains("related (1)"), "{text}");
+        assert!(text.contains("quiet-fern") && text.contains("same role: review-pr"), "{text}");
+        assert!(text.contains("cache <1m"), "a remote mate names its cache age: {text}");
+        assert_eq!(data["related"][0]["reasons"][0]["kind"], "same role");
+        assert_eq!(data["sessions"][0]["sessionId"], "brave-id");
+    }
+
+    fn load_stage_sessions() -> Vec<SessionRecord> {
+        aoide_storage::stage::load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions
+    }
+
+    #[test]
+    fn find_reads_the_stage_and_the_caches_and_writes_nothing_and_dials_no_node() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("find-b5-read-only");
+        // A registered node whose door counts every connection: a dial would be
+        // accepted here, and the non-blocking accept below would find it.
+        let door = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        door.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", door.local_addr().unwrap());
+        save_nodes(&[node("yomi-strix", &url), node("sakaki", &url)]).unwrap();
+        std::fs::create_dir_all(node_cache_dir()).unwrap();
+        let fresh = time::now_iso_utc();
+        std::fs::write(
+            node_cache_path("yomi-strix"),
+            serde_json::to_vec(&cache_entry("yomi-strix", &fresh, quiet_graph(None))).unwrap(),
+        )
+        .unwrap();
+        let brave = session("brave-id", &root.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![brave], ..Default::default() }).unwrap();
+        mail::enrol_reader("reviewer", "brave-id").unwrap();
+        mail::file_letter("builder", "reviewer", "one").unwrap();
+        mail::file_letter("builder", "reviewer", "two").unwrap();
+
+        let watched = [sessions_path(), mail::base_path(), mail::cursors_path(), nodes_path(), node_cache_path("yomi-strix")];
+        let before: Vec<(Vec<u8>, std::time::SystemTime)> = watched
+            .iter()
+            .map(|p| (std::fs::read(p).unwrap(), std::fs::metadata(p).unwrap().modified().unwrap()))
+            .collect();
+
+        let out = session_find_with(&invocation(&["session", "find"], &[]), "osaka");
+
+        assert_eq!(out.status, Status::Ok, "{out:?}");
+        assert!(out.message.contains("osaka stage"), "{}", out.message);
+        assert!(out.message.contains("yomi-strix cache <1m"), "{}", out.message);
+        assert!(out.message.contains("sakaki never pulled"), "{}", out.message);
+        let data = out.data.as_ref().expect("the answer carries its data");
+        let ids: Vec<&str> = data["sessions"].as_array().unwrap().iter().map(|v| v["sessionId"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["brave-id", "quiet"]);
+        let reads = &data["sessions"][0]["carries"]["mailboxes"]["reads"];
+        assert_eq!(reads, &json!([{ "name": "reviewer", "unread": 2, "via": null }]));
+        assert!(door.accept().is_err(), "find dialled a registered node");
+        for (path, (bytes, mtime)) in watched.iter().zip(&before) {
+            assert_eq!(&std::fs::read(path).unwrap(), bytes, "{} changed", path.display());
+            assert_eq!(&std::fs::metadata(path).unwrap().modified().unwrap(), mtime, "{} was touched", path.display());
+        }
+    }
+
+    #[test]
+    fn related_flag_runs_through_the_handler_over_the_same_stage() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("find-b5-related-handler");
+        let brave = session("brave-id", &root.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![brave], ..Default::default() }).unwrap();
+        let out = session_find_with(&flag_invocation(&["session", "find"], &[("related", "brave-id")]), "osaka");
+        assert_eq!(out.status, Status::Ok, "{out:?}");
+        assert!(out.message.contains("related (0)"), "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["sessions"][0]["sessionId"], "brave-id");
+        assert_eq!(data["related"], json!([]));
     }
 }

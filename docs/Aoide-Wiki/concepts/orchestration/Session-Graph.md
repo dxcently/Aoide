@@ -184,6 +184,15 @@ should follow).
 - **`session pending list|approve|deny`** — the resolve surface over sends held
   without standing authorization (`state/stage/pending.json`); `approve`
   re-drives a held entry through `send` with `--yes`.
+- **`session find [<query>…] [--related <ref>] [--all] [--json]`** — find
+  sessions on this box and on every registered node, from the stage and each
+  node's cached graph. It reads files only: it probes no node, takes no lock
+  and writes nothing. `node pull` refreshes a cache, and the scope line names
+  each node's cache age. Terms (`agent:`, `kind:`, `state:`, `node:`,
+  `project:`, `role:`, `mailbox:`, `cc:`, `parent:`) filter and bare words
+  rank. `--related <ref>` shows <ref>'s carries and the sessions that share a
+  reason with it. The grammar and the reasons are in
+  `docs/architecture/SESSION-FIND.md`.
 - **`session trace <id>`** — render a session's own trace file, one line per
   record: the run, step by step (see "Agents enrolled from outside" above).
   `--tail N` shows the last N records (default 50), `--follow` re-reads for

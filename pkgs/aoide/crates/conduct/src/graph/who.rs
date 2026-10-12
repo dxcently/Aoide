@@ -266,7 +266,7 @@ pub(super) struct NodeView {
 }
 
 /// Session-level presence class (module doc's "Presence model").
-fn session_presence(state: &str) -> &'static str {
+pub(super) fn session_presence(state: &str) -> &'static str {
     match state {
         "stopped" => "stale",
         "done" => "done",
@@ -444,6 +444,17 @@ fn cached_presence(presence: &str, fetched_at: Option<&str>) -> &'static str {
     }
 }
 
+/// The cached half of a failed probe, pure over the entry and the clock: the
+/// node's sessions as its last successful pull left them (`last-seen`, or
+/// `done` alone), and whether that pull is past its TTL (`stale`).
+pub(super) fn cached_node(node: &str, entry: &NodeCacheEntry, now_epoch: i64) -> (Vec<SessionView>, bool) {
+    let mut sessions = entry.graph.as_ref().map(|g| sessions_from_graph(g, node)).unwrap_or_default();
+    for sv in &mut sessions {
+        sv.presence = cached_presence(sv.presence, entry.fetched_at.as_deref());
+    }
+    (sessions, !aoide_storage::node_store::is_cache_fresh(entry, now_epoch))
+}
+
 /// Pure: classify one node's [`NodeView`] from its live-probe OUTCOME and
 /// its already-loaded last cache entry (if any) — no I/O in here at all, so
 /// it is trivially unit-testable with synthetic data. The caller
@@ -464,14 +475,9 @@ pub(super) fn build_mesh_node(node: &Node, probe: Result<Value, String>, cache: 
         },
         Err(e) => match cache {
             Some(entry) => {
-                let mut sessions =
-                    entry.graph.as_ref().map(|g| sessions_from_graph(g, &node.name)).unwrap_or_default();
-                for sv in &mut sessions {
-                    sv.presence = cached_presence(sv.presence, entry.fetched_at.as_deref());
-                }
                 let now_epoch =
                     aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
-                let stale = !aoide_storage::node_store::is_cache_fresh(&entry, now_epoch);
+                let (sessions, stale) = cached_node(&node.name, &entry, now_epoch);
                 NodeView {
                     name: node.name.clone(),
                     is_local: false,
@@ -874,6 +880,13 @@ fn remote_tags(s: &SessionView) -> String {
 /// attribution") — always sorted last in [`group_by_project`]'s output.
 const NO_PROJECT: &str = "(no project)";
 
+/// The project a session renders under: its effective project (the owner
+/// chain), else its own, else the anchor its cwd sits under. Bare `session`'s
+/// grouping and find's `project:` both read this one rule.
+pub(super) fn project_of(sv: &SessionView, projects: &[Project]) -> Option<String> {
+    sv.effective_project.clone().or_else(|| sv.project.clone()).or_else(|| project_bucket(&sv.cwd, projects))
+}
+
 /// Attribute one session's cwd to a project bucket for bare `session`'s
 /// PROJECT-grouped listing — see the module doc's "Project attribution".
 /// `None` means neither attribution resolved; the caller buckets that as
@@ -914,10 +927,7 @@ fn group_by_project(nodes: Vec<NodeView>, projects: &[Project]) -> Vec<ProjectGr
     let mut buckets: std::collections::HashMap<String, Vec<SessionView>> = std::collections::HashMap::new();
     for node in nodes {
         for sv in node.sessions {
-            let name = sv.effective_project.clone()
-                .or_else(|| sv.project.clone())
-                .or_else(|| project_bucket(&sv.cwd, projects))
-                .unwrap_or_else(|| NO_PROJECT.to_string());
+            let name = project_of(&sv, projects).unwrap_or_else(|| NO_PROJECT.to_string());
             if !buckets.contains_key(&name) {
                 order.push(name.clone());
             }

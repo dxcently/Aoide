@@ -1,9 +1,9 @@
 # Session find — every session on every node, and what each one carries
 
-> **Status: DESIGNED, NOT BUILT.** Nothing on this page runs. `aoide session
-> find` is not registered, the conductor binds no `/` key, and the three
-> additions under "What this design adds" are not made. The slices at the end
-> are the build order.
+> **Status: the bridge (B1-B5) is built.** `aoide session find` runs with its
+> query grammar, related reasons, index and scope. The conductor's `/` page and
+> its Find action (T1, T2) are not built, and bare `session <filter>` keeps its
+> own matcher until the later slice in Decision 3.
 
 The User's ruling: find agent sessions across every agent, and for specific
 ones, and see what each carries — its primitives, roles, mailboxes and cc's.

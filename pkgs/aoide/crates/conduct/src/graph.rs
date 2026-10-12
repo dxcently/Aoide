@@ -38,11 +38,9 @@ mod doorbell;
 // `sync_eidolon_sessions` (re-exported below) is called from the reaper tick
 // (`reap.rs`) beside `sync_codex_app_threads`.
 mod eidolon;
-// SESSION-FIND B3: the query core of `aoide session find` — the grammar, the
-// matcher and the order, all pure over plain rows. Test-only until B5 builds
-// its index and registers the command; B5 drops this gate.
-#[cfg(test)]
+// SESSION-FIND: the query core and the handler of `aoide session find`.
 mod find;
+pub use self::find::session_find;
 // LANE IDENTITY P-ID3: `pub(crate)`, not private — `shellbridge.rs` (a
 // SIBLING of this module, not a descendant) reuses `peer_cred`/`PeerCred`
 // for its own cross-uid accept floor rather than hand-rolling a second

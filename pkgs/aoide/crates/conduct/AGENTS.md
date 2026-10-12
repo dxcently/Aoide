@@ -1927,7 +1927,7 @@ in the message.
   `resolved_parent` never sees a remote field: that separation is the whole
   point of the second field (the autogate grant and sibling rule in
   `send.rs` read `parentSessionId`), so do not "unify" them.
-- **`graph::find` answers from its index alone (SESSION-FIND B3, B4).** The
+- **`graph::find` answers from its index alone (SESSION-FIND B3-B5).** The
   matcher reads `Row`s and nothing else: no file, no lock, no node dialled,
   and nothing written. It never infers a session from a name. A `parent:`
   reference resolves through `storage::addr::resolve` with the `send --to`
@@ -1939,7 +1939,12 @@ in the message.
   reorders a result. `related` ranks by its strongest reason, then by how many
   reasons it has, then by `tiebreak`. `mail_facts` takes the peeked cursors and
   entries as arguments and never reads them itself; a cached row gets no mail
-  facts at all, so its mail reasons never hold.
+  facts at all, so its mail reasons never hold. `load_index` is the only
+  reader, and it reads files only: the stage, each node's cache and a mailbase
+  peek, never a lock or a migration. `session_find` calls no probe and no
+  pull. Its box name arrives as an argument (`session_find_with`), so a test
+  never reads it, and its no-dial and no-write proofs are the find tests
+  `find_reads_the_stage_and_the_caches_and_writes_nothing_and_dials_no_node`.
 - **Every string `who.rs` prints off a pulled document goes through
   `common::clean_line`** (`shown`/`endpoint` — control characters and the bidi
   formatting marks stripped, flattened, clipped to `common::LINE_MAX`), in the
