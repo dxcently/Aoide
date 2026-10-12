@@ -537,12 +537,11 @@ pub struct SessionRecord {
     /// spawner_is_attested`): the claimed parent's pid, or an agent's
     /// `hookAncestry`, was really above the registering process in `/proc`.
     /// A birth fact stamped beside `headless`/`spawned`, holding the id itself
-    /// rather than a flag so a later `session start --parent <other>` — which
-    /// rewrites `parentSessionId` on an existing id without any evidence —
-    /// can never inherit it: a reader trusts the edge only while
-    /// `attestedSpawner == parentSessionId`, and the send gate's autogate does
-    /// exactly that (stance C). The hook door's sealed walk stamps it too. It is
-    /// how a detached spawn's edge
+    /// rather than a flag: a reader trusts the edge only while
+    /// `attestedSpawner == parentSessionId`. Every writer of `parentSessionId`
+    /// goes through [`SessionRecord::set_parent_session`], which drops the
+    /// stamp whenever the edge moves, so a later rewrite can never inherit it.
+    /// It is how a detached spawn's edge
     /// (`aoide spawn` leaves its child reparented to init, so no live `/proc`
     /// walk can re-derive it) stays checkable later; the ping-back's hook
     /// source speaks only for such an edge. Absent for every unconfirmed
@@ -753,6 +752,19 @@ pub struct SessionRecord {
     pub native_role: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+impl SessionRecord {
+    /// Move the local parent edge. An attested stamp names the parent it was
+    /// minted for, so the stamp moves with the edge: any change of parent,
+    /// including to none, drops it. A stamp left behind would revive the
+    /// autogate the moment the edge was set back to that id.
+    pub fn set_parent_session(&mut self, parent: Option<String>) {
+        if self.parent_session_id != parent {
+            self.attested_spawner = None;
+            self.parent_session_id = parent;
+        }
+    }
 }
 
 /// One hook record (`state/stage/hooks.json`, written by shellbridge).
@@ -1552,5 +1564,24 @@ mod tests {
         let legacy: SessionRecord =
             serde_json::from_str(r#"{ "sessionId": "s", "windowAddress": "0x1" }"#).unwrap();
         assert_eq!(legacy.restore, None);
+    }
+
+    #[test]
+    fn set_parent_session_drops_the_stamp_on_every_move() {
+        let mut rec = SessionRecord {
+            parent_session_id: Some("p".into()),
+            attested_spawner: Some("p".into()),
+            ..Default::default()
+        };
+        rec.set_parent_session(Some("p".into()));
+        assert_eq!(rec.attested_spawner.as_deref(), Some("p"), "the same edge keeps its stamp");
+        rec.set_parent_session(Some("q".into()));
+        assert_eq!(rec.attested_spawner, None, "a moved edge drops its stamp");
+        rec.attested_spawner = Some("q".into());
+        rec.set_parent_session(Some("p".into()));
+        assert_eq!(rec.attested_spawner, None, "setting the old parent back revives nothing");
+        rec.attested_spawner = Some("p".into());
+        rec.set_parent_session(None);
+        assert_eq!(rec.attested_spawner, None, "clearing the edge drops its stamp too");
     }
 }

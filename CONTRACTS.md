@@ -2182,11 +2182,13 @@ registration (a parent counts when its pid is really above the registering
 process, or it is the agent whose `hookAncestry` matched; a registration made
 after the spawner returned, such as a detached spawn that was reparented to
 init first, has no ancestry left and gets no stamp), and holds the id itself
-rather than a flag: `parentSessionId` can be rewritten by a bare `session start --parent` with no evidence at all, and a
-reader trusts the edge only while `attestedSpawner == parentSessionId`. The
-send gate's parent and sibling autogate read it that way (stance C, below), and
-the hook door's sealed-ancestry attestation (`stamp_attested_parent`) stamps the
-same field with the parent it writes. It exists because a detached `aoide spawn` leaves its child reparented to init, so
+rather than a flag. Every writer of `parentSessionId` goes through one setter,
+which drops the stamp whenever the edge moves to a different id or to none, so a
+stamp names only the edge it was minted for. The send gate's parent and sibling
+autogate read the pair (`attestedSpawner == parentSessionId`). The hook door's
+sealed-ancestry walk moves a hook-registered record's edge without attesting it,
+and never moves a conducted wrap's edge.
+It exists because a detached `aoide spawn` leaves its child reparented to init, so
 the ancestry cannot be re-derived later. Absent for every parent the kernel did
 not back (an explicit `--parent` or ambient `AOIDE_SESSION_ID` naming a session
 the registering process does not run beneath, and every wrap registered by
@@ -2684,34 +2686,48 @@ dispatched `session start --id <id>` is refused BEFORE it runs (taught error,
 pid that no longer verifies; a sealed record whose process merely died is
 not refused, and is not re-sealed.
 
-**The same-uid residual under stance C** (the User's ruling; identity OQ1-A's
-threat model). HIGH-2 and HIGH-3 are closed by two rules, both keyed on the
-daemon's live seal key:
+**Same-uid processes and the live sealed wrap.** A same-uid process runs any
+command the operator can, so the rules here do not rest on file permissions.
+They rest on the daemon's live seal key and on `/proc`: a conducted record whose
+seal verifies over its own live pid is a live sealed wrap. Two rules hold, each
+on the doors named:
 
-1. *A live sealed wrap is ended only by its own exit.* A conducted record whose
-   seal verifies on a live pid is refused by every door that could finish it:
-   `session end`, a `session phase` carrying a terminal token (`exit`,
-   `finished`, `complete`, `done`), the hook's `SessionEnd` arm, and `session
-   prune`, which keeps the record and names it. The reaper spares it whichever
-   liveness signal names it. Its own exit path (conduct's clean end, or the
-   reaper once the pid is gone) still ends it. The refusal names the wrap and
-   `aoide session kill --id`, which signals the process under the same seal
-   check. A dead, unsealed, or unverifiable record ends as it always has: a seal
-   nothing can verify is an unsealed one.
-2. *The autogate honours only the spawn-time edge.* A target's parent counts for
-   the parent-of-target and sibling rules only where its `attestedSpawner` names
-   that parent (§ `sessions.json`). A bare `session start --parent`, a `graph
-   link`, or any later rewrite earns no autogate: the send is held pending.
+1. *A live sealed wrap is ended only by its own exit.* `session end`, a `session
+   phase` carrying a terminal token (`exit`, `finished`, `complete`, `done`), and
+   `session prune` refuse it with a taught error that names the wrap and `aoide
+   session kill --id`; prune keeps the record and reports it as held. The hook's
+   `SessionEnd` arm answers `ok` and leaves the record to its own exit. The reaper
+   spares it whichever liveness signal named it. The wrap's own exit path, and the
+   reaper once the pid is gone, end it. A record that is dead, unsealed, or whose
+   seal does not verify ends as it always has: a seal nothing can verify is an
+   unsealed one.
+2. *The autogate reads only the spawn-time edge.* A target's parent counts for the
+   parent-of-target and sibling rules only where its `attestedSpawner` names that
+   parent (§ `sessions.json`). A bare `session start --parent`, a `graph link`, or
+   a moved edge earns no autogate: the send is held pending. The hook door attests
+   nothing, and it never moves a conducted wrap's edge.
 
-**The limit, stated plainly.** A same-uid process can still hand-edit
-`sessions.json`, which the hand-edit watcher reports and nothing stops; it can
-rewrite a live record's `agent`, `cwd` or `window` through `session start`, which
-the seal does not cover; and it can kill `aoided`. A restarted daemon mints a new
-key, so the seals an earlier daemon minted stop verifying and their wraps are
-unprotected for the rest of their life (`aoide session kill` refuses them too,
-since it verifies the same seal). The planned fix is stance B, the daemon owning
-session identity; this section does not build it. Every rule that depends on a
-seal depends on the daemon that minted it.
+**What a same-uid process can still do.** These are the residuals of the rules
+above. The daemon checks none of them.
+
+- Hand-edit `sessions.json`. The hand-edit watcher reports it; nothing stops it.
+  `parentSessionId` and `attestedSpawner` are not under the seal, which covers
+  only `sessionId`, `pid`, start time, `origin`, and `issuedAt`.
+- Rewrite a live record's `agent`, `cwd`, or `window` through `session start`. The
+  seal covers none of them.
+- Name a different daemon. The verifier's key comes from the socket at the
+  caller's `AOIDE_DAEMON_SOCKET`. Pointed at a socket that answers nothing, the set
+  of live sealed wraps is empty and the refusals above do not fire.
+- Kill `aoided`, or restart it. A restarted daemon mints a new key, so the seals an
+  earlier daemon minted stop verifying, and their wraps lose these protections for
+  the rest of their life. `aoide session kill` refuses them too, since it verifies
+  the same seal.
+- Keep a window-gone wrap live. This is the cost of the reaper rule: a wrap whose
+  window has vanished, but whose process still lives, stays live and deliverable
+  until that process exits.
+
+A daemon-owned session identity is the planned change for the first three. It is
+not built. Every rule that depends on a seal depends on the daemon that minted it.
 
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)

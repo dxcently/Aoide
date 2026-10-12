@@ -992,7 +992,7 @@ pub fn link(inv: &Invocation) -> Outcome {
     if rec.parent_session_id.as_deref() == Some(parent.as_str()) {
         message = format!("`{child}` already linked to `{parent}` (no change)");
     } else {
-        rec.parent_session_id = Some(parent.clone());
+        rec.set_parent_session(Some(parent.clone()));
         changed.push(format!("session {child}: parentSessionId → {parent}"));
         message = format!("linked `{child}` (spawned by `{parent}`)");
         file.schema_version = if file.schema_version.is_empty() {
@@ -1030,8 +1030,8 @@ pub fn prune(_inv: &Invocation) -> Outcome {
         Err(e) => return stage_error("session.prune", e),
     };
 
-    // Stance C (HIGH-2): a finished record whose sealed wrap process still runs
-    // is held, not dropped. Its exit (or the reaper, once the pid is gone) ends it.
+    // A finished record whose sealed wrap process still runs is held, not
+    // dropped. Its exit (or the reaper, once the pid is gone) ends it.
     let live = super::identity::live_sealed_wrap_ids(&s_file.sessions);
     let held: Vec<String> = s_file
         .sessions

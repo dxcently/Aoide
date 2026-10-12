@@ -305,10 +305,10 @@ pub(in crate::graph) fn is_self_originated(
         .is_some_and(|connector_session| connector_session == target_session_id)
 }
 
-/// Stance C (same-uid, HIGH-2): the conducted wraps whose OWN process still
-/// runs under a seal the daemon minted and still verifies. Only the wrap's
-/// own exit path, or the reaper once the pid is dead, may end such a record;
-/// every door and the hook's `SessionEnd` arm refuse (see [`live_wrap_refusal`]).
+/// The conducted wraps whose OWN process still runs under a seal the daemon
+/// minted and still verifies. Only the wrap's own exit path, or the reaper
+/// once the pid is dead, may end such a record; every door and the hook's
+/// `SessionEnd` arm refuse (see [`live_wrap_refusal`]).
 ///
 /// Empty when the daemon cannot answer for its key. A seal nothing can verify
 /// is an unsealed record, and an unsealed record ends as it always has.
@@ -381,7 +381,7 @@ mod tests {
         }
     }
 
-    // ── live_sealed_wrap_ids (stance C) ──────────────────────────────────
+    // ── live_sealed_wrap_ids ──────────────────────────────────
 
     #[test]
     fn live_sealed_wrap_ids_admit_only_a_conducted_wrap_whose_seal_verifies_on_a_live_pid() {

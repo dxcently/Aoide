@@ -228,9 +228,9 @@ through.
     sender's own session is the target session's attested parent — its
     `parentSessionId`, where its `attestedSpawner` names the same session —
     an orchestrator freely commanding a child it spawned. Cross-tree or
-    unrelated sends stay pending. A bare `session start --parent`, a `graph
-    link`, or any later rewrite carries no spawn-time stamp, so it earns no
-    autogate: the send is held pending. This is what makes conduct-by-default a
+    unrelated sends stay pending. A bare `session start --parent` or a `graph
+    link` carries no spawn-time stamp, and moving an edge drops its stamp, so
+    either earns no autogate: the send is held pending. This is what makes conduct-by-default a
     real orchestration mesh: the parent of a subtree can drive it,
     strangers cannot. The sender's session is kernel-attested, never read
     off a forgeable env var: `aoide send` walks its own real `/proc`

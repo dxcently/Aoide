@@ -1577,7 +1577,7 @@ fn reap_inner(
         }
     }
 
-    // Stance C (HIGH-2): the reaper ends a record only once its process is dead.
+    // The reaper ends a record only once its process is dead.
     // A conducted wrap whose own pid still holds a verifying seal is spared
     // whichever liveness signal (window, staleness, ghost) named it.
     if !reaped.is_empty() {

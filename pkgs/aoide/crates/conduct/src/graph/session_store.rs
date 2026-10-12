@@ -219,6 +219,10 @@ pub(in crate::graph) fn do_hook_session_start(
     ancestry: &[i32],
 ) -> Outcome {
     with_stage_lock(|| {
+        // The hook door never moves a conducted wrap's edge (`conducted_wrap`).
+        let conducted = load_stage::<SessionsFile>(&sessions_path())
+            .is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id && conducted_wrap(s)));
+        let parent = parent.filter(|_| !conducted);
         do_session_start_inner(
             id, agent, cwd, window, parent, None, None, None, pid, ancestry,
         )
@@ -622,23 +626,32 @@ pub(in crate::graph) fn stamp_session_exit(
     });
 }
 
-/// Stamp `parentSessionId` on a hook record from ATTESTED kernel process
-/// evidence (P-QOL-C §1, `send.rs`'s `hook_ensure_session`) — the fix for a
-/// record born under an EARLIER wrap (a harness id survives `--resume`)
-/// never re-parenting onto the wrap that hosts it NOW. Three differences
-/// from the hook chain ([`do_hook_session_start`]), despite the identical
-/// silent-no-op-on-error/unknown-id posture: (a) CHANGE-ONLY on difference,
-/// not write-once — a resumed record must keep following its current wrap,
-/// the whole transfer-window case this exists for; (b) refuses a self-parent
-/// or any parent that would close a cycle ([`would_cycle`], the same guard
-/// `do_session_start` applies to an explicit `--parent`) — attested evidence
-/// is still just an ordinary edge once it reaches the DAG, never license to
-/// corrupt it; (c) calls [`restage_graph`] — unlike `hookAncestry`
+/// A conducted wrap (`conduct`'s own registration, PTY or headless). Its
+/// parent edge is set there, where the spawner was checked against the
+/// registering process's own kernel ancestry, so no hook door may move it.
+fn conducted_wrap(s: &SessionRecord) -> bool {
+    s.conductable == Some(true)
+}
+
+/// Move the parent edge of a hook-registered record to the attested wrap that
+/// hosts it NOW (P-QOL-C §1, `send.rs`'s `hook_ensure_session`). That is the
+/// fix for a record born under an EARLIER wrap (a harness id survives
+/// `--resume`) never re-parenting onto the wrap that hosts it now. Three
+/// differences from the hook chain ([`do_hook_session_start`]), despite the
+/// identical silent-no-op-on-error/unknown-id posture: (a) CHANGE-ONLY on
+/// difference, not write-once — a resumed record must keep following its
+/// current wrap, the whole transfer-window case this exists for; (b) refuses a
+/// self-parent or any parent that would close a cycle ([`would_cycle`], the
+/// same guard `do_session_start` applies to an explicit `--parent`) — attested
+/// evidence is still just an ordinary edge once it reaches the DAG, never
+/// license to corrupt it; (c) calls [`restage_graph`] — unlike `hookAncestry`
 /// (consumed internally only), `parentSessionId` IS a rendered edge, so a
 /// change here must reach `graph.json` immediately, not wait for some other
-/// writer to re-stage it; and (d) it stamps `attestedSpawner` with the same
-/// parent, so the edge it just attested is the spawn-time edge the autogate
-/// reads (stance C). A bare `session start --parent` never gets that stamp.
+/// writer to re-stage it.
+///
+/// It never attests the edge it moves: `attestedSpawner` is written only by
+/// registration (`stamp_attested_spawner`), and a conducted wrap is never
+/// touched here at all.
 pub(in crate::graph) fn stamp_attested_parent(id: &str, parent: &str) {
     if parent.is_empty() || parent == id {
         return;
@@ -652,14 +665,11 @@ pub(in crate::graph) fn stamp_attested_parent(id: &str, parent: &str) {
             return;
         }
         let Some(s) = file.sessions.iter_mut().find(|s| {
-            s.session_id == id
-                && (s.parent_session_id.as_deref() != Some(parent)
-                    || s.attested_spawner.as_deref() != Some(parent))
+            s.session_id == id && !conducted_wrap(s) && s.parent_session_id.as_deref() != Some(parent)
         }) else {
             return;
         };
-        s.parent_session_id = Some(parent.to_string());
-        s.attested_spawner = Some(parent.to_string());
+        s.set_parent_session(Some(parent.to_string()));
         if file.schema_version.is_empty() {
             file.schema_version = STAGE_GRAPH_VERSION.to_string();
         }
@@ -678,7 +688,7 @@ pub(in crate::graph) fn stamp_attested_parent(id: &str, parent: &str) {
 /// (`kill_target`'s `NO_DEDICATED_PROCESS`) instead of resolving through
 /// that stale terminal. Change-only, same posture as
 /// [`stamp_attested_parent`] just above: no record, or one already
-/// parentless, is a silent no-op.
+/// parentless, or a conducted wrap, is a silent no-op.
 pub(in crate::graph) fn clear_stale_parent(id: &str) {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
@@ -688,11 +698,11 @@ pub(in crate::graph) fn clear_stale_parent(id: &str) {
         let Some(s) = file
             .sessions
             .iter_mut()
-            .find(|s| s.session_id == id && s.parent_session_id.is_some())
+            .find(|s| s.session_id == id && s.parent_session_id.is_some() && !conducted_wrap(s))
         else {
             return;
         };
-        s.parent_session_id = None;
+        s.set_parent_session(None);
         if file.schema_version.is_empty() {
             file.schema_version = STAGE_GRAPH_VERSION.to_string();
         }
@@ -765,8 +775,8 @@ pub(in crate::graph) fn stamp_spawned(id: &str) {
 /// Set-or-clear on every registration — never once-only — because the value
 /// names the parent it vouches for: re-registering an id under a parent the
 /// kernel does NOT confirm must drop the stamp, and a later `session start
-/// --parent <other>` that rewrites `parentSessionId` leaves a stamp that no
-/// longer equals it, which every reader treats as no evidence at all.
+/// --parent <other>` that rewrites `parentSessionId` drops the stamp with it,
+/// since every parent write goes through `SessionRecord::set_parent_session`.
 pub(in crate::graph) fn stamp_attested_spawner(id: &str, attested: Option<&str>) {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
@@ -1503,7 +1513,7 @@ pub(in crate::graph) fn do_subagent_rekey(from_sub_id: &str, to_sub_id: &str) {
         // keeps the tree consistent if a nested node ever raced in first).
         for s in file.sessions.iter_mut() {
             if s.parent_session_id.as_deref() == Some(from_sub_id) {
-                s.parent_session_id = Some(to_sub_id.to_string());
+                s.set_parent_session(Some(to_sub_id.to_string()));
                 changed = true;
             }
         }
@@ -1868,7 +1878,7 @@ pub fn session_end(inv: &Invocation) -> Outcome {
     do_session_end(&id)
 }
 
-/// Stance C (HIGH-2): the refusal a door returns when `id` names a live sealed
+/// The refusal a door returns when `id` names a live sealed
 /// wrap. `None` for every other record, and whenever the daemon cannot verify
 /// the seal (the record then ends as an unsealed one always has).
 pub(in crate::graph) fn live_wrap_refusal_for(id: &str) -> Option<String> {
@@ -2733,7 +2743,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
     #[test]
-    fn stamp_attested_spawner_sets_clears_and_never_survives_a_reparent() {
+    fn stamp_attested_spawner_sets_and_clears_and_a_moved_edge_drops_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = unique_stage("stamp-attested-spawner");
@@ -2753,13 +2763,14 @@ mod tests {
         stamp_attested_spawner("w", Some("p"));
         assert_eq!(std::fs::read(sessions_path()).unwrap(), before, "change-only");
 
-        // `session start --id w --parent victim`: the parent moves, the stamp
-        // keeps naming the old one, so no reader can take them as one edge.
+        // `session start --id w --parent victim`: the edge moves and the stamp
+        // goes with it, so setting the edge back to "p" revives nothing.
         do_session_start("w", None, None, None, Some("victim"), None, None, None, None);
         let rec = load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions.remove(0);
         assert_eq!(rec.parent_session_id.as_deref(), Some("victim"));
-        assert_eq!(rec.attested_spawner.as_deref(), Some("p"));
-        assert_ne!(rec.attested_spawner, rec.parent_session_id);
+        assert_eq!(rec.attested_spawner, None, "a moved edge drops its stamp");
+        do_session_start("w", None, None, None, Some("p"), None, None, None, None);
+        assert_eq!(stamped(), None, "the old parent set back is unattested");
 
         // A registration the kernel did not back clears it.
         stamp_attested_spawner("w", None);
@@ -3830,7 +3841,7 @@ mod enduring_binding_tests {
 }
 
 #[cfg(test)]
-mod same_uid_stance_c {
+mod live_sealed_wrap_guards {
     use super::*;
     use std::path::PathBuf;
     use crate::graph::manage::prune;
@@ -3888,9 +3899,9 @@ mod same_uid_stance_c {
     }
 
     #[test]
-    fn high2_session_end_refuses_a_live_sealed_wrap_and_keeps_its_seal() {
+    fn session_end_refuses_a_live_sealed_wrap_and_keeps_its_seal() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("same-uid-c-end");
+        let (_env, kp, stage) = seal_world("live-wrap-end");
         sealed_live_wrap("wrap", &kp);
 
         let out = session_end(&door(&["session", "end"], "wrap"));
@@ -3903,9 +3914,9 @@ mod same_uid_stance_c {
     }
 
     #[test]
-    fn high2_end_then_prune_leaves_a_live_sealed_wrap_in_place() {
+    fn end_then_prune_leaves_a_live_sealed_wrap_in_place() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("same-uid-c-chain");
+        let (_env, kp, stage) = seal_world("live-wrap-chain");
         sealed_live_wrap("wrap", &kp);
 
         let _ = session_end(&door(&["session", "end"], "wrap"));
@@ -3918,9 +3929,9 @@ mod same_uid_stance_c {
     }
 
     #[test]
-    fn high2_prune_keeps_a_done_record_whose_sealed_wrap_is_still_running() {
+    fn prune_keeps_a_done_record_whose_sealed_wrap_is_running() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("same-uid-c-prune");
+        let (_env, kp, stage) = seal_world("live-wrap-prune");
         sealed_live_wrap("wrap", &kp);
         set_state("wrap", "done");
 
@@ -3931,9 +3942,9 @@ mod same_uid_stance_c {
     }
 
     #[test]
-    fn high2_a_terminal_phase_does_not_finish_a_live_sealed_wrap() {
+    fn terminal_phase_does_not_finish_a_live_sealed_wrap() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("same-uid-c-phase");
+        let (_env, kp, stage) = seal_world("live-wrap-phase");
         sealed_live_wrap("wrap", &kp);
         let mut inv = door(&["session", "phase"], "wrap");
         inv.flags.insert("phase".to_string(), "exit".to_string());
@@ -3947,7 +3958,7 @@ mod same_uid_stance_c {
     #[test]
     fn the_wraps_own_exit_path_still_ends_its_sealed_record() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("same-uid-c-own-exit");
+        let (_env, kp, stage) = seal_world("live-wrap-own-exit");
         sealed_live_wrap("wrap", &kp);
 
         let _ = do_session_end("wrap");
@@ -3959,7 +3970,7 @@ mod same_uid_stance_c {
     #[test]
     fn an_unsealed_conducted_record_still_ends_as_today() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, _kp, stage) = seal_world("same-uid-c-unsealed");
+        let (_env, _kp, stage) = seal_world("live-wrap-unsealed");
         do_session_start(
             "plain",
             Some("claude"),
@@ -3982,7 +3993,7 @@ mod same_uid_stance_c {
     #[test]
     fn a_seal_that_no_longer_verifies_is_unsealed_and_ends_as_today() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("same-uid-c-stale");
+        let (_env, kp, stage) = seal_world("live-wrap-stale");
         sealed_live_wrap("wrap", &kp);
         let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
         file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().pid = Some(4_000_000);
@@ -4019,7 +4030,7 @@ mod same_uid_stance_c {
     #[test]
     fn the_refusal_names_the_running_wrap_and_how_it_ends() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("same-uid-c-refusal");
+        let (_env, kp, stage) = seal_world("live-wrap-refusal");
         sealed_live_wrap("wrap", &kp);
 
         let message = live_wrap_refusal_for("wrap").expect("a live sealed wrap is refused");
@@ -4030,23 +4041,47 @@ mod same_uid_stance_c {
     }
 
     #[test]
-    fn hook_attested_parent_is_stamped_as_the_kernel_spawner() {
+    fn hook_door_moves_a_hook_edge_and_never_attests_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, _kp, stage) = seal_world("same-uid-c-hook-stamp");
+        let (_env, _kp, stage) = seal_world("live-wrap-hook-stamp");
         do_session_start("child", Some("claude"), Some("/w"), None, None, None, None, None, None);
 
         stamp_attested_parent("child", "wrap");
 
         let rec = record("child").unwrap();
         assert_eq!(rec.parent_session_id.as_deref(), Some("wrap"));
-        assert_eq!(rec.attested_spawner.as_deref(), Some("wrap"), "a kernel-attested hook parent carries the spawn-time stamp");
+        assert_eq!(rec.attested_spawner, None, "only registration attests an edge");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The hook door's three edge writers all leave a conducted wrap alone,
+    /// while a hook-registered record still follows the wrap that hosts it.
+    #[test]
+    fn hook_door_never_moves_a_conducted_wraps_edge() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _kp, stage) = seal_world("live-wrap-hook-conducted");
+        do_session_start(
+            "victim", Some("claude"), Some("/w"), None, Some("honest"), Some(true), None, None, None,
+        );
+
+        stamp_attested_parent("victim", "wrap");
+        do_hook_session_start("victim", Some("claude"), Some("/w"), None, Some("wrap"), None, &[]);
+        clear_stale_parent("victim");
+
+        let rec = record("victim").unwrap();
+        assert_eq!(rec.parent_session_id.as_deref(), Some("honest"), "a hook names no conducted edge");
+        assert_eq!(rec.attested_spawner, None);
+
+        do_session_start("hook-child", Some("claude"), Some("/w"), None, None, None, None, None, None);
+        stamp_attested_parent("hook-child", "wrap");
+        assert_eq!(record("hook-child").unwrap().parent_session_id.as_deref(), Some("wrap"));
         let _ = std::fs::remove_dir_all(&stage);
     }
 
     #[test]
     fn session_start_parent_is_never_stamped_as_the_spawner() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, _kp, stage) = seal_world("same-uid-c-start-parent");
+        let (_env, _kp, stage) = seal_world("live-wrap-start-parent");
 
         do_session_start("child", Some("claude"), Some("/w"), None, Some("orch"), None, None, None, None);
 

@@ -198,12 +198,12 @@ fn autogate_env() -> bool {
     )
 }
 
-/// The parent a gate may honour (stance C, HIGH-3): a record's
-/// `parentSessionId`, but only where `attestedSpawner` names the same id. The
-/// stamp is written where the kernel backed the edge (conduct registration,
-/// the hook door's sealed-ancestry walk); a bare `session start --parent`, a
-/// `graph link`, or any later rewrite leaves it behind, and an edge with no
-/// matching stamp is a caller's word, so it earns no autogate.
+/// The parent a gate may honour: a record's `parentSessionId`, but only where
+/// `attestedSpawner` names the same id. The stamp is written only at
+/// registration, where the kernel backed the edge; a bare `session start
+/// --parent` or a `graph link` never carries one, and moving an edge drops
+/// its stamp (`SessionRecord::set_parent_session`). An edge with no matching
+/// stamp is a caller's word, so it earns no autogate.
 fn attested_parent_of(rec: &SessionRecord) -> Option<&str> {
     let parent = rec.parent_session_id.as_deref().filter(|p| !p.is_empty())?;
     (rec.attested_spawner.as_deref() == Some(parent)).then_some(parent)
@@ -4157,7 +4157,7 @@ mod tests {
         );
 
         // The spawn-time edge, as conduct stamps it: only a stamped parent edge
-        // is one the sibling predicate may read (stance C).
+        // is one the sibling predicate may read.
         stamp_attested_spawner(id, Some("orch"));
         let acc = expect_delivery(listener, "a self-attested sender's payload still reaches the socket");
 
@@ -7358,11 +7358,136 @@ mod tests {
         assert_eq!(target.session_id, "w");
     }
 
-    /// HIGH-3 (stance C): a parent edge the caller wrote with `session start
+    /// A hook process inside one sealed wrap, carrying another conducted
+    /// wrap's id, may not give that wrap a parent edge: a send to it from the
+    /// sealed wrap is held pending, never autogated.
+    #[test]
+    fn a_hook_naming_a_foreign_conducted_wrap_earns_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-hook-foreign-wrap");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start(
+            "attacker", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32),
+        );
+        seal_test_session("attacker", me, "", &kp);
+        let victim = "victim";
+        let socket = conduct_socket_path(victim);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            victim,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        let payload = json!({ "session_id": victim, "hook_event_name": "UserPromptSubmit", "cwd": "/w" });
+        hook_ensure_session_with(&CLAUDE_PROFILE, &payload, victim, Some(me), true, |_| {
+            Some("attacker".to_string())
+        }, None);
+
+        let rec = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == victim)
+            .unwrap();
+        assert_eq!(rec.parent_session_id, None, "a hook names no edge of a conducted wrap");
+        assert_eq!(rec.attested_spawner, None);
+
+        let out = deliver_local_with(
+            &send_invocation(&["go"], &[("id", victim)]),
+            victim,
+            test_resolver(kp.info().pubkey_hex.clone()),
+        );
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending", "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A spawn-time stamp that a rewrite moved away from and then back to the
+    /// same parent is not the spawn-time edge any more: the send is held
+    /// pending. The first send proves the stamp did autogate while it stood.
+    #[test]
+    fn a_rewritten_edge_does_not_revive_its_old_stamp() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-rewrite-revives-nothing");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+        seal_test_session("orch", me, "", &kp);
+        let id = "spawned";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        stamp_attested_spawner(id, Some("orch"));
+        let send = || {
+            deliver_local_with(
+                &send_invocation(&["go"], &[("id", id)]),
+                id,
+                test_resolver(kp.info().pubkey_hex.clone()),
+            )
+        };
+
+        let stamped = send();
+        assert_eq!(stamped.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", stamped.message);
+
+        do_session_start(id, Some("claude"), Some("/w"), None, Some("elsewhere"), None, None, None, None);
+        do_session_start(id, Some("claude"), Some("/w"), None, Some("orch"), None, None, None, None);
+        let rewritten = send();
+        assert_eq!(rewritten.data.as_ref().unwrap()["gate"], "pending", "{}", rewritten.message);
+        assert_eq!(rewritten.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A parent edge the caller wrote with `session start
     /// --parent` carries no spawn-time stamp, so it earns no autogate. The
     /// send is held pending, exactly as an unrelated send is.
     #[test]
-    fn high3_a_bare_session_start_parent_earns_no_autogate() {
+    fn bare_session_start_parent_earns_no_autogate() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -7415,10 +7540,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// HIGH-3, the sibling form: two bare `--parent` edges naming one live
+    /// The sibling form: two bare `--parent` edges naming one live
     /// parent are not siblings for the gate. Both sides must carry the stamp.
     #[test]
-    fn high3_bare_sibling_edges_earn_no_autogate() {
+    fn bare_sibling_edges_earn_no_autogate() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",

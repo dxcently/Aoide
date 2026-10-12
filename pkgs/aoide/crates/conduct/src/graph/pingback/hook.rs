@@ -36,9 +36,10 @@
 //!    died (its record lingers `done`, and nothing here checks state), or a
 //!    pid hand-edited into `sessions.json`, names a process the seal was never
 //!    minted over;
-//! 2. the spawner is that wrap's `parentSessionId`, honoured only while it
-//!    equals the wrap's `attestedSpawner` — the parent `conduct` registration
-//!    saw in its own `/proc` ancestry (`window::spawner_is_attested`). A
+//! 2. the spawner is that wrap's `parentSessionId`, honoured only while
+//!    `attestedSpawner` names it. Only `conduct` registration writes that
+//!    stamp, from its own `/proc` ancestry (`window::spawner_is_attested`);
+//!    the hook door never attests, and a moved edge drops it. A
 //!    detached spawn that registers only after its spawner returned has lost
 //!    that ancestry and gets no stamp: it is silent, never guessed;
 //! 3. a spawner that is itself a conducted wrap (sealed) hears it directly; a

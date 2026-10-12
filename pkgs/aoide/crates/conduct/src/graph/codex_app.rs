@@ -894,7 +894,7 @@ fn apply_codex_lineage(
     if rec.parent_session_id.as_deref() == Some(pt) {
         return false;
     }
-    rec.parent_session_id = Some(pt.to_string());
+    rec.set_parent_session(Some(pt.to_string()));
     true
 }
 

@@ -341,7 +341,7 @@ pub(crate) fn reconcile_eidolon_sessions(
                 changed = true;
             }
             if rec.parent_session_id != parent {
-                rec.parent_session_id = parent.clone();
+                rec.set_parent_session(parent.clone());
                 changed = true;
             }
             // The fixed identity, re-applied every upsert.

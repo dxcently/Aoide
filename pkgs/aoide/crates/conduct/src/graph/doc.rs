@@ -887,9 +887,9 @@ pub fn prune_done_scoped(
 }
 
 /// [`prune_done_scoped`] with the live-wrap set supplied by the caller. A
-/// `done` record named in `live` is never dropped (stance C, HIGH-2): its own
-/// sealed process still runs, so only that process's exit, or the reaper once
-/// the pid is gone, may end it. Every other rule here is unchanged.
+/// `done` record named in `live` is never dropped: its own sealed process
+/// still runs, so only that process's exit, or the reaper once the pid is
+/// gone, may end it. Every other rule here is unchanged.
 pub(crate) fn prune_done_keeping(
     sessions: Vec<SessionRecord>,
     hooks: Vec<HookRecord>,
@@ -995,7 +995,7 @@ pub(crate) fn drop_sessions(
         .cloned()
         .map(|mut s| {
             if matches!(&s.parent_session_id, Some(p) if gone.contains(p.as_str())) {
-                s.parent_session_id = None;
+                s.set_parent_session(None);
                 cleared.push(s.session_id.clone());
             }
             s

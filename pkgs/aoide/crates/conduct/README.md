@@ -554,7 +554,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   re-stamp is change-only on difference, and
   `do_session_start`'s upsert writes the resolved parent as it does every
   other field on a re-start. Either way, no daemon reachable or no
-  conducted ancestor found leaves the parent untouched, fail-closed.
+  conducted ancestor found leaves the parent untouched, fail-closed. A conducted
+  wrap's edge is never moved this way: the walk skips it, and
+  `do_hook_session_start` drops a parent it would write onto one.
   `session_store::lineage_of`
   (ancestors + descendants) is the matching widened carve-out for the
   same-window registration-time eviction, reused by `reap.rs`'s dedup pass
@@ -1306,19 +1308,17 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   to that one MCP subprocess, never `aoided`'s. This crate computes where
   it lives and is its first client: `doorbell.rs::ring_locked` connects to
   it (never binds or accepts — that lifecycle stays `aoide-server`'s).
-- **Stance C: a live sealed wrap is ended only by its own exit, and a parent
-  edge earns autogate only when stamped (HIGH-2, HIGH-3).**
-  `identity::live_sealed_wrap_ids` is the one predicate: a conducted record
-  whose seal verifies against the daemon's live key on a live pid.
-  `session_store::live_wrap_refusal_for` is the refusal every finishing door
-  (`session end`, a terminal `session phase`, the hook's `SessionEnd` arm)
-  asks first; `doc.rs::prune_done_keeping` keeps such a record out of every
-  prune, and `reap_inner` spares it. The autogate reads a parent edge only
-  through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner` to
-  name the same id; `stamp_attested_parent` writes that stamp for the hook
-  door's sealed walk. The same-uid residual that stays open (hand-edited
-  `sessions.json`, field rewrites through `session start`, a killed `aoided`)
-  is stated in `CONTRACTS.md`; stance B is the planned design.
+- **A live sealed wrap is ended only by its own exit, and the autogate reads
+  only the spawn-time edge.** `identity::live_sealed_wrap_ids` is the one
+  predicate: a conducted record whose seal verifies against the daemon's live key
+  on a live pid. `session_store::live_wrap_refusal_for` is the refusal every
+  finishing door (`session end`, a terminal `session phase`, the hook's
+  `SessionEnd` arm) asks first; `doc.rs::prune_done_keeping` keeps such a record
+  out of every prune, and `reap_inner` spares it. The autogate reads a parent edge
+  only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner` to
+  name the same id. Only `conduct` registration writes that stamp, and
+  `SessionRecord::set_parent_session` drops it whenever the edge moves. The
+  residuals are listed in `CONTRACTS.md`.
 - **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
   `identity::peer_cred`/`PeerCred` widened `pub(crate)` (was `pub(in
   crate::graph)`) so `shellbridge.rs` — a sibling module of `graph`, not a

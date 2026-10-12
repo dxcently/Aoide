@@ -73,7 +73,7 @@ pub fn upsert_session(
             s.window_address = w.to_string();
         }
         if let Some(p) = parent {
-            s.parent_session_id = Some(p.to_string());
+            s.set_parent_session(Some(p.to_string()));
         }
         if let Some(c) = conductable {
             s.conductable = Some(c);

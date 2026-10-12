@@ -178,7 +178,7 @@ should follow).
   cascade" below), and children that survive get `parentSessionId` cleared
   (un-orphaned rather than dangling). Everything removed or cleared is
   reported. A `done` record whose own sealed wrap process still runs is kept
-  and named in the reply (stance C, see the accounting below).
+  and named in the reply (see the live-wrap rules in CONTRACTS.md).
 - **`spawn`** and **`send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].
@@ -567,7 +567,7 @@ liveness (the lane's answered threat-model fork, OQ1-A): with Yama off the
 seal degrades to liveness-only. An unreachable or impostor daemon leaves
 every seal unverifiable — never a fallback to trust.
 
-**The lane's accounting — enforced vs open.** Enforced end to end:
+**Enforced, and open.** Enforced end to end:
 `origin` is write-once and door-stamped (P-ID0); every live, pid-carrying
 session carries the seal (P-ID1); the send gate and the per-session
 socket's accept key on kernel facts plus a verified seal, never env
@@ -575,12 +575,10 @@ socket's accept key on kernel facts plus a verified seal, never env
 cross-uid `SO_PEERCRED` floor (P-ID3, [[shellbridge]], [[aoided]]); the
 secrets broker's `allowRemoteOrigin` gate is the credential's first policy
 consumer (P-ID4); the node wire resolves identity by verifying key, never
-claimed name (P-ID5, [[Node-Federation]]). Stance C (the same-uid ruling in
-CONTRACTS.md) closes two forgeries on that seal: a live sealed wrap is ended or
-dropped only by its own exit, or by the reaper once its pid is gone; and the
-autogate honours a parent edge only where `attestedSpawner` names it (HIGH-2,
-HIGH-3). Open, each named rather than
-implied closed: (1) **consumer-name authentication** — the seal
+claimed name (P-ID5, [[Node-Federation]]). The live-wrap rules in CONTRACTS.md
+refuse a same-uid end of a live sealed wrap on each door they name, and the
+autogate reads a parent edge only where `attestedSpawner` names it. Open, each
+named: (1) **consumer-name authentication** — the seal
 authenticates the session and its class, never a self-asserted consumer
 string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker
 can race or evict the daemon's listener (`bind_socket` unlink-then-binds,
@@ -591,12 +589,11 @@ residual); (3) **a cross-uid attestation channel** — the packaged
 `aoide-secrets` broker cannot reach the operator's daemon socket or roster,
 so the origin gate is dormant in that deployment; (4) **an authenticated
 registration path** — the closer for the sweep-relaunder shape; (5)
-**per-surface dispatch-door gates** riding the attested-caller lookup; (6) **the
-same-uid residual stance C leaves** — a same-uid process can hand-edit
-`sessions.json`, rewrite a live record's `agent`, `cwd` or `window` through
-`session start` (the seal covers none of them), or kill `aoided`, whose restart
-mints a new key that leaves the earlier seals unverifiable. Stance B, the
-daemon owning session identity, is the planned fix.
+**per-surface dispatch-door gates** riding the attested-caller lookup; (6) **the live-wrap residuals** listed in CONTRACTS.md: a same-uid process can
+hand-edit `sessions.json`, rewrite a live record's `agent`, `cwd` or `window`,
+point the verifier at another daemon through `AOIDE_DAEMON_SOCKET`, or kill
+`aoided`. A daemon-owned session identity is the planned change for these; it is
+not built.
 
 ## Contracts (CONTRACTS.md §4, still v0)
 
