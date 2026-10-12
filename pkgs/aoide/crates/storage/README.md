@@ -977,6 +977,12 @@ by decision — no embedded database yet
   doc comment states the reasoning). `HEADER_NODE`/`HEADER_TIMESTAMP`/
   `HEADER_NONCE`/`HEADER_SIGNATURE` are the four wire header names — always
   present together or not at all, never independently optional.
+  The answer half: `answer_string(request_signature, request_nonce, status,
+  body)` is the canonical string a door's answer signature covers (method
+  field `ANSWER`, status in the timestamp field); `sign_answer` and
+  `verify_answer` sign and check it, and `HEADER_ANSWER_SIGNATURE` names the
+  response header that carries it. The answer string's layout is pinned by
+  `answer_string_stability_vector_never_drifts` and quoted in CONTRACTS.md §6.
 - `advertise` — the discovery advertisement's wire format and the
   advertise switch (P-P6 + task #120, `docs/architecture/PAIRING.md`'s
   "Discovery (advertise-but-locked)" section, CONTRACTS.md §6's

@@ -7267,6 +7267,37 @@ independently verifiable.) Case and surrounding whitespace on
 method/path/timestamp/nonce never change the canonical string; a different
 body, or a different path, always does (via the digest, and directly).
 
+**Signed answers (relay-proof).** A door's answer is signed with its own
+P-P1 identity key, so a client can check it against the key on file for the
+node it dialled. The signed string is `aoide_storage::wire_auth::
+answer_string(request_signature, request_nonce, status, body)`, built on
+`canonical_string` with the method field set to `ANSWER` and the status in
+the timestamp field:
+
+```
+answer = "answer"                   || 0x00
+      || lower(hex(request X-Aoide-Signature)) || 0x00
+      || status (decimal)           || 0x00
+      || lower(request X-Aoide-Nonce) || 0x00
+      || lower(hex(SHA256(body)))   || 0x00
+```
+
+The signature (`ed25519` over `answer`, hex, 128 chars) rides one response
+header, `X-Aoide-Answer-Signature`. Requests never sign the word `answer` (they
+sign `POST`), and an answer's status sits where a request's ISO timestamp
+sits, so neither form verifies as the other. Freshness is inherited from the
+request: its signature already covers the request's timestamp, and its nonce
+is single-use at the door. Pinned by
+`aoide-storage::wire_auth::tests::answer_string_stability_vector_never_drifts`
+for the request signature `"ab" * 64`, nonce `abcd1234`, status `200`, body
+`{}`:
+
+```
+answer_string("ab"*64, "abcd1234", 200, b"{}")
+  == "answer\x00" + "ab"*64 + "\x00200\x00abcd1234\x00\
+      44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\x00"
+```
+
 **Identity IS the key; the name is a label (#63 P-ID5).** The resolved
 `Node` is the one whose stored `pubkey` verifies the signature — the
 signature proves possession of a key, and the record is found BY that key,
