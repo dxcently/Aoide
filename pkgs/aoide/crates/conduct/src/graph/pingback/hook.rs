@@ -49,54 +49,50 @@
 //! Anything else — an unattested edge, a spawner that resolves back to the
 //! child or its host — has no recipient and the child is not tracked.
 //!
-//! **Died mid-turn** is the line the child's own hooks cannot write: a turn
-//! that never reached `stopped`/`idle`. Two things can say it, and both name the
-//! same death. The first is the wrap's own fact: when the wrap that hosted the
-//! harness saw its child exit while the phase was still open, it wrote
-//! `phase: "died"` with the tool in flight and the exit status onto the child's
-//! `hooks.json` record (`session_store::record_hook_deaths`), before it ended
-//! its own record. That fact is claimed here once, with its status, and only
-//! ever from an open phase. The second is the tick's inference, for a wrap that
-//! died without writing (SIGKILL): the child's last open phase
-//! (`working`/`awaiting`) is still the one `hooks.json` holds and its harness is
-//! gone — the first `hookAncestry` pid (the process the hook door walked to; the
-//! record's own `pid` where it stamps none), probed with the reaper's own
-//! `pid_is_alive` — or the record has left the roster with that phase still
-//! open. The inferred line carries no status, since no one saw the exit. It is
-//! the hook source's twin of the trace source's `died mid-turn` (an eidolon
-//! record dropped with its turn open), and says that the turn did not end, not
-//! why. A `done` phase is a session ending by its own hook and says nothing.
+//!**Died mid-turn** is the line the child's own hooks cannot write: a turn that
+//!never reached `stopped`/`idle`. Two things can say it, and both name the same
+//!death. The first is the wrap's own fact: when the wrap that hosted the
+//!harness saw its child exit while the phase was still open, it wrote
+//!`phase: "died"` with the tool in flight and the exit status onto the child's
+//!`hooks.json` record (`session_store::record_hook_deaths`), before it ended
+//!its own record. A wrap that was itself sent SIGTERM, SIGHUP or SIGINT
+//!forwards the signal and writes the same fact, with that signal as its status.
+//!That fact is claimed here once, with its status, and only ever from an open
+//!phase. The second is the tick's inference, for a wrap that died without
+//!writing (SIGKILL): the child's last open phase (`working`/`awaiting`) is
+//!still the one `hooks.json` holds and its harness is gone (the first
+//!`hookAncestry` pid, the process the hook door walked to, or the record's own
+//!`pid` where it stamps none, probed with the reaper's own `pid_is_alive`), or
+//!its session has left the roster while its hook record still reads that open
+//!phase. The inferred line carries no status, since no one saw the exit. It is
+//!the hook source's twin of the trace source's `died mid-turn` (an eidolon
+//!record dropped with its turn open), and says that the turn did not end, not
+//!why. A `done` phase is a session ending by its own hook and says nothing.
 //!
-//! A child the tick can no longer route — its record has left the roster, or
-//! its harness is dead and a wrap on its route has stopped verifying — cannot be
-//! asked for its recipient, so the cursor carries the route: the host wrap and
-//! the spawner resolved while the child was live (both sealed then, the only
-//! way a route is written), the harness it was seen alive as (pid and start
-//! time), and the tag and tool in flight. Such a child is said of over that
-//! route when the spawner verifies at the claim, inside the stage lock, and the
-//! host wrap is gone (absent, or its pid dead) or still verifies. A live host
-//! that does not verify keeps the entry until it verifies again or the turn is a
-//! day old. A harness still running under its recorded start time after its
-//! record has gone is the orphan, not a death: the entry is kept while that
-//! harness lives and the turn stays open and under a day old, so the harness's
-//! own death is said once if it comes with the phase still open. The entry is
-//! dropped silently once the phase closes, or the turn is a day old.
+//!A child the tick can no longer route cannot be asked for its recipient, so
+//!the cursor carries the route: the host wrap and the spawner resolved while
+//!the child was live (both sealed then, the only way a route is written), the
+//!harness it was seen alive as (pid and start time), and the tag and tool in
+//!flight. Its rules, the orphan case included, are stated once in
+//!`CONTRACTS.md` under `state/stage/pingback.json`; `hook::gone` is their code.
 //!
 //! `pingback.json` is unsealed data: a same-uid writer can fabricate a route and
 //! so a died line to any sealed, receptive session. Every value read from it is
 //! cleaned again where it is rendered. The trust model is stated once, in
 //! `CONTRACTS.md` under `state/stage/pingback.json`.
 //!
-//! The cursor (`pingback.json`'s `hook` field) holds the canonical phase and
-//! `updatedAt` last examined, two latches — `silent` (a silence line was sent
-//! for this stamp) and `died` (the death was announced, or was already true
-//! when first seen) — and the `route`. The latches are separate because a
-//! silence before a crash must not hide the crash. A restamp re-arms both. The
-//! first examination of a child is a baseline: it records what the child is and
-//! says nothing, so a child first seen already dead while open is latched
-//! `died` and never announces its own death.
+//!The cursor (`pingback.json`'s `hook` field) holds the canonical phase and
+//!`updatedAt` last examined, two latches (`silent`, a silence line was sent for
+//!this stamp, and `died`, the death was announced or was already true when
+//!first seen), and the `route`. The latches are separate because a silence
+//!before a crash must not hide the crash. A restamp re-arms both. The first
+//!examination of a child is a baseline: it records what the child is and says
+//!nothing, except that a `died` record first seen is announced while its stamp
+//!is under a day old. A child first seen already dead while open is latched
+//!`died` and never announces its own death.
 
 use super::{clean, died_mid_turn, harness_tag, is_false, tracks, ChildClaim, CursorEntry, CursorFile, EXIT_CODE_MAX};
+use std::collections::HashSet;
 use crate::graph::model::{canonical_state, harness_pid, HookDeath, HookRecord, SessionRecord};
 use aoide_protocol::agents::agent_profile;
 use aoide_storage::time::parse_iso_utc;
@@ -390,13 +386,31 @@ pub(super) fn claim(
         match gone(hook, id, roster, hooks, sealed, now_ms) {
             Gone::Say(claim) => {
                 lines.push(claim);
-                unhook(next, id);
+                next.entry(id.clone()).or_default().hook = Some(HookCursor { died: true, ..hook.clone() });
             }
             Gone::Keep => next.entry(id.clone()).or_default().hook = Some(hook.clone()),
             Gone::Drop => unhook(next, id),
         }
     }
     lines
+}
+
+/// The deaths a wrap wrote that the tick has not claimed yet: a `died` hook
+/// record, under a day old by its own stamp, whose cursor half is not latched.
+/// The reaper spares these records, so the fact survives until the tick has
+/// said it once; a latched record is ordinary `done` business again.
+pub(crate) fn unclaimed_deaths(hooks: &[HookRecord], now_ms: i64) -> HashSet<String> {
+    if !hooks.iter().any(|h| phase_token(&h.phase) == "died") {
+        return HashSet::new();
+    }
+    let cursor = super::read_cursor();
+    hooks
+        .iter()
+        .filter(|h| phase_token(&h.phase) == "died")
+        .filter(|h| parse_iso_utc(&h.updated_at).is_some_and(|at| now_ms - at * 1000 < STALE_MS))
+        .filter(|h| !cursor.get(&h.session_id).and_then(|e| e.hook.as_ref()).is_some_and(|c| c.died))
+        .map(|h| h.session_id.clone())
+        .collect()
 }
 
 /// Clears a child's hook half from `next`, and the entry with it once nothing
@@ -427,14 +441,16 @@ fn decide(child: &HookChild, entry: Option<&HookCursor>, now_ms: i64) -> (Option
     });
     let open = is_open(&child.phase);
     let Some(entry) = entry else {
+        let announce = child.phase == "died" && child.at_secs.is_some_and(|at| now_ms - at * 1000 < STALE_MS);
         let baseline = HookCursor {
             phase: child.phase.clone(),
             at: child.at.clone(),
             silent: false,
-            died: child.pid_dead && open,
+            died: announce || (child.pid_dead && open),
             route,
         };
-        return (None, baseline);
+        let event = announce.then(|| died_of(&child.last, child.death.as_ref()));
+        return (event, baseline);
     };
     let fresh_stamp = entry.at != child.at || entry.phase != child.phase;
     let mut silent = !fresh_stamp && entry.silent;
@@ -467,17 +483,17 @@ fn decide(child: &HookChild, entry: Option<&HookCursor>, now_ms: i64) -> (Option
     (event, HookCursor { phase: child.phase.clone(), at: child.at.clone(), silent, died, route })
 }
 
-/// The fate of an entry whose child was not gathered this tick. A child whose
-/// record is still there with its harness alive is the roster's business: kept
-/// while it is tracked and dropped once it is not, so a live child that merely
-/// lost its edge is never said of. Anything else is judged on the route cached
-/// while the child was live. The turn must be under a day old by its hook
-/// record's own stamp (its cached one, once the record is gone), unannounced,
-/// and still open in `hooks.json`: a `died` phase is the wrap's own fact and
-/// counts as open, a closed phase drops the entry. A route whose harness still
-/// runs under the start time it was seen with is the orphan, and is kept.
-/// Otherwise the spawner must verify (checked here, inside the stage lock), and
-/// the host wrap must be gone or still verify. Only then is the child said of.
+///The fate of an entry whose child was not gathered this tick. A child whose
+///record is still on the roster with its harness alive is the roster's
+///business: kept while it is tracked, dropped once it is not, so a live child
+///that merely lost its edge is never said of. Anything else is judged on the
+///route cached while the child was live, in the order of the body: no hook
+///record, a latched entry, a cursor that was not open, a closed hook phase or a
+///stamp a day old drops the entry. A route whose harness still runs under the
+///start time it was seen with is the orphan, and is kept. Otherwise the route
+///must be distinct, its spawner must verify (checked here, inside the stage
+///lock), and the host wrap must be gone or still verify. Only then is the child
+///said of; any other case is kept, until a drop rule applies.
 fn gone(
     prev: &HookCursor,
     id: &str,
@@ -489,11 +505,10 @@ fn gone(
     if let Some(rec) = roster.iter().find(|r| r.session_id == id).filter(|r| !pid_dead(r)) {
         return if tracked(rec) { Gone::Keep } else { Gone::Drop };
     }
-    let hook = hooks.iter().find(|h| h.session_id == id);
-    let phase_now = hook.map(|h| phase_token(&h.phase));
-    let stamp = hook.map_or(prev.at.as_str(), |h| h.updated_at.as_str());
-    let recent = parse_iso_utc(stamp).is_some_and(|at| now_ms - at * 1000 < STALE_MS);
-    let closed = phase_now.is_some_and(|p| p != "died" && !is_open(p));
+    let Some(hook) = hooks.iter().find(|h| h.session_id == id) else { return Gone::Drop };
+    let phase_now = phase_token(&hook.phase);
+    let recent = parse_iso_utc(&hook.updated_at).is_some_and(|at| now_ms - at * 1000 < STALE_MS);
+    let closed = phase_now != "died" && !is_open(phase_now);
     if prev.died || !is_open(&prev.phase) || !recent || closed {
         return Gone::Drop;
     }
@@ -508,7 +523,7 @@ fn gone(
     if !(distinct && host_ok && wrap_now(roster, &route.to, sealed)) {
         return Gone::Keep;
     }
-    let death = hook.filter(|_| phase_now == Some("died")).and_then(|h| h.death.as_ref());
+    let death = (phase_now == "died").then_some(hook).and_then(|h| h.death.as_ref());
     Gone::Say(ChildClaim {
         parent: route.to.clone(),
         line: render(&route.tag, &died_of(&route.last, death)),
@@ -573,6 +588,11 @@ mod tests {
 
     fn dead(phase: &str, at: &str) -> HookChild {
         HookChild { pid_dead: true, ..child(phase, at) }
+    }
+
+    /// Whether the cursor holds a claimed death for `id` (the latch, kept one pass).
+    fn latched(cursor: &CursorFile, id: &str) -> bool {
+        cursor.get(id).and_then(|e| e.hook.as_ref()).is_some_and(|h| h.died)
     }
 
     fn cursor(phase: &str, at: &str, silent: bool) -> HookCursor {
@@ -1007,7 +1027,7 @@ mod tests {
             vec![ChildClaim { parent: "P".into(), line: "[claude fond-aspen] died mid-turn · last: working".into() }],
             "one line, no settled"
         );
-        assert!(!after.contains_key("K"), "the entry leaves with its child");
+        assert!(latched(&after, "K"), "the claim stays latched for one pass");
         let mut again = CursorFile::new();
         assert!(claim(&gone_roster, &hooks, &sealed, &after, &mut again, at_ms() + 72_000).is_empty());
     }
@@ -1038,7 +1058,7 @@ mod tests {
             vec![ChildClaim { parent: "P".into(), line: "[claude fond-aspen] died mid-turn · last: working".into() }],
             "said of once, when the harness dies with the turn open"
         );
-        assert!(!after.contains_key("K"), "and the entry leaves with it");
+        assert!(latched(&after, "K"), "the claim stays latched for one pass");
         let mut again = CursorFile::new();
         assert!(claim(&gone_roster, &hooks, &sealed, &after, &mut again, at_ms() + 180_000).is_empty());
     }
@@ -1147,7 +1167,7 @@ mod tests {
         let mut old = CursorFile::new();
         old.insert("K".into(), super::super::CursorEntry { hook: Some(prev), ..Default::default() });
         let mut next = CursorFile::new();
-        let lines = claim(&gone_roster, &[], &sealed, &old, &mut next, at_ms() + 60_000);
+        let lines = claim(&gone_roster, &[hook_rec("K", "working", AT)], &sealed, &old, &mut next, at_ms() + 60_000);
         assert_eq!(lines.len(), 1, "{lines:?}");
         let line = &lines[0].line;
         assert!(line.starts_with("[claude fond-aspen]") && line.contains(" died mid-turn · last: "), "{line:?}");
@@ -1175,7 +1195,7 @@ mod tests {
             vec![ChildClaim { parent: "P".into(), line: "[claude fond-aspen] died mid-turn · last: working".into() }],
             "one line, to the sealed spawner"
         );
-        assert!(!after.contains_key("K"), "the entry leaves once its death is said");
+        assert!(latched(&after, "K"), "the claim stays latched for one pass");
         let mut again = CursorFile::new();
         assert!(claim(&exited, &hooks, &only_spawner, &after, &mut again, at_ms() + 72_000).is_empty());
     }
@@ -1431,7 +1451,7 @@ mod tests {
             lines,
             vec![ChildClaim { parent: "P".into(), line: "[claude fond-aspen] died mid-turn (exit 3) · last: Edit".into() }]
         );
-        assert!(!after.contains_key("K"));
+        assert!(latched(&after, "K"));
 
         let mut kept = CursorFile::new();
         let unsealed_spawner = |r: &SessionRecord| r.session_id != "P";
@@ -1484,6 +1504,7 @@ mod tests {
         };
         let mut next = CursorFile::new();
         let lines = claim(&roster, &hooks.hooks, &sealed, &cursor.clone(), &mut next, now_ms());
+        std::fs::write(super::super::pingback_path(), serde_json::to_string(&next).unwrap()).unwrap();
         *cursor = next;
         lines
     }
@@ -1510,8 +1531,10 @@ mod tests {
     /// spawner attested.
     #[cfg(unix)]
     fn start_wrap(root: &std::path::Path, script: &str) -> (std::process::Child, i32) {
-        let mut spawner = session(SPAWNER, "/w", "working", AT, None);
+        // Started now: a spawner older than this boot is a pre-boot ghost to the reaper.
+        let mut spawner = session(SPAWNER, "/spawner", "working", &aoide_storage::time::now_iso_utc(), None);
         spawner.conductable = Some(true);
+        spawner.exempt = true;
         spawner.pid = Some(std::process::id());
         let mut hook = session(HOOK, "/w", "working", AT, Some(WRAP));
         hook.kind = Some("agent".into());
@@ -1642,7 +1665,7 @@ mod tests {
         wrap.wait().unwrap();
         std::process::Command::new("kill").args(["-9", &harness.to_string()]).status().unwrap();
         assert!(
-            poll_until(|| (!aoide_storage::fs::pid_is_alive(harness as u32)).then_some(())).is_some(),
+            poll_until(|| harness_gone(harness as u32).then_some(())).is_some(),
             "the harness is gone"
         );
         assert_eq!(hook_record().phase, "working", "nothing was written for it");
@@ -1653,5 +1676,127 @@ mod tests {
             "said once, with no status: nobody saw the exit"
         );
         assert!(tick(&mut cursor).is_empty());
+    }
+
+    /// Gone for the tick's purposes: no such pid, or a zombie an init has not
+    /// reaped yet (`pid_is_alive` counts a zombie as alive).
+    #[cfg(unix)]
+    fn harness_gone(pid: u32) -> bool {
+        let state = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|stat| {
+            stat.rsplit(')').next().and_then(|rest| rest.trim_start().chars().next())
+        });
+        !aoide_storage::fs::pid_is_alive(pid) || state == Some('Z')
+    }
+
+    #[cfg(unix)]
+    fn child_state() -> String {
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        sessions.sessions.into_iter().find(|s| s.session_id == HOOK).expect("the hook child is on the roster").state
+    }
+
+    /// The reaper runs its pass over a wrap's death before the tick reads it: the
+    /// fact survives the pass, is held until the tick claims it, and is said once,
+    /// with its signal, however many passes follow.
+    #[cfg(unix)]
+    #[test]
+    fn a_reap_pass_leaves_a_wrap_recorded_death_to_be_said_once_with_its_signal() {
+        let (root, _env, _guard) = e2e_stage("dmt-reap");
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty());
+
+        std::fs::write(root.join("go"), "").unwrap();
+        wait_exit(&mut wrap);
+        assert_eq!(hook_record().phase, "died");
+        assert_eq!(child_state(), "done", "the wrap marks its dead child done");
+
+        crate::reap::reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        assert_eq!(hook_record().death.and_then(|d| d.signal), Some(9), "the reaper leaves the fact");
+        assert_eq!(crate::graph::held_deaths(&hooks.hooks), HashSet::from([HOOK.to_string()]), "held until said");
+        assert_eq!(
+            tick(&mut cursor),
+            vec![ChildClaim {
+                parent: SPAWNER.into(),
+                line: "[claude fond-aspen] died mid-turn (signal 9) · last: Bash".into(),
+            }]
+        );
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        assert!(crate::graph::held_deaths(&hooks.hooks).is_empty(), "claimed, so no longer held");
+
+        crate::reap::reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert!(tick(&mut cursor).is_empty(), "said once, and still once after a later pass");
+    }
+
+    /// A clean end the reaper or a prune took with its session, while its harness
+    /// still runs: the entry is dropped with the record, and the harness's later
+    /// exit says nothing.
+    #[cfg(unix)]
+    #[test]
+    fn a_pruned_clean_end_whose_harness_later_exits_is_not_said_of() {
+        let (root, _env, _guard) = e2e_stage("dmt-pruned");
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let (mut wrap, harness) = start_wrap(&root, &fake_harness(&before, ""));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty());
+        aoide_storage::fs::with_stage_lock(|| {
+            let mut sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+            sessions.sessions.retain(|s| s.session_id != HOOK);
+            write_stage(&sessions_path(), &sessions).unwrap();
+            let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+            hooks.hooks.retain(|h| h.session_id != HOOK);
+            write_stage(&hooks_path(), &hooks).unwrap();
+        });
+        assert!(tick(&mut cursor).is_empty(), "no record, no line");
+        assert!(!cursor.contains_key(HOOK), "an absent record is a clean end: the entry is dropped");
+
+        std::process::Command::new("kill").args(["-9", &harness.to_string()]).status().unwrap();
+        assert!(poll_until(|| harness_gone(harness as u32).then_some(())).is_some(), "the harness is gone");
+        wait_exit(&mut wrap);
+        assert!(tick(&mut cursor).is_empty(), "no death is said, whatever the harness did later");
+    }
+
+    /// An end signal sent to the wrap itself is forwarded to its harness, and the
+    /// harness's end is the wrap's own death fact, with the signal it ended by.
+    #[cfg(unix)]
+    #[test]
+    fn a_sigterm_to_the_wrap_is_forwarded_and_recorded_as_a_signal_death() {
+        let (root, _env, _guard) = e2e_stage("dmt-term");
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, ""));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty());
+
+        unsafe { libc::kill(wrap.id() as libc::pid_t, libc::SIGTERM) };
+        wait_exit(&mut wrap);
+        assert_eq!(hook_record().phase, "died");
+        assert_eq!(
+            hook_record().death,
+            Some(HookDeath { last_tool: Some("Bash".into()), outcome: Some("signal".into()), signal: Some(15), ..Default::default() }),
+        );
+        assert_eq!(
+            tick(&mut cursor),
+            vec![ChildClaim {
+                parent: SPAWNER.into(),
+                line: "[claude fond-aspen] died mid-turn (signal 15) · last: Bash".into(),
+            }]
+        );
+    }
+
+    /// A baseline that first sees a recent death says it; the same phase a day old
+    /// is history and says nothing.
+    #[test]
+    fn a_death_the_baseline_first_sees_is_said_while_it_is_recent() {
+        let (event, cursor) = decide(&child("died", AT), None, at_ms() + 60_000);
+        assert!(event.is_some(), "a recent death is announced");
+        assert!(cursor.died, "and latched");
+    }
+
+    #[test]
+    fn a_death_the_baseline_first_sees_a_day_old_is_silent() {
+        let (event, cursor) = decide(&child("died", AT), None, at_ms() + STALE_MS + 1);
+        assert!(event.is_none(), "a day-old death says nothing");
+        assert!(!cursor.died);
     }
 }

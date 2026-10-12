@@ -1004,6 +1004,85 @@ fn install_winch_handler() {
     }
 }
 
+/// The end signal the wrap was asked to forward, set by [`on_wrap_signal`] and
+/// taken once by the multiplex loop.
+#[cfg(unix)]
+static WRAP_SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// A signal counts as an end request only when `kill(2)` sent it to this very
+/// process (`SI_USER`). One the terminal raised (`SI_KERNEL`) is not the wrap's
+/// to answer: its default action is restored and re-raised, as it was before
+/// the wrap listened at all, so Ctrl-C keeps its meaning.
+#[cfg(unix)]
+extern "C" fn on_wrap_signal(sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: *mut libc::c_void) {
+    if !info.is_null() && unsafe { (*info).si_code } == libc::SI_USER {
+        WRAP_SIGNAL.store(sig, std::sync::atomic::Ordering::SeqCst);
+        return;
+    }
+    unsafe {
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
+/// The wrap's end signals (SIGTERM, SIGHUP, SIGINT), held for one multiplex run.
+/// Dropping it restores their default actions.
+#[cfg(unix)]
+pub(super) struct WrapSignals;
+
+#[cfg(unix)]
+impl WrapSignals {
+    pub(super) fn install() -> Self {
+        for sig in [libc::SIGTERM, libc::SIGHUP, libc::SIGINT] {
+            unsafe {
+                let mut sa: libc::sigaction = std::mem::zeroed();
+                sa.sa_sigaction = on_wrap_signal as *const () as libc::sighandler_t;
+                libc::sigemptyset(&mut sa.sa_mask);
+                sa.sa_flags = libc::SA_SIGINFO;
+                libc::sigaction(sig, &sa, std::ptr::null_mut());
+            }
+        }
+        Self
+    }
+}
+
+#[cfg(unix)]
+impl Drop for WrapSignals {
+    fn drop(&mut self) {
+        for sig in [libc::SIGTERM, libc::SIGHUP, libc::SIGINT] {
+            unsafe {
+                libc::signal(sig, libc::SIG_DFL);
+            }
+        }
+    }
+}
+
+/// The end signal sent to the wrap by `kill(2)`, once; `None` when there is none.
+#[cfg(unix)]
+pub(super) fn take_wrap_signal() -> Option<i32> {
+    match WRAP_SIGNAL.swap(0, std::sync::atomic::Ordering::SeqCst) {
+        0 => None,
+        sig => Some(sig),
+    }
+}
+
+/// Off Unix there are no end signals to forward: the wrap keeps the platform's
+/// own behaviour.
+#[cfg(not(unix))]
+pub(super) struct WrapSignals;
+
+#[cfg(not(unix))]
+impl WrapSignals {
+    pub(super) fn install() -> Self {
+        Self
+    }
+}
+
+#[cfg(not(unix))]
+pub(super) fn take_wrap_signal() -> Option<i32> {
+    None
+}
+
 /// The console this process is attached to, raw-moded.
 ///
 /// Raw mode here is `SetConsoleMode`, and each bit it clears is the same

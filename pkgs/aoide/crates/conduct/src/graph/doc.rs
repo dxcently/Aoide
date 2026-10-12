@@ -823,7 +823,9 @@ pub(in crate::graph) fn doomed_subagent_descendants(
 }
 
 /// The prune computation: drop `done` sessions (+ their hook records); clear
-/// `parentSessionId` on surviving children of removed sessions.
+/// `parentSessionId` on surviving children of removed sessions. The no-hold form,
+/// for tests: every live prune goes through [`prune_done_sparing`].
+#[cfg(test)]
 pub fn prune_done(
     sessions: Vec<SessionRecord>,
     hooks: Vec<HookRecord>,
@@ -834,6 +836,26 @@ pub fn prune_done(
     Vec<String>,
 ) {
     prune_done_scoped(sessions, hooks, false)
+}
+
+/// [`prune_done_scoped`] with the records in `held` spared: a `done` child whose
+/// wrap-written death the tick has not claimed yet keeps its session and hook
+/// record, so the fact can still be said. Spared records are neither doomed nor
+/// cascaded, and so are not in the removed set.
+pub(crate) fn prune_done_sparing(
+    sessions: Vec<SessionRecord>,
+    hooks: Vec<HookRecord>,
+    explicit: bool,
+    held: &HashSet<String>,
+) -> (Vec<SessionRecord>, Vec<HookRecord>, Vec<String>, Vec<String>) {
+    let (spared_s, rest_s): (Vec<SessionRecord>, Vec<SessionRecord>) =
+        sessions.into_iter().partition(|s| held.contains(&s.session_id));
+    let (spared_h, rest_h): (Vec<HookRecord>, Vec<HookRecord>) =
+        hooks.into_iter().partition(|h| held.contains(&h.session_id));
+    let (mut kept_s, mut kept_h, removed, cleared) = prune_done_scoped(rest_s, rest_h, explicit);
+    kept_s.extend(spared_s);
+    kept_h.extend(spared_h);
+    (kept_s, kept_h, removed, cleared)
 }
 
 /// [`prune_done`] with the retention scope made explicit.

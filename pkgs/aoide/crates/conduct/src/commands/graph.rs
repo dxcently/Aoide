@@ -132,7 +132,7 @@ pub fn register(r: &mut Registry) {
             args: [],
             flags: [
                 flag!("id", "string", "Session id (required)."),
-                flag!("phase", "string", "Live phase to record; folded to one canonical state: working | awaiting | stopped | idle | done."),
+                flag!("phase", "string", "Live phase to record, folded to one canonical state: working | awaiting | stopped | idle | done. `died` is not recordable here: a wrap records its child's death."),
             ],
             gated: false,
             implemented: true,

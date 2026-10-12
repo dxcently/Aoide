@@ -988,44 +988,32 @@ in the message.
   by `aoide wrap` have no recipient: do NOT accept a `parentSessionId` on its
   word, and do not widen this to a recipient the evidence does not name.
   Hold: the first examination of a child is a baseline and announces nothing;
-  `awaiting` is claimed on ENTERING the phase, not on every restamp, and
-  carries no reason (`hooks.json` has none, and `set_session_state` clears
-  `activity` on any non-`working` state, so a tool can never be named there);
-  `settled` needs the cursor to have seen the child `working`/`awaiting`
-  (the hour-later `stopped`→`idle` decay says nothing); `silent` is `>=` 12
-  minutes and under 24 hours of `updatedAt` age on a `working` phase, latched
-  per stamp (a day-old `working` is a crashed record). `died mid-turn` has two
-  sources, each claimed once and latched `died` (a latch separate from `silent`,
-  so a silence before a crash does not hide it). The wrap's fact: the record
-  reads `died` with a `death` (written by `session_store::record_hook_deaths`,
-  below), and the line carries its status. The tick's inference: the record
-  still reads `working`/`awaiting` and the harness pid (`hookAncestry`'s first
-  entry, else the record's `pid`) is dead to `pid_is_alive` — the reaper's own
-  probe, never a second one — and the line carries no status. A fact is said
-  only over a cursor that last held an open phase and is not latched. A `done`
-  phase says nothing. A child the tick cannot gather is judged by
-  `hook::gone`, from its entry's `route` and from what the tick reads now: the
-  roster, `hooks.json`, and the seals. The route is written only while both
-  seals verified, and carries the harness the child was seen alive as (pid and
-  start time). A route whose harness still runs under that start time is an
-  orphan: its entry is kept silently while that harness lives. Once that
-  harness is dead, the child is said of only when: its turn is under 24 hours
-  old, unannounced, and still open in `hooks.json` (an absent hook entry counts
-  as open); the spawner verifies NOW (`wrap_now`), checked at the claim inside
-  the stage lock; and the host wrap is gone (its record absent, or its pid dead
-  to `pid_is_alive`) or still verifies NOW. A `done` record whose pid still runs
-  is not gone: it is judged by its seal like any live host. A conducted wrap's
-  program IS its harness, so the wrap exits with it and its seal then fails:
-  that is why a gone host is accepted without a seal. A live host that does not
-  verify keeps the entry, not the line. An orphan drops silently when its phase
-  closes or its turn is a day old, and an entry whose turn is already `died`
-  drops silently. A record still on the roster with its harness alive is never
-  judged here: its entry is kept while it is tracked and dropped once it is
-  not. The seal key is fetched whenever a hook candidate exists, a tracked
-  record or a hook entry the cursor still holds, so a child pruned in the same
-  pass as its wrap is still judged. Every value read back from the cursor is
-  cleaned again where it is rendered, and the whole line passes `wire_line`
-  at delivery, as every ping-back line does.
+  `awaiting` is claimed on ENTERING the phase, not on every restamp, and carries
+  no reason (`hooks.json` has none, and `set_session_state` clears `activity` on
+  any non-`working` state, so a tool can never be named there); `settled` needs
+  the cursor to have seen the child `working`/`awaiting` (the hour-later
+  `stopped`→`idle` decay says nothing); `silent` is `>=` 12 minutes and under 24
+  hours of `updatedAt` age on a `working` phase, latched per stamp (a day-old
+  `working` is a crashed record). `died mid-turn` has two sources, each claimed
+  once and latched `died` (a latch separate from `silent`, so a silence before a
+  crash does not hide it). The wrap's fact: the record reads `died` with a
+  `death` (written by `session_store::record_hook_deaths`, below), and the line
+  carries its status. The tick's inference: the record still reads
+  `working`/`awaiting` and the harness pid (`hookAncestry`'s first entry, else
+  the record's `pid`) is dead to `pid_is_alive` (the reaper's own probe, never a
+  second one), and the line carries no status. A fact is said only over a cursor
+  that last held an open phase and is not latched. A `done` phase says nothing.
+  An unclaimed death's record is spared by the reaper, the session-start
+  eviction and `session prune` until its latch is set (`held_deaths`,
+  `unclaimed_deaths`). A child the tick cannot gather is judged by `hook::gone`
+  from its entry's `route` and from what the tick reads now. The rules, the
+  orphan case included, are stated once in `CONTRACTS.md` under
+  `state/stage/pingback.json`: change that section and the body of `hook::gone`
+  in one commit. The seal key is fetched whenever a hook candidate exists, a
+  tracked record or a hook entry the cursor still holds, so a child pruned in
+  the same pass as its wrap is still judged. Every value read back from the
+  cursor is cleaned again where it is rendered, and the whole line passes
+  `wire_line` at delivery, as every ping-back line does.
   **The wrap writes its own child's death.** `session_store::record_hook_deaths`
   runs from `session_conduct` (`graph/conduct.rs`) once the wrap's child has
   ended, immediately before the wrap ends its own record. Under the stage lock
@@ -1034,18 +1022,31 @@ in the message.
   whose harness is dead, and whose hook phase still reads `working` or
   `awaiting`. Each gets `phase: "died"`, the tool in flight as `lastTool`, and
   the wrap's exit fact (`exit`, `signal`, or `timeout`); its session is set to
-  `idle`. A closed phase is never written. The tick reads the fact when the wrap
-  lived to write it and infers the death otherwise, never both: a `died` record
-  is not open, so the inference cannot fire over it.
+  `done` (presence reads the process as over, and the reaper spares the record
+  until the death is claimed). `aoide session phase --phase died` folds to
+  `idle`, so only the wrap writes a death. A closed phase is never written. The
+  tick reads the fact when the wrap lived to write it and infers the death
+  otherwise, never both: a `died` record is not open, so the inference cannot
+  fire over it.
+
+  **The wrap's own signals.** `WrapSignals::install` (`graph/pty.rs`) runs first
+  in `session_conduct` and catches SIGTERM, SIGHUP and SIGINT with `SA_SIGINFO`
+  and no `SA_RESTART`. Only a signal whose `si_code` is `SI_USER` (sent by
+  `kill(2)` to the wrap's own pid) is taken: `conduct_multiplex` forwards it to
+  the harness once, SIGKILLs the harness after `WRAP_SIGNAL_GRACE` (5 s) if it
+  has not exited, and the death reaches `record_hook_deaths` with that signal as
+  its outcome. Any other signal, such as one the kernel raises for the terminal,
+  is re-raised with `SIG_DFL` and kills the wrap with no fact. Ctrl-C through
+  the pty arrives as bytes on a raw console and never reaches this path (not
+  tested directly). SIGKILL is never caught: that death is inferred, and only
+  the inference records it.
   **Trust model:** stated once, in `CONTRACTS.md` under
   `state/stage/pingback.json`. This cursor is unsealed data.
-  Known gap, not checked here: a clean session end whose record and hook entry
-  are both pruned between two ticks, before any tick saw `done`, reads as died
-  when the cursor last held an open phase (prune runs only on a reaping pass,
-  and an absent hook entry counts as open). The
-  hook source emits no `PingEvent` and never
-  spools: a child that belongs on a ring is `remoteParent`-stamped and so is
-  not its child.
+  Open gap, not checked here: a wrap that is SIGKILLed (no fact) whose child's
+  record and hook entry are both pruned before any tick sees them is never said
+  of. The inference reads that record, and an absent record drops the entry. The
+  hook source emits no `PingEvent` and never spools: a child that belongs on a
+  ring is `remoteParent`-stamped and so is not its child.
   **The screen source is the third, as a child module
   (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
   harness has neither profile (`prompt::tracked`: `agent_profile` is none, and

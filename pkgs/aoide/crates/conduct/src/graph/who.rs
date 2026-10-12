@@ -261,7 +261,7 @@ pub(super) struct NodeView {
 }
 
 /// Session-level presence class (module doc's "Presence model").
-fn session_presence(state: &str) -> &'static str {
+pub(crate) fn session_presence(state: &str) -> &'static str {
     match state {
         "stopped" => "stale",
         "done" => "done",

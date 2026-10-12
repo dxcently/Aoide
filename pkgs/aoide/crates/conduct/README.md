@@ -290,25 +290,21 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   forever; a timed-out write is an ordinary `write-failed` skip, latch
   untouched, same as any other write failure.
 - **`graph::pingback::hook`** is the ping-back's second source, for every
-  other registered harness whose hooks write `hooks.json` (claude, kimi, pi):
-  a local-parented child's canonical hook phase and `updatedAt` become
-  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …`, `… settled`
-  and `… died mid-turn · last: …`, claimed in the SAME stage-lock section as
-  the trace source into the entry's `hook` field of `pingback.json`, and
-  delivered by the same `deliver` — it adds a cursor half and four lines,
-  never a second transport.
-  A death the wrap records (`died` on the child's hook record, written by
-  `session_store::record_hook_deaths`) is said with its status; one the tick
-  infers carries none. The recipient is the child's SPAWNER, resolved
+  other registered harness whose hooks write `hooks.json` (claude, kimi, pi): a
+  local-parented child's canonical hook phase and `updatedAt` become
+  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …`, `… settled` and
+  `… died mid-turn · last: …`, claimed in the SAME stage-lock section as the
+  trace source into the entry's `hook` field of `pingback.json`, and delivered
+  by the same `deliver` — it adds a cursor half and four lines, never a second
+  transport. A death the wrap records (`died` on the child's hook record,
+  written by `session_store::record_hook_deaths`) is said with its status; one
+  the tick infers carries none. The recipient is the child's SPAWNER, resolved
   through the wrap that hosts it and only over an edge the kernel attested
   (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can no
-  longer route is judged from the route its entry kept (`hook::gone`): said of
-  while its spawner verifies at the claim and its host wrap is gone or still
-  verifies, never over a live host that does not verify. A route whose harness
-  still runs is an orphan: kept silently until that harness dies with its phase
-  open (said once), or dropped silently when the turn closes or is a day old.
-  An eidolon, a remote-parented child, a shell and a sub-agent node are not its
-  children.
+  longer route is judged from the route its entry kept (`hook::gone`). Its
+  rules, orphan included, are stated once in `CONTRACTS.md` under
+  `state/stage/pingback.json`. An eidolon, a remote-parented child, a shell and
+  a sub-agent node are not its children.
 - **`graph::prompt`** is the screen source of `awaiting`, for a conducted
   program that reports through neither hooks nor a trace (a `codex`, an
   `aider`, a REPL, an installer in a plain conducted shell). The wrap's

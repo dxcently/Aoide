@@ -69,7 +69,7 @@ use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use crate::graph::{
     canonical_state, codex_home, drop_remote_child_rows, drop_sessions, hooks_path, hyprctl_clients,
     ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
-    prune_done, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
+    prune_done_sparing, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
     stage_error, superseded_by, DroppedEidolon,
     sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
     SessionRecord,
@@ -1742,7 +1742,11 @@ fn reap_inner(
             ledger_session_exit(s, &now);
         }
     }
-    for id in &reaped {
+    // A child whose death the tick has not claimed keeps its hook record as it
+    // is: `upsert_hook` would clear the death fact, and the tick would then say
+    // the death without its status.
+    let held = crate::graph::held_deaths(&h_file.hooks);
+    for id in reaped.iter().filter(|id| !held.contains(*id)) {
         upsert_hook(&mut h_file.hooks, id, "done", &now);
     }
 
@@ -1752,9 +1756,11 @@ fn reap_inner(
     let (removed, mut cleared) = if reaped.is_empty() {
         (Vec::new(), Vec::new())
     } else {
-        let (kept_s, kept_h, removed, cleared) = prune_done(
+        let (kept_s, kept_h, removed, cleared) = prune_done_sparing(
             std::mem::take(&mut s_file.sessions),
             std::mem::take(&mut h_file.hooks),
+            false,
+            &held,
         );
         s_file.sessions = kept_s;
         h_file.hooks = kept_h;

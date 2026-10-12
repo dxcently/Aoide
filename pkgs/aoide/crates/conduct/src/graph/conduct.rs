@@ -17,7 +17,7 @@ use super::model::{
     HookDeath, HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use super::prompt::{Prompt, PromptWatch};
-use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize};
+use super::pty::{spawn_on_pty, take_wrap_signal, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize, WrapSignals};
 #[cfg(unix)]
 use super::pty::signal_name;
 use super::session_store::{
@@ -1582,6 +1582,12 @@ fn conduct_multiplex(
         conduct_refresh_shell(id, pty, shell_pid, interactive, None, typed); // stamp initial cwd/state now.
     }
 
+    // An end signal sent to the wrap itself is forwarded to the child once. The
+    // child gets a short grace to go, then SIGKILL, so the wrap always reaches
+    // its own death record. The child's exit is then recorded as the death.
+    const WRAP_SIGNAL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+    let mut forwarded_at: Option<std::time::Instant> = None;
+
     let mut timed_out = false;
     // The DIRECT CHILD's own exit governs completion, so a descendant holding
     // the PTY slave open (the master never hangs up then) can no longer keep a
@@ -1626,6 +1632,15 @@ fn conduct_multiplex(
         // re-read on Unix, the console's own size compared on Windows.
         if let Some(ws) = console.resized() {
             pty.resize(&ws);
+        }
+        if let Some(sig) = take_wrap_signal() {
+            if forwarded_at.is_none() && !child_exited {
+                unsafe { libc::kill(shell_pid as libc::pid_t, sig) };
+                forwarded_at = Some(std::time::Instant::now());
+            }
+        }
+        if !child_exited && forwarded_at.is_some_and(|at| at.elapsed() >= WRAP_SIGNAL_GRACE) {
+            unsafe { libc::kill(shell_pid as libc::pid_t, libc::SIGKILL) };
         }
 
         // Bounded wait: `min(remaining, wait_timeout)`, checked on both sides —
@@ -1768,6 +1783,9 @@ fn killed_with_label(ended: &Ended) -> String {
 /// `super::pty`'s seam.
 pub fn session_conduct(inv: &Invocation) -> Outcome {
     let cmd = "conduct";
+    // The wrap answers an end signal from the moment it runs: one that lands
+    // before its child exists is forwarded at the first pass of the multiplex.
+    let _wrap_signals = WrapSignals::install();
     if inv.args.is_empty() {
         return Outcome::usage(
             cmd,

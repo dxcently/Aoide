@@ -14,7 +14,7 @@
 
 use super::common::{require_flag, stage_error};
 use super::doc::{
-    doomed_subagent_descendants, ledger_session_exit, prune_done, restage_graph, would_cycle,
+    doomed_subagent_descendants, ledger_session_exit, prune_done_sparing, restage_graph, would_cycle,
 };
 use super::model::{
     canonical_state, clear_screen_ask, harness_pid, hooks_path, load_stage, sessions_path,
@@ -27,7 +27,7 @@ use aoide_storage::fs::{pid_is_alive, with_stage_lock};
 use serde_json::json;
 #[cfg(test)]
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// `now_iso_utc`/`iso_utc_from_epoch` (time) and `upsert_session`/
 /// `upsert_hook` (pure Vec<Record> mutators — verified DAG-free: neither
@@ -331,8 +331,9 @@ fn do_session_start_inner(
                 s.state = "done".to_string();
             }
         }
+        let held = crate::graph::pingback::held_deaths(&h_file.hooks);
         let (kept_s, kept_h, _removed, _cleared) =
-            prune_done(std::mem::take(&mut file.sessions), std::mem::take(&mut h_file.hooks));
+            prune_done_sparing(std::mem::take(&mut file.sessions), std::mem::take(&mut h_file.hooks), false, &held);
         file.sessions = kept_s;
         h_file.hooks = kept_h;
         if h_file.schema_version.is_empty() {
@@ -1548,6 +1549,7 @@ pub(in crate::graph) fn do_session_phase(id: &str, phase: &str) -> Outcome {
 }
 fn do_session_phase_inner(id: &str, phase: &str) -> Outcome {
     let cmd = "session.phase";
+    let phase = canonical_state(phase);
     let sessions: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
         Err(e) => return stage_error(cmd, e),
@@ -1673,53 +1675,77 @@ fn do_session_phase_if_inner(id: &str, phase: &str, expected: &str) -> Outcome {
         }))
 }
 
+/// A hook child a wrap hosts whose turn is open and whose harness is gone: the
+/// one the wrap's own child exit IS the death of.
+struct Doomed {
+    id: String,
+    last_tool: Option<String>,
+    harness: u32,
+    at: String,
+}
+
 /// The hook children a wrap hosts whose turn is still open and whose harness is
-/// gone: the ones the wrap's own child exit IS the death of. Pure over the roster
-/// and `hooks.json`, so the rule is table-testable.
+/// gone. Pure over the roster and `hooks.json`, so the rule is table-testable.
 ///
 /// A child is hosted when its `parentSessionId` is this wrap and its
 /// `hookAncestry` holds this wrap's pid, the same kernel edge the ping-back's
 /// route needs. Its harness must be gone, so a harness still running under a
-/// descendant that outlived the wrap is not reported dead. Each child comes with
-/// the tool in flight, read here, before `set_session_state` clears it.
-fn hosted_open_children(
-    sessions: &[SessionRecord],
-    hooks: &[HookRecord],
-    host: &str,
-    host_pid: u32,
-) -> Vec<(String, Option<String>)> {
+/// descendant that outlived the wrap is not reported dead. The tool in flight is
+/// read here, before the session is marked done and its activity cleared.
+fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: &str, host_pid: u32) -> Vec<Doomed> {
     let Ok(host_pid) = i32::try_from(host_pid) else { return Vec::new() };
     sessions
         .iter()
         .filter(|s| s.parent_session_id.as_deref() == Some(host))
         .filter(|s| s.hook_ancestry.contains(&host_pid))
-        .filter(|s| harness_pid(s).is_some_and(|pid| !pid_is_alive(pid)))
-        .filter(|s| {
-            hooks.iter().any(|h| {
-                h.session_id == s.session_id && matches!(canonical_state(&h.phase), "working" | "awaiting")
+        .filter_map(|s| {
+            let harness = harness_pid(s).filter(|&pid| !pid_is_alive(pid))?;
+            let hook = hooks.iter().find(|h| h.session_id == s.session_id)?;
+            matches!(canonical_state(&hook.phase), "working" | "awaiting").then(|| Doomed {
+                id: s.session_id.clone(),
+                last_tool: s.activity.clone().filter(|a| !a.is_empty()),
+                harness,
+                at: hook.updated_at.clone(),
             })
         })
-        .map(|s| (s.session_id.clone(), s.activity.clone().filter(|a| !a.is_empty())))
         .collect()
 }
 
-/// The wrap's own exit, recorded before the wrap ends its record (`session_conduct`):
-/// every child [`hosted_open_children`] names gets `phase: "died"` and the death
-/// fact `end`, carrying the tool it was in. Written under the stage lock, with the
-/// same phase-and-state pair `do_session_phase` writes. A closed phase is left
-/// exactly as it is, and when nothing is open the files are not touched at all.
+/// The wrap's own exit, recorded before the wrap ends its own record
+/// (`session_conduct`). Each hosted child [`hosted_open_children`] names gets the
+/// death fact `end`, carrying the tool it was in, and is marked `done` in
+/// `sessions.json`: it is dead, and presence must read it so. Written under the
+/// stage lock. One harness is one death: a `/clear` gives the same process a new
+/// hook id, so the newest id carries the fact and the older ids are closed as
+/// `done`. A closed phase is left exactly as it is, and when nothing is open the
+/// files are not touched at all.
 pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &HookDeath) {
     with_stage_lock(|| {
-        let Ok(sessions) = load_stage::<SessionsFile>(&sessions_path()) else { return };
+        let Ok(mut sessions) = load_stage::<SessionsFile>(&sessions_path()) else { return };
         let Ok(mut hooks) = load_stage::<HooksFile>(&hooks_path()) else { return };
         let doomed = hosted_open_children(&sessions.sessions, &hooks.hooks, host, host_pid);
         if doomed.is_empty() {
             return;
         }
         let now = now_iso_utc();
-        for (id, last_tool) in &doomed {
-            let fact = HookDeath { last_tool: last_tool.clone(), ..end.clone() };
-            record_death(&mut hooks.hooks, id, fact, &now);
+        let mut by_harness: BTreeMap<u32, Vec<&Doomed>> = BTreeMap::new();
+        for d in &doomed {
+            by_harness.entry(d.harness).or_default().push(d);
+        }
+        for mut group in by_harness.into_values() {
+            group.sort_by(|a, b| (&a.at, &a.id).cmp(&(&b.at, &b.id)));
+            let Some((newest, older)) = group.split_last() else { continue };
+            for d in older {
+                upsert_hook(&mut hooks.hooks, &d.id, "done", &now);
+            }
+            let fact = HookDeath { last_tool: newest.last_tool.clone(), ..end.clone() };
+            record_death(&mut hooks.hooks, &newest.id, fact, &now);
+        }
+        for s in sessions.sessions.iter_mut().filter(|s| doomed.iter().any(|d| d.id == s.session_id)) {
+            s.state = "done".to_string();
+            s.activity = None;
+            clear_screen_ask(s);
+            ledger_session_exit(s, &now);
         }
         if hooks.schema_version.is_empty() {
             hooks.schema_version = STAGE_GRAPH_VERSION.to_string();
@@ -1728,10 +1754,9 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
             eprintln!("[aoide/conduct] hook death not recorded for `{host}`: {e}");
             return;
         }
-        for (id, _) in &doomed {
-            if let Err(e) = set_session_state(id, "died") {
-                eprintln!("[aoide/conduct] hook child `{id}` not set died: {e}");
-            }
+        if let Err(e) = write_stage(&sessions_path(), &sessions) {
+            eprintln!("[aoide/conduct] hosted child not marked done for `{host}`: {e}");
+            return;
         }
         if let Err(e) = restage_graph() {
             eprintln!("[aoide/conduct] graph restage after hook death failed: {e}");
@@ -3947,9 +3972,88 @@ mod hosted_death_tests {
             hook("elsewhere", "working"),
             hook("unhosted", "working"),
         ];
-        let mut found = hosted_open_children(&sessions, &hooks, "wrap", me);
+        let mut found: Vec<(String, Option<String>)> =
+            hosted_open_children(&sessions, &hooks, "wrap", me).into_iter().map(|d| (d.id, d.last_tool)).collect();
         found.sort();
         assert_eq!(found, vec![("awaits".to_string(), None), ("open".to_string(), Some("Bash".to_string()))]);
         assert!(hosted_open_children(&sessions, &hooks, "wrap", 1).is_empty(), "a wrap whose pid the harness never saw");
+    }
+
+    /// A caller cannot record a death through the phase door: the phase folds to
+    /// its canonical rest, and only `record_death` writes `died`.
+    #[test]
+    fn a_death_cannot_be_recorded_through_the_session_phase_door() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("phase-door-died");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        session_start(&crate::graph::testutil::flag_invocation(
+            &["session", "start"],
+            &[("id", "kid"), ("agent", "claude"), ("cwd", "/w")],
+        ));
+
+        let out = session_phase(&crate::graph::testutil::flag_invocation(
+            &["session", "phase"],
+            &[("id", "kid"), ("phase", "died")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        assert_eq!(hooks.hooks.iter().find(|h| h.session_id == "kid").unwrap().phase, "idle");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// One harness is one death: a `/clear` gives the same process a second hook
+    /// id, so the newest id carries the fact and the older one is closed. Both
+    /// sessions end `done`, and presence reads a dead claude as done.
+    #[test]
+    fn two_hook_children_of_one_harness_record_one_death_and_read_done() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("wrap-death-one-harness");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let me = 4242u32;
+        let child = |id: &str| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", Some("wrap"));
+            s.hook_ancestry = vec![999_999, me as i32];
+            s.activity = Some("Bash".into());
+            s
+        };
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: vec![child("old"), child("new")] },
+        )
+        .unwrap();
+        let hook = |id: &str, at: &str| HookRecord {
+            session_id: id.into(),
+            phase: "working".into(),
+            updated_at: at.into(),
+            ..Default::default()
+        };
+        write_stage(
+            &hooks_path(),
+            &HooksFile {
+                schema_version: STAGE_GRAPH_VERSION.into(),
+                hooks: vec![hook("old", "2026-10-07T10:00:00Z"), hook("new", "2026-10-07T10:05:00Z")],
+            },
+        )
+        .unwrap();
+
+        record_hook_deaths("wrap", me, &HookDeath { outcome: Some("exit".into()), exit_code: Some(1), ..Default::default() });
+
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let rec = |id: &str| hooks.hooks.iter().find(|h| h.session_id == id).unwrap().clone();
+        assert_eq!(rec("new").phase, "died");
+        assert_eq!(
+            rec("new").death,
+            Some(HookDeath { last_tool: Some("Bash".into()), outcome: Some("exit".into()), exit_code: Some(1), ..Default::default() }),
+        );
+        assert_eq!(rec("old").phase, "done");
+        assert_eq!(rec("old").death, None);
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        for s in &sessions.sessions {
+            assert_eq!(s.state, "done");
+            assert_eq!(crate::graph::who::session_presence(&s.state), "done");
+        }
+        let _ = std::fs::remove_dir_all(&stage);
     }
 }

@@ -592,6 +592,16 @@ fn claim_locked(
 /// Read the cursor file; any unreadable/unparseable content reads as an EMPTY
 /// cursor rather than failing the pass (the file is ours alone, and a torn
 /// hand-edit may only ever cost one extra line — never a stuck sweep).
+/// The wrap-written deaths the tick has not claimed yet, as of now (see
+/// `hook::unclaimed_deaths`). The reaper and every prune spare these records, so
+/// the fact survives until the tick has said it once.
+pub(crate) fn held_deaths(hooks: &[crate::graph::model::HookRecord]) -> std::collections::HashSet<String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    hook::unclaimed_deaths(hooks, now)
+}
+
 fn read_cursor() -> CursorFile {
     std::fs::read_to_string(pingback_path())
         .ok()

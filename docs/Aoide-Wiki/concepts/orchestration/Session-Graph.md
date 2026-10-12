@@ -283,83 +283,75 @@ lock, and never reaches the daemon. A session whose harness keeps no trace,
 or whose presence names none, is a taught error naming which of the two it
 is, never an empty listing.
 
-**And the parent hears it.** The same tick that folds the state also reads
-what each child just did and, under the resident daemon alone, delivers ONE
-line about the child to the parent that spawned it. Three sources feed it, one
-delivery. An eidolon child is read off its trace — `[eidolon <petname>]
-settled end_turn · 90 calls · 31 min · last: "…"`, `… cancelled …`, `… died
-mid-turn …` (its eidolon record was just dropped with the turn still open),
-`… asking: "…"`, `… wrapping up · 8 calls left`, `… failing · 3 tool errors
-in a row · last: <tool label>`, `… silent 12 min · last: …`. Every other
-child whose harness reports through hooks (claude, kimi, pi — any agent whose
-hook writes `hooks.json`) is read off its hook phase and the stamp of its last
-hook event, which is all that file carries — `[claude <petname>] awaiting` on
-entering a permission prompt or question (the hook says no more than that:
-the tool in flight is cleared the moment the phase leaves `working`),
-`[claude <petname>] silent 12 min · last: <the tool in flight, else
-"working">` when a `working` phase has had no hook event for 12 minutes (once
-per silence; any new hook event re-arms it; a stamp more than a day old is a
-dead record, not a silence), `[claude <petname>] settled` when a child last
-seen `working` or `awaiting` stops through its own hook, and `[claude
-<petname>] died mid-turn · last: <the tool in flight, else "working">` when that
-open turn ends with its harness gone. The hosting wrap records that end itself,
-the moment its harness exits: the child's hook phase becomes `died`, with the
-tool in flight and how the process ended (`exit 1`, `signal 9`, or `timeout`),
-and the line names that status in parentheses, `… died mid-turn (exit 1) · last:
-…`. When the wrap was killed before it could write, the tick infers the death
-instead: the harness process is gone (the first `hookAncestry` pid, probed with
-the reaper's own liveness probe), or the record has left the roster while the
-phase still reads open. That inferred line carries no status. A `done` phase is
-a session ending through its own hook and says nothing. A silence before a
-death does not hide it; a death is claimed once per open turn. The first look
-at a child is a baseline and says nothing, a child found already stopped or
-already dead says nothing, and a turn that begins and ends between two ticks
-is not heard. A child the tick can no longer route (its record has left the
-roster, or its harness is dead and a wrap on its route has stopped verifying)
-cannot be asked for its recipient, so the cursor keeps the route last resolved
-for it: the host wrap and the spawner it resolved to while both seals verified,
-the harness it was seen alive as (pid and start time), and the tool in flight.
-Such a death is said over that route when the spawner verifies at the claim,
-inside the stage lock, and the host wrap is either gone (absent, or its pid
-dead) or still verifies.
-A harness still running under its recorded start time is an orphan, not a
-death: its entry is kept, and when that harness later dies with the phase still
-open, the death is said once, as above. The entry is dropped silently when the
-phase closes, or once the turn is a day old by its last update. A live host
-that does not verify keeps the entry until it verifies again, and the day bound
-applies to that wait too. A hook child's own
-`parentSessionId` is the wrap that hosts it, never the session that spawned
-it, so this source does not write to that edge: it climbs to the wrap's own
-`parentSessionId` and speaks only when `attestedSpawner` — the parent the
-registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
-and the child's `hookAncestry` (stamped by the hook door from the hook
-process's own credentials) holds the wrap's pid. On the live edge both wraps'
-pids must also carry a verifying daemon seal when the line is delivered,
-because a seal re-derives the pid's start time: a pid reused by another process
-after its wrap died fails it, and so does a daemon that cannot be asked
-(nothing is attested, nothing is said). On the gone path the host wrap may be
-gone instead (its pid dead, or no record), since a conducted wrap's program is
-its harness and its seal fails when it exits. The spawner's seal is checked at
-the claim, inside the stage lock, on both paths. The stamp itself is the
-registering process's own
-kernel ancestry and needs no seal. A spawner that is itself an agent is
-resolved to the wrap hosting it by the same test. A forged `session start
---parent` carries none of this and is ignored, and a child is never its own
-recipient nor its host wrap's. Two limits are known and deliberate. A detached
-`aoide spawn` that only registers after its spawner has returned has lost the
-`/proc` ancestry the stamp is read from, so it gets no stamp and its child is
-silent — never guessed. And a claude launched through another claude's Bash
-tool, with no wrap of its own in between, shares that claude's host wrap: its
-line reaches that wrap's attested spawner, an ancestor of the real launcher,
-not the launcher itself. A wrap whose program has neither hook nor trace (a
-`codex`, an `aider`, a REPL) is read off its own screen, below: `[codex
-<petname>] asking: "Apply patch? [y/N]"`. There is no hook session under it, so
-the wrap itself plays the child and its pid must carry a verifying daemon seal;
-its attested spawner, found by the same climb, hears it. A question is heard
-once while it stands: the same one is not repeated, and a different one is a
-new episode. An answer clears that memory only on a pass that finds the record
-without the question, so a question answered and asked again with the same text
-between two passes is not heard again. There is no episode counter.
+**And the parent hears it.** The same tick that folds the state also reads what
+each child just did and, under the resident daemon alone, delivers ONE line
+about the child to the parent that spawned it. Three sources feed it, one
+delivery. An eidolon child is read off its trace —
+`[eidolon <petname>] settled end_turn · 90 calls · 31 min · last: "…"`,
+`… cancelled …`, `… died mid-turn …` (its eidolon record was just dropped with
+the turn still open), `… asking: "…"`, `… wrapping up · 8 calls left`,
+`… failing · 3 tool errors in a row · last: <tool label>`,
+`… silent 12 min · last: …`. Every other child whose harness reports through
+hooks (claude, kimi, pi — any agent whose hook writes `hooks.json`) is read off
+its hook phase and the stamp of its last hook event, which is all that file
+carries — `[claude <petname>] awaiting` on entering a permission prompt or
+question (the hook says no more than that: the tool in flight is cleared the
+moment the phase leaves `working`),
+`[claude <petname>] silent 12 min · last: <the tool in flight, else "working">`
+when a `working` phase has had no hook event for 12 minutes (once per silence;
+any new hook event re-arms it; a stamp more than a day old is a dead record, not
+a silence), `[claude <petname>] settled` when a child last seen `working` or
+`awaiting` stops through its own hook, and
+`[claude <petname>] died mid-turn · last: <the tool in flight, else "working">`
+when that open turn ends with its harness gone. The hosting wrap records that
+end itself, the moment its harness exits: the child's hook phase becomes `died`,
+with the tool in flight and how the process ended (`exit 1`, `signal 9`, or
+`timeout`), and the line names that status in parentheses, as in
+`… died mid-turn (exit 1) · last: …`. When the wrap is SIGKILLed before it
+writes (SIGKILL is never caught), the tick infers the death instead: the harness
+process is gone (the first `hookAncestry` pid, probed with the reaper's own
+liveness probe), or the child's session has left the roster while its hook
+record still reads open. That inferred line carries no status. A wrap sent
+SIGTERM, SIGHUP or SIGINT forwards it to its harness and writes the fact before
+it exits, so that death carries its signal. A `done` phase is a session ending
+through its own hook and says nothing. A silence before a death does not hide
+it; a death is claimed once per open turn. The first look at a child is a
+baseline and says nothing, a child found already stopped or already dead says
+nothing, and a turn that begins and ends between two ticks is not heard. A child
+the tick can no longer route is judged from the route its entry kept, by the
+rules in `CONTRACTS.md` (`state/stage/pingback.json`), where the orphan rule is
+stated once. A hook child's own `parentSessionId` is the wrap that hosts it,
+never the session that spawned it, so this source does not write to that edge:
+it climbs to the wrap's own `parentSessionId` and speaks only when
+`attestedSpawner` — the parent the registering `aoide conduct` process saw in
+its own `/proc` ancestry — names it, and the child's `hookAncestry` (stamped by
+the hook door from the hook process's own credentials) holds the wrap's pid. On
+the live edge both wraps' pids must also carry a verifying daemon seal when the
+line is delivered, because a seal re-derives the pid's start time: a pid reused
+by another process after its wrap died fails it, and so does a daemon that
+cannot be asked (nothing is attested, nothing is said). On the gone path the
+host wrap may be gone instead (its pid dead, or no record), since a conducted
+wrap's program is its harness and its seal fails when it exits. The spawner's
+seal is checked at the claim, inside the stage lock, on both paths. The stamp
+itself is the registering process's own kernel ancestry and needs no seal. A
+spawner that is itself an agent is resolved to the wrap hosting it by the same
+test. A forged `session start --parent` carries none of this and is ignored, and
+a child is never its own recipient nor its host wrap's. Two limits are known and
+deliberate. A detached `aoide spawn` that only registers after its spawner has
+returned has lost the `/proc` ancestry the stamp is read from, so it gets no
+stamp and its child is silent — never guessed. And a claude launched through
+another claude's Bash tool, with no wrap of its own in between, shares that
+claude's host wrap: its line reaches that wrap's attested spawner, an ancestor
+of the real launcher, not the launcher itself. A wrap whose program has neither
+hook nor trace (a `codex`, an `aider`, a REPL) is read off its own screen,
+below: `[codex <petname>] asking: "Apply patch? [y/N]"`. There is no hook
+session under it, so the wrap itself plays the child and its pid must carry a
+verifying daemon seal; its attested spawner, found by the same climb, hears it.
+A question is heard once while it stands: the same one is not repeated, and a
+different one is a new episode. An answer clears that memory only on a pass that
+finds the record without the question, so a question answered and asked again
+with the same text between two passes is not heard again. There is no episode
+counter.
 
 It is not a send and never becomes one: the send door attests the sender from
 the running process's `/proc` ancestry, so inside the daemon the sender is the
