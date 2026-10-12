@@ -451,29 +451,59 @@ conductor starts.
 | **T1** the `/` page | `findview.rs` (or `capabilities/find/`), `App::find`, the layout, the keys, the worker-built index, `r` through `node pull` | mode and no clipping at 160×48 (two columns), 100×30 (stacked), 80×24 (one pane), 40×12, and 20×6 (the query line kept); draw and hit test agree; typing never calls `DispatchFn`; the Esc ladder; selection survives a rebuild by identity; Enter on a related row re-roots; Enter on a remote row opens its Mesh row | conductor README (keys, a Find section), AGENTS invariants, DESIGN.md flow; wiki Conductor-TUI.md; CONDUCTOR-REVIEW item 14 | B5 |
 | **T2** "Find related" | one `ContextAction` on `Session` and `Remote` targets in Graph, Agents and Mesh, opening Find on that session | the menu lists it; it opens Find with that session's id as the query and its related list shown | conductor README | T1 |
 
-## Open questions
+## Decisions
 
-1. **What `cc:` means.** Lean: search within the letters the session was cc'd
-   on — sender, To, subject, thread. The alternative, "reads a mailbox that was
-   ever cc'd", is simpler and answers less.
-2. **Publish mailbox readers to other nodes?** Lean no: it would put cursor
-   keys on the wire to every read-granted node, and ML4's published role
-   binding is the designed carrier for that fact.
-3. **Fold bare `session <filter>` into find's parser**, deleting
-   `apply_filter`'s substring fallback? Lean yes, as its own slice after B5,
-   with the roster's grouping unchanged — one matcher instead of two.
-4. **`--live`?** Lean no: `aoide node pull`, then find; `r` on the page does
-   exactly that.
-5. **The "same repo" reason** (git common dir, local) or `same cwd` only? Lean
-   repo: a box with no projects relates nothing by project, and the User works
-   in worktrees.
-6. **Ended sessions from the ledger (`--past`)?** Lean not in v1: the ledger
-   carries no mail joins, and §19's searchable History is its home.
-7. **A cached row and `state:`.** Lean: it matches its last-seen state and
-   reads "was". The alternative is that `state:` never matches a cached row.
-8. **`kind:`** is the one key beyond the ruling's list. Lean keep — agent,
-   subagent and shell is the commonest cut — and drop it if the User wants the
-   list exact.
+Eight calls the design rests on. Each names the alternative it beat, what
+that alternative would have given, and what the chosen call costs.
+
+1. **`cc:` searches inside the letters.** It matches a session that was cc'd
+   on a letter whose sender, To, subject or thread id holds the value. The
+   alternative, "reads a mailbox that was ever cc'd", is simpler and cannot
+   tell a PR 41 letter from any other letter in the same box. Cost: one decode
+   per letter a session reads (`letter::decode`), the scan in the cc table.
+
+2. **Mailbox readers stay on the node that holds them.** `cursors.json` is not
+   published to other nodes. Publishing would put cursor keys on the wire to
+   every read-granted node. ML4's published role binding is the designed
+   carrier for that fact, so until it lands a remote row reads *not published
+   by \<node\>* and its `mailbox:` and `cc:` terms never match it.
+
+3. **One matcher, in a later slice.** Bare `session <filter>` folds into
+   find's parser, and `apply_filter`'s substring fallback goes with it. The
+   slice comes after B5 and is not one of the slices in the table below. B5
+   extracts the bucket rule but leaves bare `session`'s filter alone, so until
+   the later slice the two matchers differ: bare `session` is case-sensitive
+   over id, petname and label, and find folds case over more fields. Gain: one
+   grammar. Cost: the same word can match different rows in the two until then.
+
+4. **No `--live`.** Find never probes a node. Fresh rows come from
+   `aoide node pull [<name>]`, then find; the page's `r` runs the same pull.
+   The alternative, `--live`, gives fresh rows but makes every find dial each
+   node (up to 2 s each), bare `session`'s posture, and puts a network wait
+   under a question typed one key at a time. Cost: an answer is only as fresh
+   as the last pull, and the scope line names that age.
+
+5. **"Same repo" is the git common dir.** Worktrees of one repo share it, so
+   the User's worktree sessions relate although their cwds differ. The
+   alternative, same cwd only, relates nothing across worktrees and nothing on
+   a box with no registered projects. Cost: one stat walk per distinct cwd, and
+   a far path has no repo, because the far disk is not read.
+
+6. **No `--past` in v1.** An ended session belongs to History (§19's
+   searchable History), not to find. The ledger carries no mail joins, so an
+   ended row would show `mailboxes`, `cc` and `threads` all unknown. Cost: an
+   ended session cannot be found from here.
+
+7. **A cached row matches its last-seen state.** `state:` matches the state the
+   cache last recorded, and the row reads "was \<state\>". The alternative,
+   `state:` never matching a cached row, is stricter and leaves `state:working`
+   blind to every far node. Cost: "was working" can be stale; the scope line's
+   age is the only signal of that.
+
+8. **`kind:` stays.** It is the commonest cut (agent, shell, subagent) and the
+   one key beyond the ruling's list. The alternative, keeping the list exact,
+   saves one key. Its cost: a shell or subagent cannot be separated from an
+   agent by any term but `agent:` or `state:`.
 
 ## How it sits with other work
 
