@@ -66,7 +66,7 @@ pub struct LedgerEntry {
     pub origin: Option<String>,
     /// Projected verbatim from `SessionRecord.restore` (P-C5,
     /// durable-sessions plan) — a conducted terminal's continuously-captured
-    /// cwd/idle/argv/typed at the exact instant it left the roster, `None`
+    /// cwd/idle/argv at the exact instant it left the roster, `None`
     /// for every non-shell session and every entry predating this field.
     /// Always serializes (never `skip_serializing_if`), same
     /// closed-historical-record discipline every other field here holds —
@@ -162,7 +162,6 @@ mod tests {
                 cwd: Some("/home/khoa/Aoide".to_string()),
                 idle: true,
                 argv: None,
-                typed: Some("cargo test -p aoide-conduct".to_string()),
             }),
         };
         append_ledger_entry(&entry).unwrap();
@@ -191,6 +190,33 @@ mod tests {
         };
         let line = serde_json::to_string(&entry).unwrap();
         assert!(line.contains("\"restore\":null"), "serialised: {line}");
+    }
+
+    #[test]
+    fn a_legacy_typed_key_in_a_ledger_line_is_ignored_and_not_written_back() {
+        // The ledger is append-only, so lines written while the typed capture
+        // existed keep their `typed` key forever. They parse with it dropped,
+        // and re-serialising never writes it again.
+        let entry = LedgerEntry {
+            session_id: "s2".to_string(),
+            restore: Some(RestoreSnapshot {
+                cwd: Some("/w".to_string()),
+                idle: true,
+                argv: None,
+            }),
+            ..Default::default()
+        };
+        let line = serde_json::to_string(&entry).unwrap().replacen(
+            "\"restore\":{",
+            "\"restore\":{\"typed\":\"cargo test\",",
+            1,
+        );
+        assert!(line.contains("cargo test"), "fixture: {line}");
+        let parsed: LedgerEntry = serde_json::from_str(&line).unwrap();
+        assert_eq!(parsed.restore, entry.restore);
+        let rewritten = serde_json::to_string(&parsed).unwrap();
+        assert!(!rewritten.contains("typed"), "rewritten: {rewritten}");
+        assert!(!rewritten.contains("cargo test"), "rewritten: {rewritten}");
     }
 
     #[test]

@@ -61,25 +61,16 @@
 //! write:
 //! - **not idle, with a foreground `argv`** — the session was demonstrably
 //!   RUNNING something when it left. Re-exec it, `--yes --submit` and all:
-//!   the never-auto-run rule below covers the typed-but-unsubmitted case,
-//!   not a command already in flight. EXCEPT when `argv[0]`'s basename is
+//!   the command was already in flight, so Enter resumes it rather than
+//!   starting something new. EXCEPT when `argv[0]`'s basename is
 //!   `sudo` (orchestrator ruling, open knob 5 — asked twice, unanswered,
 //!   default taken and flagged): a privileged foreground command is never
 //!   re-exec'd unattended — at best it hangs on a password prompt nobody is
 //!   watching, at worst it silently re-runs something destructive. The cwd
 //!   still restores; nothing is delivered.
-//! - **idle, with a clean `typed` line** — preload it with `--yes` and,
-//!   deliberately, NEVER `--submit`. The text sits in the new prompt until a
-//!   human presses Enter. **This is the whole safety invariant this phase
-//!   exists to hold: the no-submit path must never grow a `--submit`, and
-//!   the two branches above must never be unified behind a shared boolean
-//!   parameter** — [`restore_delivery`] hardcodes each branch's flag map
-//!   inline rather than threading a `submit: bool` through one "deliver"
-//!   helper, precisely so a later refactor can't flip one into the other by
-//!   accident. A stale `rm -rf` sitting in `typed` and firing itself at boot
-//!   is the failure this shape prevents.
-//! - **idle, with no `typed`** — nothing is delivered. A terminal reopened
-//!   at its own cwd is already the correct, complete answer.
+//! - **idle** — nothing is delivered. A terminal reopened at its own cwd is
+//!   already the correct, complete answer. Nothing typed in the old session
+//!   is carried into the new prompt, so nothing can fire itself at boot.
 //!
 //! **Bare-manifest mode (U2, command-defrag lane U).** `resurrect` with
 //! NONE of `--project`/`--all`/`--id` given walks UP from cwd
@@ -311,50 +302,32 @@ fn is_sudo_argv(argv: &[String]) -> bool {
 /// What, if anything, to deliver into a freshly-resurrected terminal once it
 /// registers — pure, no process, no socket, so this decision and its exact
 /// `Invocation` flag map are directly unit-testable apart from
-/// `resurrect_one`'s real spawn. See the module doc's safety-invariant
-/// paragraph: the two branches below are never unified behind a shared
-/// boolean parameter — each hardcodes its own flag map inline.
+/// `resurrect_one`'s real spawn. Only a session that was running a command
+/// when it left gets anything: that command is re-exec'd. An idle one is
+/// restored by cwd alone.
 fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreSnapshot) -> Option<Invocation> {
-    if !restore.idle {
-        // Branch one — demonstrably RUNNING something when the session
-        // left. Re-exec it, Enter and all: never for `sudo` (`is_sudo_argv`)
-        // — an unattended password prompt in a terminal nobody is watching
-        // is not a restore.
-        let argv = restore.argv.as_ref()?;
-        if is_sudo_argv(argv) {
-            return None;
-        }
-        let mut flags = BTreeMap::new();
-        flags.insert("id".to_string(), new_id.to_string());
-        // Attributed to the target ITSELF: these are the session's own prior
-        // bytes going back to its own prompt, and send's self-attribution
-        // rule delivers them verbatim — a provenance prefix would turn the
-        // re-exec into a shell syntax error (live P-C7 finding).
-        flags.insert("from".to_string(), new_id.to_string());
-        flags.insert("yes".to_string(), "true".to_string());
-        flags.insert("submit".to_string(), "true".to_string());
-        return Some(Invocation {
-            path: vec!["send".to_string()],
-            args: vec![argv.join(" ")],
-            flags,
-            door,
-        });
+    if restore.idle {
+        return None;
     }
-    // Branch two — idle, with a clean, unpoisoned typed line. Preload it and
-    // NOTHING else: `--yes`, and — permanently — no `--submit`. This flag
-    // map must never gain a `submit` key; that omission is the entire
-    // mechanism behind "preload, never auto-run".
-    let typed = restore.typed.as_ref()?;
+    // Re-exec, Enter and all: never for `sudo` (`is_sudo_argv`) — an
+    // unattended password prompt in a terminal nobody is watching is not a
+    // restore.
+    let argv = restore.argv.as_ref()?;
+    if is_sudo_argv(argv) {
+        return None;
+    }
     let mut flags = BTreeMap::new();
     flags.insert("id".to_string(), new_id.to_string());
-    // Self-attributed for the same verbatim-bytes reason as the re-exec
-    // branch above: the preloaded line must be exactly what the operator
-    // typed, or Enter runs something else.
+    // Attributed to the target ITSELF: these are the session's own prior
+    // bytes going back to its own prompt, and send's self-attribution
+    // rule delivers them verbatim — a provenance prefix would turn the
+    // re-exec into a shell syntax error (live P-C7 finding).
     flags.insert("from".to_string(), new_id.to_string());
     flags.insert("yes".to_string(), "true".to_string());
+    flags.insert("submit".to_string(), "true".to_string());
     Some(Invocation {
         path: vec!["send".to_string()],
-        args: vec![typed.clone()],
+        args: vec![argv.join(" ")],
         flags,
         door,
     })
@@ -503,12 +476,9 @@ fn resurrect_one(
     // TERMINAL candidate (a `restore` snapshot present) whose spawn actually
     // registered AND became READY: an unregistered session has no live pty to
     // deliver into, and a registered-but-unstarted one has a pty whose harness
-    // is still coming up, where the same early-typing defect `spawn --prompt`
-    // just fixed would lose the line (or, for the re-exec branch's Enter, run
-    // it somewhere it was never aimed at). `restore_delivery` is pure and
-    // decides the whole shape; the `submit` key on its returned flags (never
-    // present on the preload shape) is what this reads back to report which
-    // branch fired.
+    // is still coming up, where the re-exec's Enter would run the command
+    // somewhere it was never aimed at. `restore_delivery` is pure and decides
+    // the whole shape: it is `Some` only for a re-exec.
     let restore_result = if !registered {
         "skipped-unregistered".to_string()
     } else {
@@ -530,20 +500,17 @@ fn resurrect_one(
                         .as_ref()
                         .and_then(|r| restore_delivery(door, &new_id, r))
                         .expect("checked just above");
-                    let submit = inv.flags.contains_key("submit");
                     let inner = session_send(&inv);
                     if inner.status != Status::Ok {
                         format!("failed: {}", inner.message)
                     } else {
-                        // The branch that fired, and whether the readiness was
-                        // a fact or a settled guess: a terminal candidate whose
-                        // agent has no profile is typed at on the guess, and
-                        // says so.
-                        let word = if submit { "reexec" } else { "preload" };
+                        // Whether the readiness was a fact or a settled guess:
+                        // a terminal candidate whose agent has no profile is
+                        // typed at on the guess, and says so.
                         if ready == super::spawn::Ready::Verified {
-                            word.to_string()
+                            "reexec".to_string()
                         } else {
-                            format!("{word}-unverified")
+                            "reexec-unverified".to_string()
                         }
                     }
                 }
@@ -559,7 +526,7 @@ fn resurrect_one(
     ));
     if matches!(
         restore_result.as_str(),
-        "reexec" | "preload" | "reexec-unverified" | "preload-unverified"
+        "reexec" | "reexec-unverified"
     ) {
         changed.push(format!("session {new_id}: restore {restore_result}"));
     }
@@ -1310,7 +1277,7 @@ mod tests {
             "shell",
             "/home/khoa/Aoide",
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None }),
         );
         let candidate = resolve_candidate(entry);
         let argv = candidate.resume_argv.expect("the terminal arm must resolve a restore-bearing shell entry");
@@ -1330,61 +1297,34 @@ mod tests {
         assert!(candidate.resume_argv.is_none(), "a restore-less shell entry must still be skipped");
     }
 
-    /// The preload path's flag map, pinned directly — no process, no socket.
-    /// `--yes` is present; `--submit` must NEVER be, on pain of violating
-    /// the whole "preload, never auto-run" invariant this phase exists for.
-    #[test]
-    fn preload_delivery_carries_yes_and_never_submit() {
-        let restore = RestoreSnapshot {
-            cwd: Some("/home/khoa/Aoide".into()),
-            idle: true,
-            argv: None,
-            typed: Some("echo hello".to_string()),
-        };
-        let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
-            .expect("an idle restore with a typed line must construct a send");
-        assert_eq!(inv.flags.get("yes").map(String::as_str), Some("true"));
-        assert!(!inv.flags.contains_key("submit"), "the no-submit path must never carry `submit`: {:?}", inv.flags);
-        // Self-attributed (`--from <new-id>`): send's self-attribution rule
-        // then delivers the bytes verbatim — without this, the preload came
-        // back as `from <sender>: echo hello`, a line no human typed
-        // (live P-C7 finding).
-        assert_eq!(inv.flags.get("from").map(String::as_str), Some("new-id"));
-        assert_eq!(inv.args, vec!["echo hello".to_string()]);
-    }
-
     /// The re-exec path's flag map, pinned directly — no process, no socket.
     /// It carries BOTH `--yes` and `--submit`: the session was demonstrably
-    /// running this when it left, which is a different case from a typed
-    /// -but-unsubmitted line.
+    /// running this when it left.
     #[test]
     fn reexec_delivery_carries_yes_and_submit() {
         let restore = RestoreSnapshot {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: false,
             argv: Some(vec!["nvim".to_string(), "notes.md".to_string()]),
-            typed: None,
         };
         let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
             .expect("a working restore with argv must construct a send");
         assert_eq!(inv.flags.get("yes").map(String::as_str), Some("true"));
         assert_eq!(inv.flags.get("submit").map(String::as_str), Some("true"));
-        // Self-attributed for the same verbatim-bytes reason as the preload
-        // pin above — a prefixed re-exec is a shell syntax error.
+        // Self-attributed: a prefixed re-exec is a shell syntax error.
         assert_eq!(inv.flags.get("from").map(String::as_str), Some("new-id"));
         assert_eq!(inv.args, vec!["nvim notes.md".to_string()]);
     }
 
-    /// Idle with a null `typed` (a poisoned or never-populated line) must
-    /// construct no send at all — a bare cwd restore is already the correct,
-    /// complete answer, never a guess.
+    /// An idle restore constructs no send at all — a bare cwd restore is the
+    /// whole answer. Nothing typed by the old session is ever replayed.
     #[test]
-    fn idle_with_null_typed_constructs_no_send_at_all() {
-        let restore = RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None, typed: None };
+    fn an_idle_restore_delivers_nothing_it_restores_the_cwd_alone() {
+        let restore = RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None };
         assert!(restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none());
     }
 
-    /// The orchestrator ruling (open knob 5): a recorded foreground of
+    /// The orchestrator ruling (open knob 5)    /// The orchestrator ruling (open knob 5): a recorded foreground of
     /// `sudo …` re-execs nothing and delivers nothing — only the cwd
     /// restores. Covers both the narrow named check directly and the
     /// delivery decision that consults it.
@@ -1399,7 +1339,6 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: false,
             argv: Some(vec!["sudo".to_string(), "systemctl".to_string(), "restart".to_string(), "aoided".to_string()]),
-            typed: None,
         };
         assert!(
             restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
@@ -2466,7 +2405,7 @@ mod tests {
             "shell",
             &root_str,
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None }),
         )]);
         std::env::remove_var("AOIDE_TERMINAL");
         std::env::remove_var("WAYLAND_DISPLAY");
@@ -2518,7 +2457,7 @@ mod tests {
             "shell",
             &root_str,
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None }),
         )]);
         std::env::set_var("AOIDE_TERMINAL", "true");
         std::env::set_var("WAYLAND_DISPLAY", "wayland-0");

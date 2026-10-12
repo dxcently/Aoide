@@ -2112,7 +2112,6 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: true,
             argv: None,
-            typed: Some("echo hi".into()),
         });
         rec.state = "done".to_string(); // the reap-path ordering hazard this field survives.
 

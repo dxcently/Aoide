@@ -825,10 +825,8 @@ count.
   snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
   running re-execs with `--yes --submit` (never for a recorded `sudo …`,
-  which only restores the cwd); an idle session's clean unsubmitted
-  `typed` line preloads with `--yes` and permanently no `--submit`,
-  so it sits in the new prompt until a human presses Enter; idle with no
-  `typed` delivers nothing. Also the command core the daemon's own boot-time
+  which only restores the cwd); an idle session delivers nothing, its cwd
+  alone is restored. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -2976,7 +2974,7 @@ captured restore snapshot, written change-only by `aoide-conduct`'s PTY
 tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 
 ```json
-"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null, "typed": "cargo test -p aoide-conduct" }
+"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null }
 ```
 
 - `cwd` — the shell's live working directory at the last tick (`None` when
@@ -2992,15 +2990,8 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.
-- `typed` — the reconstructed unsubmitted prompt line, REFUSAL-based: `Some`
-  only for a clean, unedited keystroke run since the last submit (bytes from
-  BOTH real stdin and an injection connection count, since both land in the
-  same shell readline buffer); any readline-editing byte (an escape
-  sequence, `^R`, Tab, `^U`/`^W`) or invalid UTF-8 poisons it to `None`
-  instead of guessing. Only ever populated when `idle` is true — a shell
-  mid-command has no prompt line. A silently WRONG `typed` would put text
-  the operator never composed one keystroke from running; `None` is a fully
-  acceptable product of this capture, a guess is not.
+An older record's `typed` key, written before that field was removed, is
+ignored on read and never written back.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like
@@ -4460,7 +4451,7 @@ this field existed, tolerated on read the same as any other field here).
 
 `restore` (P-C5, durable-sessions plan) is `null` for every non-shell
 session and every line predating this field, and otherwise the SAME
-`{cwd, idle, argv, typed}` object `sessions.json`'s own `restore` field
+`{cwd, idle, argv}` object `sessions.json`'s own `restore` field
 carries (see above) — projected verbatim off `SessionRecord.restore` at the
 exact instant `ledger_session_exit` appends this line, never re-derived and
 never a `/proc` read here: the reap sweep's own ordering

@@ -948,8 +948,7 @@ fn deliver_local_with(
     // nothing, and the one caller that legitimately produces this shape —
     // `resurrect`'s restore delivery, putting a session's own prior
     // bytes back at its own prompt — needs those bytes verbatim (a prefixed
-    // re-exec is a shell syntax error; a prefixed preload is a line no human
-    // typed). Note this keys off the ATTRIBUTED sender, never the gate's
+    // re-exec is a shell syntax error). Note this keys off the ATTRIBUTED sender, never the gate's
     // own kernel-attested sender identity (LANE IDENTITY P-ID2) — restore
     // is delivered from another session's env, which is exactly why it was
     // mis-prefixed. Not a gate

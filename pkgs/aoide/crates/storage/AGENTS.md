@@ -521,7 +521,7 @@
   embedded on both `SessionRecord.restore` (additive, the outer
   `Option<RestoreSnapshot>` DOES skip when `None`) and
   `LedgerEntry.restore` (always present, possibly `null`) — but once a
-  snapshot is `Some`, its own `cwd`/`idle`/`argv`/`typed` fields always
+  snapshot is `Some`, its own `cwd`/`idle`/`argv` fields always
   serialize in both places, so a populated `restore` reads the identical
   complete shape whichever file it came from. Adding `skip_serializing_if`
   to one of `RestoreSnapshot`'s own fields would make the two homes diverge
