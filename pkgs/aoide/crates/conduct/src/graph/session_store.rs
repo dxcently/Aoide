@@ -208,7 +208,8 @@ pub(in crate::graph) fn do_session_start(
 /// with the hook process's own chain (`ancestry`, self-first) landed in the same
 /// locked write. Registration is a SessionStart or the first hook event of an
 /// unknown id, so a resumed harness that got a new process gets a current chain;
-/// the move is gated by [`ancestry_may_move`].
+/// the move is gated by [`ancestry_may_move`]. A protected live wrap is decided
+/// by [`live_wrap_hook_start`] first.
 pub(in crate::graph) fn do_hook_session_start(
     id: &str,
     agent: Option<&str>,
@@ -223,10 +224,102 @@ pub(in crate::graph) fn do_hook_session_start(
         let conducted = load_stage::<SessionsFile>(&sessions_path())
             .is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id && conducted_wrap(s)));
         let parent = parent.filter(|_| !conducted);
+        if let Some(outcome) = live_wrap_hook_start(id, agent, cwd, window, parent, pid, ancestry) {
+            return outcome;
+        }
         do_session_start_inner(
             id, agent, cwd, window, parent, None, None, None, pid, ancestry,
         )
     })
+}
+
+/// The hook door's SessionStart on a protected live wrap (`identity::
+/// is_protected_live_wrap`), decided before any write. A start that would change
+/// agent, cwd, window or parent is refused, writes nothing, and appends an audit
+/// line: the hook discards its outcome at one call site, so the line is the only
+/// trace there. A start that changes none of them writes nothing, except the
+/// hook chain. [`ancestry_may_move`] allows that move on a wrap whose own process
+/// sits in its harness's chain, the normal case, and the chain is how a harness
+/// re-binds its window, not an identity field, so it stays writable. `None` for
+/// every other record, and for a protected wrap whose chain may move (the full
+/// path below writes it).
+fn live_wrap_hook_start(
+    id: &str,
+    agent: Option<&str>,
+    cwd: Option<&str>,
+    window: Option<&str>,
+    parent: Option<&str>,
+    pid: Option<u32>,
+    ancestry: &[i32],
+) -> Option<Outcome> {
+    let file: SessionsFile = load_stage(&sessions_path()).ok()?;
+    let rec = file.sessions.iter().find(|s| s.session_id == id)?;
+    if !super::identity::is_protected_live_wrap(rec) {
+        return None;
+    }
+    let mut after = file.sessions.clone();
+    upsert_session(&mut after, id, agent, cwd, window, parent, None, None, None, pid, "");
+    let stored = after.iter().find(|s| s.session_id == id)?;
+    let unchanged = matches!(
+        (serde_json::to_value(stored), serde_json::to_value(rec)),
+        (Ok(a), Ok(b)) if a == b
+    );
+    if !unchanged {
+        audit_refused_wrap_hook_start(id, &identity_fields_changed(rec, stored));
+        return Some(
+            Outcome::error("session.start", super::identity::live_wrap_refusal(id))
+                .with_data(json!({ "reason": "live-sealed-wrap", "id": id })),
+        );
+    }
+    if !ancestry.is_empty()
+        && rec.hook_ancestry != ancestry
+        && ancestry_may_move(rec, ancestry, pid_is_alive)
+    {
+        return None;
+    }
+    Some(
+        Outcome::ok(
+            "session.start",
+            format!("re-started session `{id}` (no field changed; startedAt preserved)"),
+        )
+        .with_data(json!({
+            "sessionId": id,
+            "agent": rec.agent,
+            "startedAt": rec.started_at,
+            "inserted": false,
+            "file": sessions_path().to_string_lossy(),
+        })),
+    )
+}
+
+/// The identity fields a refused start would have changed, for the audit line.
+fn identity_fields_changed(before: &SessionRecord, after: &SessionRecord) -> String {
+    let names: Vec<&str> = [
+        ("agent", before.agent != after.agent),
+        ("cwd", before.cwd != after.cwd),
+        ("window", before.window_address != after.window_address),
+        ("parent", before.parent_session_id != after.parent_session_id),
+    ]
+    .into_iter()
+    .filter_map(|(name, changed)| changed.then_some(name))
+    .collect();
+    if names.is_empty() {
+        "its stored record".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
+/// Append the audit line for a refused hook start on a protected wrap.
+fn audit_refused_wrap_hook_start(id: &str, fields: &str) {
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        "session.start",
+        "error",
+        &format!("live-sealed-wrap: a hook start on `{id}` would change {fields}; nothing was written"),
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3944,10 +4037,16 @@ mod live_sealed_wrap_guards {
     /// The world a sealed wrap lives in: a private stage and runtime dir, and
     /// a fake daemon whose seal pubkey is `kp`'s. The caller holds `env_lock`.
     fn seal_world(tag: &str) -> (EnvVars, aoide_storage::identity::Keypair, PathBuf) {
-        let env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET", "XDG_RUNTIME_DIR"]);
+        let env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_DAEMON_SOCKET",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+        ]);
         let stage = unique_stage(tag);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("XDG_RUNTIME_DIR", &stage);
+        std::env::set_var("AOIDE_AUDIT_LOG", stage.join("audit.log"));
         let kp = aoide_storage::identity::mint_ephemeral().unwrap();
         std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
         (env, kp, stage)
@@ -4173,6 +4272,78 @@ mod live_sealed_wrap_guards {
                 "a refused {flag} change leaves the record unchanged"
             );
         }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The hook's own SessionStart with a changed window is refused on a
+    /// protected wrap: the roster stays byte-identical, and the refusal is
+    /// audited, since the hook discards its outcome at one call site.
+    #[test]
+    fn a_hook_start_that_would_change_a_protected_wraps_window_is_refused_and_audited() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("hook-start-refused");
+        sealed_live_wrap("wrap", &kp);
+        let bytes = std::fs::read(sessions_path()).unwrap();
+
+        let out = do_hook_session_start("wrap", Some("claude"), Some("/w"), Some("0xOTHER"), None, None, &[]);
+
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "the roster is byte-identical");
+        let audit = std::fs::read_to_string(stage.join("audit.log")).expect("the refusal is audited");
+        assert!(audit.contains("live-sealed-wrap") && audit.contains("window"), "{audit}");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The hook's registration with the wrap's stored fields changes nothing:
+    /// the no-op answer, byte-identical roster, and no audit line.
+    #[test]
+    fn a_same_fields_hook_start_on_a_protected_wrap_is_a_no_op() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("hook-start-no-op");
+        sealed_live_wrap("wrap", &kp);
+        let bytes = std::fs::read(sessions_path()).unwrap();
+
+        let out = do_hook_session_start("wrap", Some("claude"), Some("/w"), None, None, None, &[]);
+
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert!(out.message.contains("no field changed"), "the no-op answer: {}", out.message);
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), bytes, "the roster is byte-identical");
+        assert!(!stage.join("audit.log").exists(), "nothing is refused, so nothing is audited");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The hook chain is not an identity field: a protected wrap's chain still
+    /// moves, and its identity stays as it was.
+    #[test]
+    fn a_hook_start_still_moves_the_chain_of_a_protected_wrap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("hook-start-chain");
+        sealed_live_wrap("wrap", &kp);
+        let me = std::process::id() as i32;
+
+        let out = do_hook_session_start("wrap", Some("claude"), Some("/w"), None, None, None, &[me]);
+
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        let rec = record("wrap").unwrap();
+        assert_eq!(rec.hook_ancestry, vec![me], "the chain moved");
+        assert_eq!(rec.cwd, "/w", "the identity did not");
+        assert!(crate::graph::identity::is_protected_live_wrap(&rec), "the wrap is still protected");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A hook start on a record that is not a protected wrap takes the hook's
+    /// fields, as it always has.
+    #[test]
+    fn an_unprotected_record_still_takes_the_hook_fields() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _kp, stage) = seal_world("hook-start-plain");
+        do_session_start("plain", Some("claude"), Some("/w"), None, None, None, None, None, None);
+
+        let out = do_hook_session_start("plain", Some("claude"), Some("/w2"), Some("0xW"), None, None, &[]);
+
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        let rec = record("plain").unwrap();
+        assert_eq!((rec.cwd.as_str(), rec.window_address.as_str()), ("/w2", "0xW"));
         let _ = std::fs::remove_dir_all(&stage);
     }
 

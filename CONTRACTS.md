@@ -2821,10 +2821,16 @@ Three rules hold, each on the doors named:
    applies a `session start --id` on it to a copy of the roster. A start that
    would change no stored field answers `ok` and writes nothing, so a harness
    hook may send its own registration again (`--agent`, `--cwd`) and keep the
-   seal and the starttime. A start that would change a field is refused. The
-   door passes only `agent`, `cwd`, `window` and `parent` to the record, so
-   those are the fields a start can change. The daemon route and the direct
-   route run the same check.
+   seal and the starttime. A start that would change `agent`, `cwd`, `window` or
+   `parent` is refused. The harness hook's SessionStart (`session hook`) follows
+   the same rule in `do_hook_session_start`: a refused hook start writes nothing
+   and appends an audit line with reason `live-sealed-wrap`, because the hook
+   discards its outcome at one call site. The hook chain (`hookAncestry`) is not
+   an identity field. Where `ancestry_may_move` allows it, a hook start on a
+   protected wrap still writes the chain through the full path, which leaves its
+   identity fields as they were. The chain is how a harness re-binds its window,
+   and a wrap's own process usually sits in its harness's chain. The daemon
+   route and the direct route run the same check.
 3. *The autogate reads only the spawn-time edge.* A target's parent counts for
    the parent-of-target and sibling rules only where its `attestedSpawner` names
    that parent (§ `sessions.json`). A bare `session start --parent`, a `graph
@@ -2865,10 +2871,6 @@ checks none of them, and an infected agent can do each one.
   `issuedAt`.
 - Rewrite a record that is not protected through `session start`. The seal
   covers none of `agent`, `cwd`, or `window`.
-- Rewrite a protected wrap's `agent`, `cwd`, or `window` through the hook door's
-  SessionStart registration (`session hook`). That path is
-  `do_hook_session_start`, which does not run the start door's check, so a
-  changed field lands on the wrap. This is not closed.
 - Name a different daemon. The grant side (`session kill`, the autogate, the
   broker's origin gate) reads its key from the caller's `AOIDE_DAEMON_SOCKET`.
   Pointed at a socket that answers nothing, those grants refuse, which is fail

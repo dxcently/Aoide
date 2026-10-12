@@ -1335,19 +1335,21 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   to that one MCP subprocess, never `aoided`'s. This crate computes where
   it lives and is its first client: `doorbell.rs::ring_locked` connects to
   it (never binds or accepts — that lifecycle stays `aoide-server`'s).
-- **A protected live wrap is ended only by its own exit, and the autogate reads
-  only the spawn-time edge.** `identity::is_protected_live_wrap` is the one
-  predicate, stated once in `CONTRACTS.md`'s identity section. It reads no
+- **A protected live wrap is ended only by its own exit, and the autogate
+  reads only the spawn-time edge.** `identity::is_protected_live_wrap` is the
+  one predicate, stated once in `CONTRACTS.md`'s identity section. It reads no
   daemon key. `identity::live_sealed_wrap_ids` is the set it yields.
-  `session_store:: live_wrap_refusal_for` is the refusal every finishing door
+  `session_store::live_wrap_refusal_for` is the refusal every finishing door
   (`session end`, a terminal `session phase`, the hook's `SessionEnd` arm) asks
-  first. The start door lets a same-fields `session start` through as a no-op
-  and refuses one that would change a field. `doc.rs::prune_done_keeping` keeps
-  such a record out of every prune, and `reap_inner` spares it. The autogate
-  reads a parent edge only through `send.rs`'s `attested_parent_of`, which needs
-  `attestedSpawner` to name the same id. Only `conduct` registration writes that
-  stamp, and `SessionRecord::set_parent_session` drops it whenever the edge
-  moves. The residuals are listed in `CONTRACTS.md`.
+  first. The start door (`live_wrap_start`) and the hook's SessionStart
+  (`live_wrap_hook_start`, in `do_hook_session_start`) apply the start rule
+  before any write, and the hook's refusal is audited.
+  `doc.rs::prune_done_keeping` keeps such a record out of every prune, and
+  `reap_inner` spares it. The autogate reads a parent edge only through
+  `send.rs`'s `attested_parent_of`, which needs `attestedSpawner` to name the
+  same id. Only `conduct` registration writes that stamp, and
+  `SessionRecord::set_parent_session` drops it whenever the edge moves. The
+  residuals are listed in `CONTRACTS.md`.
 - **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
   `identity::peer_cred`/`PeerCred` widened `pub(crate)` (was `pub(in
   crate::graph)`) so `shellbridge.rs` — a sibling module of `graph`, not a
