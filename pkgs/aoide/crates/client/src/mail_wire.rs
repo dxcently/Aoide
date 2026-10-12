@@ -74,13 +74,54 @@ impl Drop for TunnelTeardownGuard {
 /// reused not reinvented).
 enum SignedCall {
     /// A JSON-RPC `result` member, whatever shape the method's own answer
-    /// takes — the CALLER interprets it.
+    /// takes — the CALLER interprets it. Produced ONLY from an answer whose
+    /// signature verified under the key on file for the node, so an acked
+    /// letter, a settled receipt or a filed hand-over is never the word of an
+    /// unproven sender.
     Result(Value),
     /// A JSON-RPC `error` member: the far end refused the call itself
-    /// (admission, per MAIL.md §Wire's admission/outcome split).
+    /// (admission, per MAIL.md §Wire's admission/outcome split). Verified like
+    /// [`SignedCall::Result`].
     Refused(String),
     /// No usable response at all — dial/tunnel/HTTP/parse failure.
     TransportFailed(String),
+    /// An answer this box cannot check against the key on file: unsigned,
+    /// signed by another key, or addressed to a node with no key on file (never
+    /// dialled). Nothing in it is read, so an entry it carried is neither
+    /// settled nor parked, and the reason says why.
+    Unauthenticated(String),
+}
+
+/// The header an answer's signature rides, lowercased as the parser keeps it.
+const ANSWER_SIGNATURE_HEADER: &str = "x-aoide-answer-signature";
+
+/// Is `node` a record this box can check an answer against: VERIFIED, with a
+/// non-blank key on file? Anything else (a `node add` record, a pair-mesh hop
+/// declared without a key, a legacy record that is verified but keyless) has
+/// nothing to check an answer under, so it is never dialled. One predicate, so
+/// every mail call asks the same question.
+pub(crate) fn keyed_record(n: &Node) -> bool {
+    n.verified && n.pubkey.as_deref().is_some_and(|k| !k.trim().is_empty())
+}
+
+/// One answer-check line in the audit log. The words are the closed
+/// `mail.answer.*` vocabulary; the door and the adapter write their own lines
+/// through the same channel, so an operator reads both the same way.
+fn audit_answer(event: &str, message: &str) {
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        event,
+        "invalid",
+        message,
+    );
+}
+
+/// The JSON-RPC `error.message` of a body that is one, for the refusal text of
+/// an unsigned answer. Shown to the operator and never acted on.
+fn rpc_error_message(body: &str) -> Option<String> {
+    serde_json::from_str::<Value>(body).ok()?.get("error")?.get("message")?.as_str().map(str::to_string)
 }
 
 /// Build, sign and send one method call to `node`, mirroring
@@ -95,6 +136,24 @@ enum SignedCall {
 /// the record (`crate::commands::request_mesh`: the node's sole mesh, else
 /// the home mesh).
 fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> SignedCall {
+    // The key the answer must verify under. Without one nothing can be checked,
+    // so the node is refused before a bearer is resolved or a socket is opened.
+    if !keyed_record(node) {
+        let why = if node.verified {
+            "a verified record with no key"
+        } else {
+            "an unverified record (a `node add`, or a declaration that names no key)"
+        };
+        let msg = format!(
+            "no identity key is on file for `{}` ({why}), so its answers cannot be checked and it is not dialled — \
+             pair it (`aoide pair {}`) or give its charter line a key",
+            node.name, node.name
+        );
+        audit_answer("mail.answer.no-key", &msg);
+        return SignedCall::Unauthenticated(msg);
+    }
+    let key = node.pubkey.clone().unwrap_or_default();
+
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     let body_str = serde_json::to_string(&body).unwrap_or_default();
 
@@ -106,6 +165,15 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
         Ok(h) => h,
         Err(e) => return SignedCall::TransportFailed(format!("signing: {e}")),
     };
+    // The answer covers the request's own signature and nonce, so both are
+    // taken from the headers that were actually sent.
+    let header = |name: &str| extra_headers.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str());
+    let (Some(request_signature), Some(request_nonce)) = (
+        header(aoide_storage::wire_auth::HEADER_SIGNATURE),
+        header(aoide_storage::wire_auth::HEADER_NONCE),
+    ) else {
+        return SignedCall::Unauthenticated(format!("the request to `{}` could not be signed, so its answer cannot be checked", node.name));
+    };
     let answer = match crate::commands::post_json_to_node_answered(node, &body_str, bearer.as_deref(), &extra_headers, 15) {
         Ok(v) => v,
         Err(e) => return SignedCall::TransportFailed(e),
@@ -113,6 +181,51 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
     if answer.status != 200 {
         return SignedCall::TransportFailed(format!("HTTP {}", answer.status));
     }
+
+    // The one signature this answer may carry. None is an unsigned answer; two
+    // or more are ambiguous and refused the same way, so no reader can pick the
+    // one that suits it.
+    let signatures: Vec<&str> = answer
+        .headers
+        .iter()
+        .filter(|(name, _)| name == ANSWER_SIGNATURE_HEADER)
+        .map(|(_, value)| value.as_str())
+        .collect();
+    let signature = match signatures.as_slice() {
+        [one] => *one,
+        [] => {
+            let said = rpc_error_message(&answer.body).map(|m| format!(" (it said: {m}; not acted on)")).unwrap_or_default();
+            let msg = format!(
+                "`{}` answered `{method}` with no answer signature (X-Aoide-Answer-Signature), so nothing in it was \
+                 used: an aoide older than this box's answers unsigned, and so does anything else standing at {} — \
+                 upgrade aoide on `{}`{said}",
+                node.name, node.url, node.name
+            );
+            audit_answer("mail.answer.unsigned", &msg);
+            return SignedCall::Unauthenticated(msg);
+        }
+        many => {
+            let msg = format!(
+                "`{}` answered `{method}` with {} answer signatures, not one, so nothing in it was used",
+                node.name,
+                many.len()
+            );
+            audit_answer("mail.answer.unsigned", &msg);
+            return SignedCall::Unauthenticated(msg);
+        }
+    };
+    // Over the exact bytes received: the body is never re-serialised or trimmed
+    // before it is checked.
+    if !aoide_storage::wire_auth::verify_answer(&key, request_signature, request_nonce, 200, answer.body.as_bytes(), signature) {
+        let msg = format!(
+            "`{}` answered `{method}`, but the answer does not verify as signed by the key on file for it ({}…) — nothing in it was used",
+            node.name,
+            key.chars().take(8).collect::<String>()
+        );
+        audit_answer("mail.answer.key-mismatch", &msg);
+        return SignedCall::Unauthenticated(msg);
+    }
+
     let parsed: Value = match serde_json::from_str(&answer.body) {
         Ok(v) => v,
         Err(e) => return SignedCall::TransportFailed(format!("unparseable response: {e}")),
@@ -153,6 +266,10 @@ enum DepositAttempt {
     /// No JSON-RPC response at all — dial/tunnel/HTTP/parse failure. The
     /// LINK is the suspect, not this entry.
     TransportFailed(String),
+    /// An answer that could not be checked against the key on file. Nothing in
+    /// it is believed: the entry stays spooled and live, and it is not parked.
+    /// The link backs off and the next pass asks again.
+    Unauthenticated(String),
 }
 
 /// The mesh one deposit acts in, for an outbox entry: **the container's own**
@@ -193,6 +310,7 @@ fn attempt_deposit(node: &Node, entry: &aoide_storage::outbox::OutboxEntry) -> D
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return DepositAttempt::Refused(detail),
         SignedCall::TransportFailed(reason) => return DepositAttempt::TransportFailed(reason),
+        SignedCall::Unauthenticated(reason) => return DepositAttempt::Unauthenticated(reason),
     };
     classify_deposit_response(&result)
 }
@@ -787,7 +905,9 @@ impl SendMeshError {
 /// That holds for an `ssh://` hop too, which used to go out unsigned under
 /// loopback treatment: it is signed now, and the receiving door refuses
 /// (`-32007`) a signed request whose key neither its registry nor its in-force
-/// charter carries. A declaration that gives no key leaves the hop unsigned.
+/// charter carries. A declaration that gives no key is a hop [`post_signed`]
+/// refuses before it dials: its answers could never be checked, so it is not
+/// dialled at all.
 ///
 /// **`mesh` is the mesh the letters in that spool RIDE**, and the declaration
 /// read is that one's alone: one node name may sit in several meshes with a
@@ -1027,6 +1147,19 @@ fn relay_proves_charter_key(node: &Node, mesh: &str) -> Result<(), String> {
     let Some(key) = node.pubkey.as_deref() else {
         return Err(format!("relay `{}` has no charter key to check its identity against", node.name));
     };
+    // Every refusal here is the documented relay-key mismatch (MAIL.md, the
+    // charter relay bullet), so each is audited under that one word.
+    let refuse = |msg: String| -> Result<(), String> {
+        let _ = aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::audit::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.poll.relay-key-mismatch",
+            "invalid",
+            &msg,
+        );
+        Err(msg)
+    };
     let theirs: aoide_storage::seal::Binding =
         match post_signed(node, "aoide/binding", json!({}), Some(mesh)) {
             SignedCall::Result(result) => {
@@ -1039,23 +1172,23 @@ fn relay_proves_charter_key(node: &Node, mesh: &str) -> Result<(), String> {
             SignedCall::TransportFailed(reason) => {
                 return Err(format!("relay `{}` did not answer the identity check: {reason}", node.name))
             }
+            // An answer whose signature does not verify under the charter key is
+            // the same fact as a binding signed by another key: the relay did not
+            // prove the key the charter gives it.
+            SignedCall::Unauthenticated(reason) => {
+                return refuse(format!(
+                    "relay `{}` answered its identity check with a key the charter of mesh `{mesh}` does not give it, or with no proof at all — refusing to poll it ({reason})",
+                    node.name
+                ))
+            }
         };
     if aoide_storage::seal::verify_binding(&theirs, Some(key)) {
         return Ok(());
     }
-    let msg = format!(
+    refuse(format!(
         "relay `{}` answered as a key that the charter of mesh `{mesh}` does not give it — refusing to poll it",
         node.name
-    );
-    let _ = aoide_protocol::audit::audit(
-        &aoide_protocol::audit::default_audit_log(),
-        aoide_protocol::audit::Door::Cli,
-        aoide_protocol::audit::EventClass::Audit,
-        "mail.poll.relay-key-mismatch",
-        "invalid",
-        &msg,
-    );
-    Err(msg)
+    ))
 }
 
 /// A refusal as one line for a caller that reports text: what, why, and the fix.
@@ -1135,6 +1268,9 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
+        // A poll whose answer cannot be checked is a failed poll: it files
+        // nothing and clears nothing, so the filed list is carried to the next.
+        SignedCall::Unauthenticated(reason) => return Err(reason),
     };
     if result.get("status").and_then(Value::as_str) == Some("refused") {
         let detail = result
@@ -1394,10 +1530,12 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
 pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_storage::seal::Binding, String> {
     let mine = aoide_storage::seal::publish_binding()?;
     let params = json!({ "binding": mine });
+    // An unverified answer teaches nothing: it returns before `learn_binding`.
     let result = match post_signed(node, "aoide/binding", params, named_mesh) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
+        SignedCall::Unauthenticated(reason) => return Err(reason),
     };
     let theirs: aoide_storage::seal::Binding = serde_json::from_value(
         result.get("binding").cloned().unwrap_or(Value::Null),
@@ -1701,6 +1839,14 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
                 record_failed_attempt(node_name, entry, now_epoch, "transport", &reason)?;
                 break;
             }
+            DepositAttempt::Unauthenticated(reason) => {
+                // An answer this box cannot check is believed about nothing: the
+                // entry is not settled and not parked, it is recorded as a failed
+                // attempt, and the link backs off. `contacted` stays false, so the
+                // poll-on-contact below does not follow an answer that was not read.
+                record_failed_attempt(node_name, entry, now_epoch, "unauthenticated", &reason)?;
+                break;
+            }
             DepositAttempt::LinkRefused(reason) => {
                 // The far end ANSWERED — with a word about its OWN state (a node
                 // its mesh quarantines, a declaration set that will not load),
@@ -1786,6 +1932,11 @@ fn record_failed_attempt(
 ///
 /// `status` is the far end's own word, recorded verbatim as `last_outcome` —
 /// the same string [`DepositAttempt::Delivered`] carries, never re-derived.
+///
+/// Reachable only from a VERIFIED answer: `Delivered` comes only from a
+/// [`SignedCall::Result`], which [`post_signed`] returns only after the answer's
+/// signature checked under the key on file. A relay's acknowledgement therefore
+/// retires its receipt, charter and transit entries, and nothing unproven does.
 fn settle_delivered(
     node_name: &str,
     entry: aoide_storage::outbox::OutboxEntry,
@@ -1863,7 +2014,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"down","detail":"node `elsewhere` is declared `down`"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "waiting").unwrap();
@@ -1889,7 +2040,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -1918,7 +2069,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"config-invalid","detail":"config-invalid: config-unreadable"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "waiting").unwrap();
@@ -1936,7 +2087,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -1968,7 +2119,7 @@ mod tests {
             "[pairing]\nhomeMesh = \"home\"\n\n[mesh.home.status]\nnobody = \"down\"\n",
         )
         .unwrap();
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -2001,7 +2152,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"down","detail":"node `elsewhere` is declared `down`"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -2027,7 +2178,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn unpaired_node(name: &str) -> Node {
+    /// This test process's own identity key. Every stand-in signs its answers
+    /// with it, and [`keyed_node`] holds it on file as the key those answers
+    /// verify under, so a genuine stand-in is one this box can check.
+    fn own_key() -> aoide_storage::identity::Keypair {
+        aoide_storage::identity::load_or_mint().unwrap().0
+    }
+
+    /// A VERIFIED record for `name` under [`own_key`]: a node this box can dial
+    /// and check. The URL is nothing, so a test points it at its own stand-in.
+    fn keyed_node(name: &str) -> Node {
         Node {
             name: name.to_string(),
             url: "http://127.0.0.1:1".to_string(), // nothing listens here
@@ -2035,8 +2195,8 @@ mod tests {
             token_file: None,
             bearer_secret: None,
             hub: false,
-            pubkey: None,
-            verified: false,
+            pubkey: Some(own_key().info().pubkey_hex),
+            verified: true,
             grants: aoide_storage::node_store::Grants::new(),
             narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
@@ -2044,12 +2204,151 @@ mod tests {
         }
     }
 
+    /// One request's head as a stand-in reads it: bytes up to the blank line
+    /// that ends the headers, never the body. Empty on a closed socket.
+    fn read_request_head(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !bytes.windows(4).any(|w| w == b"\r\n\r\n") && bytes.len() < 16 * 1024 {
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+            }
+        }
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    /// The full HTTP answer a door sends to `request`, signed the way a verified
+    /// door signs it: `key` signs the status and the exact body, bound to the
+    /// request's own signature and nonce, with the production signer.
+    fn signed_reply(request: &str, key: &aoide_storage::identity::Keypair, status: u16, body: &str) -> String {
+        use aoide_storage::wire_auth::{sign_answer, HEADER_ANSWER_SIGNATURE, HEADER_NONCE, HEADER_SIGNATURE};
+        let request_signature = aoide_test_support::raw_header(request, HEADER_SIGNATURE).expect("the request is signed");
+        let request_nonce = aoide_test_support::raw_header(request, HEADER_NONCE).expect("the request is signed");
+        let signature = sign_answer(key, &request_signature, &request_nonce, status, body.as_bytes());
+        format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{HEADER_ANSWER_SIGNATURE}: {signature}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// The answer a deposit gets when the far end takes the letter.
+    const ACCEPTED: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#;
+    /// The admission refusal a far end gives a call it will not take (MAIL.md
+    /// §Wire): a JSON-RPC `error`, which is not a verdict on the letter.
+    const LACKS_MESSAGE: &str = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32010,"message":"lacks message"}}"#;
+    /// What a door says to a method it does not have.
+    const NO_SUCH_METHOD: &str = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#;
+
+    /// One whole request as a stand-in reads it: the head, then exactly as many
+    /// body bytes as its `Content-Length` names. Empty on a closed socket.
+    fn read_full_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = stream.read(&mut chunk).unwrap_or(0);
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf).to_string();
+            let Some(head) = text.find("\r\n\r\n") else {
+                if n == 0 { break } else { continue }
+            };
+            let len: usize = text[..head]
+                .lines()
+                .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse().ok()))
+                .unwrap_or(0);
+            if n == 0 || buf.len() >= head + 4 + len {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    /// A whole 200 answer carrying `body` and one `X-Aoide-Answer-Signature`
+    /// header per entry of `signatures`: none for an unsigned answer, two for an
+    /// ambiguous one.
+    fn reply_with(body: &str, signatures: &[&str]) -> String {
+        use aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE;
+        let headers: String = signatures.iter().map(|s| format!("{HEADER_ANSWER_SIGNATURE}: {s}\r\n")).collect();
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// A door that reads each request whole and answers it with `reply`, so a
+    /// test can sign, leave unsigned, forge or replay each answer in turn.
+    /// Returns its port.
+    fn scripted_door(reply: impl Fn(&str) -> String + Send + 'static) -> u16 {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let request = read_full_request(&mut stream);
+                let _ = stream.write_all(reply(&request).as_bytes());
+            }
+        });
+        port
+    }
+
+    /// A charter relay's door for the binding tests. `aoide/binding` is answered
+    /// genuinely, signed by `relay`; with `replay`, every binding after the first
+    /// is that first answer again. `aoide/mailPoll` is signed by `poll`, or left
+    /// unsigned when that is `None`.
+    fn replaying_relay(
+        binding: serde_json::Value,
+        relay: aoide_storage::identity::Keypair,
+        poll: Option<aoide_storage::identity::Keypair>,
+        replay: bool,
+    ) -> u16 {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let first_binding = std::sync::Mutex::new(None::<String>);
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let request = read_full_request(&mut stream);
+                let answered = if request.contains("aoide/binding") {
+                    let mut first = first_binding.lock().unwrap();
+                    match first.clone() {
+                        Some(earlier) if replay => earlier,
+                        _ => {
+                            let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "binding": binding } }).to_string();
+                            let genuine = signed_reply(&request, &relay, 200, &body);
+                            *first = Some(genuine.clone());
+                            genuine
+                        }
+                    }
+                } else {
+                    let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "envelopes": [], "containers": [], "withheld": [] } }).to_string();
+                    match &poll {
+                        Some(key) => signed_reply(&request, key, 200, &body),
+                        None => reply_with(&body, &[]),
+                    }
+                };
+                let _ = stream.write_all(answered.as_bytes());
+            }
+        });
+        port
+    }
+
+    /// Spool one letter for `name`, whose record points at a door on `port`.
+    fn spool_letter_to(name: &str, port: u16) {
+        let mut node = keyed_node(name);
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", name, "bob", "hi").unwrap();
+        aoide_storage::outbox::write_entry(name, &OutboxEntry::fresh(envelope)).unwrap();
+    }
+
     #[test]
     fn a_dead_node_leaves_its_entry_waiting_and_drains_on_return() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("drain-dead-node");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(env)).unwrap();
@@ -2086,7 +2385,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("backoff-despite-write-failure");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         let msgid = env.msgid.clone();
@@ -2120,7 +2419,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("transport-failure-records-entry");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(env)).unwrap();
@@ -2149,7 +2448,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2183,24 +2482,19 @@ mod tests {
     /// `commands::spawn_fake_card_server`'s exact shape (that copy is
     /// private to `commands.rs`'s own test module, so this is a second,
     /// module-local instance rather than a cross-module reach).
-    fn fake_deposit_server(body: &'static str) -> (std::net::TcpListener, u16) {        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    fn fake_deposit_server(body: &'static str) -> (std::net::TcpListener, u16) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let accepter = listener.try_clone().unwrap();
         std::thread::spawn(move || {
-            use std::io::{Read, Write};
+            use std::io::Write;
             loop {
                 let Ok((mut stream, _)) = accepter.accept() else { break };
-                let mut buf = [0u8; 1024];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                if n == 0 {
+                let request = read_request_head(&mut stream);
+                if request.is_empty() {
                     continue;
                 }
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(signed_reply(&request, &own_key(), 200, body).as_bytes());
             }
         });
         (listener, port)
@@ -2221,7 +2515,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"addressing-mismatch","detail":"container is addressed to `chiyo`, not this node"}}"#,
         );
-        let mut node = unpaired_node("sakaki");
+        let mut node = keyed_node("sakaki");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2281,7 +2575,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2332,7 +2626,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"bad-msgid","detail":"envelope msgid does not match the recomputed value"}}"#,
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2378,7 +2672,7 @@ mod tests {
         let (_env, dir) = root("missing-status-parks");
 
         let (listener, port) = fake_deposit_server(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2410,7 +2704,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("drain-no-forward");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(env)).unwrap();
@@ -2476,12 +2770,7 @@ mod tests {
             let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
             log.lock().unwrap().push(body.clone());
             let answer = if body.contains("aoide/mailPoll") { poll_body.clone() } else { deposit.clone() };
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                answer.len(),
-                answer
-            );
-            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(signed_reply(&text, &own_key(), 200, &answer).as_bytes());
         });
         (listener, port, seen)
     }
@@ -2508,7 +2797,7 @@ mod tests {
     fn register_local_origin() -> String {
         let me = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
-        let mut node = unpaired_node(&me);
+        let mut node = keyed_node(&me);
         node.pubkey = Some(kp.info().pubkey_hex.clone());
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -2519,7 +2808,7 @@ mod tests {
     }
 
     fn register_relay(url: String) -> Node {
-        let relay = unpaired_node("relay");
+        let relay = keyed_node("relay");
         let relay = Node { url, ..relay };
         let mut nodes = aoide_storage::node_store::load_nodes();
         aoide_storage::node_store::insert_node(&mut nodes, relay.clone());
@@ -2597,6 +2886,17 @@ mod tests {
     /// Mint `name`'s identity under `root` and read back what a charter line and a
     /// relay's own answer carry: the node line, the identity key, and the signed
     /// binding. This box's own root and node name are restored afterwards.
+    /// The identity key of the box whose state lives under `root`, loaded with
+    /// `AOIDE_ROOT` pointed there, as [`mint_box`] does. A stand-in that plays
+    /// that box signs with it.
+    fn box_keypair(root: &std::path::Path) -> aoide_storage::identity::Keypair {
+        let own_root = std::env::var("AOIDE_ROOT").unwrap();
+        std::env::set_var("AOIDE_ROOT", root);
+        let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+        std::env::set_var("AOIDE_ROOT", own_root);
+        kp
+    }
+
     fn mint_box(root: &std::path::Path, name: &str) -> (String, String, serde_json::Value) {
         let own_root = std::env::var("AOIDE_ROOT").unwrap();
         let own_name = std::env::var("AOIDE_A2A_NODE_NAME").ok();
@@ -2636,7 +2936,10 @@ mod tests {
     /// A loopback stand-in for a relay's door: answers `aoide/binding` with
     /// `binding` and `aoide/mailPoll` with an empty hand-over, and keeps the raw
     /// request of every call it was sent.
-    fn relay_stand_in(binding: serde_json::Value) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    fn relay_stand_in(
+        binding: serde_json::Value,
+        signer: aoide_storage::identity::Keypair,
+    ) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -2669,13 +2972,7 @@ mod tests {
                     serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": { "envelopes": [], "containers": [], "withheld": [] } })
                 }
                 .to_string();
-                let _ = stream.write_all(
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
-                        answer.len()
-                    )
-                    .as_bytes(),
-                );
+                let _ = stream.write_all(signed_reply(&text, &signer, 200, &answer).as_bytes());
             }
         });
         (port, seen)
@@ -2763,15 +3060,16 @@ mod tests {
         charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
 
         let mut target = poll_target("relay", None).unwrap();
-        let (port, seen) = relay_stand_in(impostor_binding);
+        let (port, seen) = relay_stand_in(impostor_binding, box_keypair(&dir.join("impostor-box")));
         target.node.url = format!("http://127.0.0.1:{port}/");
         let err = poll_through("relay", None, target).expect_err("a key the charter does not give is refused");
-        assert!(err.contains("does not give it"), "{err}");
+        assert!(err.contains("does not give it") && err.contains("does not verify as signed by the key on file"), "{err}");
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 1, "the identity check alone was sent: no poll, no letter");
         assert!(seen[0].contains("aoide/binding"), "{}", seen[0]);
         let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
-        assert!(log.contains("mail.poll.relay-key-mismatch"), "the mismatch is audited: {log}");
+        assert!(log.contains("mail.answer.key-mismatch"), "the answer is audited: {log}");
+        assert!(log.contains("mail.poll.relay-key-mismatch"), "the relay is audited under its documented word: {log}");
     }
 
     /// The relay proves its charter key, and the poll then goes out signed. This
@@ -2787,7 +3085,7 @@ mod tests {
         charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
 
         let mut target = poll_target("relay", None).unwrap();
-        let (port, seen) = relay_stand_in(relay_binding);
+        let (port, seen) = relay_stand_in(relay_binding, box_keypair(&dir.join("relay-box")));
         target.node.url = format!("http://127.0.0.1:{port}/");
         let outcome = poll_through("relay", None, target).expect("the relay proves its key and answers the poll");
         assert_eq!(outcome.filed, 0, "an empty spool files nothing, and says so as an answer");
@@ -2894,7 +3192,9 @@ mod tests {
     /// A door that keeps each request it is sent, whole, and answers a
     /// deposit as accepted: what a test needs to read the signature headers
     /// off the wire.
-    fn head_door() -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    fn head_door(
+        signer: aoide_storage::identity::Keypair,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -2920,15 +3220,10 @@ mod tests {
                         break;
                     }
                 }
-                log.lock().unwrap().push(String::from_utf8_lossy(&buf).to_string());
+                let request = String::from_utf8_lossy(&buf).to_string();
+                log.lock().unwrap().push(request.clone());
                 let answer = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#;
-                let _ = stream.write_all(
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
-                        answer.len()
-                    )
-                    .as_bytes(),
-                );
+                let _ = stream.write_all(signed_reply(&request, &signer, 200, answer).as_bytes());
             }
         });
         (listener, port, seen)
@@ -2973,7 +3268,7 @@ mod tests {
         let (mut hop, dial_only) = dial_node("relay", Some("home")).expect("the charter's line is a dial target");
         assert!(dial_only, "this box holds no record for the relay");
         assert_eq!(hop.url, "https://relay.example.net/");
-        let (listener, port, seen) = head_door();
+        let (listener, port, seen) = head_door(box_keypair(&relay_root));
         hop.url = format!("http://127.0.0.1:{port}/");
 
         let envelope = aoide_storage::mail::mint_outbound_letter_in_mesh("alice", "relay", "bob", "hi", "home").unwrap();
@@ -3013,32 +3308,303 @@ mod tests {
     /// **A declaration with no key signs nothing.** A pair mesh's address for a
     /// node this box holds no record of names where to dial and vouches for no
     /// key, so the dialled record is unverified and the deposit goes out bare.
+    /// **A node with no key on file is never dialled.** A declaration that names
+    /// no key leaves nothing to check its answers under, so the deposit is refused
+    /// before a bearer is resolved or a socket is opened: the door sees nothing,
+    /// and the refusal is audited.
     #[test]
-    fn a_hop_declared_without_a_key_goes_out_unsigned() {
+    fn a_node_with_no_key_on_file_is_never_dialled() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("declared-no-key");
-        std::fs::write(
-            aoide_storage::config::source().path,
-            "[mesh.friends.nodes]\nghost = \"ssh://khoa@192.168.1.5\"\n",
-        )
-        .unwrap();
-
-        let (mut hop, dial_only) = dial_node("ghost", Some("friends")).expect("the declared address is a dial target");
-        assert!(dial_only, "this box holds no record for it");
+        let (listener, port, seen) = head_door(own_key());
+        let hop = Node::declared("ghost", &format!("http://127.0.0.1:{port}/"), None, None);
         assert!(!hop.verified && hop.pubkey.is_none(), "no key was declared, so none is trusted");
-        assert!(!Node::declared("ghost", "https://ghost.example.net/", None, None).verified);
 
-        let (listener, port, seen) = head_door();
-        hop.url = format!("http://127.0.0.1:{port}/");
-        hop.via = None;
-        let envelope = aoide_storage::mail::mint_outbound_letter_in_mesh("alice", "ghost", "bob", "hi", "friends").unwrap();
-        attempt_deposit(&hop, &OutboxEntry::fresh(envelope));
-
-        let request = seen.lock().unwrap().first().cloned().expect("the door saw the deposit");
-        let head = request.split_once("\r\n\r\n").unwrap().0.to_ascii_lowercase();
-        assert!(!head.contains("x-aoide-"), "no mesh, node or signature header goes out:\n{head}");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "ghost", "bob", "hi").unwrap();
+        match attempt_deposit(&hop, &OutboxEntry::fresh(envelope)) {
+            DepositAttempt::Unauthenticated(reason) => {
+                assert!(reason.contains("no identity key is on file for `ghost`"), "{reason}");
+                assert!(reason.contains("aoide pair ghost"), "and it says how to fix it: {reason}");
+            }
+            other => panic!("a node with no key is refused before it is dialled, got {other:?}"),
+        }
+        assert!(seen.lock().unwrap().is_empty(), "the door saw nothing: the request never left this box");
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.no-key"), "the refusal is audited: {log}");
 
         drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An unsigned accepted answer is not believed.** A far end that says
+    /// `accepted` with no signature has said nothing this box can check: the
+    /// letter stays spooled and unrefused, the attempt is recorded as
+    /// unauthenticated, and the link backs off.
+    #[test]
+    fn an_unsigned_accepted_answer_is_not_acted_on_and_the_entry_stays_live() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-accepted");
+        spool_letter_to("elsewhere", scripted_door(|_| reply_with(ACCEPTED, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(!entries[0].refused, "an answer that cannot be checked parks nothing");
+        assert!(entries[0].last_outcome.starts_with("unauthenticated:"), "{}", entries[0].last_outcome);
+        assert_eq!(entries[0].tries, 1);
+        let link = aoide_storage::outbox::read_link_state("elsewhere").unwrap().expect("the link backs off");
+        assert!(aoide_storage::outbox::is_held_off(&link, unix_now()), "and it is held off");
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.unsigned"), "the unsigned answer is audited: {log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A forged acknowledgement retires nothing.** A relay that says `accepted`
+    /// under a key that is not the one on file is not believed. The three entries
+    /// a VERIFIED ack retires (a receipt, a charter and a transit container) all
+    /// stay spooled, and each mismatch is audited.
+    #[test]
+    fn a_forged_accepted_ack_never_retires_a_receipt_charter_or_transit_entry() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("forged-ack");
+        let now = aoide_storage::time::now_iso_utc();
+        let transit = {
+            let envelope = aoide_storage::mail::mint_outbound_letter("alice", "ft", "bob", "through the hub").unwrap();
+            let live = aoide_storage::seal::publish_binding().unwrap();
+            OutboxEntry::transit(aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "ft", "ft", &now).unwrap())
+        };
+        let receipt = aoide_storage::mail::mint_ack(
+            "alice",
+            aoide_storage::mail::Address { node: "fr".to_string(), name: "bob".to_string() },
+            "forged-receipt",
+        )
+        .unwrap();
+        let charter = aoide_storage::mail::mint_charter_letter("fc", "charter home v1", "home").unwrap();
+        let spooled = [
+            ("fr", OutboxEntry::fresh(receipt)),
+            ("fc", OutboxEntry::fresh(charter)),
+            ("ft", transit),
+        ];
+
+        let mut nodes = Vec::new();
+        for (name, entry) in &spooled {
+            let port = scripted_door(|request| {
+                signed_reply(request, &aoide_storage::identity::mint_ephemeral().unwrap(), 200, ACCEPTED)
+            });
+            let mut node = keyed_node(name);
+            node.url = format!("http://127.0.0.1:{port}/");
+            nodes.push(node);
+            aoide_storage::outbox::write_entry(name, entry).unwrap();
+        }
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        for (name, _) in &spooled {
+            drain_node(name).unwrap();
+            let left = aoide_storage::outbox::list_entries(name).unwrap();
+            assert_eq!(left.len(), 1, "`{name}`: a forged ack retires nothing");
+            assert!(left[0].last_outcome.starts_with("unauthenticated:"), "`{name}`: {}", left[0].last_outcome);
+        }
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.key-mismatch"), "each forgery is audited: {log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A replayed answer settles nothing twice.** The far end answers the first
+    /// deposit genuinely and every deposit after it with that same answer again.
+    /// The first charter lands and retires; the second is not believed, because
+    /// the signature inside the replayed answer was made for the first request.
+    #[test]
+    fn a_replayed_answer_does_not_settle_a_second_deposit() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("replayed-answer");
+        let key = own_key();
+        let first_answer = std::sync::Mutex::new(None::<String>);
+        let port = scripted_door(move |request| {
+            if !request.contains("aoide/mailDeposit") {
+                return signed_reply(request, &key, 200, NO_SUCH_METHOD);
+            }
+            let mut first = first_answer.lock().unwrap();
+            match first.clone() {
+                Some(earlier) => earlier,
+                None => {
+                    let genuine = signed_reply(request, &key, 200, ACCEPTED);
+                    *first = Some(genuine.clone());
+                    genuine
+                }
+            }
+        });
+        let mut node = keyed_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        for text in ["charter home v1", "charter home v2"] {
+            let charter = aoide_storage::mail::mint_charter_letter("elsewhere", text, "home").unwrap();
+            aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(charter)).unwrap();
+        }
+
+        drain_node("elsewhere").unwrap();
+
+        let left = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(left.len(), 1, "the first charter landed and retired; the replay settled nothing else");
+        assert!(left[0].last_outcome.starts_with("unauthenticated:"), "{}", left[0].last_outcome);
+        assert!(!left[0].refused);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An answer bound to another request is refused.** The signature covers
+    /// the request's own signature and nonce, so a genuine key signing over a
+    /// different request's bytes has not answered this request.
+    #[test]
+    fn an_answer_signed_for_another_request_is_refused() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("answer-other-request");
+        let key = own_key();
+        let port = scripted_door(move |request| {
+            let nonce = aoide_test_support::raw_header(request, aoide_storage::wire_auth::HEADER_NONCE)
+                .expect("the request is signed");
+            let other_request = "00".repeat(64);
+            let signature = aoide_storage::wire_auth::sign_answer(&key, &other_request, &nonce, 200, ACCEPTED.as_bytes());
+            reply_with(ACCEPTED, &[&signature])
+        });
+        spool_letter_to("elsewhere", port);
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(entries[0].last_outcome.starts_with("unauthenticated:"), "{}", entries[0].last_outcome);
+        assert!(!entries[0].refused);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.key-mismatch"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Two answer signatures are refused, even when both are genuine.** An
+    /// answer carries one signature, so no reader can pick the one that suits it.
+    /// The same genuine signature sent twice is still two.
+    #[test]
+    fn an_answer_with_two_signatures_is_refused_even_when_both_are_genuine() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("two-signatures");
+        let key = own_key();
+        let port = scripted_door(move |request| {
+            let request_signature = aoide_test_support::raw_header(request, aoide_storage::wire_auth::HEADER_SIGNATURE)
+                .expect("the request is signed");
+            let nonce = aoide_test_support::raw_header(request, aoide_storage::wire_auth::HEADER_NONCE)
+                .expect("the request is signed");
+            let signature = aoide_storage::wire_auth::sign_answer(&key, &request_signature, &nonce, 200, ACCEPTED.as_bytes());
+            reply_with(ACCEPTED, &[&signature, &signature])
+        });
+        spool_letter_to("elsewhere", port);
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(!entries[0].refused);
+        assert!(
+            entries[0].last_outcome.starts_with("unauthenticated:") && entries[0].last_outcome.contains("2 answer signatures"),
+            "{}",
+            entries[0].last_outcome
+        );
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.unsigned"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An unsigned error is not a refusal.** A JSON-RPC `error` nobody signed
+    /// could be anyone's word, so it must not park the letter. What it says is
+    /// shown to the operator and never acted on.
+    #[test]
+    fn an_unsigned_jsonrpc_error_never_parks_an_entry() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-error");
+        spool_letter_to("elsewhere", scripted_door(|_| reply_with(LACKS_MESSAGE, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(!entries[0].refused, "an error nobody signed parks nothing");
+        assert!(entries[0].last_outcome.starts_with("unauthenticated:"), "{}", entries[0].last_outcome);
+        assert!(entries[0].last_outcome.contains("lacks message"), "{}", entries[0].last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A signed error parks the letter.** The same error, signed by the key on
+    /// file, is the far end's own refusal and parks the letter at its sender, as
+    /// any verified refusal does.
+    #[test]
+    fn a_signed_jsonrpc_error_parks_it() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("signed-error");
+        let key = own_key();
+        spool_letter_to("elsewhere", scripted_door(move |request| signed_reply(request, &key, 200, LACKS_MESSAGE)));
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "a refused entry stays in the spool");
+        assert!(entries[0].refused, "a verified refusal parks it");
+        assert!(entries[0].last_outcome.starts_with("refused:") && entries[0].last_outcome.contains("lacks message"), "{}", entries[0].last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A replayed binding does not prove a charter relay.** The relay's identity
+    /// check is its signed binding answer, bound to the request it answered. A
+    /// genuine answer sent again for a later poll proves nothing, and neither does
+    /// a poll answer that is unsigned or signed by a key the charter does not give.
+    /// Each failed poll files and clears nothing, so the filed list it carried
+    /// survives to the next one.
+    #[test]
+    fn a_replayed_binding_does_not_prove_a_charter_relay() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-replayed-binding");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, relay_binding) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+        let relay_at = |port: u16| {
+            let mut target = poll_target("relay", None).unwrap();
+            target.node.url = format!("http://127.0.0.1:{port}/");
+            target
+        };
+
+        // The first poll is genuine, so its binding is the one a replay sends again.
+        let port = replaying_relay(
+            relay_binding.clone(),
+            box_keypair(&dir.join("relay-box")),
+            Some(box_keypair(&dir.join("relay-box"))),
+            true,
+        );
+        poll_through("relay", None, relay_at(port)).expect("the first poll proves its key");
+
+        aoide_storage::outbox::record_filed("relay", "seeded-msgid").unwrap();
+        let carried = aoide_storage::outbox::filed_pending("relay").unwrap();
+        assert_eq!(carried, vec!["seeded-msgid".to_string()]);
+        let err = poll_through("relay", None, relay_at(port)).expect_err("a replayed binding proves nothing");
+        assert!(err.contains("does not give it"), "{err}");
+        assert_eq!(aoide_storage::outbox::filed_pending("relay").unwrap(), carried, "a failed poll clears nothing");
+
+        // A fresh binding, then a poll answer that is unsigned, or signed by a key
+        // the charter does not give.
+        for (poll, why) in [
+            (None, "with no answer signature"),
+            (Some(aoide_storage::identity::mint_ephemeral().unwrap()), "does not verify as signed by the key on file"),
+        ] {
+            let port = replaying_relay(relay_binding.clone(), box_keypair(&dir.join("relay-box")), poll, false);
+            let err = poll_through("relay", None, relay_at(port)).expect_err("the poll's own answer is not proven");
+            assert!(err.contains(why), "{err}");
+            assert_eq!(aoide_storage::outbox::filed_pending("relay").unwrap(), carried, "and it files and clears nothing");
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3104,7 +3670,7 @@ mod tests {
 
         let laptop = Node {
             url: aoide_storage::charter::DEFAULT_ADDRESS.to_string(),
-            ..unpaired_node("laptop")
+            ..keyed_node("laptop")
         };
         let laptop = Node { pubkey: Some("cc33".to_string()), verified: true, ..laptop };
         let laptop = Node { grants: aoide_storage::node_store::grants_in("home", &["message"]), ..laptop };
@@ -3520,7 +4086,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("relay");
+        let mut node = keyed_node("relay");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -3577,18 +4143,13 @@ mod tests {
                     ack_recorded_rx.recv().unwrap();
                 }
                 let body = r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#;
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(signed_reply(&request, &own_key(), 200, body).as_bytes());
                 if is_poll {
                     return;
                 }
             }
         });
-        let mut node = unpaired_node("relay");
+        let mut node = keyed_node("relay");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 

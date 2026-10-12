@@ -445,12 +445,23 @@ pub(crate) fn request_json_with_headers(
     parse_http_response(status, &raw)
 }
 
+/// Split a response into its head and body at the FIRST blank line, whether
+/// that line ends in CRLF or bare LF. A CRLF boundary found later in the body
+/// must not win over an LF-only head that ends earlier.
+fn split_head(raw: &str) -> Option<(&str, &str)> {
+    let crlf = raw.find("\r\n\r\n").map(|at| (at, 4));
+    let lf = raw.find("\n\n").map(|at| (at, 2));
+    let (at, width) = match (crlf, lf) {
+        (Some(a), Some(b)) => if a.0 <= b.0 { a } else { b },
+        (a, b) => a.or(b)?,
+    };
+    Some((&raw[..at], &raw[at + width..]))
+}
+
 fn parse_http_response(status: u16, raw: &str) -> Result<HttpResponse, String> {
     let mut rest = raw;
     loop {
-        let (block, body) = rest.split_once("\r\n\r\n")
-            .or_else(|| rest.split_once("\n\n"))
-            .ok_or("HTTP response has no header boundary")?;
+        let (block, body) = split_head(rest).ok_or("HTTP response has no header boundary")?;
         let mut lines = block.lines();
         let status_line = lines.next().ok_or("HTTP response has no status line")?;
         let mut parts = status_line.split_whitespace();
@@ -469,7 +480,7 @@ fn parse_http_response(status: u16, raw: &str) -> Result<HttpResponse, String> {
         let mut headers = Vec::new();
         for line in lines {
             let (name, value) = line.split_once(':').ok_or("invalid HTTP response header")?;
-            headers.push((name.to_ascii_lowercase(), value.trim().to_string()));
+            headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
         }
         return Ok(HttpResponse { status, headers, body: body.to_string() });
     }
@@ -9647,6 +9658,25 @@ mod tests {
     /// the codebase's established dead-loopback-port fixture) — for tests
     /// that need `mail send`'s node branch to get PAST the verified check
     /// and actually attempt (and fail fast at) a real drain dial.
+    /// This test process's identity key: the key [`verified_node`] holds on file,
+    /// and the one [`spawn_fixed_answer_door`] signs its answers with.
+    fn own_test_key() -> aoide_storage::identity::Keypair {
+        aoide_storage::identity::load_or_mint().unwrap().0
+    }
+
+    /// The full HTTP answer a door sends to `request`, signed with `key` over the
+    /// status and the exact body, bound to the request's own signature and nonce.
+    fn signed_reply(request: &str, key: &aoide_storage::identity::Keypair, status: u16, body: &str) -> String {
+        use aoide_storage::wire_auth::{sign_answer, HEADER_ANSWER_SIGNATURE, HEADER_NONCE, HEADER_SIGNATURE};
+        let request_signature = aoide_test_support::raw_header(request, HEADER_SIGNATURE).expect("the request is signed");
+        let request_nonce = aoide_test_support::raw_header(request, HEADER_NONCE).expect("the request is signed");
+        let signature = sign_answer(key, &request_signature, &request_nonce, status, body.as_bytes());
+        format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{HEADER_ANSWER_SIGNATURE}: {signature}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
     fn verified_node(name: &str, url: &str) -> aoide_storage::node_store::Node {
         aoide_storage::node_store::Node {
             name: name.to_string(),
@@ -9655,7 +9685,7 @@ mod tests {
             token_file: None,
             bearer_secret: None,
             hub: false,
-            pubkey: None,
+            pubkey: Some(own_test_key().info().pubkey_hex),
             verified: true,
             grants: aoide_storage::node_store::grants_in("home", &["message"]),
             narrowed: aoide_storage::node_store::Grants::new(),
@@ -10084,12 +10114,8 @@ mod tests {
                 continue;
             }
             counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes());
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let _ = stream.write_all(signed_reply(&request, &own_test_key(), 200, &body).as_bytes());
         });
         (listener, port, seen)
     }
@@ -10099,6 +10125,8 @@ mod tests {
     #[test]
     fn post_json_to_node_answered_reads_the_answer_header_off_a_real_socket() {
         use std::io::{Read, Write};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _root = aoide_test_support::isolated_mail_root("answer-header-socket");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
@@ -11419,6 +11447,28 @@ mod mcp_http_tests {
 
         let unsigned = parse_http_response(200, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}").unwrap();
         assert_eq!(signature(&unsigned), None, "no header means no signature, and the parse does not invent one");
+    }
+
+    #[test]
+    fn parse_http_response_trims_header_names_and_splits_an_lf_only_head() {
+        // A name padded before its colon is the same header, and a head ending in
+        // bare LF splits there, as a CRLF one does.
+        let padded = parse_http_response(200, "HTTP/1.1 200 OK\r\nX-Aoide-Answer-Signature : abcd\r\n\r\n{}").unwrap();
+        assert!(padded.headers.iter().any(|(n, v)| n == "x-aoide-answer-signature" && v == "abcd"), "{:?}", padded.headers);
+
+        let lf_only = parse_http_response(200, "HTTP/1.1 200 OK\nx-aoide-answer-signature: abcd\n\n{\"result\":{}}").unwrap();
+        assert!(lf_only.headers.iter().any(|(n, v)| n == "x-aoide-answer-signature" && v == "abcd"));
+        assert_eq!(lf_only.body, "{\"result\":{}}");
+    }
+
+    #[test]
+    fn parse_http_response_ends_the_head_at_its_first_blank_line_not_one_in_the_body() {
+        // The body carries a CRLF blank line of its own. The head ends at the
+        // LF-only blank line that comes first, so the body is kept whole.
+        let raw = "HTTP/1.1 200 OK\nx-aoide-answer-signature: abcd\n\n{\"a\":\"x\r\n\r\ny\"}";
+        let answer = parse_http_response(200, raw).unwrap();
+        assert_eq!(answer.body, "{\"a\":\"x\r\n\r\ny\"}", "the body is exactly the bytes after the head");
+        assert!(answer.headers.iter().any(|(n, v)| n == "x-aoide-answer-signature" && v == "abcd"));
     }
 
     // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).

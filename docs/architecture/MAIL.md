@@ -533,7 +533,19 @@ door's audit name whitelist gains both names so they never log as bare
   missing and the one fix (`aoide pair <node>`, or a charter that declares the
   relay); it is never an empty answer. A relay the charter declares `down` is
   not asked, and a relay whose answer contradicts its charter line is refused
-  and audited (`mail.poll.relay-key-mismatch`).
+  and audited (`mail.poll.relay-key-mismatch` when a verified binding names
+  another key; `mail.answer.key-mismatch` when the answer is not signed by the
+  key on file at all).
+- **An answer is believed only when it is signed.** Every mail call's answer
+  (`aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) is read only once its
+  signature verifies under the key on file for that node, over the exact body
+  bytes and bound to the request it answers (CONTRACTS §6). An answer that does
+  not verify (unsigned, signed by another key, made for another request, or
+  carrying two signatures) is `unauthenticated`: nothing in it is used, the
+  attempt is recorded, and the link backs off. Its `accepted` retires nothing,
+  and its JSON-RPC `error` parks nothing. A node with no key on file is never
+  dialled. A verified `accepted` or `duplicate` retires a receipt, a `charter`
+  letter or a `transit` container; a letter waits for its receipt.
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
   destination. Routed like any letter, never themselves acked. **An

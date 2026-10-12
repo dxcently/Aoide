@@ -693,11 +693,18 @@
   door that answers a word the sender was never taught parks a charter that
   already landed. A new outcome a door wants to report belongs in `data`, never
   as a fourth status.
-- **`settle_delivered`'s retire set is `receipt` and `charter`, and a letter
-  waits.** A receipt's deposit outcome is its confirmation; a `charter` letter
-  is applied rather than filed, so there is no mailbox on the far end to ack
-  from and its own outcome is the whole confirmation there can be. Widening
-  that set to letters would retire a letter on a delivery nobody acked.
+- **`settle_delivered`'s retire set is `receipt`, `charter` and `transit`, and
+  a letter waits.** A receipt's deposit outcome is its confirmation; a
+  `charter` letter is applied rather than filed, so there is no mailbox on the
+  far end to ack from and its own outcome is the whole confirmation there can
+  be; a `transit` container is the hub's custody, ended by the next hop's
+  acceptance. Widening that set to letters would retire a letter on a delivery
+  nobody acked. **Only a VERIFIED answer reaches it**: an unsigned, forged or
+  replayed `accepted` leaves all three kinds spooled.
+- **Every mail answer is verified before it is read.** `post_signed` is the one
+  path to a `SignedCall::Result`, and a node with no key on file is refused
+  before it is dialled (`keyed_record`). Do not add a mail call that parses a
+  response directly.
 - **`charter`'s handlers render; `aoide_storage::charter` acts (P-CHARTER).**
   The document, its validation, the five accept steps, the operator key, the
   trust record, the high-water mark and the spool all live in storage —

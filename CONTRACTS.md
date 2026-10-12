@@ -1522,7 +1522,9 @@ differently, and neither has a compat write:
   `< 0.0.26` has no arm for, so every signed command from the newer node to
   the older one is refused `-32007` while the reverse still works — a pair
   that looks healthy and is one-way. The rules, the operations and the reason
-  there is deliberately no fallback are §6's "Mixed versions".
+  there is deliberately no fallback are §6's "Mixed versions". The answer
+  signature runs one way too: a client older than it reads unsigned answers as
+  it always did, so rolling a client back widens what it believes.
 - **`state/nodes.json`.** The migration folds each record's `allows` into
   `grants[<home>]` and REMOVES the legacy key, and an older binary's own
   `save_nodes` serializes the whole registry from its own structs — which
@@ -8321,6 +8323,17 @@ its `envelope` or `container` holds, never a parse-level `-32602`. (A
 charter-purpose container is admitted on a verified signature alone, so the
 purpose is read from the raw params for that one decision.)
 
+**The answer is verified before it is read.** A client takes this method's
+answer only when the door's `X-Aoide-Answer-Signature` verifies under the key
+on file for that node, over the exact body bytes and bound to the request's
+own signature and nonce (`wire_auth::answer_string`). Anything else (no
+signature, two of them, another key's, another request's) is
+`unauthenticated`: the client records the attempt, parks nothing, settles
+nothing and backs off the link. Only a verified `accepted` or `duplicate`
+retires a receipt, a `charter` letter or a `transit` container; a letter waits
+for its receipt. A verified JSON-RPC `error` parks the entry, an unsigned one
+never does.
+
 A container takes a longer path than an envelope, and every step of it is
 still a REFUSED RESULT rather than a JSON-RPC error, because what became of
 a well-formed container is the same kind of answer as what became of a
@@ -8394,6 +8407,7 @@ operations cross which way is a rule of the wire, not of any command:
 | --- | --- | --- |
 | the pairing ceremony (`pairRequest`, `pairReveal`, `pairPoll`) | **works** — its own signatures carry no mesh (`wire_auth::canonical_string("PAIRPOLL", …, None)`, byte-identical on both sides) | **works** |
 | every signed command (`node pull`, `send` to `node/<q>`, `node spawn`, `tasks get`/`history` on a node, `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) | **refused `-32007` "signature verification failed"** — the sixth field is not in the bytes the older verifier rebuilds | **works**, judged in `[pairing] homeMesh`, so a grant that lives only in a NAMED mesh is still refused |
+| the answer to a mail call (`aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) | **held, not parked** — the older door's `-32007` carries no answer signature, so it is `unauthenticated`: the letter stays spooled and is retried on back-off, not parked | **works** — the new door signs its answer to a verified request, and an older client does not read the header |
 
 So a pair across the versions succeeds and looks healthy in `node list` while
 being **one-way**: the older node reaches the newer one and the newer node
@@ -8589,6 +8603,9 @@ result — the caller has to know before it starts sealing:
 `stale-binding` (not above the stored generation) or `binding-mismatch`
 (its signer is not the key on record for the caller). Audits under
 `a2a.aoide/binding`, unconditionally, in the door's audit-name whitelist.
+
+A caller reads this answer only once its signature verifies (the signed-answer
+rule); an unsigned or unverified binding is never learned.
 
 The rest of this section describes the plaintext arm, unchanged:
 

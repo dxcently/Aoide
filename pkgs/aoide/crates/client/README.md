@@ -455,7 +455,7 @@ never the inbound/serve half (that's `aoide-server`).
   `attempt_deposit` builds and sends one `aoide/mailDeposit` POST,
   mirroring `spawn_on_node_via`'s exact shape (resolve bearer, sign, POST,
   parse, check `error`) with no `--via` override — a drain only ever dials
-  `node.via` as recorded. Its `DepositAttempt` has three arms:
+  `node.via` as recorded. Its `DepositAttempt` has five arms:
   `Delivered{status}` (a result whose `status` is `"accepted"` or
   `"duplicate"`), `Refused(reason)` (the far end's own policy call, e.g.
   `-32010` lacks-message as a JSON-RPC `error` for an ADMISSION refusal,
@@ -464,8 +464,13 @@ never the inbound/serve half (that's `aoide-server`).
   split means the two travel differently on the wire but collapse into
   this one arm here, since a drain only ever needs "not currently
   deliverable," never which shape carried that news; the link is fine
-  either way, this ONE entry isn't), and `TransportFailed(reason)` (no
-  response at all — the LINK is the suspect). `drain_node`'s loop walks up
+  either way, this ONE entry isn't), `TransportFailed(reason)` (no
+  response at all — the LINK is the suspect), `LinkRefused(reason)` (the far
+  end answered with a word about its own state, `down` or `config-invalid`: the
+  entry stays live and the link backs off), and `Unauthenticated(reason)` (an
+  answer that did not verify under the key on file: nothing in it is read, so
+  the entry is recorded `unauthenticated:`, neither settled nor parked, and the
+  link backs off). `drain_node`'s loop walks up
   to `DRAIN_BATCH_CAP` (50) non-refused entries oldest first — a per-call
   bound so one tick's cost never scales with an unbounded backlog (mail
   register §26 outbox fix; a stuck link that had piled up 16k+ undelivered
@@ -480,7 +485,9 @@ never the inbound/serve half (that's `aoide-server`).
   frozen at `tries: 0` forever. A receipt's own successful deposit —
   accepted OR duplicate, either way the far end has it now — IS its
   confirmation (ruling 4: no separate ack-of-an-ack), so `drain_node`
-  removes it outright; an ordinary letter waits for a REAL ack instead,
+  removes it outright (`settle_delivered` retires a `charter` letter and a
+  `transit` container on the same verified acceptance); an ordinary letter
+  waits for a REAL ack instead,
   only having its `tries`/`last_try_at`/`last_outcome` bookkeeping
   updated. **P-M3 adds hold, the poll, and poll-on-contact to this same
   function.** `drain_node` skips a `hold` entry exactly the way it skips a
@@ -501,9 +508,13 @@ never the inbound/serve half (that's `aoide-server`).
   for), and `pollable_nodes()` leaves such a node out, so a bare
   `aoide mail poll` never dials a node that has no inbound transport to answer
   on.
-  `post_signed(node, method, params)` is the dial/bearer/sign/POST/parse
-  half both methods share — `attempt_deposit` and `poll_node` are two
-  readings of its `SignedCall`, never two copies of the wire machinery.
+  `post_signed(node, method, params, mesh)` is the dial/bearer/sign/POST/
+  verify/parse half every mail method shares — `attempt_deposit`, `poll_node`
+  and the binding exchange are readings of its `SignedCall`, never copies of
+  the wire machinery. It is the one place an answer is verified: the
+  `X-Aoide-Answer-Signature` must verify under the key on file for the node,
+  over the exact body bytes, before anything in it is read. A node with no key
+  on file is refused before it is dialled (`keyed_record`).
   `poll_node` posts `{"node": <this box's own name>}`, and receives each
   handed-over envelope through the SAME `aoide_storage::mail::deposit`
   chain a pushed deposit gets (hop = the node polled, origin = the
@@ -523,7 +534,10 @@ never the inbound/serve half (that's `aoide-server`).
   it always has. A charter relay is polled with no pair record, and only after
   `relay_proves_charter_key` has checked its signed `aoide/binding` answer
   against the charter's key: a relay answering as any other key is audited
-  (`mail.poll.relay-key-mismatch`) and refused before a letter moves. Every
+  (`mail.poll.relay-key-mismatch`) and refused before a letter moves. An answer
+  not signed by the key on file (unsigned, forged, or bound to another request)
+  is audited `mail.answer.unsigned` or `mail.answer.key-mismatch`, and the poll
+  fails with nothing filed or cleared. Every
   refusal is a taught `Refusal` (what, why, fix) raised before any dial — no
   record and no charter line, a `pair` mesh, a `down` line, a `poll` or
   `ssh://` address, a charter with no identity key — never an empty
