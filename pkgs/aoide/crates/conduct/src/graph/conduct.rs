@@ -461,9 +461,9 @@ fn walk(argv: &[String]) -> Walked {
     };
     let base = command_basename(first);
     if let Some(l) = launcher(&base) {
-        // `sudo` and `doas` read as a shell whatever they run, so nothing is ever
-        // typed into one: a line typed before its program starts answers its own
-        // password prompt. A shell under it is at its prompt only when it is the
+        // `sudo` and `doas` read as a shell whatever they run, so no automatic
+        // reader types into one: a line typed before its program starts answers
+        // its own password prompt. A shell under it is at its prompt only when it is the
         // whole command.
         let wraps = matches!(base.as_str(), "sudo" | "doas");
         return match handoff(l, argv, 1) {
@@ -2958,7 +2958,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dash_dash_after_an_operand_is_refused_and_sudo_is_never_typed_into() {
+    fn a_dash_dash_after_an_operand_is_refused_and_sudo_is_never_auto_typed() {
         // `chrt` skips a `--` after its priority and `timeout` runs it as the
         // program: the walk cannot tell which, so it names nothing and reads a shell.
         let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
@@ -2971,7 +2971,7 @@ mod tests {
         // A harness under `sudo` is still a `sudo`: its password prompt would read
         // the first line typed.
         for case in [&["sudo", "claude"][..], &["sudo", "-u", "root", "claude"], &["doas", "claude"]] {
-            assert!(program_is_a_shell(&owned(case)), "{case:?} is never typed into");
+            assert!(program_is_a_shell(&owned(case)), "{case:?} is never auto-typed");
         }
     }
 
