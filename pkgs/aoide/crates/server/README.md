@@ -10,11 +10,13 @@ the inbound half of the two-door contract (the outbound half is
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`
-  execs: take the start lock `<socket>.lock` (`daemon::acquire_daemon_lock`,
-  a non-blocking `flock` held for the process's life: a held lock refuses
-  the start before the socket is touched), then bind the control socket
-  (`$AOIDE_DAEMON_SOCKET`, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`,
-  `daemon::socket_path`), spawn a thread-per-connection accept loop
+  execs: take the socket lock `<socket>.lock` (`daemon::acquire_daemon_lock`)
+  and the state lock `aoided.lock` in the state dir
+  (`daemon::acquire_state_lock`), both non-blocking `flock`s held for the
+  process's life, so a held lock refuses the start before anything is
+  bound. Then bind the control socket (`$AOIDE_DAEMON_SOCKET`, else
+  `$XDG_RUNTIME_DIR/aoide/aoided.sock`, `daemon::socket_path`), spawn a
+  thread-per-connection accept loop
   (fallible `Builder::spawn`, accept-error backoff — the secrets broker's
   own accept-loop discipline, reused by convention), then tick forever
   (~1s; P-D3's two producers, below). Newline-delimited JSON, the secrets

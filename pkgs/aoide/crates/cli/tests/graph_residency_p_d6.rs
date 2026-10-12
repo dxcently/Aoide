@@ -123,7 +123,9 @@ impl RunLoopGuard {
         let socket_path = socket_path.to_path_buf();
         let events_path = unique_dir(&format!("{tag}-events")).with_extension("jsonl");
         let log_path = unique_dir(&format!("{tag}-log"));
+        let state_dir = unique_dir(&format!("{tag}-state"));
         std::fs::create_dir_all(stage_dir).expect("the fixture must stage its own dir");
+        std::fs::create_dir_all(&state_dir).expect("the fixture must stage its own state dir");
 
         // The routed CLIENT half of a test reads this process's env.
         std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
@@ -140,6 +142,7 @@ impl RunLoopGuard {
             .env(CHILD_EVENTS_ENV, &events_path)
             .env(CHILD_LOG_ENV, &log_path)
             .env("AOIDE_STAGE_DIR", stage_dir)
+            .env("AOIDE_STATE_DIR", &state_dir)
             .env("AOIDE_DAEMON_SOCKET", &socket_path);
         if let Some(pid_file) = pid_file {
             cmd.env(CHILD_PID_FILE_ENV, pid_file);
