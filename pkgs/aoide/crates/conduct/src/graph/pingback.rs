@@ -66,9 +66,9 @@
 //! program's BASENAME is the harness its agent names: the wrap's
 //! `wrapped_program` (the launcher walk's answer, stamped at registration, by
 //! basename) equals the agent profile's binary. The proof is that basename and
-//! no more. Anything else is withheld and counted: a shell (`shell-parent`), a
-//! wrap the walk cannot resolve or does not model (`unverified-wrap`, e.g.
-//! `taskset -c 0 bash`, `env -S bash`). Every child-authored fragment of a line
+//! no more. Anything else is withheld and counted: a shell (`shell-parent`, which
+//! includes `script` and `env -S`), a wrap the walk cannot resolve or does not
+//! model (`unverified-wrap`, e.g. `taskset -c 0 claude`). Every child-authored fragment of a line
 //! (the quoted say, prompt and stop reason, the question and the tag, and the
 //! unquoted tool label) is untrusted model output (house rule 4): one line,
 //! every unsafe character stripped (control, and the Unicode `Cf` marks that
@@ -80,7 +80,7 @@ mod hook;
 mod prompt;
 
 use super::common::{clean_line, clip_flat, strip_unsafe};
-use super::conduct::{channel_socket_path, wrapped_program_is_a_shell};
+use super::conduct::{channel_socket_path, is_its_harness, wrapped_program_is_a_shell};
 use super::doorbell::{connect_for_ring, write_channel};
 use super::eidolon::{eidolon_state_from_trace, DroppedEidolon};
 use super::model::{
@@ -1195,10 +1195,11 @@ fn deliver(
 /// [`wrapped_program_is_a_shell`] is the same `program_is_a_shell` verdict read
 /// off the record, so the two halves cannot drift.
 ///
-/// The positive arm is [`is_its_harness`]: the resolved program must be the
-/// profile's own binary. A wrap the launcher walk cannot resolve, or does not
-/// model (`taskset -c 0 claude`, `env -S claude`), has no proof, so it is
-/// withheld as `unverified-wrap` even when its label is a harness.
+/// The positive arm is [`is_its_harness`] (`conduct.rs`, shared with the doorbell
+/// and the A2A door): the resolved program must be the profile's own binary. A
+/// wrap the launcher walk cannot resolve, or does not model (`taskset -c 0
+/// claude`), has no proof, so it is withheld as `unverified-wrap` even when its
+/// label is a harness.
 fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
     if matches!(rec.agent.as_str(), "" | "shell") || wrapped_program_is_a_shell(rec) {
         return Some("shell-parent");
@@ -1213,16 +1214,6 @@ fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
         return Some("parent-done");
     }
     None
-}
-
-/// Whether the wrap's resolved program is the harness its agent profile names
-/// (the profile's first launch token, `claude` for `claude`). Read off the
-/// record's `wrapped_program`, which the launcher walk stamped at registration;
-/// `None` (no program the walk could name, or no profile) is not a harness.
-fn is_its_harness(rec: &SessionRecord) -> bool {
-    agent_profile(&rec.agent)
-        .and_then(|p| p.launch.first().copied())
-        .is_some_and(|bin| rec.wrapped_program.as_deref() == Some(bin))
 }
 
 // ── the pull (the parent's own side) ─────────────────────────────────────
@@ -2699,10 +2690,10 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_claude_label_behind_a_launcher_the_walk_cannot_resolve_is_unverified() {
-        // `--agent claude -- env -S "sleep 1"`: the label is a harness and the
-        // program is not a shell, but `env -S` hands its program name to a split
-        // string the walk cannot name, so there is no proof of the harness.
+    fn a_claude_label_behind_env_s_is_a_shell_and_never_receptive() {
+        // `--agent claude -- env -S "sleep 1"`: the label is a harness, but the
+        // split string is a whole command line that may be a shell, so the walk
+        // names no program and the wrap reads as a shell, never as a harness.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -2711,7 +2702,7 @@ mod tests {
             "AOIDE_AUDIT_LOG",
             "AOIDE_SESSION_ID",
         ]);
-        let _root = setup("pingback-env-s-unverified");
+        let _root = setup("pingback-env-s-shell");
 
         let out = crate::graph::conduct::session_conduct(&conduct_invocation(
             &["env", "-S", "sleep 1"],
@@ -2722,8 +2713,8 @@ mod tests {
         let file: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = file.sessions.iter().find(|s| s.session_id == "env-s").unwrap();
         assert_eq!(rec.wrapped_program, None, "the walk names no program: {rec:?}");
-        assert!(!rec.shell, "not a shell, so the reason is the missing proof: {rec:?}");
-        assert_eq!(unreceptive(rec), Some("unverified-wrap"));
+        assert!(rec.shell, "a split string is a command line, so a shell: {rec:?}");
+        assert_eq!(unreceptive(rec), Some("shell-parent"));
     }
 
     /// Every arm of the ping line, built from hostile fields: the raw text a field

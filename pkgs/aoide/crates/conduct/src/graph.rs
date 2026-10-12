@@ -129,6 +129,9 @@ pub use self::conduct::program_is_a_shell;
 // The positive half of the same walk: the registered harness an argv runs, for
 // the door that spawns one and must prove what it spawned. Same walk, no copy.
 pub use self::conduct::wrapped_harness;
+// The same proof read off a RECORD: the ping-back, the doorbell's PTY arm and the
+// A2A door all type into a pty only when this holds. One predicate, no copy.
+pub use self::conduct::is_its_harness;
 // The screen episode's one clearing write (`question` and the `sudo` lock badge
 // together), shared by the session end, the reaper and the refresh writer.
 pub(crate) use self::model::clear_screen_ask;

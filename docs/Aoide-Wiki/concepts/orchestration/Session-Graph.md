@@ -342,20 +342,14 @@ trace; `hook` for a hook phase; `screen` for the question last heard), claimed
 inside one short stage-lock section before the write, so each event is delivered
 at most once.
 
-A parent is heard only on a positive proof: its wrapped program, the launcher
-walk's resolved basename stamped as `wrappedProgram` at registration, must be the
-harness its agent names. A shell is skipped (`shell-parent`). So is a wrap the
-walk cannot name or does not resolve to its harness (`unverified-wrap`), and one
-whose record is gone, not conductable, or already `done`. The proof is a
-basename, and it is stated as one: a symlink named `claude` that points at
-`bash`, or a script named `claude` that execs a shell, passes it. The proof
-rejects the launchers the walk does not model and a label that does not match
-the wrap. It does not stop a same-uid process that names a shell after a
-harness. For that class the defence is inert content: every line takes one pass
-as it is written (`wire_line`), which makes every shell metacharacter, and `!`
-and `"`, its fullwidth twin, so `$(…)` or `!e` in any field cannot run. The
-leading `-` of a login spelling is dropped for a shell name only: `-bash` is
-`bash`, and `-claude` stays `-claude`, which is not the harness.
+A parent is heard only on the positive proof of `CONTRACTS.md`'s `wrappedProgram`
+paragraph: its wrapped program must be the harness its agent names. The ping-back
+is one of the readers of that rule (the doorbell's PTY arm, the A2A inject and the
+A2A spawn are the others), and its refusals are `shell-parent` and `unverified-wrap`, plus
+`not-conductable` and `parent-done` for a wrap whose record is gone, not
+conductable, or already `done`. The leading `-` of a login spelling is dropped
+for a shell name only: `-bash` is `bash`, and `-claude` stays `-claude`, which is
+not the harness.
 
 The ruling is the User's (2026-09-17): a parent hears the children it spawned,
 and nothing wider.
@@ -452,8 +446,10 @@ A shell's screen counts by what the shell was given. An interactive shell (no
 its bare prompt, so a question typed or echoed there is never `awaiting`, and a
 `read -p` it runs itself goes unseen. A shell given a command or a script
 (`bash -c "apt install x"`, `sh ./run.sh`) is a program like any other, and its
-questions are heard. The argv decides which, read by the walk that classes a
-shell; no process is probed for it.
+questions are heard. `script` is a shell at its prompt unless `-c` or `--command`
+appears after it, and `env -S` hands a command line to a shell, so its questions
+are heard. The argv decides which, read by the walk that classes a shell; no
+process is probed for it.
 
 Precedence, highest first: **hook phase, trace, screen, presence.** A non-shell
 session whose harness is an agent with a profile (claude, kimi, pi, eidolon) is

@@ -41,8 +41,10 @@
 //! gate, no pending queue, no provenance prefix, no title rename — and that
 //! one is followed by the target's own submit keystroke. A PTY ring is
 //! therefore refused outright for a wrap whose WRAPPED program is a shell
-//! (`shell-parent`, [`wrapped_program_is_a_shell`]): the line is submitted,
-//! and a shell would RUN it. The channel arm is not that — nothing is typed.
+//! (`shell-parent`, [`wrapped_program_is_a_shell`]), and for a wrap the launcher
+//! walk does not prove to be its harness (`unverified-wrap`,
+//! [`is_its_harness`]): the line is submitted, and a shell would RUN it. The
+//! channel arm is not that — nothing is typed.
 //!
 //! **Every other door forwards, never rings.** `aoide-client`'s `mail send`
 //! (self branch) already forwarded `mail ring` through
@@ -55,7 +57,7 @@
 //! deliberately deferred out of this slice.
 
 use super::conduct::channel_socket_path;
-use super::conduct::wrapped_program_is_a_shell;
+use super::conduct::{is_its_harness, wrapped_program_is_a_shell};
 use super::doc::is_conductable_now;
 use super::model::{load_stage, sessions_path, SessionRecord, SessionsFile};
 use super::permit::profile_for_agent;
@@ -87,7 +89,8 @@ pub struct RingReport {
     /// `not-conductable` (`is_conductable_now` false, including a socket
     /// file that no longer exists), `shell-parent` (the wrap's own WRAPPED
     /// program is a shell and no channel socket answered: the PTY line would
-    /// be RUN as a command), `interactive-composer` (interactive
+    /// be RUN as a command), `unverified-wrap` (no channel socket answered and
+    /// the walk does not prove the wrap is its harness), `interactive-composer` (interactive
     /// AND no live channel socket), `no-readiness-signal` (no hook-fed
     /// agent child), or `write-failed` (the chosen transport's connect/
     /// write itself failed — channel or PTY alike). The latch is untouched
@@ -301,11 +304,21 @@ fn ring_locked(name: &str, exclude: Option<&str>) -> RingReport {
                 report.skipped.push((wrap_id.clone(), "shell-parent".to_string()));
                 continue;
             }
+            // The same positive proof the ping-back asks: a line is typed only
+            // into a wrap whose walked program is the harness its own agent names.
+            // Scoped to the headless arm that types: an interactive wrap is never
+            // typed into, so it keeps its own `interactive-composer` reason.
+            None if wrap.headless && !is_its_harness(wrap) => {
+                report.skipped.push((wrap_id.clone(), "unverified-wrap".to_string()));
+                continue;
+            }
             None if wrap.headless => {
                 // `is_conductable_now` already proved `wrap.socket` is
-                // `Some`, non-empty, and exists on disk.
+                // `Some`, non-empty, and exists on disk. The submit key is the
+                // proven harness's own (`wrap.agent`), the program the line
+                // is typed into; the readiness read above stays the child's.
                 let socket = wrap.socket.as_deref().unwrap_or_default();
-                let profile = profile_for_agent(&child.agent);
+                let profile = profile_for_agent(&wrap.agent);
                 (|| -> std::io::Result<()> {
                     let mut stream = connect_for_ring(socket)?;
                     write_delivery(&mut stream, payload.as_bytes(), true, profile.submit_key, SUBMIT_KEYSTROKE_DELAY)
@@ -447,6 +460,7 @@ mod tests {
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
         do_session_start(id, Some("claude"), Some("/w"), None, None, Some(true), Some(socket.to_str().unwrap()), None, None);
+        stamp_wrapped_program(id, Some("claude"));
         stamp_headless(id);
         listener
     }
@@ -461,6 +475,7 @@ mod tests {
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
         do_session_start(id, Some("claude"), Some("/w"), None, None, Some(true), Some(socket.to_str().unwrap()), None, None);
+        stamp_wrapped_program(id, Some("claude"));
         listener
     }
 
@@ -1257,6 +1272,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The positive proof on the PTY arm: a wrap labelled `claude` whose walk
+    /// names no program, or names another launcher, is never typed into. The
+    /// label is a harness and nothing is a shell, so only [`is_its_harness`]
+    /// refuses it.
+    #[test]
+    fn a_wrap_the_walk_does_not_prove_is_never_typed_into() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("ring-unproven-wrap-pty");
+        let name = "claude-mail";
+        let mut listeners = Vec::new();
+        for (wrap_id, walked) in [("wrap-none", None), ("wrap-taskset", Some("taskset"))] {
+            listeners.push(headless_wrap(wrap_id));
+            stamp_wrapped_program(wrap_id, walked);
+            let child_id = format!("{wrap_id}-child");
+            hook_child(&child_id, wrap_id, "claude");
+            do_session_phase(&child_id, "stopped");
+            aoide_storage::mail::enrol_reader(name, wrap_id).unwrap();
+        }
+        aoide_storage::mail::file_letter("someone", name, "hello").unwrap();
+
+        let report = ring(name, None).unwrap();
+        assert!(report.rung.is_empty(), "{report:?}");
+        assert_eq!(report.skipped.len(), 2, "{report:?}");
+        assert!(report.skipped.iter().all(|(_, why)| why == "unverified-wrap"), "{report:?}");
+        for listener in &listeners {
+            assert_nothing_arrives(listener);
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// N1's doorbell half: a wrap that is CONDUCTING a shell is never typed
     /// into, however its record is labelled — and this wrapper's label
     /// (`claude`, [`headless_wrap`]'s own) is a registered harness profile, so
@@ -1743,6 +1797,7 @@ mod tests {
         // connect itself fails — the write-failed path, not not-conductable.
         drop(UnixListener::bind(&socket).unwrap());
         do_session_start(wrap_id, Some("claude"), Some("/w"), None, None, Some(true), Some(socket.to_str().unwrap()), None, None);
+        stamp_wrapped_program(wrap_id, Some("claude"));
         stamp_headless(wrap_id);
         hook_child(child_id, wrap_id, "claude");
         do_session_phase(child_id, "stopped");

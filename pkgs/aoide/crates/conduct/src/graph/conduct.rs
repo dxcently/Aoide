@@ -98,13 +98,6 @@ fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
         ),
         "doas" => matches!(arg, "-u" | "-C"),
         "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
-        // `-c` and `--command` take the command, and in a cluster (`-qc CMD`) the
-        // `c` that ends the cluster takes the next argument, as getopt reads it.
-        // `--command=CMD` carries its value in the same token, so it takes none.
-        "script" => {
-            matches!(arg, "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in" | "--command")
-                || (arg.starts_with('-') && !arg.starts_with("--") && arg.ends_with('c'))
-        }
         _ => false,
     }
 }
@@ -184,16 +177,20 @@ fn nix_shell_verdict(argv: &[String], i: usize) -> Option<bool> {
     Some(true)
 }
 
-/// Where `script -q <typescript> [<command> …]`'s payload starts, or `None`
-/// when it carries no command of its own. `script -c <cmd> <file>` also gives
-/// `None`: the option skip takes `-c` and its command, and the file is the
-/// typescript. [`script_runs_a_command`] reads that `-c` off the options.
-fn script_command(argv: &[String], i: usize) -> Option<usize> {
-    let mut j = skip_launcher_options(argv, i + 1, "script", true);
-    if j < argv.len() {
-        j += 1; // the typescript FILE
-    }
-    (j < argv.len()).then_some(j)
+/// Whether an `env` argv carries its command in a split string: `-S`/`--split-string`
+/// in any spelling. That is `-S X`, `-SX`, a short cluster with an `S` (`-iS X`),
+/// `--split-string=X`, and any unique prefix of the long name (`--sp`). The string
+/// is a whole command line, which may be a shell, so the walk cannot see past it.
+/// The scan covers the whole remainder, so an assignment cannot hide the option;
+/// a harness argument spelled the same way is refused too, the safe direction.
+fn env_splits_a_command_line(argv: &[String], i: usize) -> bool {
+    argv[i + 1..].iter().any(|a| match a.strip_prefix("--") {
+        Some(long) => {
+            let name = long.split('=').next().unwrap_or_default();
+            !name.is_empty() && "split-string".starts_with(name)
+        }
+        None => a.starts_with('-') && a.contains('S'),
+    })
 }
 
 /// Whether a conducted command IS a shell — one question, one list, one
@@ -223,8 +220,8 @@ fn script_command(argv: &[String], i: usize) -> Option<usize> {
 /// The ping-back does not trust this predicate's silence. It delivers only to a
 /// wrap whose RESOLVED program is the harness its agent names
 /// ([`wrapped_program_name`], stamped as `wrapped_program`), so a launcher this
-/// walk does not model (`taskset`, `flock`, `env -S`) is withheld there, whatever
-/// this predicate says. Here, for the forms it models, a shell answers `true`; a
+/// walk does not model (`taskset`, `flock`) is withheld there, whatever this
+/// predicate says. Here, for the forms it models, a shell answers `true`; a
 /// false POSITIVE costs a skipped auto-typing, the silent-safe direction.
 pub fn program_is_a_shell(argv: &[String]) -> bool {
     shell_verdict(argv).is_some()
@@ -254,6 +251,10 @@ fn shell_verdict(argv: &[String]) -> Option<bool> {
         }
         let base = command_basename(&argv[i]);
         match base.as_str() {
+            // `env -S`: the split string is a whole command line, which may be a
+            // shell. The walk names no program, and the shell it may be answers
+            // as one that runs a command, so its questions are heard.
+            "env" if env_splits_a_command_line(argv, i) => return Some(false),
             b if FORWARDING_LAUNCHERS.contains(&b) => {
                 i = skip_launcher_options(argv, i + 1, &b, true)
             }
@@ -263,12 +264,9 @@ fn shell_verdict(argv: &[String]) -> Option<bool> {
             // is spelled (`60`, `1m`, `0.5s`).
             "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
             "nix" => return nix_shell_verdict(argv, i),
-            "script" => match script_command(argv, i) {
-                Some(next) => i = next,
-                // No command of its own: `script` runs the user's `$SHELL`, a
-                // shell at its prompt, unless `-c` hands it a command.
-                None => return Some(!script_runs_a_command(argv, i)),
-            },
+            // `script` runs the user's `$SHELL`: a shell at its prompt, unless
+            // `-c` hands it a command. The walk never reads past it.
+            "script" => return Some(!script_runs_a_command(argv, i)),
             // `busybox sh` is the shell as one of its applets; `busybox ls` is a
             // program, and a shell all the same (it is a `busybox`).
             "busybox" => {
@@ -336,20 +334,19 @@ fn shell_args_are_interactive(args: &[String]) -> bool {
     true
 }
 
-/// Whether `script`'s own options carry `-c` or `--command`: it then runs that
-/// command through a shell, which is a command, never a prompt.
+/// Whether `script`'s argv carries `-c` or `--command` anywhere after it: it then
+/// runs that command, never a prompt. The whole remainder is scanned, so no
+/// option-parsing guess can step over a `-c` (`-qc`, `-fc`, `--command=x`); an
+/// over-match only has the screen hear a question it could have silenced.
 fn script_runs_a_command(argv: &[String], i: usize) -> bool {
-    let end = skip_launcher_options(argv, i + 1, "script", true).min(argv.len());
-    argv[i + 1..end].iter().any(|a| {
-        a.starts_with("--command") || (a.starts_with('-') && !a.starts_with("--") && a.contains('c'))
-    })
+    argv[i + 1..].iter().any(|a| a.starts_with('-') && a.contains('c'))
 }
 
 /// The program a wrapped argv runs, by basename: the first token the launcher
 /// walk does not forward through. `None` when the walk names no program at all:
-/// `script` with no command, `su`, a `nix` form without a `-c` payload, a
-/// launcher option that eats the program name (`env -S bash`). A launcher the
-/// walk does not model names itself (`taskset`), which is never a harness.
+/// `script` (a shell whatever its argv), `env -S` (a command line, which names
+/// no program), `su`, a `nix` form without a `-c` payload. A launcher the walk
+/// does not model names itself (`taskset`), which is never a harness.
 /// Stamped on the record at registration as `wrapped_program`; the ping-back's
 /// receptiveness reads it.
 fn wrapped_program_name(argv: &[String]) -> Option<String> {
@@ -361,11 +358,12 @@ fn wrapped_program_name(argv: &[String]) -> Option<String> {
         }
         let base = command_basename(&argv[i]);
         match base.as_str() {
+            "env" if env_splits_a_command_line(argv, i) => return None,
             b if FORWARDING_LAUNCHERS.contains(&b) => {
                 i = skip_launcher_options(argv, i + 1, b, true)
             }
             "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
-            "script" => i = script_command(argv, i)?,
+            "script" => return None,
             "sudo" | "doas" => i = skip_launcher_options(argv, i + 1, &base, false),
             "su" => return None,
             "nix" => {
@@ -384,7 +382,7 @@ fn wrapped_program_name(argv: &[String]) -> Option<String> {
 
 /// The registered harness a conducted argv runs, by the launcher walk: the
 /// walked program must BE a profile's own launch token. `None` for everything
-/// else — a shell, a launcher the walk does not model (`taskset`, `env -S`), a
+/// else — a shell, a launcher the walk does not model (`taskset`, `flock`), a
 /// wrapper script, a name with no profile. The positive half of
 /// [`program_is_a_shell`]: a caller that may only type into a harness asks for
 /// this proof, never for the mere absence of a shell.
@@ -431,6 +429,19 @@ pub fn wrapped_harness(argv: &[String]) -> Option<&'static str> {
 /// pre-Phase-3b visibility `conduct_socket_path` carries one screen down.
 pub fn wrapped_program_is_a_shell(rec: &SessionRecord) -> bool {
     rec.shell || rec.restore.is_some()
+}
+
+/// Whether a wrap is a harness the launcher walk PROVES: its walked program
+/// (`wrapped_program`, stamped at registration) is the launch token of the profile
+/// its `agent` names. The positive half of [`wrapped_program_is_a_shell`]. A shell
+/// is never a harness, and neither is a launcher the walk does not model, a wrapper
+/// script, or a name with no profile: none of them has a proof. Every reader that
+/// types a line into a pty asks this one question (the ping-back, the doorbell's
+/// PTY arm, the A2A door's inject), and none restates it.
+pub fn is_its_harness(rec: &SessionRecord) -> bool {
+    agent_profile(&rec.agent)
+        .and_then(|p| p.launch.first().copied())
+        .is_some_and(|bin| rec.wrapped_program.as_deref() == Some(bin))
 }
 
 /// Whether a process is invocation plumbing rather than a harness: a shell or a
@@ -2559,6 +2570,11 @@ mod tests {
             &["script", "--command", "make", "out.log"],
             &["script", "--command=make", "out.log"],
             &["script", "--command", "bash"],
+            // `-c` after the typescript operand is still script's option.
+            &["script", "-q", "/dev/null", "-c", "make"],
+            &["env", "-S", "bash"],
+            &["env", "--split-string=bash -c x"],
+            &["env", "-iS", "bash"],
             &["fish", "--command=make"],
             &["fish", "-c", "x"],
             &["busybox", "sh", "-c", "x"],
@@ -2595,10 +2611,14 @@ mod tests {
             (&["timeout", "600", "claude"], Some("claude")),
             (&["sudo", "-u", "root", "claude"], Some("claude")),
             (&["nix", "develop", "-c", "claude"], Some("claude")),
-            (&["script", "-q", "/dev/null", "claude"], Some("claude")),
+            (&["script", "-q", "/dev/null", "claude"], None),
             (&["taskset", "-c", "0", "claude"], Some("taskset")),
             (&["taskset", "-c", "0", "bash"], Some("taskset")),
             (&["env", "-S", "bash"], None),
+            (&["env", "-S", "claude"], None),
+            (&["env", "--split-string=claude"], None),
+            (&["env", "-iS", "claude"], None),
+            (&["env", "-u", "FOO", "claude"], Some("claude")),
             (&["script", "-c", "claude", "out.log"], None),
             (&["script", "-qc", "claude", "out.log"], None),
             (&["script", "--command", "claude", "out.log"], None),
@@ -2635,7 +2655,7 @@ mod tests {
             (&["nice", "-n", "5", "claude"], Some("claude")),
             (&["timeout", "600", "claude"], Some("claude")),
             (&["nix", "develop", "-c", "claude"], Some("claude")),
-            (&["script", "-q", "/dev/null", "claude"], Some("claude")),
+            (&["script", "-q", "/dev/null", "claude"], None),
             (&["kimi"], Some("kimi")),
             (&["pi"], Some("pi")),
             (&["eidolon"], Some("eidolon")),
@@ -2643,6 +2663,7 @@ mod tests {
             (&["bash", "-lc", "claude"], None),
             (&["env", "bash"], None),
             (&["env", "-S", "claude"], None),
+            (&["env", "--split-string=claude"], None),
             (&["taskset", "-c", "0", "claude"], None),
             (&["/opt/x/my-wrapper"], None),
             (&["no-such-agent"], None),
@@ -2673,6 +2694,12 @@ mod tests {
             (&["script", "--command", "claude", "out.log"], true),
             (&["script", "--command", "bash"], true),
             (&["script", "--command=bash", "out.log"], true),
+            // A script is a shell whatever its argv: the wrapped harness never
+            // reads past it, so it is never typed into.
+            (&["script", "-q", "/dev/null", "claude"], true),
+            (&["env", "-S", "claude"], true),
+            (&["env", "--split-string=claude"], true),
+            (&["env", "-iS", "claude"], true),
             (&["zsh"], true),
             (&["fish"], true),
             (&["sh"], true),
