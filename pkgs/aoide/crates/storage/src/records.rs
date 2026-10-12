@@ -247,11 +247,11 @@ pub struct SessionRecord {
     /// basename (`claude` for `aoide spawn -- env claude`), stamped at the same
     /// registration as `shell`. A launcher the walk does not model names itself
     /// (`taskset -c 0 claude` is `taskset`). Absent when the walk names no program
-    /// at all: a login shell with no command, `script` with no command, `su`,
-    /// a `nix` form without a `-c` payload, `env -S` (its split string swallows
-    /// the program name). The ping-back delivers only to a wrap whose program is
-    /// the harness its agent names, so an absent or foreign name is never
-    /// delivered to. `skip_serializing_if` keeps every older record identical.
+    /// at all: a login shell, `script` (a shell whatever its argv), `su`, a `nix`
+    /// form without a `-c` payload, and `env -S` (a command line that names no
+    /// program). The readers type into a wrap only when its program is the harness
+    /// its agent names (`conduct.rs::is_its_harness`), so an absent or foreign name
+    /// is never typed into. `skip_serializing_if` keeps every older record identical.
     #[serde(rename = "wrappedProgram", default, skip_serializing_if = "Option::is_none")]
     pub wrapped_program: Option<String>,
     #[serde(rename = "startedAt", default)]
@@ -645,9 +645,8 @@ pub struct SessionRecord {
     /// - `busy` — the door's opening-turn worker pool was full (nothing was
     ///   typed; ask again);
     /// - `no-worker` — no worker thread could be started (nothing was typed);
-    /// - `skipped-empty` / `skipped-shell` / `skipped-unverified` — nothing to
-    ///   type, a shell may not be typed at, or the configured command is not
-    ///   proven to be a registered harness (default-deny);
+    /// - `skipped-*` — nothing typed; the verdicts and their reasons are listed
+    ///   once, in `CONTRACTS.md`;
     /// - `no-socket` / `write-failed` — the target's control socket never
     ///   answered, or the write failed (no receipt filed in either case);
     /// - `unknown` — the process that owed a verdict died before it could
