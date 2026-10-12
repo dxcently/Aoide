@@ -1595,7 +1595,13 @@ fn reap_inner(
     // records are already `done`, so there is nothing to reap, and folding them
     // in would trip the `prune_done` call below into sweeping every unrelated
     // `done` record on the desktop, which stays `session prune`'s job.
-    let superseded_done = superseded_done_siblings(&s_file.sessions);
+    // A wrap-written death the tick has not claimed is held: no pass below may
+    // take its record, the only place its fact lives (see `held_deaths`).
+    let held = crate::graph::held_deaths(&s_file.sessions, &h_file.hooks);
+    let superseded_done: Vec<String> = superseded_done_siblings(&s_file.sessions)
+        .into_iter()
+        .filter(|id| !held.contains(id))
+        .collect();
 
     // Orphaned hook records: a `hooks.json` entry whose sessionId matches NO
     // session record anywhere in the roster. The hook door always writes the
@@ -1616,7 +1622,7 @@ fn reap_inner(
     let orphan_hooks: Vec<String> = h_file
         .hooks
         .iter()
-        .filter(|h| !live_ids.contains(h.session_id.as_str()))
+        .filter(|h| !live_ids.contains(h.session_id.as_str()) && !held.contains(&h.session_id))
         .map(|h| h.session_id.clone())
         .collect();
 
@@ -1745,7 +1751,6 @@ fn reap_inner(
     // A child whose death the tick has not claimed keeps its hook record as it
     // is: `upsert_hook` would clear the death fact, and the tick would then say
     // the death without its status.
-    let held = crate::graph::held_deaths(&h_file.hooks);
     for id in reaped.iter().filter(|id| !held.contains(*id)) {
         upsert_hook(&mut h_file.hooks, id, "done", &now);
     }
@@ -4362,5 +4367,114 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&stage);
         let _ = std::fs::remove_dir_all(&runtime);
+    }
+
+    /// A cursor whose hook half caches the route a child's death is said over:
+    /// what keeps an unclaimed death held once its record has left the roster.
+    fn cache_route(id: &str) {
+        let body = format!(
+            r#"{{"{id}":{{"hook":{{"phase":"working","at":"2026-10-07T10:00:00Z","route":{{"host":"wrap","to":"spawner","tag":"[claude {id}]","last":"working"}}}}}}}}"#
+        );
+        std::fs::write(crate::graph::pingback_path(), body).unwrap();
+    }
+
+    /// The wrap recorded a death on `id`'s hook record, as `done` with its fact.
+    fn record_death(hooks: &mut [crate::graph::HookRecord], id: &str) {
+        let h = hooks.iter_mut().find(|h| h.session_id == id).unwrap();
+        h.phase = "done".into();
+        h.death = Some(crate::graph::HookDeath {
+            outcome: Some("signal".into()),
+            signal: Some(9),
+            ..Default::default()
+        });
+    }
+
+    /// A tombstone the superseded pass would drop is spared while its wrap's death
+    /// is unclaimed; the same tombstone without a death is dropped.
+    #[test]
+    fn reap_spares_a_superseded_tombstone_whose_death_the_tick_has_not_said() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-held-superseded");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-held-superseded-xdg");
+
+        let now = now_iso_utc();
+        let mk = |id: &str, state: &str| {
+            let mut r = agent(id, "0xW", &now);
+            r.kind = Some("agent".into());
+            r.state = state.into();
+            r.pid = None;
+            r.cwd = "/nonexistent/nowhere".into();
+            r
+        };
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![mk("held", "done"), mk("plain", "done"), mk("live", "working")],
+            },
+        )
+        .unwrap();
+        let mut hooks = Vec::new();
+        for id in ["held", "plain", "live"] {
+            upsert_hook(&mut hooks, id, "working", &now);
+        }
+        record_death(&mut hooks, "held");
+        upsert_hook(&mut hooks, "plain", "done", &now);
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+        cache_route("held");
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let ids: Vec<&str> = sessions.sessions.iter().map(|s| s.session_id.as_str()).collect();
+        assert!(ids.contains(&"held"), "the unclaimed death keeps its tombstone: {ids:?}");
+        assert!(!ids.contains(&"plain"), "a tombstone with no death is dropped: {ids:?}");
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let held = hooks.hooks.iter().find(|h| h.session_id == "held").expect("the held record stays");
+        assert_eq!(held.death.as_ref().and_then(|d| d.signal), Some(9), "its fact is intact");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// An orphan hook record (no session left) whose wrap's death is unclaimed is
+    /// spared by the orphan sweep; an orphan without a death is still dropped.
+    #[test]
+    fn reap_spares_an_orphan_hook_whose_death_the_tick_has_not_said() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env =
+            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE", "XDG_RUNTIME_DIR"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-held-orphan");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-held-orphan-xdg");
+
+        let now = now_iso_utc();
+        let mut live = hook_only("live-1", "idle");
+        live.started_at = now.clone();
+        live.cwd = "/nonexistent/nowhere".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![live] }).unwrap();
+        let mut hooks = Vec::new();
+        upsert_hook(&mut hooks, "live-1", "idle", &now);
+        upsert_hook(&mut hooks, "ghost-held", "working", &now);
+        record_death(&mut hooks, "ghost-held");
+        upsert_hook(&mut hooks, "ghost-plain", "stopped", &now);
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+        cache_route("ghost-held");
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let ids: Vec<&str> = hooks.hooks.iter().map(|h| h.session_id.as_str()).collect();
+        assert!(ids.contains(&"ghost-held"), "the unclaimed death's record is spared: {ids:?}");
+        assert!(!ids.contains(&"ghost-plain"), "an orphan with no death is dropped: {ids:?}");
+
+        let _ = std::fs::remove_dir_all(&stage);
     }
 }

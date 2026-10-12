@@ -46,8 +46,16 @@ mod fs_windows;
 #[cfg(unix)]
 pub fn lock_exclusive(file: &std::fs::File) -> bool {
     use std::os::unix::io::AsRawFd;
-    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-    rc == 0
+    // A signal that interrupts the wait is not a refusal: the wait is retried,
+    // so a TERM to the wrap cannot leave a stage write unlocked.
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return true;
+        }
+        if std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return false;
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -3281,5 +3289,44 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A signal that interrupts the wait for a stage lock does not refuse it: the
+    /// wait is retried and the lock is taken once its holder lets go. The handler
+    /// is installed without `SA_RESTART`, so `flock(2)` really returns `EINTR`.
+    #[cfg(unix)]
+    #[test]
+    fn a_signal_that_interrupts_the_stage_lock_wait_does_not_refuse_it() {
+        use std::os::unix::io::AsRawFd;
+        extern "C" fn noop(_sig: libc::c_int) {}
+        let home = std::env::temp_dir().join(format!("aoide-eintr-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let path = home.join("lock");
+        let holder = std::fs::OpenOptions::new().create(true).write(true).open(&path).unwrap();
+        let waiter = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        assert_eq!(unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX) }, 0);
+
+        let usr2 = libc::SIGUSR2;
+        let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+        let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+        sa.sa_sigaction = noop as *const () as libc::sighandler_t;
+        unsafe {
+            libc::sigemptyset(&mut sa.sa_mask);
+            libc::sigaction(usr2, &sa, &mut old);
+        }
+        let (tid_tx, tid_rx) = std::sync::mpsc::channel();
+        let blocked = std::thread::spawn(move || {
+            tid_tx.send(unsafe { libc::pthread_self() }).unwrap();
+            lock_exclusive(&waiter)
+        });
+        let tid = tid_rx.recv().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        unsafe { libc::pthread_kill(tid, usr2) };
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(holder);
+        let taken = blocked.join().unwrap();
+        unsafe { libc::sigaction(usr2, &old, std::ptr::null_mut()) };
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(taken, "the interrupted wait retries and takes the lock");
     }
 }

@@ -1030,7 +1030,7 @@ pub fn prune(_inv: &Invocation) -> Outcome {
         Err(e) => return stage_error("session.prune", e),
     };
 
-    let held = crate::graph::pingback::held_deaths(&h_file.hooks);
+    let held = crate::graph::pingback::held_deaths(&s_file.sessions, &h_file.hooks);
     let (kept_s, kept_h, removed, cleared) = prune_done_sparing(
         std::mem::take(&mut s_file.sessions),
         std::mem::take(&mut h_file.hooks),

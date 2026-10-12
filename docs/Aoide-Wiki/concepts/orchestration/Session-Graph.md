@@ -304,19 +304,19 @@ a silence), `[claude <petname>] settled` when a child last seen `working` or
 `awaiting` stops through its own hook, and
 `[claude <petname>] died mid-turn · last: <the tool in flight, else "working">`
 when that open turn ends with its harness gone. The hosting wrap records that
-end itself, the moment its harness exits: the child's hook phase becomes `died`,
-with the tool in flight and how the process ended (`exit 1`, `signal 9`, or
-`timeout`), and the line names that status in parentheses, as in
-`… died mid-turn (exit 1) · last: …`. When the wrap is SIGKILLed before it
-writes (SIGKILL is never caught), the tick infers the death instead: the harness
-process is gone (the first `hookAncestry` pid, probed with the reaper's own
-liveness probe), or the child's session has left the roster while its hook
-record still reads open. That inferred line carries no status. A wrap sent
-SIGTERM, SIGHUP or SIGINT forwards it to its harness and writes the fact before
-it exits, so that death carries its signal. A `done` phase is a session ending
-through its own hook and says nothing. A silence before a death does not hide
-it; a death is claimed once per open turn. The first look at a child is a
-baseline and says nothing, a child found already stopped or already dead says
+end itself, the moment its harness exits: the child's hook record becomes
+`done` with a fact naming the tool in flight and how the process ended (`exit
+1`, `signal 9`, or `timeout`), and the line names that status in parentheses,
+as in `… died mid-turn (exit 1) · last: …`. A wrap sent SIGTERM, SIGHUP or
+SIGINT forwards it to its harness, records the fact, and then exits by that
+signal, so the death carries its signal. When the wrap is SIGKILLed before it
+writes (SIGKILL is never caught), the tick infers the death instead, once the
+wrap is gone and the child's route still stands; that inferred line carries no
+status. The tick says each fact once, then clears it, and a recorded death is
+held against every prune until it is said. A `done` phase with no fact is a
+session ending through its own hook and says nothing. A silence before a death
+does not hide it. The first look at a child is a baseline and says nothing,
+except a recorded death under a day old; a child found already stopped says
 nothing, and a turn that begins and ends between two ticks is not heard. A child
 the tick can no longer route is judged from the route its entry kept, by the
 rules in `CONTRACTS.md` (`state/stage/pingback.json`), where the orphan rule is

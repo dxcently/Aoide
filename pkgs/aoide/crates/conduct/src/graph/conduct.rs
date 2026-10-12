@@ -17,7 +17,7 @@ use super::model::{
     HookDeath, HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use super::prompt::{Prompt, PromptWatch};
-use super::pty::{spawn_on_pty, take_wrap_signal, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize, WrapSignals};
+use super::pty::{die_by_signal, spawn_on_pty, take_wrap_signal, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize, WrapSignals};
 #[cfg(unix)]
 use super::pty::signal_name;
 use super::session_store::{
@@ -1523,6 +1523,8 @@ struct MultiplexEnd {
     /// cannot (see `Pty::hung_up`), so a host that cannot answer never has a
     /// guessed fact stamped into every run's outcome.
     pty_held_after_exit: Option<bool>,
+    /// The end signal the loop answered, if one arrived while it ran.
+    end_signal: Option<i32>,
 }
 
 /// The single-thread multiplexer. Shuttles: real stdin → terminal (you type
@@ -1587,6 +1589,7 @@ fn conduct_multiplex(
     // its own death record. The child's exit is then recorded as the death.
     const WRAP_SIGNAL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
     let mut forwarded_at: Option<std::time::Instant> = None;
+    let mut end_signal: Option<i32> = None;
 
     let mut timed_out = false;
     // The DIRECT CHILD's own exit governs completion, so a descendant holding
@@ -1634,6 +1637,7 @@ fn conduct_multiplex(
             pty.resize(&ws);
         }
         if let Some(sig) = take_wrap_signal() {
+            end_signal = Some(sig);
             if forwarded_at.is_none() && !child_exited {
                 unsafe { libc::kill(shell_pid as libc::pid_t, sig) };
                 forwarded_at = Some(std::time::Instant::now());
@@ -1756,7 +1760,7 @@ fn conduct_multiplex(
         None
     };
 
-    MultiplexEnd { timed_out, killed_with, pty_held_after_exit }
+    MultiplexEnd { timed_out, killed_with, pty_held_after_exit, end_signal }
 }
 
 /// The `killedWith` label: the post-kill status as SECONDARY evidence, in the
@@ -2143,6 +2147,12 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // open is recorded as died now, before this wrap ends its own record.
     record_hook_deaths(&id, std::process::id(), &death);
     let _ = do_session_end(&id);
+    // An end signal the wrap answered is its own end: it leaves by that signal, so
+    // its parent reads the signal, not a status of its own. The record is written
+    // above, and the signal is taken again here in case it arrived after the loop.
+    if let Some(sig) = end.end_signal.or_else(take_wrap_signal) {
+        die_by_signal(sig);
+    }
 
     let changed = vec![format!("session {id}: running → done")];
     // The end facts, as they actually are: `outcome` is the discriminator, and

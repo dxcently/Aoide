@@ -788,8 +788,9 @@ pub struct HookRecord {
     pub phase: String,
     #[serde(rename = "updatedAt", default)]
     pub updated_at: String,
-    /// Present only beside `phase: "died"`: how the harness went away under an
-    /// open turn, written by the wrap that hosted it.
+    /// Present only beside `phase: "done"`: how the harness went away under an
+    /// open turn, written by the wrap that hosted it. The ping-back claim clears
+    /// it once the death is said, and any later hook event drops it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub death: Option<HookDeath>,
     #[serde(flatten)]

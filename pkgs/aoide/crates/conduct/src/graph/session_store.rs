@@ -322,6 +322,10 @@ fn do_session_start_inner(
     };
     if !evicted.is_empty() {
         let mut h_file: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        // A held death is a wrap's fact the tick has not said yet. `upsert_hook`
+        // clears a record's fact, so an eviction skips it, held before any write.
+        let held = crate::graph::pingback::held_deaths(&file.sessions, &h_file.hooks);
+        let evicted: Vec<String> = evicted.into_iter().filter(|eid| !held.contains(eid)).collect();
         let done_at = now_iso_utc();
         for eid in &evicted {
             upsert_hook(&mut h_file.hooks, eid, "done", &done_at);
@@ -331,7 +335,6 @@ fn do_session_start_inner(
                 s.state = "done".to_string();
             }
         }
-        let held = crate::graph::pingback::held_deaths(&h_file.hooks);
         let (kept_s, kept_h, _removed, _cleared) =
             prune_done_sparing(std::mem::take(&mut file.sessions), std::mem::take(&mut h_file.hooks), false, &held);
         file.sessions = kept_s;
@@ -1647,6 +1650,7 @@ fn do_session_phase_if_inner(id: &str, phase: &str, expected: &str) -> Outcome {
             "expected": expected,
         }));
     }
+    let phase = canonical_state(phase);
     let now = now_iso_utc();
     upsert_hook(&mut file.hooks, id, phase, &now);
     if file.schema_version.is_empty() {
@@ -3980,7 +3984,8 @@ mod hosted_death_tests {
     }
 
     /// A caller cannot record a death through the phase door: the phase folds to
-    /// its canonical rest, and only `record_death` writes `died`.
+    /// its canonical rest, and a death is written only by `record_death`, as
+    /// `done` with its fact.
     #[test]
     fn a_death_cannot_be_recorded_through_the_session_phase_door() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4042,7 +4047,7 @@ mod hosted_death_tests {
 
         let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
         let rec = |id: &str| hooks.hooks.iter().find(|h| h.session_id == id).unwrap().clone();
-        assert_eq!(rec("new").phase, "died");
+        assert_eq!(rec("new").phase, "done");
         assert_eq!(
             rec("new").death,
             Some(HookDeath { last_tool: Some("Bash".into()), outcome: Some("exit".into()), exit_code: Some(1), ..Default::default() }),

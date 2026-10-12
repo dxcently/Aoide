@@ -296,9 +296,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `… died mid-turn · last: …`, claimed in the SAME stage-lock section as the
   trace source into the entry's `hook` field of `pingback.json`, and delivered
   by the same `deliver` — it adds a cursor half and four lines, never a second
-  transport. A death the wrap records (`died` on the child's hook record,
-  written by `session_store::record_hook_deaths`) is said with its status; one
-  the tick infers carries none. The recipient is the child's SPAWNER, resolved
+  transport. A death the wrap records (`done` with a `death` fact on the
+  child's hook record, written by `session_store::record_hook_deaths`) is said
+  once, with its status; one the tick infers carries none. The recipient is the child's SPAWNER, resolved
   through the wrap that hosts it and only over an edge the kernel attested
   (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can no
   longer route is judged from the route its entry kept (`hook::gone`). Its

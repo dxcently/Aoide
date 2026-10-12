@@ -235,10 +235,12 @@ pub fn upsert_hook(hooks: &mut Vec<HookRecord>, id: &str, phase: &str, now: &str
     }
 }
 
-/// UPSERT a hook child's death: the phase becomes `died` and `death` rides on
-/// the same record, so the phase and its fact are never written apart.
+/// UPSERT a hook child's death: the phase becomes `done` (the process is over,
+/// and every reader folds it so) and `death` rides on the same record, so the
+/// phase and its fact are never written apart. The fact is the unclaimed state:
+/// the ping-back says it once and clears it.
 pub fn record_death(hooks: &mut Vec<HookRecord>, id: &str, death: HookDeath, now: &str) {
-    upsert_hook(hooks, id, "died", now);
+    upsert_hook(hooks, id, "done", now);
     if let Some(h) = hooks.iter_mut().find(|h| h.session_id == id) {
         h.death = Some(death);
     }
@@ -463,7 +465,7 @@ mod death_tests {
             ..Default::default()
         };
         record_death(&mut hooks, "k", fact.clone(), "2026-10-07T10:01:00Z");
-        assert_eq!(hooks[0].phase, "died");
+        assert_eq!(hooks[0].phase, "done");
         assert_eq!(hooks[0].updated_at, "2026-10-07T10:01:00Z");
         assert_eq!(hooks[0].death.as_ref(), Some(&fact));
 

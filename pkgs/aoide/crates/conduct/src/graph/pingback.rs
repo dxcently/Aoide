@@ -84,7 +84,7 @@ use super::conduct::{auto_type_refusal, channel_socket_path, AutoTypeRefusal};
 use super::doorbell::{connect_for_ring, write_channel};
 use super::eidolon::{eidolon_state_from_trace, DroppedEidolon};
 use super::model::{
-    canonical_state, hooks_path, load_stage, sessions_path, HooksFile, SessionRecord, SessionsFile,
+    canonical_state, hooks_path, load_stage, sessions_path, write_stage, HooksFile, SessionRecord, SessionsFile,
 };
 use super::permit::profile_for_agent;
 use super::send::{audit_send, write_delivery, SUBMIT_KEYSTROKE_DELAY};
@@ -441,7 +441,7 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         let roster_now: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path())
             .map(|f| f.sessions)
             .unwrap_or_default();
-        let hooks_now: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        let mut hooks_now: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
         let mut tracked_now = tracked_ids.clone();
         tracked_now.extend(
             roster_now
@@ -451,16 +451,34 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         );
 
         let (mut claims, old_cursor, mut new_cursor) = claim_locked(&children, &tracked_now, now_ms);
-        claims.lines.extend(hook::claim(&roster_now, &hooks_now.hooks, &sealed, &old_cursor, &mut new_cursor, now_ms));
+        let (hook_lines, said) =
+            hook::claim(&roster_now, &hooks_now.hooks, &sealed, &old_cursor, &mut new_cursor, now_ms);
+        claims.lines.extend(hook_lines);
         claims.lines.extend(prompt::claim(&roster_now, &sealed, &mut new_cursor));
+        // The cursor is written before anything is delivered, and a line is
+        // delivered only once its claim is durable: a failed write delivers
+        // nothing, so no later tick can repeat what this one said.
         if new_cursor != old_cursor {
-            match serde_json::to_string(&new_cursor) {
-                Ok(body) => {
-                    if let Err(e) = aoide_storage::fs::atomic_write(&pingback_path(), &format!("{body}\n")) {
-                        eprintln!("[aoide/reap] ping-back cursor write failed: {e}");
-                    }
-                }
-                Err(e) => eprintln!("[aoide/reap] ping-back cursor encode failed: {e}"),
+            let body = serde_json::to_string(&new_cursor)
+                .map_err(|e| eprintln!("[aoide/reap] ping-back cursor encode failed: {e}"))
+                .ok();
+            let written = body.and_then(|body| {
+                aoide_storage::fs::atomic_write(&pingback_path(), &format!("{body}\n"))
+                    .map_err(|e| eprintln!("[aoide/reap] ping-back cursor write failed: {e}"))
+                    .ok()
+            });
+            if written.is_none() {
+                return Claimed::default();
+            }
+        }
+        // A said death's fact leaves its record only after the cursor has
+        // recorded it. A record that keeps its fact is said again next tick,
+        // so a failed clear costs a repeat, never a silent loss.
+        if !said.is_empty() {
+            hook::clear_said(&mut hooks_now.hooks, &said);
+            if let Err(e) = write_stage(&hooks_path(), &hooks_now) {
+                eprintln!("[aoide/reap] ping-back death clear failed: {e}");
+                return Claimed::default();
             }
         }
         claims
@@ -589,19 +607,22 @@ fn claim_locked(
     (claimed, old, next)
 }
 
-/// Read the cursor file; any unreadable/unparseable content reads as an EMPTY
-/// cursor rather than failing the pass (the file is ours alone, and a torn
-/// hand-edit may only ever cost one extra line — never a stuck sweep).
 /// The wrap-written deaths the tick has not claimed yet, as of now (see
 /// `hook::unclaimed_deaths`). The reaper and every prune spare these records, so
 /// the fact survives until the tick has said it once.
-pub(crate) fn held_deaths(hooks: &[crate::graph::model::HookRecord]) -> std::collections::HashSet<String> {
+pub(crate) fn held_deaths(
+    roster: &[SessionRecord],
+    hooks: &[crate::graph::model::HookRecord],
+) -> std::collections::HashSet<String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64);
-    hook::unclaimed_deaths(hooks, now)
+    hook::unclaimed_deaths(roster, hooks, now)
 }
 
+/// Read the cursor file; any unreadable/unparseable content reads as an EMPTY
+/// cursor rather than failing the pass (the file is ours alone, and a torn
+/// hand-edit may only ever cost one extra line — never a stuck sweep).
 fn read_cursor() -> CursorFile {
     std::fs::read_to_string(pingback_path())
         .ok()
@@ -1700,7 +1721,7 @@ fn audit_pull(inv: &Invocation, status: &str, message: &str) {
 mod tests {
     use super::*;
     use crate::graph::conduct::conduct_socket_path;
-    use crate::graph::model::{load_stage, sessions_path, write_stage, SessionsFile};
+    use crate::graph::model::{load_stage, sessions_path, write_stage, HookDeath, HooksFile, SessionsFile};
     use crate::graph::session_store::{do_session_start, stamp_headless};
     use crate::graph::testutil::*;
     use aoide_test_support::{accept_one, read_delivery};
@@ -2479,8 +2500,32 @@ mod tests {
         (String::from_utf8_lossy(&acc.join().unwrap()).into_owned(), report)
     }
 
+    /// The wrap records what it saw of its child's death, as `record_hook_deaths`
+    /// does on exit: `done`, with the fact the tick will say once.
+    fn host_records_death(fact: HookDeath) {
+        let mut file: HooksFile = load_stage(&hooks_path()).unwrap();
+        for h in file.hooks.iter_mut().filter(|h| h.session_id == "kid") {
+            h.phase = "done".into();
+            h.death = Some(fact.clone());
+        }
+        write_stage(&hooks_path(), &file).unwrap();
+    }
+
+    fn recorded_death_of_kid() -> Option<HookDeath> {
+        let file: HooksFile = load_stage(&hooks_path()).unwrap();
+        file.hooks.into_iter().find(|h| h.session_id == "kid").and_then(|h| h.death)
+    }
+
+    /// A harness that is already reaped: its pid names nothing.
+    fn reaped_pid() -> u32 {
+        let mut harness = std::process::Command::new("true").spawn().unwrap();
+        let pid = harness.id();
+        harness.wait().unwrap();
+        pid
+    }
+
     #[test]
-    fn a_hook_child_whose_harness_dies_inside_its_live_host_is_reported_once_to_its_spawner() {
+    fn a_harness_that_dies_under_a_live_host_is_said_once_when_the_host_records_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -2492,28 +2537,80 @@ mod tests {
             "AOIDE_DAEMON_SOCKET",
         ]);
         let (root, spawner, _host) = died_fixture("pingback-hook-died");
+        set_harness("kid", reaped_pid());
 
-        // The harness is gone: its pid is one this test has already reaped.
-        let reaped = {
-            let mut harness = std::process::Command::new("true").spawn().unwrap();
-            let pid = harness.id();
-            harness.wait().unwrap();
-            pid
-        };
-        {
-            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
-            for rec in file.sessions.iter_mut().filter(|r| r.session_id == "kid") {
-                rec.hook_ancestry = vec![reaped as i32, std::process::id() as i32];
-            }
-            write_stage(&sessions_path(), &file).unwrap();
-        }
+        // The harness is gone under a live, sealed host: the host has not recorded
+        // it, so the tick says nothing.
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the live host tells, not the tick");
+
+        host_records_death(HookDeath::default());
         let (text, report) = heard_by(&spawner);
         assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r", "one line to the spawner");
         assert_eq!(report.delivered.len(), 1, "{report:?}");
         assert!(report.skipped.is_empty(), "{report:?}");
+        assert_eq!(recorded_death_of_kid(), None, "the claim cleared the fact it said");
 
-        // Once: the next pass says nothing, and the spawner is not written again.
-        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default());
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "once");
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "the spawner heard nothing more");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_death_whose_cursor_cannot_be_written_is_delivered_by_no_pass_and_said_once_it_can() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-cursor");
+        set_harness("kid", reaped_pid());
+        host_records_death(HookDeath::default());
+
+        // The claim cannot make its cursor durable: nothing is delivered, and the
+        // fact stays on the record for a later pass.
+        std::fs::remove_file(pingback_path()).unwrap();
+        std::fs::create_dir(pingback_path()).unwrap();
+        let report = pingback(&daemon_inv(), &[]);
+        assert!(report.delivered.is_empty(), "{report:?}");
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "nothing reached the spawner");
+        assert!(recorded_death_of_kid().is_some(), "the fact is not cleared by a claim that did not land");
+
+        std::fs::remove_dir(pingback_path()).unwrap();
+        let (text, report) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_said_death_is_not_repeated_when_pingback_json_is_deleted() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-deleted");
+        set_harness("kid", reaped_pid());
+        host_records_death(HookDeath::default());
+        let (text, _) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r");
+
+        std::fs::remove_file(pingback_path()).unwrap();
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the claim left no fact to say again");
         spawner.set_nonblocking(true).unwrap();
         assert!(spawner.accept().is_err(), "the spawner heard nothing more");
 
@@ -2557,7 +2654,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-        /// Name `harness` as the process the hook child `id` runs under: the pid a
+    /// Name `harness` as the process the hook child `id` runs under: the pid a
     /// sighting reads as alive or dead.
     fn set_harness(id: &str, harness: u32) {
         let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
