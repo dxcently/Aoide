@@ -98,10 +98,11 @@ fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
         ),
         "doas" => matches!(arg, "-u" | "-C"),
         "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
-        // `-c` takes the command, and in a cluster (`-qc CMD`) the `c` that ends
-        // the cluster takes the next argument, as getopt reads it.
+        // `-c` and `--command` take the command, and in a cluster (`-qc CMD`) the
+        // `c` that ends the cluster takes the next argument, as getopt reads it.
+        // `--command=CMD` carries its value in the same token, so it takes none.
         "script" => {
-            matches!(arg, "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in")
+            matches!(arg, "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in" | "--command")
                 || (arg.starts_with('-') && !arg.starts_with("--") && arg.ends_with('c'))
         }
         _ => false,
@@ -2540,6 +2541,9 @@ mod tests {
             &["script", "-c", "make", "out.log"],
             &["script", "-qc", "make", "out.log"],
             &["script", "-qfc", "make", "out.log"],
+            &["script", "--command", "make", "out.log"],
+            &["script", "--command=make", "out.log"],
+            &["script", "--command", "bash"],
             &["fish", "--command=make"],
             &["fish", "-c", "x"],
             &["busybox", "sh", "-c", "x"],
@@ -2582,6 +2586,9 @@ mod tests {
             (&["env", "-S", "bash"], None),
             (&["script", "-c", "claude", "out.log"], None),
             (&["script", "-qc", "claude", "out.log"], None),
+            (&["script", "--command", "claude", "out.log"], None),
+            (&["script", "--command=claude", "out.log"], None),
+            (&["script", "--command", "claude"], None),
             (&["-bash"], Some("bash")),
             // A login-looking spelling of a harness is not the harness: only a
             // shell name loses its `-`.
@@ -2611,6 +2618,10 @@ mod tests {
             (&["-bash"], true),
             (&["-claude"], false),
             (&["script", "-qc", "make", "out.log"], true),
+            (&["script", "--command", "bash", "out.log"], true),
+            (&["script", "--command", "claude", "out.log"], true),
+            (&["script", "--command", "bash"], true),
+            (&["script", "--command=bash", "out.log"], true),
             (&["zsh"], true),
             (&["fish"], true),
             (&["sh"], true),

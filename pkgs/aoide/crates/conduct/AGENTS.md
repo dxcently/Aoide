@@ -1056,8 +1056,10 @@ in the message.
   `restore`); `unverified-wrap` (the walk names no program, or names one that is
   not the harness); then `not-conductable`, `parent-done`. The walk resolves
   what it models: the forwarding launchers (`env`, `exec`, `setsid`, `nohup`,
-  `stdbuf`, `chrt`, `ionice`, `nice`), `timeout`, `sudo`/`doas`, `script`, and
-  `nix develop|shell -c`. Every other launcher names itself, so `taskset -c 0
+  `stdbuf`, `chrt`, `ionice`, `nice`), `timeout`, `sudo`/`doas`, `script` (its
+  `-c` and `--command` forms, both the separate and the `=` spelling, mean a
+  shell runs the command), and `nix develop|shell -c`. Every other launcher
+  names itself, so `taskset -c 0
   claude` is `unverified-wrap`, and so is `env -S claude` (no program name
   survives the split string). Its costs are stated: a wrapper script (`-- ./rig.sh`)
   and a harness binary whose basename differs from its profile's launch token
