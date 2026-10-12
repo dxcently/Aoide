@@ -617,6 +617,18 @@ the inbound half of the two-door contract (the outbound half is
   replayed into the method once the config returns. A request whose signature
   does not verify, or naming a node that charter does not carry, still reads
   `-32007`.
+- **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
+  verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
+  `wire_auth::answer_string` over the request's own signature and nonce, the
+  status and the exact body bytes (`answer_headers`). The `config-invalid`
+  answer above is signed too, because its signature was checked under the
+  charter key and its nonce consumed. Everything else is unsigned, and each
+  write site says why in a comment there: an unparsed or unsigned request, the
+  card GET even when it verified, every refusal (`-32007`, `-32008`, and the
+  replay `-32009`), the busy 503s, and the SSE stream. The door's key signs
+  nothing an unverified sender chose. A key that will not load leaves the
+  answer unsigned and audited (`a2a.answer-unsigned`), and the client refuses
+  it.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

@@ -734,6 +734,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   env/flag "for redundancy": a duplicate advertiser thread would just
   double the send rate and complicate the "both off means silence"
   proof.
+- **The door signs only what it verified, and only a JSON-RPC POST to `/`
+  (relay-proof).** `answer_headers` is the one place an answer is signed, and
+  `handle_connection` calls it from two sites: the final write, gated on
+  `verified.is_some()`, and the `config-invalid` arm, whose signature
+  `mail_unloadable_declaration` checked under the charter key. Don't widen
+  either gate to a refusal, a replay (`-32009`), an unsigned or unparsed
+  request, the card GET, a busy 503, or an SSE event. Each of those is a write
+  site a replayed or unsigned request can reach, and a signature there is a
+  signing oracle for the door's identity key. Every write site in `a2a.rs`
+  carries a one-line comment saying whether it is signed and why; a new write
+  site needs the same comment.
 - **The mail adapter's method table is `mail_rpc`, and nothing may add a
   second entry to it (H1).** `aoide mail serve` is a second LISTENER with its
   own process: `route_mail` → `handle_mail_jsonrpc` → `mail_rpc`, which is the

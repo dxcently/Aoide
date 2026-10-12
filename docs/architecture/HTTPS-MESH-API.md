@@ -562,6 +562,14 @@ plaintext HTTPS. The design follows from that:
   observed source address is never an input: behind a tunnel, every request looks
   like loopback. TLS is additional and never replaces payload protection.
   Revocation and scope changes affect active streams as well as new requests.
+- **Answers carry the responder's signature.** Cloudflare can read and rewrite
+  any response it terminates, so an answer's authenticity cannot rest on the
+  transport. A door signs its answer to each verified request with its own
+  identity key (`X-Aoide-Answer-Signature`, CONTRACTS.md §6 "Signed answers"),
+  and the signed answer is the identity proof a client checks against the key
+  on file for the node it dialled. A front that strips the header makes the
+  answer unverifiable, and the client refuses it rather than trusting the
+  front.
 - **Certificate pinning is optional and per node.** It applies only where TLS is
   end to end (a VPS, a tailnet) and is declared in `[mesh.<name>.pins]`. The design
   never assumes a pin through Cloudflare, where the edge certificate belongs to the

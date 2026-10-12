@@ -7298,6 +7298,16 @@ answer_string("ab"*64, "abcd1234", 200, b"{}")
       44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\x00"
 ```
 
+**Which answers the door signs.** The door signs an answer only when the
+request's own signature verified, and only for a JSON-RPC `POST /`
+(`a2a.rs`, `answer_headers`). The `config-invalid` answer is signed too: its
+signature was checked under the charter key and its nonce consumed first.
+Everything else is unsigned, and each write site says why in a comment there:
+an unparsed or unsigned request, the card GET even when it verified, every
+refusal (`-32007`, `-32008`, and the replay `-32009`), the busy 503s, and the
+SSE stream. A door whose identity key will not load answers unsigned and
+audits `a2a.answer-unsigned`; a client refuses an unsigned answer.
+
 **Identity IS the key; the name is a label (#63 P-ID5).** The resolved
 `Node` is the one whose stored `pubkey` verifies the signature — the
 signature proves possession of a key, and the record is found BY that key,
@@ -8896,6 +8906,11 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   refused through the adapter exactly as it is at the door — the difference
   between the two listeners is the method table, the bind, and sealing — and
   nothing else on the admission path.
+- **Signs its answers with its own `AOIDE_ROOT` identity.** Every signed answer
+  (see §6 "Signed answers") is made with the identity key under this
+  process's `AOIDE_ROOT`, the key the charter line names for this node. The
+  adapter must therefore run under the `AOIDE_ROOT` whose identity its mesh's
+  charter carries, since that is the key a client checks its answers against.
 - **The Host header is never consulted.** Through a tunnel it is the front's
   own hostname, which names nothing this process decides.
 - **Audit**: the door's own labels (`a2a.aoide/mailDeposit`,
