@@ -177,8 +177,9 @@ should follow).
   descendant of a dropped session cascades away with it (see "Sub-agent
   cascade" below), and children that survive get `parentSessionId` cleared
   (un-orphaned rather than dangling). Everything removed or cleared is
-  reported. A `done` record whose own sealed wrap process still runs is kept
-  and named in the reply (see the live-wrap rules in CONTRACTS.md).
+  reported. A `done` record that is still a protected live wrap (its own
+  process still runs under its sealed starttime) is kept and named in the
+  reply (see the live-wrap rules in CONTRACTS.md).
 - **`spawn`** and **`send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].
@@ -670,8 +671,13 @@ are consumed internally and get no `graph.json` projection:
   A ledger row leaves with its parent: both roster-exit paths call
   `drop_remote_child_rows` over the ids they removed, after their own
   `sessions.json` write lands.
-- **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
-  one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
+- **`seal` + `sealedIssuedAt` + `sealedPidStarttime`** — the sealed session
+  credential. `seal` and `sealedIssuedAt` share one lifecycle (always both or
+  neither). `sealedPidStarttime` is the minted starttime in plain text, written
+  with them, and it is what decides protection: a conducted wrap is protected
+  while its live pid's starttime still equals it, with no key involved. It is
+  not authenticated, so a hand edit can set it (CONTRACTS.md, "Same-uid
+  processes"). `aoided` mints an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate
   key from `state/identity/`'s on-disk node-wire key, which any same-uid
   reader could sign with. The signature covers a canonical NUL-separated
@@ -708,8 +714,9 @@ cross-uid `SO_PEERCRED` floor (P-ID3, [[shellbridge]], [[aoided]]); the
 secrets broker's `allowRemoteOrigin` gate is the credential's first policy
 consumer (P-ID4); the node wire resolves identity by verifying key, never
 claimed name (P-ID5, [[Node-Federation]]). The live-wrap rules in CONTRACTS.md
-refuse a same-uid end of a live sealed wrap on each door they name, and the
-autogate reads a parent edge only where `attestedSpawner` names it. Open, each
+refuse a same-uid end of a protected live wrap on each door they name, judged
+by the plaintext starttime and no key, and the autogate reads a parent edge
+only where `attestedSpawner` names it. Open, each
 named: (1) **consumer-name authentication** — the seal
 authenticates the session and its class, never a self-asserted consumer
 string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker
@@ -741,7 +748,8 @@ not built.
   headless-conducted session's pty-master log — [[Conductor-Channel]]),
   `hookAncestry` (up to 8 self-first `/proc` pids, the chain of the latest
   registration, bind, or heal, the auto-parenting seam above), and the identity pair `origin` and
-  `seal`/`sealedIssuedAt` (the lane's provenance and credential, above).
+  `seal`/`sealedIssuedAt`/`sealedPidStarttime` (the lane's provenance and
+  credential, above).
   The full field list — `kind`/`conductable`,
   `contextTokens`/`contextCeiling`/`tool`/`petname` and more — is CONTRACTS.md
   §4; each is round-tripped by every rewriter regardless of whether it

@@ -973,7 +973,12 @@ pub fn stamp_remote_parent(id: &str, parent: &aoide_storage::records::RemotePare
 /// (`SessionRecord::sealed_issued_at`'s own doc) — this is the same
 /// "stamp from the authority that just authenticated the fact" shape
 /// [`stamp_origin`]'s own doc names.
-pub fn stamp_seal(id: &str, seal: &str, issued_at: i64) {
+///
+/// `pid_starttime` is the value the seal was minted over, written in plain text
+/// as `sealedPidStarttime` in the same change (LANE SAME-UID ruling A). The
+/// refusal predicate reads that plaintext, not the signature, so it is the one
+/// fact that must land with the seal.
+pub fn stamp_seal(id: &str, seal: &str, issued_at: i64, pid_starttime: u64) {
     if seal.is_empty() {
         return;
     }
@@ -989,6 +994,7 @@ pub fn stamp_seal(id: &str, seal: &str, issued_at: i64) {
         {
             s.seal = Some(seal.to_string());
             s.sealed_issued_at = Some(issued_at);
+            s.sealed_pid_starttime = Some(pid_starttime);
             s.ever_sealed = Some(true);
             if file.schema_version.is_empty() {
                 file.schema_version = STAGE_GRAPH_VERSION.to_string();
@@ -3754,12 +3760,13 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         do_session_start("sealed-1", Some("claude"), Some("/w"), None, None, None, None, None, None);
-        stamp_seal("sealed-1", "deadbeefcafe", 1_700_000_000);
+        stamp_seal("sealed-1", "deadbeefcafe", 1_700_000_000, 42);
 
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = s.sessions.iter().find(|r| r.session_id == "sealed-1").unwrap();
         assert_eq!(rec.seal.as_deref(), Some("deadbeefcafe"));
         assert_eq!(rec.sealed_issued_at, Some(1_700_000_000));
+        assert_eq!(rec.sealed_pid_starttime, Some(42), "the plaintext starttime lands with the seal");
 
         // A registration nobody sealed never gets a `seal` at all.
         do_session_start("unsealed-1", Some("claude"), Some("/w"), None, None, None, None, None, None);
@@ -3769,8 +3776,8 @@ mod tests {
         assert_eq!(unsealed.sealed_issued_at, None);
 
         // An empty seal is a no-op, same as an unknown id.
-        stamp_seal("unsealed-1", "", 1_700_000_000);
-        stamp_seal("no-such-session", "deadbeef", 1_700_000_000);
+        stamp_seal("unsealed-1", "", 1_700_000_000, 42);
+        stamp_seal("no-such-session", "deadbeef", 1_700_000_000, 42);
         let s3: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s3.sessions.iter().find(|r| r.session_id == "unsealed-1").unwrap().seal, None);
 
@@ -4029,9 +4036,9 @@ mod live_sealed_wrap_guards {
     }
 
     #[test]
-    fn a_seal_that_no_longer_verifies_is_unsealed_and_ends_as_today() {
+    fn a_record_repointed_to_a_dead_pid_ends_as_today() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, kp, stage) = seal_world("live-wrap-stale");
+        let (_env, kp, stage) = seal_world("live-wrap-dead-pid");
         sealed_live_wrap("wrap", &kp);
         let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
         file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().pid = Some(4_000_000);
@@ -4039,7 +4046,80 @@ mod live_sealed_wrap_guards {
 
         let _ = session_end(&door(&["session", "end"], "wrap"));
 
-        assert_eq!(record("wrap").unwrap().state, "done", "a seal over a pid that is gone verifies nothing");
+        assert_eq!(record("wrap").unwrap().state, "done", "a dead pid is never protected");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// `AOIDE_DAEMON_SOCKET` names a dead path, so no daemon can answer. The
+    /// protection reads no key, so every door still refuses.
+    #[test]
+    fn a_live_sealed_wrap_is_refused_with_a_dead_daemon_socket() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-dead-socket");
+        sealed_live_wrap("wrap", &kp);
+        std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-aoided.sock"));
+
+        let out = session_end(&door(&["session", "end"], "wrap"));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_ne!(record("wrap").unwrap().state, "done");
+
+        set_state("wrap", "done");
+        let _ = prune(&flag_invocation(&["session", "prune"], &[]));
+        assert!(record("wrap").is_some(), "prune keeps it with no daemon to ask");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A daemon restart mints a new key, so the old seal verifies nothing. The
+    /// wrap stays protected: the protection reads the plaintext starttime.
+    #[test]
+    fn a_live_sealed_wrap_is_refused_after_the_daemon_restarts_with_a_new_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-restart");
+        sealed_live_wrap("wrap", &kp);
+        let restarted = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&restarted.info().pubkey_hex));
+
+        let out = session_end(&door(&["session", "end"], "wrap"));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_ne!(record("wrap").unwrap().state, "done");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A reused pid: the record's starttime is not the live process's starttime,
+    /// so the record ends as an unprotected one.
+    #[test]
+    fn a_reused_pid_does_not_protect_a_sealed_wrap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-reused-pid");
+        sealed_live_wrap("wrap", &kp);
+        let live = crate::graph::pid_starttime(std::process::id() as i32).unwrap();
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().sealed_pid_starttime =
+            Some(live + 1);
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let out = session_end(&door(&["session", "end"], "wrap"));
+
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert_eq!(record("wrap").unwrap().state, "done");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A seal minted before `sealedPidStarttime` existed carries no plaintext
+    /// starttime. Nothing backfills it, so it is never protected.
+    #[test]
+    fn a_legacy_seal_without_a_plaintext_starttime_ends_as_today() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, kp, stage) = seal_world("live-wrap-legacy");
+        sealed_live_wrap("wrap", &kp);
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == "wrap").unwrap().sealed_pid_starttime = None;
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let out = session_end(&door(&["session", "end"], "wrap"));
+
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert_eq!(record("wrap").unwrap().state, "done");
         let _ = std::fs::remove_dir_all(&stage);
     }
 

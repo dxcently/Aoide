@@ -2725,8 +2725,14 @@ stamped alongside `seal` in the SAME call. `sealedIssuedAt` exists because
 `issuedAt` has no live fact a verifier can re-derive it from (unlike
 `pidStarttime`, below): without storing it, checking a signature would mean
 brute-forcing every plausible mint instant, which P-ID1's own original test
-suite did as a test-only expedient before this field existed. Both fields
-share ONE lifecycle — always `Some` together, always `None` together.
+suite did as a test-only expedient before this field existed. `seal` and
+`sealedIssuedAt` share ONE lifecycle — always `Some` together, always `None`
+together. `sealedPidStarttime` (number, additive) is the `pidStarttime` above
+in plain text, stamped in the SAME call as `seal`. It is the protection fact
+for a conducted wrap (see "Same-uid processes and the live sealed wrap"
+below). It is not authenticated, so a same-uid writer can set or clear it. A
+record with a `seal` but no `sealedPidStarttime` predates the field, and is
+never protected.
 **`sessionId`/`originClass` ride VERBATIM — no trim, no case-folding**
 (review fix: the original shape copied `wire_auth::canonical_string`'s
 trim+lowercase wholesale, but `sessionId` is the session store's own
@@ -2765,52 +2771,81 @@ set by `stamp_seal`, never cleared) bars the daemon — both the tick and the
 dispatched-`session start` path — from sealing a record that ever carried a
 seal, so a seal that goes missing can never be re-minted over another pid. A
 dispatched `session start --id <id>` is refused BEFORE it runs (taught error,
-`seal_refused` event on the events feed) when the record is sealed over a live
-pid that no longer verifies; a sealed record whose process merely died is
-not refused, and is not re-sealed.
+`seal_refused` event on the events feed) when the record is a protected live
+wrap (below). A record whose pid was reused, whose process has ended, or that
+is not a conducted wrap is not refused, and is not re-sealed.
 
 **Same-uid processes and the live sealed wrap.** A same-uid process runs any
 command the operator can, so the rules here do not rest on file permissions.
-They rest on the daemon's live seal key and on `/proc`: a conducted record whose
-seal verifies over its own live pid is a live sealed wrap. Two rules hold, each
-on the doors named:
+They rest on `/proc` and on one plaintext field, `sealedPidStarttime`. A record
+is a *protected live wrap* only when all five hold. `identity::
+is_protected_live_wrap` is the one predicate that decides it, and every refusal
+below asks it:
 
-1. *A live sealed wrap is ended only by its own exit.* `session end`, a `session
-   phase` carrying a terminal token (`exit`, `finished`, `complete`, `done`), and
-   `session prune` refuse it with a taught error that names the wrap and `aoide
-   session kill --id`; prune keeps the record and reports it as held. The hook's
-   `SessionEnd` arm answers `ok` and leaves the record to its own exit. The reaper
-   spares it whichever liveness signal named it. The wrap's own exit path, and the
-   reaper once the pid is gone, end it. A record that is dead, unsealed, or whose
-   seal does not verify ends as it always has: a seal nothing can verify is an
-   unsealed one.
+```
+conductable == true
+seal present
+pid alive
+sealedPidStarttime present and nonzero
+sealedPidStarttime == the live pid's current starttime
+```
+
+No key, no daemon socket, and no signature check sit on this path. A daemon
+restart, or an `AOIDE_DAEMON_SOCKET` that answers nothing, cannot lift it. It
+holds while the process with that pid and start time lives, whatever the daemon
+can verify. Two rules hold, each on the doors named:
+
+1. *A protected live wrap is ended only by its own exit.* `session end`, a
+   `session phase` carrying a terminal token (`exit`, `finished`, `complete`,
+   `done`), and `session prune` refuse it with a taught error that names the
+   wrap and `aoide session kill --id`; prune keeps the record and reports it as
+   held. The hook's `SessionEnd` arm answers `ok` and leaves the record to its
+   own exit. The reaper spares it whichever liveness signal named it. A
+   dispatched `session start --id` on it is refused. The wrap's own exit path,
+   and the reaper once the pid is gone, end it. A record that is dead, unsealed,
+   not conducted, or whose starttime does not match ends as it always has.
 2. *The autogate reads only the spawn-time edge.* A target's parent counts for the
    parent-of-target and sibling rules only where its `attestedSpawner` names that
    parent (§ `sessions.json`). A bare `session start --parent`, a `graph link`, or
    a moved edge earns no autogate: the send is held pending. The hook door attests
    nothing, and it never moves a conducted wrap's edge.
 
+**Who can set the marker.** `sealedPidStarttime` is written in one place,
+`stamp_seal`, by the daemon's mint, and no CLI verb reaches it. A hand edit of
+`sessions.json` is a different matter. It can give ANY live same-uid process's
+record `conductable`, a `seal`, and that process's current starttime, and that
+record is then protected from end, prune, phase, and start until the process
+exits. It can also clear the fields and unprotect a live wrap. Neither is
+stopped. The marker is unkeyed by design: the seal's key is the grant side's
+concern, not this one's. Hand edits are the domain of the daemon-owned session
+identity (stance B, below), which is not built.
+
+**The accepted loss.** A protected wrap whose seal no longer verifies, because
+`aoided` restarted and minted a new key, stays protected. It ends only when its
+process exits. Its `aoide session kill` and its autogate still verify the seal,
+so they refuse it until it registers again.
+
 **What a same-uid process can still do.** These are the residuals of the rules
 above. The daemon checks none of them.
 
-- Hand-edit `sessions.json`. The hand-edit watcher reports it; nothing stops it.
-  `parentSessionId` and `attestedSpawner` are not under the seal, which covers
-  only `sessionId`, `pid`, start time, `origin`, and `issuedAt`.
-- Rewrite a live record's `agent`, `cwd`, or `window` through `session start`. The
-  seal covers none of them.
-- Name a different daemon. The verifier's key comes from the socket at the
-  caller's `AOIDE_DAEMON_SOCKET`. Pointed at a socket that answers nothing, the set
-  of live sealed wraps is empty and the refusals above do not fire.
-- Kill `aoided`, or restart it. A restarted daemon mints a new key, so the seals an
-  earlier daemon minted stop verifying, and their wraps lose these protections for
-  the rest of their life. `aoide session kill` refuses them too, since it verifies
-  the same seal.
+- Hand-edit `sessions.json`, as described above. The hand-edit watcher reports
+  it; nothing stops it. `parentSessionId` and `attestedSpawner` are not under the
+  seal, which covers only `sessionId`, `pid`, start time, `origin`, and
+  `issuedAt`.
+- Rewrite a live record's `agent`, `cwd`, or `window` through `session start` on
+  a record that is not protected. The seal covers none of them.
+- Name a different daemon. The grant side (`session kill`, the autogate, the
+  broker's origin gate) reads its key from the caller's `AOIDE_DAEMON_SOCKET`.
+  Pointed at a socket that answers nothing, those grants refuse, which is fail
+  closed. Pointed at a fake daemon, a process can pass only a seal its own key
+  signed, and that needs a hand-edited roster, already listed above.
 - Keep a window-gone wrap live. This is the cost of the reaper rule: a wrap whose
   window has vanished, but whose process still lives, stays live and deliverable
   until that process exits.
 
-A daemon-owned session identity is the planned change for the first three. It is
-not built. Every rule that depends on a seal depends on the daemon that minted it.
+A daemon-owned session identity is the planned change for the hand edits above.
+It is not built. The protection rule no longer depends on the daemon; the grant
+rules still do.
 
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)

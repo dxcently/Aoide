@@ -129,16 +129,18 @@ the inbound half of the two-door contract (the outbound half is
   `daemon::mint_seal(session_id, pid, origin_class)` builds a
   `SealedIdentity` (reading `pid_starttime` via `aoide_conduct::
   graph::pid_starttime`, no second `/proc` parse) and signs it under that
-  key (`aoide_storage::sealed_id::mint_seal`). `handle_conn`'s `dispatch`
-  op calls `daemon::seal_freshly_registered_session` right after a
-  successful `session start` dispatch: if the just-written record already
-  carries a `pid` (today, only `session_conduct`'s own direct
-  registration does — the bare wire path does not), it mints a seal and
-  stamps it via `aoide_conduct::graph::stamp_seal`. **This is honest
-  scaffolding, not a security boundary**: the pid sealed over is
+  key (`aoide_storage::sealed_id::mint_seal`), and returns the starttime it
+  signed over as well. `handle_conn`'s `dispatch` op calls
+  `daemon::seal_freshly_registered_session` right after a successful
+  `session start` dispatch: if the just-written record already carries a
+  `pid` (today, only `session_conduct`'s own direct registration does — the
+  bare wire path does not), it mints a seal and stamps it, with that
+  starttime as `sealedPidStarttime`, via `aoide_conduct::graph::stamp_seal`.
+  The refusal `session_start_refusal` reads `is_protected_live_wrap` (the
+  plaintext starttime and the seal's presence), never the signature. **This
+  is honest scaffolding, not a security boundary**: the pid sealed over is
   whatever the record already carries, not yet a peercred-verified
-  CONNECTING pid, and nothing anywhere reads `seal` back to gate a
-  decision. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
+  CONNECTING pid. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
   own README for the full mechanism.
 - **The dispatch socket's own accept gets a cross-uid floor, and two
   attribution leaks close (LANE IDENTITY P-ID3).** `daemon::accept_loop`

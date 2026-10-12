@@ -84,6 +84,7 @@ pub(crate) fn session(
         origin: None,
         seal: None,
         sealed_issued_at: None,
+        sealed_pid_starttime: None,
         ever_sealed: None,
         attested_spawner: None,
         restore: None,
@@ -544,15 +545,17 @@ pub(crate) fn seal_record(id: &str, kp: &aoide_storage::identity::Keypair) {
     let rec = file.sessions.iter_mut().find(|r| r.session_id == id).unwrap();
     let pid = rec.pid.unwrap() as i32;
     let issued_at = 1_700_000_000;
+    let pid_starttime = super::window::pid_starttime(pid).expect("a live pid");
     let identity = aoide_storage::sealed_id::SealedIdentity {
         session_id: id.to_string(),
         pid,
-        pid_starttime: super::window::pid_starttime(pid).expect("a live pid"),
+        pid_starttime,
         origin_class: String::new(),
         issued_at,
     };
     rec.seal = Some(aoide_storage::sealed_id::mint_seal(kp, &identity));
     rec.sealed_issued_at = Some(issued_at);
+    rec.sealed_pid_starttime = Some(pid_starttime);
     rec.ever_sealed = Some(true);
     write_stage(&sessions_path(), &file).unwrap();
 }

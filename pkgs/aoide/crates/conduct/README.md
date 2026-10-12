@@ -1335,13 +1335,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   to that one MCP subprocess, never `aoided`'s. This crate computes where
   it lives and is its first client: `doorbell.rs::ring_locked` connects to
   it (never binds or accepts — that lifecycle stays `aoide-server`'s).
-- **A live sealed wrap is ended only by its own exit, and the autogate reads
-  only the spawn-time edge.** `identity::live_sealed_wrap_ids` is the one
-  predicate: a conducted record whose seal verifies against the daemon's live key
-  on a live pid. `session_store::live_wrap_refusal_for` is the refusal every
-  finishing door (`session end`, a terminal `session phase`, the hook's
-  `SessionEnd` arm) asks first; `doc.rs::prune_done_keeping` keeps such a record
-  out of every prune, and `reap_inner` spares it. The autogate reads a parent edge
+- **A protected live wrap is ended only by its own exit, and the autogate reads
+  only the spawn-time edge.** `identity::is_protected_live_wrap` is the one
+  predicate: a conducted record with a seal, on a live pid whose current
+  starttime equals the plaintext `sealedPidStarttime`. It reads no daemon key.
+  `identity::live_sealed_wrap_ids` is the set it yields. `session_store::
+  live_wrap_refusal_for` is the refusal every finishing door (`session end`, a
+  terminal `session phase`, the hook's `SessionEnd` arm) asks first;
+  `doc.rs::prune_done_keeping` keeps such a record out of every prune, and
+  `reap_inner` spares it. `aoide-server`'s `session_start_refusal` refuses a
+  dispatched `session start` on one. The autogate reads a parent edge
   only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner` to
   name the same id. Only `conduct` registration writes that stamp, and
   `SessionRecord::set_parent_session` drops it whenever the edge moves. The

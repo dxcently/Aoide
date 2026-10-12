@@ -3899,7 +3899,7 @@ mod tests {
             issued_at,
         };
         let seal_hex = aoide_storage::sealed_id::mint_seal(kp, &identity);
-        crate::graph::session_store::stamp_seal(id, &seal_hex, issued_at);
+        crate::graph::session_store::stamp_seal(id, &seal_hex, issued_at, starttime);
     }
 
     /// The REAL `attested_sender`/`verify_seal_over` pipeline (module doc
@@ -7117,7 +7117,7 @@ mod tests {
             "r3", Some("pi"), Some("/p"), None, None, Some(DEAD as u32),
             &[DEAD, DEAD + 1, DEAD + 2],
         );
-        stamp_seal("r3", "seal-r3", 1);
+        stamp_seal("r3", "seal-r3", 1, 1);
         hook_for_profile_gated(pi, &pi_start("r3", me), false, Some(me), None);
         let r3 = load("r3");
         assert_eq!(r3.hook_ancestry, mine, "a sealed record's chain may still refresh");
@@ -7536,6 +7536,60 @@ mod tests {
             "a bare --parent edge is a caller's word, not a spawn: {}",
             out.message
         );
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The grant side keeps verifying (LANE SAME-UID ruling A): a spawn-time
+    /// stamp earns the autogate only while the daemon's key verifies the
+    /// parent's seal. A restarted daemon's key verifies nothing, so the send is
+    /// held pending.
+    #[test]
+    fn autogate_refuses_a_spawn_stamp_whose_seal_does_not_verify() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-autogate-unverified");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        let restarted = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+        seal_test_session("orch", me, "", &kp);
+        let id = "spawned-unverified";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        stamp_attested_spawner(id, Some("orch"));
+
+        let out = deliver_local_with(
+            &send_invocation(&["go"], &[("id", id)]),
+            id,
+            test_resolver(restarted.info().pubkey_hex.clone()),
+        );
+
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending", "{}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
         let _ = std::fs::remove_dir_all(&root);
     }

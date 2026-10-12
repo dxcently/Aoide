@@ -305,50 +305,47 @@ pub(in crate::graph) fn is_self_originated(
         .is_some_and(|connector_session| connector_session == target_session_id)
 }
 
-/// The conducted wraps whose OWN process still runs under a seal the daemon
-/// minted and still verifies. Only the wrap's own exit path, or the reaper
-/// once the pid is dead, may end such a record; every door and the hook's
-/// `SessionEnd` arm refuse (see [`live_wrap_refusal`]).
+/// THE refusal predicate (LANE SAME-UID ruling A). A conducted wrap is
+/// protected while its own process still runs under the starttime its record
+/// was sealed over: `conductable`, a seal, a live pid, and the plaintext
+/// `sealedPidStarttime` equal to that pid's current starttime. Every refusal
+/// asks this and nothing else: `session end`/`phase`/`prune`, the hook's
+/// `SessionEnd` arm, the reaper's spare, and a dispatched `session start`.
 ///
-/// Empty when the daemon cannot answer for its key. A seal nothing can verify
-/// is an unsealed record, and an unsealed record ends as it always has.
-pub(crate) fn live_sealed_wrap_ids(sessions: &[SessionRecord]) -> HashSet<String> {
-    let any_sealed_wrap = sessions
-        .iter()
-        .any(|r| r.conductable == Some(true) && r.seal.is_some());
-    if !any_sealed_wrap {
-        return HashSet::new();
-    }
-    match aoide_storage::attest::daemon_seal_pubkey_hex() {
-        Some(key) => live_sealed_wrap_ids_with(sessions, &key),
-        None => HashSet::new(),
-    }
+/// No key, no socket, no signature. A daemon restart or an unreachable
+/// `AOIDE_DAEMON_SOCKET` cannot switch it off. A reused pid cannot inherit it,
+/// because its starttime differs. Not authenticated: a same-uid writer of
+/// `sessions.json` can set or clear these fields. The seal's signature is a
+/// grant-side check only (`verify_seal_over`), never read here.
+pub fn is_protected_live_wrap(rec: &SessionRecord) -> bool {
+    let (Some(pid), Some(sealed_starttime)) = (rec.pid, rec.sealed_pid_starttime) else {
+        return false;
+    };
+    rec.conductable == Some(true)
+        && rec.seal.is_some()
+        && sealed_starttime != 0
+        && aoide_storage::fs::pid_is_alive(pid)
+        && aoide_storage::attest::pid_starttime(pid as i32) == Some(sealed_starttime)
 }
 
-/// [`live_sealed_wrap_ids`] against a key the caller already holds: the
-/// daemon's own key inside `aoided`, or a test's. The only I/O is the `/proc`
-/// read a seal verification makes anyway.
-pub(crate) fn live_sealed_wrap_ids_with(
-    sessions: &[SessionRecord],
-    pubkey_hex: &str,
-) -> HashSet<String> {
+/// The protected conducted wraps among `sessions` (see
+/// [`is_protected_live_wrap`]). Used by the door, prune, and reaper refusals.
+pub(crate) fn live_sealed_wrap_ids(sessions: &[SessionRecord]) -> HashSet<String> {
     sessions
         .iter()
-        .filter(|r| r.conductable == Some(true))
-        .filter(|r| r.pid.is_some_and(aoide_storage::fs::pid_is_alive))
-        .filter(|r| verify_seal_over(r, pubkey_hex))
+        .filter(|r| is_protected_live_wrap(r))
         .map(|r| r.session_id.clone())
         .collect()
 }
 
-/// The taught refusal for a live sealed wrap: what is running, and who can end
-/// it. Named so the caller can act on it without reading the design.
+/// The taught refusal for a protected live wrap: what is running, and how it
+/// ends. Named so the caller can act on it without reading the design.
 pub(crate) fn live_wrap_refusal(id: &str) -> String {
     format!(
-        "session `{id}` is a live conducted wrap sealed by aoided: its own process is still \
-         running, so it cannot be ended or finished from outside. The wrap ends its own record \
-         when that process exits. `aoide session kill --id {id}` asks the process to exit \
-         (SIGTERM, under the same seal check); a record whose process is gone is reaped normally."
+        "session `{id}` is a live conducted wrap: its own process is still running, so it \
+         cannot be ended or finished from outside. The wrap ends its own record when that \
+         process exits. `aoide session kill --id {id}` asks the process to exit (SIGTERM, only \
+         under a seal the daemon can verify); a record whose process is gone is reaped normally."
     )
 }
 
@@ -377,16 +374,16 @@ mod tests {
             origin: origin.map(str::to_string),
             seal: Some(seal),
             sealed_issued_at: Some(issued_at),
+            sealed_pid_starttime: Some(starttime),
             ..Default::default()
         }
     }
 
-    // ── live_sealed_wrap_ids ──────────────────────────────────
+    // ── is_protected_live_wrap / live_sealed_wrap_ids ─────────────────────
 
     #[test]
-    fn live_sealed_wrap_ids_admit_only_a_conducted_wrap_whose_seal_verifies_on_a_live_pid() {
+    fn live_sealed_wrap_ids_admit_only_a_conducted_wrap_on_its_sealed_starttime() {
         let kp = identity::mint_ephemeral().unwrap();
-        let key = kp.info().pubkey_hex;
         let me = std::process::id() as i32;
         let mut wrap = sealed_record("wrap", me, None, &kp);
         wrap.conductable = Some(true);
@@ -400,16 +397,66 @@ mod tests {
             pid: Some(me as u32),
             ..Default::default()
         };
-        let sessions = [wrap.clone(), plain, dead, unsealed];
+        let sessions = [wrap, plain, dead, unsealed];
 
-        let live = live_sealed_wrap_ids_with(&sessions, &key);
-        assert_eq!(live, HashSet::from(["wrap".to_string()]));
+        assert_eq!(live_sealed_wrap_ids(&sessions), HashSet::from(["wrap".to_string()]));
+    }
 
-        let other = identity::mint_ephemeral().unwrap();
-        assert!(
-            live_sealed_wrap_ids_with(&[wrap], &other.info().pubkey_hex).is_empty(),
-            "a seal another daemon minted verifies nothing here"
-        );
+    /// A daemon restart mints a new key, so the seal verifies nothing any more.
+    /// The protection is the plaintext starttime and does not read the key.
+    #[test]
+    fn a_sealed_wrap_stays_protected_under_a_different_signing_key() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let me = std::process::id() as i32;
+        let mut wrap = sealed_record("wrap", me, None, &kp);
+        wrap.conductable = Some(true);
+        let restarted = identity::mint_ephemeral().unwrap();
+        assert!(!verify_seal_over(&wrap, &restarted.info().pubkey_hex));
+        assert!(is_protected_live_wrap(&wrap));
+        assert!(live_sealed_wrap_ids(&[wrap]).contains("wrap"));
+    }
+
+    /// A reused pid: the record's starttime is not the live process's starttime.
+    #[test]
+    fn a_reused_pid_does_not_inherit_a_sealed_wrap_protection() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let me = std::process::id() as i32;
+        let mut wrap = sealed_record("wrap", me, None, &kp);
+        wrap.conductable = Some(true);
+        wrap.sealed_pid_starttime = wrap.sealed_pid_starttime.map(|t| t + 1);
+        assert!(!is_protected_live_wrap(&wrap));
+        assert!(live_sealed_wrap_ids(&[wrap]).is_empty());
+    }
+
+    /// A seal with no plaintext starttime (minted before the field existed) is
+    /// never protected, and a zero starttime never matches a live read.
+    #[test]
+    fn a_legacy_seal_without_a_starttime_or_a_zero_one_is_not_protected() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let me = std::process::id() as i32;
+        let mut legacy = sealed_record("legacy", me, None, &kp);
+        legacy.conductable = Some(true);
+        legacy.sealed_pid_starttime = None;
+        let mut zeroed = sealed_record("zeroed", me, None, &kp);
+        zeroed.conductable = Some(true);
+        zeroed.sealed_pid_starttime = Some(0);
+        assert!(!is_protected_live_wrap(&legacy));
+        assert!(!is_protected_live_wrap(&zeroed));
+    }
+
+    /// No seal, or a dead pid: neither is protected, whatever the starttime says.
+    #[test]
+    fn an_unsealed_or_dead_wrap_is_not_protected() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let me = std::process::id() as i32;
+        let mut unsealed = sealed_record("unsealed", me, None, &kp);
+        unsealed.conductable = Some(true);
+        unsealed.seal = None;
+        let mut dead = sealed_record("dead", me, None, &kp);
+        dead.conductable = Some(true);
+        dead.pid = Some(4_000_000);
+        assert!(!is_protected_live_wrap(&unsealed));
+        assert!(!is_protected_live_wrap(&dead));
     }
 
     #[test]
@@ -432,8 +479,7 @@ mod tests {
             1_800_000_000,
             |_| None,
         ));
-        let key = kp.info().pubkey_hex;
-        assert!(live_sealed_wrap_ids_with(&[wrap], &key).contains("wrap"));
+        assert!(live_sealed_wrap_ids(&[wrap]).contains("wrap"));
     }
 
     // ── verify_seal_over ──────────────────────────────────────────────────

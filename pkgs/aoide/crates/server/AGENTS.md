@@ -182,11 +182,14 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   a successful `session start` dispatch whose record already carries a
   `pid`, and it seals a record ONCE.** A record that already carries a
   `seal`, or ever did (`everSealed`), is never sealed again — by this
-  function or by the `seal_unsealed_live_sessions` tick. `session_start_
-  refusal` refuses a dispatched `session start` BEFORE it runs when the
-  record is sealed over a live pid that no longer verifies (taught error +
-  `seal_refused` event); a sealed record whose process merely died is not
-  refused. Never refuse after mutating, and never add a path that re-mints
+  function or by the `seal_unsealed_live_sessions` tick. Both stamp the
+  plaintext `sealedPidStarttime` in the same call as the seal. `session_start_
+  refusal` refuses a dispatched `session start` BEFORE it runs when the record
+  is a protected live conducted wrap (`aoide_conduct::graph::
+  is_protected_live_wrap`, the one predicate; taught error + `seal_refused`
+  event). It reads no daemon key, so a restart does not lift it. A record that
+  is not a conducted wrap, whose pid was reused, or whose process merely died
+  is not refused. Never refuse after mutating, and never add a path that re-mints
   over a record that has ever been sealed; the pid it mints over is the
   record's OWN `pid`
   field (kept immutable by `aoide_storage::session::pid_may_move`), not a
