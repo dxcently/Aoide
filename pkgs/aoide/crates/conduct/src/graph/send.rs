@@ -254,23 +254,6 @@ fn sibling_autogate_enabled() -> bool {
 pub const DOOR_CANNOT_APPROVE: &str =
     "this door cannot approve a gated send; approval comes from a terminal or the conductor";
 
-/// Which doors may approve a gated send (the door half of the send gate).
-///
-/// `Cli` (a person or a local agent at a terminal) and `Daemon` (aoided's own
-/// dispatch, which the conductor and herald reach through their local
-/// sockets) keep every approval route: `--yes`, the box-wide autogate
-/// environment, the parent/sibling rules, `session pending approve`.
-/// `Mcp` (stdio, and lyra's) and `A2a` (the network door) cannot: a send
-/// through them parks as pending whatever it asks for, so a caller on those
-/// doors can queue a send but never approve one. Exhaustive on purpose, so a
-/// new door has to be decided here rather than inherit an answer.
-pub fn door_can_approve(door: Door) -> bool {
-    match door {
-        Door::Cli | Door::Daemon => true,
-        Door::Mcp | Door::A2a => false,
-    }
-}
-
 /// Resolve the gate: `--yes`, then the global autogate switch, then the
 /// parent-of-target rule, then the sibling rule, else pending.
 fn send_gate(yes: bool, sender_is_parent: bool, is_sibling: bool) -> SendGate {
@@ -908,9 +891,9 @@ fn deliver_local_with(
     // peercred-derived ancestry roots back to the target's OWN session,
     // unconditionally, un-bypassably — stronger than the old guard, which
     // only ever covered well-behaved callers of `aoide send`).
-    // A door that cannot approve (`door_can_approve`) never reaches the gate's
+    // A door that cannot approve (`Door::can_approve`) never reaches the gate's
     // inputs at all: its send parks below, so identity is not resolved for it.
-    let may_approve = door_can_approve(inv.door);
+    let may_approve = inv.door.can_approve();
     let (is_parent, is_sibling) = if !may_approve || yes || autogate_env() {
         (false, false) // never examined — send_gate's own precedence short-circuits first.
     } else {
@@ -3924,14 +3907,6 @@ mod tests {
         "AOIDE_SESSION_ID",
         "AOIDE_CONDUCT_SIBLING_AUTOGATE",
     ];
-
-    #[test]
-    fn door_can_approve_is_the_local_doors_only() {
-        assert!(door_can_approve(Door::Cli));
-        assert!(door_can_approve(Door::Daemon));
-        assert!(!door_can_approve(Door::Mcp));
-        assert!(!door_can_approve(Door::A2a));
-    }
 
     /// Path 1 of the audit: `--yes` on a send from an MCP or A2A door. The
     /// send still parks, reaches nothing, and carries the taught line.

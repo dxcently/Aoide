@@ -12,7 +12,7 @@ address: with a door-wide token configured, a caller that presents neither that
 token nor a node identity (its own bearer, or a verified signature) gets the
 uniform answer and nothing queues. A spawn's opening turn is held the same way,
 verdict `held-pending`. The gate that decides this is `aoide_conduct::graph::
-door_can_approve`; CONTRACTS.md's pending-queue section has the table.
+Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
 
 ## Named seams (what it exposes)
 

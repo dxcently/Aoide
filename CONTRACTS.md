@@ -3506,7 +3506,7 @@ parsed as markup or as a command.
 
 #### Approval doors — who may approve a gated send
 
-`door_can_approve` (`pkgs/aoide/crates/conduct/src/graph/send.rs`) is the one
+`Door::can_approve` (`pkgs/aoide/crates/protocol/src/audit.rs`) is the one
 predicate. It is exhaustive over `aoide_protocol::Door`, so a new door has to
 be decided there. The taught line a refused approval carries is
 `DOOR_CANNOT_APPROVE`.
@@ -4174,7 +4174,8 @@ valid_node_name`) — never clamped. A self-filed letter's data also
 carries a `ring` field (P-M5a-2): the doorbell report forwarded through
 `daemon_dispatch` (`{"name","rung","deferred","skipped"}`, `mail
 ring`'s own shape) when a resident daemon answered, or the literal
-string `"no-daemon"` when none did — filing itself always still
+string `"no-daemon"` when none did, or `"refused"` when the caller's door
+cannot approve (nothing is forwarded then) — filing itself always still
 succeeds either way, so `ring` never turns an accepted send into a
 reported failure. `mail send` also takes `--subject <text>`, `--cc
 <addr>[,<addr>…]`, `--thread <id>` and `--reply-to <msgid>`; with any of
@@ -6526,7 +6527,7 @@ request (`a2a.rs::decide_send_action`, unit-tested for every branch):
   never a silent fallback to spawning.
 
 **This door parks every send.** The A2A door cannot approve a gated send:
-`door_can_approve` is false for `Door::A2a`, and the taught line is
+`Door::can_approve` is false for `Door::A2a`, and the taught line is
 `DOOR_CANNOT_APPROVE` (§3, approval doors). So every inject this door takes is
 queued in `state/stage/pending.json` for a human to approve or deny at a
 terminal or through the conductor. The entry is attributed `node:<name>` when

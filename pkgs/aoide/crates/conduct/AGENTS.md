@@ -99,7 +99,7 @@ in the message.
 
 ## Invariants
 
-- **Only an approving door may approve a gated send.** `door_can_approve`
+- **Only an approving door may approve a gated send.** `Door::can_approve`
   (`graph/send.rs`) is the one predicate: `Cli` and `Daemon` approve, `Mcp`
   and `A2a` never do. `--yes`, the global autogate environment, and the
   parent/sibling rules are read only past that check, so a send from a
@@ -1987,7 +1987,7 @@ in the message.
   `session_send`, and that is where the receipt is filed. A held network send is
   filed when a local approver releases it, through that same path. A network
   door never reaches it: `aoide-server`'s A2A `do_inject` parks its send in
-  `pending.json` (`door_can_approve`), and its A2A spawn holds the opening turn
+  `pending.json` (`Door::can_approve`), and its A2A spawn holds the opening turn
   the same way, so neither files anything. `aoide-server`'s `mail_deposit`
   (`a2a.rs`) calls `aoide_storage::mail::deposit` directly for a letter/receipt
   arriving over the wire FROM a peer node. It never touches
@@ -2246,7 +2246,7 @@ in the message.
   socket resolves against the daemon's own ancestry, not the original caller's.
   Don't "fix" this by threading a peercred pid into `send.rs` without opening
   that as its own scoped phase. A network door never reaches that resolution,
-  because its send parks first (`door_can_approve`). P-ID3 closed only the
+  because its send parks first (`Door::can_approve`). P-ID3 closed only the
   ATTRIBUTION half of that gap (`aoided`'s `invocation_from_dispatch_request`
   and `a2a::do_inject` both stamp an absent `from` explicit-empty rather than
   let it fall through to their own process's ambient `AOIDE_SESSION_ID`), not

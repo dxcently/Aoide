@@ -807,7 +807,7 @@ fn opening_turn_worker(
 }
 
 /// The opening turn of a spawn this network door started, held rather than
-/// typed. The door cannot approve (`door_can_approve`), so the prompt is queued
+/// typed. The door cannot approve (`Door::can_approve`), so the prompt is queued
 /// for a human exactly like a send that did not clear the gate. Nothing is
 /// typed into the new session, and the verdict says so.
 fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>) -> &'static str {

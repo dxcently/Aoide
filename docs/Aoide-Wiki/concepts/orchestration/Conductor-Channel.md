@@ -228,7 +228,7 @@ through.
   (`aoide a2a serve`, loopback included) cannot: a send through them parks
   as pending whatever it asks for, `--yes` included, and
   `session pending approve` is refused there with a taught line. The
-  decision is one predicate, `door_can_approve`, read from the door the
+  decision is one predicate, `Door::can_approve`, read from the door the
   invocation arrived through; a caller's own claim about itself is never
   consulted. The full table is in CONTRACTS.md (the pending-queue section).
   A local agent with a shell can still approve through the CLI until the

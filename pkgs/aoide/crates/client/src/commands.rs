@@ -5232,12 +5232,20 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
                     },
                     door: inv.door,
                 };
-                let ring_value = match crate::daemon::daemon_dispatch(&ring_inv) {
-                    None => json!("no-daemon"),
-                    Some(out) if out.status == aoide_protocol::output::Status::Ok => {
-                        out.data.unwrap_or(Value::Null)
+                // A door that cannot approve rings nothing, and the forward is
+                // never sent: `daemon_dispatch` carries no door on the wire, so
+                // the daemon would run this `mail ring` as its own door and type
+                // it into the reader's pty. The letter is filed either way.
+                let ring_value = if !inv.door.can_approve() {
+                    json!("refused")
+                } else {
+                    match crate::daemon::daemon_dispatch(&ring_inv) {
+                        None => json!("no-daemon"),
+                        Some(out) if out.status == aoide_protocol::output::Status::Ok => {
+                            out.data.unwrap_or(Value::Null)
+                        }
+                        Some(_) => json!("error"),
                     }
-                    Some(_) => json!("error"),
                 };
                 if let Some(obj) = data.as_object_mut() {
                     obj.insert("ring".to_string(), ring_value);
@@ -9758,6 +9766,30 @@ mod tests {
 
         let req = handle.join().unwrap();
         assert_eq!(req["path"], json!(["mail", "ring"]), "forwards `mail ring`, never rings in-process");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The remote-door half: an MCP self-send files the letter and forwards no
+    /// ring. A resident daemon IS listening here, and it must see no dispatch at
+    /// all, since the forward would reach it as the daemon's own door.
+    #[test]
+    fn mail_send_to_self_from_a_door_that_cannot_approve_never_forwards_a_ring() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-ring-mcp");
+
+        let socket_path = std::env::temp_dir().join(format!("aoide-mm-{}.sock", std::process::id()));
+        let listener = fake_daemon_listener(&socket_path);
+        listener.set_nonblocking(true).unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
+
+        let mut inv = mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "self/conductor")]);
+        inv.door = aoide_protocol::Door::Mcp;
+        let out = handle_mail_send(&inv);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["ring"], json!("refused"));
+        assert!(out.changed.iter().any(|c| c.contains("state/mail/base.jsonl")), "{:?}", out.changed);
+        assert!(listener.accept().is_err(), "no dispatch reached the daemon");
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -29,7 +29,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 
 - **A network door never approves a gated send, and never delivers one.**
   `message/send`'s Inject arm asks
-  `aoide_conduct::graph::door_can_approve(Door::A2a)`, which is false. Every
+  `aoide_protocol::Door::A2a.can_approve()`, which is false. Every
   Inject the door admits parks in `pending.json` for a human, whoever the caller
   is, so no network send is delivered. A spawn's opening turn is held with
   `hold_pending`, not typed, verdict `held-pending`. The MCP side of the same
@@ -560,7 +560,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   (`an_unattributed_inject_never_falls_back_to_this_processs_own_ambient_session_id`
   is the regression pin). This closes only the ATTRIBUTION leak, not the GATE.
   The gate never reads the ancestry for this door: a non-approving door parks
-  its send before any identity is resolved (`door_can_approve`,
+  its send before any identity is resolved (`Door::can_approve`,
   `graph/send.rs`).
 - **`NONCE_CACHE` (P-P4) is process-local, in-memory, and deliberately NOT
   a `HashSet` — a bounded `VecDeque<(node, nonce)>` capped at

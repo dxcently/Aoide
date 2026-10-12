@@ -60,7 +60,7 @@ use super::conduct::{auto_type_refusal, AutoTypeRefusal};
 use super::doc::is_conductable_now;
 use super::model::{load_stage, sessions_path, SessionRecord, SessionsFile};
 use super::permit::profile_for_agent;
-use super::send::{door_can_approve, write_delivery, DOOR_CANNOT_APPROVE, SUBMIT_KEYSTROKE_DELAY};
+use super::send::{write_delivery, DOOR_CANNOT_APPROVE, SUBMIT_KEYSTROKE_DELAY};
 use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::{Door, Invocation};
 use serde_json::json;
@@ -377,7 +377,7 @@ pub fn ring(name: &str, exclude: Option<&str>) -> Result<RingReport, String> {
 /// ring exactly like [`ring`]'s own `exclude` parameter.
 ///
 /// A ring types a submitted nudge into the reader's pty, so a door that cannot
-/// approve (`door_can_approve`: MCP, the network door) is refused before the
+/// approve (`Door::can_approve`: MCP, the network door) is refused before the
 /// forward. The daemon would otherwise ring as its own door and type it.
 pub fn mail_ring(inv: &Invocation) -> Outcome {
     let cmd = "mail.ring";
@@ -395,7 +395,7 @@ pub fn mail_ring(inv: &Invocation) -> Outcome {
 
     // Refused before any forward, so the daemon never sees a ring it would
     // have to type as its own door.
-    if !door_can_approve(inv.door) {
+    if !inv.door.can_approve() {
         return Outcome::refuse(
             cmd,
             Kind::Refused,

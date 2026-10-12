@@ -100,6 +100,23 @@ pub enum Door {
     A2a,
 }
 
+impl Door {
+    /// Whether this door may approve a gated send (the door half of the send
+    /// gate). `Cli` (a person or a local agent at a terminal) and `Daemon`
+    /// (aoided's own dispatch) keep every approval route: `--yes`, the box-wide
+    /// autogate environment, the parent and sibling rules, `session pending
+    /// approve`. `Mcp` (stdio, and lyra's) and `A2a` (the network door) cannot:
+    /// a send through them parks as pending whatever it asks for. Exhaustive on
+    /// purpose, so a new door has to be decided here rather than inherit an
+    /// answer.
+    pub fn can_approve(self) -> bool {
+        match self {
+            Door::Cli | Door::Daemon => true,
+            Door::Mcp | Door::A2a => false,
+        }
+    }
+}
+
 /// Event classes for the neutral event stream. Subscriptions are default-deny
 /// per class, so OSD noise never burns an agent run and forwarded notification
 /// text never reaches an agent as a command (entities/aoided).
@@ -264,6 +281,15 @@ pub fn audit(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_local_doors_can_approve() {
+        use super::Door;
+        assert!(Door::Cli.can_approve());
+        assert!(Door::Daemon.can_approve());
+        assert!(!Door::Mcp.can_approve());
+        assert!(!Door::A2a.can_approve());
+    }
+
     use super::*;
 
     fn tmp_log(tag: &str) -> PathBuf {

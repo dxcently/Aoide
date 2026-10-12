@@ -167,7 +167,7 @@ the conductor) approves it there. Enabling the door is admitted at
 - **Inject never delivers at this door.** An inject that is admitted parks in
   `pending.json`, the same queue the local `send` uses. Attribution is not a
   gate: a node caller's entry carries `node:<name>`, whichever rung resolved
-  the node. The door cannot approve, because `door_can_approve` is true only
+  the node. The door cannot approve, because `Door::can_approve` is true only
   for the local CLI and the daemon. A network caller therefore queues a steer
   and cannot release it. A human releases it with
   `aoide session pending approve`, or the conductor does.

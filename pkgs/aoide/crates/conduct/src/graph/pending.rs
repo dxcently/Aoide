@@ -44,7 +44,7 @@ use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
 };
-use super::send::{door_can_approve, pending_path, DOOR_CANNOT_APPROVE};
+use super::send::{pending_path, DOOR_CANNOT_APPROVE};
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::Invocation;
 use serde_json::{json, Value};
@@ -317,7 +317,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
     };
     // Refused before the entry leaves the queue: a caller on a door that
     // cannot approve gets a taught refusal and the held send stays held.
-    if !door_can_approve(inv.door) {
+    if !inv.door.can_approve() {
         return Outcome::refuse(
             cmd,
             Kind::Refused,

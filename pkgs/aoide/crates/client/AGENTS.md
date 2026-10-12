@@ -183,6 +183,12 @@
   `aoide_storage::attest` with this module delegating — edit the body
   there; a change to the daemon socket's resolution rule updates that body
   AND `aoide-server`'s bind-side copy in the same commit.
+- **`daemon_dispatch` carries no door.** The request is `op`, `path`, `args`
+  and `flags`, and the daemon stamps `Door::Daemon` on every dispatch it runs
+  (`server::daemon::invocation_from_dispatch_request`). Nothing the daemon
+  receives can say which door the caller came through, so a forwarder that
+  holds a non-approving caller's door checks `Door::can_approve` BEFORE it
+  forwards. `handle_mail_send`'s self-ring does, and reports `"refused"`.
 - **`daemon_dispatch` returning `None` is not the same as an error, and the
   distinction is load-bearing.** `None` means "nothing usable answered" —
   dead socket, refused connect, or `inv.door == Door::Daemon` (the

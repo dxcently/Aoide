@@ -604,7 +604,11 @@ never the inbound/serve half (that's `aoide-server`).
   `daemon_dispatch` always answers `None` for) reports the outcome's own
   `ring` field as the literal string `"no-daemon"`, never an error — the
   letter is filed and the latch stays armed for the next trigger either
-  way, so a self-send's own status never depends on ring's success.
+  way, so a self-send's own status never depends on ring's success. A caller
+  on a door that cannot approve (`Door::can_approve` is false: MCP, the
+  network door) forwards nothing and reports `ring` as `"refused"`: the
+  dispatch request carries no door, so the daemon would run the forwarded
+  ring as its own door and type it into the reader's pty.
   `handle_mail_outbox` (`mail outbox [node]`) is the spool's own read-only
   status view — an optional node arg narrows to one, otherwise every node
   `outbox::nodes_with_outbox` reports — rendering each `list_entries` row's

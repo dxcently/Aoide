@@ -50,7 +50,7 @@
 //!    files a card, so a card never stands over a session that is not waiting.
 //! 3. ONLY A DOOR THAT CAN APPROVE RAISES A CARD. The card is the only way a
 //!    human learns to type a verdict, so a caller whose door cannot approve
-//!    (`door_can_approve`: MCP, the network door) files nothing and is told
+//!    (`Door::can_approve`: MCP, the network door) files nothing and is told
 //!    why. An agent or a remote peer cannot put a card over another session's
 //!    real prompt.
 
@@ -58,7 +58,7 @@ use super::common::{require_flag, stage_error};
 use super::model::{
     hooks_path, load_stage, merged_sessions, sessions_path, HooksFile, SessionsFile,
 };
-use super::send::{door_can_approve, DOOR_CANNOT_APPROVE};
+use super::send::DOOR_CANNOT_APPROVE;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::Invocation;
@@ -398,7 +398,7 @@ pub fn session_permit(inv: &Invocation) -> Outcome {
     let what = inv.flags.get("what").map(String::as_str);
 
     // Guard 3: a door that cannot approve files no card (module header).
-    if !door_can_approve(inv.door) {
+    if !inv.door.can_approve() {
         audit_refusal(inv, &id, DOOR_CANNOT_APPROVE);
         return Outcome::refuse(
             cmd,

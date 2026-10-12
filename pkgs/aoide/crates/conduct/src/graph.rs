@@ -176,7 +176,7 @@ pub use self::send::DAEMON_PEER_PID_FLAG;
 // door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
 // registry, `aoide-server`'s dispatch).
 pub use self::send::{
-    door_can_approve, hold_pending, pending_path, session_hook, session_send, DOOR_CANNOT_APPROVE,
+    hold_pending, pending_path, session_hook, session_send, DOOR_CANNOT_APPROVE,
 };
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile
