@@ -27,6 +27,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 
 ## Invariants
 
+- **A network door never approves a gated send.** `message/send`'s Inject
+  arm asks `aoide_conduct::graph::door_can_approve(Door::A2a)` before any
+  autogate rail (loopback, token, signed node, IP, remote parent) may
+  deliver. A rail that would have delivered is audited as `held-door` and
+  parks. A spawn's opening turn is held with `hold_pending`, not typed,
+  verdict `held-pending`. The MCP side of the same rule is conduct's. Only the
+  autogate rails' admission (the #50 uniform-response guard) is unchanged.
+  Admission is about who gets an answer; delivery is what this rule closed.
+
+## Invariants
+
 - **Inbound/serve only.** This crate is the SERVER half of every door.
   Outbound client behavior (A2A client, adapters) belongs in `aoide-client`,
   never here — even a "just this once" helper reverses the direction the

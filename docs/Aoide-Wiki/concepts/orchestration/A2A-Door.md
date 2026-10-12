@@ -159,28 +159,21 @@ to **rebuild time** instead.
   mail-side doorbell write lands in its input, where a non-headless wrap with no
   channel would have been skipped. All of it is the local wrapper's own
   semantics, reached through this door — not a second set of rules.
-- **Non-loopback callers are gated at request time.** `message/send`
-  classifies the caller's address first (`a2a::classify_origin` →
-  `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
-  caller falls back to the same interactive pending-approval queue
-  `send` uses — auto-delivering on an autogate match: the OR of the
-  address check, the per-node `tokenFile` check, the signature-rung
-  `autogate` flag on the resolved node's own record, and a matched
-  remote-parent claim — the node that spawned this very session steering its
-  own child ([[Node-Federation]]; the claim and its three-way match are
-  CONTRACTS.md §6's remote-parent rule); an `Unknown` origin (the address
-  couldn't be read at all) is never auto-delivered, failing safe like an
-  unmatched `Remote`.
-  A verified signature outranks loopback for this question: a request
-  `verify_signed_request` already verified is remote by construction (an
-  ssh `-L` forward terminates at loopback on this end), so
-  `origin_for_inject` strips `Loopback`'s free pass from it — and then the
-  node's own `autogate` flag, with `message` in the mesh the request signed
-  for, or a matched remote-parent claim decides
-  delivery, never the arrival address ([[Node-Transport]]).
-  This is the one interactive per-request gate the wire otherwise lacks —
-  added for [[Node-Federation|node federation]]'s non-loopback case, which
-  the original loopback-only design didn't need to cover.
+- **Inject never delivers at this door.** `message/send` classifies the
+  caller's address first (`a2a::classify_origin` → `ConnOrigin`:
+  `Loopback` / `Remote(IpAddr)` / `Unknown`). The rungs that decide whether
+  a message WOULD deliver still run: loopback, a verified signature
+  (`origin_for_inject` strips loopback's free pass from it), the per-node
+  `tokenFile` match, the signature-rung `autogate` flag on the resolved node,
+  and a matched remote-parent claim. None of them delivers. Every inject is
+  queued on the same `pending.json` the local `send` uses, attributed
+  `node:<name>` for a node caller. A rung that would have delivered writes a
+  `held-door` audit line instead. The door cannot approve: `door_can_approve`
+  is true only for the local CLI and the daemon, so a network caller queues a
+  steer and cannot release it. A human releases it with
+  `aoide session pending approve`, or the conductor does. A loopback caller
+  parks like any other caller, and an `Unknown` origin fails safe into the
+  same queue.
 - **Pairing gates Spawn; the door-wide bearer gates only unsigned reads.**
   A spawn runs only for an identified, paired node: `spawn_admitted`
   requires a request resolved on the Signature rung (a verified per-request
@@ -230,7 +223,7 @@ to **rebuild time** instead.
   `effective_origin(origin, token_configured, token_state)`
   coerces any caller — loopback included — that did not present the valid
   token to `ConnOrigin::Unknown` before `should_deliver_now` ever sees it,
-  which never auto-delivers. There is no separate "trust loopback" toggle: behind a
+  which is never trusted. There is no separate "trust loopback" toggle: behind a
   reverse proxy or tunnel (`ssh -R`, a tailscale funnel, cloudflared, nginx)
   the server sees the proxy's own loopback address for every caller, so an
   unconditional loopback trust hands a remote attacker the same standing as
@@ -250,21 +243,19 @@ to **rebuild time** instead.
   (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared
   secret could never tell two nodes apart, so identifying which node called
   needs one file per node, not one flag for the whole door.
-  **The match is not the delivery.** The address and token rails carry no
-  request signature, so they name no mesh: the door judges the record they
-  matched by its HOME mesh's rules (`aoide-server::a2a::rail_admits` — where a
-  charter governs `[pairing] homeMesh`, the record must be `verified` and its
-  key on the charter's line with `message`, minus this box's own
-  `node allow … off --mesh`; a charter-shaped home with an undecidable
-  operator key, or a `config.toml` that will not load, delivers nothing; a
-  pair-mesh home keeps the record's own flag as the whole rule). A record the
-  charter does not answer for is held PENDING — never refused — so the knock
-  reaches the operator as a `session pending list` entry attributed
-  `node:<name>`; the #50 uniform-response guard is still exempted by the
-  MATCH, which is what keeps that send a real pending entry instead of a
-  synthetic unqueued answer. The address rung is an address match with an
-  address match's limits (a first-match tie-break, live DNS, spoofable from
-  where it matches — CONTRACTS.md §6, review F5).
+  **A match is an audit verdict, not a delivery.** The address and token
+  rails carry no request signature, so they name no mesh. The door judges the
+  record they matched by its HOME mesh's rules (`aoide-server::a2a::rail_admits`:
+  where a charter governs `[pairing] homeMesh`, the record must be `verified`
+  and its key on the charter's line with `message`, minus this box's own
+  `node allow … off --mesh`; an unreadable `config.toml` pends). That verdict
+  decides only whether the audit says `held-door`. Nothing at this door
+  delivers, so a record the charter does not answer for queues like every
+  other inject, attributed `node:<name>`. The #50 uniform-response guard is
+  still exempted by the MATCH, which keeps that send a real pending entry
+  instead of a synthetic unqueued answer. The address rung is an address
+  match with an address match's limits (a first-match tie-break, live DNS,
+  spoofable from where it matches — CONTRACTS.md §6, review F5).
 - **The outbound direction has its own bearer.** `node add --bearer-secret
   <name>` records a secret THIS instance resolves through the local secrets
   broker, as consumer `a2a-client`, on every outbound call to that node —

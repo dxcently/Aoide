@@ -5,6 +5,13 @@ listeners, sessions, snapshots, the audit sink. Untrusted input stops here —
 the inbound half of the two-door contract (the outbound half is
 `aoide-client`).
 
+The A2A door (`a2a.rs`) never approves a gated send. An inbound `message/send`
+that would auto-deliver (loopback, a token, a signed autogate node, an IP
+autogate, a remote parent) is held in `pending.json` instead, audited as
+`held-door`. A spawn's opening turn is held the same way, verdict
+`held-pending`. The gate that decides this is `aoide_conduct::graph::
+door_can_approve`; CONTRACTS.md's pending-queue section has the table.
+
 ## Named seams (what it exposes)
 
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check

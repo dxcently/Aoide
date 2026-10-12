@@ -512,6 +512,102 @@ mod tests {
         assert_eq!(resp["error"]["code"], -32602);
     }
 
+    // ── Approval doors: the MCP door cannot approve a gated send ─────────
+
+    /// The conduct commands, assembled the way `dispatch()` reads its registry,
+    /// so `tools/call` reaches the real `send` and `session pending` handlers
+    /// rather than the fixture above.
+    fn conduct_registry() -> &'static Registry {
+        static REGISTRY: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+        REGISTRY.get_or_init(|| {
+            let mut r = Registry::new();
+            aoide_conduct::commands::graph::register(&mut r);
+            r
+        })
+    }
+
+    fn conduct_dispatch(inv: &Invocation) -> Outcome {
+        conduct_registry()
+            .get(&inv.path)
+            .expect("a registered conduct command")
+            .invoke("aoide", inv)
+    }
+
+    /// One `tools/call` through the real JSON-RPC handler. The tool's text is
+    /// the `Outcome` JSON an MCP client reads back.
+    fn tools_call(name: &str, arguments: Value) -> Value {
+        let req = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        });
+        let resp = handle(&req, conduct_registry(), conduct_dispatch).unwrap();
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+
+    /// `tools/call send` with `yes: true` over the MCP door parks: the socket
+    /// sees nothing, the entry is queued, and the outcome carries the taught
+    /// line. `tools/call session.pending.approve` on the same door is refused
+    /// and leaves the held entry where it was. Both run through `handle`, so
+    /// the arguments are mapped by the MCP tool schema like a real client's.
+    #[test]
+    fn a_tools_call_send_with_yes_parks_over_the_mcp_door_and_never_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = aoide_test_support::short_tmp(&format!("aoide-mcp-door-{}", std::process::id()));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let id = "mcp-door-target";
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        aoide_conduct::graph::write_stage(
+            &aoide_conduct::graph::sessions_path(),
+            &aoide_conduct::graph::SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![aoide_conduct::graph::SessionRecord {
+                    session_id: id.to_string(),
+                    state: "idle".to_string(),
+                    conductable: Some(true),
+                    socket: Some(socket.to_string_lossy().into_owned()),
+                    ..Default::default()
+                }],
+            },
+        )
+        .unwrap();
+
+        let sent = tools_call("send", json!({ "text": "run it", "id": id, "submit": true, "yes": true }));
+        assert_eq!(sent["data"]["state"], "pending", "{sent}");
+        assert_eq!(sent["data"]["approvalRefused"], true, "{sent}");
+        assert!(
+            sent["message"].as_str().unwrap().contains(aoide_conduct::graph::DOOR_CANNOT_APPROVE),
+            "{sent}"
+        );
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "a refused approval reaches nothing"
+        );
+
+        let approved = tools_call("session.pending.approve", json!({ "id": "0" }));
+        assert_eq!(approved["data"]["reason"], "door-cannot-approve", "{approved}");
+        let raw: Value = serde_json::from_str(&std::fs::read_to_string(aoide_conduct::graph::pending_path()).unwrap()).unwrap();
+        assert_eq!(raw["pending"].as_array().unwrap().len(), 1, "the entry stays held");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // ── P-M5c-2: the Claude channel bridge ──────────────────────────────
 
     /// A short, private `$XDG_RUNTIME_DIR` under `/tmp` — a full channel

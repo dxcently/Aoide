@@ -50,8 +50,8 @@
 //! (they only ever touched session state), so they're untouched.
 
 use aoide_conduct::graph::{
-    canonical_state, load_stage, now_iso_utc, resolve_graph_document, session_send, sessions_path,
-    Project, ProjectsFile, SessionRecord, SessionsFile,
+    canonical_state, door_can_approve, hold_pending, load_stage, now_iso_utc, resolve_graph_document,
+    session_send, sessions_path, Project, ProjectsFile, SessionRecord, SessionsFile, DOOR_CANNOT_APPROVE,
 };
 use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
@@ -889,13 +889,18 @@ fn opening_turn_worker(
     budget: Duration,
     audit_log: PathBuf,
     slot: OpeningTurnSlot,
+    from: Option<String>,
 ) {
     let _slot = slot;
     // The door's ack-path stamp can miss a record that registered after it;
     // this one closes that window. A no-op when the value is already `pending`,
     // and — being this thread's first write — always before the verdict below.
     aoide_conduct::graph::stamp_opening_turn(&id, "pending");
-    let word = spawn_inject_prompt(&id, &agent_cmd, &prompt, &launch_at, budget);
+    let word = if door_can_approve(Door::A2a) || prompt.is_empty() {
+        spawn_inject_prompt(&id, &agent_cmd, &prompt, &launch_at, budget)
+    } else {
+        hold_opening_turn(&id, &prompt, from.as_deref())
+    };
     aoide_conduct::graph::stamp_opening_turn(&id, word);
     let _ = audit(
         &audit_log,
@@ -905,6 +910,17 @@ fn opening_turn_worker(
         word,
         &format!("opening turn for `{id}`: {word}"),
     );
+}
+
+/// The opening turn of a spawn this network door started, held rather than
+/// typed. The door cannot approve (`door_can_approve`), so the prompt is queued
+/// for a human exactly like a send that did not clear the gate. Nothing is
+/// typed into the new session, and the verdict says so.
+fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>) -> &'static str {
+    match hold_pending(id, prompt, true, from) {
+        Ok(()) => "held-pending",
+        Err(_) => "hold-failed",
+    }
 }
 
 /// One `status.message` for an opening-turn verdict — the A2A `Message` shape
@@ -2774,6 +2790,7 @@ fn do_spawn(
                     let agent_cmd = agent_cmd.to_string();
                     let prompt = prompt.to_string();
                     let launch_at = launch_at.clone();
+                    let worker_from = Some(format!("node:{node_name}"));
                     let scheduled = std::thread::Builder::new()
                         .name(format!("a2a-opening-turn-{worker_id}"))
                         .spawn(move || {
@@ -2785,6 +2802,7 @@ fn do_spawn(
                                 aoide_conduct::graph::READY_BUDGET,
                                 worker_audit,
                                 slot,
+                                worker_from,
                             )
                         })
                         .is_ok();
@@ -3181,7 +3199,7 @@ fn message_send(
             // does NOT get the without-pending delivery; it falls through to
             // the pending queue, exactly as a stranger does.
             && may_message(&caller_grant(signed_caller));
-            if remote_parent_hit {
+            if remote_parent_hit && door_can_approve(Door::A2a) {
                 let _ = audit(
                     audit_log,
                     Door::A2a,
@@ -3240,7 +3258,20 @@ fn message_send(
             // (`unverified-wrap`). Paid only where it can matter: a decision
             // that was going to pend anyway is left alone, and its audit line
             // is not written.
-            let door_delivers = should_deliver_now(eff_origin, deliver_match || remote_parent_hit);
+            // A network door never approves a gated send (`door_can_approve`):
+            // a rung that would have delivered parks here, and says so.
+            let wants_delivery = should_deliver_now(eff_origin, deliver_match || remote_parent_hit);
+            let door_delivers = wants_delivery && door_can_approve(Door::A2a);
+            if wants_delivery && !door_delivers {
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.message/send",
+                    "held-door",
+                    &format!("holding `{session_id}` for a human: {DOOR_CANNOT_APPROVE}"),
+                );
+            }
             let hold = if door_delivers { session_inject_hold(&session_id) } else { None };
             if let Some(reason) = hold {
                 let why = match reason {
@@ -7059,7 +7090,7 @@ fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_test_support::{accept_one, expect_delivery, read_delivery};
+    use aoide_test_support::{accept_one, read_delivery};
     use serde_json::json;
 
     fn fake_handler(_inv: &Invocation) -> aoide_protocol::output::Outcome {
@@ -8946,6 +8977,19 @@ mod tests {
     // directly (the same function `handle_jsonrpc`'s `message/send` arm
     // calls) with a real `UnixListener` standing in for the target session's
     // control socket, exactly like `conduct::graph::send`'s own gate tests.
+
+    /// What a network door does with an inject it would have delivered: the
+    /// session's socket sees nothing, the send queues on `pending.json` (`queued`
+    /// is the running total for the test), and the audit names the rung that
+    /// would have delivered. Puts `listener` nonblocking to make that check.
+    fn assert_held_at_the_door(listener: &UnixListener, stage: &std::path::Path, audit_log: &std::path::Path, queued: usize) {
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.accept().is_err(), "a network door never writes to the session's socket");
+        let queue: Value = serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).expect("the send is queued")).unwrap();
+        assert_eq!(queue["pending"].as_array().map(Vec::len), Some(queued), "{queue}");
+        let log = std::fs::read_to_string(audit_log).unwrap_or_default();
+        assert!(log.contains("held-door"), "the rung that would have delivered is named, never silent: {log}");
+    }
 
     /// A conducted harness wrap: labelled `claude`, and the launcher walk resolved
     /// `claude` (`wrapped_program`), so it carries the proof every pty writer asks.
@@ -11107,11 +11151,10 @@ mod tests {
     }
 
     #[test]
-    fn loopback_message_send_still_auto_delivers_exactly_as_before() {
-        // Regression test (hard requirement): this amendment must NOT change
-        // loopback semantics at all — a loopback origin still auto-delivers,
-        // byte-for-byte the same as `do_inject`'s pre-amendment unconditional
-        // `--yes` behavior.
+    fn loopback_message_send_is_held_at_the_door_like_any_other() {
+        // A loopback origin is no exception at a network door: it is held like
+        // any caller. A tunnel terminating on loopback looks exactly like this,
+        // so loopback cannot be the trusted rung here.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -11139,7 +11182,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "a loopback `message/send` with no token configured is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -11155,14 +11197,9 @@ mod tests {
             None,
             None,
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "hello loopback\r");
-
         let task = result.unwrap();
-        assert_eq!(task["id"], id);
-
-        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
-        assert!(log.contains("\"status\":\"delivered\""), "audited as delivered: {log}");
+        assert_eq!(task["status"]["state"], "submitted", "{task}");
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11176,7 +11213,7 @@ mod tests {
     }
 
     #[test]
-    fn message_send_injects_with_an_existing_socket_and_refuses_once_it_is_removed() {
+    fn message_send_to_a_live_socket_is_held_and_a_removed_one_is_refused() {
         // The A2A-door half of the identical bug `e2758f7` fixed on `graph`:
         // a stored `conductable` session whose control socket has since been
         // deleted (`shellbridge.service` owns `$XDG_RUNTIME_DIR/aoide` with
@@ -11215,10 +11252,8 @@ mod tests {
 
         let audit_log = root.join("log");
 
-        // While the socket still exists, delivery is unaffected — byte-for-
-        // byte the same as `loopback_message_send_still_auto_delivers_
-        // exactly_as_before` above.
-        let acc = expect_delivery(listener, "an inject into an existing socket is DELIVERED");
+        // While the socket still exists the send is held like any other at this
+        // door: nothing is written, and the socket's presence changes nothing.
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "still here" }], "contextId": id }
         });
@@ -11232,9 +11267,8 @@ mod tests {
             None,
             None,
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "still here\r");
-        assert_eq!(result.unwrap()["id"], id);
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         // The socket file is deleted (a rebuild tearing down the runtime
         // dir) — the STORED record is untouched, but the SAME contextId
@@ -11268,12 +11302,10 @@ mod tests {
         }
     }
 
-    /// A shell child takes no auto-delivered steer from ANY rung of this door
-    /// (house rule 4): loopback included, remote-parent autogate included. The
-    /// line is held PENDING instead — a human's own approval, and nothing else,
-    /// is what lets it reach a shell. Both arms run on the same fixture, so the
-    /// difference is exactly the target record's own P-C5 capture, never the
-    /// caller's standing.
+    /// A shell child takes no steer from a network door (house rule 4). Every
+    /// line is held PENDING, and a human's own approval is what lets it reach a
+    /// shell. The P-C5 capture on the shell record is why that approval matters
+    /// for it; this door never supplies one.
     #[test]
     fn a_shell_wrapped_target_takes_no_auto_delivered_inject() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -11309,10 +11341,9 @@ mod tests {
         write_stage(&sessions_path(), &SessionsFile { schema_version: "0".to_string(), sessions: records }).unwrap();
         let audit_log = root.join("log");
 
-        // Arm 1 — an ordinary target on the door's own trusted loopback rung:
-        // delivered, exactly as before this rule existed.
+        // Both arms are held: a network door writes to no session, and the
+        // shell rule is one more reason it never delivers.
         let plain = listeners.iter().find(|(id, _)| *id == "plain-target").unwrap().1.try_clone().unwrap();
-        let acc = expect_delivery(plain, "the ordinary loopback target's message is DELIVERED");
         let result = message_send(
             &json!({ "message": { "parts": [{ "kind": "text", "text": "plain hello" }], "contextId": "plain-target" } }),
             &audit_log,
@@ -11323,14 +11354,10 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "plain hello\r");
-        assert_eq!(result.unwrap()["id"], "plain-target");
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&plain, &stage, &audit_log, 1);
 
-        // Arm 2 — the same call, the same loopback origin, into the shell:
-        // held, nothing on the wire, the synchronous answer the door's own
-        // held-pending shape (`submitted_task`).
         let shell = listeners.iter().find(|(id, _)| *id == "shell-target").unwrap().1.try_clone().unwrap();
-        shell.set_nonblocking(true).unwrap();
         let held = message_send(
             &json!({ "message": { "parts": [{ "kind": "text", "text": "would run" }], "contextId": "shell-target" } }),
             &audit_log,
@@ -11343,10 +11370,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(held["status"]["state"], "submitted", "{held}");
-        assert!(shell.accept().is_err(), "a shell target is never written to");
-        let log = std::fs::read_to_string(&audit_log).unwrap();
-        assert!(log.contains("shell-wrapped"), "the refusal is named, never silent: {log}");
-        assert!(log.contains("is conducting a shell"), "{log}");
+        assert_held_at_the_door(&shell, &stage, &audit_log, 2);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11359,11 +11383,11 @@ mod tests {
         }
     }
 
-    /// The inject's positive proof: a target labelled `claude` whose walk names
-    /// no program, or names another launcher, is held as `unverified-wrap` and
-    /// nothing is written to it. A target the walk proves is delivered.
+    /// A harness target is held at a network door whether or not the launcher
+    /// walk proves its harness: a label of `claude` with no proof, or the wrong
+    /// proof, and a proven wrap alike. Nothing is written to any of them.
     #[test]
-    fn a_target_the_walk_does_not_prove_is_held_and_a_proven_one_delivers() {
+    fn a_harness_target_is_held_at_a_network_door_proven_or_not() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -11397,7 +11421,7 @@ mod tests {
         let audit_log = root.join("log");
         let listener_for = |id: &str| listeners.iter().find(|(i, _)| *i == id).unwrap().1.try_clone().unwrap();
 
-        let acc = expect_delivery(listener_for("proven-target"), "the walk-proven harness target is DELIVERED");
+        let proven = listener_for("proven-target");
         let result = message_send(
             &json!({ "message": { "parts": [{ "kind": "text", "text": "proven hello" }], "contextId": "proven-target" } }),
             &audit_log,
@@ -11408,12 +11432,11 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "proven hello\r");
-        assert_eq!(result.unwrap()["id"], "proven-target");
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&proven, &stage, &audit_log, 1);
 
-        for id in ["none-target", "taskset-target"] {
+        for (n, id) in ["none-target", "taskset-target"].into_iter().enumerate() {
             let listener = listener_for(id);
-            listener.set_nonblocking(true).unwrap();
             let held = message_send(
                 &json!({ "message": { "parts": [{ "kind": "text", "text": "held" }], "contextId": id } }),
                 &audit_log,
@@ -11426,11 +11449,8 @@ mod tests {
             )
             .unwrap();
             assert_eq!(held["status"]["state"], "submitted", "{held}");
-            assert!(listener.accept().is_err(), "`{id}` is never written to");
+            assert_held_at_the_door(&listener, &stage, &audit_log, n + 2);
         }
-        let log = std::fs::read_to_string(&audit_log).unwrap();
-        assert!(log.contains("unverified-wrap"), "the refusal is named, never silent: {log}");
-        assert!(log.contains("is not proven to be its harness"), "{log}");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11444,10 +11464,10 @@ mod tests {
     }
 
     #[test]
-    fn a_successfully_delivered_message_send_files_into_the_mailbase() {
-        // Messaging plan P-M1: `do_inject` files no entry of its own (see its
-        // doc comment) — this proves the SHARED seam actually fires for an
-        // A2A-delivered message, end to end through `message_send`.
+    fn a_message_held_at_the_network_door_files_nothing_into_the_mailbase() {
+        // Messaging plan P-M1: the mailbase entry is filed at delivery through the
+        // shared seam. A network door holds the message instead, so nothing is
+        // filed until a local approval delivers it.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -11475,33 +11495,18 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "an A2A-delivered message is DELIVERED and filed");
-
         let audit_log = root.join("log");
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "hello from a node" }], "contextId": id }
         });
-        let result = message_send(
-            &params,
-            &audit_log,
-            "",
-            "",
-            ConnOrigin::Loopback,
-            "",
-            None,
-            None,
-        );
-        let _ = acc.join().unwrap();
-        assert!(result.is_ok(), "{:?}", result.err());
+        let result = message_send(&params, &audit_log, "", "", ConnOrigin::Loopback, "", None, None);
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
-        let entries = aoide_storage::mail::read_base().unwrap();
-        assert_eq!(entries.len(), 1, "one delivered A2A message, one mailbase entry — not two");
-        assert_eq!(entries[0].envelope.header.to.name, id);
-        assert_eq!(entries[0].envelope.text, "hello from a node");
-        // The a2a door has no caller identity to offer today (#51's scope) —
-        // `do_inject`'s Invocation never sets `--from`, and this test process
-        // has no AOIDE_SESSION_ID either, so the honest attribution is empty.
-        assert_eq!(entries[0].envelope.header.from.name, "");
+        // Filing happens at delivery, and this door never delivers: the message
+        // waits in `pending.json` and is not yet in the mailbase.
+        let entries = aoide_storage::mail::read_base().unwrap_or_default();
+        assert!(entries.is_empty(), "held, so nothing is filed yet: {entries:?}");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11864,8 +11869,8 @@ mod tests {
             f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone())
         };
 
-        // A target with no readiness fact and no log settles at the deadline —
-        // the verdict is `not-ready`, and that is what the record ends on.
+        // A network door cannot approve, so the opening turn is held for a
+        // human, not typed: the verdict is `held-pending`, never `pending`.
         opening_turn_worker(
             id.to_string(),
             "eidolon".to_string(),
@@ -11874,8 +11879,9 @@ mod tests {
             Duration::from_millis(50),
             audit_log.clone(),
             OpeningTurnSlot::acquire().expect("a slot"),
+            None,
         );
-        assert_eq!(read_word().as_deref(), Some("not-ready"), "the verdict, never `pending`");
+        assert_eq!(read_word().as_deref(), Some("held-pending"), "the verdict, never `pending`");
 
         // And a verdict already on the record is replaced by THIS worker's own
         // — the pending write in between is the same thread's, so nothing can
@@ -11889,8 +11895,9 @@ mod tests {
             Duration::from_millis(50),
             audit_log,
             OpeningTurnSlot::acquire().expect("a slot"),
+            None,
         );
-        assert_eq!(read_word().as_deref(), Some("not-ready"), "still ends on its own verdict");
+        assert_eq!(read_word().as_deref(), Some("held-pending"), "still ends on its own verdict");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -12142,7 +12149,7 @@ mod tests {
     }
 
     #[test]
-    fn loopback_message_send_with_a_valid_token_still_auto_delivers() {
+    fn loopback_message_send_with_a_valid_token_is_held_too() {
         // The other half of the same coupling: presenting the CORRECT token
         // restores exactly the original loopback behavior — this amendment
         // narrows trust, it doesn't remove the ability to be trusted.
@@ -12174,7 +12181,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "a token-presenting loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -12189,9 +12195,8 @@ mod tests {
             "the-real-token",
             Some("the-real-token"), None
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "authenticated loopback\r");
-        assert_eq!(result.unwrap()["id"], id);
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -12205,7 +12210,7 @@ mod tests {
     }
 
     #[test]
-    fn autogated_node_delivers_despite_being_non_loopback() {
+    fn autogated_node_send_from_a_non_loopback_address_is_held() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -12252,7 +12257,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "an autogated node's non-loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -12260,21 +12264,8 @@ mod tests {
         });
         let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
         let result = message_send(&params, &audit_log, "", "", remote_origin, "", None, None);
-        let got = acc.join().unwrap();
-        assert_eq!(
-            String::from_utf8(got).unwrap(),
-            "trusted send\r",
-            "an autogate-marked node's non-loopback send still auto-delivers"
-        );
-        assert!(result.is_ok());
-
-        // No pending.json entry was ever queued for this delivered send.
-        let pending_path = stage.join("pending.json");
-        if pending_path.exists() {
-            let pending: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&pending_path).unwrap()).unwrap();
-            assert!(pending["pending"].as_array().map(Vec::is_empty).unwrap_or(true));
-        }
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -12584,17 +12575,21 @@ mod tests {
     }
 
     /// The other half of the same rule: a key the charter DOES list with
-    /// `message` delivers exactly as an autogated record always did — the
-    /// charter narrows the rail, it does not close it.
+    /// `message` matches the rail, and the audit names it `held-door`. The
+    /// charter decides the verdict; the door holds the send either way.
     #[test]
-    fn a_key_the_home_charter_lists_still_autodelivers() {
+    fn a_key_the_home_charter_lists_is_held_at_the_door() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let boxed = rail_box("aoide-a2a-rail-listed", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
 
         let result = boxed.send("listed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
         assert!(result.is_ok(), "{result:?}");
-        assert_eq!(boxed.delivered().as_deref(), Some("listed-line\r"), "the line's `message` is what the rail delivers on");
-        assert!(boxed.pending().is_empty(), "and nothing was queued");
+        assert_eq!(boxed.delivered(), None, "a network door never writes to the session");
+        assert_eq!(boxed.pending().len(), 1, "the send queues for a human");
+        assert!(
+            std::fs::read_to_string(&boxed.audit_log).unwrap_or_default().contains("held-door"),
+            "the charter's line is the verdict the rail would have delivered on"
+        );
     }
 
     /// The TOKEN rail is the same question, one rung over: a per-node token
@@ -12662,24 +12657,28 @@ mod tests {
             loaded.send("cfg-line", "", None, origin).is_ok(),
             "with a readable config the rail delivers, so the arm below is about the config alone"
         );
-        assert_eq!(loaded.delivered().as_deref(), Some("cfg-line\r"), "named home, listed key: delivered");
-        assert!(loaded.pending().is_empty(), "and nothing was queued");
+        assert_eq!(loaded.delivered(), None, "a network door never writes to the session");
+        assert_eq!(loaded.pending().len(), 1, "named home, listed key: the send queues");
+        assert!(
+            std::fs::read_to_string(&loaded.audit_log).unwrap_or_default().contains("held-door"),
+            "and the rail's verdict is audited: the listed key would have delivered"
+        );
         drop(loaded);
 
         let broken = rail_box("aoide-a2a-rail-cfg-broken", "fleet", &url, true, None);
         broken.break_config();
         let result = broken.send("cfg-broken", "", None, origin);
         assert!(result.is_ok(), "and it is answered, never refused: {result:?}");
-        assert_eq!(
-            broken.delivered(),
-            None,
-            "an unreadable config has no home mesh to judge by, so the rail PENDS rather than resolving to the default mesh's pair rules"
+        assert_eq!(broken.delivered(), None, "an unreadable config has no home mesh to judge by");
+        assert_eq!(broken.pending().len(), 1, "so the knock still reaches the operator, queued");
+        assert!(
+            !std::fs::read_to_string(&broken.audit_log).unwrap_or_default().contains("held-door"),
+            "and no default-mesh verdict was guessed: the rail does not match"
         );
-        assert_eq!(broken.pending().len(), 1, "the knock still reaches the operator");
     }
 
     #[test]
-    fn autogated_node_delivers_via_a_matching_token_even_when_ip_does_not_match() {
+    fn autogated_node_token_match_is_held_at_the_door() {
         // The actual replacement for the dead IP match: behind a proxy the
         // caller's real address is unknowable, but a per-node TOKEN survives
         // the hop. No global A2A token is configured here at all — this is
@@ -12738,7 +12737,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "an autogated node's token-matched send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -12755,9 +12753,8 @@ mod tests {
             Some("node-secret"),
             None,
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "token-identified send\r");
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -12861,7 +12858,7 @@ mod tests {
     }
 
     #[test]
-    fn signed_inject_from_an_autogate_node_on_a_loopback_connection_still_auto_delivers() {
+    fn signed_inject_from_an_autogate_node_on_a_loopback_connection_is_held() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -12902,7 +12899,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "a signed autogate node's loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -12918,20 +12914,10 @@ mod tests {
             None,
             Some(caller("trusted-tunneled-node")),
         );
-        let got = acc.join().unwrap();
-        assert_eq!(
-            String::from_utf8(got).unwrap(),
-            "trusted tunneled send\r",
-            "an autogate-marked node's signed send still auto-delivers through a loopback-classified connection"
-        );
         assert!(result.is_ok(), "{:?}", result.err());
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let pending_path = stage.join("pending.json");
-        if pending_path.exists() {
-            let pending: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&pending_path).unwrap()).unwrap();
-            assert!(pending["pending"].as_array().map(Vec::is_empty).unwrap_or(true), "a delivered send never queues");
-        }
 
         // Review N5: the SAME autogate-marked node, naming a mesh it holds
         // nothing in, does NOT get the without-pending delivery — it falls to
@@ -12969,13 +12955,13 @@ mod tests {
         }
     }
 
-    // ── P-RSA S5: a remote parent steers its own child without pending ───────
+    // ── P-RSA S5: a remote parent's steer is held, its rung named ───────
     //
     // The claim `node spawn` stamped on the child (S3) is read BACK on the
     // Inject arm: a caller whose verified key and claimed session id both equal
-    // the target record's `remoteParent` delivers WITHOUT pending — audited
-    // `autogate-remote-parent` — and every other shape is byte-for-byte today's
-    // result. The table below is the whole predicate: signed and unsigned, key
+    // the target record's `remoteParent` matches a rung that would deliver. The
+    // door holds that steer and audits it `held-door`; every other shape audits
+    // nothing and queues the same way. The table below is the whole predicate: signed and unsigned, key
     // match and mismatch, session match and mismatch, and the node's own
     // `autogate` flag on and off.
 
@@ -13117,13 +13103,12 @@ mod tests {
     }
 
     /// The slice's headline, with the node's own `autogate` flag OFF — the
-    /// shape a real pair is in. The origin is a genuine non-loopback address, so
-    /// nothing but the remote-parent match can deliver this: the caller is a
-    /// signed, NON-autogate node, which [`origin_for_inject`] would otherwise
-    /// coerce to `Unknown` (where `autogate_match` is ignored outright) and
-    /// which would pend even on `Remote`'s own arm.
+    /// shape a real pair is in. The origin is a genuine non-loopback address and
+    /// the caller is a signed, NON-autogate node, so only the remote-parent match
+    /// puts the send on a rung that would deliver. The door holds it, and the
+    /// audit names that rung.
     #[test]
-    fn a_remote_parent_steers_its_child_without_pending_with_autogate_off() {
+    fn a_remote_parent_with_autogate_off_is_held_at_the_door() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -13131,8 +13116,6 @@ mod tests {
         let (stage, audit_log, listener) =
             write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
 
-        let acc = expect_delivery(listener, "the parent's steer is DELIVERED with the node's autogate off");
-
         let key = PARENT_KEY.to_string();
         let result = message_send(
             &remote_parent_body(Some(PARENT_SESSION)),
@@ -13145,29 +13128,16 @@ mod tests {
             Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
-        assert_eq!(
-            String::from_utf8(acc.join().unwrap()).unwrap(),
-            "steer it\r",
-            "the parent's steer is DELIVERED, not held pending"
-        );
-
-        let log = std::fs::read_to_string(&audit_log).unwrap();
-        assert!(log.contains("autogate-remote-parent"), "its own audit label: {log}");
-        assert!(
-            !stage.join("pending.json").exists(),
-            "a delivered send never queues"
-        );
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);
     }
 
-    /// The same match with the node marked `autogate: true`: the setting the
-    /// existing door already honours must neither be required nor defeated —
-    /// a parent steers its child either way, exactly as the LOCAL parent rule
-    /// delivers regardless of the box-wide switch.
+    /// The same match with the node marked `autogate: true`. The flag changes
+    /// which rung matches, never the door's answer: the send is held either way.
     #[test]
-    fn a_remote_parent_steers_its_child_without_pending_with_autogate_on() {
+    fn a_remote_parent_with_autogate_on_is_held_at_the_door() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -13175,8 +13145,6 @@ mod tests {
         let (stage, audit_log, listener) =
             write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, true);
 
-        let acc = expect_delivery(listener, "the parent's steer is DELIVERED, not held pending");
-
         let key = PARENT_KEY.to_string();
         let result = message_send(
             &remote_parent_body(Some(PARENT_SESSION)),
@@ -13189,9 +13157,7 @@ mod tests {
             Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
-        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "steer it\r");
-        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
-        assert!(!stage.join("pending.json").exists());
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);
@@ -13200,10 +13166,11 @@ mod tests {
     /// End to end through the REAL signature (not the [`caller`] shorthand): the
     /// key the match reads is the one `verify_signed_request` PROVED, so a
     /// genuinely signed node whose own key is the child's `remoteParent.key`
-    /// delivers — the same round trip S3's spawn-side tests drive, on the arm
+    /// matches a rung that would deliver, and the door holds it with that rung
+    /// audited — the same round trip S3's spawn-side tests drive, on the arm
     /// that reads the claim back.
     #[test]
-    fn a_genuinely_signed_remote_parent_steers_its_child_without_pending() {
+    fn a_genuinely_signed_remote_parent_is_held_at_the_door() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -13225,7 +13192,6 @@ mod tests {
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
 
-        let acc = expect_delivery(listener, "a genuinely signed parent's steer is DELIVERED, not held pending");
         let result = message_send(
             &body,
             &audit_log,
@@ -13237,13 +13203,7 @@ mod tests {
             Some(SignedCaller { name: &signed_name, key: &signed_key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
-        assert_eq!(
-            String::from_utf8(acc.join().unwrap()).unwrap(),
-            "steer it\r",
-            "the key that VERIFIED the signature matched the child's remoteParent.key"
-        );
-        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
-        assert!(!stage.join("pending.json").exists());
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);
@@ -13326,23 +13286,18 @@ mod tests {
     /// exactly as an unsigned local caller's does. This row pins the EXEMPTION,
     /// one half of what carries the rule: without it the signed parent is
     /// coerced to `Unknown` (where `should_deliver_now` ignores `autogate_match`
-    /// outright) and a genuinely tunneled parent would silently pend — the
+    /// outright) and the tunneled parent would be held with no rung named — the
     /// production shape S5 exists to serve. Its twin, the FOLD into
     /// `autogate_match`, is what the two `Remote` rows above pin; both are
     /// load-bearing.
     #[test]
-    fn a_tunneled_remote_parent_steers_its_child_without_pending() {
+    fn a_tunneled_remote_parent_is_held_at_the_door() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let root = remote_parent_box_root("s5-parent-tunneled");
         let (stage, audit_log, listener) =
             write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
-
-        let acc = expect_delivery(
-            listener,
-            "the tunneled parent's steer is DELIVERED — the exemption keeps it off the Unknown arm",
-        );
 
         let key = PARENT_KEY.to_string();
         let result = message_send(
@@ -13356,17 +13311,10 @@ mod tests {
             Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
-        assert!(
-            !stage.join("pending.json").exists(),
-            "a tunneled parent that PENDED would be the regression — assert before joining, so \
-             the failure is clean rather than a test that hangs on bytes that never arrive"
-        );
-        assert_eq!(
-            String::from_utf8(acc.join().unwrap()).unwrap(),
-            "steer it\r",
-            "the tunneled parent's steer is DELIVERED — the exemption keeps it off the Unknown arm"
-        );
-        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
+        // A tunneled parent arrives as loopback. The exemption keeps it on the
+        // matching rung: without it the origin is `Unknown`, which audits
+        // nothing, so the `held-door` line is what proves the match held.
+        assert_held_at_the_door(&listener, &stage, &audit_log, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);
@@ -13676,11 +13624,10 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(real_listener, "a loopback, tokenless send with no token configured is DELIVERED");
 
         let audit_log = root.join("log");
-        // Loopback + no token configured: off-path, must auto-deliver exactly
-        // as it did before the #50 amendment.
+        // Loopback + no token configured: off-path, held at the door like any
+        // other inject. The #50 guard is not involved.
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "off-path send" }], "contextId": real_id }
         });
@@ -13694,9 +13641,8 @@ mod tests {
             None,
             None,
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "off-path send\r", "no token configured: loopback still auto-delivers");
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{:?}", result.as_ref().err());
+        assert_held_at_the_door(&real_listener, &stage, &audit_log, 1);
 
         let bogus_params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "x" }], "contextId": bogus_id }
@@ -17846,13 +17792,12 @@ mod tests {
         }
     }
 
-    /// **A local path that consults no grant is unchanged** by the fence: an
-    /// unsigned loopback inject never reads a rail, a grant or the config
-    /// (`should_deliver_now(ConnOrigin::Loopback, _)` is unconditionally true),
-    /// and an ordinary `tasks/get` is the bearer gate and the stage. Both stay
-    /// byte-identical with a config that will not load.
+    /// **A loopback inject reads no rail, grant or config.** It is held at the
+    /// network door like any other origin, and an ordinary `tasks/get` is the
+    /// bearer gate and the stage. Both answer the same with a config that will
+    /// not load.
     #[test]
-    fn an_unreadable_config_leaves_the_local_paths_unchanged() {
+    fn an_unreadable_config_leaves_the_loopback_path_unread() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let boxed = rail_box("aoide-a2a-cfg-local", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
         boxed.break_config();
@@ -17860,12 +17805,8 @@ mod tests {
 
         let result = boxed.send("local-line", "", None, ConnOrigin::Loopback);
         assert!(result.is_ok(), "{result:?}");
-        assert_eq!(
-            boxed.delivered().as_deref(),
-            Some("local-line\r"),
-            "an unsigned loopback inject delivers exactly as before — no grant, no mesh, no config read"
-        );
-        assert!(boxed.pending().is_empty(), "and nothing was queued");
+        assert_eq!(boxed.delivered(), None, "an unsigned loopback inject is held at the door, not written");
+        assert_eq!(boxed.pending().len(), 1, "and queued for a human");
 
         let ctx = test_ctx(&boxed.audit_log, "");
         let task = handle_jsonrpc(
