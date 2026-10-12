@@ -89,12 +89,13 @@
 //! resolving lands the session in the trailing [`NO_PROJECT`] bucket.
 
 use super::model::{resolved_parent, HookRecord, Project, SessionRecord};
+use super::spawn::TASK_MAX;
 use aoide_protocol::output::Outcome;
 use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::node_store::{Node, NodeCacheEntry};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// A roster-probe pull closure: given a node, return its live resolved graph
@@ -350,13 +351,22 @@ pub(super) fn sessions_from_graph(graph: &Value, host: &str) -> Vec<SessionView>
     let empty: Vec<Value> = Vec::new();
     let nodes = graph.get("nodes").and_then(Value::as_array).unwrap_or(&empty);
     let edges = graph.get("edges").and_then(Value::as_array).unwrap_or(&empty);
+    // Each child's spawned edge, found once: the first edge naming a `to`
+    // wins, as the scan it replaces did. A per-node scan of every edge is
+    // quadratic on a large graph.
+    let mut spawned: HashMap<&str, &Value> = HashMap::new();
+    for e in edges.iter().filter(|e| e["kind"] == "spawned") {
+        if let Some(to) = e["to"].as_str() {
+            spawned.entry(to).or_insert(e);
+        }
+    }
     nodes
         .iter()
         .filter(|n| n["kind"] == "session")
         .map(|n| {
             let full_id = n["id"].as_str().unwrap_or("");
             let session_id = full_id.strip_prefix("session:").unwrap_or(full_id).to_string();
-            let spawned_edge = edges.iter().find(|e| e["kind"] == "spawned" && e["to"] == full_id);
+            let spawned_edge = spawned.get(full_id).copied();
             let role = if spawned_edge.is_some() { "child" } else { "root" };
             let parent = spawned_edge
                 .and_then(|e| e["from"].as_str())
@@ -391,7 +401,7 @@ pub(super) fn sessions_from_graph(graph: &Value, host: &str) -> Vec<SessionView>
                 kind: n["role"].as_str().map(String::from),
                 parent,
                 native_role: n["nativeRole"].as_str().map(String::from),
-                task: n["task"].as_str().filter(|t| !t.is_empty()).map(String::from),
+                task: remote_task(&n["task"]),
                 // Both cross-machine fields are published by the far node's own
                 // projection (it resolved the names against ITS `nodes.json`),
                 // so they are read back verbatim — re-resolving here would mean
@@ -415,6 +425,16 @@ fn remote_link(v: &Value) -> Option<RemoteLink> {
     let session_id = v["sessionId"].as_str().filter(|s| !s.is_empty())?;
     let node = v["node"].as_str().filter(|s| !s.is_empty())?;
     Some(RemoteLink { node: node.to_string(), session_id: session_id.to_string() })
+}
+
+/// A far node's managed-run slug, kept only when it is a legal mailbox name
+/// of at most [`TASK_MAX`] characters. A foreign document is untrusted: a value
+/// that is not a slug is dropped, not clipped, since a clipped slug would name
+/// a different mailbox.
+fn remote_task(v: &Value) -> Option<String> {
+    let t = v.as_str()?;
+    let legal = aoide_storage::node_store::valid_node_name(t) && t.chars().count() <= TASK_MAX;
+    legal.then(|| t.to_string())
 }
 
 /// The same shape read as one of a session's own children — the link plus the
@@ -2247,5 +2267,41 @@ mod tests {
         assert_eq!(child["nativeRole"], "subagent");
         // Built from the SAME `session_view_json`, so the project grouping
         // agrees by construction — no second check needed.
+    }
+
+    /// A far node's graph of one session with `task` published as given.
+    fn far_task(task: Value) -> Option<String> {
+        let graph = json!({ "nodes": [{ "kind": "session", "id": "session:a", "state": "idle", "task": task }], "edges": [] });
+        sessions_from_graph(&graph, "yomi")[0].task.clone()
+    }
+
+    #[test]
+    fn a_far_nodes_task_is_kept_only_as_a_legal_slug_within_the_cap() {
+        assert_eq!(far_task(json!("review-pr")), Some("review-pr".into()));
+        assert_eq!(far_task(json!("a".repeat(TASK_MAX))), Some("a".repeat(TASK_MAX)), "the cap itself is kept");
+        assert_eq!(far_task(json!("a".repeat(TASK_MAX + 1))), None, "over the cap is dropped, not clipped");
+        assert_eq!(far_task(json!("rm -rf ~; echo")), None, "a value that is no slug is dropped");
+        assert_eq!(far_task(json!("\u{1b}[2Jreview-pr")), None, "an escape sequence is no slug");
+        assert_eq!(far_task(json!("")), None);
+    }
+
+    #[test]
+    fn a_graph_of_twenty_thousand_sessions_reads_in_linear_time() {
+        let n = 20_000;
+        let nodes: Vec<Value> = (0..n)
+            .map(|i| json!({ "kind": "session", "id": format!("session:s{i}"), "state": "idle", "agent": "claude", "cwd": "/w" }))
+            .collect();
+        let edges: Vec<Value> = (1..n)
+            .map(|i| json!({ "kind": "spawned", "from": format!("session:s{}", i - 1), "to": format!("session:s{i}") }))
+            .collect();
+        let graph = json!({ "nodes": nodes, "edges": edges });
+
+        let start = std::time::Instant::now();
+        let views = sessions_from_graph(&graph, "yomi");
+        let took = start.elapsed();
+
+        assert_eq!(views.len(), n);
+        assert_eq!(views[n - 1].parent.as_deref(), Some("s19998"), "the last child still finds its spawned edge");
+        assert!(took < std::time::Duration::from_secs(2), "20k sessions took {took:?}");
     }
 }

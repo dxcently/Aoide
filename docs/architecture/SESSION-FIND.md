@@ -72,7 +72,7 @@ Cost: **free** — already loaded by the roster (`collect_roster`'s inputs);
 
 | Carries | Local fact | Cached remote | Cost | Notes |
 |---|---|---|---|---|
-| task | `task`, the managed run's slug | **not published** | free | slice B1 publishes it |
+| task | `task`, the managed run's slug | `task`, read back only as a legal slug of at most 64 characters (Decision 9) | free | a value that is no slug reads as absent |
 | native role | `nativeRole` | `nativeRole` | free | the harness's own label (codex `subagent`, `guardian_review`) |
 | lead | `projects.json` `lead` (`leads_project`) | the project node's `lead` | free | "lead of aoide" |
 | assigned role | **not recorded anywhere** | — | — | TASK-REGISTER §15/§21: `mail role` (ML3) and the published `assignedRole`/`roleMailbox` (ML4) are designed and unbuilt. Find adds no role store; once ML4 publishes the binding, `role:` and `mailbox:` read it with no grammar change |
@@ -112,8 +112,9 @@ mailboxes, cc's and threads read *not published by \<node\>*, never *none*.
 ### What this design adds, and why
 
 1. **`task` on `graph.json` session nodes** — additive v0, beside `petname`.
-   Without it `role:` cannot see a far run. The slug is already the run's
-   mailbox name, so nothing new crosses the wire.
+   Without it `role:` cannot see a far run. The slug is the run's mailbox
+   name, so a node that publishes it sends a value its older document did not
+   carry. Decision 9 says how a reader trusts it.
 2. **A lock-free read of the mailbase** in `aoide-storage::mail`:
    `peek_cursors()` (the reader maps, pseudo-readers dropped) and `peek_base()`
    (entries, an incomplete final line ignored) — no lock, no migration, no
@@ -453,8 +454,8 @@ conductor starts.
 
 ## Decisions
 
-Eight calls the design rests on. Each names the alternative it beat, what
-that alternative would have given, and what the chosen call costs.
+The calls the design rests on. Each names the alternative it beat, what that
+alternative would have given, and what the chosen call costs.
 
 1. **`cc:` searches inside the letters.** It matches a session that was cc'd
    on a letter whose sender, To, subject or thread id holds the value. The
@@ -504,6 +505,15 @@ that alternative would have given, and what the chosen call costs.
    one key beyond the ruling's list. The alternative, keeping the list exact,
    saves one key. Its cost: a shell or subagent cannot be separated from an
    agent by any term but `agent:` or `state:`.
+
+9. **A far run's slug is published, and read back only when it is a slug.**
+   A far node's `task` is kept when it is a legal mailbox name of at most 64
+   characters, and dropped otherwise, not clipped: a clipped slug names a
+   different mailbox. The alternative, keep the slug local, leaves `role:`
+   blind to every far run. The alternative, publish and trust the value, lets
+   a far node put control bytes into a human row. Cost: one more field on the
+   wire, and a far node can still claim any legal slug, which find shows as
+   that node's claim.
 
 ## How it sits with other work
 

@@ -36,7 +36,7 @@ use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::send::session_send;
 use super::session_store::now_iso_utc;
 use super::undying::nothing_to_restore_warning;
-use aoide_protocol::output::{Outcome, Status};
+use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::Invocation;
 use aoide_storage::fs::session_logs_dir;
 use aoide_storage::undying::{load_undying, save_undying, set_undying};
@@ -735,12 +735,8 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         _ => None,
     };
     if let Some(slug) = task.as_deref() {
-        if !aoide_storage::node_store::valid_node_name(slug) {
-            return Outcome::usage(
-                cmd,
-                format!("task name `{slug}` is not a legal mailbox name (^[a-z0-9][a-z0-9-]*$)"),
-            )
-            .with_data(json!({ "reason": "invalid-task", "sessionId": id, "task": slug }));
+        if let Some(refusal) = task_slug_refusal(cmd, &id, slug) {
+            return refusal;
         }
         // One live run per slug: two live runs must never share one mailbox,
         // and the refusal names BOTH the holding session and its start
@@ -1042,6 +1038,39 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     Outcome::ok(cmd, message)
         .changed(changed)
         .with_data(data)
+}
+
+/// The longest `--task` slug. A run's slug is its mailbox name, and a far
+/// node's cached row carries the same name, read back under this bound
+/// (`who.rs`'s `remote_task`).
+pub(crate) const TASK_MAX: usize = 64;
+
+/// The refusal for a `--task` slug that cannot name a run's mailbox: longer
+/// than [`TASK_MAX`], or not a legal mailbox name. `None` when it can.
+fn task_slug_refusal(cmd: &str, id: &str, slug: &str) -> Option<Outcome> {
+    let len = slug.chars().count();
+    if len > TASK_MAX {
+        return Some(
+            Outcome::refuse(
+                cmd,
+                Kind::Usage,
+                format!("task name `{slug}` is {len} characters"),
+                format!("a task's slug is its mailbox name, and a mailbox name is at most {TASK_MAX} characters"),
+                Fix::Run(format!("spawn --task <slug of at most {TASK_MAX} characters>")),
+            )
+            .with_data(json!({ "reason": "invalid-task", "sessionId": id, "task": slug })),
+        );
+    }
+    if !aoide_storage::node_store::valid_node_name(slug) {
+        return Some(
+            Outcome::usage(
+                cmd,
+                format!("task name `{slug}` is not a legal mailbox name (^[a-z0-9][a-z0-9-]*$)"),
+            )
+            .with_data(json!({ "reason": "invalid-task", "sessionId": id, "task": slug })),
+        );
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1990,5 +2019,14 @@ mod tests {
         assert_eq!(shell_quote(""), "''");
         assert_eq!(shell_quote("two words"), "'two words'");
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn a_task_slug_is_refused_past_its_cap_and_one_that_is_no_mailbox_name() {
+        assert!(task_slug_refusal("spawn", "s1", &"a".repeat(TASK_MAX)).is_none(), "the cap itself is a legal slug");
+        let over = task_slug_refusal("spawn", "s1", &"a".repeat(TASK_MAX + 1)).expect("one past the cap is refused");
+        assert!(over.message.contains(&format!("{} characters", TASK_MAX + 1)), "the refusal names the length: {}", over.message);
+        let bad = task_slug_refusal("spawn", "s1", "Not A Slug").expect("a non-slug is refused");
+        assert!(bad.message.contains("not a legal mailbox name"), "{}", bad.message);
     }
 }
