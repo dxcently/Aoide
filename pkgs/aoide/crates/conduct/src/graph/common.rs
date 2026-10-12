@@ -136,7 +136,7 @@ pub fn strip_ansi(input: &str) -> String {
 /// [`strip_ansi`], and the byte offset of the ESC that opens a sequence still
 /// open at the end of `input`, if there is one. A reader that judges one chunk
 /// of output by itself holds the bytes from that offset, so a sequence split
-/// across two reads is judged whole.
+/// across two valid UTF-8 reads is judged whole.
 pub(in crate::graph) fn strip_ansi_open(input: &str) -> (String, Option<usize>) {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum State {

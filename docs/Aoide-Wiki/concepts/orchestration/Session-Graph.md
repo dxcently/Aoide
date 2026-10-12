@@ -420,10 +420,12 @@ hold until their Enter, which is the common shape.
 
 One cost is stated plainly. A single-key reader that echoes its key and then
 goes silent stays `awaiting` until its next output: a stale state, which the
-ping-back never repeats. A split echo does not answer the question. A read that
-cuts an escape sequence or a multi-byte character holds the cut bytes for the
-next read, so the echo is judged whole. The rule errs toward a stale `awaiting`,
-since a false `idle` would drop the ping-back, the sudo badge and the dock state.
+ping-back never repeats. A read that cuts an escape sequence or a multi-byte
+character holds up to 64 cut bytes for the next read, so a split echo is judged
+whole. A read carrying an invalid UTF-8 byte is judged whole as it stands, and
+an escape cut at its end can then answer the question. The rule errs toward a
+stale `awaiting`, since a false `idle` would drop the ping-back, the sudo badge
+and the dock state.
 
 A second question printed on the same row after an answered one is never
 announced. The row is already answered, so the new question reads as the same

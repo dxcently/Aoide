@@ -31,8 +31,9 @@
 //! output follows it. An echo is not output. It is the typed characters, with
 //! carriage returns and ESC sequences ignored, so a line editor's `\ry\x1b[K` is
 //! still one. A single-key prompt (`read -n1`) reads once it prints after its
-//! key. A read that cuts an escape sequence or a multi-byte character holds the
-//! cut bytes for the next read ([`judged_len`]), so an echo is judged whole.
+//! key. A read that cuts an escape sequence or a multi-byte character holds up
+//! to 64 cut bytes for the next read ([`judged_len`]), so an echo is judged
+//! whole; a read carrying an invalid UTF-8 byte is judged whole as it stands.
 //! One cost is stated plainly: a single-key reader that echoes its key and then
 //! goes silent stays `awaiting` until its next output. That is a stale state,
 //! never a repeated announcement, and it is the cheaper error, since a false

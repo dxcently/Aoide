@@ -946,8 +946,7 @@ fn inert_char(c: char) -> char {
 /// fullwidth twin, so a field that skipped its own [`clean`] (a raw number, a
 /// bare label) cannot carry one. The renderer's own quotes and its `! ` error
 /// marker are ASCII in the render and reach the wire as their twins too: the
-/// canonical wire form is the twin, and no mark is carved out. A harness
-/// composer shows the twin as the mark it stands for.
+/// canonical wire form is the twin, and no mark is carved out.
 fn wire_line(line: &str) -> String {
     inert(&strip_unsafe(line))
 }

@@ -2305,8 +2305,9 @@ it, so a password typed and not yet submitted is still asked. An echoed key
 holds the question until its Enter or real program output: the echo is not
 output. A single-key reader that echoes its key and then goes silent stays
 `awaiting` until its next output (a stale state, never a repeated announcement).
-A read that cuts an escape sequence or a multi-byte character holds those bytes
-for the next read, so a split echo never answers. A second question printed on
+A read that cuts an escape sequence or a multi-byte character holds up to 64 of
+those bytes for the next read, so a split echo does not answer; a read carrying
+an invalid UTF-8 byte is judged whole as it stands. A second question printed on
 the same row after an answered one is never announced. The `sudo` row also sets
 `needsSudo`, and that row is never announced to a spawner.
 The line is held in three places, each capped at 80 characters and sanitised:
