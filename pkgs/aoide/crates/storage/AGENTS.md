@@ -899,9 +899,18 @@
 - **`git::common_dir` is the one `git.rs` function that runs no process
   (SESSION-FIND B2).** It canonicalizes its input, walks up to the nearest
   `.git`, and follows a file's `gitdir:` (relative to the file's own
-  directory) and that gitdir's `commondir`. Its no-git-on-`PATH` test re-runs
-  itself in a child with an empty `PATH`, because the parent's `PATH` is
-  shared by every test thread. Don't give it a `Command`.
+  directory) and that gitdir's `commondir`. It reads the `.git` entry with
+  `symlink_metadata`: a symlink, FIFO or socket answers as no repo, never
+  followed and never opened (an open of a FIFO blocks), and a `.git` file is
+  read to at most 4 KiB. Its no-git-on-`PATH` test re-runs itself in a child
+  with an empty `PATH`, because the parent's `PATH` is shared by every test
+  thread. Don't give it a `Command`.
+- **`node_store`'s loaders come in two forms.** `load_nodes` and
+  `load_node_cache` read a corrupt file as empty or `None`, for the callers
+  that only need the data. `read_nodes` and `read_node_cache` return `Err`
+  for a file that is there and does not parse; a caller that shows the
+  operator a node's state (`session find`) uses those, so it can say
+  "registry unreadable" or "cache unreadable" rather than an empty roster.
 - **`outbox`'s two locks are never conflated (P-M2).** The crate-wide
   stage lock (`with_lock`, wrapping `fs::try_stage_lock`) guards file
   mutations only and is held for microseconds; `.bsy`

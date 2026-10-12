@@ -200,6 +200,11 @@ pub fn anchor(repo: &Path, sha: &str) -> Result<(), String> {
         .map_err(|e| format!("{e} (anchoring {sha} in {})", repo.display()))
 }
 
+/// The longest `.git` file, or `commondir`, read. A `gitdir:` line is one short
+/// line; anything past this many bytes is not a git file, and the cap keeps a
+/// hostile one from costing a read of all of it.
+const GIT_FILE_CAP: u64 = 4096;
+
 /// The git common directory of the repository `path` sits in: the `.git`
 /// directory of the main checkout, which every linked worktree of that repo
 /// shares. Walks up from `path` to the nearest `.git`; a directory is the
@@ -212,28 +217,46 @@ pub fn common_dir(path: &Path) -> Option<PathBuf> {
     let mut dir = path.canonicalize().ok()?;
     loop {
         let dotgit = dir.join(".git");
-        if dotgit.exists() {
+        // The entry itself, not what it points at: a symlinked `.git` is not
+        // followed, and a FIFO is never opened (an open would block).
+        if std::fs::symlink_metadata(&dotgit).is_ok() {
             return resolve_common_dir(&dotgit);
         }
         dir = dir.parent()?.to_path_buf();
     }
 }
 
-/// [`common_dir`]'s second half: `dotgit` is a `.git` directory or file.
+/// [`common_dir`]'s second half: `dotgit` is a `.git` directory or a regular
+/// file. A symlink, FIFO, socket or device resolves to nothing.
 fn resolve_common_dir(dotgit: &Path) -> Option<PathBuf> {
-    let gitdir = if dotgit.is_dir() {
+    let meta = std::fs::symlink_metadata(dotgit).ok()?;
+    let gitdir = if meta.is_dir() {
         dotgit.to_path_buf()
-    } else {
-        let text = std::fs::read_to_string(dotgit).ok()?;
+    } else if meta.is_file() {
+        let text = read_git_file(dotgit)?;
         let target = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
         // A relative `gitdir:` is relative to the directory holding the file.
         dotgit.parent()?.join(target)
+    } else {
+        return None;
     };
-    let common = match std::fs::read_to_string(gitdir.join("commondir")) {
-        Ok(text) => gitdir.join(text.trim()),
-        Err(_) => gitdir,
+    let common = match read_git_file(&gitdir.join("commondir")) {
+        Some(text) => gitdir.join(text.trim()),
+        None => gitdir,
     };
     common.canonicalize().ok()
+}
+
+/// `path`'s text when it is a regular file, read to at most [`GIT_FILE_CAP`]
+/// bytes. Absent, or anything but a regular file, is `None`.
+fn read_git_file(path: &Path) -> Option<String> {
+    use std::io::Read;
+    if !std::fs::symlink_metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    std::fs::File::open(path).ok()?.take(GIT_FILE_CAP).read_to_string(&mut text).ok()?;
+    Some(text)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -480,5 +503,56 @@ mod tests {
             .expect("re-run this test binary");
         assert!(status.success(), "common_dir must answer with an empty PATH");
         let _ = std::fs::remove_dir_all(&main);
+    }
+
+    /// `common_dir` on its own thread, answered within five seconds. A
+    /// regression that blocks reads as a timeout, not a hung test run.
+    fn common_dir_within_five_seconds(path: PathBuf) -> Option<Option<PathBuf>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(common_dir(&path));
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5)).ok()
+    }
+
+    #[test]
+    fn a_fifo_named_dot_git_answers_no_repo_and_never_blocks() {
+        let dir = unique_tmp("git-fifo");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let made = Command::new("mkfifo").arg(dir.join(".git")).status().expect("mkfifo runs");
+        assert!(made.success());
+
+        assert_eq!(
+            common_dir_within_five_seconds(dir.join("sub")),
+            Some(None),
+            "a FIFO is answered as no repo; opening it would block until a writer appears"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_symlinked_dot_git_is_not_followed() {
+        let real = init_repo("git-symlink-real");
+        let wt = unique_tmp("git-symlink-wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::os::unix::fs::symlink(real.join(".git"), wt.join(".git")).unwrap();
+
+        assert_eq!(common_dir(&wt), None, "a .git symlink names no repo for this checkout");
+        assert!(common_dir(&real).is_some(), "the repo it points at still resolves on its own");
+        let _ = std::fs::remove_dir_all(&wt);
+        let _ = std::fs::remove_dir_all(&real);
+    }
+
+    #[test]
+    fn a_dot_git_file_past_the_cap_is_refused() {
+        let real = init_repo("git-oversized-real");
+        let dir = unique_tmp("git-oversized");
+        std::fs::create_dir_all(&dir).unwrap();
+        let padding = "#".repeat(GIT_FILE_CAP as usize + 1);
+        std::fs::write(dir.join(".git"), format!("{padding}\ngitdir: {}\n", real.join(".git").display())).unwrap();
+
+        assert_eq!(common_dir(&dir), None, "the gitdir line sits past the cap, so the file is no git file");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&real);
     }
 }
