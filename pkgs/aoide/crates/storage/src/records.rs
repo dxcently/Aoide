@@ -632,31 +632,22 @@ pub struct SessionRecord {
     )]
     pub session_start_at: Option<String>,
     /// The OPENING TURN of a session the A2A door spawned: what became of the
-    /// first turn a remote peer asked for. Writers, in order: the door's ack
-    /// path stamps `pending` before the worker is scheduled, the worker stamps
-    /// `pending` again as its own first write, and then — same thread, so this
-    /// order is a property of the code and not a race — its verdict. No other
-    /// path writes this field, which is what keeps a verdict from being
-    /// clobbered back to `pending`. The vocabulary, complete:
+    /// first turn a remote peer asked for. The door's ack path stamps `pending`
+    /// before the worker is scheduled, and the worker stamps its verdict from
+    /// its own thread, so the verdict is the last write it makes. The boot pass
+    /// that settles a stranded `pending` is the only other writer. The
+    /// vocabulary is listed once, in `CONTRACTS.md` §4:
     ///
-    /// - `pending` — accepted, the worker is waiting for the target;
-    /// - `delivered` / `delivered-unverified` — the turn went out (the second
-    ///   when the target declared no readiness fact, so whether it submitted
-    ///   is not known);
-    /// - `not-ready` — the budget ran out and NOTHING was typed;
-    /// - `held-pending` — the door cannot approve a gated send, so the turn is
-    ///   queued in `pending.json` for a human; nothing is typed until then;
-    /// - `hold-failed` — that queue write failed (nothing typed, nothing
-    ///   queued);
-    /// - `busy` — the door's opening-turn worker pool was full (nothing was
-    ///   typed; ask again);
-    /// - `no-worker` — no worker thread could be started (nothing was typed);
-    /// - `skipped-*` — nothing typed; the verdicts and their reasons are listed
-    ///   once, in `CONTRACTS.md`;
-    /// - `no-socket` / `write-failed` — the target's control socket never
-    ///   answered, or the write failed (no receipt filed in either case);
-    /// - `unknown` — the process that owed a verdict died before it could
-    ///   stamp one (a boot pass reconciles a stranded `pending` to this).
+    /// - `pending` — accepted; no verdict yet;
+    /// - `held-pending` — queued in `pending.json` for a human; nothing is typed
+    ///   until one approves it;
+    /// - `skipped-empty` — there was nothing to queue;
+    /// - `hold-failed` — the queue write failed (nothing queued);
+    /// - `busy` — the opening-turn worker pool was full (nothing queued; ask
+    ///   again);
+    /// - `no-worker` — no worker thread could start (nothing queued);
+    /// - `unknown` — the process that owed a verdict died before it could stamp
+    ///   one.
     ///
     /// It is a HISTORICAL fact, not live state: it is stamped once and never
     /// cleared, so a `tasks/get` long after the fact reports what happened to

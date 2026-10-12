@@ -49,8 +49,9 @@ Approval is decided by the door a send arrived through. `door_can_approve`
 (re-exported from `graph`) says which doors may approve a gated send: the local
 CLI and aoided's own dispatch. `DOOR_CANNOT_APPROVE` is the taught line a
 refused approval carries, and `hold_pending` parks a text a non-approving door
-asked to inject (A2A's spawn opening turn). CONTRACTS.md's pending-queue
-section has the table.
+asked to inject (A2A's spawn opening turn). The same predicate refuses
+`session permit` (no summons card) and `mail ring` (no ring) on those doors.
+CONTRACTS.md's approval-doors section has the table.
 
 ## Named seams (what it exposes)
 

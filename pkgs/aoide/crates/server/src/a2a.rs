@@ -15,23 +15,23 @@
 //!     command registry, filtered to `implemented: true`.
 //!   - `POST /` — JSON-RPC 2.0: `tasks/get` (real), `message/send` (real —
 //!     inject into a known conductable session, or spawn a freshly conducted
-//!     one; [`decide_send_action`] below — a non-loopback Inject queues
-//!     pending unless its rails earn delivery (an `autogate` record's address
-//!     or token, judged by that record's HOME mesh; CONTRACTS.md §6 amendment
-//!     2026-08-14 and P-CHARTER; see [`ConnOrigin`]/[`should_deliver_now`]),
+//!     one; [`decide_send_action`] below. Every Inject parks in
+//!     `state/stage/pending.json` for a human: this door cannot approve a
+//!     gated send, whatever rail a caller matches (see [`ConnOrigin`] and
+//!     [`should_deliver_now`], which decide only the `held-door` audit line),
 //!     `aoide/graphSummary` (real — CONTRACTS.md §7: wraps
 //!     [`resolve_graph_document`] in the federation envelope; see
 //!     [`graph_summary`]), anything else → `-32601 method not found`.
 //!
 //! A forwarded A2A message's TEXT is untrusted DATA, never executed as a
-//! command — `message/send`'s inject path types it into a target session
-//! exactly like `send` (in fact it reuses
-//! [`aoide_conduct::graph::session_send`] for that), and its spawn path never
-//! runs a client-supplied command: it only ever launches the
+//! command. `message/send`'s inject path parks the text through
+//! [`aoide_conduct::graph::session_send`], the same gated door `send` uses,
+//! and a human's approval is what types it. Its spawn path never runs a
+//! client-supplied command: it only ever launches the
 //! operator-configured `aoide.a2a.spawnAgent` executable (a rebuild-gated nix
-//! option — the user's admission), with the client-supplied prompt injected
-//! as its first turn. See [`decide_send_action`]'s doc comment for the full
-//! security model.
+//! option — the user's admission), with the client-supplied prompt held in
+//! `pending.json` as its first turn until a human approves it. See
+//! [`decide_send_action`]'s doc comment for the full security model.
 //!
 //! Extracted from root `src/a2a.rs` (Phase 4c restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md) — this is the SERVER half only. The
@@ -458,17 +458,13 @@ impl Listener {
     }
 }
 
-/// Should an Inject's verdict be a yes (`--yes`, or a rail that would deliver)? Pure —
-/// unit-tested directly; the one place I/O enters is the caller, which
-/// resolves `deliver_match` from the call's rails. Loopback is unconditionally
-/// trusted (today's behavior, unchanged); a non-loopback or unknown-origin
-/// caller only bypasses the queue when its rails EARNED delivery —
-/// `deliver_match` is [`message_send`]'s `sig_autogate || rail_delivers`, NOT
-/// the bare `autogate_match`: the unsigned rails' match is what exempts a
-/// caller from the #50 uniform-response guard, while the RECORD they matched
-/// is judged by its HOME mesh (`rail_admits`: the charter's line, the shaped
-/// fail-closed arm, or a pair mesh's own flag), so an `autogate` record a
-/// charter no longer lists arrives here `false` and PENDS.
+/// Which rung of an Inject matched, for the audit line. Pure and unit-tested.
+/// The door never acts on the answer: an Inject parks whatever it returns, and
+/// a `true` only writes the `held-door` audit line. Loopback always answers
+/// `true`, because a tunnel that ends on loopback looks local.
+/// `deliver_match` is [`message_send`]'s `sig_autogate || rail_delivers`: the
+/// rails a caller matched, with each record judged by its HOME mesh
+/// (`rail_admits`).
 fn should_deliver_now(origin: ConnOrigin, deliver_match: bool) -> bool {
     match origin {
         ConnOrigin::Loopback => true,
@@ -1996,22 +1992,6 @@ fn session_ref_lookup(id: &str) -> Option<SessionRef> {
     })
 }
 
-/// Deliver into a KNOWN, conductable session: reuse
-/// [`aoide_conduct::graph::session_send`] (the same gated injection door
-/// `send` uses) rather than reimplementing the socket write or its
-/// pending-queue.
-///
-/// `deliver_now` decides whether `--yes` is forced:
-/// - `true` (a loopback connection, or a non-loopback one from an
-///   `autogate`-marked node — [`should_deliver_now`]) forces delivery, same
-///   as this door's original behavior: `--submit` (the prompt is a full
-///   turn, not a keystroke), `--yes` (deliver now, don't queue).
-/// - `false` (a non-loopback, non-autogated connection — CONTRACTS.md §6
-///   amendment, 2026-08-14) OMITS `--yes` entirely: `session_send`'s own
-///   gate then does exactly what a local ungated `send` does — writes
-///   `pending.json` and reports `delivered:false`, never touching the
-///   socket. No pending-queue logic is reimplemented here.
-///
 /// Build a `submitted`-state Task keyed on `session_id`/`contextId`
 /// (NOT `task_get`, which would report the SESSION's current phase — an
 /// unrelated prior turn's state — rather than "this particular message is
@@ -2640,7 +2620,7 @@ fn do_spawn(
                 "a2a.message/send",
                 "ok",
                 &format!(
-                    "spawned conducted session `{id}` (configured agent, {origin}{}) — opening turn pending, typed by a worker once the target reports itself ready",
+                    "spawned conducted session `{id}` (configured agent, {origin}{}) — opening turn pending; it is held in pending.json for a human, never typed by this door",
                     match task {
                         Some(slug) => format!(", managed run on task `{slug}`"),
                         None => String::new(),
@@ -2678,23 +2658,22 @@ fn do_spawn(
 
 /// `message/send`: parse params, resolve [`decide_send_action`], execute.
 ///
-/// `origin` (CONTRACTS.md §6 amendment, 2026-08-14) affects the Inject
-/// branch. `expected_token`/`presented_token` (amendment, 2026-08-18) affect
+/// `origin` affects the Inject branch, and only its audit line: every Inject
+/// parks (see [`should_deliver_now`]). `expected_token`/`presented_token` affect
 /// BOTH branches: an empty `expected_token` (no token configured) is a pure
 /// no-op on every decision below — [`effective_origin`] is the identity
-/// function and [`token_authorized`] always allows — so this whole amendment
-/// is byte-identical-when-off by construction, not merely by testing.
+/// function and [`token_authorized`] always allows.
 ///
-/// - Inject's autogate match now folds TWO independent signals: the
-///   original address match ([`aoide_storage::node_store::autogated_node_addr`],
-///   dead behind any proxy) OR a per-node token match
-///   ([`aoide_storage::node_store::autogated_node_token`], survives one) —
-///   either is sufficient, so an operator who has never set a node
-///   `token_file` sees the exact original address-only behavior.
+/// - Inject's autogate match folds TWO independent signals: an address match
+///   ([`aoide_storage::node_store::autogated_node_addr`], dead behind any
+///   proxy) OR a per-node token match
+///   ([`aoide_storage::node_store::autogated_node_token`], survives one). Either
+///   is sufficient, and the match decides only whether the `held-door` audit
+///   line is written.
 /// - Inject's ORIGIN is [`effective_origin`]'d before reaching
-///   [`should_deliver_now`]: once a token is configured, an unauthenticated
-///   loopback caller no longer gets the automatic pass — see that function's
-///   doc comment for why this is one switch, not two.
+///   [`should_deliver_now`], so an unauthenticated loopback caller is audited
+///   as unauthenticated once a token is configured. See that function's doc
+///   comment.
 /// - Spawn gained a gate it never had at all: [`token_authorized`] must pass
 ///   before [`do_spawn`] runs. This is the actual must-fix gap this
 ///   amendment closes — Spawn was origin-blind AND token-blind before it.
@@ -2716,7 +2695,7 @@ fn do_spawn(
 /// question, just unfiltered by `autogate` and narrowed to ONE specific
 /// node). Spawn accepts ONLY the token rung — a bare address match resolves
 /// a node identity for attribution (Inject's `from` field, origin-stamping)
-/// and for the ordinary autogate question, but never for spawning a process
+/// and for the autogate audit line, but never for spawning a process
 /// attributed to that node; behind any NAT/reverse-proxy deployment an
 /// address match is exactly the shared-source-IP situation that would
 /// otherwise let one tenant spawn "as" another. The refusal is `-32006`,
@@ -11322,6 +11301,56 @@ mod tests {
         let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
         assert_eq!(word.as_deref(), Some("skipped-empty"));
         assert!(!root.join("stage").join("pending.json").exists(), "an empty turn is not a send");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// A failed queue write is `hold-failed`, end to end: the worker stamps it
+    /// on the record, nothing is typed, and the queue file the failure hit is
+    /// left as it was. The write fails inside the queue's own read, because
+    /// `pending.json` does not parse; that is the error branch a failed write
+    /// takes as well, and it is the only way this test can make the write fail
+    /// without depending on whether the suite runs as root.
+    #[test]
+    fn a_failed_queue_write_is_hold_failed_and_overwrites_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-hold-failed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let queue = root.join("stage").join("pending.json");
+        let corrupt = "{ not json";
+        std::fs::write(&queue, corrupt).unwrap();
+
+        let id = "hold-failed";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+
+        opening_turn_worker(
+            id.to_string(),
+            "hi".to_string(),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            None,
+        );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("hold-failed"), "the verdict names the failure");
+        assert_eq!(std::fs::read_to_string(&queue).unwrap(), corrupt, "the queue file was overwritten");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {

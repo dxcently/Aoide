@@ -40,6 +40,7 @@
 //! the entry stays exactly where it was for a human to inspect by hand.
 
 use super::common::{require_args, stage_error};
+use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
 };
@@ -224,6 +225,15 @@ pub fn pending_list(_inv: &Invocation) -> Outcome {
     Outcome::ok(cmd, format!("{n} pending\n{body}")).with_data(json!({ "pending": data }))
 }
 
+/// Is `id` a session that `session_send` can type into right now? The same
+/// test its own not-conductable refusal makes (`is_conductable_now`), read off
+/// the roster as it stands. A session that has not registered is absent.
+fn target_is_live(id: &str) -> bool {
+    load_stage::<SessionsFile>(&sessions_path())
+        .map(|f| f.sessions.iter().any(|s| s.session_id == id && is_conductable_now(s)))
+        .unwrap_or(false)
+}
+
 /// Remove and return the raw entry at `index`, under the stage lock — but
 /// ONLY when it resolves to a real session (see [`is_malformed`]); a broken
 /// entry is left exactly where it was rather than destroyed by a failed
@@ -293,6 +303,8 @@ fn parse_id(cmd: &str, raw: &str) -> Result<usize, Outcome> {
 /// forever" posture) — if delivery then fails (the target session died while
 /// queued, say), that failure is reported plainly rather than silently
 /// re-queued; the human re-sends by hand if the target is still reachable.
+/// A target that is not live yet is refused before the take, so an entry held
+/// for a session still registering is not lost to the failed delivery.
 pub fn pending_approve(inv: &Invocation) -> Outcome {
     let cmd = "session.pending.approve";
     let args = match require_args(inv, &["id"]) {
@@ -314,6 +326,26 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             Fix::Run(format!("aoide session pending approve {index}")),
         )
         .with_fields(json!({ "reason": "door-cannot-approve", "id": index.to_string() }));
+    }
+    // Refused before the entry leaves the queue while its target is not live.
+    // An A2A spawn's opening turn can be held before its child has registered,
+    // and `session_send` refuses a target with no socket: taking the entry first
+    // would lose it. The entry stays put for a later approve, or a deny.
+    let target = load_pending_array()
+        .ok()
+        .and_then(|a| a.get(index).cloned())
+        .filter(|v| !is_malformed(v))
+        .and_then(|v| v.get("sessionId").and_then(Value::as_str).map(str::to_string));
+    if let Some(sid) = target.filter(|sid| !target_is_live(sid)) {
+        audit_pending(inv, cmd, "refused", &format!("approve [{index}] {sid}: target not live"), "");
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("`{sid}` is not live yet"),
+            "the session is not live yet; approve again once it registers",
+            Fix::Run(format!("aoide session pending approve {index}")),
+        )
+        .with_fields(json!({ "reason": "target-not-live", "id": index.to_string(), "sessionId": sid }));
     }
     let removed = match take_pending_entry(index) {
         Ok(v) => v,
@@ -883,6 +915,63 @@ mod tests {
         let _ = acc.join().unwrap();
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["injected"], true);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 11: an entry held for a session that has not registered yet (an
+    /// A2A spawn's opening turn is queued before its child exists) survives an
+    /// early approve. The refusal says why, the entry stays, and the same
+    /// approve delivers it once the session registers.
+    #[test]
+    fn an_approve_before_the_target_registers_is_refused_and_keeps_the_entry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pnd-early");
+
+        let id = "apr-early";
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"opening turn","submit":true,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "target-not-live", "data: {data}");
+        assert_eq!(
+            data["refusal"]["why"], "the session is not live yet; approve again once it registers",
+            "data: {data}"
+        );
+        assert_eq!(load_pending_array().unwrap().len(), 1, "the early approve took nothing");
+
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        let acc = expect_delivery(listener, "the registered session receives the approved opening turn");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert!(load_pending_array().unwrap().is_empty(), "approved, so it left the queue");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -628,7 +628,9 @@ pub fn wait_ready(agent: &str, id: &str, since: &str, budget: Duration) -> Ready
 /// no declarable fact at all gets output settling only, and its delivery is
 /// reported as unverified). `prompt` in the result is `none` (no flag),
 /// `skipped-unregistered`, `not-ready` (no readiness within [`READY_BUDGET`],
-/// nothing typed), `delivered`, `delivered-unverified`, or `failed: …`.
+/// nothing typed), `held-pending` (the calling door cannot approve, so the
+/// prompt is queued in `pending.json` for a human and nothing is typed),
+/// `delivered`, `delivered-unverified`, or `failed: …`.
 ///
 /// `--task <slug>` turns the run into a MANAGED TASK WRAPPER run
 /// (`docs/Aoide-Wiki/concepts/orchestration/Managed-Task-Wrapper.md`): the
@@ -1401,6 +1403,68 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
         let logged = std::fs::read_to_string(log_path).unwrap_or_default();
         assert!(!logged.contains("say pong"), "an unready target was typed at: {logged:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 5, spawn: an MCP caller's `--prompt` is parked, never typed. The
+    /// ready-harness fixture of `prompt_is_injected_once_the_harness_reports_
+    /// itself_ready`, with the door set to MCP: the prompt reports
+    /// `held-pending`, pending.json holds the prompt, and the child's pty never
+    /// sees its text.
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`,
+    /// a `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run.
+    #[cfg(unix)]
+    #[test]
+    fn an_mcp_door_spawn_prompt_is_held_pending_and_never_typed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_SPAWN_EXE",
+        ]);
+
+        let root = unique_stage("spawn-prompt-mcp");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+
+        let id = "spawn-prompt-mcp";
+        let bin = built_aoide_bin();
+        let child_cmd = format!(
+            "printf '%s' '{{\"session_id\":\"claude-uuid-mcp\",\"hook_event_name\":\"SessionStart\",\"cwd\":\"/w\",\"source\":\"startup\"}}' \
+             | {} session hook --agent claude; exec timeout 5 cat",
+            bin.display()
+        );
+
+        let mut inv = spawn_invocation(
+            &["sh", "-c", child_cmd.as_str()],
+            &[("id", id), ("agent", "claude"), ("prompt", "say pong")],
+        );
+        inv.door = aoide_protocol::Door::Mcp;
+        let out = session_spawn(&inv);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["prompt"], "held-pending", "data: {data}");
+
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(crate::graph::send::pending_path()).unwrap()).unwrap();
+        let held = raw["pending"].as_array().expect("pending.json holds the prompt");
+        assert_eq!(held.len(), 1, "pending: {raw}");
+        assert_eq!(held[0]["sessionId"], id);
+        assert_eq!(held[0]["text"], "say pong");
+
+        let log_path = data["logPath"].as_str().expect("logPath once registered");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let logged = std::fs::read_to_string(log_path).unwrap_or_default();
+        assert!(!logged.contains("say pong"), "an MCP door typed the prompt: {logged:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

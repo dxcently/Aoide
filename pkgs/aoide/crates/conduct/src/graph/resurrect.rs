@@ -314,6 +314,29 @@ fn is_sudo_argv(argv: &[String]) -> bool {
 /// `resurrect_one`'s real spawn. See the module doc's safety-invariant
 /// paragraph: the two branches below are never unified behind a shared
 /// boolean parameter — each hardcodes its own flag map inline.
+/// The outcome word for one restore, from the answer `session_send` gave it.
+/// Pure, so the held-pending mapping is testable without a spawn: a send the
+/// door parked is `held-pending`, never reported as typed.
+fn restore_word(inner: &Outcome, submit: bool, ready: super::spawn::Ready) -> String {
+    if inner.status != Status::Ok {
+        return format!("failed: {}", inner.message);
+    }
+    if inner.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str) == Some("pending") {
+        // The door could not approve the restore, so it is queued for a human,
+        // not typed: say so, never "restored".
+        return "held-pending".to_string();
+    }
+    // The branch that fired, and whether the readiness was a fact or a settled
+    // guess: a terminal candidate whose agent has no profile is typed at on the
+    // guess, and says so.
+    let word = if submit { "reexec" } else { "preload" };
+    if ready == super::spawn::Ready::Verified {
+        word.to_string()
+    } else {
+        format!("{word}-unverified")
+    }
+}
+
 fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreSnapshot) -> Option<Invocation> {
     if !restore.idle {
         // Branch one — demonstrably RUNNING something when the session
@@ -531,27 +554,7 @@ fn resurrect_one(
                         .and_then(|r| restore_delivery(door, &new_id, r))
                         .expect("checked just above");
                     let submit = inv.flags.contains_key("submit");
-                    let inner = session_send(&inv);
-                    let held = inner.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str)
-                        == Some("pending");
-                    if inner.status != Status::Ok {
-                        format!("failed: {}", inner.message)
-                    } else if held {
-                        // The door could not approve the restore, so it is
-                        // queued for a human, not typed: say so, never "restored".
-                        "held-pending".to_string()
-                    } else {
-                        // The branch that fired, and whether the readiness was
-                        // a fact or a settled guess: a terminal candidate whose
-                        // agent has no profile is typed at on the guess, and
-                        // says so.
-                        let word = if submit { "reexec" } else { "preload" };
-                        if ready == super::spawn::Ready::Verified {
-                            word.to_string()
-                        } else {
-                            format!("{word}-unverified")
-                        }
-                    }
+                    restore_word(&session_send(&inv), submit, ready)
                 }
             }
         }
@@ -2593,6 +2596,71 @@ mod tests {
             aoide_storage::undying::is_undying(&undying, &new_id),
             "a manifest clean-spawn must mark its new session undying"
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 5, resurrect: a restore an MCP door parks reports `held-pending`
+    /// and its entry is in pending.json. It is never reported as preloaded. The
+    /// target is registered and conductable on a bound socket, so the held
+    /// word can only come from the door (an unreachable target would answer
+    /// `failed`, not `held-pending`), and the socket must see nothing.
+    #[cfg(unix)]
+    #[test]
+    fn a_restore_over_an_mcp_door_is_held_pending_and_never_typed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let (root, _proj_path) = setup("resurrect-mcp-restore");
+
+        let id = "rs-target";
+        let socket = crate::graph::conduct::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        crate::graph::session_store::do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        let restore = RestoreSnapshot {
+            idle: true,
+            typed: Some("echo hello".to_string()),
+            ..Default::default()
+        };
+        let inv = restore_delivery(aoide_protocol::Door::Mcp, id, &restore)
+            .expect("an idle restore with a typed line constructs a send");
+        let inner = session_send(&inv);
+        assert_eq!(
+            restore_word(&inner, false, crate::graph::spawn::Ready::Verified),
+            "held-pending",
+            "inner: {}",
+            inner.message
+        );
+
+        listener.set_nonblocking(true).unwrap();
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "a restore over an MCP door typed into the session"
+        );
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(crate::graph::send::pending_path()).unwrap()).unwrap();
+        let held = raw["pending"].as_array().expect("pending.json holds the restore");
+        assert_eq!(held.len(), 1, "pending: {raw}");
+        assert_eq!(held[0]["sessionId"], id);
+        assert_eq!(held[0]["text"], "echo hello");
 
         let _ = std::fs::remove_dir_all(&root);
     }

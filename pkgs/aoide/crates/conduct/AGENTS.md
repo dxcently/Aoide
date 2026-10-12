@@ -104,7 +104,12 @@ in the message.
   and `A2a` never do. `--yes`, the global autogate environment, and the
   parent/sibling rules are read only past that check, so a send from a
   remote door parks whatever it asks for, and `pending_approve` refuses
-  before it takes an entry off the queue. The predicate is exhaustive over
+  before it takes an entry off the queue, both when the door cannot approve
+  and when the entry's target is not live yet. The same predicate gates the
+  other two things a human's approval answers: `session_permit` files no
+  summons card for a door that cannot approve (or for a session that is not
+  `awaiting`), and `mail_ring` refuses before any forward, so such a caller
+  never types into a reader. The predicate is exhaustive over
   `Door`, so a new door must be decided there. The door is the invocation's
   own `Door`, set where the request arrived: a caller's claim about itself is
   never read. A routed command (`daemon_dispatch`) reaches aoided as

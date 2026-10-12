@@ -3530,9 +3530,20 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
 - A send from a door that cannot approve parks, records its pending entry
   and attributes it as usual, touches no socket, and returns the taught
   line. `approvalRefused: true` marks a parked send that asked for `--yes`.
-- A spawn's `--prompt`, a `session permit` verdict and a resurrect's restore
-  go through the same door, so over MCP they park too and report
-  `held-pending`, never as typed.
+- A spawn's `--prompt` and a resurrect's restore go through the same door, so
+  over MCP they park too and report `held-pending`, never as typed.
+- `session permit` is refused on a door that cannot approve (`reason:
+  "door-cannot-approve"`, taught line `DOOR_CANNOT_APPROVE`). It files no
+  summons card, and the refusal is audited. A card is how a human is asked for
+  a verdict, so a caller that cannot approve cannot raise one. The card is
+  also refused for a session that is not `awaiting` (`reason:
+  "not-awaiting"`).
+- `mail ring` is refused on a door that cannot approve, before any forward, so
+  it types nothing into a reader. The daemon's own rings are unaffected.
+- `session pending approve` for an entry whose target is not live yet (no
+  conductable record with a socket on disk) is refused with `reason:
+  "target-not-live"`, and the entry stays queued. An A2A spawn's opening turn
+  can be held before its child registers, so approve again once it does.
 - The MCP door has no generic passthrough. Every command is its own tool,
   and `spawn` and `conduct` take one `command` argument, which is one argv
   element, so an MCP caller cannot express `aoide send --yes` as a child
@@ -4045,9 +4056,10 @@ seen.jsonl      one {"msgid","receivedAt"} per line, append-only dedup
                 serializes the resident daemon's own concurrent rings
                 (and a restart overlap) — the daemon process itself, not
                 this file, is the policy and audit boundary: a ring
-                executes only inside `aoided`, and `mail ring` from any
-                other door forwards there instead of taking this lock
-                itself.
+                executes only inside `aoided`. `mail ring` from a door
+                that can approve forwards there instead of taking this
+                lock itself. A door that cannot approve is refused before
+                any forward.
 ```
 
 `rung` is additive in v0 (omitted while zero): the doorbell latch — the
@@ -6751,9 +6763,10 @@ silence.
 `AOIDE_A2A_SPAWN_AGENT` env, set by the `aoide-a2a` systemd unit → the option's
 default). **The A2A client supplies the message/prompt only, never the command**
 — this is the load-bearing invariant that bounds what an external A2A caller can
-do to aoide: task the operator's own already-configured agent, or steer a
-session already running under aoide's conductor, but never execute an arbitrary
-binary. If `spawnAgent` is empty, the spawn path returns `{"code": -32004,
+do to aoide: task the operator's own already-configured agent, or queue a
+message for a session already running under aoide's conductor, which a human
+approves before anything is typed. It never executes an arbitrary binary. If
+`spawnAgent` is empty, the spawn path returns `{"code": -32004,
 "message": "A2A spawn not configured"}` rather than silently doing nothing. The
 configured command is **default-denied**: it runs only when the launcher walk
 proves it is a registered harness, `aoide_conduct::graph::wrapped_harness` (the
@@ -6791,8 +6804,9 @@ what to do, not about who is calling). The door turns it into the wrapper's own
 `--task <slug>`; with it, the remote child IS a managed task run — the task
 mailbox, `session watch`'s task view, the exit report and the retained record
 all come from the same flag a local `aoide spawn --task` passes. Without it,
-the spawn is a plain headless conducted session: watchable through its log and
-steerable through the door, with no mailbox and no report.
+the spawn is a plain headless conducted session: watchable through its log,
+with no mailbox and no report. Anything the caller sends into it parks for a
+human (§6, the approval doors).
 
 The slug is held to the one predicate every task slug and mailbox name already
 takes — `^[a-z0-9][a-z0-9-]*$`, `node_store::valid_node_name`, the validator
@@ -7113,11 +7127,14 @@ callers match on it.
 Attribution is separate from admission. A held inject from a caller that
 resolves to a node carries `"from": "node:<name>"` in its `pending.json` entry.
 That reuses `send --from`'s existing attribution field rather than adding one. A
-session spawned on behalf of a node records that node as well:
-`a2a.rs::do_spawn` sets `AOIDE_SESSION_ORIGIN=node:<name>` on the child it
-launches, and `aoide-conduct`'s `session_conduct` stamps `SessionRecord.origin`
-from it (`stamp_origin`, change-once, like `headless`). See §4's `origin` field
-and §7's "`state/nodes.json`" subsection.
+session spawned on behalf of a node records that node as well, and the door
+stamps it, not the child's environment. `a2a.rs::spawn_child_command` removes
+`AOIDE_SESSION_ORIGIN` from the child. Once the child registers,
+`stamp_spawn_provenance` stamps `SessionRecord.origin = node:<name>` from the
+door's own authenticated resolution (`stamp_origin`, change-once, like
+`headless`). `session_conduct` refuses a `node:*` value in
+`AOIDE_SESSION_ORIGIN` and stamps nothing from it. See §4's `origin` field and
+§7's "`state/nodes.json`" subsection.
 
 ### Signed wire authentication
 

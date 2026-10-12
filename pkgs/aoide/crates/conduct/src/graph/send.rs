@@ -1268,20 +1268,19 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
 /// `--parent` (`aoide_client::commands::resolve_remote_parent`), because `send`
 /// has no `--parent` flag and the parent steering a child it spawned is exactly
 /// the caller the spawn path stamped into that child's `remoteParent`. The
-/// receiving door reads the claim as `remote_parent_match`: a match delivers
-/// without pending (`autogate-remote-parent`), a mismatch changes nothing. The
-/// env is never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1
+/// receiving door reads the claim as `remote_parent_match`, and a network door
+/// holds the send for a human whatever the claim says. The env is never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1
 /// closes), so no daemon and no sealed ancestry simply means no claim.
 ///
 /// `Err` is the resolver's own "this node would sign a claim the far door
 /// refuses" case, and the two callers answer it differently because they were
 /// asked for different things. `node spawn` REFUSES the call (a caller who named
-/// a parentage gets one or hears why). A `send` DROPS the claim and delivers
+/// a parentage gets one or hears why). A `send` DROPS the claim and sends
 /// anyway, naming the reason on one warning line: it was never asked for a
-/// parentage — the claim is an autogate shortcut, not the request — and the
-/// door's Inject arm reads a malformed claim as a non-match, never as a refusal
-/// (`a2a.rs`'s own `remote_parent_match`), so an unruly id costs this send the
-/// autogate and nothing else. Neither path lets one reach the wire: the one that
+/// parentage — the claim is a label the far door may audit, not the request —
+/// and the door's Inject arm reads a malformed claim as a non-match, never as a
+/// refusal (`a2a.rs`'s own `remote_parent_match`), so an unruly id costs this
+/// send its audit label and nothing else. Neither path lets one reach the wire: the one that
 /// refuses never signs, the other signs nothing.
 fn remote_parent_claim() -> Result<Option<String>, String> {
     aoide_client::commands::resolve_remote_parent(None)

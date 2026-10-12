@@ -299,10 +299,11 @@ Remote reach composes what already exists:
   mesh; each node's capability card is its A2A AgentCard, derived from that
   binary's own `schema --json` with `implemented`-only skills
   (`CONTRACTS.md §6`, "AgentCard"). No second inventory.
-- **Route**: `send --to node/<query>` already delivers over A2A
+- **Route**: `send --to node/<query>` already sends over A2A
   `message/send` (`conduct/src/graph/send.rs:8-16`, `deliver_remote`), and
-  the receiving node's own gate governs (`a2a.rs:566` `decide_send_action`,
-  `:724` `do_inject`, `:790` `spawn_inject_prompt`). Bearer auth is the
+  the receiving node's own door governs: the network door parks every inject
+  for a human (`a2a.rs` `decide_send_action`, `do_inject`, and the spawn's
+  opening turn in `opening_turn_worker`). Bearer auth is the
   landing-in-parallel bearer lane on the existing token surface
   (`a2a.rs:348` `token_authorized`, `node_store.rs:196` `token_bytes_eq`,
   `:216` `autogated_node_token`); this workstream consumes it, never
