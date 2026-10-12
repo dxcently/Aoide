@@ -1077,41 +1077,36 @@ in the message.
   gone, so its cursor entry leaves on that pass — so a dropped REMOTE child
   claims its trace row AND its exit on that one pass, and the ring always ends
   with exactly one `Exited`.
-  **Receptive only by a positive proof** (house rule 4). A line submitted into
-  a shell would RUN as a command, and `agent` is only a label a caller picks:
+  **Typed only by a positive proof** (house rule 4). A line submitted into a pty
+  RUNS if that pty is a shell, and `agent` is only a label a caller picks:
   `--agent pi -- bash` names a registered profile over a pty running a shell,
-  which is how a ping-back line came to be executed (N1). So a target is
-  receptive only when its WRAPPED program is the harness its agent profile
-  names: `wrapped_program`, stamped at registration (`stamp_wrap`) from
-  `conduct.rs::wrapped_program_name` (the launcher walk's resolved program, by
-  basename), must equal the profile's first launch token. The refusals, in
-  order: `shell-parent` (the label is `""`/`"shell"`, or the wrap is a shell by
-  `conduct.rs::wrapped_program_is_a_shell`: the durable `shell` field OR a `Some`
-  `restore`); `unverified-wrap` (the walk names no program, or names one that is
-  not the harness); then `not-conductable`, `parent-done`. The walk resolves
-  what it models: the forwarding launchers (`env`, `exec`, `setsid`, `nohup`,
-  `stdbuf`, `chrt`, `ionice`, `nice`), `timeout`, `sudo`/`doas`, `script`, and
-  `nix develop|shell -c`. Every other launcher names itself, so `taskset -c 0
-  claude` is `unverified-wrap`, and so is `env -S claude` (no program name
-  survives the split string). Its costs are stated: a wrapper script (`-- ./rig.sh`)
-  and a harness binary whose basename differs from its profile's launch token
-  are withheld, where the old negative read let them through. `shell` and
-  `wrapped_program` are written together at registration on both `upsert_session`
-  arms, so re-registering an id flips both. Shell syntax in a child's text (the
+  which is how a ping-back line came to be executed (N1). The proof is
+  `conduct.rs::is_its_harness`: the record's `wrapped_program` (stamped at
+  registration from `conduct.rs::wrapped_program_name`, the launcher walk's
+  resolved program) must equal the first launch token of the profile its `agent`
+  names. Three automatic readers ask one refusal, `conduct.rs::auto_type_refusal` (a shell
+  first, then the `is_its_harness` proof), and none restates it: the ping-back
+  (`pingback.rs::unreceptive`), the doorbell's PTY arm (`doorbell.rs`), and the A2A
+  inject (`server/src/a2a.rs::session_inject_hold`). The A2A spawn asks its argv twin,
+  `conduct.rs::wrapped_harness`, the same walk read before a record exists. The
+  refusal names and their order, the proof's limits and the one-time cost live once,
+  in `CONTRACTS.md`'s `wrappedProgram` paragraph. Locally, each launcher resolves through its own option table (`conduct.rs::launcher`),
+  and an option the table does not list refuses the whole launcher: the walk never
+  guesses how many tokens an option takes (default-deny). The tables are coreutils
+  9.11, util-linux 2.42, sudo 1.9.17 and bash's `exec`; `doas` is from its man page.
+  `script` and `su` answer by a scan for `-c`/`--command`, which only over-matches.
+  `nix` resolves `develop|shell -c`, and `env -S` refuses (its split string is a
+  command line). Every other launcher names itself. `shell`
+  and `wrapped_program` are written together at registration on both
+  `upsert_session` arms, so re-registering an id flips both. Shell syntax in a child's text (the
   question, the tag, the say, the prompt, the stop reason, the tool label) is made
   inert on the way into a line (`pingback.rs::inert`: `$(…)` becomes its fullwidth
   twin), and every line takes one more pass as it is written
   (`pingback.rs::wire_line`, the only place `deliver` shapes the bytes). That pass is
   the backstop for a field that skipped its own cleaning. It takes `!` and `"` with
   no carve-out, so the renderer's own quote and `! ` marker reach the wire as their
-  fullwidth twins. The proof is the launcher
-  walk's BASENAME, and that is all it is: a symlink named `claude` to `bash`, or a
-  script named `claude` that execs a shell, passes it. It rejects unmodeled launchers
-  and a label that does not match the wrap; it does NOT stop a same-uid process that
-  names a shell after a harness. Inert line content is the defence for that class,
-  not the proof. The positive rule is
-  the ping-back's alone: the doorbell's PTY arm and the A2A door still read the
-  negative `wrapped_program_is_a_shell`. The walk's own limit is argv only. Those
+  fullwidth twins. What the basename proves, and what it does not, is stated once,
+  in `CONTRACTS.md`'s `wrappedProgram` paragraph. The walk reads argv only. Those
   four predicates (`shell-parent`, `unverified-wrap`, `not-conductable`,
   `parent-done`) live in ONE function (`unreceptive`), which `deliver` itself
   calls, so nothing may restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately
