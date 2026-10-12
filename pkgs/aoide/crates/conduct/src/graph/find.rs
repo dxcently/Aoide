@@ -23,6 +23,7 @@ use aoide_storage::node_store::{self, Node, NodeCacheEntry};
 use aoide_storage::{display, git, time};
 use serde_json::{json, Map, Value};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// The closed key set. A word whose text before its first colon is not one of
@@ -191,6 +192,21 @@ pub(crate) struct FindIndex {
     /// Every registered node name, for a `node/<rest>` reference.
     pub(crate) nodes: Vec<String>,
     pub(crate) rows: Vec<Row>,
+    /// Each row's children, keyed by the identity of the parent they name. Built
+    /// once by [`FindIndex::new`], so `carries` reads a lookup, not a scan.
+    pub(crate) children: HashMap<Ident, Vec<Ident>>,
+}
+
+impl FindIndex {
+    pub(crate) fn new(host: String, nodes: Vec<String>, rows: Vec<Row>) -> Self {
+        let mut children: HashMap<Ident, Vec<Ident>> = HashMap::new();
+        for row in &rows {
+            if let Some(parent) = &row.parent {
+                children.entry(parent.clone()).or_default().push(identity(row));
+            }
+        }
+        FindIndex { host, nodes, rows, children }
+    }
 }
 
 /// What one term or bare word matched on one row.
@@ -551,12 +567,16 @@ struct Ranked<'a> {
     sum: u32,
 }
 
-/// The four keys, in order: the weakest bare-word grade, then the sum of the
-/// grades (both higher first), then [`tiebreak`]. Terms only filter, so they
-/// never rank.
+/// The keys, in order: local before cached, then the weakest bare-word grade,
+/// then the sum of the grades (both higher first), then [`tiebreak`]. Terms only
+/// filter, so they never rank. A far node's row ranks below a local one whatever
+/// its grade, because its fields are that node's claims.
 fn order(a: &Ranked<'_>, b: &Ranked<'_>) -> Ordering {
-    b.weakest
-        .cmp(&a.weakest)
+    b.hit
+        .row
+        .local
+        .cmp(&a.hit.row.local)
+        .then(b.weakest.cmp(&a.weakest))
         .then(b.sum.cmp(&a.sum))
         .then_with(|| tiebreak(a.hit.row, b.hit.row))
 }
@@ -669,19 +689,13 @@ pub(crate) struct Carries {
 /// The index's view of one row: its mail facts, its inbox, and its edges.
 pub(crate) fn carries(index: &FindIndex, row: &Row) -> Carries {
     let me = identity(row);
-    let children = index
-        .rows
-        .iter()
-        .filter(|r| r.parent.as_ref() == Some(&me))
-        .map(identity)
-        .collect();
-    let siblings = match &row.parent {
+    let children: Vec<Ident> = index.children.get(&me).cloned().unwrap_or_default();
+    let siblings: Vec<Ident> = match &row.parent {
         Some(parent) => index
-            .rows
-            .iter()
-            .filter(|r| r.parent.as_ref() == Some(parent) && identity(r) != me)
-            .map(identity)
-            .collect(),
+            .children
+            .get(parent)
+            .map(|kids| kids.iter().filter(|k| **k != me).cloned().collect())
+            .unwrap_or_default(),
         None => Vec::new(),
     };
     let unknown = if row.mail.is_none() { vec!["mailboxes", "cc", "threads"] } else { Vec::new() };
@@ -728,50 +742,59 @@ fn repo_name(common: &str) -> String {
         .map_or_else(|| common.to_string(), |n| n.to_string_lossy().into_owned())
 }
 
-/// Every reason `r` shares with `t`, one per distinct phrase, in order. Mail
-/// reasons hold only between local rows, and so does the repo reason.
+/// Every reason `r` shares with `t`, one per distinct phrase, in order. A row's
+/// own claims (its parent, roles, project and remote links) count only when its
+/// node vouches for them: a local row always does, and a far row does only
+/// against a row on its own node. A far node's claim about a row on another node
+/// never makes a reason, so a far node cannot link itself to this box's rows.
+/// Mail and repo reasons hold between local rows only.
 fn reasons_between(t: &Row, r: &Row) -> Vec<Reason> {
     let (t_id, r_id) = (identity(t), identity(r));
+    let t_vouches = t.local || t.node == r.node;
+    let r_vouches = r.local || r.node == t.node;
+    let both_vouch = t_vouches && r_vouches;
     let mut out: Vec<Reason> = Vec::new();
     let mut add = |order: u8, kind: &'static str, shown: String| out.push(Reason { order, kind, shown });
 
     let both_local = t.local && r.local;
     let r_is_t_wrap = both_local && t.wrap.as_deref() == Some(r.session_id.as_str());
     let t_is_r_wrap = both_local && r.wrap.as_deref() == Some(t.session_id.as_str());
-    if t.parent.as_ref() == Some(&r_id) {
+    if t_vouches && t.parent.as_ref() == Some(&r_id) {
         add(1, "lineage", if r_is_t_wrap { "parent (its wrap)" } else { "parent" }.into());
     } else if r_is_t_wrap {
         add(1, "lineage", "parent (its wrap)".into());
     }
-    if r.parent.as_ref() == Some(&t_id) {
+    if r_vouches && r.parent.as_ref() == Some(&t_id) {
         add(1, "lineage", if t_is_r_wrap { "child (its wrap)" } else { "child" }.into());
     } else if t_is_r_wrap {
         add(1, "lineage", "child (its wrap)".into());
     }
 
-    if t.remote_parent.as_ref() == Some(&r_id) || r.remote_children.contains(&t_id) {
+    if (t_vouches && t.remote_parent.as_ref() == Some(&r_id)) || (r_vouches && r.remote_children.contains(&t_id)) {
         add(2, "remote lineage", "remote parent".into());
     }
-    if r.remote_parent.as_ref() == Some(&t_id) || t.remote_children.contains(&r_id) {
+    if (r_vouches && r.remote_parent.as_ref() == Some(&t_id)) || (t_vouches && t.remote_children.contains(&r_id)) {
         add(2, "remote lineage", "remote child".into());
     }
 
-    if t.parent.is_some() && t.parent == r.parent {
+    if both_vouch && t.parent.is_some() && t.parent == r.parent {
         add(3, "sibling", "sibling".into());
     }
 
-    if let (Some(a), Some(b)) = (&t.task, &r.task) {
-        if a == b {
-            add(4, "same role", format!("same role: {a}"));
+    if both_vouch {
+        if let (Some(a), Some(b)) = (&t.task, &r.task) {
+            if a == b {
+                add(4, "same role", format!("same role: {a}"));
+            }
         }
-    }
-    if let (Some(a), Some(b)) = (&t.native_role, &r.native_role) {
-        if a == b {
-            add(4, "same role", format!("same role: {a}"));
+        if let (Some(a), Some(b)) = (&t.native_role, &r.native_role) {
+            if a == b {
+                add(4, "same role", format!("same role: {a}"));
+            }
         }
-    }
-    if !t.leads.is_empty() && !r.leads.is_empty() {
-        add(4, "same role", "same role: lead".into());
+        if !t.leads.is_empty() && !r.leads.is_empty() {
+            add(4, "same role", "same role: lead".into());
+        }
     }
 
     if let (true, Some(tm), Some(rm)) = (both_local, &t.mail, &r.mail) {
@@ -795,7 +818,7 @@ fn reasons_between(t: &Row, r: &Row) -> Vec<Reason> {
         }
     }
 
-    if t.project.is_some() && t.project == r.project {
+    if both_vouch && t.project.is_some() && t.project == r.project {
         add(7, "same project", format!("same project: {}", t.project.as_deref().unwrap_or_default()));
     }
 
@@ -818,8 +841,8 @@ fn reasons_between(t: &Row, r: &Row) -> Vec<Reason> {
 /// The rows related to `target`, each with its reasons. The target never
 /// relates to itself. A `done` row is left out unless `all`, and `narrow`
 /// (a query beside `--related`) filters the related rows the way it filters
-/// find's. Rows sort by their strongest reason, then by how many reasons they
-/// have, then by [`tiebreak`].
+/// find's. Rows sort local before far, then by their strongest reason, then by
+/// how many reasons they have, then by [`tiebreak`].
 pub(crate) fn related<'a>(
     index: &'a FindIndex,
     target: &Row,
@@ -843,8 +866,10 @@ pub(crate) fn related<'a>(
     }
     found.sort_by(|a, b| {
         let strongest = |x: &Related<'_>| x.reasons.iter().map(|r| r.order).min();
-        strongest(a)
-            .cmp(&strongest(b))
+        b.row
+            .local
+            .cmp(&a.row.local)
+            .then(strongest(a).cmp(&strongest(b)))
             .then(b.reasons.len().cmp(&a.reasons.len()))
             .then_with(|| tiebreak(a.row, b.row))
     });
@@ -983,7 +1008,7 @@ pub(crate) fn build_index(input: Inputs) -> Loaded {
         }
     }
     let nodes = input.nodes.iter().map(|n| n.name.clone()).collect();
-    let mut index = FindIndex { host: input.host, nodes, rows };
+    let mut index = FindIndex::new(input.host, nodes, rows);
     if let Some((cursors, entries)) = &input.mail {
         mail_facts(&mut index.rows, cursors, entries);
     }
@@ -1516,7 +1541,7 @@ mod tests {
     }
 
     fn index(rows: Vec<Row>) -> FindIndex {
-        FindIndex { host: "osaka".into(), nodes: vec!["yomi-strix".into()], rows }
+        FindIndex::new("osaka".into(), vec!["yomi-strix".into()], rows)
     }
 
     fn query(line: &str) -> Query {
@@ -2198,7 +2223,7 @@ mod tests {
     }
 
     #[test]
-    fn related_shows_the_target_its_reasons_and_a_remote_mate_with_its_cache_age() {
+    fn related_does_not_take_a_far_nodes_task_claim_as_a_reason() {
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _env) = isolated("find-b5-related");
         let mut mine = session("brave-id", &root.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
@@ -2211,10 +2236,9 @@ mod tests {
         let loaded = build_index(inputs);
 
         let (text, data) = related_view(&loaded, "brave-id", &query(""), false).expect("the target is a row");
-        assert!(text.contains("related (1)"), "{text}");
-        assert!(text.contains("quiet-fern") && text.contains("same role: review-pr"), "{text}");
-        assert!(text.contains("cache <1m"), "a remote mate names its cache age: {text}");
-        assert_eq!(data["related"][0]["reasons"][0]["kind"], "same role");
+        assert!(text.contains("related (0)"), "a far node's own claim of the same task is no reason: {text}");
+        assert!(!text.contains("quiet-fern"), "{text}");
+        assert_eq!(data["related"], json!([]));
         assert_eq!(data["sessions"][0]["sessionId"], "brave-id");
     }
 
@@ -2430,5 +2454,73 @@ mod tests {
 
         let (text, _) = list_view(&loaded, &query("agent:claude"), true).expect("the list answers");
         assert!(!text.contains("mail is not published"), "{text}");
+    }
+
+    #[test]
+    fn a_far_nodes_claim_about_a_local_row_makes_no_reason() {
+        let mut target = local("warm-birch", "warm-birch", "working");
+        target.project = Some("aoide".into());
+        let mut far = cached("yomi-strix", "far-1", "far", "working");
+        far.remote_parent = Some(("osaka".into(), "warm-birch".into()));
+        far.project = Some("aoide".into());
+        far.task = Some("review-pr".into());
+        target.task = Some("review-pr".into());
+        assert!(reasons_between(&target, &far).is_empty(), "{:?}", reasons_between(&target, &far));
+
+        target.remote_children = vec![("yomi-strix".into(), "far-1".into())];
+        let shown: Vec<String> = reasons_between(&target, &far).into_iter().map(|r| r.shown).collect();
+        assert_eq!(shown, vec!["remote child".to_string()], "only this box's own record links the far row");
+    }
+
+    #[test]
+    fn two_rows_on_one_far_node_share_a_project_because_that_node_vouches_for_both() {
+        let mut a = cached("yomi-strix", "far-1", "a", "working");
+        let mut b = cached("yomi-strix", "far-2", "b", "working");
+        a.project = Some("aoide".into());
+        b.project = Some("aoide".into());
+        let shown: Vec<String> = reasons_between(&a, &b).into_iter().map(|r| r.shown).collect();
+        assert_eq!(shown, vec!["same project: aoide".to_string()]);
+    }
+
+    #[test]
+    fn a_local_match_ranks_above_a_far_match_of_a_better_grade() {
+        let near = local("warm-birch", "warmbirch", "working");
+        let far = cached("yomi-strix", "far-1", "warm", "working");
+        let index = index(vec![far, near]);
+        let found = find(&index, &query("warm"), true).expect("the query answers");
+        assert!(found.hits[0].row.local, "a far exact match must not lead a local prefix match");
+    }
+
+    #[test]
+    fn related_rows_list_local_rows_before_far_ones() {
+        let mut target = local("warm-birch", "warm-birch", "working");
+        target.parent = Some(("osaka".into(), "p".into()));
+        target.remote_children = vec![("yomi-strix".into(), "far-1".into())];
+        let mut sibling = local("fond-aspen", "fond-aspen", "working");
+        sibling.parent = Some(("osaka".into(), "p".into()));
+        let far = cached("yomi-strix", "far-1", "far", "working");
+        let index = index(vec![target.clone(), sibling, far]);
+        let found = related(&index, &target, &query(""), true).expect("the related rows answer");
+        let locals: Vec<bool> = found.iter().map(|r| r.row.local).collect();
+        assert_eq!(locals, vec![true, false]);
+    }
+
+    #[test]
+    fn carries_for_twenty_thousand_rows_reads_in_linear_time() {
+        let n = 20_000;
+        let rows: Vec<Row> = (0..n)
+            .map(|i| Row {
+                parent: (i > 0).then(|| ("osaka".to_string(), format!("s{}", i - 1))),
+                ..local(&format!("s{i}"), &format!("p{i}"), "idle")
+            })
+            .collect();
+        let index = FindIndex::new("osaka".into(), Vec::new(), rows);
+
+        let start = std::time::Instant::now();
+        let children: usize = index.rows.iter().map(|r| carries(&index, r).edges.children.len()).sum();
+        let took = start.elapsed();
+
+        assert_eq!(children, n - 1, "every row but the last has one child");
+        assert!(took < std::time::Duration::from_secs(2), "20k rows' carries took {took:?}");
     }
 }

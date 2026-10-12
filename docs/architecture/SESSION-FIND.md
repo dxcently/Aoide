@@ -169,11 +169,14 @@ cwd component) > **prefix** > **substring** — and takes its best field's grade
 (ties name the field petname > task > title > id > cwd in `matched`). Rows sort
 by:
 
-1. the weakest bare word's grade, then the sum of grades — only bare words
+1. local rows before cached rows
+2. the weakest bare word's grade, then the sum of grades — only bare words
    rank; terms only filter
-2. local rows before cached rows
 3. state: awaiting · working · idle · stopped · done (the fold mark's urgency)
 4. petname (else id), node, session id
+
+A far row ranks below a local one whatever its grade: its fields are its own
+claims, and a local row's record outranks them.
 
 No fuzzy match, no recency, no weights: the same files and the same query give
 the same order, and the four keys explain every position — and an order with
@@ -217,7 +220,7 @@ not `graph.json` edges and not §22's typed edges.
 | Order | Reason | Holds when | Shown as |
 |---|---|---|---|
 | 1 | lineage | parent or child; the wrap that hosts it, or the agent it hosts | `parent` · `child` · `parent (its wrap)` |
-| 2 | remote lineage | `remoteParent` / `remoteChildren` | `remote parent` · `remote child` |
+| 2 | remote lineage | a local row's own `remoteParent` or `remoteChildren` names the other row | `remote parent` · `remote child` |
 | 3 | sibling | the same local parent | `sibling` |
 | 4 | same role | the same task slug or native role; both lead a project | `same role: review-pr` |
 | 5 | mailbox | both read M; or one's `reportTo` is M and the other reads M | `same mailbox: reviewer` · `reads its reports: conductor` |
@@ -225,8 +228,16 @@ not `graph.json` edges and not §22's typed edges.
 | 7 | same project | the same roster bucket | `same project: aoide` |
 | 8 | same repo | the same git common dir (local rows) | `same repo: aoide` |
 
-A related row sorts by its strongest reason, then by how many distinct reasons
-it has, then by find's keys 2–4. A query beside `--related` narrows the related
+A row's own claims (its parent, task, native role, leads, project, remote
+links) count only when its node vouches for them: a local row always does, and
+a far row does only against a row on its own node. A far node's claim about a
+row on another node never makes a reason. So a far row relates to a local row
+through the local row's own `remoteParent` or `remoteChildren` and nothing
+else; a far row's task of the same slug is shown as that node's claim, not
+taken as a shared role.
+
+A related row sorts local before far, then by its strongest reason, then by how
+many distinct reasons it has, then by find's keys 2–4. A query beside `--related` narrows the related
 rows (`--related brave-otter agent:claude`). The target never relates to
 itself, `done` rows need `--all`, and the mail reasons (5, 6) hold only between
 local rows.
@@ -527,6 +538,20 @@ alternative would have given, and what the chosen call costs.
     field print an escape sequence. Cost: `--json` no longer round-trips a
     title that held a control character, and a refusal names a far candidate
     with its characters stripped, not as the node wrote it.
+
+11. **Local rows rank before far rows, ahead of match grade.** The alternative,
+    grade first, lets a far node's exact petname match outrank a local prefix
+    match, so one far claim can push this box's own work down the list. Cost: a
+    strong far match can sit below a weak local one. The scope line still names
+    every node, and `--all` still lists everything.
+
+12. **Cross-node reasons come from this box's own records only.** A far node's
+    claims about a row on another node (its parent, its task, its project, its
+    remote links) never make a reason. The alternative, trust a far node's
+    `remoteChildren` or `remoteParent` as it publishes them, lets a far node
+    link itself to this box's sessions and show as related. Cost: a remote link
+    this box never recorded is invisible here, and a far row sharing a task with
+    a local row is not related to it.
 
 ## How it sits with other work
 
