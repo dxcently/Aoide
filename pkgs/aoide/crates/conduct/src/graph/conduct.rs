@@ -380,6 +380,14 @@ fn wrapped_program_name(argv: &[String]) -> Option<String> {
     None
 }
 
+/// The label a wrap takes when no `--agent` names one: the program the launcher
+/// walk resolves to (`env claude` is `claude`), else the command's own basename
+/// (`taskset`, `script`). `conduct` and `spawn` both default through it, so the
+/// label is the name [`is_its_harness`] checks against `wrappedProgram`.
+pub(in crate::graph) fn default_label(argv: &[String]) -> String {
+    wrapped_program_name(argv).unwrap_or_else(|| argv.first().map(|p| command_basename(p)).unwrap_or_default())
+}
+
 /// The registered harness a conducted argv runs, by the launcher walk: the
 /// walked program must BE a profile's own launch token. `None` for everything
 /// else — a shell, a launcher the walk does not model (`taskset`, `flock`), a
@@ -435,7 +443,7 @@ pub fn wrapped_program_is_a_shell(rec: &SessionRecord) -> bool {
 /// (`wrapped_program`, stamped at registration) is the launch token of the profile
 /// its `agent` names. The positive half of [`wrapped_program_is_a_shell`]. A shell
 /// is never a harness, and neither is a launcher the walk does not model, a wrapper
-/// script, or a name with no profile: none of them has a proof. Every reader that
+/// with another name, or a name with no profile: none of them has a proof. Every reader that
 /// types a line into a pty asks this one question (the ping-back, the doorbell's
 /// PTY arm, the A2A door's inject), and none restates it.
 pub fn is_its_harness(rec: &SessionRecord) -> bool {
@@ -1509,7 +1517,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         .flags
         .get("agent")
         .cloned()
-        .unwrap_or_else(|| command_basename(&program));
+        .unwrap_or_else(|| default_label(&inv.args));
     let id = inv
         .flags
         .get("id")
@@ -2637,6 +2645,27 @@ mod tests {
         for (argv, want) in cases {
             let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
             assert_eq!(wrapped_program_name(&argv).as_deref(), *want, "wrapped_program_name({argv:?})");
+        }
+    }
+
+    #[test]
+    fn an_unlabelled_wrap_is_named_by_the_program_the_walk_resolves_to() {
+        // The label is the name the positive proof checks, so a launcher in front
+        // of the harness must not become it; a form the walk names nothing for
+        // keeps its own basename, which is never a harness.
+        let cases: &[(&[&str], &str)] = &[
+            (&["claude"], "claude"),
+            (&["env", "claude"], "claude"),
+            (&["/usr/bin/env", "FOO=1", "claude", "--resume"], "claude"),
+            (&["nix", "develop", "-c", "claude"], "claude"),
+            (&["taskset", "-c", "0", "claude"], "taskset"),
+            (&["script", "-q", "/dev/null"], "script"),
+            (&["env", "-S", "claude"], "env"),
+            (&["bash"], "bash"),
+        ];
+        for (argv, label) in cases {
+            let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            assert_eq!(default_label(&argv), *label, "{argv:?}");
         }
     }
 

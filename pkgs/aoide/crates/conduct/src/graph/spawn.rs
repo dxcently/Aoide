@@ -31,7 +31,7 @@
 //! nix anywhere in this path — a terminal emulator is a shell concern, never
 //! `lyra`'s.
 
-use super::conduct::{conduct_socket_path, program_is_a_shell, unix_ts};
+use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, unix_ts};
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::send::session_send;
 use super::session_store::now_iso_utc;
@@ -664,7 +664,7 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         .flags
         .get("agent")
         .cloned()
-        .unwrap_or_else(|| command_basename(&program));
+        .unwrap_or_else(|| default_label(&inv.args));
     let id = inv
         .flags
         .get("id")

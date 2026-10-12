@@ -2168,7 +2168,10 @@ id flips both together):
 
 **A line is typed into a pty only by a positive proof, one rule for every
 reader.** The record's `wrappedProgram` must equal the first launch token of the
-profile its `agent` names (`conduct.rs::is_its_harness`). Four readers apply it:
+profile its `agent` names (`conduct.rs::is_its_harness`). A `conduct` or `spawn`
+with no `--agent` is labelled by the walked program (`default_label`), so `env
+claude` is `claude`, and the A2A spawn labels its wrap with the harness it
+proved. Four readers apply it:
 the ping-back, the doorbell's PTY arm, the A2A door's inject, and the A2A door's
 spawn, which asks its argv twin `conduct.rs::wrapped_harness` (the same walk,
 read before a record exists). The proof is that basename, and it is stated as
@@ -2187,7 +2190,7 @@ same two as `shell-wrapped` and `unverified-wrap`, and an unreadable stage holds
 as `unverified-wrap`. The label alone never decides it: `agent` is a caller's
 choice, and `--agent pi -- bash` names a registered profile over a shell.
 
-**One-time cost (R2).** The proof reads the `wrappedProgram` a registration
+**One-time cost.** The proof reads the `wrappedProgram` a registration
 stamped. A wrap registered by an earlier build keeps the stamp that build wrote
 until it restarts, so until then the readers judge it by the old walk's answer.
 Both fields absent (the default, skipped on serialization) mean `false` and no
