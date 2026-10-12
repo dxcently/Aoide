@@ -921,6 +921,15 @@ fn write_temp_file(
             // first place — the temp is created AT 0600, not narrowed to it
             // afterward, so there is no instant where it exists on disk under
             // any wider mode.
+            //
+            // `mode` applies only when the file is made. A leftover of the same
+            // name (a private write killed between create and rename, under a
+            // pid since reused) would keep ITS mode through O_TRUNC, so the
+            // leftover goes first and the temp is created exclusively: O_EXCL
+            // also refuses to follow a link planted at that name, and if the
+            // removal fails the create fails closed.
+            let _ = std::fs::remove_file(tmp);
+            opts.create_new(true);
             opts.mode(mode);
         }
         opts.open(tmp)?
@@ -2597,6 +2606,33 @@ mod tests {
             mode, 0o600,
             "the file at its FINAL path must be 0600 immediately after mint even under an 000 umask, got {mode:o}"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Unix-only: a private write killed between its create and its rename
+    /// leaves `<target>.tmp.<pid>` behind at whatever mode it was made with.
+    /// A later process that reuses that pid writes to the same name, and
+    /// `O_TRUNC` keeps the leftover's mode rather than applying `0600` again,
+    /// so the rename would publish a wider file as the private one. This test
+    /// plants a `0644` leftover under our own pid (the reuse case, without a
+    /// dead process to stage it) and requires the private file to come out
+    /// `0600` with the new bytes.
+    #[cfg(unix)]
+    #[test]
+    fn a_wider_leftover_temp_under_the_private_name_is_never_published() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("aoide-stale-private-temp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sessions.json");
+        let leftover = path.with_extension(format!("tmp.{}", std::process::id()));
+        std::fs::write(&leftover, b"leftover").unwrap();
+        std::fs::set_permissions(&leftover, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        atomic_write_private(&path, b"fresh").unwrap();
+        assert_private_file(&path);
+        assert_eq!(std::fs::read(&path).unwrap(), b"fresh");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
