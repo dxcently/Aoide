@@ -344,10 +344,43 @@ pub(crate) fn post_json_capped(
     timeout_secs: u64,
     max_bytes: usize,
 ) -> Result<(u16, String), String> {
+    post_json_args(url, body, bearer, extra_headers, timeout_secs, max_bytes, false)
+}
+
+/// [`post_json_capped`] that keeps the response's status line and headers:
+/// curl writes them ahead of the body, and [`parse_http_response`] splits them
+/// back out. A mail answer's signature header is read from here.
+pub(crate) fn post_json_answered(
+    url: &str,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    max_bytes: usize,
+) -> Result<HttpResponse, String> {
+    let (status, raw) = post_json_args(url, body, bearer, extra_headers, timeout_secs, max_bytes, true)?;
+    parse_http_response(status, &raw)
+}
+
+/// The one argv both POST shapes build. `include_head` adds `--include` (with
+/// `--suppress-connect-headers`, so a proxy's CONNECT head is never read as the
+/// answer); with `false` the argv is exactly the one `post_json_capped` always
+/// built.
+fn post_json_args(
+    url: &str,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    max_bytes: usize,
+    include_head: bool,
+) -> Result<(u16, String), String> {
     let header_args: Vec<String> = extra_headers.iter().flat_map(|(k, v)| ["-H".to_string(), format!("{k}: {v}")]).collect();
+    let head_args: &[&str] = if include_head { &["--include", "--suppress-connect-headers"] } else { &[] };
     match bearer {
         None => {
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
+            args.extend(head_args);
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["--data-binary", "@-", "--", url]);
             run_curl_capped(timeout_secs, max_bytes, &args, Some(body))
@@ -357,6 +390,7 @@ pub(crate) fn post_json_capped(
             let data_arg = scratch.arg();
             let header_line = format!("Authorization: Bearer {token}\n");
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
+            args.extend(head_args);
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["-H", "@-", "--data-binary", &data_arg, "--", url]);
             run_curl_capped(
@@ -369,8 +403,10 @@ pub(crate) fn post_json_capped(
     }
 }
 
-/// MCP needs response headers as well as the bounded body. Session headers and
-/// credentials use stdin; the shared curl runner remains the only spawn point.
+/// A response's status line, headers and bounded body. MCP reads its session
+/// headers from one, and every mail answer reads its signature header from one
+/// ([`post_json_to_node_answered`]). Session headers and credentials use stdin;
+/// the shared curl runner remains the only spawn point.
 pub(crate) struct HttpResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
@@ -595,14 +631,33 @@ pub(crate) fn post_json_to_node_with_tunnel_key(
     tunnel_key: &str,
     cap_bytes: usize,
 ) -> Result<(u16, String), String> {
+    let dial_url = node_dial_url(node, tunnel_key)?;
+    post_json_capped(&dial_url, body, bearer, extra_headers, timeout_secs, cap_bytes)
+}
+
+/// [`post_json_to_node`] that keeps the response head (see
+/// [`post_json_answered`]), dialled the same way.
+pub(crate) fn post_json_to_node_answered(
+    node: &aoide_storage::node_store::Node,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+) -> Result<HttpResponse, String> {
+    let dial_url = node_dial_url(node, &node.name)?;
+    post_json_answered(&dial_url, body, bearer, extra_headers, timeout_secs, MAX_RESPONSE_BYTES)
+}
+
+/// The url a POST to `node` dials: `node.url` as its recorded `via` routes it,
+/// keyed by `tunnel_key`. The one resolution every node POST shares.
+fn node_dial_url(node: &aoide_storage::node_store::Node, tunnel_key: &str) -> Result<String, String> {
     let via = node
         .via
         .as_deref()
         .map(aoide_storage::tunnel::parse_via)
         .transpose()
         .map_err(|e| format!("node `{}`'s recorded via: {e}", node.name))?;
-    let dial_url = resolve_dial_url(&node.url, via.as_ref(), tunnel_key)?;
-    post_json_capped(&dial_url, body, bearer, extra_headers, timeout_secs, cap_bytes)
+    resolve_dial_url(&node.url, via.as_ref(), tunnel_key)
 }
 
 /// [`post_json_to_node`]'s own body, plus an explicit `via_override` that
@@ -10039,6 +10094,33 @@ mod tests {
         (listener, port, seen)
     }
 
+    /// The answered POST reads the head curl writes off a real socket: the
+    /// signature a door sends is in `headers`, and `body` is the answer.
+    #[test]
+    fn post_json_to_node_answered_reads_the_answer_header_off_a_real_socket() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else { return };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Aoide-Answer-Signature: abcd\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            );
+        });
+
+        let node = verified_node("relay", &format!("http://127.0.0.1:{port}/"));
+        let answer = post_json_to_node_answered(&node, "{}", None, &[], 5).unwrap();
+        assert_eq!(answer.status, 200);
+        assert_eq!(answer.body, "{}");
+        assert!(
+            answer.headers.contains(&("x-aoide-answer-signature".to_string(), "abcd".to_string())),
+            "the header survives curl's --include: {:?}",
+            answer.headers
+        );
+    }
+
 
     // ── S2: a refusal is a taught refusal, and a mistyped live name is named ──
 
@@ -11315,6 +11397,28 @@ mod mcp_http_tests {
         assert_eq!(response.body, "{\"result\":\"body: value\"}");
         assert!(parse_http_response(200, "HTTP/1.1 403 Forbidden\r\n\r\ndenied").is_err());
         assert!(parse_http_response(200, "{\"missing\":\"headers\"}").is_err());
+    }
+
+    /// The answer signature a door attaches comes through the parse whatever the
+    /// case of its name, the spacing around its value, the HTTP version, or an
+    /// interim 1xx head ahead of it; an answer without it parses to no header.
+    #[test]
+    fn parse_http_response_keeps_the_answer_signature_header() {
+        let signature = |r: &HttpResponse| r.headers.iter().find(|(n, _)| n.as_str() == "x-aoide-answer-signature").map(|(_, v)| v.clone());
+
+        let plain = parse_http_response(200, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Aoide-Answer-Signature:   abcd  \r\nConnection: close\r\n\r\n{\"result\":{}}").unwrap();
+        assert_eq!(signature(&plain).as_deref(), Some("abcd"));
+        assert_eq!(plain.body, "{\"result\":{}}", "the body is exactly what follows the blank line");
+
+        let http2 = parse_http_response(200, "HTTP/2 200\r\nx-aoide-answer-signature: abcd\r\n\r\n{}").unwrap();
+        assert_eq!(signature(&http2).as_deref(), Some("abcd"));
+
+        let interim = parse_http_response(200, "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nX-AOIDE-Answer-Signature: abcd\r\n\r\n{}").unwrap();
+        assert_eq!(signature(&interim).as_deref(), Some("abcd"));
+        assert_eq!(interim.body, "{}");
+
+        let unsigned = parse_http_response(200, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}").unwrap();
+        assert_eq!(signature(&unsigned), None, "no header means no signature, and the parse does not invent one");
     }
 
     // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).

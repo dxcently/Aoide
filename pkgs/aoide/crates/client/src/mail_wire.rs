@@ -106,14 +106,14 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
         Ok(h) => h,
         Err(e) => return SignedCall::TransportFailed(format!("signing: {e}")),
     };
-    let (code, resp) = match crate::commands::post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, 15) {
+    let answer = match crate::commands::post_json_to_node_answered(node, &body_str, bearer.as_deref(), &extra_headers, 15) {
         Ok(v) => v,
         Err(e) => return SignedCall::TransportFailed(e),
     };
-    if code != 200 {
-        return SignedCall::TransportFailed(format!("HTTP {code}"));
+    if answer.status != 200 {
+        return SignedCall::TransportFailed(format!("HTTP {}", answer.status));
     }
-    let parsed: Value = match serde_json::from_str(&resp) {
+    let parsed: Value = match serde_json::from_str(&answer.body) {
         Ok(v) => v,
         Err(e) => return SignedCall::TransportFailed(format!("unparseable response: {e}")),
     };

@@ -274,6 +274,11 @@ never the inbound/serve half (that's `aoide-server`).
   out near 321 KB and 512 KiB is ~1.6× that, not 2×. (Stated as arithmetic
   rather than derived: those two bounds live in `aoide-conduct` and
   `aoide-server`.)
+  `post_json_answered` and `post_json_to_node_answered` are the same POST
+  with curl's `--include`, returning the status line, headers and bounded
+  body as an `HttpResponse`. Every mail call goes through the node form
+  (`post_signed`), so the answer's signature header is in reach of the check
+  that reads it.
 - **Dial resolution (P-S4, ssh-transport lane)** — the tunnel seam every
   outbound POST resolves through BEFORE it ever reaches `commands::
   post_json` (`aoide-client`'s one HTTP transport, unchanged by this
