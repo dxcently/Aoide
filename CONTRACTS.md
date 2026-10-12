@@ -830,7 +830,8 @@ count.
   `NAME=value` word (`A=1 sudo x`); a control, bidi or invisible character, a
   newline or U+FFFD in any word (a control byte, `\r` included, would act as
   Enter at the prompt); a line over 4096 bytes; a privilege program anywhere in
-  its launcher chain (`sudo`, `doas`, `su`, `pkexec`, `run0`); a shell-form
+  its launcher chain (a `PRIVILEGE_PROGRAMS` name, `busybox su` included);
+  a shell-form
   argv such as `sh -c …`. The words are POSIX-quoted (`shell_join`), so the
   typed line re-parses to the recorded argv for an argv that passes. Never
   submitted, because an argv is attacker-choosable: a same-uid process can
@@ -2363,34 +2364,51 @@ else speaks for. A shell's `state` is its own snapshot (foreground command, then
 screen), whatever hook records it holds; the screen is silenced only for an
 interactive shell at its bare prompt. A command shell (`bash -c …`,
 `sh ./run.sh`) has no prompt, so its idle verdict is `shell_at_prompt`'s
-ordered reads, the first that answers ending it: a foreground command holds
-the terminal, working; an interactive shell at its bare prompt, idle by the
-process-group check alone; a live child (`sh -c 'make; true'`), working; the
-shell's executable differs from the file its program name resolves to, read
-before the spawn, working (`sh -c 'sleep 30'` exec-optimizes, whatever comm
-the command renames itself to; `sh -c 'exec bash'` reads working by design);
-the shell's CPU time
+ordered reads, the first that answers ending it: a
+foreground command holds the terminal, working; an interactive shell at its
+bare prompt, idle by the process-group check alone; a live child (`sh -c 'make;
+true'`), working; the shell's executable is not the file its spawn started,
+working (`sh -c 'sleep 30'` exec-optimizes, whatever comm the command renames
+itself to); the shell's executable cannot be read at all, working, since a
+process that made itself non-dumpable (a setuid `sudo`, `doas` or `su`, or a
+program with `PR_SET_DUMPABLE 0`) reads that way; the shell's CPU time
 (`utime + stime`) rose since the previous tick, working (a builtin-only loop
-such as `while :; do :; done`); comm names no shell, working; otherwise idle.
-The executable and CPU facts are the wrap's own memory, read from
-`/proc/<pid>` on Linux; elsewhere those two reads are skipped and the comm
-read decides. A fact that cannot be read is no evidence either way, so the
-reads after it still decide. The comm read is the last one, not a second
-exec test: it is what keeps a launcher the operator typed (`sudo`, `doas`,
-`su -c`), which execs nothing and at its password prompt has no child and
-burns no CPU, reading working. An interactive shell is idle at its bare prompt
-by the process-group check alone. `restore.idle` is the same verdict, computed
-once per tick, so the two never disagree. The accepted losses: a `&`
-background child under a command shell keeps it `working` for as long as
-that child lives; a command shell started under an exec launcher (`env`,
-`nice`, `timeout`) reads `working` from its first tick, because the
-launcher's file is its baseline, and a command shell is running a command
-anyway, so the error is toward `working`; a command shell blocked in a
-builtin `read` has no child and
-burns no CPU, so it reads idle, and the screen's prompt detection is what hears
-it. A bare `su` is an interactive shell and reads idle at its prompt. A
-password prompt is still `awaiting`: by sudo's own witness for `sudo`, and by
-the screen's password row for `doas` and `su`. Readers
+such as `while :; do :; done`); with no baseline (non-Linux hosts, `busybox`),
+comm names no shell, working; otherwise idle. `restore.idle` is the same
+verdict, computed once per tick, so the two never disagree.
+
+The baseline is the wrap's own memory: the identity of the file the spawn
+started, resolved once (`PATH` searched as `execvp` searches it: an executable
+regular file, with the default path when `PATH` is unset; a `#!` script's
+baseline is its interpreter; a file the kernel will not start itself has none,
+and its name is spawned as before) and read from that path after the spawn. It
+is never read from `/proc`, where a shell that has already exec'd shows its
+command. The exe and CPU reads come from `/proc/<pid>` on Linux; elsewhere
+those reads are skipped and comm decides. A CPU sample that cannot be read is
+no evidence either way, so the reads after it still decide. Comm is consulted
+only with no baseline, so a setuid program's password prompt reads working
+through its unreadable exe, not through its name.
+
+The accepted losses: a `&` background child under a command shell keeps it
+`working` for as long as that child lives; a command shell started under an
+exec launcher (`env`, `nice`, `timeout`) reads `working` from its first tick,
+because the launcher's file is its baseline, and a command shell is running a
+command anyway, so the error is toward `working`; a `#!` script whose
+interpreter is `env` is baselined at `env`, so it reads `working` once its
+interpreter runs, the same error; `sh -c 'exec bash'` where `sh` and `bash` are
+one file (the usual sh-is-bash host) is no exec at all, since the executable is
+unchanged: it reads like any shell, idle while only builtins run and working
+once it has a child or burns CPU, the same loss as the builtin `read` below; and
+a command shell blocked in a builtin `read` has no child and burns no CPU, so it
+reads idle, and the screen's prompt detection is what hears it.
+
+A privilege program (`sudo bash`, `doas bash`, `su`, `su -`) is never an
+interactive shell: its prompt is a password until its command or shell starts,
+so it reads working by the exe test and by its child, never idle. A password
+prompt is still `awaiting`: by sudo's own witness for `sudo`, and by the
+screen's password row for `doas` and `su`. The screen hears a `sudo bash`
+prompt, since a privilege program is not silenced as an interactive shell.
+Readers
 tolerate its absence and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)

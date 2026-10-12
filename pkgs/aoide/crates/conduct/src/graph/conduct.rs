@@ -63,10 +63,14 @@ const SHELL_BASENAMES: &[&str] = &[
 
 /// The programs that take a privilege or a login in place of the operator: the
 /// one list. `sudo` and `doas` also wrap a command, which the walk reads as a
-/// shell whatever it runs ([`walk`]); `su`, `pkexec` and `run0` ask for a
-/// password on the pty. [`runs_a_privilege_program`] reads it for the restore
-/// refusals. Basename match only, so `sudoedit` and other names are not listed.
-pub(in crate::graph) const PRIVILEGE_PROGRAMS: &[&str] = &["sudo", "doas", "su", "pkexec", "run0"];
+/// shell whatever it runs ([`walk`]); the rest ask for a password or a root
+/// shell on the pty. [`runs_a_privilege_program`] reads it for the restore
+/// refusals and [`program_is_an_interactive_shell`] for the screen. A basename
+/// match, and `busybox <applet>` counts through its applet.
+pub(in crate::graph) const PRIVILEGE_PROGRAMS: &[&str] = &[
+    "sudo", "doas", "su", "pkexec", "run0", "sudoedit", "runuser", "setpriv", "chroot", "sg",
+    "newgrp", "dzdo", "ksu",
+];
 
 /// Launchers that only FORWARD to the program after them. The hook door's plumbing
 /// verdict ([`is_invocation_plumbing`]) reads this list; the walk reads each
@@ -439,15 +443,17 @@ pub fn program_is_a_shell(argv: &[String]) -> bool {
 }
 
 /// Whether a conducted command is a shell at its OWN prompt: no `-c` command
-/// string and no script operand (`bash`, `bash --norc -i`, `sudo bash`). A
-/// shell that runs a command or a script (`bash -c "apt install x"`,
-/// `sh ./run.sh`) is a program like any other, and its questions are heard.
+/// string and no script operand (`bash`, `bash --norc -i`). A shell that runs a
+/// command or a script (`bash -c "apt install x"`, `sh ./run.sh`) is a program
+/// like any other, and its questions are heard. A privilege program is never one
+/// (`sudo bash`, `su`): until its command starts, its prompt is a password, so
+/// its exe and its children decide ([`shell_at_prompt`]).
 ///
 /// Only the prompt case is silenced by the screen (`shell_snapshot`): a `bash
 /// -c` child shares the shell's process group, so the foreground pgid cannot
 /// tell its question from the bare prompt.
 pub(in crate::graph) fn program_is_an_interactive_shell(argv: &[String]) -> bool {
-    shell_verdict(argv) == Some(true)
+    shell_verdict(argv) == Some(true) && !runs_a_privilege_program(argv)
 }
 
 /// What the launcher walk finds in one argv: whether it is a shell (the answer
@@ -494,16 +500,20 @@ fn walk(argv: &[String]) -> Walked {
             program: None,
         },
         "su" => Walked { shell: Some(!su_runs_a_command(argv)), program: None },
-        // `busybox sh` is the shell as one of its applets; `busybox ls` is still a busybox.
+        // `busybox sh` is the shell as one of its applets. Any other applet is a
+        // program: every applet runs inside the one busybox binary, so comm reads
+        // `busybox` for all of them. A bare `busybox` stays a shell, an over-match
+        // that only has the screen hear a question.
         "busybox" => {
             let applet = argv.get(1).map(|a| command_basename(a)).unwrap_or_default();
-            Walked {
-                shell: Some(
-                    SHELL_BASENAMES.contains(&applet.as_str())
-                        && shell_args_are_interactive(&applet, argv.get(2..).unwrap_or_default()),
-                ),
-                program: Some(base.clone()),
-            }
+            let shell = if applet.is_empty() {
+                Some(false)
+            } else if SHELL_BASENAMES.contains(&applet.as_str()) {
+                Some(shell_args_are_interactive(&applet, argv.get(2..).unwrap_or_default()))
+            } else {
+                None
+            };
+            Walked { shell, program: Some(base.clone()) }
         }
         name if SHELL_BASENAMES.contains(&name) => Walked {
             shell: Some(shell_args_are_interactive(name, &argv[1..])),
@@ -566,13 +576,10 @@ fn shell_verdict(argv: &[String]) -> Option<bool> {
     walk(argv).shell
 }
 
-/// Whether a conducted argv runs a [`PRIVILEGE_PROGRAMS`] program anywhere
-/// along
-/// its launcher chain: `doas bash`, `env pkexec x`, `nice su -l`, `nix develop
-/// -c
-/// run0 x`. The same tables [`walk`] reads name the launchers, so a launcher
-/// the
-/// walk does not list (`busybox su`) is not seen here either.
+/// Whether a conducted argv runs a [`PRIVILEGE_PROGRAMS`] program anywhere along
+/// its launcher chain: `doas bash`, `env pkexec x`, `nice su -l`, `nix develop -c
+/// run0 x`, `busybox su`. The tables [`walk`] reads name the launchers; a
+/// launcher the walk does not model (`xargs`, `flock`) is not followed here.
 pub(in crate::graph) fn runs_a_privilege_program(argv: &[String]) -> bool {
     let Some(first) = argv.first() else {
         return false;
@@ -580,6 +587,10 @@ pub(in crate::graph) fn runs_a_privilege_program(argv: &[String]) -> bool {
     let base = command_basename(first);
     if PRIVILEGE_PROGRAMS.contains(&base.as_str()) {
         return true;
+    }
+    if base == "busybox" {
+        let applet = argv.get(1).map(|a| command_basename(a)).unwrap_or_default();
+        return PRIVILEGE_PROGRAMS.contains(&applet.as_str());
     }
     if base == "nix" {
         if let Some(line) = argv.iter().find_map(|a| a.strip_prefix("--command=")) {
@@ -1050,14 +1061,19 @@ fn proc_command(pid: i32) -> Option<String> {
 
 /// Pure NUL-split of a raw `/proc/<pid>/cmdline` buffer into argv — split out
 /// of [`proc_command`]/[`proc_argv`] so the split itself is unit-testable
-/// against a synthesized buffer without a real `/proc` read. Empty segments
-/// (a trailing NUL, or two in a row) are dropped. Unix's own shape: the
-/// Windows arm of [`proc_argv`] asks the process-table seam, which re-splits
-/// with that host's own parser.
+/// against a synthesized buffer without a real `/proc` read. The kernel ends
+/// every argument with a NUL, so the last one ends the buffer and makes no word.
+/// An empty word between two NULs is an empty argument (`grep "" f`) and stays.
+/// Unix's own shape: the Windows arm of [`proc_argv`] asks the process-table
+/// seam, which re-splits with that host's own parser.
 #[cfg(unix)]
 fn parse_cmdline(raw: &[u8]) -> Vec<String> {
-    raw.split(|b| *b == 0)
-        .filter(|p| !p.is_empty())
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    raw.strip_suffix(&[0u8])
+        .unwrap_or(raw)
+        .split(|b| *b == 0)
         .map(|p| String::from_utf8_lossy(p).into_owned())
         .collect()
 }
@@ -1316,9 +1332,9 @@ struct ExeId {
 /// itself, from the process table; the shell never reports it.
 #[derive(Debug)]
 struct ShellWatch {
-    /// The executable the program name resolves to, read BEFORE the spawn (see
-    /// [`program_exe`]). A later, different identity means the shell exec'd
-    /// into its command.
+    /// The identity of the file the spawn started (see [`shell_baseline`]). A
+    /// later identity that differs, or none at all, means the shell exec'd into
+    /// its command or made its executable unreadable.
     exe_at_spawn: Option<ExeId>,
     /// `utime + stime` at the previous tick. A rise since then means the shell
     /// itself is running, with no child to show for it.
@@ -1331,43 +1347,56 @@ impl ShellWatch {
     }
 }
 
-/// The executable a program name starts, resolved the way `execvp` resolves
-/// it: a name with a `/` is itself, and a bare name is the first `PATH` entry
-/// holding a file of that name. It is read BEFORE the spawn. A read after the
-/// spawn can land after the shell has exec'd its command, and then the
-/// command's own file would be taken for the shell's: `sh -c 'exec python3 …'`
-/// would read idle.
+/// The identity of the file at `path`, following symlinks: the device and inode
+/// that a `/proc/<pid>/exe` read names.
 #[cfg(target_os = "linux")]
-fn program_exe(program: &str) -> Option<ExeId> {
+fn identity_of(path: &std::path::Path) -> Option<ExeId> {
     use std::os::unix::fs::MetadataExt;
-    let candidates: Vec<std::path::PathBuf> = if program.contains('/') {
-        vec![program.into()]
-    } else {
-        std::env::var("PATH")
-            .ok()?
-            .split(':')
-            .map(|dir| std::path::Path::new(if dir.is_empty() { "." } else { dir }).join(program))
-            .collect()
+    let meta = std::fs::metadata(path).ok()?;
+    Some(ExeId { dev: meta.dev(), ino: meta.ino() })
+}
+
+/// The file the kernel starts when it execs `file`: the file itself, or for a
+/// `#!` script its interpreter, which is what `/proc/<pid>/exe` names afterwards.
+#[cfg(target_os = "linux")]
+fn first_exec_image(file: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::io::Read;
+    let mut head = Vec::new();
+    std::fs::File::open(file).ok()?.take(256).read_to_end(&mut head).ok()?;
+    let Some(line) = head.strip_prefix(b"#!") else {
+        return Some(file.to_path_buf());
     };
-    candidates.iter().find_map(|path| {
-        let meta = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
-        Some(ExeId { dev: meta.dev(), ino: meta.ino() })
-    })
+    let line = &line[..line.iter().position(|b| *b == b'\n').unwrap_or(line.len())];
+    let interpreter = String::from_utf8_lossy(line).split_whitespace().next()?.to_owned();
+    Some(interpreter.into())
+}
+
+/// The baseline the exec test compares against: the identity of the file the
+/// spawn started (`image`, from [`super::pty::PtyChild::image`]), read from that
+/// path and never from `/proc`, where a shell that has already exec'd shows its
+/// command. `busybox` has none: its applets all run inside one executable, so
+/// the comm check decides there.
+#[cfg(target_os = "linux")]
+fn shell_baseline(program: &str, image: Option<&std::path::Path>) -> Option<ExeId> {
+    if command_basename(program) == "busybox" {
+        return None;
+    }
+    first_exec_image(image?).and_then(|file| identity_of(&file))
 }
 
 /// Non-Linux hosts have no `/proc/<pid>/exe` to compare with, so there is no
-/// baseline to read here.
+/// baseline and the comm check is the whole exec test.
 #[cfg(not(target_os = "linux"))]
-fn program_exe(_program: &str) -> Option<ExeId> {
+fn shell_baseline(_program: &str, _image: Option<&std::path::Path>) -> Option<ExeId> {
     None
 }
 
-/// The executable identity of `pid`, or `None` when this host cannot read it.
+/// The executable identity of `pid`, or `None` when this host cannot read it. A
+/// process that made itself non-dumpable (a setuid program after its exec, or
+/// `PR_SET_DUMPABLE 0`) reads `None` to an unprivileged user.
 #[cfg(target_os = "linux")]
 fn proc_exe(pid: i32) -> Option<ExeId> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(format!("/proc/{pid}/exe")).ok()?;
-    Some(ExeId { dev: meta.dev(), ino: meta.ino() })
+    identity_of(std::path::Path::new(&format!("/proc/{pid}/exe")))
 }
 
 /// Non-Linux hosts have no `/proc/<pid>/exe`: the executable check is skipped
@@ -1406,29 +1435,12 @@ fn comm_is_a_shell(comm: &str) -> bool {
 
 /// The one predicate `state` and `restore.idle` are both read off. It is
 /// evaluated once per tick in [`conduct_refresh_shell`] and passed to both
-/// snapshots, so the two can never disagree.
-///
-/// The reads run in this order, and the first that answers ends it:
-/// 1. a foreground command holds the terminal (`fg` names neither `<= 0` nor
-///    the shell): working;
-/// 2. an interactive shell at its own prompt: idle, the process group alone;
-/// 3. a live child (`sh -c 'make; true'`): working;
-/// 4. the shell's executable changed since spawn: working. An exec-optimized
-///    command (`sh -c 'sleep 30'`) is caught here, whatever comm it renames
-///    itself to. So is `sh -c 'exec bash'`, which reads working by design;
-/// 5. CPU time rose since the last tick: working. This catches a command that
-///    runs only builtins (`sh -c 'while :; do :; done'`);
-/// 6. comm names no shell: working. This is the launcher the operator typed
-///    (`sudo`, `doas`, `su -c`) holding the pid. It execs nothing, and at its
-///    password prompt it has no child and burns no CPU, so only its name says
-///    it is busy. Reading it idle would let the typed buffer capture the
-///    password;
-/// 7. otherwise idle.
-///
-/// A fact that cannot be read answers as an idle shell, as it always has. An
-/// unreadable executable or CPU sample is no evidence either way, so the reads
-/// after it still decide. The CPU sample is taken on every call, so a tick
-/// that returns early still moves the baseline forward.
+/// snapshots, so the two can never disagree. The reads run in the order
+/// CONTRACTS.md's shell-state paragraph gives, and the first that answers ends
+/// it. An unreadable CPU sample is no evidence either way, so the reads after it
+/// still decide. An unreadable executable is an exec when there is a baseline
+/// ([`shell_baseline`]). The CPU sample is taken on every call, so a tick that
+/// returns early still moves the baseline forward.
 #[allow(clippy::too_many_arguments)]
 fn shell_at_prompt(
     fg: i32,
@@ -1454,14 +1466,15 @@ fn shell_at_prompt(
     if children_of(shell_pid) == Some(true) {
         return false;
     }
-    let exec_changed = matches!(
-        (exe_of(shell_pid), watch.exe_at_spawn),
-        (Some(now), Some(at_spawn)) if now != at_spawn
-    );
+    let exec_changed = match (exe_of(shell_pid), watch.exe_at_spawn) {
+        (now, Some(at_spawn)) => now != Some(at_spawn),
+        (_, None) => false,
+    };
     if exec_changed || cpu_rose {
         return false;
     }
-    comm_of(shell_pid).is_none_or(|comm| comm_is_a_shell(&comm))
+    // With no baseline, comm is the exec test: `busybox` and non-Linux hosts.
+    watch.exe_at_spawn.is_some() || comm_of(shell_pid).is_none_or(|comm| comm_is_a_shell(&comm))
 }
 
 /// The process a shell that is not idle is running: the foreground group
@@ -1774,8 +1787,8 @@ fn conduct_multiplex(
     // wait gets a ~1s timeout and the tick fires on the elapsed clock. Agents
     // also wake to observe child exit when a descendant keeps the PTY open.
     let shell_pid = child.id();
-    // The shell's CPU memory, and the executable it was started as (read before
-    // the spawn, see `program_exe`).
+    // The shell's CPU memory, and the executable it was started as (see
+    // `shell_baseline`).
     let mut shell_watch = ShellWatch::new(shell_exe);
     const WAIT_TIMEOUT_MS: i32 = 1000;
     let tick_period = std::time::Duration::from_millis(950);
@@ -2105,13 +2118,12 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         None => None,
     };
 
-    // The program's own executable, read before the spawn (see `program_exe`).
-    let shell_exe = program_exe(&program);
     // Spawn FIRST: a failed exec must register no session (parity with `wrap`).
     let (mut child, mut pty) = match spawn_on_pty(&program, &inv.args[1..], &id, ws, task.as_ref()) {
         Ok(v) => v,
         Err(e) => return Outcome::error(cmd, format!("failed to conduct `{program}`: {e}")),
     };
+    let shell_exe = shell_baseline(&program, child.image());
 
     // Bind the per-session injection socket (best-effort: a bind failure leaves
     // the session running but un-injectable — recorded as conductable=false).
@@ -2976,8 +2988,9 @@ mod tests {
     }
     /// R2 (F4): a process that exec'd into another program is working, whatever
     /// name it gives itself: a `prctl` rename to `bash` changes comm, not the
-    /// executable. The same executable reads idle, and an unreadable executable
-    /// falls back to the name, as it always did.
+    /// executable. The same executable reads idle. Without a baseline, an
+    /// unreadable executable falls back to the name; with one, see
+    /// `an_unreadable_exe_with_a_baseline_is_an_exec`.
     #[test]
     fn an_exec_is_read_by_the_executable_not_the_name() {
         let at_spawn = Some(ExeId { dev: 1, ino: 10 });
@@ -2995,6 +3008,21 @@ mod tests {
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None));
         assert!(!shell_at_prompt(100, 100, false, &mut watch, |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
     }
+    /// A process that made its own executable unreadable is no longer the one the
+    /// spawn started: `PR_SET_DUMPABLE 0`, or a setuid program after its exec.
+    /// With a baseline it reads working, whatever comm it carries. Without one,
+    /// the name decides, as it always did.
+    #[test]
+    fn an_unreadable_exe_with_a_baseline_is_an_exec() {
+        let mut watch = ShellWatch::new(Some(ExeId { dev: 1, ino: 10 }));
+        assert!(
+            !shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None),
+            "an unreadable executable with a baseline reads working"
+        );
+        let mut watch = ShellWatch::new(None);
+        assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None));
+    }
+
     #[test]
     fn shell_at_prompt_is_working_while_a_foreground_command_holds_the_terminal() {
         // A foreground group that is not the shell: working, and neither fact
@@ -3074,15 +3102,15 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
-    fn parse_cmdline_splits_on_nul_and_drops_empty_segments() {
-        // A synthesized raw `/proc/<pid>/cmdline` buffer: NUL-separated,
-        // trailing NUL included (the kernel's real shape).
-        let raw = b"nvim\0notes.md\0";
-        assert_eq!(parse_cmdline(raw), vec!["nvim".to_string(), "notes.md".to_string()]);
-        // Two NULs in a row (an empty argv element) never produces an empty
-        // string in the output.
-        let raw2 = b"cargo\0\0test\0";
-        assert_eq!(parse_cmdline(raw2), vec!["cargo".to_string(), "test".to_string()]);
+    fn parse_cmdline_keeps_an_empty_argument_between_nuls() {
+        // A synthesized raw `/proc/<pid>/cmdline` buffer: a NUL after every
+        // argument, the last one included (the kernel's real shape).
+        assert_eq!(parse_cmdline(b"nvim\0notes.md\0"), vec!["nvim".to_string(), "notes.md".to_string()]);
+        // `grep "" f`: the empty argument is a word, so a re-typed line keeps it.
+        assert_eq!(
+            parse_cmdline(b"grep\0\0f\0"),
+            vec!["grep".to_string(), String::new(), "f".to_string()]
+        );
         assert_eq!(parse_cmdline(b""), Vec::<String>::new());
     }
     #[test]
@@ -3171,20 +3199,13 @@ mod tests {
             &["env", "bash"],
             &["nix", "develop"],
             &["nix", "develop", "-c", "bash"],
-            &["sudo", "bash"],
-            &["sudo", "-u", "root", "bash"],
-            &["su", "-"],
-            &["su", "-", "khoa"],
             &["script", "-q", "/dev/null"],
             // `-` reads commands from stdin, which on a tty is a prompt.
             &["bash", "-"],
             &["busybox", "sh"],
             &["busybox", "ash"],
-            &["sudo", "--user", "root", "bash"],
-            &["sudo", "-D", "/tmp", "bash"],
             &["-bash"],
             &["/usr/bin/-zsh"],
-            &["sudo", "-T", "5", "bash"],
             &["fish", "-C", "x"],
             // `-C` takes a value only in fish. bash, sh and dash read it as
             // noclobber.
@@ -3237,7 +3258,37 @@ mod tests {
         for case in runs_a_command {
             assert!(!program_is_an_interactive_shell(&owned(case)), "{case:?} runs a command");
         }
+        // A privilege program is never an interactive shell: its prompt is a
+        // password until its command starts. It still names a shell for the walk.
+        let privilege_prompts: &[&[&str]] = &[
+            &["sudo", "bash"],
+            &["sudo", "-u", "root", "bash"],
+            &["sudo", "--user", "root", "bash"],
+            &["sudo", "-D", "/tmp", "bash"],
+            &["sudo", "-T", "5", "bash"],
+            &["doas", "bash"],
+            &["su"],
+            &["su", "-"],
+            &["su", "-", "khoa"],
+        ];
+        for case in privilege_prompts {
+            assert!(!program_is_an_interactive_shell(&owned(case)), "{case:?} asks for a password");
+            assert!(program_is_a_shell(&owned(case)), "{case:?} still names a shell to the walk");
+        }
     }
+    /// `busybox sleep 30` is a program, not a shell: comm reads `busybox` for every
+    /// applet, so a shell verdict would park it at idle. `busybox sh` stays a
+    /// shell, and `busybox su` is a privilege program.
+    #[test]
+    fn a_busybox_applet_that_is_not_a_shell_is_not_a_shell() {
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        assert!(!program_is_a_shell(&owned(&["busybox", "sleep", "30"])));
+        assert!(program_is_a_shell(&owned(&["busybox", "sh"])));
+        assert!(!program_is_an_interactive_shell(&owned(&["busybox", "sh", "-c", "x"])));
+        assert!(runs_a_privilege_program(&owned(&["busybox", "su", "-l", "khoa"])));
+        assert!(!runs_a_privilege_program(&owned(&["busybox", "sleep", "30"])));
+    }
+
     #[test]
     fn wrapped_program_names_what_the_launcher_walk_resolves_to() {
         // The ping-back's positive proof reads this name. A launcher the walk
@@ -3329,8 +3380,6 @@ mod tests {
             &["exec", "-a", "claude", "bash"],
             &["ionice", "-c", "3", "bash"],
             &["chrt", "-T", "5", "10", "bash"],
-            &["sudo", "-u", "claude", "bash"],
-            &["doas", "-u", "claude", "bash"],
         ];
         let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
         for case in shells {
@@ -3338,6 +3387,12 @@ mod tests {
             assert_eq!(wrapped_program_name(&argv).as_deref(), Some("bash"), "{case:?}");
             assert!(program_is_an_interactive_shell(&argv), "{case:?} sits at its prompt");
             assert_eq!(wrapped_harness(&argv), None, "{case:?} is never proven as claude");
+        }
+        // A privilege program wraps the shell, but its prompt is a password first.
+        for case in [&["sudo", "-u", "claude", "bash"][..], &["doas", "-u", "claude", "bash"][..]] {
+            let argv = owned(case);
+            assert_eq!(wrapped_program_name(&argv).as_deref(), Some("bash"), "{case:?}");
+            assert!(!program_is_an_interactive_shell(&argv), "{case:?} asks for a password first");
         }
     }
 
@@ -5569,23 +5624,44 @@ mod tests {
         );
     }
 
-    /// R2 (F4): the baseline is the file a program name starts, resolved the
-    /// way `execvp` resolves it: a bare name is the first `PATH` file of that
-    /// name.
+    /// The spoof a non-setuid process can run on itself: it renames itself `bash`
+    /// and makes its own executable unreadable with `PR_SET_DUMPABLE 0`. The
+    /// executable is no longer the one the spawn started, so the shell reads
+    /// working. Skipped as root, which reads every executable, and where python3
+    /// is not on PATH.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_shell_renamed_to_bash_and_made_undumpable_reads_working() {
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipped: as root every executable stays readable");
+            return;
+        }
+        if !python3_on_path() {
+            eprintln!("skipped: python3 is not on PATH, so nothing here can rename itself with prctl");
+            return;
+        }
+        a_command_shell_reads_working_until_its_command_ends(
+            "sb-undump",
+            &["sh", "-c", "exec python3 -c 'import ctypes,time; c=ctypes.CDLL(None); c.prctl(15, b\"bash\", 0, 0, 0); c.prctl(4, 0, 0, 0, 0); time.sleep(6)'"],
+        );
+    }
+
+    /// The baseline is the image the spawn started, and a `#!` script's image is
+    /// its interpreter: the file `/proc/<pid>/exe` names after the exec. `busybox`
+    /// has no baseline, since its applets never change the executable.
     #[cfg(target_os = "linux")]
     #[test]
-    fn program_exe_resolves_a_name_the_way_execvp_does() {
-        use std::os::unix::fs::MetadataExt;
-        assert!(program_exe("/no/such/program/anywhere").is_none());
-        let sh = program_exe("sh").expect("sh is on PATH");
-        let on_path = std::env::var("PATH")
-            .expect("PATH is set")
-            .split(':')
-            .map(|dir| std::path::Path::new(dir).join("sh"))
-            .find(|p| p.is_file())
-            .expect("a sh file is on PATH");
-        let meta = std::fs::metadata(on_path).expect("the sh file reads");
-        assert_eq!(sh, ExeId { dev: meta.dev(), ino: meta.ino() });
+    fn a_script_baseline_is_its_interpreter_and_busybox_has_none() {
+        let dir = std::env::temp_dir().join(format!("aoide-baseline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a scratch dir");
+        let script = dir.join("probe.sh");
+        std::fs::write(&script, "#!/bin/sh\necho hi\n").expect("the script");
+        let sh = std::path::PathBuf::from("/bin/sh");
+        assert_eq!(first_exec_image(&script), Some(sh.clone()));
+        assert_eq!(first_exec_image(&sh), Some(sh.clone()));
+        assert_eq!(shell_baseline("sh", Some(&sh)), identity_of(&sh));
+        assert!(shell_baseline("busybox", Some(&sh)).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// R3 (F5), end to end: a loop of builtins, with no child and no exec,

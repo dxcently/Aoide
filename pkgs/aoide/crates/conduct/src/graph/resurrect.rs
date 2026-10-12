@@ -62,12 +62,9 @@
 //! - **not idle, with a foreground `argv`** — the session was demonstrably
 //!   RUNNING something when it left. Its command is TYPED at the prompt, never
 //!   submitted: the human who reads the line presses Enter. Nothing runs at
-//!   boot on its own. EXCEPT when [`restore_argv_refusal`] refuses the argv: a
-//!   privilege program anywhere in its launcher chain (`sudo`, `doas`, `su`,
-//!   `pkexec`, `run0`) is never typed in, since it would sit on a password
-//!   prompt nobody is watching. Likewise a shell-form argv, an assignment
-//!   prefix, a control or invisible byte, and an over-long line. The cwd
-//!   still restores; nothing is delivered.
+//!   boot on its own. EXCEPT when [`restore_argv_refusal`] refuses the argv: the
+//!   refusals, and why each one exists, are listed once in CONTRACTS.md's
+//!   restore paragraph. The cwd still restores; nothing is delivered.
 //! - **idle, with a clean `typed` line** — preload it with `--yes` and,
 //!   deliberately, NEVER `--submit`. The text sits in the new prompt until a
 //!   human presses Enter. **This is the safety invariant this phase exists to
@@ -301,18 +298,9 @@ fn stored_login_shell() -> Option<String> {
 const RESTORE_LINE_MAX: usize = 4096;
 
 /// Why a recorded foreground argv is never re-typed, or `None` when it may be.
-/// Pure. Each refusal names what the typed line would have done:
-/// - a leading `NAME=value` word is a shell assignment, and the word after it
-///   is hidden from every check below (`A=1 sudo x`), so the whole argv is
-///   refused rather than checked past it;
-/// - a control, bidi or invisible character, a newline or U+FFFD (a lossy
-///   decode of non-UTF-8 bytes): readline reads `^A` as an edit key and a
-///   newline as Enter, and quoting does not contain either;
-/// - a line over [`RESTORE_LINE_MAX`];
-/// - a privilege program anywhere in its launcher chain (`sudo`, `doas`, `su`,
-///   `pkexec`, `run0`): at best it waits on a password prompt nobody watches;
-/// - a shell-form argv (`sh -c …`): its command sits inside the quotes, where
-///   no program check can see it.
+/// Pure. The refusals are listed once, in CONTRACTS.md's restore paragraph. The
+/// reason returned names the one that fired, and the `restore refused` line
+/// carries it.
 ///
 /// Reading argv is not proof of what will run: a same-uid process can rewrite
 /// its own `/proc` cmdline, so these refusals judge the typed text, not the
@@ -1619,6 +1607,15 @@ mod tests {
             vec!["doas", "apt", "x"],
             vec!["env", "pkexec", "x"],
             vec!["nice", "su", "-l"],
+            vec!["sudoedit", "x"],
+            vec!["runuser", "-u", "root", "bash"],
+            vec!["setpriv", "--reuid=0", "bash"],
+            vec!["chroot", "/x", "sh"],
+            vec!["sg", "wheel", "x"],
+            vec!["newgrp", "wheel"],
+            vec!["dzdo", "x"],
+            vec!["ksu", "x"],
+            vec!["busybox", "su", "-l", "khoa"],
         ] {
             let restore = busy_restore(&argv);
             assert!(

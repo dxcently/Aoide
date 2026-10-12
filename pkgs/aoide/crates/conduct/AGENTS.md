@@ -1314,12 +1314,13 @@ in the message.
   and the pgid check reads it at the prompt. An interactive shell is the pgid
   check alone; keep it that way. The reads and their order are CONTRACTS.md's
   shell-state paragraph.
-- **The executable baseline is read BEFORE the spawn, from the program's name
-  (`program_exe`, `execvp`'s own resolution), never from the child after it.**
-  A read after the spawn can land after the shell has exec'd its command, and
-  then the command's file is the baseline and an exec reads idle: the race the
-  `prctl` rename e2e test lost under load. The CPU sample is taken on every
-  tick. Don't move either read into `shell_at_prompt`.
+- **The executable baseline is the file the spawn started, read from its path
+  (`resolve_program`, once; `PtyChild::image`; `shell_baseline`), never from
+  `/proc`.** A `/proc/<pid>/exe` read can land after the shell has exec'd its
+  command, and then the command is the baseline. The spawn starts that same
+  path with the name as argv[0], so the baseline and the exec are one file. The
+  CPU sample is taken on every tick. Don't move either read into
+  `shell_at_prompt`.
 - **`proc_argv` and `proc_command` are deliberately two functions, never
   merged (P-C5).** `proc_command` is a DISPLAY label — it basename-
   collapses `argv[0]` and truncates at 48 chars — built for the roster's

@@ -317,9 +317,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
 - **`shell_at_prompt`** is the one idle verdict a conducted shell's `state` and
   `restore.idle` are both read off. An interactive shell is idle at its bare
   prompt (the pgid check); a command shell (`bash -c …`) is working while a
-  child runs, once it has exec'd into its command, or while its CPU time
-  rises. The wrap keeps the executable and CPU memory for it (see AGENTS.md
-  and CONTRACTS.md, the shell-state paragraph).
+  child runs, once its executable is no longer the one it started as (or
+  cannot be read), or while its CPU time rises. The wrap keeps the executable
+  and CPU memory for it (see AGENTS.md and CONTRACTS.md, the shell-state
+  paragraph).
 - **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape
   stripper: the screen source reads its window through it, and
   `aoide-conductor`'s log tail renders through it.
