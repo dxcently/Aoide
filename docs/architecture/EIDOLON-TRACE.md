@@ -291,7 +291,13 @@ carries whatever the journal carries; that fix is harnox's.
   any other registered harness that reports through hooks is read by
   `conduct/src/graph/pingback/hook.rs` off its `hooks.json` phase instead of a
   trace, with the same delivery and cursor file (`Session-Graph.md`, "And the
-  parent hears it"); nothing in this section's table applies to it.
+  parent hears it"); nothing in this section's table applies to it. A third,
+  `conduct/src/graph/pingback/prompt.rs`, speaks for a conducted program with
+  neither (a `codex`, an `aider`, a REPL): the wrap that went `awaiting` off
+  its own screen (`Session-Graph.md`, "Programs with no harness — the screen")
+  and published the line it is waiting on is the child, and its spawner hears
+  `[<agent> <petname>] asking: "<line>"` once per question, the last one heard
+  held in the entry's `screen` field.
 
   **At-most-once by a claimed cursor.** `state/stage/pingback.json`
   (`{ "<child id>": { "seen": "<id>", "silentAt": "<id>" } }`) is read,

@@ -113,10 +113,11 @@ pub fn upsert_session(
             state: "idle".to_string(),
             // Whether the wrapped command is a shell is a fact only the
             // process CONDUCTING it holds (`conduct`'s own argv), stamped
-            // right after this registration by `stamp_shell` — every other
+            // right after this registration by `stamp_wrap` — every other
             // registration path (a hook, a door, a test fixture) leaves it
             // false rather than guessing.
             shell: false,
+            wrapped_program: None,
             started_at: now.to_string(),
             parent_session_id: parent.map(str::to_string),
             // A remote parent is stamped by the A2A door on its own record
@@ -140,6 +141,7 @@ pub fn upsert_session(
             context_tokens: None,
             context_ceiling: None,
             needs_sudo: None,
+            question: None,
             // Stamped later by `set_session_log_path`, only for a headless
             // `aoide conduct` session; every other fresh record starts without one.
             log_path: None,

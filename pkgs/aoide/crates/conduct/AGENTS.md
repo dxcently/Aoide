@@ -1019,8 +1019,8 @@ in the message.
   it is not. The seal key is fetched whenever a hook candidate exists, a tracked
   record or a hook entry the cursor still holds, so a child pruned in the same
   pass as its wrap is still judged. Every value read back from the cursor is
-  cleaned again where it is rendered, and the whole line passes the
-  unsafe-character strip last (`died_mid_turn`).
+  cleaned again where it is rendered, and the whole line passes `wire_line`
+  at delivery, as every ping-back line does.
   **Trust model:** stated once, in `CONTRACTS.md` under
   `state/stage/pingback.json`. This cursor is unsealed data.
   Known gap, not checked here: a clean session end whose record and hook entry
@@ -1030,6 +1030,25 @@ in the message.
   hook source emits no `PingEvent` and never
   spools: a child that belongs on a ring is `remoteParent`-stamped and so is
   not its child.
+  **The screen source is the third, as a child module
+  (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
+  harness has neither profile (`prompt::tracked`: `agent_profile` is none, and
+  the hook and trace sources do not track it) is read off the `question` its
+  own wrap published (below), and its `[<agent> <petname>] asking: "<line>"`
+  joins the SAME `claims.lines`, claimed inside the SAME `with_stage_lock`
+  section after `hook::claim`, into the entry's `screen` half — the last
+  question announced. There is no baseline (the wrap publishes once its line
+  has stood for 3 s), a different question is a new episode, the same one is not
+  heard twice, and a record that no longer holds a question while `awaiting`
+  clears the key. A question that carries `needsSudo` is never claimed
+  (`prompt::asking`): the password is the human's. The child IS the wrap, so
+  there is no host to climb from:
+  `prompt::recipient` requires a daemon seal over the wrap's own pid, then the
+  spawner climb the hook source uses (`hook::spawner_of`, steps (2) and (3)
+  above) — one climb, two callers; do not fork a second. The seal key is
+  fetched before the lock for a pass that has a `prompt::pending` record, as
+  for a hook one. The question is cleaned and quoted again at render: it was
+  capped where it was written, but this is the line a parent types.
   **The event and the line are two things, and a remote parent gets the
   event (P-RSA S8, `CONTRACTS.md` §4/§6).** `choose_event` decides WHICH
   `PingEvent` a child's new records amount to — a closed enum whose every
@@ -1058,33 +1077,44 @@ in the message.
   gone, so its cursor entry leaves on that pass — so a dropped REMOTE child
   claims its trace row AND its exit on that one pass, and the ring always ends
   with exactly one `Exited`.
-  **Never a shell parent.** A target is unreceptive on either of two reads:
-  its `rec.agent` is `""`/`"shell"` or names no registered harness profile, or
-  its WRAPPED command is a shell
-  (`conduct.rs::wrapped_program_is_a_shell` = the record's durable `shell`
-  field OR a `Some` `restore`). A line submitted into a shell would RUN as a
-  command, and `agent` is only a label a caller picks: `--agent pi -- bash`
-  names a registered profile over a pty running a shell, which is how a
-  ping-back line came to be executed (N1). Both reads come from the ONE
-  predicate (`program_is_a_shell`), so they can never drift: it walks the
-  whole argv and resolves the launchers a shell actually arrives through
-  (`env bash`, `nix develop -c bash`, `setsid`/`timeout`/`nice`/`stdbuf`/
-  `chrt`/`ionice`/`nohup`/`exec`/`script`), its shell list is wider than the
-  four names the capture path began with, and `su`/`doas`/`sudo` answer shell
-  (no command of their own lands in one). `conduct` STAMPS `shell` at
-  registration from its own argv, so the durable half is there from the first
-  moment the record is visible — on both `upsert_session` arms, so
-  re-registering an id as `-- env bash` sets it and re-registering it as a
-  harness clears it. The LIMIT is argv-only: a wrapper script that execs a
-  shell (`-- ./rig.sh`) is not a shell to it and stays receptive. A false
-  POSITIVE is silent-safe and deliberately not narrowed: a harness reached
-  through a shell (`spawnAgent = "bash -lc <harness>"`) reads as a shell for
-  the whole run, costing it a ping-back, a PTY ring and every unapproved
-  remote inject — a dead lane, never a line typed where it would run. Skipped
-  and counted `shell-parent`. The same applies to `not-conductable`,
-  `parent-done` and `no-parent-record`; those four predicates live in ONE
-  function (`unreceptive`), which `deliver` itself calls, so nothing may
-  restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately
+  **Receptive only by a positive proof** (house rule 4). A line submitted into
+  a shell would RUN as a command, and `agent` is only a label a caller picks:
+  `--agent pi -- bash` names a registered profile over a pty running a shell,
+  which is how a ping-back line came to be executed (N1). So a target is
+  receptive only when its WRAPPED program is the harness its agent profile
+  names: `wrapped_program`, stamped at registration (`stamp_wrap`) from
+  `conduct.rs::wrapped_program_name` (the launcher walk's resolved program, by
+  basename), must equal the profile's first launch token. The refusals, in
+  order: `shell-parent` (the label is `""`/`"shell"`, or the wrap is a shell by
+  `conduct.rs::wrapped_program_is_a_shell`: the durable `shell` field OR a `Some`
+  `restore`); `unverified-wrap` (the walk names no program, or names one that is
+  not the harness); then `not-conductable`, `parent-done`. The walk resolves
+  what it models: the forwarding launchers (`env`, `exec`, `setsid`, `nohup`,
+  `stdbuf`, `chrt`, `ionice`, `nice`), `timeout`, `sudo`/`doas`, `script`, and
+  `nix develop|shell -c`. Every other launcher names itself, so `taskset -c 0
+  claude` is `unverified-wrap`, and so is `env -S claude` (no program name
+  survives the split string). Its costs are stated: a wrapper script (`-- ./rig.sh`)
+  and a harness binary whose basename differs from its profile's launch token
+  are withheld, where the old negative read let them through. `shell` and
+  `wrapped_program` are written together at registration on both `upsert_session`
+  arms, so re-registering an id flips both. Shell syntax in a child's text (the
+  question, the tag, the say, the prompt, the stop reason, the tool label) is made
+  inert on the way into a line (`pingback.rs::inert`: `$(…)` becomes its fullwidth
+  twin), and every line takes one more pass as it is written
+  (`pingback.rs::wire_line`, the only place `deliver` shapes the bytes). That pass is
+  the backstop for a field that skipped its own cleaning. It takes `!` and `"` with
+  no carve-out, so the renderer's own quote and `! ` marker reach the wire as their
+  fullwidth twins. The proof is the launcher
+  walk's BASENAME, and that is all it is: a symlink named `claude` to `bash`, or a
+  script named `claude` that execs a shell, passes it. It rejects unmodeled launchers
+  and a label that does not match the wrap; it does NOT stop a same-uid process that
+  names a shell after a harness. Inert line content is the defence for that class,
+  not the proof. The positive rule is
+  the ping-back's alone: the doorbell's PTY arm and the A2A door still read the
+  negative `wrapped_program_is_a_shell`. The walk's own limit is argv only. Those
+  four predicates (`shell-parent`, `unverified-wrap`, `not-conductable`,
+  `parent-done`) live in ONE function (`unreceptive`), which `deliver` itself
+  calls, so nothing may restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately
   not this rule: that caller is a resident session steering a shell it can see
   in its own roster, no remote text rides its line, and an agent that
   hand-relays a peer's words into it is steering with its OWN authority —
@@ -1478,6 +1508,66 @@ in the message.
   set explicitly via `OpenOptionsExt`/`PermissionsExt`, never left to
   umask. Don't reintroduce a second open/stamp call site for either arm —
   headless and interactive both go through the one function.
+- **A wrapped program with no hook and no trace says it is waiting on a human
+  through the pty bytes the wrap already relays, in `graph/prompt.rs`, and
+  nowhere else.** `conduct_multiplex` feeds the master-read side to
+  `PromptWatch::output(bytes, now)` and the stdin or inbox bytes to
+  `input(bytes)`, which classifies them (a printable key or Enter answers the
+  row; arrows, Tab, Ctrl keys and other escapes do not) and keeps none of them.
+  Its ~1s tick asks `standing(now)`: the last non-empty CR/LF line of the recent
+  output (`strip_ansi` over the last `WINDOW_BYTES`, a CHA to column 1 read as
+  a CR) has stood unchanged for `QUIET` (3s), matches ONE named row of `ROWS`,
+  and no key or Enter has answered its row. The episode identity is (text, row),
+  where a row is the count of newlines before the line; a repaint keeps both and
+  so keeps the clock. The child still running is the loop still looping. Hold
+  these when editing:
+  - **The table is closed and each row is end-anchored.** A row is a named
+    `fn(&str) -> bool` over the lowercased, flattened line and a test beside
+    the others — every row's positive and its near-misses (a sentence that
+    only mentions `[y/N]` or `password`, a `+  password:` diff line). A new
+    prompt is a new row, never a looser one; a false `awaiting` is noise a
+    parent is paged for. The `sudo` row is the only row that also raises
+    `needsSudo`; a shell's foreground-is-`sudo` check (`sudo_awaiting`) holds
+    that badge on its own.
+  - **A shell's screen is silenced only for an interactive shell at its bare
+    prompt.** `program_is_an_interactive_shell` reads the wrapped argv: no `-c`
+    string and no script operand. For such a shell `shell_snapshot` drops the
+    prompt when `fg <= 0` or `fg == shell_pid`, so its own `read -p` is not
+    heard. A shell given `-c` or a script (`bash -c "apt install x"`,
+    `sh ./run.sh`) shares its process group with the command it runs, so the
+    foreground pgid cannot tell that command's question from the prompt; its
+    questions are heard like any program's. The decision reads argv only; no
+    `/proc` probe is added.
+  - **Precedence is hook phase > trace > screen > presence.** The wrap is
+    watched only when it is a shell or its label has no `agent_profile`
+    (`watch_prompts` at the `conduct_multiplex` call). `do_session_refresh`
+    re-checks `hooks.json` under the stage lock: `hooked` is computed only for
+    non-shells, and a non-shell that gained a hook record has the `question` and
+    `needsSudo` the screen set taken back, and sets nothing (the hook door owns
+    its `state`). A shell's `state` is its own snapshot whatever records it
+    holds. The screen clears `awaiting` only as its own: a state it did not set
+    (`working` from a `session phase`) is never rewritten, and `idle` is what an
+    answered question returns to. A record that is `done` keeps no question and
+    is never set `awaiting`; the reaper's done write clears both fields.
+  - **The line is foreign text (house rule 4).** It leaves the module only as
+    the record's single `question` field: escape sequences and control
+    characters stripped, flattened, `"` softened, cut to `QUESTION_MAX`
+    keeping its END. The window of recent output is memory only, bounded at
+    `WINDOW_BYTES`, and never written; a screen that matches no row leaves
+    nothing behind. The text is held in three places, each capped and
+    sanitised: the record's `question`, the ping-back cursor's `screen`
+    entry, and the audit line of a ping that carried it. The session log
+    still tees the master-read side only.
+  - **Pure text over the pty.** No `/proc`, no `cfg(target_os)` — the shell
+    tick's foreground facts stay in `conduct_refresh_shell`, the screen is one
+    portable path for shell and non-shell alike. The non-shell wrap writes
+    through the same `do_session_refresh` (change-only, one stage lock), with
+    no shell snapshot.
+  - **The herald's summons card is not raised for it.** `permit::
+    spawn_summons` is the hook door's and types a profile's approve/deny
+    keystrokes; a program with no profile has none. The conductor, the dock
+    and the A2A `input-required` fold read `state: awaiting` and need nothing
+    more.
 - **Gate the sweep on `spawned`, never on `headless` and never on
   `parentSessionId`.** `headless` is the wrong axis: `spawn --windowed`
   execs a real terminal running the same `aoide conduct`, and a windowed
@@ -2016,9 +2106,11 @@ in the message.
   `docs/architecture/MAIL.md`'s roadmap), and update MAIL.md's doorbell
   section in the same commit that does.
 - **A ring never PTY-injects into a wrap whose WRAPPED program is a shell
-  either — `shell-parent`, the same refusal the ping-back lane makes
+  either — `shell-parent`, the shell arm the ping-back lane shares
   (`conduct.rs::wrapped_program_is_a_shell`, never the `agent` label: a
-  wrap labelled from a harness profile can be conducting `bash`).** The
+  wrap labelled from a harness profile can be conducting `bash`). Unlike the
+  ping-back, this lane has no positive proof of the harness: a wrap the walk
+  cannot name is not refused here.** The
   line is submitted, so a shell would RUN it. The channel arm is exempt by
   construction — a one-way push into the harness's own MCP subprocess types
   nothing into any pty — so a shell wrap hosting a channel-connected agent
@@ -2299,7 +2391,7 @@ in the message.
 - `doorbell.rs` changes update `docs/architecture/MAIL.md`'s "Delivery and
   the doorbell" section — that document is the design's canonical prose
   statement, this file only the invariants an editor must hold.
-- `pingback.rs` and `pingback/hook.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
+- `pingback.rs`, `pingback/hook.rs` and `pingback/prompt.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
   "Second slice" section (the ping-back's canonical prose statement), the
   `state/stage/pingback.json` shape in `CONTRACTS.md` §4, and
   `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md`'s
@@ -2314,6 +2406,10 @@ in the message.
   report is delivered" (the remote-parent paragraph), and `EIDOLON-TRACE.md`'s
   "Second slice" beside the spool half: the two lanes are one conversation,
   and a doc that describes only the sending end is half a page.
+- `prompt.rs` or the screen half of `conduct.rs`'s tick changes update
+  `docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md`'s "Programs with no
+  harness — the screen" (the table and the quiet are written there too) and
+  the `question` and `needsSudo` fields in `CONTRACTS.md` §4.
 - A change to shellbridge's replying verbs — the
   `sessionaction`/`projectaction`/`workspaceaction` whitelists and reply
   shapes, the `sessiontrace`/`ricemenu` reads — or to the fire-and-forget

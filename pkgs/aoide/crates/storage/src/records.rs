@@ -237,12 +237,23 @@ pub struct SessionRecord {
     /// (ping-back, the doorbell's PTY arm, the A2A door) must be able to tell
     /// a shell from a harness wrap without having been there at spawn time,
     /// and a line submitted into a shell runs as a command. Written by
-    /// `stamp_shell` on both registration arms, so re-registering an id as
+    /// `stamp_wrap` on both registration arms, so re-registering an id as
     /// `-- bash` sets it and re-registering it as a harness clears it.
     /// `false` is skipped, so every record written before this field existed
     /// stays byte-identical.
     #[serde(default, skip_serializing_if = "is_false")]
     pub shell: bool,
+    /// The program the conduct launcher walk resolved the wrapped argv to, by
+    /// basename (`claude` for `aoide spawn -- env claude`), stamped at the same
+    /// registration as `shell`. A launcher the walk does not model names itself
+    /// (`taskset -c 0 claude` is `taskset`). Absent when the walk names no program
+    /// at all: a login shell with no command, `script` with no command, `su`,
+    /// a `nix` form without a `-c` payload, `env -S` (its split string swallows
+    /// the program name). The ping-back delivers only to a wrap whose program is
+    /// the harness its agent names, so an absent or foreign name is never
+    /// delivered to. `skip_serializing_if` keeps every older record identical.
+    #[serde(rename = "wrappedProgram", default, skip_serializing_if = "Option::is_none")]
+    pub wrapped_program: Option<String>,
     #[serde(rename = "startedAt", default)]
     pub started_at: String,
     #[serde(
@@ -378,10 +389,11 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub context_ceiling: Option<u64>,
-    /// True while this conducted SHELL is blocked at a `sudo` password prompt
-    /// — detected by conduct's PTY tick (the foreground process is `sudo`, or
-    /// the `[sudo] password for` text was just seen crossing master→stdout)
-    /// and force-published alongside `state:"awaiting"`. Additive/v0-safe:
+    /// True while this conducted program is blocked at a `sudo` password
+    /// prompt — detected by conduct's PTY tick (a shell's foreground process
+    /// is `sudo` with no children, or the screen has gone quiet on the
+    /// `[sudo] password for` row of `graph/prompt.rs`'s table) and
+    /// force-published alongside `state:"awaiting"`. Additive/v0-safe:
     /// absent on a legacy record and cleared back to `None` (never written as
     /// `Some(false)`) the moment the prompt clears — so the key disappears
     /// rather than lingering false. Agents are hook-driven and never set this.
@@ -390,6 +402,18 @@ pub struct SessionRecord {
     /// agent's.
     #[serde(rename = "needsSudo", default, skip_serializing_if = "Option::is_none")]
     pub needs_sudo: Option<bool>,
+    /// The line a conducted program is waiting on while `state` is `awaiting`
+    /// off its SCREEN: the pty's last non-empty line, sanitised and capped at
+    /// 80 characters, set by conduct's tick when output has been quiet on a
+    /// row of the prompt table (`aoide-conduct`'s `graph/prompt.rs`) and cleared
+    /// the moment it is answered or the output moves on. It is the only screen
+    /// text kept anywhere. Written only for a wrap whose harness reports
+    /// through neither hooks nor a trace — never over a hook phase — and read
+    /// by the ping-back's third source, which quotes it to the attested
+    /// spawner. Additive/v0-safe: absent on a legacy record and on every
+    /// session that is not asking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
     /// Absolute path to the pty-master transcript of an `aoide conduct`
     /// session (`state/sessions/<sessionId>.log`, CONTRACTS.md §4) — raw bytes,
     /// append-only, unrotated. Stamped right after `do_session_start` by
@@ -1157,6 +1181,23 @@ mod tests {
         let legacy: SessionRecord =
             serde_json::from_str(r#"{ "sessionId": "s", "windowAddress": "0x1" }"#).unwrap();
         assert_eq!(legacy.needs_sudo, None);
+    }
+    #[test]
+    fn session_record_question_round_trips_and_stays_absent_when_unset() {
+        let rec = SessionRecord {
+            session_id: "s".into(),
+            question: Some("Overwrite? [y/N]".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"question\":\"Overwrite? [y/N]\""), "serialised: {json}");
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.question.as_deref(), Some("Overwrite? [y/N]"));
+
+        let bare = serde_json::to_string(&SessionRecord { session_id: "s".into(), ..Default::default() }).unwrap();
+        assert!(!bare.contains("question"), "serialised: {bare}");
+        let legacy: SessionRecord = serde_json::from_str(r#"{ "sessionId": "s" }"#).unwrap();
+        assert_eq!(legacy.question, None);
     }
     #[test]
     fn session_record_context_tokens_round_trips_and_stays_absent_when_unset() {

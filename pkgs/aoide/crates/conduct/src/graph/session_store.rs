@@ -17,8 +17,8 @@ use super::doc::{
     doomed_subagent_descendants, ledger_session_exit, prune_done, restage_graph, would_cycle,
 };
 use super::model::{
-    canonical_state, hooks_path, load_stage, sessions_path, write_stage, HooksFile,
-    SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
+    canonical_state, clear_screen_ask, hooks_path, load_stage, sessions_path, write_stage,
+    HooksFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 #[cfg(test)]
 use super::model::HookRecord;
@@ -795,18 +795,17 @@ pub(in crate::graph) fn stamp_attested_spawner(id: &str, attested: Option<&str>)
 /// id. Change-only, so a no-op write when the value already matches, and both
 /// arms of `upsert_session` are covered because this reads and writes the
 /// record that exists, whichever arm produced or refreshed it.
-pub(in crate::graph) fn stamp_shell(id: &str, is_shell: bool) {
+pub(in crate::graph) fn stamp_wrap(id: &str, is_shell: bool, program: Option<String>) {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return,
         };
-        if let Some(s) = file
-            .sessions
-            .iter_mut()
-            .find(|s| s.session_id == id && s.shell != is_shell)
-        {
+        if let Some(s) = file.sessions.iter_mut().find(|s| {
+            s.session_id == id && (s.shell != is_shell || s.wrapped_program != program)
+        }) {
             s.shell = is_shell;
+            s.wrapped_program = program.clone();
             if file.schema_version.is_empty() {
                 file.schema_version = STAGE_GRAPH_VERSION.to_string();
             }
@@ -1735,6 +1734,8 @@ fn do_session_end_inner(id: &str) -> Outcome {
                 ledger_session_exit(s, &now);
             }
             s.state = "done".to_string();
+            // The pty is gone and so is whatever it was asking.
+            clear_screen_ask(s);
             // A managed task run's end instant and its discriminated end are
             // facts the `session watch` footer and the exit-report lane both
             // read. Stamped only for a task record, and only where the child's
@@ -2902,6 +2903,43 @@ mod tests {
         let lines2 = aoide_storage::ledger::read_ledger().unwrap();
         let mine2: usize = lines2.iter().filter(|l| l.session_id == "end-ledger-1").count();
         assert_eq!(mine2, 1, "a repeat `session end` must not double-append");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+    #[test]
+    fn a_session_end_clears_the_screen_question_and_the_sudo_badge_together() {
+        // M2: a `sudo` wrap whose prompt is still on screen when it is ended
+        // must not keep the lock badge after its question is gone. Both go
+        // through one helper (`clear_screen_ask`), so neither can outlive the
+        // other.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = unique_stage("sess-end-sudo");
+        let state = stage.join("state");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        session_start(&flag_invocation(
+            &["session", "start"],
+            &[("id", "sudo-end-1"), ("agent", "claude"), ("cwd", "/w")],
+        ));
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter_mut().find(|s| s.session_id == "sudo-end-1").unwrap();
+        rec.state = "awaiting".to_string();
+        rec.question = Some("[sudo] password for khoa:".to_string());
+        rec.needs_sudo = Some(true);
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let out = session_end(&flag_invocation(&["session", "end"], &[("id", "sudo-end-1")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "sudo-end-1").unwrap();
+        assert_eq!(
+            (rec.state.as_str(), rec.question.as_deref(), rec.needs_sudo),
+            ("done", None, None),
+            "the question and its lock badge end together: {rec:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&stage);
     }

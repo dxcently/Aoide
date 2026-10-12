@@ -2148,23 +2148,40 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
-**`shell` — the one durable answer to "is this session conducting a shell".**
-A session record MAY carry a `shell` bool, `true` only for a session whose
-wrapped command IS a shell (`aoide_conduct::graph::program_is_a_shell`: the
-program's own basename against the shell list, with `env`/`nix develop -c`/
-`setsid`/`timeout`/`nice`/… resolved to what they forward to). Written by the
-conducting process at REGISTRATION (`stamp_shell`), on both `upsert_session`
-arms, so re-registering an id as `-- env bash` sets it and re-registering it
-as a harness clears it. It exists because a line submitted into a shell RUNS
-as a command: the ping-back, the doorbell's PTY arm and the A2A door's own
-injects all refuse a record for which
-`aoide_conduct::graph::wrapped_program_is_a_shell` holds — that field OR a
-`Some` `restore` — rather than trusting the `agent` label, which is a
-caller's choice (`--agent pi -- bash` names a registered profile over a
-shell). A harness reached THROUGH a shell reads as a shell; the cost is a
-skipped auto-typing, never a line typed somewhere it would run. Absent (the
-default, skipped on serialization) means `false`, byte-identical to every
-record written before the field existed.
+**`shell` and `wrappedProgram` — what a conducted wrap runs.** A session
+record MAY carry two fields, both written by the conducting process at
+REGISTRATION (`stamp_wrap`, on both `upsert_session` arms, so re-registering an
+id flips both together):
+
+- `shell` (bool), `true` only for a session whose wrapped command IS a shell
+  (`aoide_conduct::graph::program_is_a_shell`: the program's own basename
+  against the shell list, with `env`/`nix develop -c`/`setsid`/`timeout`/
+  `nice`/… resolved to what they forward to).
+- `wrappedProgram` (string), the program the same launcher walk resolves the
+  wrapped argv to, by basename (`conduct.rs::wrapped_program_name`). It is `claude` for `-- env claude`, and
+  `taskset` for `-- taskset -c 0 claude`, because a launcher the walk does not
+  model names itself. It is absent when the walk names no program: a login
+  shell, `script` with no command, `su`, a `nix` form without a `-c` payload,
+  `env -S` (whose split string swallows the program name). A login spelling's
+  leading `-` is dropped for a shell name only: `-bash` names `bash`, and
+  `-claude` names `-claude`.
+
+The ping-back is receptive only by a positive proof: the record's
+`wrappedProgram` must equal the first launch token of the profile its `agent`
+names. The proof is that basename, and it is stated as one: a symlink named
+`claude` that points at `bash`, or a script named `claude` that execs a shell,
+passes it. It rejects the launchers the walk does not model and a label that
+does not match the wrap. It does not stop a same-uid process that names a shell
+after a harness; for that class the defence is inert content, since every line
+takes one pass as it is written (`wire_line`), and every shell metacharacter in
+it is made inert, with `!` and `"` among them. A shell (`shell`, or a `restore` snapshot, `wrapped_program_is_a_shell`)
+is refused as `shell-parent`; a wrap whose program is absent or is not its
+harness is refused as `unverified-wrap`. The label alone never decides it:
+`agent` is a caller's choice, and `--agent pi -- bash` names a registered
+profile over a shell. The doorbell's PTY arm and the A2A door refuse by the
+negative `wrapped_program_is_a_shell` read only. Both fields absent (the
+default, skipped on serialization) mean `false` and no program, byte-identical
+to every record written before they existed.
 
 **Additive in v0:** a session record MAY carry an optional `parentSessionId`
 (string) naming the session that spawned it — the graph's spawned-by edge. Set
@@ -2266,6 +2283,45 @@ their own ceiling. Re-derived whenever `model` changes, so a mid-session model
 switch re-caps the meter automatically. Same lifecycle as `contextTokens`:
 absent for shells and until the session has produced an assistant turn, and a
 legacy record without it falls back to a conservative 200k client-side.
+
+**Additive in v0:** a session record MAY also carry an optional `question`
+(string) — the line a conducted program is waiting on while its `state` is
+`awaiting` off its SCREEN, for a wrap whose harness reports through neither
+hooks nor a trace (a `codex`, an `aider`, a REPL, an installer in a plain
+conducted shell). It is the pty's last non-empty CR/LF line, read off the recent
+output with escape sequences and control characters stripped, flattened to one
+line, `"` softened to `'`, and cut to 80 characters keeping its end. It exists
+while that line has stood unchanged for 3 seconds on a row of
+`conduct/src/graph/prompt.rs`'s closed table (`[y/N]`, `[Y/n]`, `(y/n)`,
+`(y,N)`, `(yes/no)`, `? (yes)`, a password or passphrase prompt, `Press Enter` /
+`Press return` / `press any key` with `continue` close after it, a trailing
+`Continue?` / `Proceed?` / `Overwrite?`, a `rm:` / `cp:` / `mv:` / `ln:` line
+ending in `?`), the child is still running, and no Enter has landed on that
+line's row and no program output has answered a typed key. A repaint of the same
+text keeps it; a changed line, a later row, Enter, output that answers a typed
+key, the child exiting or the session ending clears it: the key disappears and
+the `awaiting` it set returns to `idle`. A printable key alone does not clear
+it, so a password typed and not yet submitted is still asked. An echoed key
+holds the question until its Enter or real program output: the echo is not
+output. A single-key reader that echoes its key and then goes silent stays
+`awaiting` until its next output (a stale state, never a repeated announcement).
+A read that cuts an escape sequence or a multi-byte character holds up to 64 of
+those bytes for the next read, so a split echo does not answer; a read carrying
+an invalid UTF-8 byte is judged whole as it stands. A second question printed on
+the same row after an answered one is never announced. The `sudo` row also sets
+`needsSudo`, and that row is never announced to a spawner.
+The line is held in three places, each capped at 80 characters and sanitised:
+this field, the ping-back cursor's `screen` entry (`pingback.json`), and the
+audit line of a ping that carried it. The screen reader's own working buffer
+(the recent output it reads) is memory only. The session log
+(`state/sessions/<id>.log`) tees the same pty bytes as they pass, so the
+screen's text reaches disk there, and only there; nothing reads that file back
+into the screen. A non-shell
+session with a hook phase or a trace never carries one: the hook phase, then the
+trace, then the screen decide its `state`, and the screen only for a wrap nothing
+else speaks for. A shell's `state` is its own snapshot (foreground command, then
+screen), whatever hook records it holds; the screen is silenced only for an
+interactive shell at its bare prompt. Readers tolerate its absence and round-trip fields they do not know.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
@@ -3483,14 +3539,15 @@ anyone who can already write to the target's control socket.
 
 ### `state/stage/pingback.json` — **v0**
 
-The ping-back's per-child cursor, for its two sources. An
+The ping-back's per-child cursor, for its three sources. An
 `agent:"eidolon"` child whose trace the reaper tick has examined (P-EIDOLON
 slice E5b, `docs/architecture/EIDOLON-TRACE.md`'s "Second slice") has a
 `seen`/`silentAt` entry; a local-parented child of any other registered
-harness that reports through hooks has a `hook` entry. Either is keyed by the
-child's own native session id (the eidolon presence id, verbatim — the same id
-`sessions.json` carries); a child belongs to exactly one source, so an entry
-carries one half.
+harness that reports through hooks has a `hook` entry; a local-parented
+conducted wrap whose program has neither has a `screen` entry. Each is keyed by
+the child's own native session id (the eidolon presence id, verbatim — the
+same id `sessions.json` carries); a child belongs to exactly one source, so an
+entry carries one half.
 
 ```json
 {
@@ -3602,6 +3659,25 @@ A child whose route does not verify when its death is owed keeps its entry
 while the death is recent (under 24 hours old), so a later tick that verifies
 it still says it; past that the entry is dropped. A child that never had a
 recipient has no entry. A reader that does not know `hook` ignores it.
+
+**`screen` — additive in v0.** A screen-source child's entry is
+`{ "screen": "<question>" }`: the `question` (§ `sessions.json`) last
+announced for it. There is no baseline — the wrap publishes only once its line
+has stood for 3 seconds, so the first examination may already find a question,
+and that is news. A question that differs from the cursor's is a new episode and
+is claimed (`[<agent> <petname>] asking: "<question>"`, the question cleaned and
+quoted again as eidolon's `asking:` line is); the same question is not claimed
+again; a record that no longer holds a question while `awaiting` clears the
+key, so a later ask is claimed. The limit: a question that is answered and asked
+again with the same text between two passes is one continuous question to the
+cursor, and its return is not claimed; there is no episode counter. A question
+that carries `needsSudo` is never
+claimed: it is the human's password, and the record shows only its lock badge. The child IS the wrap, with no hook session
+under it: its own pid must carry a verifying daemon seal, and the line goes to
+its `attestedSpawner` resolved by the same climb the `hook` source uses — a
+wrap no spawner attested (a terminal the User opened) has nobody to tell and no
+entry. A question with no recipient yet keeps its cursor unclaimed and is heard
+on the pass that finds one. A reader that does not know `screen` ignores it.
 
 ### `state/stage/remote-children.json` — **v0**
 

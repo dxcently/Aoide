@@ -86,7 +86,7 @@
 //! says nothing, so a child first seen already dead while open is latched
 //! `died` and never announces its own death.
 
-use super::{clean, died_mid_turn, is_false, tracks, ChildClaim, CursorEntry, CursorFile};
+use super::{clean, died_mid_turn, harness_tag, is_false, tracks, ChildClaim, CursorEntry, CursorFile};
 use crate::graph::model::{canonical_state, HookRecord, SessionRecord};
 use aoide_protocol::agents::agent_profile;
 use aoide_storage::time::parse_iso_utc;
@@ -149,7 +149,7 @@ pub(super) struct HookChild {
     phase: String,
     at: String,
     at_secs: Option<i64>,
-        last: String,
+    last: String,
     pid_dead: bool,
     harness: Option<Harness>,
 }
@@ -207,6 +207,21 @@ fn route_of(
     sealed: &impl Fn(&SessionRecord) -> bool,
 ) -> Option<(String, String)> {
     let host = host_wrap(kid, roster, sealed)?;
+    let to = spawner_of(host, &kid.session_id, roster, sealed)?;
+    Some((host.session_id.clone(), to))
+}
+
+/// Steps 2 and 3 of [`route_of`]: the spawner of a conducted `host` wrap,
+/// over the edge `host`'s registration attested, resolved to the conducted
+/// session that can be written to. Shared with the screen source
+/// (`prompt.rs`), whose child IS the wrap and so has no hook child to climb
+/// from. Never `kid_id` itself and never `host`.
+pub(super) fn spawner_of(
+    host: &SessionRecord,
+    kid_id: &str,
+    roster: &[SessionRecord],
+    sealed: &impl Fn(&SessionRecord) -> bool,
+) -> Option<String> {
     let spawner_id = host.parent_session_id.as_deref()?;
     if host.attested_spawner.as_deref() != Some(spawner_id) {
         return None;
@@ -217,8 +232,8 @@ fn route_of(
     } else {
         host_wrap(spawner, roster, sealed)?
     };
-    (target.session_id != kid.session_id && target.session_id != host.session_id)
-        .then(|| (host.session_id.clone(), target.session_id.clone()))
+    (target.session_id != kid_id && target.session_id != host.session_id)
+        .then(|| target.session_id.clone())
 }
 
 /// The process a hook child's liveness is read off: the harness its hook door
@@ -288,10 +303,9 @@ fn gather(roster: &[SessionRecord], hooks: &[HookRecord], sealed: &impl Fn(&Sess
         .filter_map(|rec| {
             let hook = hooks.iter().find(|h| h.session_id == rec.session_id)?;
             let (host, to) = route_of(rec, roster, sealed)?;
-            let name = rec.petname.as_deref().filter(|p| !p.trim().is_empty()).unwrap_or(&rec.session_id);
             Some(HookChild {
                 id: rec.session_id.clone(),
-                tag: clean(&format!("[{} {}]", rec.agent, clean(name))),
+                tag: harness_tag(&rec.agent, rec.petname.as_deref(), &rec.session_id),
                 host,
                 to,
                 phase: canonical_state(&hook.phase).to_string(),
