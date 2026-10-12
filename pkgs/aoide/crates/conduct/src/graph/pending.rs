@@ -43,8 +43,8 @@ use super::common::{require_args, stage_error};
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
 };
-use super::send::pending_path;
-use aoide_protocol::output::{Outcome, Status};
+use super::send::{door_can_approve, pending_path, DOOR_CANNOT_APPROVE};
+use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::Invocation;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -303,6 +303,18 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         Ok(i) => i,
         Err(o) => return o,
     };
+    // Refused before the entry leaves the queue: a caller on a door that
+    // cannot approve gets a taught refusal and the held send stays held.
+    if !door_can_approve(inv.door) {
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            "this door cannot approve a gated send",
+            DOOR_CANNOT_APPROVE,
+            Fix::Run(format!("aoide session pending approve {index}")),
+        )
+        .with_fields(json!({ "reason": "door-cannot-approve", "id": index.to_string() }));
+    }
     let removed = match take_pending_entry(index) {
         Ok(v) => v,
         Err(e) => {
@@ -808,6 +820,69 @@ mod tests {
             "no prefix at all — the approver's own session id must never leak in"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Path 4 of the audit: `session pending approve` on a remote door. The
+    /// refusal comes before the entry leaves the queue, so the held send is
+    /// still there afterwards and reaches nothing; the same entry approves from
+    /// the local CLI, which proves the entry itself was sound.
+    #[test]
+    fn pending_approve_from_a_remote_door_is_refused_and_the_entry_stays_held() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pnd-remote");
+
+        let id = "apr1";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello world","submit":true,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        for door in [aoide_protocol::Door::Mcp, aoide_protocol::Door::A2a] {
+            let mut inv = pending_invocation(&["session", "pending", "approve"], &["0"]);
+            inv.door = door;
+            let out = pending_approve(&inv);
+            assert_eq!(out.status, Status::Error, "{door:?}: {}", out.message);
+            assert_eq!(out.message, "this door cannot approve a gated send", "{door:?}");
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+            assert_eq!(load_pending_array().unwrap().len(), 1, "{door:?}: the entry stays held");
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "{door:?}: a refused approval delivers nothing"
+            );
+        }
+
+        listener.set_nonblocking(false).unwrap();
+        let acc = expect_delivery(listener, "the local CLI still approves the same entry");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["injected"], true);
         let _ = std::fs::remove_dir_all(&root);
     }
 

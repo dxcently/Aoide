@@ -249,6 +249,29 @@ fn sibling_autogate_enabled() -> bool {
     }
 }
 
+/// The taught line a send from a door that cannot approve carries back to its
+/// caller, and the one `session pending approve` refuses with. One string, so
+/// the send outcome, the approve refusal and the A2A audit cannot drift.
+pub const DOOR_CANNOT_APPROVE: &str =
+    "this door cannot approve a gated send; approval comes from a terminal or the conductor";
+
+/// Which doors may approve a gated send (the door half of the send gate).
+///
+/// `Cli` (a person or a local agent at a terminal) and `Daemon` (aoided's own
+/// dispatch, which the conductor and herald reach through their local
+/// sockets) keep every approval route: `--yes`, the box-wide autogate
+/// environment, the parent/sibling rules, `session pending approve`.
+/// `Mcp` (stdio, and lyra's) and `A2a` (the network door) cannot: a send
+/// through them parks as pending whatever it asks for, so a caller on those
+/// doors can queue a send but never approve one. Exhaustive on purpose, so a
+/// new door has to be decided here rather than inherit an answer.
+pub fn door_can_approve(door: Door) -> bool {
+    match door {
+        Door::Cli | Door::Daemon => true,
+        Door::Mcp | Door::A2a => false,
+    }
+}
+
 /// Resolve the gate: `--yes`, then the global autogate switch, then the
 /// parent-of-target rule, then the sibling rule, else pending.
 fn send_gate(yes: bool, sender_is_parent: bool, is_sibling: bool) -> SendGate {
@@ -411,6 +434,15 @@ fn record_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Res
         });
         write_stage(&pending_path(), &file)
     })
+}
+
+/// Park a send in `pending.json` without touching any socket: the one seam a
+/// door that cannot approve uses to hold text it was asked to inject, such as
+/// the A2A spawn's opening turn (`aoide-server`'s `opening_turn_worker`). Same
+/// queue, same `record_pending` shape, so `session pending approve` treats it
+/// exactly like any other held send.
+pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), String> {
+    record_pending(id, text, submit, from)
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -877,7 +909,10 @@ fn deliver_local_with(
     // peercred-derived ancestry roots back to the target's OWN session,
     // unconditionally, un-bypassably — stronger than the old guard, which
     // only ever covered well-behaved callers of `aoide send`).
-    let (is_parent, is_sibling) = if yes || autogate_env() {
+    // A door that cannot approve (`door_can_approve`) never reaches the gate's
+    // inputs at all: its send parks below, so identity is not resolved for it.
+    let may_approve = door_can_approve(inv.door);
+    let (is_parent, is_sibling) = if !may_approve || yes || autogate_env() {
         (false, false) // never examined — send_gate's own precedence short-circuits first.
     } else {
         let sender = resolve_sender_id(&file.sessions);
@@ -896,7 +931,11 @@ fn deliver_local_with(
             siblings_share_live_parent(sender_parent.as_deref(), target_parent.as_deref(), parent_live);
         (is_parent, is_sibling)
     };
-    let gate = send_gate(yes, is_parent, is_sibling);
+    let gate = if may_approve {
+        send_gate(yes, is_parent, is_sibling)
+    } else {
+        SendGate::Pending
+    };
     // The provenance attribution — `--from` or `AOIDE_SESSION_ID` (see
     // [`resolve_sender`]) — is resolved once here, from the ORIGINAL
     // invocation, and reused for both the pending record and (below) the
@@ -907,18 +946,24 @@ fn deliver_local_with(
         if let Err(e) = record_pending(&id, &text, submit, attributed_sender.as_deref()) {
             return stage_error(cmd, e);
         }
-        let out = Outcome::ok(
-            cmd,
-            format!("send to `{id}` held pending approval (no --yes / autogate)"),
-        )
-        .changed(vec![format!("pending send queued for {id}")])
-        .with_data(json!({
-            "id": id,
-            "state": "pending",
-            "delivered": false,
-            "submit": submit,
-            "gate": gate.label(),
-        }));
+        // `yes` asked for approval this door is not allowed to give: the send
+        // still parks, and the caller is told why, in the taught line.
+        let refused = yes && !may_approve;
+        let message = if refused {
+            format!("send to `{id}` held pending approval — {DOOR_CANNOT_APPROVE}")
+        } else {
+            format!("send to `{id}` held pending approval (no --yes / autogate)")
+        };
+        let out = Outcome::ok(cmd, message)
+            .changed(vec![format!("pending send queued for {id}")])
+            .with_data(json!({
+                "id": id,
+                "state": "pending",
+                "delivered": false,
+                "submit": submit,
+                "gate": gate.label(),
+                "approvalRefused": refused,
+            }));
         audit_send(inv, "pending", &out.message, &text);
         return out;
     }
@@ -3829,6 +3874,170 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    // ── Approval doors: which door may approve a gated send ─────────────────
+
+    fn send_on(door: Door, args: &[&str], flags: &[(&str, &str)]) -> Invocation {
+        Invocation {
+            door,
+            ..send_invocation(args, flags)
+        }
+    }
+
+    /// Stage a conductable target whose socket is a stand-in listener, so a
+    /// test can prove by `accept` whether anything reached it. The caller
+    /// owns the env (`EnvVars::save` + the stage it points at).
+    fn door_fixture(tag: &str, parent: Option<&str>) -> (std::path::PathBuf, String, UnixListener) {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let id = format!("{tag}-target");
+        let socket = conduct_socket_path(&id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        do_session_start(
+            &id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            parent,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        (root, id, listener)
+    }
+
+    fn nothing_connected(listener: &UnixListener) -> bool {
+        matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock)
+    }
+
+    const DOOR_ENV: &[&str] = &[
+        "AOIDE_STAGE_DIR",
+        "XDG_RUNTIME_DIR",
+        "AOIDE_AUDIT_LOG",
+        "AOIDE_CONDUCT_AUTOGATE",
+        "AOIDE_SESSION_ID",
+        "AOIDE_CONDUCT_SIBLING_AUTOGATE",
+    ];
+
+    #[test]
+    fn door_can_approve_is_the_local_doors_only() {
+        assert!(door_can_approve(Door::Cli));
+        assert!(door_can_approve(Door::Daemon));
+        assert!(!door_can_approve(Door::Mcp));
+        assert!(!door_can_approve(Door::A2a));
+    }
+
+    /// Path 1 of the audit: `--yes` on a send from an MCP or A2A door. The
+    /// send still parks, reaches nothing, and carries the taught line.
+    #[test]
+    fn a_yes_send_from_a_remote_door_parks_and_never_reaches_the_socket() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        for (door, tag) in [(Door::Mcp, "door-yes-mcp"), (Door::A2a, "door-yes-a2a")] {
+            let (root, id, listener) = door_fixture(tag, None);
+            let out = session_send(&send_on(
+                door,
+                &["do", "a", "thing"],
+                &[("id", &id), ("submit", "true"), ("yes", "true")],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{door:?}: {}", out.message);
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["state"], "pending", "{door:?}");
+            assert_eq!(data["gate"], "pending", "{door:?}");
+            assert_eq!(data["approvalRefused"], true, "{door:?}");
+            assert!(out.message.contains(DOOR_CANNOT_APPROVE), "{door:?}: {}", out.message);
+            assert!(nothing_connected(&listener), "{door:?}: a refused approval delivers nothing");
+            let pf: PendingFile = load_stage(&pending_path()).unwrap();
+            assert!(pf.pending.iter().any(|p| p.session_id == id && p.text == "do a thing"), "{door:?}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    /// Path 2 of the audit: the box-wide autogate environment. It is read from
+    /// the dispatching process's own env (`autogate_env`), and it must not
+    /// approve a remote door's send. Controls: the same env still delivers
+    /// from the local CLI, so the door is what changed, not the env rule.
+    #[test]
+    fn the_autogate_env_never_approves_a_send_from_a_remote_door() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        for (door, tag) in [(Door::Mcp, "env-mcp"), (Door::A2a, "env-a2a")] {
+            let (root, id, listener) = door_fixture(tag, None);
+            std::env::set_var("AOIDE_CONDUCT_AUTOGATE", "1"); // after the fixture, which clears it.
+            let out = session_send(&send_on(door, &["hi"], &[("id", &id), ("submit", "true")]));
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["state"], "pending", "{door:?}: {}", out.message);
+            assert_eq!(data["approvalRefused"], false, "{door:?}: nothing was asked for");
+            assert!(nothing_connected(&listener), "{door:?}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        let (root, id, listener) = door_fixture("env-control-cli", None);
+        std::env::set_var("AOIDE_CONDUCT_AUTOGATE", "1");
+        let acc = expect_delivery(listener, "the autogate env still delivers from the local CLI");
+        let out = session_send(&send_invocation(&["hi"], &[("id", &id), ("submit", "true")]));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Path 3 of the audit: the parent rule. It decides from the sender's
+    /// identity, which the caller resolves; a remote door must not reach it.
+    /// `deliver_local_with` takes the resolver as a parameter so the test can
+    /// name the parent without a live daemon. The Cli arm is the control.
+    #[test]
+    fn a_parent_targeted_send_delivers_locally_and_parks_from_mcp() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("parent-mcp", Some("the-parent"));
+        let out = deliver_local_with(
+            &send_on(Door::Mcp, &["hi"], &[("id", &id), ("submit", "true")]),
+            &id,
+            |_| Some("the-parent".to_string()),
+        );
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending");
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending");
+        assert!(nothing_connected(&listener));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let (root, id, listener) = door_fixture("parent-cli", Some("the-parent"));
+        let acc = expect_delivery(listener, "the parent rule still delivers from the local CLI");
+        let out = deliver_local_with(
+            &send_on(Door::Cli, &["hi"], &[("id", &id), ("submit", "true")]),
+            &id,
+            |_| Some("the-parent".to_string()),
+        );
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-parent");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The local CLI's `send --yes` still approves and delivers (the local
+    /// case is unchanged by this lane). The Daemon arm is the other local
+    /// door, which the conductor and herald reach through aoided.
+    #[test]
+    fn the_local_cli_send_yes_still_approves_and_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        for (door, tag) in [(Door::Cli, "local-yes-cli"), (Door::Daemon, "local-yes-daemon")] {
+            let (root, id, listener) = door_fixture(tag, None);
+            let acc = expect_delivery(listener, "a local `--yes` send reaches the target's socket");
+            let out = session_send(&send_on(door, &["go"], &[("id", &id), ("submit", "true"), ("yes", "true")]));
+            let got = acc.join().unwrap();
+            assert_eq!(out.data.as_ref().unwrap()["gate"], "yes", "{door:?}: {}", out.message);
+            assert_eq!(String::from_utf8(got).unwrap(), "go\r", "{door:?}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
     // ── LANE IDENTITY P-ID2: the kernel-attested gate ───────────────────────
 
     /// Seal an ALREADY-REGISTERED session record (`do_session_start`'s own

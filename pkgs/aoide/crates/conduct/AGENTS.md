@@ -99,6 +99,20 @@ in the message.
 
 ## Invariants
 
+- **Only an approving door may approve a gated send.** `door_can_approve`
+  (`graph/send.rs`) is the one predicate: `Cli` and `Daemon` approve, `Mcp`
+  and `A2a` never do. `--yes`, the global autogate environment, and the
+  parent/sibling rules are read only past that check, so a send from a
+  remote door parks whatever it asks for, and `pending_approve` refuses
+  before it takes an entry off the queue. The predicate is exhaustive over
+  `Door`, so a new door must be decided there. The door is the invocation's
+  own `Door`, set where the request arrived: a caller's claim about itself is
+  never read. A routed command (`daemon_dispatch`) reaches aoided as
+  `Door::Daemon`, so a routed command must never be the approving path.
+  `pkgs/aoide/crates/conduct/src/graph/send.rs`'s door tests pin each path.
+
+## Invariants
+
 - **The hook door never moves a live record's pid and never trusts a payload
   pid it cannot vouch for.** `vouched_payload_pid` keeps a payload `pid` only
   if it is the hook process or one of its `/proc` ancestors (`hook_pid` is the

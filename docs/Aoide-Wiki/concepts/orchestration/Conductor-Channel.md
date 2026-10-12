@@ -218,12 +218,26 @@ through.
   position; malformed entries surface as `state: malformed` rather than
   failing the whole read), `approve <id>` re-drives the entry through this
   exact `send` door (`--yes`, in-process) and removes it, `deny <id>`
-  removes it without injecting. This is CLI-only today — the conductor
+  removes it without injecting. Approval is a local act: see the approval
+  doors below. This is CLI-only today — the conductor
   TUI's own one-key approve/deny (below) is still Phase ③.
+- **Approval doors.** Only a door that can approve may deliver a gated
+  send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
+  the herald, and any same-uid client of the aoided socket) can. The MCP
+  door (`aoide mcp serve --stdio`, and lyra's) and the A2A door
+  (`aoide a2a serve`, loopback included) cannot: a send through them parks
+  as pending whatever it asks for, `--yes` included, and
+  `session pending approve` is refused there with a taught line. The
+  decision is one predicate, `door_can_approve`, read from the door the
+  invocation arrived through; a caller's own claim about itself is never
+  consulted. The full table is in CONTRACTS.md (the pending-queue section).
+  A local agent with a shell can still approve through the CLI until the
+  local design lands.
 - **Autogate policy.** Four rules ship today, all still audited, in
   priority order: `--yes` ▸ the global switch ▸ parent-of-target ▸
-  sibling-of-target ▸ else pending. The fourth is the daemon's own line,
-  never a prompted send: child-of-target.
+  sibling-of-target ▸ else pending. They decide only for a send from an
+  approving door. The fourth is the daemon's own line, never a prompted
+  send: child-of-target.
   - **Parent-of-target.** A send delivers without a prompt when the
     sender's own session is the target session's `parentSessionId` — an
     orchestrator freely commanding a child it spawned. Cross-tree or

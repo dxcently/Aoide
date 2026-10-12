@@ -35,6 +35,12 @@ The MCP layer is deliberately optional and agent-added:
 | Per-session | agents spawn `aoide mcp serve --stdio` |
 | Network MCP | user-only; never agent-enabled |
 
+An MCP caller can queue a gated send but never approve one. A send through
+the MCP door parks as pending whatever it asks for, `--yes` included, and
+`session pending approve` is refused there. Approval comes from a terminal
+(the CLI) or the conductor. The A2A door works the same way. See
+[[Conductor-Channel|the gate]] for the doors and the rule.
+
 ## A2A: the interop door
 
 The [[A2A-Door|A2A door]] (Agent2Agent, a Linux Foundation protocol) is the

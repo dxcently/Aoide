@@ -951,6 +951,12 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
                     });
                     if inner.status != Status::Ok {
                         format!("failed: {}", inner.message)
+                    } else if inner.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str)
+                        == Some("pending")
+                    {
+                        // This door could not approve the opening turn: it is
+                        // queued for a human, not typed.
+                        "held-pending".to_string()
                     } else if ready == Ready::Verified {
                         "delivered".to_string()
                     } else {
@@ -979,6 +985,9 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     }
     if prompt_result == "not-ready" {
         changed.push(format!("session {id}: prompt not injected — {agent} was not ready"));
+    }
+    if prompt_result == "held-pending" {
+        changed.push(format!("session {id}: prompt held pending approval"));
     }
     if undying {
         changed.push(format!("session {id}: undying"));

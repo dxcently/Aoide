@@ -532,8 +532,14 @@ fn resurrect_one(
                         .expect("checked just above");
                     let submit = inv.flags.contains_key("submit");
                     let inner = session_send(&inv);
+                    let held = inner.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str)
+                        == Some("pending");
                     if inner.status != Status::Ok {
                         format!("failed: {}", inner.message)
+                    } else if held {
+                        // The door could not approve the restore, so it is
+                        // queued for a human, not typed: say so, never "restored".
+                        "held-pending".to_string()
                     } else {
                         // The branch that fired, and whether the readiness was
                         // a fact or a settled guess: a terminal candidate whose
@@ -568,6 +574,9 @@ fn resurrect_one(
             "session {new_id}: restore not injected — `{}` was not ready",
             c.entry.agent
         ));
+    }
+    if restore_result == "held-pending" {
+        changed.push(format!("session {new_id}: restore held pending approval"));
     }
     resurrected.push(json!({
         "sessionId": new_id,

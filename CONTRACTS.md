@@ -3514,6 +3514,45 @@ parsed as markup or as a command.
 }
 ```
 
+#### Approval doors — who may approve a gated send
+
+`door_can_approve` (`pkgs/aoide/crates/conduct/src/graph/send.rs`) is the one
+predicate. It is exhaustive over `aoide_protocol::Door`, so a new door has to
+be decided there. The taught line a refused approval carries is
+`DOOR_CANNOT_APPROVE`.
+
+```
+door            reached by                              approves?   a send through it
+--------------  --------------------------------------  ----------  ----------------------------------
+Cli             `aoide` at a terminal, a local agent    yes         --yes, global switch, parent and
+                with a shell                                        sibling rules, pending approve
+Daemon          aoided's own dispatch: the conductor,   yes         the same routes as Cli
+                the herald (shellbridge verdict), and
+                any same-uid client of the aoided socket
+Mcp             `aoide mcp serve --stdio`, and          no          queued only; `session pending
+                `lyra mcp serve --stdio`                            approve` is refused
+A2a             `aoide a2a serve`, loopback included    no          queued only; an inbound inject, or
+                                                                    a spawn's opening turn, parks
+                                                                    whatever its origin, token,
+                                                                    signature or autogate rail
+```
+
+- A send from a door that cannot approve parks, records its pending entry
+  and attributes it as usual, touches no socket, and returns the taught
+  line. `approvalRefused: true` marks a parked send that asked for `--yes`.
+- A spawn's `--prompt`, a `session permit` verdict and a resurrect's restore
+  go through the same door, so over MCP they park too and report
+  `held-pending`, never as typed.
+- The MCP door has no generic passthrough. Every command is its own tool,
+  and `spawn` and `conduct` take one `command` argument, which is one argv
+  element, so an MCP caller cannot express `aoide send --yes` as a child
+  process.
+- The mail listener (`aoide mail serve`) serves mail deposit, poll and
+  binding only. It reaches no send.
+- A local agent with a shell still approves through `aoide send --yes` and
+  `session pending approve`. The local case is unchanged, and its own design
+  comes later.
+
 ### `state/stage/pending.json` — **v0**
 
 The held-injection queue: entries `aoide send` writes when its gate
@@ -3525,12 +3564,14 @@ delivering rules are `--yes`, the global switch, parent-of-target,
 sibling-of-target, and the reciprocal child-of-target — the last is the
 daemon's OWN one-line report about a parent's eidolon child, never a send: it
 never reaches this file at all, so a child's progress is never held pending
-while a stranger's send still is. Read and
+while a stranger's send still is. Those rules decide only for a send that
+arrives through a door that can approve (the table below); on any other door
+a send parks whatever it asks for. Read and
 resolved by `aoide session pending list/approve/deny`: `list` enumerates every
 entry (a malformed one — a stale hand-edited line — surfaces as
 `"state": "malformed"` rather than failing the read); `approve` re-drives the
-entry through the SAME gated injection door with `--yes`, in-process; `deny`
-drops it. Either resolution REMOVES the entry from this file — the record of
+entry through the SAME gated injection door with `--yes`, in-process, and only
+on a door that can approve (the table below); `deny` drops it from any door. Either resolution REMOVES the entry from this file — the record of
 what happened is the audit log (`session.pending.approve` / `.deny`), not a
 persisted "resolved" archive. An entry carries no id of its own; `list`'s
 `id` is its array position, which shifts on the next resolve. The optional
