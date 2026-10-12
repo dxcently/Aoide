@@ -1287,11 +1287,11 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   find a session whose seal `verify_seal_over` confirms against the
   daemon's LIVE public key (`aoide_client::daemon::daemon_seal_pubkey_hex`
   — a fresh `ping` round trip, never cached, never a file; that channel is
-  only as trustworthy as the daemon socket's same-uid exclusivity, which
-  `bind_socket`'s unlink-then-bind with no flock/pidfile does NOT actually
-  provide against a same-uid attacker — P-ID3's job to floor, stated
-  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred`
-  reads `SO_PEERCRED` off an accepted `UnixStream` (a local
+  only as trustworthy as the daemon socket's same-uid exclusivity, and the
+  start lock (`AOIDED.md` "Socket") only refuses a second `aoided`: it does
+  NOT stop a same-uid attacker that kills the holder — P-ID3's job to
+  floor, stated honestly in `CONTRACTS.md` rather than oversold here);
+  `peer_cred` reads `SO_PEERCRED` off an accepted `UnixStream` (a local
   reimplementation of `aoide_secrets::peercred`'s own shape — no new
   cross-crate edge for one struct+fn). **That mechanism is Linux/Android
   only, and deliberately NOT ported**: any other host gets the same

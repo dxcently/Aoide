@@ -116,6 +116,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   allowlist a review-blocking violation; a new per-command policy need is
   proved by a failing test against the EXISTING handler's `inv.door`
   branch, never by a new table in this crate.
+- **`daemon::run_loop` takes `acquire_daemon_lock` before it touches the
+  socket path, and a held lock is a refusal, never a takeover.** The lock is
+  a non-blocking `flock` on `<socket>.lock` (`aoide_storage::fs::
+  try_lock_exclusive`), and its `File` lives for the whole `run_loop` (`let
+  _daemon_lock`, never `_`: dropping it early re-opens the hole). Every
+  production path that binds the daemon socket takes this lock first;
+  `bind_socket`'s unconditional stale-socket unlink is safe only behind it.
+  `serve_daemon` takes no lock because only tests call it. Put any new
+  startup work that prepares the socket's directory after the lock. The
+  remaining hole (a same-uid process kills the holder, then binds) is named
+  once, in `docs/architecture/AOIDED.md` "Socket"; do not restate it here.
 - **`daemon::accept_loop` refuses a CROSS-uid connection before it ever
   reaches `handle_conn` (LANE IDENTITY P-ID3, G8).** `cross_uid_gate` is a
   pure decision fn (`Option<PeerCred>` in, `Option<String>` refusal reason

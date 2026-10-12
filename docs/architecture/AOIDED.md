@@ -175,10 +175,10 @@ hand edit.
 ### The loop and the unit
 
 `aoide_server::daemon` grows `serve(config) -> io::Result<!>`-shaped
-`run_loop`: bind the socket (next section), spawn the accept thread, then
-tick (~1s): poll the secrets Follower, run the hand-edit sweep, run the
-periodic jobs L4 adds. Thread model mirrors the secrets broker
-(`broker.rs:315`): thread-per-connection via fallible
+`run_loop`: take the start lock and bind the socket (next section), spawn
+the accept thread, then tick (~1s): poll the secrets Follower, run the
+hand-edit sweep, run the periodic jobs L4 adds. Thread model mirrors the
+secrets broker (`broker.rs:315`): thread-per-connection via fallible
 `thread::Builder::spawn` (drop one connection, never unwind the accept
 loop), 250ms backoff on accept error. The `aoided` binary
 (`cli/src/bin/aoided.rs`) calls it with the assembled registry and dispatch
@@ -208,10 +208,23 @@ needs the daemon socket.
 ### Socket
 
 `$AOIDE_DAEMON_SOCKET` override, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`.
-Bind mirrors `secrets::broker::bind_socket` (`broker.rs:275`): create
-parent, remove stale socket, bind, chmod `0600` (user-private — unlike the
-secrets socket there is no cross-uid audience; `$XDG_RUNTIME_DIR` is 0700
-anyway, the chmod is belt-and-braces).
+Ownership is a lock taken before the socket is touched: an exclusive,
+non-blocking `flock` on `<socket>.lock` (the socket's path with `.lock`
+appended, so two roots never share one), held by the daemon for its whole
+life. A second `aoided` finds the lock held and refuses to start. Its
+message names the lock file, the socket and, where readable, the holder's
+pid. It never unlinks or rebinds a socket it does not hold the lock for.
+The kernel drops the lock on exit, crash included, so a dead daemon's lock
+never blocks a restart. Once the lock is held, bind mirrors
+`secrets::broker::bind_socket` (`broker.rs:275`): create parent, remove the
+leftover socket, bind, chmod `0600` (user-private — unlike the secrets
+socket there is no cross-uid audience; `$XDG_RUNTIME_DIR` is 0700 anyway,
+the chmod is belt-and-braces).
+
+**The remaining hole.** The lock stops a second `aoided` from replacing a
+live one. It does not stop a same-uid process that kills the lock holder
+first, then takes the lock and binds its own listener. The real fix
+(`aoided` under its own user) is not planned.
 
 ### Framing
 
@@ -234,14 +247,12 @@ reply line. One `write_json_line`-shaped formatter, one
   paragraph) is this process's current seal-signing public key — never
   secret, but a same-uid-writable FILE next to the seal it vouches for
   would be cryptographically void, so it is fetched fresh from a live
-  round trip instead. That round trip is NOT attacker-proof under OQ1-A:
-  `bind_socket` unlink-then-binds with no flock/pidfile, so a same-uid
-  attacker can already race or evict the real listener and answer with a
-  forged key — LANE IDENTITY P-ID3 added a CROSS-uid peercred floor to
-  this socket's accept, which does not close this (a same-uid attacker
-  racing the bind is the same uid the floor admits); a `flock`/pidfile
-  guard on `bind_socket` would be the actual fix, not attempted there. It
-  buys no more than the raw per-session socket already leaves open.
+  round trip instead. That round trip is NOT attacker-proof under OQ1-A: a
+  same-uid attacker that kills the lock holder (the remaining hole, under
+  "Socket") can answer with a forged key. LANE IDENTITY P-ID3 added a
+  CROSS-uid peercred floor to this socket's accept, which does not close
+  this (a same-uid attacker is the same uid the floor admits). It buys no
+  more than the raw per-session socket already leaves open.
 - `subscribe` → the connection becomes a stream: each matching bus event is
   written as an interim line as it happens; the final reply only comes on
   shutdown. Classes are explicit — an empty/absent `classes` delivers

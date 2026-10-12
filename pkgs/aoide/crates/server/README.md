@@ -10,7 +10,9 @@ the inbound half of the two-door contract (the outbound half is
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`
-  execs: bind the control socket
+  execs: take the start lock `<socket>.lock` (`daemon::acquire_daemon_lock`,
+  a non-blocking `flock` held for the process's life: a held lock refuses
+  the start before the socket is touched), then bind the control socket
   (`$AOIDE_DAEMON_SOCKET`, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`,
   `daemon::socket_path`), spawn a thread-per-connection accept loop
   (fallible `Builder::spawn`, accept-error backoff — the secrets broker's

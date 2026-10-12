@@ -34,6 +34,14 @@
 //! is no cross-uid audience, `$XDG_RUNTIME_DIR` is `0700` anyway, the chmod
 //! is belt-and-braces.
 //!
+//! **Ownership is a lock, taken before the socket path is touched.**
+//! [`run_loop`] takes an exclusive, non-blocking `flock` on `<socket>.lock`
+//! ([`acquire_daemon_lock`]) and holds it for the process's life. A held lock
+//! refuses the start, and the socket is never unlinked or rebound by a process
+//! that does not hold it. The kernel drops the lock on exit, crash included.
+//! This is partial by design: a same-uid process can still kill the holder
+//! first, and the real fix (`aoided` under its own user) is not planned.
+//!
 //! ## Framing (P-D2, `dispatch` landed P-D4)
 //!
 //! Newline-delimited JSON, the secrets wire contract verbatim (`AGENTS.md`'s
@@ -713,11 +721,52 @@ fn runtime_dir() -> PathBuf {
     aoide_storage::runtime_dir::socket_dir()
 }
 
-/// Bind `socket_path`: create its parent dir if absent, remove a stale
-/// socket file first (single-owner path per host, the same precedent
-/// `aoide_secrets::broker::bind_socket`/`aoide_conduct::shellbridge::run`
-/// already set), bind, then chmod to `0600` (module doc's "The socket" —
-/// user-private, unlike the secrets socket).
+/// The lock file that proves a live `aoided` owns `socket_path`: the socket's
+/// own path with `.lock` appended, so two roots never share one.
+fn daemon_lock_path(socket_path: &Path) -> PathBuf {
+    let mut name = socket_path.as_os_str().to_owned();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+/// Take the exclusive, non-blocking lock that makes this process the one
+/// `aoided` for `socket_path` (module doc's "Ownership is a lock"). The caller
+/// keeps the returned `File` alive for the process's life; dropping it releases
+/// the lock. A held lock is a refusal, never a takeover, and the refusal names
+/// the lock file and the socket. The holder's pid is named too, when it can be
+/// read: a second handle cannot read the file on native Windows (`LockFileEx`
+/// locks the whole range), so there the message omits it.
+fn acquire_daemon_lock(socket_path: &Path) -> std::io::Result<std::fs::File> {
+    let lock = daemon_lock_path(socket_path);
+    if let Some(parent) = lock.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(&lock)?;
+    if !aoide_storage::fs::try_lock_exclusive(&file)? {
+        let pid = std::fs::read_to_string(&lock).map(|s| s.trim().to_string()).unwrap_or_default();
+        let holder = if pid.is_empty() { String::new() } else { format!(" (pid {pid})") };
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!(
+                "aoided is already running{holder}: lock {} is held, so that daemon owns the socket {}. \
+                 This start refused and left the socket alone. Stop the running daemon first, or give \
+                 this one its own socket with AOIDE_DAEMON_SOCKET.",
+                lock.display(),
+                socket_path.display()
+            ),
+        ));
+    }
+    file.set_len(0)?;
+    let _ = writeln!(file, "{}", std::process::id());
+    Ok(file)
+}
+
+/// Bind `socket_path`: create its parent dir if absent, remove a socket file
+/// left behind, bind, then chmod to `0600` (module doc's "The socket" —
+/// user-private, unlike the secrets socket). The unconditional remove is safe
+/// only because [`run_loop`] calls this AFTER [`acquire_daemon_lock`]: the lock
+/// proves no live daemon owns the path. [`serve_daemon`], the tick-less entry
+/// the tests drive, takes no lock, so it is never the production start.
 fn bind_socket(socket_path: &Path) -> std::io::Result<UnixListener> {
     if let Some(parent) = socket_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -1276,6 +1325,8 @@ fn stream_subscribe(events_path: &Path, req: &Value, reader: &mut BufReader<Unix
 /// surfacing only inside a spawned thread's silent `eprintln!`. Only
 /// returns on that bind failure or a failure to spawn the accept thread —
 /// a running daemon never returns `Ok` (module doc's "no producers yet").
+/// The start lock is taken before the socket is touched: a held lock returns
+/// its refusal from here, and the socket is left alone.
 pub fn run_loop(
     socket_path: PathBuf,
     events_path: PathBuf,
@@ -1283,6 +1334,7 @@ pub fn run_loop(
     registry: &'static Registry,
     dispatch: DispatchFn,
 ) -> std::io::Result<()> {
+    let _daemon_lock = acquire_daemon_lock(&socket_path)?;
     let listener = bind_socket(&socket_path)?;
 
     let _ = audit(&log_path, Door::Daemon, EventClass::Audit, "daemon", "started", "aoided resident loop online");
@@ -1933,6 +1985,89 @@ mod tests {
         }
 
         std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_file(&events_path).ok();
+        std::fs::remove_file(&log_path).ok();
+    }
+
+    /// A second `run_loop` against a socket a live daemon holds is refused
+    /// before it touches anything: the refusal returns on the caller's thread,
+    /// the socket keeps its inode (a rebind would unlink and replace it), and
+    /// the message names the lock file and the socket.
+    #[test]
+    fn run_loop_refuses_a_second_start_and_leaves_the_socket_untouched() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let socket_path = short_tmp("refuse").with_extension("sock");
+        let events_path = short_tmp("refuse-events").with_extension("jsonl");
+        let log_path = short_tmp("refuse-log");
+        let holder = acquire_daemon_lock(&socket_path).unwrap();
+        let live = bind_socket(&socket_path).unwrap();
+        #[cfg(unix)]
+        let inode_before = {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(&socket_path).unwrap().ino()
+        };
+
+        let (sp, ep, lp) = (socket_path.clone(), events_path.clone(), log_path.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(run_loop(sp, ep, lp, test_registry(), noop_dispatch));
+        });
+        let refusal = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a refused start must return, not run as a second daemon")
+            .expect_err("a second start against a held lock must be refused");
+
+        let message = refusal.to_string();
+        let lock = format!("{}.lock", socket_path.display());
+        assert!(message.contains(&lock), "the refusal must name the lock file: {message}");
+        assert!(message.contains(&socket_path.display().to_string()), "the refusal must name the socket: {message}");
+        #[cfg(unix)]
+        {
+            assert!(message.contains(&format!("(pid {})", std::process::id())), "the holder's pid must be named: {message}");
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(
+                std::fs::metadata(&socket_path).unwrap().ino(),
+                inode_before,
+                "a refused start must not unlink or rebind the socket"
+            );
+        }
+
+        drop(live);
+        drop(holder);
+        std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_file(&lock).ok();
+        std::fs::remove_file(&events_path).ok();
+        std::fs::remove_file(&log_path).ok();
+    }
+
+    /// Dropping the holder releases the lock, so the next start binds and
+    /// answers `ping`. Passes before and after the lock: it guards against a
+    /// lock that a holder can never give back.
+    #[test]
+    fn run_loop_starts_once_the_holder_has_dropped_its_lock() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let socket_path = short_tmp("restart").with_extension("sock");
+        let events_path = short_tmp("restart-events").with_extension("jsonl");
+        let log_path = short_tmp("restart-log");
+        drop(acquire_daemon_lock(&socket_path).unwrap());
+
+        let sp = socket_path.clone();
+        let ep = events_path.clone();
+        let lp = log_path.clone();
+        std::thread::spawn(move || {
+            let _ = run_loop(sp, ep, lp, test_registry(), noop_dispatch);
+        });
+
+        let stream = connect_retrying(&socket_path);
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+        writer.write_all(b"{\"v\":0,\"op\":\"ping\"}\n").unwrap();
+        let reply = read_one_line(&mut reader);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["daemon"], "aoided", "{reply}");
+
+        std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_file(daemon_lock_path(&socket_path)).ok();
         std::fs::remove_file(&events_path).ok();
         std::fs::remove_file(&log_path).ok();
     }

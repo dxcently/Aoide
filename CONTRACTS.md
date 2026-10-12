@@ -1113,7 +1113,10 @@ interleave on the wire.
 
 `aoided`'s own control socket (`$AOIDE_DAEMON_SOCKET`, else
 `$XDG_RUNTIME_DIR/aoide/aoided.sock`, `0600` user-private — no cross-uid
-audience) speaks the secrets wire's framing verbatim: one newline-delimited
+audience) is owned by the holder of an exclusive `flock` on `<socket>.lock`
+for that process's life; a second `aoided` refuses to start rather than
+replace it (`docs/architecture/AOIDED.md` "Socket"). It speaks the secrets
+wire's framing verbatim: one newline-delimited
 JSON request line → zero or more interim lines (`"interim":true`) → exactly
 one final reply line. Three ops, a closed set:
 
@@ -2803,15 +2806,14 @@ beside it in the same module, shared by the send gate and the secrets
 broker's origin gate — the credential's consumers, see the "Secrets home"
 section's origin-gate paragraph for the second one). **This channel is
 only as trustworthy as the daemon socket's same-uid exclusivity, and under
-OQ1-A that is NOT attacker-proof**: `bind_socket` unlink-then-binds with
-no `flock`/pidfile guard, so a same-uid attacker can already race or evict
-the real listener and bind its own in its place, serving a forged
-`sealPubkeyHex` from an impostor `ping` reply. **P-ID3's dispatch-socket
-peercred floor does NOT close this** — it is a CROSS-uid floor (see
-below); a same-uid attacker racing or evicting the real listener is by
-definition the SAME uid the floor admits, so this residual is
-OQ1-A-inherent and stays open (a `flock`/pidfile guard on `bind_socket`
-would be the actual fix, not attempted here). This buys the attacker
+OQ1-A that is NOT attacker-proof**: the start lock refuses a second
+`aoided`, but a same-uid process that kills the lock holder can bind its
+own listener in its place, serving a forged `sealPubkeyHex` from an
+impostor `ping` reply (the remaining hole, `docs/architecture/AOIDED.md`
+"Socket"). **P-ID3's dispatch-socket peercred floor does NOT close this**
+— it is a CROSS-uid floor (see below); a same-uid attacker that kills the
+holder is by definition the SAME uid the floor admits, so this residual is
+OQ1-A-inherent and stays open. This buys the attacker
 nothing beyond the door already open (the raw per-session socket a
 same-uid process can already connect to directly, OQ1-A-inherent): the
 seal's value is against a caller that follows its OWN tooling honestly
