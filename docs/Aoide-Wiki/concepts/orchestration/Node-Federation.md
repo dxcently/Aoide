@@ -66,10 +66,11 @@ an error.
 record; a never-paired (legacy-registered) node carries none of them and
 never enters the signature rung's trial set.
 
-`autogate` (default `false`) is the cross-device analogue of `send`'s
-local "sender is the target's own parent" autogate rule: a node marked
-`true` has its inbound `message/send` auto-deliver without the pending
-queue even though the connection is non-loopback — see
+`autogate` (default `false`) marks a node whose inbound `message/send` the door
+audits as `held-door` when the rails would have delivered it. It is the
+cross-device counterpart of `send`'s local "sender is the target's own parent"
+rule, but at the A2A door it never delivers: a marked node's send still parks
+in the pending queue, as every remote send does — see
 [[#Security — pairing is the verification path]] below. An
 unmarked/unknown sender is never autogated.
 
@@ -220,10 +221,10 @@ ceremony over every declared node with no verified record; see
 through the same tiered address grammar bare `session` uses; a `node/<query>`
 form is its remote tier. It resolves `<query>` against a registered node's
 CACHED graph (the same `state/node-cache/<name>.json` the fold above reads)
-and, on a match, delivers the message over A2A `message/send` instead of
-queuing a local pending send. The call is always attempted: the receiving
-node gates its own delivery through its own [[A2A-Door]] security model, so
-a remote send never sits in the sender's local pending queue. `--to` and
+and, on a match, sends the message over A2A `message/send` instead of
+queuing a local pending send. The call is always made: a remote send never
+sits in the sender's local pending queue, and the receiving node parks it in
+its own pending queue for an approver there ([[A2A-Door]]). `--to` and
 `--id` are mutually exclusive on `send`.
 
 ## Security — pairing is the verification path
@@ -290,24 +291,23 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
   the second legacy escape; it authenticates the read arms without ever
   resolving a node identity.
 
-Inject delivery still classifies the caller's address first
-(`a2a::classify_origin` → `ConnOrigin`: `Loopback` / `Remote(IpAddr)` /
-`Unknown`). A `Remote` caller falls back to the same interactive
-pending-approval queue `send` uses, auto-delivering only on an autogate
-match — the OR of the address check, the per-node `tokenFile` check, and
-the signature-rung `autogate` flag on the resolved node's own record
-(`autogate_match` = `ip_autogate || token_autogate || sig_autogate`) — the
-flag opening that rail, and `message` in the mesh the request SIGNED for
-being what it delivers on ([[A2A-Door]], P-CHARTER). An
-`Unknown` origin never auto-delivers. A verified signature outranks
-loopback for this question: an ssh `-L` forward delivers a tunneled
-node's packets from its own end's sshd, so `origin_for_inject` strips
-`ConnOrigin::Loopback`'s free pass from any request
-`verify_signed_request` already verified — a signed node's delivery
-timing is decided by its `autogate` flag AND the caller's grant in the mesh
-that request signed for, never by which address it
-arrived from ([[Node-Transport]]). `Loopback` keeps its unconditional
-trust only while no server-wide inbound bearer gate is configured
+Inject still classifies the caller's address first (`a2a::classify_origin` →
+`ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). Every inject parks in
+the same pending-approval queue `send` uses, whatever the caller. The rails
+still run, and they decide only whether the audit line says `held-door`: the
+OR of the address check, the per-node `tokenFile` check, and the signature-rung
+`autogate` flag on the resolved node's own record
+(`autogate_match` = `ip_autogate || token_autogate || sig_autogate`), with
+`message` in the mesh the request SIGNED for ([[A2A-Door]], P-CHARTER). An
+`Unknown` origin is never audited as one that would have delivered. A verified
+signature changes only the audit verdict: an ssh `-L` forward carries a
+tunneled node's packets from its own end's sshd, so `origin_for_inject` strips
+`ConnOrigin::Loopback`'s audit standing from any request
+`verify_signed_request` already verified. A signed node's `held-door` verdict
+is decided by its `autogate` flag AND the caller's grant in the mesh that
+request signed for, never by which address it arrived from
+([[Node-Transport]]). `Loopback` keeps its standing only while no server-wide
+inbound bearer gate is configured
 ([[A2A-Door#Security and governance]]): `aoide.a2a.bearerSecret` (a
 secret NAME resolved fresh on every request through the local
 [[Secrets-Broker]], consumer `a2a-door`, failing closed on a resolve

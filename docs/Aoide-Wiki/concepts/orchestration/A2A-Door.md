@@ -45,7 +45,9 @@ The server serves:
   an existing conducted session named by `contextId`, or **spawns** a new
   conducted agent. The spawn runs a **configured** agent
   (`aoide.a2a.spawnAgent`), never a client-supplied command — the client
-  supplies only the prompt. A spawn may also name a task
+  supplies only the prompt, and that prompt is the spawned session's opening
+  turn. The door parks it in `pending.json` for a human rather than typing it.
+  A spawn may also name a task
   (`metadata["aoide/task"]`), which makes the child the SAME
   [[Managed-Task-Wrapper|managed task run]] a local `aoide spawn --task`
   produces: task mailbox, exit report, a record the routine prune retains. A
@@ -69,9 +71,9 @@ session on a PAIRED node's own configured agent: it POSTs a signed,
 spawn-shaped `message/send` to the node's A2A door, and the node's own
 paired+signature+allows gate is the sole authority. `send --to
 node/<name>` (or `--to <name>/<session>`) drives an EXISTING remote session:
-it resolves the target against the node's cached graph and delivers over the
-same `message/send` RPC — mutually exclusive with `--id`, and a remote send
-always attempts delivery since the receiving node gates its own inject. Each
+it resolves the target against the node's cached graph and sends over the
+same `message/send` RPC — mutually exclusive with `--id`. A remote send is
+always attempted, and the receiving node parks it for its own approver. Each
 registered node folds into the [[Session-Graph]] as a root node, so a remote
 instance appears in the DAG beside aoide's own sessions. The message text is
 untrusted data, never executed.
@@ -105,9 +107,10 @@ precedence). The dock renders this same signal as the Conductor gadget's
 
 The A2A door fits the [[Governance]] model — the user admits, agents propose,
 git records — with one adaptation forced by the wire: **a request/response
-cannot block on a human admission**, so there is no interactive per-request
-gate like `send`'s pending/approve dance. The admission is moved entirely
-to **rebuild time** instead.
+cannot block on a human admission**, so nothing a remote caller sends is
+admitted on the wire at all. Every remote send parks in the receiving node's
+`pending.json`, the same queue `send` uses, and a human (or the conductor)
+approves it there. Enabling the door is admitted at **rebuild time**.
 
 - **Admitted at rebuild time.** Enabling the door (`aoide.a2a.enable`) and
   setting the spawn target (`aoide.a2a.spawnAgent`) are nix options, so both go
@@ -133,8 +136,9 @@ to **rebuild time** instead.
   command is default-denied: it runs only as a proven harness (`claude`,
   `env claude`), and the rule is stated once in `CONTRACTS.md` (the spawnAgent
   paragraph). An inject steers a session already running under aoide's
-  conductor, the same door `send` uses, and types only into a wrap the launcher
-  walk proves is its harness. A forwarded A2A message is **data**, routed
+  conductor, through the same gated door `send` uses: it parks in that
+  session's pending queue until a terminal or the conductor approves it. A
+  forwarded A2A message is **data**, routed
   through the dispatcher, never executed — the A2A door adds no new trust tier.
 - **A spawn's child is the local wrapper, always headless.** The door has no
   terminal to hand a child, so its spawn is `conduct --spawned --headless`,
@@ -163,7 +167,7 @@ to **rebuild time** instead.
   caller's address first (`a2a::classify_origin` → `ConnOrigin`:
   `Loopback` / `Remote(IpAddr)` / `Unknown`). The rungs that decide whether
   a message WOULD deliver still run: loopback, a verified signature
-  (`origin_for_inject` strips loopback's free pass from it), the per-node
+  (`origin_for_inject` strips loopback's standing from it), the per-node
   `tokenFile` match, the signature-rung `autogate` flag on the resolved node,
   and a matched remote-parent claim. None of them delivers. Every inject is
   queued on the same `pending.json` the local `send` uses, attributed
@@ -219,16 +223,18 @@ to **rebuild time** instead.
   rather than falling back to no-token-configured behavior, so every bearer
   check on that connection is denied. When `bearer-secret` is unset, the
   file mechanism above is unchanged.
-- **Loopback is trusted unconditionally only while no token is configured.**
-  `effective_origin(origin, token_configured, token_state)`
-  coerces any caller — loopback included — that did not present the valid
-  token to `ConnOrigin::Unknown` before `should_deliver_now` ever sees it,
-  which is never trusted. There is no separate "trust loopback" toggle: behind a
+- **Loopback earns nothing by its address.** Every caller parks at this door,
+  loopback included; the origin decides only whether the audit says
+  `held-door`. Once a token is configured, `effective_origin(origin,
+  token_configured, token_state)` coerces any caller that did not present the
+  valid token to `ConnOrigin::Unknown` before `should_deliver_now` sees it,
+  which is never trusted. With no token configured, the origin passes through
+  unchanged. There is no separate "trust loopback" toggle, because behind a
   reverse proxy or tunnel (`ssh -R`, a tailscale funnel, cloudflared, nginx)
   the server sees the proxy's own loopback address for every caller, so an
-  unconditional loopback trust hands a remote attacker the same standing as
-  the operator. A caller that presents the valid token keeps
-  loopback's original standing exactly.
+  unconditional loopback trust would hand a remote attacker the same standing
+  as the operator. A caller that presents the valid token keeps its
+  classification, and its send still parks.
 - **Per-node tokens identify WHICH node, not just whether one is trusted.**
   `Node.tokenFile` (`state/nodes.json`, set via `node add --token-file
   <path>`) is a separate, per-node secret from the server-wide `tokenFile`
@@ -236,8 +242,8 @@ to **rebuild time** instead.
   `node_store::autogated_node_token` folds a presented token
   against every registered node's own token file, and Inject's autogate
   match is the OR of the address check, this token check, the
-  signature-rung `autogate` flag (the flag opens that rail too; what it
-  delivers on is `message` in the mesh the request SIGNED for), and a
+  signature-rung `autogate` flag (the flag opens that rail too; the verdict
+  also needs `message` in the mesh the request SIGNED for), and a
   matched remote-parent claim — the
   node that spawned this very session steering its own child
   (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared

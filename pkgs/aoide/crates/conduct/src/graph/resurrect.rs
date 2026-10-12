@@ -961,8 +961,8 @@ fn resurrect_from_manifest(
 /// takes toward a spec's own `command`, never re-asked at revival time.
 /// **Which AGENT actually runs is the NODE's own configured
 /// `aoide.a2a.spawnAgent`, never chosen here** — [`summon_text`]'s result
-/// only ever becomes that agent's first typed turn
-/// (`aoide-server::a2a::do_spawn`'s `spawn_inject_prompt`), the same
+/// only ever becomes that agent's first turn (an A2A door holds it for a human
+/// and never types it), the same
 /// security model `handle_node_spawn`'s own doc states; `spec.agent` is
 /// informational on the remote leg, unlike the local leg where it picks
 /// the actual harness. Every remaining refusal — unreachable node, the

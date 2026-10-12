@@ -98,10 +98,9 @@ use std::path::{Path, PathBuf};
 /// pass a real, explicit delay when they need to observe the boundary.
 // `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is a SECOND production
 // caller of `write_delivery`, alongside `deliver_local_with` below — both
-// raw-inject, both want the exact same submit-keystroke gap — and
-// `aoide-server`'s A2A door (`a2a::spawn_inject_prompt`) is the THIRD, from
-// another crate: a spawned session's opening turn is a pty injection like any
-// other and must not carry a keystroke spelling of its own.
+// raw-inject, both want the exact same submit-keystroke gap. A spawned
+// session's opening turn is a pty injection like any other and must not carry
+// a keystroke spelling of its own.
 #[cfg(not(test))]
 pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 #[cfg(test)]
@@ -797,8 +796,8 @@ fn deliver_local(inv: &Invocation, id: &str) -> Outcome {
 /// `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is the second production
 /// caller — raw injection into a target wrap's socket, no gate, no provenance
 /// prefix, exactly this function's own contract — and `aoide-server`'s
-/// `a2a::spawn_inject_prompt` the third, typing a brand-new session's opening
-/// turn over the same control socket. Every pty injection in the tree goes
+/// `spawn --prompt` the third, typing a brand-new session's first turn over the
+/// same control socket. Every pty injection in the tree goes
 /// through here, which is the point: the keystroke shape (payload, flush, the
 /// gap, then the TARGET's own submit key alone) has one implementation.
 pub fn write_delivery(

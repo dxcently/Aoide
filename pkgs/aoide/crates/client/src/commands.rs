@@ -1513,8 +1513,8 @@ fn confirm_spawn(name: &str, text: &str) -> Result<bool, String> {
 /// entirely is simpler and is exactly [`crate::wire::build_message_send_body`]'s
 /// existing `None` branch) routes to `SendAction::Spawn` REGARDLESS of
 /// `spawn_asked`; the message's `parts[].text` becomes the PROMPT
-/// `do_spawn` types as the newly spawned session's first turn
-/// (`spawn_inject_prompt`) — `<text…>` here is that prompt, NOT a
+/// `do_spawn` holds as the newly spawned session's first turn for a human —
+/// `<text…>` here is that prompt, NOT a
 /// remote-chosen executable: which agent runs is the NODE's own configured
 /// `aoide.a2a.spawnAgent`, never client-supplied (`do_spawn`'s own doc
 /// comment on `SessionRef`'s security model). Built via
@@ -1546,7 +1546,7 @@ fn confirm_spawn(name: &str, text: &str) -> Result<bool, String> {
 /// The wire-level twin of [`send_message_to_node`] for the SPAWN shape:
 /// `context_id: None` routes `aoide-server::a2a::do_spawn` to spawn the
 /// node's own configured `aoide.a2a.spawnAgent` and inject `text` as that
-/// session's first turn (`spawn_inject_prompt`) — never a client-chosen
+/// session's first turn for a human — never a client-chosen
 /// agent or argv (see [`handle_node_spawn`]'s own doc on the security
 /// model this enforces). Extracted so this is the ONE place that builds and
 /// sends a spawn-shaped `message/send`: [`handle_node_spawn`] (the CLI's
@@ -2029,7 +2029,7 @@ pub fn register_nodes(r: &mut Registry) {
             arg!("url", "string", true, "The node's A2A door URL (e.g. http://host:8710/)."),
         ],
         flags: [
-            flag!("autogate", "bool", "Trust this node: its inbound message/send auto-delivers without the pending queue."),
+            flag!("autogate", "bool", "Mark this node autogate: its inbound message/send parks for a human like any other, and the audit records the rail as one that would deliver."),
             flag!("no-verify", "bool", "Skip the AgentCard fetch entirely and register the node unverified — for a node that serves no AgentCard (a plain A2A client endpoint). `verified` stays false either way; a card fetch was never identity, only reachability."),
             flag!("token-file", "string", "Path to a file holding the shared secret this node must present (Authorization: Bearer <token>) to be identified as this node — required for --autogate to survive a proxy/tunnel, where every caller's address looks the same.", value: "path"),
             flag!("bearer-secret", "string", "Name of a secret, resolved fresh on every outbound call through the local secrets broker, THIS instance presents as Authorization: Bearer <value> when calling this node's own A2A door. Absent = no bearer sent (today's behavior).", value: "secret"),

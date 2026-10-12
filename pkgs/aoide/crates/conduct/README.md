@@ -149,8 +149,7 @@ section has the table.
   READY to take a turn (`wait_ready`, a per-harness fact: `Hook` reads THIS
   launch's timestamped `SessionStart`; `OutputSettled` claims no fact at all,
   so its deliveries are unverified — the same gate
-  `resurrect`'s restore delivery and `aoide-server`'s
-  `a2a::spawn_inject_prompt` pass). The result says which it was:
+  `resurrect`'s restore delivery passes). The result says which it was:
   `delivered`, `delivered-unverified` (no declared fact for that name — the
   text went out once output settled and whether it submitted is unknown), or
   `not-ready` (nothing typed). `--undying` (P-C3, durable-sessions
@@ -222,39 +221,35 @@ section has the table.
   `Stop` stays swallowed on purpose (blocking the turn to force the note
   through was rejected on design grounds — see `door_command`'s own doc).
 - `graph` — the session DAG: build/merge/send/spawn/wrap, `normalize_addr`
-  (widened to `pub` at P-A1 so `screen` could reach it without duplicating
-  it), `SessionRecord`/`SessionsFile`/`load_stage`/`write_stage`. `--id`
-  accepts a bare session id OR the exact `session:<id>` form bare `graph
-  --json` emits for a node id (a known prefix stripped before matching,
-  same discipline `focus_session` already used) — bare `graph`'s own
-  emitted contract is unchanged, only what `--id`/`--to` accept
-  as input widened; an id with any OTHER prefix still errors as unknown,
-  unchanged. `send` gained `--to <target>` (messaging plan P-C3, mutually exclusive
-  with `--id`): resolves via `aoide_storage::addr::resolve` (itself
-  `session:`-prefix-tolerant on its exact-id tier) against local
-  sessions + registered nodes — a LOCAL match re-drives the exact `--id`
-  path unchanged, a REMOTE match (`node/<query>`, resolved against that
-  node's CACHED graph, never a live pull) delivers over A2A `message/send`
-  instead, gated entirely on the RECEIVING node's side (this door's own
+  (widened to `pub` at P-A1 so `screen` could reach it without duplicating it),
+  `SessionRecord`/`SessionsFile`/`load_stage`/`write_stage`. `--id` accepts a
+  bare session id OR the exact `session:<id>` form bare `graph --json` emits for
+  a node id (a known prefix stripped before matching, same discipline
+  `focus_session` already used) — bare `graph`'s own emitted contract is
+  unchanged, only what `--id`/`--to` accept as input widened; an id with any
+  OTHER prefix still errors as unknown, unchanged. `send` gained `--to <target>`
+  (messaging plan P-C3, mutually exclusive with `--id`): resolves via
+  `aoide_storage::addr::resolve` (itself `session:`-prefix-tolerant on its
+  exact-id tier) against local sessions + registered nodes — a LOCAL match
+  re-drives the exact `--id` path unchanged, a REMOTE match (`node/<query>`,
+  resolved against that node's CACHED graph, never a live pull) sends over A2A
+  `message/send` instead, and the RECEIVING node parks it (this door's own
   `--yes`/pending/autogate machinery is a local-socket concept and does not
-  apply to a remote delivery). A `--to` query that resolves against neither
-  a local session nor any node/prefix form falls through to a registered
-  **hub node** (P-D5's `node hub`, wired here at P-D6 —
-  `aoide_storage::addr::resolve_with_hub`, given the one node with
-  `hub: true` if any) instead of erroring `not-found` — the ONE routing
-  consumer of the hub preference in this crate; `who.rs`'s own listing
-  filter deliberately keeps the plain, hub-blind `addr::resolve`. `send::deliver_local`'s success path is ONE
-  of exactly TWO seams that file a delivered message into
+  apply to a remote send). A `--to` query that resolves against neither a local
+  session nor any node/prefix form falls through to a registered **hub node**
+  (P-D5's `node hub`, wired here at P-D6 —
+  `aoide_storage::addr::resolve_with_hub`, given the one node with `hub: true`
+  if any) instead of erroring `not-found` — the ONE routing consumer of the hub
+  preference in this crate; `who.rs`'s own listing filter deliberately keeps the
+  plain, hub-blind `addr::resolve`. `send::deliver_local`'s success path is the
+  one seam in this crate that files a delivered message into
   `aoide_storage::mail` as a receipt (messaging plan P-M1,
   `state/mail/base.jsonl`) — every route that lands a message into an
-  ALREADY-REGISTERED session (direct `--id`, `--to` local, `pending
-  approve`'s re-drive, AND `aoide-server`'s A2A `do_inject`, which reaches
-  this same function through `session_send`) is covered by that one call
-  (`mail::file_receipt`). The OTHER seam lives in `aoide-server` itself
-  (`spawn_inject_prompt`, `a2a.rs`): a brand-new A2A-spawned session's
-  first turn is typed before that session has a `SessionRecord` at all,
-  so it can't reach `deliver_local` and files itself instead — see
-  `aoide_storage::mail`'s module doc for the full two-writer reasoning.
+  ALREADY-REGISTERED session (direct `--id`, `--to` local, `pending approve`'s
+  re-drive) is covered by that one call (`mail::file_receipt`). A network door
+  never lands one: its send parks in `pending.json`, and a held send is filed
+  when a local approver releases it. `aoide-server`'s A2A spawn holds its
+  opening turn the same way, so it files nothing either.
 - **`send.rs::write_delivery`** is the one place a delivered payload actually
   reaches a target's control socket (task #124): the text write, then — on
   `--submit` — a SEPARATE, later write of the target's own submit keystroke,
@@ -275,7 +270,7 @@ section has the table.
   a dedicated `.ring.lock` file (`aoide_storage::mail::with_ring_lock`) —
   never `.stage.lock`, and only the daemon's own serializer, not a second
   policy boundary. The PTY fallback is refused by `auto_type_refusal`, the one
-  refusal the ping-back and the A2A inject make too: a wrap whose WRAPPED program is
+  refusal the ping-back makes too: a wrap whose WRAPPED program is
   a shell (`shell-parent`), and a wrap the walk does not prove is its harness
   (`unverified-wrap`, the proof `is_its_harness` checks). The line is submitted, so
   a shell would RUN it. The channel arm is not that
@@ -1162,99 +1157,92 @@ section has the table.
   that an early return must never silently skip the audit line a full run
   gets.
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
-  WRAPPED ARGV, never the agent label (task #100).**
-  `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz
-  refresh tick, `typed_capture_active`'s buffer, the restore snapshot) comes
-  from the SAME `program_is_a_shell(&inv.args)` every refusal lane reads —
-  the program's own basename against the shell list, with the launchers a
-  shell arrives through (`env`, `nix develop -c`, `setsid`, `timeout`,
-  `nice`, …) resolved to what they forward to — never `agent == "shell"`.
-  Its verdict is also stamped on the record at registration as the durable
-  `shell` field (`wrapped_program_is_a_shell` = that field OR a `Some`
-  `restore`), which is how a lane that was not there at spawn time can
-  refuse to type into a shell without knowing the argv. `agent` is a caller-
-  chosen label (`--agent <name>`, or the command's own basename by default)
-  that can disagree with what actually execs on the pty; the P-C7 soak's
-  live finding was exactly that gap — `spawn --agent soak-a -- bash` ran a
-  real interactive shell whose record never ticked, because its label
-  wasn't the literal string `"shell"`. kitty.nix's own terminal wrapper
-  needs no special case here: it always execs the resolved login shell
-  explicitly as the conducted command, so its basename lands in the same
-  set any other shell invocation does. `graph/conduct.rs`'s PTY tick
-  (`conduct_refresh_shell`, ~1 Hz, the same
-  tick that drives `cwd`/`activity`/`state`) also builds a
-  `RestoreSnapshot` (`restore_snapshot`, pure, mirrors `shell_snapshot`'s
-  injected-lookup shape) and lands it on the record change-only through
-  `do_session_refresh` — `cwd`/`idle`/RAW `argv` (`proc_argv`, never
-  `proc_command`'s truncated DISPLAY label) off the pty's foreground
-  process group. `idle` is captured as its OWN field rather than read back
-  off `state` later: `reap.rs`'s sweep overwrites `state` to `"done"`
-  BEFORE its ledger write, so idleness is unrecoverable from `state` by
-  then. This is a CONTINUOUS capture, not a reap-time snapshot — by the
-  time a sweep condemns a session its process is already gone (the exact
-  signal it reaped on), so a `/proc` read there returns nothing, every
-  time; `doc.rs::ledger_session_exit` projects the record's last-captured
-  `restore` verbatim into the ledger line, no new call site. `typed` (the
-  reconstructed unsubmitted prompt line) is REFUSAL-based: `conduct_
-  multiplex` feeds every byte written to the master — from BOTH real stdin
-  and an injection connection, since both land in the same shell readline
-  buffer — into a capped `TypedLineBuffer`; `\r`/`\n` submit-clears it, and
-  ANY other control byte (an escape sequence, `^R`, Tab, `^U`/`^W`) or
-  invalid UTF-8 POISONS the current line to `None` rather than guessing.
-  `typed_capture_active` gates the buffer's very existence to an
-  interactive shell (`is_shell && read_stdin`) — a headless conduct never
-  reads stdin, so it never populates `typed`. See AGENTS.md for why this
-  is refusal-based, not best-effort. The same verdict is readable OFF a
-  record as `wrapped_program_is_a_shell(&rec)` (`restore.is_some()`), which
-  is how a lane that was not there at spawn time — ping-back, doorbell,
-  the A2A door — can refuse to type into a shell without knowing the
-  wrapped argv: stamped on the multiplexer's opening tick, so it is present
-  from the start of a live shell session.
+  WRAPPED ARGV, never the agent label (task #100).** `session_conduct`'s
+  `is_shell` (everything below this bullet: the ~1 Hz refresh tick,
+  `typed_capture_active`'s buffer, the restore snapshot) comes from the SAME
+  `program_is_a_shell(&inv.args)` every refusal lane reads — the program's own
+  basename against the shell list, with the launchers a shell arrives through
+  (`env`, `nix develop -c`, `setsid`, `timeout`, `nice`, …) resolved to what
+  they forward to — never `agent == "shell"`. Its verdict is also stamped on the
+  record at registration as the durable `shell` field
+  (`wrapped_program_is_a_shell` = that field OR a `Some` `restore`), which is
+  how a lane that was not there at spawn time can refuse to type into a shell
+  without knowing the argv. `agent` is a caller-chosen label (`--agent <name>`,
+  or the command's own basename by default) that can disagree with what actually
+  execs on the pty; the P-C7 soak's live finding was exactly that gap — `spawn
+  --agent soak-a -- bash` ran a real interactive shell whose record never
+  ticked, because its label wasn't the literal string `"shell"`. kitty.nix's own
+  terminal wrapper needs no special case here: it always execs the resolved
+  login shell explicitly as the conducted command, so its basename lands in the
+  same set any other shell invocation does. `graph/conduct.rs`'s PTY tick
+  (`conduct_refresh_shell`, ~1 Hz, the same tick that drives
+  `cwd`/`activity`/`state`) also builds a `RestoreSnapshot` (`restore_snapshot`,
+  pure, mirrors `shell_snapshot`'s injected-lookup shape) and lands it on the
+  record change-only through `do_session_refresh` — `cwd`/`idle`/RAW `argv`
+  (`proc_argv`, never `proc_command`'s truncated DISPLAY label) off the pty's
+  foreground process group. `idle` is captured as its OWN field rather than read
+  back off `state` later: `reap.rs`'s sweep overwrites `state` to `"done"`
+  BEFORE its ledger write, so idleness is unrecoverable from `state` by then.
+  This is a CONTINUOUS capture, not a reap-time snapshot — by the time a sweep
+  condemns a session its process is already gone (the exact signal it reaped
+  on), so a `/proc` read there returns nothing, every time;
+  `doc.rs::ledger_session_exit` projects the record's last-captured `restore`
+  verbatim into the ledger line, no new call site. `typed` (the reconstructed
+  unsubmitted prompt line) is REFUSAL-based: `conduct_ multiplex` feeds every
+  byte written to the master — from BOTH real stdin and an injection connection,
+  since both land in the same shell readline buffer — into a capped
+  `TypedLineBuffer`; `\r`/`\n` submit-clears it, and ANY other control byte (an
+  escape sequence, `^R`, Tab, `^U`/`^W`) or invalid UTF-8 POISONS the current
+  line to `None` rather than guessing. `typed_capture_active` gates the buffer's
+  very existence to an interactive shell (`is_shell && read_stdin`) — a headless
+  conduct never reads stdin, so it never populates `typed`. See AGENTS.md for
+  why this is refusal-based, not best-effort. The same verdict is readable OFF a
+  record as `wrapped_program_is_a_shell(&rec)` (`restore.is_some()`), which is
+  how a lane that was not there at spawn time — ping-back and doorbell — can
+  refuse to type into a shell without knowing the wrapped argv: stamped on the
+  multiplexer's opening tick, so it is present from the start of a live shell
+  session.
 - **Session origin (P-P3, `docs/architecture/PAIRING.md` decision 7;
   write-authority tightened at LANE IDENTITY P-ID0, G16/G5):**
   `session_store.rs::stamp_origin` (now `pub`, crossing the crate boundary)
-  stamps `SessionRecord.origin` — `"node:<name>"` for a session
-  `aoide-server`'s A2A door spawned on behalf of an identified, paired node.
-  It has exactly two legitimate STAMP callers: `aoide-server`'s
-  `a2a::do_spawn` calls it DIRECTLY on the just-spawned record
-  (`stamp_spawn_provenance`, polling for the record's registration the same way
-  `spawn_inject_prompt` already does), from the door where the node name is
-  actually authenticated — the only place a `node:*` value may originate.
-  `graph/conduct.rs::session_conduct` calls it for a LOCAL-CLASS value off
-  its own inherited `AOIDE_SESSION_ORIGIN` env, right after
-  `do_session_start`, same seam `stamp_headless` uses — and REFUSES a
-  `node:*` shape read from that env (a taught refusal, never a panic):
-  inherited env is exactly what a same-uid process can set on itself before
-  invoking `aoide conduct` directly, so a `node:*` value threaded that way
-  was never trustworthy. A THIRD path reads `origin` back rather than
-  stamping it fresh: `doc.rs::ledger_session_exit` projects
-  `SessionRecord.origin` verbatim into the durable session ledger's own
+  stamps `SessionRecord.origin` — `"node:<name>"` for a session `aoide-server`'s
+  A2A door spawned on behalf of an identified, paired node. It has exactly two
+  legitimate STAMP callers: `aoide-server`'s `a2a::do_spawn` calls it DIRECTLY
+  on the just-spawned record (`stamp_spawn_provenance`, polling for the record's
+  registration on its own budget), from the door where the node name is actually
+  authenticated — the only place a `node:*` value may originate.
+  `graph/conduct.rs::session_conduct` calls it for a LOCAL-CLASS value off its
+  own inherited `AOIDE_SESSION_ORIGIN` env, right after `do_session_start`, same
+  seam `stamp_headless` uses — and REFUSES a `node:*` shape read from that env
+  (a taught refusal, never a panic): inherited env is exactly what a same-uid
+  process can set on itself before invoking `aoide conduct` directly, so a
+  `node:*` value threaded that way was never trustworthy. A THIRD path reads
+  `origin` back rather than stamping it fresh: `doc.rs::ledger_session_exit`
+  projects `SessionRecord.origin` verbatim into the durable session ledger's own
   `origin` field at exit (no `graph.json` projection — like
   `headless`/`hookAncestry`, consumed internally, not rendered), and
   `graph/resurrect.rs::origin_to_carry` reads that field BACK on a revival to
-  carry a LOCAL-class session's own provenance forward onto its revived
-  record (G6, same phase). It REFUSES a `node:*` shape found there too
-  (eprintln, never carried): `state/session-ledger.jsonl` is a plain,
-  same-uid-writable, append-only file — a same-uid process can append a line
-  claiming `origin:"node:X"` and then run the ungated local `aoide
-  resurrect`, which has no door and no seal behind it to re-mint that
-  authority. `origin_to_carry` is pure and directly unit-tested for exactly
-  this refusal. **This closes the STAMP paths, not the files**: a
-  hand-crafted `sessions.json`/ledger line claiming `node:X` is still a
-  readable, unflagged string on disk — nothing here makes the files
-  tamper-evident; that is P-ID1 (the daemon-signed credential, below) —
-  minted and stored, verified on the per-session control socket's own
-  accept and consumed by the send gate as of P-ID2, and both remaining
-  sockets get a peercred floor of their own as of P-ID3 (below).
-  **The raw field is attribution, never a gate**: a same-uid process can
-  still forge a LOCAL-class `origin` string, so nothing gates a security
-  decision on the field as read off disk — the authenticated form is the
-  `originClass` carried inside a VERIFIED seal (below), which is what the
-  secrets broker's origin gate (P-ID4) consumes; the consumer NAME
-  presenting a request stays unauthenticated either way (a separate,
-  unbuilt axis — CONTRACTS.md's identity-lane accounting). What P-ID0
-  closes: every record-STAMP path this codebase drives refuses a `node:*`
-  shape it didn't mint itself at the door — env AND ledger both.
+  carry a LOCAL-class session's own provenance forward onto its revived record
+  (G6, same phase). It REFUSES a `node:*` shape found there too (eprintln, never
+  carried): `state/session-ledger.jsonl` is a plain, same-uid-writable,
+  append-only file — a same-uid process can append a line claiming
+  `origin:"node:X"` and then run the ungated local `aoide resurrect`, which has
+  no door and no seal behind it to re-mint that authority. `origin_to_carry` is
+  pure and directly unit-tested for exactly this refusal. **This closes the
+  STAMP paths, not the files**: a hand-crafted `sessions.json`/ledger line
+  claiming `node:X` is still a readable, unflagged string on disk — nothing here
+  makes the files tamper-evident; that is P-ID1 (the daemon-signed credential,
+  below) — minted and stored, verified on the per-session control socket's own
+  accept and consumed by the send gate as of P-ID2, and both remaining sockets
+  get a peercred floor of their own as of P-ID3 (below). **The raw field is
+  attribution, never a gate**: a same-uid process can still forge a LOCAL-class
+  `origin` string, so nothing gates a security decision on the field as read off
+  disk — the authenticated form is the `originClass` carried inside a VERIFIED
+  seal (below), which is what the secrets broker's origin gate (P-ID4) consumes;
+  the consumer NAME presenting a request stays unauthenticated either way (a
+  separate, unbuilt axis — CONTRACTS.md's identity-lane accounting). What P-ID0
+  closes: every record-STAMP path this codebase drives refuses a `node:*` shape
+  it didn't mint itself at the door — env AND ledger both.
 - **Remote parent (remote sub-agents P-RSA S3, CONTRACTS.md §4):**
   `session_store.rs::stamp_remote_parent` is the ONE stamp function for
   `SessionRecord.remoteParent` (`pub`, crossing the crate boundary), and its
@@ -1367,8 +1355,8 @@ section has the table.
   same for an unattributed remote inject, so it never picks up `aoide a2a
   serve`'s own ambient env either (G9). Neither closes the GATE itself —
   `real_attested_sender`'s `std::process::id()` walks whichever process is
-  actually running `deliver_local`, which for a dispatched/injected send is
-  the daemon's/`a2a serve`'s own ancestry, not the original caller's; in
+  actually running `deliver_local`, which for a dispatched send is
+  the daemon's own ancestry, not the original caller's; in
   production that ancestry never resolves a live sealed session, so this
   already fails closed to `pending` by construction, not because either fix
   re-derives the real caller's identity — threading the connecting peer's

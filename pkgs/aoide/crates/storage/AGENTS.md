@@ -285,7 +285,7 @@
   and a match is never a trust decision.** They answer only "which `autogate`
   record does this address/bearer resolve to" (registry order, the same
   tie-break `resolve_node` uses), so the door can ask its second question —
-  whether that record earns auto-delivery under its HOME mesh's rules
+  whether that record earns a `held-door` audit under its HOME mesh's rules
   (`aoide-server::a2a::rail_admits`, which reads the charter and
   `Node::narrowed` the door already reads). **Don't fold a grant, a charter or
   a `verified` check into these folds:** the door's #50 guard exemption asks

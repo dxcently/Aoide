@@ -339,12 +339,11 @@ never the inbound/serve half (that's `aoide-server`).
   ordinary dead-pid arm. Both key shapes converge on one sweep; neither is
   a special case of it.
   Every tunneled request reaches the far door as `ConnOrigin::Loopback`
-  (`aoide-server::a2a::classify_origin`), which carries an unconditional
-  delivery free pass for an UNSIGNED request. `aoide-server::a2a` narrows
-  that free pass for a request carrying a verified per-request signature
-  (`origin_for_inject`, CONTRACTS.md §6) — a signed caller is a remote node
-  by construction and never rides Loopback's trust, so tunneled delivery is
-  safe against a real, non-autogate node, not merely possible.
+  (`aoide-server::a2a::classify_origin`). Loopback earns nothing by its
+  address: the door parks every A2A send in `pending.json` whether it arrives
+  tunneled or direct, signed or not, and a human or the conductor approves it
+  there (CONTRACTS.md §6). The signature and the `autogate` rail feed only the
+  audit verdict.
   **`mail_wire`'s drain (P-M2) is the one deliberate exception to "this
   crate never closes a tunnel itself."** A rarely-contacted outbox target
   should not accumulate a standing forward just because a background daemon

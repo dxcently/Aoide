@@ -585,15 +585,12 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   tunnel for `ssh://`, an outbound HTTPS request for `https://` (H1); a
   `poll` node is never dialed — deposits, and **tears any tunnel down
   before it exits** — never leaves a forward standing for the next tick. A standing `ssh -L` is a loopback path into the far
-  door for any same-uid process, and the door classifies an unsigned
-  loopback caller as local (auto-delivered conduct) unless a bearer
-  token is configured. That is a conduct hole older than mail; mail
-  does not widen it, and the ops fix — `aoide.a2a.bearerSecret` set on
-  every node, so an unsigned caller is Unknown and gated — is
-  recommended in the same breath as the first `message` grant. The front
+  door for any same-uid process. The door parks that caller's send in
+  `pending.json` like every other network send (CONTRACTS.md §6), so a
+  standing forward can queue a message but never deliver one. The front
   that faces the mesh points at the mail adapter's port, never at the A2A
   door: `https://` reaches a listener whose whole method set is mail, and
-  the door — where a loopback caller is conduct — is never fronted by a
+  the door — which parks every send — is never fronted by a
   TLS-terminating hop (H1).
 - `now` entries are attempted on every drain; `hold` entries are never
   attempted — they leave only through the node's `mailPoll`. A node

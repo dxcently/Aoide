@@ -50,7 +50,7 @@
 //! (they only ever touched session state), so they're untouched.
 
 use aoide_conduct::graph::{
-    canonical_state, door_can_approve, hold_pending, load_stage, now_iso_utc, resolve_graph_document,
+    canonical_state, hold_pending, load_stage, now_iso_utc, resolve_graph_document,
     session_send, sessions_path, Project, ProjectsFile, SessionRecord, SessionsFile, DOOR_CANNOT_APPROVE,
 };
 use aoide_protocol::output::Status;
@@ -67,7 +67,6 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 #[cfg(unix)]
-use std::os::unix::net::UnixStream;
 #[cfg(windows)]
 use aoide_protocol::win_unix::UnixStream;
 use std::path::{Path, PathBuf};
@@ -255,8 +254,8 @@ pub fn resolve_spawn_cwd(inv: &Invocation) -> String {
 /// Resolve `aoide.a2a.tokenFile`: the path to a file holding the shared
 /// secret a caller must present (`Authorization: Bearer <token>`) to be
 /// trusted as an authenticated caller (CONTRACTS.md §6 amendment,
-/// 2026-08-18) — required before Spawn runs at all, and the switch that
-/// decouples loopback's free pass once it's set (see [`effective_origin`]).
+/// required before Spawn runs at all, and the switch that
+/// stops loopback standing in for a caller once it's set (see [`effective_origin`]).
 /// `--token-file` flag → `AOIDE_A2A_TOKEN_FILE` env (set by the `aoide-a2a`
 /// systemd unit) → default `""` (empty = no token required — today's fully
 /// open behavior, unchanged). Mirrors [`resolve_spawn_agent`]'s exact
@@ -378,19 +377,19 @@ pub fn resolve_node_name(inv: &Invocation) -> String {
 //
 // CONTRACTS.md §6 amendment (2026-08-14): the non-loopback pending-gate fix.
 // A connection's ORIGIN (not any client-supplied field — TCP `peer_addr()`,
-// which a hostile client cannot spoof from off-box) decides whether an
-// Inject auto-delivers or queues pending, exactly the same shape `graph
+// which a hostile client cannot spoof from off-box) feeds the audit verdict
+// on an Inject. The send always parks; the verdict takes the same shape `graph
 // send`'s own gate already resolves (`conduct::graph::send::send_gate`).
 
 /// Where one `message/send` (or `message/stream`) request's TCP connection
 /// came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnOrigin {
-    /// The connection's peer IP is loopback (127.0.0.0/8, `::1`) — today's
-    /// trusted-by-bind-address default. UNCHANGED behavior: auto-delivers,
-    /// exactly as before this amendment (hard regression requirement).
+    /// The connection's peer IP is loopback (127.0.0.0/8, `::1`). Loopback earns
+    /// nothing by its address: the send parks like any other; only the audit
+    /// verdict differs.
     Loopback,
-    /// A non-loopback peer IP — gated UNLESS its rails earn auto-delivery:
+    /// A non-loopback peer IP — its rails decide only the audit verdict:
     /// the address must resolve to an `autogate` record in `state/nodes.json`
     /// AND that record must answer under its HOME mesh's rules
     /// ([`rail_admits`] — a pair mesh keeps the record's own flag as the whole
@@ -398,7 +397,7 @@ pub enum ConnOrigin {
     Remote(IpAddr),
     /// The peer address could not be determined (e.g. `peer_addr()` failed).
     /// Fails SAFE: treated exactly like an unmatched [`Self::Remote`] — never
-    /// auto-delivered, never autogate-matched.
+    /// given a yes verdict, never autogate-matched.
     Unknown,
 }
 
@@ -459,7 +458,7 @@ impl Listener {
     }
 }
 
-/// Should an Inject auto-deliver (`--yes`) rather than queue pending? Pure —
+/// Should an Inject's verdict be a yes (`--yes`, or a rail that would deliver)? Pure —
 /// unit-tested directly; the one place I/O enters is the caller, which
 /// resolves `deliver_match` from the call's rails. Loopback is unconditionally
 /// trusted (today's behavior, unchanged); a non-loopback or unknown-origin
@@ -501,7 +500,7 @@ fn should_deliver_now(origin: ConnOrigin, deliver_match: bool) -> bool {
 //     ([`effective_origin`]) — once a token is configured, loopback stops
 //     being a trust signal, full stop: no separate opt-out, no
 //     `trustLoopback` bool to leave mis-set. A caller — local or not — must
-//     present the valid token to keep loopback's old free pass.
+//     present the valid token to keep its classification.
 //
 // Separately, [`aoide_storage::node_store::autogated_node_token`] restores
 // PER-NODE identification for the non-loopback autogate match (replacing the
@@ -559,7 +558,7 @@ fn token_authorized(token_configured: bool, token_state: TokenState) -> bool {
 
 /// May this caller use a READ arm? The bearer gate ([`token_authorized`]) OR a
 /// verified signature whose grant in the request's mesh holds `read`. The
-/// bearer exists to strip the loopback free pass from UNSIGNED callers, who
+/// bearer exists because UNSIGNED callers, who
 /// behind a tunnel or proxy all look loopback; a verified signature plus a
 /// grant is a stronger credential than the bearer, so it is governed by the
 /// grant alone. Writes never reach this predicate: spawn and inject keep their
@@ -582,10 +581,10 @@ fn unauthorized() -> (i64, String) {
 /// bearer is coerced to [`ConnOrigin::Unknown`] — deliberately reusing that
 /// variant's existing "never trusted, fails safe" arm in `should_deliver_now`
 /// rather than adding a fourth origin kind, since the resulting trust
-/// decision (never auto-deliver) is exactly the same either way. This is the
+/// verdict (never a yes) is exactly the same either way. This is the
 /// "loopback stops being a trust signal" coupling: there is no code path
-/// where a token is required AND loopback still auto-delivers unauthenticated
-/// — the same `token_configured` bool drives both. Pure.
+/// where a token is required AND an unauthenticated loopback caller still earns
+/// a yes verdict — the same `token_configured` bool drives both. Pure.
 fn effective_origin(origin: ConnOrigin, token_configured: bool, token_state: TokenState) -> ConnOrigin {
     if token_configured && token_state != TokenState::Valid {
         ConnOrigin::Unknown
@@ -594,7 +593,7 @@ fn effective_origin(origin: ConnOrigin, token_configured: bool, token_state: Tok
     }
 }
 
-// ── Signed requests outrank loopback (CONTRACTS.md §6 amendment, 2026-08-26) ─
+// ── Signed requests and the audit verdict (CONTRACTS.md §6) ─
 //
 // An ssh `-L` port-forward delivers a tunneled node's packets from the FAR
 // box's own sshd, so `classify_origin` sees loopback for every tunneled
@@ -603,17 +602,17 @@ fn effective_origin(origin: ConnOrigin, token_configured: bool, token_state: Tok
 // token, now reachable without any token configured at all. A request
 // carrying a per-request signature that [`verify_signed_request`] already
 // verified is, by construction, a REMOTE node: [`origin_for_inject`] below
-// strips `ConnOrigin::Loopback`'s free pass from it before `should_deliver_
-// now` ever runs.
+// strips `ConnOrigin::Loopback`'s standing from it before `should_deliver_
+// now` computes the verdict.
 
 /// The origin [`should_deliver_now`]'s Inject decision actually sees, once a
 /// verified per-request signature is factored in. Pure.
 ///
 /// `signed_non_autogate` is `true` only when the caller both ran the request
 /// through [`verify_signed_request`] AND resolved it to a node the operator
-/// has NOT marked auto-deliver (`message_send` computes exactly
+/// has NOT marked as a delivering rail (`message_send` computes exactly
 /// `signed_caller.is_some() && !sig_autogate`). Such a caller is a remote
-/// node by construction, so it loses `ConnOrigin::Loopback`'s free pass:
+/// node by construction, so it loses `ConnOrigin::Loopback`'s standing:
 /// coerced to [`ConnOrigin::Unknown`], reusing that variant's existing
 /// fail-safe arm rather than inventing a fourth origin kind — exactly the
 /// move [`effective_origin`] already makes for an invalid door-wide token.
@@ -873,7 +872,7 @@ impl Drop for OpeningTurnSlot {
 
 /// The opening-turn worker's whole life, in ONE function so its write order is
 /// a property of the code rather than of a closure's shape: stamp `pending`,
-/// wait for readiness and type, stamp the verdict, audit it. `pending` and the
+/// hold the turn for a human, stamp the verdict, audit it. `pending` and the
 /// verdict therefore come from the SAME thread in that order — nothing can
 /// land a verdict first and then be clobbered back to `pending` (branch
 /// re-review 2's L was a second writer of `pending`: the door's registration
@@ -883,10 +882,7 @@ impl Drop for OpeningTurnSlot {
 /// real waits.
 fn opening_turn_worker(
     id: String,
-    agent_cmd: String,
     prompt: String,
-    launch_at: String,
-    budget: Duration,
     audit_log: PathBuf,
     slot: OpeningTurnSlot,
     from: Option<String>,
@@ -896,8 +892,8 @@ fn opening_turn_worker(
     // this one closes that window. A no-op when the value is already `pending`,
     // and — being this thread's first write — always before the verdict below.
     aoide_conduct::graph::stamp_opening_turn(&id, "pending");
-    let word = if door_can_approve(Door::A2a) || prompt.is_empty() {
-        spawn_inject_prompt(&id, &agent_cmd, &prompt, &launch_at, budget)
+    let word = if prompt.is_empty() {
+        "skipped-empty"
     } else {
         hold_opening_turn(&id, &prompt, from.as_deref())
     };
@@ -1184,7 +1180,7 @@ fn paired_grant(nodes: &[aoide_storage::node_store::Node], mesh: &str, caller_ke
     Grant { caps }
 }
 
-/// **Does the record the UNSIGNED autogate rail resolved earn auto-delivery**
+/// **Does the record the UNSIGNED autogate rail resolved earn a yes verdict**
 /// — judged by the record's HOME mesh, because that rail carries no signed
 /// mesh of its own (the A3 review's finding 4; the same "judge the unnamed
 /// request by home" ruling [`effective_mesh`] implements).
@@ -1956,32 +1952,6 @@ fn session_remote_parent(id: &str) -> Option<RemoteParent> {
     sf.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.remote_parent.clone())
 }
 
-/// Why the A2A door will not type a line into `id` by itself, read off its
-/// record through [`aoide_conduct::graph::auto_type_refusal`], the one refusal
-/// the ping-back and doorbell make too: `shell-wrapped` for a SHELL,
-/// `unverified-wrap` for a wrap the launcher walk does not prove to be its harness.
-/// The whole box agrees on which sessions a submitted line must never reach.
-///
-/// Unlike [`session_remote_parent`], an unreadable stage answers a hold, and
-/// `unverified-wrap` is the reason: this is a refusal's input, so "cannot tell"
-/// takes the safe arm, the same fail-safe direction
-/// `should_deliver_now(ConnOrigin::Unknown, _)` takes one screen up. An unknown
-/// id (no record) answers `None` and is unreachable anyway: `decide_send_action`
-/// resolves through [`session_ref_lookup`] first, and a missing record is its
-/// own `Error` arm.
-fn session_inject_hold(id: &str) -> Option<&'static str> {
-    match load_stage::<SessionsFile>(&sessions_path()) {
-        Ok(sf) => {
-            let rec = sf.sessions.iter().find(|s| s.session_id == id)?;
-            aoide_conduct::graph::auto_type_refusal(rec).map(|why| match why {
-                aoide_conduct::graph::AutoTypeRefusal::Shell => "shell-wrapped",
-                aoide_conduct::graph::AutoTypeRefusal::Unproven => "unverified-wrap",
-            })
-        }
-        Err(_) => Some("unverified-wrap"),
-    }
-}
-
 fn unix_ts_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2061,39 +2031,24 @@ fn submitted_task(session_id: &str) -> Value {
     serde_json::to_value(&task).expect("Task always serializes")
 }
 
-/// A delivered send returns the freshly-reloaded Task (unchanged from
-/// before). A held-pending send returns [`submitted_task`]'s Task so the
-/// synchronous JSON-RPC caller gets an honest immediate response;
-/// `tasks/get`/the SSE stream reflect the real session state once/if a
-/// human approves and delivers it.
-/// **Messaging plan P-M1, `state/mail/base.jsonl`**: this function files NO
-/// mailbase entry of its own. It builds a `send --id` [`Invocation`] and
-/// calls [`session_send`] just like `send` itself does — and since this
-/// invocation never carries a `--to` flag, `session_send` can only ever
-/// reach its LOCAL branch (`deliver_local`), which is one of the two places
-/// a delivered message gets filed (`aoide_conduct::graph::send::deliver_local`
-/// — see `aoide_storage::mail`'s module doc, and [`spawn_inject_prompt`]
-/// for the OTHER site: a brand-new spawned session's first turn, which
-/// cannot go through `deliver_local` at all — this function only ever
-/// injects into an ALREADY-REGISTERED session). So a remote node's message
-/// into an existing session lands in the mailbase through the exact same
-/// call `do_inject` already makes below; adding a second append here would
-/// double-file every A2A-delivered message. See
-/// `a_successfully_delivered_message_send_files_into_the_mailbase` below for
-/// the end-to-end proof.
+/// Queue an inject from this network door. The door never delivers, so the
+/// send is held in `pending.json` for a human to approve from a terminal or
+/// the conductor, and the caller gets [`submitted_task`]: the honest immediate
+/// answer. `tasks/get` and the SSE stream show the real state once a human has
+/// approved.
+///
+/// The send goes through [`session_send`], as `send` does, so approval and the
+/// mailbase filing at delivery (`deliver_local`) belong to the conductor. This
+/// invocation never carries `--to`, so `session_send` takes its local branch.
 fn do_inject(
     session_id: &str,
     prompt: &str,
     audit_log: &Path,
-    deliver_now: bool,
     from: Option<&str>,
 ) -> Result<Value, (i64, String)> {
     let mut flags = std::collections::BTreeMap::new();
     flags.insert("id".to_string(), session_id.to_string());
     flags.insert("submit".to_string(), "true".to_string());
-    if deliver_now {
-        flags.insert("yes".to_string(), "true".to_string());
-    }
     flags.insert("audit-log".to_string(), audit_log.to_string_lossy().into_owned());
     // The resolved node's identity (P-P3, PAIRING.md decision 7), when the
     // caller resolved to one (`aoide_storage::node_store::resolve_node` —
@@ -2129,140 +2084,7 @@ fn do_inject(
     if outcome.status != Status::Ok {
         return Err((-32603, outcome.message));
     }
-    let delivered = outcome
-        .data
-        .as_ref()
-        .and_then(|d| d.get("delivered"))
-        .and_then(Value::as_bool)
-        .unwrap_or(deliver_now);
-    if delivered {
-        task_get(session_id)
-    } else {
-        Ok(submitted_task(session_id))
-    }
-}
-
-/// Best-effort: wait for a just-spawned conducted session to be READY to take
-/// a turn, then connect to its control socket and type `prompt` as its first
-/// turn — the same connect-and-retry shape
-/// `aoide_conduct::graph::conduct`'s own PTY-injection test uses (there,
-/// proving the production socket-write path; here, actually driving it). A
-/// missed connect after the retry budget is tolerated: the session still
-/// exists and is `conductable`, just without its opening turn typed in — a
-/// client can always follow up with a plain `send`/another
-/// `message/send`.
-///
-/// **Readiness comes FIRST** ([`aoide_conduct::graph::wait_ready`], whose fact
-/// is the target harness's own `AgentProfile::readiness`), because a bound
-/// socket is not a started agent: this door used to type at the socket the
-/// instant it appeared, which for a harness still drawing its TUI put the
-/// opening turn into a composer that was not there yet and dropped its submit
-/// keystroke — the live 2026-09-26 defect `spawn --prompt` fixed. A target
-/// that never becomes ready within `ready_budget` is typed at by NOTHING and
-/// files NO receipt: an unacknowledged letter that the sender can retry, never
-/// a receipt for a turn that never started. `ready_budget` is a parameter, not
-/// a hardcoded read of the constant, so a test can pass an observable one
-/// directly — [`do_spawn`] always passes
-/// [`aoide_conduct::graph::READY_BUDGET`].
-///
-/// **Deliberately a RAW socket write, not `session_send`/`deliver_local`.**
-/// `session_send` requires a `SessionRecord` already present in
-/// `sessions.json` with `conductable:true` and a socket path — and that
-/// record is written by the SPAWNED CHILD ITSELF, once its own `aoide
-/// conduct` process starts up and registers. At the moment `do_spawn` wants
-/// to type the opening turn, that registration may not have happened yet —
-/// exactly the race this function's own retry loop exists to survive (the
-/// socket file itself may not even exist). Routing through the session
-/// registry here would just trade the socket race for a registration race,
-/// so this stays on the raw socket path it already computed — but the WRITE
-/// is the tree's one pty-injection shape, `write_delivery`: the text, a
-/// flush, the submit-keystroke gap, then **the target harness's own
-/// `submit_key`** (`profile_for_agent`, resolved from the configured program
-/// — never a byte spelled at this call site) as a SEPARATE write. This door
-/// typed `{prompt}\n` for as long as it existed, which is a keystroke of its
-/// own and the wrong one wherever the target submits on `\r` (claude, kimi):
-/// the opening turn landed in the composer and never submitted.
-///
-/// **Only a proven harness takes the opening turn.** A configured command that
-/// is a shell is `skipped-shell`; any other that the launcher walk does not
-/// prove to be a registered harness is `skipped-unverified`. Nothing is typed in
-/// either case ([`spawn_agent_harness`]).
-///
-/// **Messaging plan P-M1, `state/mail/base.jsonl`**: because of the above,
-/// this is the SECOND (and last) mailbase-filing site in the tree, alongside
-/// `deliver_local`'s (see `aoide_storage::mail`'s module doc) — a spawned
-/// session's first turn can never reach `deliver_local`, so it has to file
-/// itself. `from` is empty: the a2a door has no caller identity to offer
-/// today (#51's scope), same reasoning [`do_inject`]'s callers rely on.
-/// Best-effort, same tolerance as the rest of this function — a write error
-/// above is swallowed (the retry loop only confirms a bound socket, never
-/// delivery), so a failed mailbase write is no less tolerated. What the write
-/// error DOES decide is the receipt: it is filed only for a delivery that went
-/// out, so a letter is never acknowledged by a turn nobody received.
-fn spawn_inject_prompt(
-    id: &str,
-    agent_cmd: &str,
-    prompt: &str,
-    launch_at: &str,
-    ready_budget: Duration,
-) -> &'static str {
-    if prompt.is_empty() {
-        return "skipped-empty";
-    }
-    // The last gate before a REMOTE prompt becomes a line on a pty, so it asks
-    // the same question `do_spawn`'s prologue asked instead of trusting its
-    // caller to have asked it. Silent by construction: this function's contract
-    // is best-effort, and the caller's own refusal is the taught one.
-    let agent = match spawn_agent_harness(agent_cmd) {
-        Ok(harness) => harness,
-        Err(SpawnAgentRefusal::Shell) => return "skipped-shell",
-        Err(SpawnAgentRefusal::Unproven) => return "skipped-unverified",
-    };
-    // The PROVEN harness decides what readiness means and which keystroke
-    // SUBMITS a line in it.
-    let ready = aoide_conduct::graph::wait_ready(agent, id, &launch_at, ready_budget);
-    if ready == aoide_conduct::graph::Ready::NotReady {
-        return "not-ready";
-    }
-    // The target harness's own submit keystroke, resolved from the SAME table
-    // every other delivery reads (`profile_for_agent`; claude when the name is
-    // unregistered). Never a byte spelled here: claude's is `\r`, and a bare
-    // `\n` only inserts a newline in its composer — the exact way this door
-    // used to type an opening turn that never submitted.
-    let submit_key = aoide_conduct::graph::profile_for_agent(agent).submit_key;
-    let socket = aoide_conduct::graph::conduct_socket_path(id);
-    for _ in 0..300 {
-        if socket.exists() {
-            if let Ok(mut s) = UnixStream::connect(&socket) {
-                // The tree's ONE pty-injection shape: the text, a flush, the
-                // submit-keystroke gap, then the submit key as a SEPARATE
-                // write (`write_delivery`) — never one concatenated payload,
-                // which a harness reading the composer mid-paste can coalesce
-                // differently (task #124).
-                let written = aoide_conduct::graph::write_delivery(
-                    &mut s,
-                    prompt.as_bytes(),
-                    true,
-                    submit_key,
-                    aoide_conduct::graph::SUBMIT_KEYSTROKE_DELAY,
-                );
-                // A receipt acknowledges a TURN: file it only for a write that
-                // actually went out, so a broken delivery leaves the sender's
-                // letter unacknowledged (retryable) instead of acknowledged.
-                if written.is_ok() {
-                    let _ = aoide_storage::mail::file_receipt("", id, prompt);
-                    return if ready == aoide_conduct::graph::Ready::Verified {
-                        "delivered"
-                    } else {
-                        "delivered-unverified"
-                    };
-                }
-                return "write-failed";
-            }
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    "no-socket"
+    Ok(submitted_task(session_id))
 }
 
 /// Stamp `origin=node:<name>` directly on the just-spawned session's own
@@ -2276,11 +2098,9 @@ fn spawn_inject_prompt(
 /// now REFUSES that shape from its env read entirely, and this function is
 /// the only remaining writer of a `node:*` value.
 ///
-/// Retries on the session record landing in `sessions.json`, the identical
-/// registration race [`spawn_inject_prompt`] above already tolerates
-/// (best-effort, same 300×10ms budget — ~3s): a spawn whose child never
-/// registers within that window simply never gets stamped, same as it never
-/// gets its opening turn typed. Disclosed behavior change from the pre-P-ID0
+/// Retries on the session record landing in `sessions.json` (best-effort, same
+/// 300×10ms budget — ~3s): a spawn whose child never registers within that
+/// window simply never gets stamped. Disclosed behavior change from the pre-P-ID0
 /// shape (a synchronous env write that could never "miss"): a genuinely
 /// slow-to-register child can now lose its origin stamp. Never silent about
 /// it, though — poll exhaustion with no registration found is eprintln'd by
@@ -2442,8 +2262,7 @@ fn spawn_agent_harness(agent_cmd: &str) -> Result<&'static str, SpawnAgentRefusa
 /// directly unit-testable via `Command::get_envs()`/`Command::get_current_dir()`
 /// without an OS-level process spawn (`do_spawn` always launches
 /// `std::env::current_exe()`, which under `cargo test` is the TEST binary —
-/// see `spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_
-/// mailbase`'s doc comment for why no test here drives that spawn).
+/// see the `Spawn gate table` note above for why no test here drives that spawn).
 fn spawn_child_command(
     aoide_bin: &Path,
     argv: &[String],
@@ -2597,8 +2416,8 @@ fn do_spawn(
     // `spawnAgent` that IS a shell must cost one RPC, never a process and
     // never a line typed into a shell (H1, house rule 4), and never a line typed
     // into a pty the walk cannot prove is a harness. The spawn arm's first turn
-    // is written straight into the child's pty by `spawn_inject_prompt`, and a
-    // shell's stdin is a COMMAND LINE: a remote peer's prompt would RUN. The
+    // is held for a human, never typed, and a shell's stdin is a COMMAND LINE:
+    // a remote peer's prompt would RUN. The
     // `agent` label is not the question — the configured argv is
     // (`spawn_agent_harness`), so `bash -lc <harness>` is the shell on its face,
     // `env claude` is resolved to its harness, and `taskset -c 0 claude` or a
@@ -2687,12 +2506,6 @@ fn do_spawn(
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
     let argv = spawn_argv(&id, harness, agent_cmd, task);
-    // This launch's start instant, taken BEFORE the child exists: the worker's
-    // readiness wait reads only a harness `SessionStart` stamped at or after
-    // it, so a leftover child record from a previous run of a reused id cannot
-    // pass for this launch's hello.
-    let launch_at = now_iso_utc();
-
     let origin = format!("node:{node_name}");
     // Project roots are already loaded the same way `session_ref_lookup`
     // loads `sessions.json` off the stage — a missing/corrupt file degrades
@@ -2787,19 +2600,14 @@ fn do_spawn(
                 }
                 Some(slot) => {
                     let worker_id = id.clone();
-                    let agent_cmd = agent_cmd.to_string();
                     let prompt = prompt.to_string();
-                    let launch_at = launch_at.clone();
                     let worker_from = Some(format!("node:{node_name}"));
                     let scheduled = std::thread::Builder::new()
                         .name(format!("a2a-opening-turn-{worker_id}"))
                         .spawn(move || {
                             opening_turn_worker(
                                 worker_id,
-                                agent_cmd,
                                 prompt,
-                                launch_at,
-                                aoide_conduct::graph::READY_BUDGET,
                                 worker_audit,
                                 slot,
                                 worker_from,
@@ -3072,8 +2880,8 @@ fn message_send(
     // signature rung can join `ip_autogate`/`token_autogate` in the same
     // fold: `resolved_node` matched via `NodeRung::Signature` whose own
     // `autogate` flag is set is the like-for-like restoration for a node
-    // the operator already marked auto-deliver, now that a verified
-    // signature no longer rides `ConnOrigin::Loopback`'s free pass (see
+    // the operator already marked as a delivering rail, now that a verified
+    // signature no longer rides `ConnOrigin::Loopback`'s standing (see
     // `origin_for_inject`). `ip_autogate`/`token_autogate` are unchanged
     // from before this amendment.
     let ip_rail = match origin {
@@ -3104,8 +2912,8 @@ fn message_send(
     //
     //   `autogate_match` = the rails MATCHED a record → the door admits the
     //     caller (the #50 uniform-response guard's exemption, unchanged);
-    //   `rail_delivers`  = that record earns auto-delivery under home's rules
-    //     → Inject's delivery decision (`should_deliver_now`), and nothing
+    //   `rail_delivers`  = that record earns a yes verdict under home's rules
+    //     → Inject's audit verdict (`should_deliver_now`), and nothing
     //     else.
     //
     // Folding the second into the first would be the wrong fix twice over: a
@@ -3196,23 +3004,8 @@ fn message_send(
             // the capability it needs is the one the delivery itself needs —
             // `message`. A caller whose key is stamped as a child's remote
             // parent but who holds no grant in the mesh its request names
-            // does NOT get the without-pending delivery; it falls through to
-            // the pending queue, exactly as a stranger does.
+            // is not a match here; it queues like any stranger.
             && may_message(&caller_grant(signed_caller));
-            if remote_parent_hit && door_can_approve(Door::A2a) {
-                let _ = audit(
-                    audit_log,
-                    Door::A2a,
-                    EventClass::Audit,
-                    "a2a.message/send",
-                    "autogate-remote-parent",
-                    &format!(
-                        "delivering to `{session_id}` without pending — the caller proved the \
-                         remote parent of that session (remoteParent.sessionId `{}`)",
-                        claimed_from.as_deref().unwrap_or_default(),
-                    ),
-                );
-            }
             // `should_deliver_now(ConnOrigin::Unknown, _)` is unconditionally
             // `false` — it ignores `autogate_match` entirely (the SAME
             // fail-safe arm `effective_origin`'s own token coercion already
@@ -3245,24 +3038,12 @@ fn message_send(
                 effective_origin(origin, token_configured, token_state),
                 signed_caller.is_some() && !sig_autogate && !remote_parent_hit,
             );
-            // Every OTHER rung of this decision is about the CALLER (its
-            // origin, its signature, its token). This one is about the
-            // TARGET: a session conducting a SHELL takes no line that was not
-            // held pending and approved by a human, whoever asked for it and
-            // however well they proved who they are. A shell's input is a
-            // command line, and `--agent <harness> -- bash` is a record that
-            // names a harness while running a shell — the door therefore reads
-            // the WRAP (house rule 4), exactly as the ping-back and doorbell
-            // lanes do, rather than the `agent` label it was handed. A wrap the
-            // walk does not prove to be its harness is held the same way
-            // (`unverified-wrap`). Paid only where it can matter: a decision
-            // that was going to pend anyway is left alone, and its audit line
-            // is not written.
-            // A network door never approves a gated send (`door_can_approve`):
-            // a rung that would have delivered parks here, and says so.
-            let wants_delivery = should_deliver_now(eff_origin, deliver_match || remote_parent_hit);
-            let door_delivers = wants_delivery && door_can_approve(Door::A2a);
-            if wants_delivery && !door_delivers {
+            // This network door never delivers an inject: it cannot approve a
+            // gated send (`DOOR_CANNOT_APPROVE`), so every inject queues for a
+            // human. A rung that WOULD have delivered is audited as held-door
+            // instead, which keeps the verdict legible. `should_deliver_now`
+            // answers which rung matched; nothing acts on the answer.
+            if should_deliver_now(eff_origin, deliver_match || remote_parent_hit) {
                 let _ = audit(
                     audit_log,
                     Door::A2a,
@@ -3272,34 +3053,10 @@ fn message_send(
                     &format!("holding `{session_id}` for a human: {DOOR_CANNOT_APPROVE}"),
                 );
             }
-            let hold = if door_delivers { session_inject_hold(&session_id) } else { None };
-            if let Some(reason) = hold {
-                let why = match reason {
-                    "shell-wrapped" => "is conducting a shell — a submitted line would RUN in it as a command",
-                    _ => "is not proven to be its harness by the launcher walk, so a submitted line is held",
-                };
-                let _ = audit(
-                    audit_log,
-                    Door::A2a,
-                    EventClass::Audit,
-                    "a2a.message/send",
-                    reason,
-                    &format!("holding for a human: `{session_id}` {why}"),
-                );
-            }
-            let deliver_now = door_delivers && hold.is_none();
-            // The `from` attribution rides ONLY the QUEUED path (P-P3
-            // decision 7: "pending-queue entries a node's send creates").
-            // `session_send`'s own `from` mechanism ALSO prefixes an
-            // IMMEDIATELY-delivered payload's text ("from <sender>: ",
-            // `provenance_prefix`) — scoping this to `!deliver_now` keeps
-            // an already-autogated node's DELIVERED payload byte-identical
-            // to before this phase (pinned by
-            // `autogated_node_delivers_despite_being_non_loopback`), while
-            // still attributing every entry that actually reaches
-            // `pending.json`.
-            let from = if deliver_now { None } else { resolved_node.map(|(p, _rung)| format!("node:{}", p.name)) };
-            do_inject(&session_id, &prompt, audit_log, deliver_now, from.as_deref())
+            // Every inject queues, so the resolved node's identity always rides
+            // the pending entry (P-P3 decision 7).
+            let from = resolved_node.map(|(p, _rung)| format!("node:{}", p.name));
+            do_inject(&session_id, &prompt, audit_log, from.as_deref())
         }
         SendAction::Spawn { agent_cmd } => {
             if spawn_admitted(resolved_node, &caller_grant(signed_caller)) {
@@ -7090,7 +6847,8 @@ fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_test_support::{accept_one, read_delivery};
+    use aoide_test_support::read_delivery;
+    use std::os::unix::net::UnixStream;
     use serde_json::json;
 
     fn fake_handler(_inv: &Invocation) -> aoide_protocol::output::Outcome {
@@ -7450,46 +7208,6 @@ mod tests {
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-    }
-
-    /// The second guard, on the write itself: an unproven or shell `spawnAgent`
-    /// is refused before the target's socket is ever dialled, so no byte reaches
-    /// a pty the door cannot prove is a harness. Asserted by a listener that
-    /// would hold a pending connection, and has none.
-    #[test]
-    fn spawn_inject_prompt_types_nothing_into_an_unproven_or_shell_spawn_agent() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-refused-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-
-        let id = "spawn-inject-refused";
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-        listener.set_nonblocking(true).unwrap();
-
-        for (configured, want) in [
-            ("no-such-agent", "skipped-unverified"),
-            ("taskset -c 0 claude", "skipped-unverified"),
-            ("env -S claude", "skipped-shell"),
-            ("bash -lc claude", "skipped-shell"),
-        ] {
-            let got = spawn_inject_prompt(id, configured, "remote prompt", &now_iso_utc(), Duration::from_millis(50));
-            assert_eq!(got, want, "`{configured}`");
-        }
-        assert!(listener.accept().is_err(), "no connection was ever made to the target's socket");
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
     }
 
@@ -9092,7 +8810,7 @@ mod tests {
     #[test]
     fn effective_origin_denies_loopback_once_a_token_is_configured_and_not_valid() {
         // The "coupled loopback trust" amendment: once ANY token is
-        // configured, loopback keeps its old free pass ONLY with a valid
+        // configured, loopback keeps its classification ONLY with a valid
         // bearer — an absent or wrong one is coerced to Unknown, which
         // `should_deliver_now` already treats as never-trusted.
         assert_eq!(
@@ -9132,7 +8850,7 @@ mod tests {
     fn origin_for_inject_downgrades_loopback_once_the_request_is_signed() {
         // The P-S6 narrowing itself: a verified per-request signature is by
         // construction a REMOTE node (an ssh tunnel makes it LOOK loopback
-        // to `peer_addr()`), so it loses Loopback's free pass — coerced to
+        // to `peer_addr()`), so it loses Loopback's standing — coerced to
         // `Unknown`, `should_deliver_now`'s existing fail-safe arm, not a
         // fourth `ConnOrigin` kind.
         assert_eq!(origin_for_inject(ConnOrigin::Loopback, true), ConnOrigin::Unknown);
@@ -9381,10 +9099,9 @@ mod tests {
     //
     // `spawn_child_command` and `resolve_bounded_spawn_cwd` are `do_spawn`'s
     // own pure-ish halves, factored out exactly so they're testable without a
-    // real OS-level spawn — same "never through `do_spawn` itself" precedent
-    // `spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_
-    // mailbase`'s doc comment states for `current_exe()` resolving to the
-    // TEST binary under `cargo test`.
+    // real OS-level spawn — same "never through `do_spawn` itself" precedent:
+    // `current_exe()` resolves to the TEST binary under `cargo test`, so no
+    // test drives that spawn.
 
     /// GATED on native Windows with its PROVEN reason: the fixture proves the
     /// child's environment by spawning `/bin/sh` and comparing `printf`'s exact
@@ -9568,9 +9285,9 @@ mod tests {
     // WHICH rung resolved the caller) covers token-rung-admitted /
     // addr-rung-refused, both directly against fixtures — never through
     // `message_send`/`do_spawn`, which would actually launch a process (see
-    // `spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_mailbase`'s
-    // own doc comment on why no test in this file drives `do_spawn`'s real
-    // OS-level spawn). The integration tests below drive `message_send`
+    // no test in this file drives `do_spawn`'s real OS-level spawn, because
+    // `current_exe()` under `cargo test` is the test binary). The integration
+    // tests below drive `message_send`
     // itself for the REFUSAL branches, which never reach `do_spawn` at all.
 
     #[test]
@@ -10238,8 +9955,7 @@ mod tests {
     /// (the two-line `nodes.iter().find(name).map(|p| (p,
     /// NodeRung::Signature))`) — really admits it. This file's own
     /// established discipline (see the doc comment atop the "Spawn gate
-    /// table" section above, and `spawn_inject_prompts_success_branch_
-    /// files_the_opening_turn_into_the_mailbase`'s) is that NO test here drives
+    /// table" section above) is that NO test here drives
     /// `do_spawn`'s real process spawn, because `std::env::current_exe()`
     /// inside a `cargo test` binary is the TEST binary, not a real `aoide`
     /// — calling `message_send`'s Spawn arm all the way through on the
@@ -10807,7 +10523,7 @@ mod tests {
         assert_eq!(entries[0]["text"], "inject me");
 
         // Audited through the single Door::A2a log, "pending" status — every
-        // outcome (queued/auto-delivered/error) routes through the SAME
+        // outcome (queued/delivered/error) routes through the SAME
         // audit path `send` already uses (`conduct::graph::send::
         // audit_send`), never a second logging path.
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
@@ -11519,222 +11235,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_mailbase() {
-        // Messaging plan P-M1, the bounce-fix hole: `message/send` with NO
-        // contextId (or `spawn_asked`) resolves to `SendAction::Spawn` and
-        // `do_spawn` — a brand-new session's FIRST turn is typed by
-        // `spawn_inject_prompt`, the SECOND (and last) mailbase-filing site
-        // alongside `deliver_local`'s (see its own doc comment for why it
-        // can't reach `deliver_local`).
-        //
-        // This drives `spawn_inject_prompt` directly rather than through
-        // `message_send`/`do_spawn`: `do_spawn` launches the configured
-        // agent via `std::env::current_exe()`, which inside `cargo test` IS
-        // THE TEST BINARY ITSELF — invoking it with `conduct --agent a2a
-        // --id … -- …` would hand those words to the test harness as
-        // positional filter args and actually re-run (a subset of) this
-        // suite as a detached child process, never bind the real socket,
-        // and time out this test's 3s retry budget for nothing. No test in
-        // this file exercises `do_spawn`'s OS-level spawn for that reason
-        // (there is no `AOIDE_A2A_BIN`-style override seam for it) —
-        // `spawn_inject_prompt` is the exact function the mailbase-filing
-        // code lives in, and driving it directly against a stand-in
-        // listener is the same boundary `aoide_conduct::graph::conduct`'s
-        // own PTY-injection test already uses for the underlying
-        // socket-write mechanism (see `spawn_inject_prompt`'s doc comment).
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-
-        let id = "spawn-inject-target";
-        let launch_at = now_iso_utc();
-        // READINESS comes before the write, so this test stages the fact the
-        // hook door would have written: the target harness's own session,
-        // parented to the wrapper. Without it the gate refuses and nothing is
-        // typed — the same staged-roster shape `wait_ready` reads live.
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let stage = root.join("stage");
-        std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        write_stage(
-            &sessions_path(),
-            &SessionsFile {
-                schema_version: "0".to_string(),
-                sessions: vec![SessionRecord {
-                    session_id: "claude-child".to_string(),
-                    state: "idle".to_string(),
-                    parent_session_id: Some(id.to_string()),
-                    agent: "claude".to_string(),
-                    // THIS launch's `SessionStart`, stamped after it began —
-                    // the only child record that may satisfy the hook arm.
-                    session_start_at: Some(launch_at.clone()),
-                    harness_session_id: Some("claude-child".to_string()),
-                    ..Default::default()
-                }],
-            },
-        )
-        .unwrap();
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-
-        let acc = std::thread::spawn(move || {
-            let mut conn = accept_one(&listener, "the spawned session's opening turn is typed");
-            // Exactly the text, no more: the submit keystroke must NOT be
-            // part of this write.
-            let mut text = Vec::new();
-            let mut chunk = [0u8; 64];
-            while text.len() < "hello new session".len() {
-                let n = conn.read(&mut chunk).unwrap();
-                assert!(n > 0, "the writer closed before the text arrived");
-                text.extend_from_slice(&chunk[..n]);
-            }
-            let before_submit = Instant::now();
-            let mut submit = [0u8; 8];
-            let n = conn.read(&mut submit).unwrap();
-            (text, submit[..n].to_vec(), before_submit.elapsed())
-        });
-
-        assert_eq!(spawn_inject_prompt(id, "claude", "hello new session", &launch_at, Duration::from_millis(500)), "delivered");
-        let (text, submit, gap) = acc.join().unwrap();
-        assert_eq!(
-            String::from_utf8(text).unwrap(),
-            "hello new session",
-            "the text goes out alone — no keystroke concatenated into it"
-        );
-        assert_eq!(
-            String::from_utf8(submit).unwrap(),
-            "\r",
-            "claude's own submit key (CLAUDE_PROFILE.submit_key), never a hand-rolled `\\n`"
-        );
-        // And it is a SEPARATE, LATER write, not a lucky read boundary: the
-        // writer sleeps `SUBMIT_KEYSTROKE_DELAY` (300ms in a non-test build of
-        // aoide-conduct, which is what a dependent crate compiles) between the
-        // two writes, so the submit byte cannot arrive with the text.
-        assert!(
-            gap >= Duration::from_millis(150),
-            "the submit keystroke arrived {gap:?} after the text — one write, not two"
-        );
-
-        let entries = aoide_storage::mail::read_base().unwrap();
-        assert_eq!(entries.len(), 1, "the spawned session's opening turn is filed exactly once");
-        assert_eq!(entries[0].envelope.header.to.name, id);
-        assert_eq!(entries[0].envelope.text, "hello new session");
-        assert_eq!(entries[0].envelope.header.from.name, "", "no caller identity to offer — #51's scope");
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-    }
-
-    /// The opening turn's WRITE SHAPE, on its own: the text, then the target
-    /// profile's own submit key as a SECOND write after the keystroke gap —
-    /// never `{prompt}\n`, which is what this door used to type.
-    ///
-    /// The configured program names no profile at all, so this also pins the
-    /// resolution's fallback (claude's key, through `profile_for_agent`) and
-    /// drives the READINESS arm such a target gets: output quiescence, since it
-    /// has no `SessionStart` hook to fire — the wrapper's own log appears and
-    /// then stands still.
-    #[test]
-    fn the_opening_turn_writes_the_text_then_the_targets_submit_key_as_a_second_write() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-shape-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(root.join("stage")).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
-
-        let id = "spawn-inject-shape";
-        let launch_at = now_iso_utc();
-        // The wrapper's own record, with a log that has already spoken — what
-        // a hookless target's readiness is read off.
-        let log = root.join("wrapper.log");
-        std::fs::write(&log, "eidolon$ ").unwrap();
-        let mut wrap = fixture_session(id, "idle", None);
-        wrap.log_path = Some(log.to_string_lossy().into_owned());
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: "0".to_string(), sessions: vec![wrap] },
-        )
-        .unwrap();
-
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-
-        let expected = aoide_protocol::agents::agent_profile("eidolon").expect("a registered harness").submit_key;
-        let acc = std::thread::spawn(move || {
-            let mut conn = accept_one(&listener, "the opening turn's text-then-keystroke write");
-            let mut text = Vec::new();
-            let mut chunk = [0u8; 64];
-            while text.len() < "first turn".len() {
-                let n = conn.read(&mut chunk).unwrap();
-                assert!(n > 0, "the writer closed before the text arrived");
-                text.extend_from_slice(&chunk[..n]);
-            }
-            let before_submit = Instant::now();
-            let mut submit = [0u8; 8];
-            let n = conn.read(&mut submit).unwrap();
-            (text, submit[..n].to_vec(), before_submit.elapsed())
-        });
-
-        // A budget comfortably past the quiescence window the readiness wait
-        // uses for a registered harness with no declarable fact (eidolon).
-        assert_eq!(spawn_inject_prompt(id, "eidolon", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this harness");
-        let (text, submit, gap) = acc.join().unwrap();
-        assert_eq!(String::from_utf8(text).unwrap(), "first turn", "the text, alone");
-        assert_eq!(
-            String::from_utf8(submit).unwrap(),
-            expected,
-            "the target profile's submit key, resolved through the table"
-        );
-        assert!(
-            gap >= Duration::from_millis(150),
-            "the keystroke is a separate, later write — it arrived {gap:?} after the text"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-    }
-
     /// M3/M4, at the read end: what the worker stamped is what `tasks/get`
     /// shows. A record whose opening turn never ran carries `not-ready`, and
     /// that reaches the peer as the task's `status.message` — never a bare
@@ -11787,49 +11287,46 @@ mod tests {
         }
     }
 
-    /// M4, the cost the handler no longer pays: an unready target makes the
-    /// wait run its whole budget. That is exactly why `do_spawn` runs
-    /// `spawn_inject_prompt` on a worker instead of on its connection handler
-    /// — 20s of a `MAX_CONN` slot is `503 server busy` for every other RPC.
+    /// An empty opening turn is not a send: the worker records `skipped-empty`
+    /// and nothing reaches the queue.
     #[test]
-    fn the_readiness_wait_is_the_cost_that_moved_off_the_handler() {
+    fn an_empty_opening_turn_is_skipped_and_queues_nothing() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
         let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-waitcost-{}-{}",
+            "aoide-a2a-empty-turn-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         std::fs::create_dir_all(root.join("stage")).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "empty-turn";
         write_stage(
             &sessions_path(),
-            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
         )
         .unwrap();
 
-        let budget = Duration::from_millis(400);
-        let launch_at = now_iso_utc();
-        let started = Instant::now();
-        let word = spawn_inject_prompt("never-ready", "claude", "hello", &launch_at, budget);
-        let took = started.elapsed();
-        assert_eq!(word, "not-ready");
-        assert!(
-            took >= Duration::from_millis(350),
-            "the wait must spend its budget on an unready target (took {took:?}) — this is the \
-             handler time the worker exists to absorb"
+        opening_turn_worker(
+            id.to_string(),
+            String::new(),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            None,
         );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("skipped-empty"));
+        assert!(!root.join("stage").join("pending.json").exists(), "an empty turn is not a send");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
     }
 
@@ -11873,10 +11370,7 @@ mod tests {
         // human, not typed: the verdict is `held-pending`, never `pending`.
         opening_turn_worker(
             id.to_string(),
-            "eidolon".to_string(),
             "hi".to_string(),
-            now_iso_utc(),
-            Duration::from_millis(50),
             audit_log.clone(),
             OpeningTurnSlot::acquire().expect("a slot"),
             None,
@@ -11889,10 +11383,7 @@ mod tests {
         aoide_conduct::graph::stamp_opening_turn(id, "delivered");
         opening_turn_worker(
             id.to_string(),
-            "eidolon".to_string(),
             "hi".to_string(),
-            now_iso_utc(),
-            Duration::from_millis(50),
             audit_log,
             OpeningTurnSlot::acquire().expect("a slot"),
             None,
@@ -11964,98 +11455,6 @@ mod tests {
             OpeningTurnSlot::acquire().is_some(),
             "a released slot is reusable"
         );
-    }
-
-    #[test]
-    fn spawn_inject_prompt_types_nothing_and_files_no_receipt_when_the_target_is_never_ready() {
-        // The readiness gate's refusal arm, against a real bound listener: a
-        // socket nobody's harness has announced itself behind is NOT a session
-        // ready to take a turn, so nothing is written into it and no receipt is
-        // filed — the sender's letter stays unacknowledged rather than
-        // acknowledged by a turn that never ran.
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-unready-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(root.join("stage")).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
-        // An empty roster: no harness under this wrapper has started.
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
-        )
-        .unwrap();
-
-        let id = "spawn-inject-unready";
-        let launch_at = now_iso_utc();
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-        listener.set_nonblocking(true).unwrap();
-
-        assert_eq!(spawn_inject_prompt(id, "claude", "hello unready target", &launch_at, Duration::from_millis(150)), "not-ready");
-
-        let deadline = Instant::now() + Duration::from_millis(600);
-        let mut typed_at = false;
-        while Instant::now() < deadline {
-            if listener.accept().is_ok() {
-                typed_at = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert!(!typed_at, "an unready target was typed at");
-        assert!(
-            aoide_storage::mail::read_base().unwrap().is_empty(),
-            "no receipt may be filed for an opening turn that never ran"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-    }
-
-    #[test]
-    fn spawn_inject_prompt_on_an_empty_prompt_files_nothing() {
-        // The existing early return (`if prompt.is_empty() { return; }`) —
-        // an empty prompt never connects at all, so it must not file a
-        // mailbase entry either.
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-empty-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-
-        let launch_at = now_iso_utc();
-        assert_eq!(spawn_inject_prompt("whatever-id", "claude", "", &launch_at, Duration::from_millis(50)), "skipped-empty");
-        assert!(aoide_storage::mail::read_base().unwrap().is_empty());
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
     }
 
     #[test]
@@ -12283,7 +11682,7 @@ mod tests {
     // The A3 confirm review's finding 4, and the ruling it was handed: the
     // addr/token rails matched a record's `autogate` flag and nothing else, so
     // a machine whose charter line was REMOVED — its record still `autogate` —
-    // kept auto-delivering while its HOME mesh was a charter mesh. The rail
+    // kept earning a yes verdict while its HOME mesh was a charter mesh. The rail
     // carries no signed mesh, so the record is judged by home's rules, and a
     // record that does not answer falls to PENDING: never refused outright,
     // never delivered.
@@ -12505,7 +11904,7 @@ mod tests {
             vec!["read".to_string()];
         assert!(
             !rail_admits(std::slice::from_ref(&record), &record, Some(&read_only), false, "home"),
-            "a line that grants `read` and not `message` never auto-delivers a send"
+            "a line that grants `read` and not `message` never earns a yes verdict for a send"
         );
 
         // The finding's machine: the line is GONE, the record still `autogate`
@@ -12565,7 +11964,7 @@ mod tests {
 
         let result = boxed.send("removed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
         assert!(result.is_ok(), "the door ANSWERS a rail it does not deliver for: {result:?}");
-        assert_eq!(boxed.delivered(), None, "a record off the charter's line does not auto-deliver");
+        assert_eq!(boxed.delivered(), None, "a record off the charter's line earns no yes verdict");
         let pending = boxed.pending();
         assert_eq!(pending.len(), 1, "it falls to the operator's queue instead: {pending:?}");
         assert_eq!(
@@ -12774,7 +12173,7 @@ mod tests {
     // `peer_addr()` looking exactly like a genuinely local caller — the top
     // risk the ssh-transport lane's plan names explicitly. These two tests
     // are the pin: a signed, non-autogate node over a LOOPBACK connection
-    // must NOT get the free pass a real local caller gets (this is the
+    // must NOT get the standing a real local caller gets (this is the
     // regression a tunnel would otherwise introduce), while a signed,
     // autogate-marked node over the same loopback connection keeps
     // delivering (the like-for-like restoration — narrowing must not cost
@@ -12799,7 +12198,7 @@ mod tests {
         std::env::remove_var("AOIDE_SESSION_ID");
 
         // Paired, verified, NOT autogate-marked — a signed send from this
-        // node must queue, never auto-deliver, whatever the connection's
+        // node must queue, whatever the connection's
         // own origin looks like.
         let mut signed_node = fixture_node("tunneled-node", "http://10.0.0.9:8710/", false);
         signed_node.verified = true;
@@ -13541,7 +12940,7 @@ mod tests {
         let task = result.expect("a valid bearer still resolves the real Inject decision");
         assert_eq!(task["id"], real_id);
         assert_eq!(task["status"]["state"], "submitted");
-        assert!(real_listener.accept().is_err(), "not auto-delivered — held pending, same as before #50");
+        assert!(real_listener.accept().is_err(), "not delivered — held pending, same as before #50");
 
         let pending: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
@@ -13700,7 +13099,7 @@ mod tests {
         // necessarily instant delivery: a non-Valid server-wide bearer still
         // coerces `effective_origin` to `Unknown` (the pre-existing,
         // 2026-08-19 amendment — unrelated to #50), and `should_deliver_now`
-        // never auto-delivers on `Unknown` regardless of autogate (fail-safe
+        // never earns a yes verdict on `Unknown` regardless of autogate (fail-safe
         // pin: `should_deliver_now_covers_every_origin_autogate_combination`).
         // So this send is correctly held PENDING — the proof that autogate
         // exempted it from the #50 guard is that it reaches the real
@@ -13784,7 +13183,7 @@ mod tests {
 
         // The proof this reached REAL Inject machinery (not the #50 guard):
         // `pending.json` carries the queued entry, exactly like an
-        // authenticated-but-not-auto-delivered send does.
+        // authenticated-but-not-delivered send does.
         let pending: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
@@ -15512,7 +14911,7 @@ mod tests {
 
     /// A broker secret whose stored value is EMPTY must read as a resolve
     /// failure: an empty expected bearer is the "no token configured" signal,
-    /// and treating it so would restore the loopback free pass.
+    /// and treating it so would restore loopback's standing.
     #[cfg_attr(windows, ignore = "the fixture stores through the built-in `file` backend, whose template is the POSIX preset `cat ...`")]
     #[test]
     fn resolve_inbound_bearer_fails_closed_on_an_empty_resolved_secret() {

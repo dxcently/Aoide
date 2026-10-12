@@ -242,8 +242,8 @@ by decision — no embedded database yet
   `skip_serializing_if` false, so every record written before it stays
   byte-identical): whether this session's wrapped command IS a shell, written
   by the conducting process at registration from its own argv. It exists so a
-  lane that refuses to type a line into a shell — the ping-back, the
-  doorbell's PTY arm, the A2A door's injects and spawn arm — can read that
+  lane that refuses to type a line into a shell — the ping-back and the
+  doorbell's PTY arm — can read that
   answer off a record instead of trusting the `agent` label, which a caller
   chooses freely (`--agent pi -- bash`). Re-registration re-stamps it, so an
   id re-conducted as a harness stops claiming to be one.
@@ -729,21 +729,20 @@ by decision — no embedded database yet
   a tested library function only; `send --to`'s live call site still
   calls plain `resolve` (the same "land the function, wire a caller later"
   order this module's own tier-5 `node/<rest>` grammar went through).
-- `mail` — the addressed, signed, append-only mailbase (messaging plan
-  P-M1, `docs/architecture/MAIL.md`, CONTRACTS.md §4's `state/mail/`
-  subsection): `base.jsonl`/`cursors.json`/`seen.jsonl` under
-  `state/mail/`, one entry per envelope (header, text, ed25519 `sig`,
-  sha256 `msgid` over the signed bytes — MAIL.md's "The envelope" is the
-  formula). Every write funnels through one `with_lock` choke point —
-  under `fs::try_stage_lock`, migrate a legacy `inbox.json` if not yet
-  done (skipping any row whose `msgid` is already in `seen.jsonl`, so a
-  retry after a crash mid-migration never re-files one), truncate any torn
-  tail, append, fsync, then append `seen.jsonl` — so a crash between the
-  two appends is re-accepted next time, never lost. `mail::file_receipt` is the shared seam both `conduct`'s
-  `deliver_local` and the A2A door's `spawn_inject_prompt` file a
-  delivered message through; `mail::file_letter` is `mail send`'s own
-  engine. Keep-all: `mail rm --older-than` is the only pruning, and it
-  never touches `seen.jsonl`.
+- `mail` — the addressed, signed, append-only mailbase (messaging plan P-M1,
+  `docs/architecture/MAIL.md`, CONTRACTS.md §4's `state/mail/` subsection):
+  `base.jsonl`/`cursors.json`/`seen.jsonl` under `state/mail/`, one entry per
+  envelope (header, text, ed25519 `sig`, sha256 `msgid` over the signed bytes —
+  MAIL.md's "The envelope" is the formula). Every write funnels through one
+  `with_lock` choke point — under `fs::try_stage_lock`, migrate a legacy
+  `inbox.json` if not yet done (skipping any row whose `msgid` is already in
+  `seen.jsonl`, so a retry after a crash mid-migration never re-files one),
+  truncate any torn tail, append, fsync, then append `seen.jsonl` — so a crash
+  between the two appends is re-accepted next time, never lost.
+  `mail::file_receipt` is the shared seam `conduct`'s `deliver_local` files a
+  delivered message through; `mail::file_letter` is `mail send`'s own engine.
+  Keep-all: `mail rm --older-than` is the only pruning, and it never touches
+  `seen.jsonl`.
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key

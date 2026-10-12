@@ -182,10 +182,9 @@ pub use self::send::{
 // the target's own submit key ALONE (`write_delivery`), plus the profile
 // resolver that picks that key (`profile_for_agent`, claude's fallback for an
 // unregistered name) and the gap itself (`SUBMIT_KEYSTROKE_DELAY`). `pub` for
-// the third caller, in another crate: `aoide-server`'s
-// `a2a::spawn_inject_prompt` used to hand-roll `{prompt}\n` at a spawned
-// session's socket, which is a keystroke spelling of its own — and the wrong
-// one for every harness whose `submit_key` is `\r`.
+// the test-support rig in another crate. A hand-rolled `{prompt}\n` at a
+// session's socket is a keystroke spelling of its own, and the wrong one for
+// every harness whose `submit_key` is `\r`.
 pub use self::send::{write_delivery, SUBMIT_KEYSTROKE_DELAY};
 pub use self::permit::profile_for_agent;
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};
@@ -235,9 +234,9 @@ pub use self::spawn::build_conduct_args;
 pub use self::spawn::{live_run_for, live_run_refusal};
 // `wait_ready`/`READY_BUDGET` — WHEN a just-launched target may be typed at,
 // and for how long the tree waits for it (the per-harness fact is
-// `AgentProfile::readiness`). `pub` for the third first-turn caller outside
-// this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
-// would otherwise be the one injection path with no readiness gate at all.
+// `AgentProfile::readiness`). `pub` for first-turn callers outside this crate.
+// The A2A door holds its opening turns for a human and never waits, so none
+// exists today.
 pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
 // `harness_session_started` — the hook arm's readiness PREDICATE itself
 // (`wait_ready`'s `Readiness::Hook` clause), `pub` for the door-policy

@@ -376,37 +376,24 @@ nodes:
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where
   secrets are still compared).
-- **A verified signature outranks loopback for the Inject delivery
-  gate.** A loopback-terminating transport hop — an ssh `-L` forward
-  is the case that motivates this — delivers a remote node's request
-  from ITS OWN end's loopback, so the connection's observed origin
-  classifies as loopback exactly like a genuinely local caller. A
-  request whose signature this door already verified is, by
-  construction, never a local caller, so it is treated as remote for
-  the auto-deliver-vs-pending question regardless of which address it
-  arrived from: `state/nodes.json`'s per-node `autogate` flag AND the
-  caller's grant in the mesh its own request SIGNED for (P-CHARTER: the flag
-  opens the rail, and `message` on the charter's line — or on the paired
-  record, where no charter is shaped — is what the flag then delivers on;
-  CONTRACTS.md §6's rail table), or the remote-parent rule below, decides
-  whether a signed node's send still auto-delivers — never the connection
-  origin. An unsigned request's loopback trust is unaffected —
-  this narrowing only ever removes a free pass a signature was never
-  entitled to in the first place.
-- **A remote parent steers the child it spawned, and the tunnel is its
+- **Loopback earns nothing by its address, and a verified signature earns
+  nothing at the door either.** A loopback-terminating transport hop (an ssh
+  `-L` forward is the case that motivates this) delivers a remote node's
+  request from ITS OWN end's loopback, so the observed origin classifies as
+  loopback exactly like a genuinely local caller. The door therefore parks
+  every Inject in `state/stage/pending.json` whatever the origin, and whether
+  or not the request is signed (CONTRACTS.md §6). The signature, the
+  `autogate` flag, the mesh the request SIGNED for and the remote-parent rule
+  below feed only the audit: the `held-door` line records which rail would
+  have delivered.
+- **A remote parent's steer waits for a human, and the tunnel is its
   production shape.** The Inject arm matches the `metadata["aoide/from"]`
   claim against the target record's `remoteParent`: the caller must have
   signed with a paired node's key this door verified, that key must equal the
   record's stored `remoteParent.key`, and the claim must equal its stored
-  `remoteParent.sessionId`. A match delivers WITHOUT pending
-  (`autogate-remote-parent`) on both rails the signature-rung `autogate` flag
-  rides — the exemption from `origin_for_inject`'s downgrade, which is what
-  carries the loopback/`ssh -L` shape above, and the fold into
-  `autogate_match`, which is what carries a directly-addressed
-  `ConnOrigin::Remote` caller. Both are load-bearing; the node's own
-  `autogate` flag need not be set, the door-wide bearer is still checked
-  first, and there is no off switch (unpairing the node or the child ending
-  are the levers — `node allow <n> spawn off` stops only new children).
+  `remoteParent.sessionId`. A match is a rail that would deliver, and the
+  `held-door` line says so; the send still parks in `pending.json` for the
+  approver, tunneled or not.
 - **Identity IS the key; the name is a label (#63 P-ID5).**
   `X-Aoide-Node` carries the caller's own self name
   (`aoide_storage::display::local_host_name()`), the same value the
@@ -766,24 +753,14 @@ forward is a pipe, not a party to the protocol.
   control socket. Nothing about a tunnel is ever allowed to become a
   resident daemon. A bare shell with no conducted session gets a
   process-scoped tunnel instead — per-command rather than persistent.
-- **The door's own loopback trust narrows so a tunneled request cannot
-  silently auto-deliver.** Every tunneled connection reaches the far door's
-  socket as loopback — that is what a forward IS. The door treats an
-  UNSIGNED loopback connection as implicitly trusted for Inject delivery (a
-  sound stance behind a bind that only a genuinely local caller could ever
-  reach); a tunnel is a way to reach that same socket from somewhere else,
-  so a request carrying a verified per-request signature never rides that
-  trust — it is a remote node by construction, and `a2a.rs::origin_for_
-  inject` strips loopback's free pass from it before the delivery decision
-  runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
-  auto-delivery for a node the operator already marked that way — the flag
-  AND the caller's grant in the mesh its request SIGNED for (P-CHARTER: the
-  flag opens the rail, `message` is what it delivers on) — exactly
-  the like-for-like an operator's existing grant expects, and a matched
-  remote-parent claim does the same for the node that spawned this very
-  session — the tunneled parent is the shape that rule exists to serve.
-  `via`/`--via` are
-  safe to use against a real node.
+- **The door grants a tunneled request no delivery standing.** Every
+  tunneled connection reaches the far door's socket as loopback, because that
+  is what a forward is, so the observed address says nothing about the
+  sender. The door parks every Inject in `pending.json`, tunneled or not and
+  signed or not; no signature, `autogate` flag or remote-parent claim changes
+  that (CONTRACTS.md §6). Those rails survive only as the `held-door` audit
+  verdict. `via`/`--via` are safe to use against a real node for that reason:
+  what arrives is queued for a human, never typed.
 
 ## Mesh declaration
 

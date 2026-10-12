@@ -93,7 +93,7 @@ const READY_QUIET: Duration = Duration::from_millis(100);
 /// than sharing it across modules. `pub` for ONE caller in another crate —
 /// `aoide-server`'s A2A door reads the harness its configured `spawnAgent`
 /// command names off this, to look up that harness's readiness fact instead of
-/// guessing one (`a2a::spawn_inject_prompt`).
+/// guessing one.
 pub fn command_basename(program: &str) -> String {
     std::path::Path::new(program)
         .file_name()
@@ -483,8 +483,8 @@ fn resolve_windowed_argv(
 /// until `budget` elapses. Returns whether one answered.
 ///
 /// A successful `UnixStream::connect` — not bare existence — is the signal,
-/// for the same reason `reap::sweep_orphan_sockets` and the a2a door's
-/// `spawn_inject_prompt` both insist on it: a SIGKILLed conduct leaves its
+/// for the same reason `reap::sweep_orphan_sockets` insists on it: a SIGKILLed
+/// conduct leaves its
 /// socket FILE behind until the reaper sweeps it (~12s), so an existence
 /// check against a reused `--id` can see the corpse of the PREVIOUS session
 /// and report the new one registered before it has even forked.

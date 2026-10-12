@@ -74,7 +74,9 @@ aoide mcp serve [--stdio] [--json]
   stdin closes (exit 0) or an I/O error (exit 1,
   `eprintln "aoide mcp serve: …"`). Implementation:
   `pkgs/aoide/crates/server/src/mcp.rs`.
-- **Notes:** not gated. Off by default (`aoide.mcp.enable = false`); spawned
+- **Notes:** the server itself is not gated, but a gated `send` through it
+  always parks, since this door cannot approve. Off by default
+  (`aoide.mcp.enable = false`); spawned
   per session as `aoide mcp serve --stdio`. One implementation, two doors —
   the tool list cannot drift from `schema --json`.
 
@@ -292,7 +294,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   the pre-token-open behavior). Per request: `state/stage/sessions.json`
   (task/session state), `state/nodes.json` (signed-request verification —
   the signature tried against every `verified` node's stored pubkey — and
-  the autogate match: by caller address, by an autogate-marked node's own
+  the autogate rails: by caller address, by an autogate-marked node's own
   `tokenFile`, or by the resolved signed node's `autogate` flag; read fresh
   off disk per request). The `aoide-a2a` systemd unit
   (`modules/nucleus/aoided.nix`) sets
@@ -300,8 +302,8 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   `AOIDE_A2A_NODE_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
 - **Writes:** an audit record (door `a2a`) for every handled request, spawn,
   and SSE open/close in the audit log; the `message/send` inject path reuses
-  `send`'s `session_send`, so a held send writes the session's
-  `pending.json` and a delivered one writes the session's control socket.
+  `send`'s `session_send`, so every inject writes the session's `pending.json`
+  and nothing is written to the session's control socket.
 - **Output:** blocks in a thread-per-connection `TcpListener` accept loop
   (`pkgs/aoide/crates/server/src/a2a.rs`); announces
   `aoide a2a: listening on http://<bind>:<port>/` on stderr; a bind failure is
@@ -313,31 +315,31 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     state maps `working→working`, `stopped→completed`,
     `awaiting→input-required` (`auth-required` when `needsSudo`),
     `idle→submitted`, `done→completed`. Unknown id → `-32001`.
-  - `message/send` — inject into a known conductable session (`contextId`),
-    or spawn when `metadata["aoide/spawn"] == true` or no contextId: re-execs
-    the aoide binary as `conduct --agent a2a --id a2a-<pid>-<secs>-<n> --
+  - `message/send` — inject into a known conductable session (`contextId`), or
+    spawn when `metadata["aoide/spawn"] == true` or no contextId: re-execs the
+    aoide binary as `conduct --agent a2a --id a2a-<pid>-<secs>-<n> --
     <spawnAgent>` (`setsid`, stdio nulled, reaped on a parked thread,
-    `$AOIDE_AUDIT_LOG` passed down), then types the prompt as its first turn
-    over the conduct socket with a connect-retry budget. A loopback caller's
-    inject auto-delivers; non-loopback queues pending unless it matches an
-    `autogate` node (address, per-node token, or the resolved signed node's
-    own flag). Once a token is configured, loopback stops being a trust
-    signal (unauthenticated → never auto-delivers). Spawn answers to
-    pairing alone: the caller must resolve on the Signature rung — a
-    verified per-request signature against some `verified` node's stored
-    pubkey — with `spawn` among the caller's grants IN THE MESH ITS REQUEST
-    NAMES; every refusal is
-    `-32006` with a shape-specific taught message (pair first / sign the
-    request / `node allow <name> spawn on --mesh <m>`), and the door-wide bearer
-    never reaches the spawn arm. Signed-request failures carry their own
-    codes — `-32007` (malformed or unverifiable signature, partial header
-    set), `-32008` (timestamp skew), `-32009` (nonce replay). **A signed
-    request from a `>= 0.0.26` node to a `< 0.0.26` door is always this
-    `-32007`**: the sixth (mesh) field of the canonical string has no arm in
-    the older verifier, which rebuilds five fields and compares bytes
-    ([[Node-Federation#Mixed versions — the wire is one-way]]). Spawn unconfigured →
-    `-32004`; session not conductable → `-32004`; unknown contextId →
-    `-32001`. A held-pending send returns a `submitted` Task immediately.
+    `$AOIDE_AUDIT_LOG` passed down). The prompt is queued in `pending.json` as
+    the spawned session's opening turn, attributed `node:<name>`, and is never
+    typed; an empty prompt queues nothing. Every inject parks in `pending.json`,
+    loopback included. The autogate rails still run and write a `held-door`
+    audit line when they would have delivered; once a token is configured, a
+    caller that did not present it is never audited that way. Spawn answers to
+    pairing alone: the caller must resolve on the Signature rung — a verified
+    per-request signature against some `verified` node's stored pubkey — with
+    `spawn` among the caller's grants IN THE MESH ITS REQUEST NAMES; every
+    refusal is `-32006` with a shape-specific taught message (pair first / sign
+    the request / `node allow <name> spawn on --mesh <m>`), and the door-wide
+    bearer never reaches the spawn arm. Signed-request failures carry their own
+    codes — `-32007` (malformed or unverifiable signature, partial header set),
+    `-32008` (timestamp skew), `-32009` (nonce replay). **A signed request from
+    a `>= 0.0.26` node to a `< 0.0.26` door is always this `-32007`**: the sixth
+    (mesh) field of the canonical string has no arm in the older verifier, which
+    rebuilds five fields and compares bytes ([[Node-Federation#Mixed versions —
+    the wire is one-way]]). Spawn unconfigured → `-32004`; session not
+    conductable → `-32004`; unknown contextId → `-32001`. A parked send returns
+    a `submitted` Task immediately; `tasks/get` and the SSE stream show its real
+    state once an approver acts.
   - `aoide/graphSummary` — `{schemaVersion: "0", instance: {name, url,
     emittedAt}, graph}` wrapping the same resolved graph document bare
     `graph` renders (CONTRACTS.md §7) — every stage mutation restages
@@ -386,8 +388,9 @@ aoide node add <name> <url|poll> [--autogate] [--no-verify]
   never silently repointed.
 - **Output:** `"registered node \`<name>\` → <url>[ (autogate)] (<n> total)"`,
   data `{node: {name, url, autogate, tokenFile?, bearerSecret?, addedAt}, count}`.
-- **Notes:** `--autogate` marks the node trusted: its inbound `message/send`
-  on this instance's A2A door auto-delivers instead of queueing pending,
+- **Notes:** `--autogate` marks the node for audit: its inbound `message/send`
+  on this instance's A2A door writes a `held-door` line when its rails match,
+  and the send still parks in `pending.json`,
   matched by caller address or by the per-node `--token-file` secret (the form
   that survives a reverse proxy/tunnel, where every caller's address is the
   proxy's) — that is what THIS node must present TO us. `--bearer-secret

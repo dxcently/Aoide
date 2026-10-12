@@ -101,8 +101,8 @@ threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
   (auto-rename) and, since aoide owns the PTY, may push an OSC-2 title
   sequence to the real terminal so the window title tracks the flow. `--to
   <name>` resolves a local id/tail4/petname or a `node/<query>` instead of a
-  raw `--id`; a node-resolved send always attempts delivery over A2A rather
-  than queuing locally — see [[Node-Federation]].
+  raw `--id`; a node-resolved send is always attempted over A2A rather than
+  queued locally; the receiving node parks it — see [[Node-Federation]].
 - **Title discovery** — a small hyprctl step (`hyprctl clients -j`, match the
   session's process to a client) populates `windowAddress` and reads the
   live chat title claude already writes to its terminal window, so
@@ -348,42 +348,42 @@ through.
     cannot be asked at the session's own socket: a parent on another box.
     `aoide send --to <node>/<session>` carries its KERNEL-ATTESTED caller as
     the `metadata["aoide/from"]` claim (the same resolution `node spawn`
-    stamps into a child's `remoteParent`), and the receiving door delivers
-    WITHOUT pending only when all three agree: the request signed with a
-    paired node's key this door verified, that key is the target record's
-    stored `remoteParent.key`, and the claim equals its stored
-    `remoteParent.sessionId`. A claim alone proves nothing — the signature
-    rung is what makes it a claim rather than a wish — so an unsigned or
-    bearer-only caller with a claim gets one audit line and its send holds
-    pending like any stranger's. The hit rides gate label
-    `autogate-remote-parent` and does NOT exempt the door-wide bearer, which
-    is still checked first. It has no off switch either: neither the node's own
-    `autogate` flag nor the box-wide `AOIDE_CONDUCT_AUTOGATE` gates it, so the
-    levers against a node that already spawned a child are unpairing it
-    (`node remove`) or the child ending — `node allow <n> spawn off` stops only
-    NEW children. An unruly claim (an id the far door could never
-    have stamped) is dropped by the sender — one warning line, `not claiming
-    parent: <reason>` — and the send goes out unclaimed rather than failing.
-    One thing overrides every rail of it: a TARGET conducting a shell, whose
-    line is held pending whoever asks (`shell-wrapped`, N1) — a submitted
-    line in a shell's input runs. `CONTRACTS.md` §6 carries the full rule.
-  - **Autogate record — a registered node's own sends.** The same door's third
-    delivery rail, and the only one behind neither a signature nor a parent
-    claim: the Inject arm auto-delivers a send whose source ADDRESS resolves to
-    an `autogate` record's `url`, or whose presented bearer matches that
-    record's own `TokenFile`. It names no mesh (there is no signed request to
-    name one), so the door judges the matched RECORD by its HOME mesh's rules —
-    where a charter governs `[pairing] homeMesh`, the record must be `verified`
-    and its key must be on the charter's line with `message`, minus this box's
-    own `node allow … message off --mesh <home>`; where home is charter-shaped
-    with an undecidable operator key nothing on this rail delivers; where home
-    is a pair mesh the record's own flag is the whole rule, exactly as it
-    always was; and where `config.toml` will not load at all the rail PENDS
-    too — home is READ (`home_mesh_fallible`), never answered from the
-    built-in default. A record that does not answer falls to PENDING — never a
-    refusal, never a delivery — so the knock still reaches the operator as an
-    entry in `session pending list`, attributed `node:<name>`. `aoide mesh`
-    lists, on the home mesh's charter row, the records this rail answers for.
+    stamps into a child's `remoteParent`). The receiving door matches the
+    claim only when all three agree: the request signed with a paired node's
+    key this door verified, that key is the target record's stored
+    `remoteParent.key`, and the claim equals its stored
+    `remoteParent.sessionId`. A match is audited as `held-door`, and the send
+    still parks: the A2A door cannot approve, so a remote parent's steer waits
+    for a human or the conductor like every other remote send. A claim alone
+    proves nothing — the signature rung is what makes it a claim rather than a
+    wish — so an unsigned or bearer-only caller with a claim gets one audit
+    line and parks like any stranger's. The door-wide bearer is still checked
+    first. The levers against a node that already spawned a child are
+    unpairing it (`node remove`) or the child ending; `node allow <n> spawn off`
+    stops only NEW children. An unruly claim (an id the far door could never
+    have stamped) is dropped by the sender — one warning line,
+    `not claiming parent: <reason>` — and the send goes out unclaimed rather
+    than failing. A shell target needs no rule of its own at this door, since
+    nothing here types into a session. The local ping-back and doorbell still
+    refuse shell targets through `auto_type_refusal`; `CONTRACTS.md` §6 carries
+    the full rule.
+  - **Autogate record — a registered node's own address or token.** The
+    Inject arm matches a send whose source ADDRESS resolves to an `autogate`
+    record's `url`, or whose presented bearer matches that record's own
+    `TokenFile`. The match admits the caller past the #50 uniform-response
+    guard, so the send is a real pending entry attributed `node:<name>`. It
+    names no mesh (there is no signed request to name one), so the door judges
+    the matched RECORD by its HOME mesh's rules — where a charter governs
+    `[pairing] homeMesh`, the record must be `verified` and its key must be on
+    the charter's line with `message`, minus this box's own
+    `node allow … message off --mesh <home>`; where home is charter-shaped with
+    an undecidable operator key the verdict is no; where home is a pair mesh
+    the record's own flag is the whole rule; and where `config.toml` will not
+    load at all the verdict is no too — home is READ (`home_mesh_fallible`),
+    never answered from the built-in default. That verdict decides only whether
+    the audit says `held-door`. The send parks either way, so the knock reaches
+    the operator as an entry in `session pending list`. `aoide mesh` lists, on
+    the home mesh's charter row, the records this rail answers for.
 - **Sender provenance.** A delivered payload that NAMES the node (carries a
   letter — a real message, not a bare keystroke answer) is prefixed on its
   first line with `from <sender>: `, where `<sender>` resolves from

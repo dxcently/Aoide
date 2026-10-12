@@ -809,9 +809,9 @@ fn render_charter(charter: &CharterRow) -> String {
     }
     if !charter.autogated.is_empty() {
         line.push_str(&format!(
-            "\n  autogate rail here (unsigned send auto-delivers by address/token): {} — \
+            "\n  autogate rail here (an unsigned send matches by address or token): {} — \
              this charter is what judges it (home mesh): the record verified and its key on \
-             the line with `message` ⇒ delivered, otherwise held PENDING",
+             the line with `message` ⇒ a yes verdict, otherwise held PENDING",
             charter.autogated.join(", ")
         ));
     }

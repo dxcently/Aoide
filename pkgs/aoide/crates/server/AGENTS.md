@@ -27,14 +27,16 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 
 ## Invariants
 
-- **A network door never approves a gated send.** `message/send`'s Inject
-  arm asks `aoide_conduct::graph::door_can_approve(Door::A2a)` before any
-  autogate rail (loopback, token, signed node, IP, remote parent) may
-  deliver. A rail that would have delivered is audited as `held-door` and
-  parks. A spawn's opening turn is held with `hold_pending`, not typed,
-  verdict `held-pending`. The MCP side of the same rule is conduct's. Only the
-  autogate rails' admission (the #50 uniform-response guard) is unchanged.
-  Admission is about who gets an answer; delivery is what this rule closed.
+- **A network door never approves a gated send, and never delivers one.**
+  `message/send`'s Inject arm asks
+  `aoide_conduct::graph::door_can_approve(Door::A2a)`, which is false. Every
+  autogate rail (loopback, token, signed node, IP, remote parent) therefore
+  decides only whether the audit says `held-door`, and the send parks. A spawn's
+  opening turn is held with `hold_pending`, not typed, verdict `held-pending`.
+  The MCP side of the same rule is conduct's. The autogate rails' admission (the
+  #50 uniform-response guard) is unchanged: a matched caller still gets a real
+  queue entry, not the synthetic answer. Admission is about who gets an answer;
+  approval is what this rule withholds.
 
 ## Invariants
 
@@ -245,21 +247,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `aoide_storage::fs::state_dir()` — the SAME un-joined background thread
   makes that call too, so without this floor it would eventually touch the
   real `~/Aoide/state/auto-resume-boot-epoch` on this box.
-- **An `a2a` test fixture that EXPECTS a delivery waits for it through the
-  shared rig — `aoide_test_support`'s `expect_delivery`/`accept_one`/
-  `read_delivery` — never a hand-rolled blocking `accept`/`read_to_end`
-  thread** (that crate's own `AGENTS.md` states the rig's contract, its
-  deadline and its host-neutrality; this bullet is only the reason it is
-  load-bearing HERE). These fixtures bind a listener at the target's control
-  socket and then drive a `message/send` that is supposed to dial it, and
-  they hold `env_lock` — so a delivery this door WITHHELD (a refused arm, a
-  grant the fixture no longer holds, a dial that landed on another path)
-  would park the acceptor thread and take every test queued behind it down
-  with it: a suite that hangs instead of reporting one failure. Write the
-  rig's `what` as the fixture's own expectation ("…is DELIVERED, not held
-  pending"). A fixture that expects SILENCE keeps asserting on a
-  non-blocking `accept().is_err()`, which is already bounded and says the
-  same thing.
+- **An `a2a` test fixture never expects a send to dial a session.** Every
+  network-door send parks, so such a fixture asserts the queue instead:
+  `pending.json` and the audit line. Where a fixture does expect a dial (on the
+  local conduct door), it waits through the shared rig, `aoide_test_support`'s
+  `expect_delivery`/`accept_one`/`read_delivery`, never a hand-rolled blocking
+  `accept`/`read_to_end` thread: those fixtures hold `env_lock`, so a dial that
+  never arrives would park every test queued behind it. The rig's contract is in
+  that crate's own `AGENTS.md`. Write its `what` as the fixture's own expectation
+  ("…is DELIVERED, not held pending"). A fixture that expects SILENCE keeps
+  asserting on a non-blocking `accept().is_err()`, which is already bounded and
+  says the same thing.
 - **`daemon::run_boot_auto_resume` fires exactly ONCE per `run_loop` call,
   strictly BEFORE the tick loop — never move it inside the loop (P-D8).**
   It is a boot-time trigger, not a tick-cadence one: the guard
@@ -413,8 +411,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   canonical-string/verify logic, `aoide-client` holds the signer; this
   crate is verify-only, consistent with "inbound/serve only" above. No
   test in this file drives `do_spawn`'s real OS-level process spawn (an
-  established precedent, `spawn_inject_prompts_success_branch_
-  files_the_opening_turn_into_the_mailbase`'s own doc comment) — the gate
+  established precedent) — the gate
   itself is proven via the pure `may_spawn`/`spawn_admitted`/
   `spawn_refusal` predicates, `verify_signed_request`'s own dedicated test
   section, and `message_send`'s REFUSAL branches only. **P-P5b's own
@@ -523,90 +520,89 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 - **`message_send`'s Inject arm feeds `should_deliver_now` through
   `origin_for_inject` first (P-S6, CONTRACTS.md §6's "Node authentication
   today" standing paragraph) — a VERIFIED signature strips
-  `ConnOrigin::Loopback`'s automatic auto-deliver pass, whatever the
-  connection's own address looks like, UNLESS that node's own signature
-  rung is itself autogate-marked.** An ssh `-L` forward (or any other
-  loopback-terminating proxy) delivers a tunneled node's packets from its
-  own end's sshd, so `classify_origin` sees loopback for a tunneled request
-  exactly like a genuinely local caller — `origin_for_inject(origin,
-  signed_caller.is_some() && !sig_autogate)` closes that gap by coercing
-  the origin fed to `should_deliver_now` to `ConnOrigin::Unknown` for a
-  signed, NON-autogate node (reusing that variant's existing fail-safe arm,
-  the same move `effective_origin` already makes for an invalid door-wide
-  token — no fourth `ConnOrigin` kind). **The `!sig_autogate` guard is not
-  optional plumbing — `should_deliver_now(ConnOrigin::Unknown, _)` ignores
+  `ConnOrigin::Loopback`'s audit standing, whatever the connection's own
+  address looks like, UNLESS that node's own signature rung is itself
+  autogate-marked.** An ssh `-L` forward (or any other loopback-terminating
+  proxy) carries a tunneled node's packets from its own end's sshd, so
+  `classify_origin` sees loopback for a tunneled request exactly like a
+  genuinely local caller — `origin_for_inject(origin,
+  signed_caller.is_some() && !sig_autogate)` closes that gap by coercing the
+  origin fed to `should_deliver_now` to `ConnOrigin::Unknown` for a signed,
+  NON-autogate node (reusing that variant's existing fail-safe arm, the same
+  move `effective_origin` already makes for an invalid door-wide token — no
+  fourth `ConnOrigin` kind). **The `!sig_autogate` guard is not optional
+  plumbing — `should_deliver_now(ConnOrigin::Unknown, _)` ignores
   `autogate_match` entirely (unconditional `false`, see that function's own
   match arm and `uniform_response_guard_never_fires_for_a_per_node_
   autogated_token`'s doc comment for the existing pin), so coercing an
-  autogate-marked signed node's origin to `Unknown` would make it
-  UN-deliverable, the opposite of the restoration this phase owes.** An
-  UNSIGNED request is completely untouched: `origin_for_inject` is the
-  identity function when its `signed` argument is `false`, so a genuinely
-  local caller's loopback trust is exactly as before this phase. The
-  like-for-like half: `autogate_match` folds in a THIRD signal,
-  `sig_autogate` — `resolved_node` matched via `NodeRung::Signature` whose
-  own `Node.autogate` is `true` AND whose caller holds `message` in the mesh
-  its request SIGNED for (`node.autogate && may_message(&caller_grant(..))`,
-  review finding 5) — alongside the existing
-  `ip_autogate`/`token_autogate`, computed AFTER `resolved_node` now (moved
-  down from before it) so this fold can read it; an operator who already
-  marked a node auto-deliver keeps that behavior once it starts signing,
-  riding the ordinary Loopback/Remote arms (which DO consult
+  autogate-marked signed node's origin to `Unknown` would make its held-door
+  verdict unreachable, the opposite of what that verdict must report.** An
+  UNSIGNED request is completely untouched: `origin_for_inject` is the identity
+  function when its `signed` argument is `false`, so a genuinely local caller's
+  loopback standing is unchanged. The like-for-like half: `autogate_match` folds
+  in a THIRD signal, `sig_autogate` — `resolved_node` matched via
+  `NodeRung::Signature` whose own `Node.autogate` is `true` AND whose caller
+  holds `message` in the mesh its request SIGNED for
+  (`node.autogate && may_message(&caller_grant(..))`, review finding 5) —
+  alongside the existing `ip_autogate`/`token_autogate`, computed AFTER
+  `resolved_node` now (moved down from before it) so this fold can read it; an
+  operator who already marked a node autogate keeps that verdict once it starts
+  signing, riding the ordinary Loopback/Remote arms (which DO consult
   `autogate_match`) instead of the coercion. Don't gate this on
-  `token_configured`/`TokenState` — that's `effective_origin`'s own,
-  separate question (an invalid DOOR-WIDE bearer); this narrowing fires on
+  `token_configured`/`TokenState` — that's `effective_origin`'s own, separate
+  question (an invalid DOOR-WIDE bearer); this narrowing fires on
   `signed_caller`/`sig_autogate` alone, unconditionally. Tests:
   `signed_inject_from_a_non_autogate_node_on_a_loopback_connection_is_held_pending`
-  is the actual regression pin (the exact hole a tunnel would otherwise
-  open); `signed_inject_from_an_autogate_node_on_a_loopback_connection_still_auto_delivers`
-  is the restoration; `origin_for_inject_is_the_identity_function_when_unsigned`
-  and `origin_for_inject_downgrades_loopback_once_the_request_is_signed`
-  pin the pure predicate directly.
+  is the actual regression pin (the exact hole a tunnel would otherwise open);
+  `signed_inject_from_an_autogate_node_on_a_loopback_connection_is_held` is the
+  held-door verdict for an autogate-marked node on loopback;
+  `origin_for_inject_is_the_identity_function_when_unsigned` and
+  `origin_for_inject_downgrades_loopback_once_the_request_is_signed` pin the
+  pure predicate directly.
 - **The two UNSIGNED autogate rails are judged by the matched record's HOME
-  mesh, and the MATCH is not the DELIVERY — two booleans, never one (A3 review
+  mesh, and the MATCH is not the VERDICT — two booleans, never one (A3 review
   finding 4).** `ip_rail`/`token_rail` (the records
   `aoide_storage::node_store::autogated_node_addr`/`autogated_node_token`
   return) fold into `autogate_match`, which is what exempts a caller from the
   #50 uniform-response guard; `rail_admits_here` → `rail_admits` →
-  `deliver_match` is what `should_deliver_now` reads. Folding the charter into
-  `autogate_match` would answer a charter-unlisted caller with the guard's
-  synthetic `submitted` Task — no delivery, no queue entry, invisible to the
-  operator — and the ruling is PENDING: never refused, never delivered.
-  `rail_admits` reuses `grant_from` (the line minus `Node::narrowed[home]`), so
-  the rail cannot drift from the grant lookup, and it reads HOME with
-  `config::home_mesh_fallible`, PENDS on `Err` — a `config.toml` that will not
-  load must not silently resolve to the built-in default mesh, which is how a
-  charter-governed box would otherwise be judged by a pair mesh's rules (review
-  F6). `grant_in_mesh` reads the SAME failable resolution: `effective_mesh`
-  returns `Err` for an unnamed request with an unreadable config, and the
-  grant is `Grant::none()` — a guessed default mesh's paired records never
-  answer, which is the stale-`grants[home]` door N1/F2 closed for a charter
-  home, reachable by breaking one file (`mesh_or_refusal` turns that same
-  `Err` into the refusal's own words, naming the file and the parse error).
-  A NAMED mesh is untouched — the name is the answer — and callers that never
-  consult a grant (an unsigned loopback inject, an ordinary `tasks/get`) read
-  no config at all. **`verified` is asked ONLY of a
-  record claiming a charter LINE**, never of a keyless record the rail matched
-  by address: `aoide node add --autogate` writes `verified: false` (a card
-  fetch is reachability, never identity), so requiring it in a pair mesh would
-  delete the rail rather than harden it. A pair mesh is otherwise untouched —
-  the record's own flag is the whole rule — and loopback is untouched
-  (`should_deliver_now(Loopback, _)` reads neither boolean). Tests:
+  `deliver_match` decides only whether the `held-door` line is written. Folding
+  the charter into `autogate_match` would answer a charter-unlisted caller with
+  the guard's synthetic `submitted` Task — no queue entry, invisible to the
+  operator — so the send must stay PENDING: never refused, never answered
+  synthetically. `rail_admits` reuses `grant_from` (the line minus
+  `Node::narrowed[home]`), so the rail cannot drift from the grant lookup, and
+  it reads HOME with `config::home_mesh_fallible`, answering no on `Err` — a
+  `config.toml` that will not load must not silently resolve to the built-in
+  default mesh, which is how a charter-governed box would otherwise be judged by
+  a pair mesh's rules (review F6). `grant_in_mesh` reads the SAME failable
+  resolution: `effective_mesh` returns `Err` for an unnamed request with an
+  unreadable config, and the grant is `Grant::none()` — a guessed default mesh's
+  paired records never answer, which is the stale-`grants[home]` door N1/F2
+  closed for a charter home, reachable by breaking one file (`mesh_or_refusal`
+  turns that same `Err` into the refusal's own words, naming the file and the
+  parse error). A NAMED mesh is untouched — the name is the answer — and callers
+  that never consult a grant (an unsigned loopback inject, an ordinary
+  `tasks/get`) read no config at all. **`verified` is asked ONLY of a record
+  claiming a charter LINE**, never of a keyless record the rail matched by
+  address: `aoide node add --autogate` writes `verified: false` (a card fetch is
+  reachability, never identity), so requiring it in a pair mesh would delete the
+  rail rather than harden it. A pair mesh is otherwise untouched — the record's
+  own flag is the whole rule — and loopback is untouched by either boolean
+  (`should_deliver_now(Loopback, _)` reads neither). Tests:
   `the_autogate_rail_reads_the_matched_record_against_its_home_mesh` (the whole
   table over one real box, plus the disk reads),
   `a_record_the_home_charter_no_longer_lists_pends_its_autogated_send` and
-  `the_token_rail_reads_the_same_home_charter_as_the_address_rail` (the
-  finding, end to end), `a_key_the_home_charter_lists_still_autodelivers` (the
-  other half of the rule), and
+  `the_token_rail_reads_the_same_home_charter_as_the_address_rail` (the finding,
+  end to end), `a_key_the_home_charter_lists_is_held_at_the_door` (the other
+  half of the rule), and
   `a_charter_unlisted_record_reaches_the_queue_rather_than_the_uniform_guard`
   (the split itself: reaching `pending.json` is what proves the guard was
   exempted by the MATCH).
-- **A REMOTE PARENT steers the child it spawned without pending — the
-  claim's second consumer, riding exactly those two rails (P-RSA S5,
-  CONTRACTS.md §6).** `remote_parent_match(caller, claim, target)` is the whole
-  predicate, true only for all three at once: the caller
-  `verify_signed_request` proved (Signature rung, so every weaker rung's `None`
-  can never match), the target record's `remoteParent.key` equal to that
+- **A REMOTE PARENT's steer is held at the door like any other send, and its
+  claim is audited (P-RSA S5, CONTRACTS.md §6).** `remote_parent_match(caller,
+  claim, target)` is the whole predicate, true only for all three at once: the
+  caller `verify_signed_request` proved (Signature rung, so every weaker rung's
+  `None` can never match), the target record's `remoteParent.key` equal to that
   caller's verified key, and its `remoteParent.sessionId` equal to the claim.
   Both equalities are load-bearing — the key is what this door's own spawn
   stamped from the key that verified THAT request, so a caller can only ever
@@ -617,89 +613,71 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   read exactly what they read before. The hit needs BOTH rails `sig_autogate`
   rides, and each rail carries one transport — neither is redundancy. The
   EXEMPTION from `origin_for_inject`'s downgrade carries the loopback/ssh `-L`
-  shape: `should_deliver_now(ConnOrigin::Loopback, _)` delivers
-  unconditionally, so the exemption alone is enough there, while without it a
-  tunneled parent is coerced to `Unknown` — whose arm delivers nothing at all.
-  The FOLD into `autogate_match` carries `ConnOrigin::Remote`'s shape: that arm
-  consults `autogate_match` and nothing else, so a directly-addressed parent
-  pends without the fold (the exemption is inert there — the origin was never
+  shape: `should_deliver_now(ConnOrigin::Loopback, _)` is true unconditionally,
+  so the exemption alone is enough there, while without it a tunneled parent is
+  coerced to `Unknown`, which audits nothing at all. The FOLD into
+  `autogate_match` carries `ConnOrigin::Remote`'s shape: that arm consults
+  `autogate_match` and nothing else, so a directly-addressed parent is audited
+  only with the fold (the exemption is inert there — the origin was never
   loopback to begin with). It overrides neither earlier question: the door-wide
   bearer still runs FIRST — a door with `aoide.a2a.tokenFile`/`bearerSecret` set
   admits a remote parent only if it presents the bearer, and `effective_origin`
   still coerces a bearer that does not classify `Valid` — and a node's own
-  `autogate` flag need not be on for a parent to steer its child (the same
-  independence `send_gate`'s local parent rule has), so pass
-  `autogate_match || remote_parent_hit`, never `remote_parent_hit` folded INTO
-  `autogate_match`. A hit audits
-  `a2a.message/send`/`status:"autogate-remote-parent"`; a MISS adds nothing at
-  all — no new error, no new pending wording, the same bytes the same request
-  got before. A malformed claim needs no arm here: this door never stamped a
-  value outside `valid_claimed_session_id` as any record's `sessionId`, so
-  equality is false exactly as for an absent claim, and the `-32602` stays
-  spawn-side where the value is actually built. That is also why the client
-  stops refusing one on the send path: `send --to` drops an unruly claim, sends
-  unclaimed, and names the reason on one warning line
-  (`not claiming parent: <reason>`) — the door answers the same send the same
-  way either way — while `node spawn` still refuses the call outright. Tests:
+  `autogate` flag need not be on for a parent's claim to match (the same
+  independence `send_gate`'s local parent rule has), so pass `autogate_match ||
+  remote_parent_hit`, never `remote_parent_hit` folded INTO `autogate_match`. A
+  hit audits `a2a.message/send`/`held-door`, and the send parks like every
+  other; a MISS adds nothing at all — no new error, no new pending wording, the
+  same bytes the same request got before. A malformed claim needs no arm here:
+  this door never stamped a value outside `valid_claimed_session_id` as any
+  record's `sessionId`, so equality is false exactly as for an absent claim, and
+  the `-32602` stays spawn-side where the value is actually built. That is also
+  why the client does not refuse one on the send path: `send --to` drops an
+  unruly claim, sends unclaimed, and names the reason on one warning line (`not
+  claiming parent: <reason>`) — the door answers the same send the same way
+  either way — while `node spawn` still refuses the call outright. Tests:
   `remote_parent_match_needs_a_signed_caller_its_key_and_its_session` is the
-  predicate's whole table; `a_remote_parent_steers_its_child_without_pending_
-  with_autogate_off`/`_on` are the hit; `a_genuinely_signed_remote_parent_
-  steers_its_child_without_pending` is the non-loopback origin;
-  `a_tunneled_remote_parent_steers_its_child_without_pending` is the
-  loopback/ssh `-L` origin the exemption exists for (its pending check runs
-  before the byte join, so its regression fails instead of hanging);
+  predicate's whole table;
+  `a_remote_parent_with_autogate_off_is_held_at_the_door` and
+  `a_remote_parent_with_autogate_on_is_held_at_the_door` are the hit;
+  `a_genuinely_signed_remote_parent_is_held_at_the_door` is the non-loopback
+  origin; `a_tunneled_remote_parent_is_held_at_the_door` is the loopback/ssh
+  `-L` origin the exemption exists for;
   `a_door_token_refuses_a_remote_parents_delivery_uniformly` is the bearer
   running first; `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte`
   is the miss.
-- **A shell target takes no auto-delivered inject from ANY rung — loopback
-  and remote-parent autogate alike (N1, house rule 4).** The Inject arm
-  reads the TARGET's own record through `session_inject_hold` →
-  `aoide_conduct::graph::auto_type_refusal` (its shell arm is the record-side
-  half of `program_is_a_shell`) before it folds `deliver_now`, and holds the line
-  PENDING when it comes back true — a shell's input is a command line, and
-  `--agent <harness> -- bash` names a harness over a pty running a shell, so
-  the `agent` label is not the question. Paid only where it can change the
-  outcome (a decision that was going to pend anyway reads nothing), audited
-  `a2a.message/send`/`status:"shell-wrapped"`. An unreadable stage answers
-  TRUE (this is a refusal's input: "cannot tell" takes the safe arm), unlike
-  `session_remote_parent`'s `None`. Pinned by
-  `a_shell_wrapped_target_takes_no_auto_delivered_inject`, whose two arms
-  differ only by the target's P-C5 capture.
-- **`do_inject`'s `from` attribution (P-P3 decision 7) is scoped to the
-  QUEUED path only — never an immediately-delivered payload's bytes.**
-  `session_send`'s own `from` mechanism also prefixes DELIVERED text
-  (`provenance_prefix`, "from `<sender>`: "), so stamping a resolved
-  node's identity unconditionally would change what an already-autogated
-  node's delivered message looks like — a regression
-  `autogated_node_delivers_despite_being_non_loopback` pins against.
-  `message_send`'s Inject arm computes `from` as `None` whenever
-  `deliver_now` is `true`, `Some("node:<name>")` only when it's `false`
-  (queuing). Don't lift that `!deliver_now` guard without re-reading why
-  it's there.
+- **A shell target takes no steer from a network door, and every A2A send to
+  one parks (N1, house rule 4).** Nothing at this door types into a session, so
+  it carries no shell check of its own. Conduct's ping-back and doorbell refuse
+  a shell target through `aoide_conduct::graph::auto_type_refusal`'s `Shell`
+  arm, because a submitted line in a shell RUNS. Pinned by
+  `a_shell_wrapped_target_takes_no_auto_delivered_inject`, whose two arms (a
+  plain target and the same record with the P-C5 capture) both stay held.
+- **`do_inject`'s `from` attribution (P-P3 decision 7) is always the resolved
+  node's identity.** Every inject queues, so `message_send`'s Inject arm passes
+  `Some("node:<name>")` whenever a node resolved and `None` otherwise. The
+  attribution rides the `pending.json` entry; nothing at this door delivers a
+  payload, so nothing here prefixes one.
 - **`do_inject` stamps the `from` flag EXPLICIT-EMPTY when its own `from`
   parameter is `None` (LANE IDENTITY P-ID3, G9) — never leaves the flag
-  absent.** `session_send`'s `resolve_sender` falls back to
-  `AOIDE_SESSION_ID` off the CALLING process's env whenever `--from` is
-  absent, and `do_inject` calls `session_send` DIRECTLY, in-process — the
-  "calling process" for a remote A2A inject is `aoide a2a serve` itself, a
-  long-lived process whose own ambient env has nothing to do with whichever
-  remote node just sent the message. `from.unwrap_or_default()` (an empty
-  `String` when `None`) is `resolve_sender`'s own documented "explicit no
-  attribution" form (`--from ""`) — it skips the env fallback outright,
-  rather than merely overwriting whatever the env currently holds, so this
-  holds regardless of what `a2a serve`'s own env carries at any given
-  moment. Don't revert to a bare `if let Some(f) = from { flags.insert(...)
-  }` "for symmetry with reading `from`" — that shape is exactly what let
-  the daemon's own ambient `AOIDE_SESSION_ID` leak into an unattributed
-  inject's pending record before this fix
+  absent.** `session_send`'s `resolve_sender` falls back to `AOIDE_SESSION_ID`
+  off the CALLING process's env whenever `--from` is absent, and `do_inject`
+  calls `session_send` DIRECTLY, in-process — the "calling process" for a remote
+  A2A inject is `aoide a2a serve` itself, a long-lived process whose own ambient
+  env has nothing to do with whichever remote node just sent the message.
+  `from.unwrap_or_default()` (an empty `String` when `None`) is
+  `resolve_sender`'s own documented "explicit no attribution" form (`--from ""`)
+  — it skips the env fallback outright, rather than merely overwriting whatever
+  the env currently holds, so this holds regardless of what `a2a serve`'s own
+  env carries at any given moment. Don't revert to a bare `if let Some(f) = from
+  { flags.insert(...) }` "for symmetry with reading `from`" — that shape is
+  exactly what let the daemon's own ambient `AOIDE_SESSION_ID` leak into an
+  unattributed inject's pending record before this fix
   (`an_unattributed_inject_never_falls_back_to_this_processs_own_ambient_session_id`
-  is the regression pin). This closes only the ATTRIBUTION leak, not the
-  GATE — `real_attested_sender` still walks `a2a serve`'s own `/proc`
-  ancestry for `do_inject`'s in-process `session_send` call, same posture
-  `aoided`'s dispatch-socket `send` holds (`accept_loop`'s own invariant
-  above); it already fails closed in practice because `restore_delivery`
-  and `do_inject` both only reach the gate with `--yes` already forced or
-  the ancestry never resolving a live session.
+  is the regression pin). This closes only the ATTRIBUTION leak, not the GATE.
+  The gate never reads the ancestry for this door: a non-approving door parks
+  its send before any identity is resolved (`door_can_approve`,
+  `graph/send.rs`).
 - **`NONCE_CACHE` (P-P4) is process-local, in-memory, and deliberately NOT
   a `HashSet` — a bounded `VecDeque<(node, nonce)>` capped at
   `NONCE_CACHE_CAP` with FIFO eviction, so it never needs a second
@@ -787,14 +765,12 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the origin can never tell tunnel traffic from door traffic on its own.
   Don't widen the door's detail "for symmetry" — its bytes are pinned by
   existing tests and by operators' greps.
-- **The `spawnAgent` seam: `spawn_agent_harness` is the one judgement.** Its rule
-  and refusals are `CONTRACTS.md`'s spawnAgent paragraph. Locally: the walk is
-  `aoide_conduct::graph::wrapped_harness`, never a copy; `do_spawn`'s prologue and
-  `spawn_inject_prompt` both read it; readiness, the submit key and `spawn_argv`'s
-  `--agent` label take the PROVEN harness's name, never the configured first token
-  (`env claude` is `claude`, not `env`). The opening-turn tests use `eidolon` (a
-  registered harness with output-settled readiness) for the "no declarable fact"
-  branch.
+- **The `spawnAgent` seam: `spawn_agent_harness` is the one judgement.** Its
+  rule and refusals are `CONTRACTS.md`'s spawnAgent paragraph. Locally: the walk
+  is `aoide_conduct::graph::wrapped_harness`, never a copy; `do_spawn`'s
+  prologue reads it, and so does `spawn_argv`'s `--agent` label, which takes the
+  PROVEN harness's name, never the configured first token (`env claude` is
+  `claude`, not `env`).
 - **`do_spawn` never acks `submitted` on `cmd.spawn()`'s success alone
   (task #103).** `cmd.spawn()` only proves the WRAPPER `aoide conduct`
   process launched — it says nothing about whether that process's OWN
@@ -819,8 +795,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   died-immediately — configure such a command as a job, not a spawnAgent. `poll_bounded_exit`/`spawn_died_immediately_message` are pure
   over an injected poll closure specifically so they're unit-testable
   without a real spawn — `do_spawn` itself is still never driven by a test
-  in this file (the existing precedent, `spawn_inject_prompts_success_
-  branch_...`'s own doc comment).
+  in this file (an established precedent).
 - **`session_ref_lookup`'s `has_socket` is DERIVED at read time — the
   stored socket path must exist ON DISK, never merely be a non-empty
   string — while `SessionRef`/`decide_send_action` stay pure and disk-free
@@ -835,7 +810,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `decide_send_action` itself still takes no I/O and still gates on
   `sref.conductable && sref.has_socket` unchanged. This matters more here
   than on `graph`: a stale `Inject` would tell a remote node its message is
-  being delivered when nothing can reach the target, instead of the
+  queued for a session nothing can reach, instead of the
   existing `-32004` "session not conductable" refusal. Don't move this
   check into `decide_send_action` or `SessionRef` "for locality" — both
   types' own doc comments state the point of staying stage-file-free and
@@ -854,7 +829,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `caller_grant`/`grant_in_mesh`, which take the rung from the PROOF rather than a second
   lookup: no `SignedCaller` (unsigned, bearer, address) is `None` whatever the
   registry holds. The remote-parent key match is deliberately NOT required to
-  READ — reading is wider than writing, and `send`'s remote-parent delivery
+  READ — reading is wider than writing, and `send`'s remote-parent match
   (S5) and the ping-back history still need the key. The refusal is this arm's
   OWN code, `-32011` — minted like Spawn's `-32006` and `mailDeposit`'s
   `-32010`, and never `-32007`, which stays `verify_signed_request`'s

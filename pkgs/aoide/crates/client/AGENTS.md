@@ -551,13 +551,13 @@
   than `pull_node_live`/`send_message_to_node`/`spawn_on_node` is not that.
 - **A tunneled request is safe against a real node, not merely possible.**
   Every request delivered through an ssh forward reaches the far A2A door
-  as `ConnOrigin::Loopback` (`aoide-server::a2a::classify_origin`), which
-  carries an unconditional Inject delivery free pass for an UNSIGNED
-  request. This module makes the tunnel work; `aoide-server` narrows that
-  free pass (`origin_for_inject`, CONTRACTS.md §6) so a verified per-request
-  signature never rides Loopback's trust, with a like-for-like
-  signature-rung autogate restoring delivery for a node the operator
-  already marked auto-deliver. `--via`/`Node.via` are safe to recommend for
+  as `ConnOrigin::Loopback` (`aoide-server::a2a::classify_origin`). The far
+  door parks every send regardless, so the tunnel is only reachability: this
+  module makes the tunnel work, and `aoide-server` keeps a verified per-request
+  signature from riding Loopback's standing (`origin_for_inject`, CONTRACTS.md
+  §6). A like-for-like signature-rung autogate decides the `held-door` audit
+  for a node the operator already marked autogate. `--via`/`Node.via` are
+  safe to recommend for
   a real cross-box pair.
 - **The self-pair guard (`discover::is_self_target`) runs BEFORE the
   proceed-confirm and BEFORE the ceremony, in `pair_via_hostname`, never

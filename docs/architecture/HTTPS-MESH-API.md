@@ -175,22 +175,24 @@ Rules:
   for a pair mesh. For mail, the request's mesh must equal the envelope's `mesh`.
   The remote sub-agent rules (register §32: any-frame read, spawn, the
   remote-parent inject match) read the grant in the request's mesh.
-- **The unsigned autogate rail is judged by the record's HOME mesh.** The door
-  has one delivery rail with no request signature behind it: an inbound
-  `message/send` whose source address resolves to an `autogate` record's `url`,
-  or whose bearer matches that record's own `tokenFile`, auto-delivers without
-  pending. It names no mesh — there is no signed request to name one — so it is
-  judged exactly as a request that names none: `[pairing] homeMesh`'s rules.
-  Where a charter governs home, the record must be `verified` AND its key must
-  be on the charter's line with `message` (minus the box's own local narrowing);
-  a charter-shaped home whose operator key is undecidable delivers nothing on
-  this rail; a pair-mesh home keeps the record's own `autogate` flag as the
-  whole rule, as it always was. A `config.toml` that will not load delivers
-  nothing here either: home is read through `home_mesh_fallible` (a swallowed
-  load error would judge the record by the built-in default mesh instead of the
-  real `[pairing] homeMesh`). A record the charter does not answer for is held
-  PENDING — never refused — and the queue entry names it (`node:<name>`).
-  `aoide mesh` reports those records on the home mesh's charter row.
+- **The unsigned autogate rail is judged by the record's HOME mesh, as an
+  audit verdict.** The door has one rail with no request signature behind it:
+  an inbound `message/send` whose source address resolves to an `autogate`
+  record's `url`, or whose bearer matches that record's own `tokenFile`. Every
+  such send parks in `pending.json` (CONTRACTS.md §6). The rail's `held-door`
+  verdict says whether it would have delivered, and it is judged the way a
+  request that names no mesh is judged: `[pairing] homeMesh`'s rules. Where a
+  charter governs home, the record must be `verified` AND its key must be on
+  the charter's line with `message` (minus the box's own local narrowing); a
+  charter-shaped home whose operator key is undecidable records no
+  would-deliver verdict. A pair-mesh home keeps the record's own `autogate`
+  flag as the whole rule, as it always was. A `config.toml` that will not load
+  records no would-deliver verdict here either: home is read through
+  `home_mesh_fallible` (a swallowed load error would judge the record by the
+  built-in default mesh instead of the real `[pairing] homeMesh`). A record
+  the charter does not answer for is held PENDING, never refused, and the queue
+  entry names it (`node:<name>`). `aoide mesh` reports those records on the
+  home mesh's charter row.
 - **An unreadable config grants nothing and refuses with the reason.** The same
   resolution decides every unnamed request, so it fails closed at the grant too:
   `aoide-server::a2a::effective_mesh` is failable, an unnamed request's grant is

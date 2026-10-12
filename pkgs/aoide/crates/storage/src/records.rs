@@ -644,6 +644,10 @@ pub struct SessionRecord {
     ///   when the target declared no readiness fact, so whether it submitted
     ///   is not known);
     /// - `not-ready` — the budget ran out and NOTHING was typed;
+    /// - `held-pending` — the door cannot approve a gated send, so the turn is
+    ///   queued in `pending.json` for a human; nothing is typed until then;
+    /// - `hold-failed` — that queue write failed (nothing typed, nothing
+    ///   queued);
     /// - `busy` — the door's opening-turn worker pool was full (nothing was
     ///   typed; ask again);
     /// - `no-worker` — no worker thread could be started (nothing was typed);

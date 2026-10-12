@@ -216,23 +216,23 @@ in the message.
   `conductable`/`socket` — there is no transport and no lifecycle event to
   back any of them.
 
-- **An `"app"` record refuses `send`, `kill`, `session phase`, and
-  `session end` by NAME and never falls back to another executor (P-CX-3,
-  P-CX-5 S3b).** `graph/send.rs::deliver_local_with` checks
-  `rec.kind.as_deref() == Some("app")` BEFORE `is_conductable_now` and
-  errors `codex-app-unsupported` — never today's `not-conductable`, which
-  implies a retry might work. `graph/actions.rs::kill_target` checks the
-  same field at the top of its walk, beside the `sub:` check, and refuses
-  with `APP_OWNS_PROCESS` — the app owns the process, never a signal this
-  crate sends. `graph/session_store.rs::do_session_phase_inner`/
-  `do_session_end_inner` check the same field (`refuse_app_record`) before
-  touching either stage file and refuse with the same `codex-app-unsupported`
-  reason `send` uses — `apply_codex_capture` is the one writer for an app
-  record's `state` from here on, and neither of these commands is it. Both
-  `--to` and A2A inject (`aoide-server`'s `a2a::do_inject`) fold into
-  `deliver_local_with` before ever reaching a socket, so that's the ONE
-  gate for every send path; don't add a second `kind:"app"` check anywhere
-  else.
+- **An `"app"` record refuses `send`, `kill`, `session phase`, and `session
+  end` by NAME and never falls back to another executor (P-CX-3, P-CX-5 S3b).**
+  `graph/send.rs::deliver_local_with` checks `rec.kind.as_deref() ==
+  Some("app")` BEFORE `is_conductable_now` and errors `codex-app-unsupported` —
+  never today's `not-conductable`, which implies a retry might work.
+  `graph/actions.rs::kill_target` checks the same field at the top of its walk,
+  beside the `sub:` check, and refuses with `APP_OWNS_PROCESS` — the app owns
+  the process, never a signal this crate sends.
+  `graph/session_store.rs::do_session_phase_inner`/`do_session_end_inner` check
+  the same field (`refuse_app_record`) before touching either stage file and
+  refuse with the same `codex-app-unsupported` reason `send` uses —
+  `apply_codex_capture` is the one writer for an app record's `state` from here
+  on, and neither of these commands is it. `--to` folds into
+  `deliver_local_with` before ever reaching a socket, and A2A inject
+  (`aoide-server`'s `a2a::do_inject`) reaches that same gate, which parks it, so
+  that's the ONE gate for every send path; don't add a second `kind:"app"` check
+  anywhere else.
 
 - **No path may synthesize a per-thread window address.** A Codex-app
   record's `windowAddress` is the window owning the process that holds that
@@ -922,141 +922,132 @@ in the message.
   accepted under the manifest's host-local, operator-authored trust model
   (the operator who writes a spec already controls their own disk), not a
   gap to close with a `canonicalize` call here.
-- **A parent automatically hears the children it spawned, and that line is
-  the DAEMON's own, never a `send` (P-EIDOLON E5b, `docs/architecture/
+- **A parent automatically hears the children it spawned, and that line is the
+  DAEMON's own, never a `send` (P-EIDOLON E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice"; the User's ruling, 2026-09-17).**
-  `graph/pingback.rs::pingback` is the one implementation: called from
-  `reap()` on the POST-LOCK side, AFTER `sync_eidolon_sessions()`, with its
-  result deliberately NOT folded into `outcome.changed` (the
-  `refresh_live_agents` rule — telling a parent something must not toast the
-  desktop every twelve seconds; each delivery prints its own
-  `[aoide/reap]` line instead), and only under `Door::Daemon` — every other
-  door returns silently and lets the daemon's own tick do it. It is NOT
-  routed through `session_send`: `send.rs` attests the sender from the
-  running process's `/proc` ancestry, so inside the daemon the attested
-  sender is the daemon and never the child, which is exactly why the
-  reciprocal rule cannot be `sender_is_parent` made symmetric (do NOT thread
-  a peercred pid into `send.rs` for it). The line is delivered the
-  DOORBELL's way instead — `doorbell.rs`'s `connect_for_ring`/`write_channel`
-  for a live channel socket (one write, close, no keystroke), else
-  `send.rs::write_delivery` + the target's own profile submit key for a
-  headless wrap, an interactive wrap with no channel skipped
-  `interactive-composer`, and a wrap whose WRAPPED program is a shell skipped
-  `shell-parent` (the channel arm is not a keystroke and is still taken for
-  one) — with no gate, no `pending.json` entry, no
-  provenance prefix, no `names_the_node` title rename (the line starts with
-  `[`, and must never be routed through `session_send` for it), and no
-  mailbase receipt. One audit line per delivery through `send.rs::audit_send`
-  (widened `pub(in crate::graph)` for it, the `audit_pending`/
-  `audit_resurrect` sibling precedent), gate label `autogate-child`, the
-  delivered line as `untrusted_data`.
-  **At-most-once, claimed before the delivery.** The per-child cursor is
+  `graph/pingback.rs::pingback` is the one implementation: called from `reap()`
+  on the POST-LOCK side, AFTER `sync_eidolon_sessions()`, with its result
+  deliberately NOT folded into `outcome.changed` (the `refresh_live_agents` rule
+  — telling a parent something must not toast the desktop every twelve seconds;
+  each delivery prints its own `[aoide/reap]` line instead), and only under
+  `Door::Daemon` — every other door returns silently and lets the daemon's own
+  tick do it. It is NOT routed through `session_send`: `send.rs` attests the
+  sender from the running process's `/proc` ancestry, so inside the daemon the
+  attested sender is the daemon and never the child, which is exactly why the
+  reciprocal rule cannot be `sender_is_parent` made symmetric (do NOT thread a
+  peercred pid into `send.rs` for it). The line is delivered the DOORBELL's way
+  instead — `doorbell.rs`'s `connect_for_ring`/`write_channel` for a live
+  channel socket (one write, close, no keystroke), else
+  `send.rs::write_delivery` + the target's own profile submit key for a headless
+  wrap, an interactive wrap with no channel skipped `interactive-composer`, and
+  a wrap whose WRAPPED program is a shell skipped `shell-parent` (the channel
+  arm is not a keystroke and is still taken for one) — with no gate, no
+  `pending.json` entry, no provenance prefix, no `names_the_node` title rename
+  (the line starts with `[`, and must never be routed through `session_send` for
+  it), and no mailbase receipt. One audit line per delivery through
+  `send.rs::audit_send` (widened `pub(in crate::graph)` for it, the
+  `audit_pending`/`audit_resurrect` sibling precedent), gate label
+  `autogate-child`, the delivered line as `untrusted_data`. **At-most-once,
+  claimed before the delivery.** The per-child cursor is
   `state/stage/pingback.json` (`<child id> → {seen, silentAt?}` for a trace,
-  `{hook: {phase, at, silent?}}` for a hook phase): a short
-  `with_stage_lock` critical section reads it, decides, and writes the
-  advanced cursor (temp-then-rename) — the socket write happens AFTER, with
-  no lock held, bounded by `connect_for_ring`'s own write timeout. A crash
-  between the two loses a line, which is the safe direction (a duplicate is
-  noise in a parent's composer); a child whose `agent:"eidolon"` record is
-  gone drops out of the file on the same pass. Do NOT move the delivery
-  inside that critical section, and do not add a second lock.
-  **The hook source is the same lane, as a child module
-  (`graph/pingback/hook.rs`).** A local-parented child of any registered
+  `{hook: {phase, at, silent?}}` for a hook phase): a short `with_stage_lock`
+  critical section reads it, decides, and writes the advanced cursor
+  (temp-then-rename) — the socket write happens AFTER, with no lock held,
+  bounded by `connect_for_ring`'s own write timeout. A crash between the two
+  loses a line, which is the safe direction (a duplicate is noise in a parent's
+  composer); a child whose `agent:"eidolon"` record is gone drops out of the
+  file on the same pass. Do NOT move the delivery inside that critical section,
+  and do not add a second lock. **The hook source is the same lane, as a child
+  module (`graph/pingback/hook.rs`).** A local-parented child of any registered
   harness that is not an `eidolon` (`hook::tracked`: no `remoteParent`, not a
   shell, sub-agent node or app thread) is read off its `hooks.json` phase and
   stamp, never a trace, and its lines (`awaiting`, `silent 12 min · last: …`,
-  `settled`) join the SAME `claims.lines` the eidolon source fills, so
-  `deliver` and its skips are one implementation. Its claim runs inside the
-  SAME `with_stage_lock` section over the cursor `claim_locked` just built
+  `settled`) join the SAME `claims.lines` the eidolon source fills, so `deliver`
+  and its skips are one implementation. Its claim runs inside the SAME
+  `with_stage_lock` section over the cursor `claim_locked` just built
   (`hook::claim`), reading the roster and `hooks.json` inside that lock and
-  writing the entry's `hook` half — `{phase, at, silent?}` — so the two
-  sources never read each other's half and one file write covers both; the
-  hook children's ids join the tracked set, which is what keeps their entries
-  from being pruned by the eidolon pass.
-  **The recipient is the SPAWNER, never the child's `parentSessionId`.** A
-  hook child's `parentSessionId` is its own HOST wrap (`HookAction::Start`
-  resolves it from `attested_wrap(hook_pid)` or `AOIDE_SESSION_ID`), so
-  delivering there rings the child's own PTY: a headless host takes the line
-  as its next prompt (a self-prompt loop), an interactive one has it typed
-  into the user's composer. `hook::recipient` climbs: (1) the host wrap must
-  be a conducted wrap whose pid is in the child's `hookAncestry` (stamped by
-  the hook door from the hook process's own peer credentials; `session start`
-  cannot write it) AND whose daemon seal verifies — a seal re-derives the
-  pid's start time, so a pid reused after the wrap died (its record lingers
-  `done`, and `host_wrap` checks no state) or a pid hand-edited into
-  `sessions.json` fails it; the key is fetched once per pass, before the lock, and no
-  answering daemon means no recipient; (2) the
-  wrap's `parentSessionId` is the spawner only while it equals the wrap's
-  `attestedSpawner` (stamped by `session_conduct` from its own `/proc`
-  ancestry, `window::spawner_is_attested`, set-or-cleared on every
-  registration — a detached `aoide spawn` child is reparented to init, so the
-  evidence cannot be re-derived later and must be stamped at birth, and a
-  registration that happens only AFTER the spawner returned has none left to
-  read and stays unstamped: fail-closed, never guessed; the stamp takes no
-  seal, the hook-time check in (1) and (3) is the only one); (3) a conducted
-  (sealed) spawner hears it, a hook-registered spawner is resolved to its own
-  attested host wrap by (1).
+  writing the entry's `hook` half — `{phase, at, silent?}` — so the two sources
+  never read each other's half and one file write covers both; the hook
+  children's ids join the tracked set, which is what keeps their entries from
+  being pruned by the eidolon pass. **The recipient is the SPAWNER, never the
+  child's `parentSessionId`.** A hook child's `parentSessionId` is its own HOST
+  wrap (`HookAction::Start` resolves it from `attested_wrap(hook_pid)` or
+  `AOIDE_SESSION_ID`), so delivering there rings the child's own PTY: a headless
+  host takes the line as its next prompt (a self-prompt loop), an interactive
+  one has it typed into the user's composer. `hook::recipient` climbs: (1) the
+  host wrap must be a conducted wrap whose pid is in the child's `hookAncestry`
+  (stamped by the hook door from the hook process's own peer credentials;
+  `session start` cannot write it) AND whose daemon seal verifies — a seal
+  re-derives the pid's start time, so a pid reused after the wrap died (its
+  record lingers `done`, and `host_wrap` checks no state) or a pid hand-edited
+  into `sessions.json` fails it; the key is fetched once per pass, before the
+  lock, and no answering daemon means no recipient; (2) the wrap's
+  `parentSessionId` is the spawner only while it equals the wrap's
+  `attestedSpawner` (stamped by `session_conduct` from its own `/proc` ancestry,
+  `window::spawner_is_attested`, set-or-cleared on every registration — a
+  detached `aoide spawn` child is reparented to init, so the evidence cannot be
+  re-derived later and must be stamped at birth, and a registration that happens
+  only AFTER the spawner returned has none left to read and stays unstamped:
+  fail-closed, never guessed; the stamp takes no seal, the hook-time check in
+  (1) and (3) is the only one); (3) a conducted (sealed) spawner hears it, a
+  hook-registered spawner is resolved to its own attested host wrap by (1).
   Never the child, never its host wrap, and a bare `session start --parent`
-  edge, an explicit `--parent` the kernel did not back, and a wrap registered
-  by `aoide wrap` have no recipient: do NOT accept a `parentSessionId` on its
-  word, and do not widen this to a recipient the evidence does not name.
-  Hold: the first examination of a child is a baseline and announces nothing;
-  `awaiting` is claimed on ENTERING the phase, not on every restamp, and
-  carries no reason (`hooks.json` has none, and `set_session_state` clears
-  `activity` on any non-`working` state, so a tool can never be named there);
-  `settled` needs the cursor to have seen the child `working`/`awaiting`
-  (the hour-later `stopped`→`idle` decay says nothing); `silent` is `>=` 12
-  minutes and under 24 hours of `updatedAt` age on a `working` phase, latched
-  per stamp (a day-old `working` is a crashed record). The hook source emits
-  no `PingEvent` and never spools: a child that belongs on a ring is
-  `remoteParent`-stamped and so is not its child.
-  **The screen source is the third, as a child module
-  (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
-  harness has neither profile (`prompt::tracked`: `agent_profile` is none, and
-  the hook and trace sources do not track it) is read off the `question` its
-  own wrap published (below), and its `[<agent> <petname>] asking: "<line>"`
-  joins the SAME `claims.lines`, claimed inside the SAME `with_stage_lock`
-  section after `hook::claim`, into the entry's `screen` half — the last
-  question announced. There is no baseline (the wrap publishes once its line
-  has stood for 3 s), a different question is a new episode, the same one is not
-  heard twice, and a record that no longer holds a question while `awaiting`
-  clears the key. A question that carries `needsSudo` is never claimed
-  (`prompt::asking`): the password is the human's. The child IS the wrap, so
-  there is no host to climb from:
-  `prompt::recipient` requires a daemon seal over the wrap's own pid, then the
-  spawner climb the hook source uses (`hook::spawner_of`, steps (2) and (3)
-  above) — one climb, two callers; do not fork a second. The seal key is
-  fetched before the lock for a pass that has a `prompt::pending` record, as
-  for a hook one. The question is cleaned and quoted again at render: it was
-  capped where it was written, but this is the line a parent types.
-  **The event and the line are two things, and a remote parent gets the
-  event (P-RSA S8, `CONTRACTS.md` §4/§6).** `choose_event` decides WHICH
-  `PingEvent` a child's new records amount to — a closed enum whose every
-  string is already `clean`ed at the sender — and `render_line(tag, &event)`
-  renders the ONE line from it; the tag belongs to whoever renders, so an
-  event names no node. Local lines are unchanged to the byte, which the
-  module's own fixtures pin. A child whose record carries `remoteParent` (the
-  A2A door's stamp, whatever its harness) SPOOLS its events to
-  `state/stage/pingback-remote.json` through `aoide_storage::pingback_remote`
-  — cap 16 per child, monotonic `seq` per child, a read that missed any says
-  `gap` — stamping the ring entry with that stamp's KEY (the far door's only
-  gate input once the record is gone) and with the tick's own `at`. `deliver`
-  is NEVER called for it: the far parent pulls them off this node's own door.
-  The same pass drops the rings no parent can be owed any more
-  (`retain_rings`: the child's record is gone AND the ring's `at` is past
-  `RING_GRACE_SECS`), because a ring is rewritten whole on every spool and an
-  unbounded set of dead children would be paid for by every live event.
-  `PingEvent::Exited` is the one row that comes from the
-  RECORD (`state` folds to `done`, plus its `outcome`/`exitCode`) rather than
-  from the trace, it is claimed ONCE per child (the cursor's `exited` latch —
-  a child that keeps no trace has no `seen` to advance past its own end), and
-  it fires only for a remote child (Q5's ruled default: a local parent hears
-  the run's own report). It sits AFTER every trace row and takes the place of
-  the silence row, so the last thing before an exit is the child's own last
-  word. A child that leaves the roster is never decided again — its record is
-  gone, so its cursor entry leaves on that pass — so a dropped REMOTE child
-  claims its trace row AND its exit on that one pass, and the ring always ends
-  with exactly one `Exited`.
+  edge, an explicit `--parent` the kernel did not back, and a wrap registered by
+  `aoide wrap` have no recipient: do NOT accept a `parentSessionId` on its word,
+  and do not widen this to a recipient the evidence does not name. Hold: the
+  first examination of a child is a baseline and announces nothing; `awaiting`
+  is claimed on ENTERING the phase, not on every restamp, and carries no reason
+  (`hooks.json` has none, and `set_session_state` clears `activity` on any
+  non-`working` state, so a tool can never be named there); `settled` needs the
+  cursor to have seen the child `working`/`awaiting` (the hour-later
+  `stopped`→`idle` decay says nothing); `silent` is `>=` 12 minutes and under 24
+  hours of `updatedAt` age on a `working` phase, latched per stamp (a day-old
+  `working` is a crashed record). The hook source emits no `PingEvent` and never
+  spools: a child that belongs on a ring is `remoteParent`-stamped and so is not
+  its child. **The screen source is the third, as a child module
+  (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose harness
+  has neither profile (`prompt::tracked`: `agent_profile` is none, and the hook
+  and trace sources do not track it) is read off the `question` its own wrap
+  published (below), and its `[<agent> <petname>] asking: "<line>"` joins the
+  SAME `claims.lines`, claimed inside the SAME `with_stage_lock` section after
+  `hook::claim`, into the entry's `screen` half — the last question announced.
+  There is no baseline (the wrap publishes once its line has stood for 3 s), a
+  different question is a new episode, the same one is not heard twice, and a
+  record that no longer holds a question while `awaiting` clears the key. A
+  question that carries `needsSudo` is never claimed (`prompt::asking`): the
+  password is the human's. The child IS the wrap, so there is no host to climb
+  from: `prompt::recipient` requires a daemon seal over the wrap's own pid, then
+  the spawner climb the hook source uses (`hook::spawner_of`, steps (2) and (3)
+  above) — one climb, two callers; do not fork a second. The seal key is fetched
+  before the lock for a pass that has a `prompt::pending` record, as for a hook
+  one. The question is cleaned and quoted again at render: it was capped where
+  it was written, but this is the line a parent types. **The event and the line
+  are two things, and a remote parent gets the event (P-RSA S8, `CONTRACTS.md`
+  §4/§6).** `choose_event` decides WHICH `PingEvent` a child's new records
+  amount to — a closed enum whose every string is already `clean`ed at the
+  sender — and `render_line(tag, &event)` renders the ONE line from it; the tag
+  belongs to whoever renders, so an event names no node. Local lines are
+  unchanged to the byte, which the module's own fixtures pin. A child whose
+  record carries `remoteParent` (the A2A door's stamp, whatever its harness)
+  SPOOLS its events to `state/stage/pingback-remote.json` through
+  `aoide_storage::pingback_remote` — cap 16 per child, monotonic `seq` per
+  child, a read that missed any says `gap` — stamping the ring entry with that
+  stamp's KEY (the far door's only gate input once the record is gone) and with
+  the tick's own `at`. `deliver` is NEVER called for it: the far parent pulls
+  them off this node's own door. The same pass drops the rings no parent can be
+  owed any more (`retain_rings`: the child's record is gone AND the ring's `at`
+  is past `RING_GRACE_SECS`), because a ring is rewritten whole on every spool
+  and an unbounded set of dead children would be paid for by every live event.
+  `PingEvent::Exited` is the one row that comes from the RECORD (`state` folds
+  to `done`, plus its `outcome`/`exitCode`) rather than from the trace, it is
+  claimed ONCE per child (the cursor's `exited` latch — a child that keeps no
+  trace has no `seen` to advance past its own end), and it fires only for a
+  remote child (Q5's ruled default: a local parent hears the run's own report).
+  It sits AFTER every trace row and takes the place of the silence row, so the
+  last thing before an exit is the child's own last word. A child that leaves
+  the roster is never decided again — its record is gone, so its cursor entry
+  leaves on that pass — so a dropped REMOTE child claims its trace row AND its
+  exit on that one pass, and the ring always ends with exactly one `Exited`.
   **Typed only by a positive proof** (house rule 4). A line submitted into a pty
   RUNS if that pty is a shell, and `agent` is only a label a caller picks:
   `--agent pi -- bash` names a registered profile over a pty running a shell,
@@ -1064,102 +1055,101 @@ in the message.
   `conduct.rs::is_its_harness`: the record's `wrapped_program` (stamped at
   registration from `conduct.rs::wrapped_program_name`, the launcher walk's
   resolved program) must equal the first launch token of the profile its `agent`
-  names. Three automatic readers ask one refusal, `conduct.rs::auto_type_refusal` (a shell
-  first, then the `is_its_harness` proof), and none restates it: the ping-back
-  (`pingback.rs::unreceptive`), the doorbell's PTY arm (`doorbell.rs`), and the A2A
-  inject (`server/src/a2a.rs::session_inject_hold`). The A2A spawn asks its argv twin,
+  names. Two automatic readers ask one refusal, `conduct.rs::auto_type_refusal`
+  (a shell first, then the `is_its_harness` proof), and none restates it: the
+  ping-back (`pingback.rs::unreceptive`) and the doorbell's PTY arm
+  (`doorbell.rs`). The A2A spawn's prologue asks its argv twin,
   `conduct.rs::wrapped_harness`, the same walk read before a record exists. The
-  refusal names and their order, the proof's limits and the one-time cost live once,
-  in `CONTRACTS.md`'s `wrappedProgram` paragraph. Locally, each launcher resolves through its own option table (`conduct.rs::launcher`),
-  and an option the table does not list refuses the whole launcher: the walk never
-  guesses how many tokens an option takes (default-deny). The tables are coreutils
-  9.11, util-linux 2.42, sudo 1.9.17 and bash's `exec`; `doas` is from its man page.
-  `script` and `su` answer by a scan for `-c`/`--command`, which only over-matches.
-  `nix` resolves `develop|shell -c`, and `env -S` refuses (its split string is a
-  command line). Every other launcher names itself. `shell`
+  refusal names and their order, the proof's limits and the one-time cost live
+  once, in `CONTRACTS.md`'s `wrappedProgram` paragraph. Locally, each launcher
+  resolves through its own option table (`conduct.rs::launcher`), and an option
+  the table does not list refuses the whole launcher: the walk never guesses how
+  many tokens an option takes (default-deny). The tables are coreutils 9.11,
+  util-linux 2.42, sudo 1.9.17 and bash's `exec`; `doas` is from its man page.
+  `script` and `su` answer by a scan for `-c`/`--command`, which only
+  over-matches. `nix` resolves `develop|shell -c`, and `env -S` refuses (its
+  split string is a command line). Every other launcher names itself. `shell`
   and `wrapped_program` are written together at registration on both
-  `upsert_session` arms, so re-registering an id flips both. Shell syntax in a child's text (the
-  question, the tag, the say, the prompt, the stop reason, the tool label) is made
-  inert on the way into a line (`pingback.rs::inert`: `$(…)` becomes its fullwidth
-  twin), and every line takes one more pass as it is written
-  (`pingback.rs::wire_line`, the only place `deliver` shapes the bytes). That pass is
-  the backstop for a field that skipped its own cleaning. It takes `!` and `"` with
-  no carve-out, so the renderer's own quote and `! ` marker reach the wire as their
-  fullwidth twins. What the basename proves, and what it does not, is stated once,
-  in `CONTRACTS.md`'s `wrappedProgram` paragraph. The walk reads argv only. Those
-  four predicates (`shell-parent`, `unverified-wrap`, `not-conductable`,
-  `parent-done`) live in ONE function (`unreceptive`), which `deliver` itself
-  calls, so nothing may restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately
-  not this rule: that caller is a resident session steering a shell it can see
-  in its own roster, no remote text rides its line, and an agent that
-  hand-relays a peer's words into it is steering with its OWN authority —
-  by design, and not something a second guard here could fix. Conducting
-  shells is the product's headline.
-  **The parent pulls its own remote children (P-RSA S9, `CONTRACTS.md`
+  `upsert_session` arms, so re-registering an id flips both. Shell syntax in a
+  child's text (the question, the tag, the say, the prompt, the stop reason, the
+  tool label) is made inert on the way into a line (`pingback.rs::inert`: `$(…)`
+  becomes its fullwidth twin), and every line takes one more pass as it is
+  written (`pingback.rs::wire_line`, the only place `deliver` shapes the bytes).
+  That pass is the backstop for a field that skipped its own cleaning. It takes
+  `!` and `"` with no carve-out, so the renderer's own quote and `! ` marker
+  reach the wire as their fullwidth twins. What the basename proves, and what it
+  does not, is stated once, in `CONTRACTS.md`'s `wrappedProgram` paragraph. The
+  walk reads argv only. Those four predicates (`shell-parent`,
+  `unverified-wrap`, `not-conductable`, `parent-done`) live in ONE function
+  (`unreceptive`), which `deliver` itself calls, so nothing may restate them.
+  The LOCAL parent/sibling autogate in `send.rs` is deliberately not this rule:
+  that caller is a resident session steering a shell it can see in its own
+  roster, no remote text rides its line, and an agent that hand-relays a peer's
+  words into it is steering with its OWN authority — by design, and not
+  something a second guard here could fix. Conducting shells is the product's
+  headline. **The parent pulls its own remote children (P-RSA S9, `CONTRACTS.md`
   §4/§6).** `pingback_pull` runs in the SAME post-lock block, right after
   `pingback`, and only under `Door::Daemon`: for every row in
   `state/stage/remote-children.json` that is not `drained` and whose
-  `parentSessionId` is a record `unreceptive` admits, it asks that child's
-  node `tasks/get` + `aoide/linesAfter` = the row's cursor
+  `parentSessionId` is a record `unreceptive` admits, it asks that child's node
+  `tasks/get` + `aoide/linesAfter` = the row's cursor
   (`aoide_client::commands::task_history_on_node`, tunnel key = the PARENT's
-  session id, so the ssh forward is the parent's own and the daemon holds
-  none) and renders the answer HERE. The far node is resolved by the row's
-  `key` alone, never by its display `node`. The events are a peer's bytes:
-  each is re-validated against the closed set (`ping_event_of` — an unknown
-  kind is dropped), every string re-cleaned (`reclean` = the shared
+  session id, so the ssh forward is the parent's own and the daemon holds none)
+  and renders the answer HERE. The far node is resolved by the row's `key`
+  alone, never by its display `node`. The events are a peer's bytes: each is
+  re-validated against the closed set (`ping_event_of` — an unknown kind is
+  dropped), every string re-cleaned (`reclean` = the shared
   `common::strip_unsafe` + `SAY_MAX` + the `/`/`!` guard, because the BARE
   segments `render_line` emits are never quoted) and every number re-clamped
   (`COUNT_MAX`/`MINS_MAX`, and an exit code outside `0..=EXIT_CODE_MAX` is
-  DROPPED rather than clamped into a fabricated `exit 0`), then rendered by
-  the LOCAL `render_line` under `[<node>/<child id>]`.
-  **The claim is atomic, not a read-then-write.** The cursor is advanced
-  through `remote_children::claim_lines_after` — one `with_stage_lock`
-  section that reads the stored value and advances it, returning the cursor
-  the caller may deliver from — and only events with `seq` past that are
-  delivered; two overlapping passes therefore cannot duplicate a line, and a
-  claim that cannot be written delivers NOTHING (losing a line is this lane's
-  safe direction, duplicating one is not). `last` is trusted ONLY under
-  `gap`, where the ring's own doc says it is the resync; without a gap an
-  honest ring cannot report a `last` beyond the events it sent, and believing
-  a peer's number there would silence the child forever. A `gap` buys exactly
-  one arithmetic marker line, and only when the claim left a hole to name.
-  **The pass has a budget and a rotation.** `PULL_BUDGET` (6 s) bounds the
-  whole loop, because the rows are pulled synchronously inside the daemon's
-  tick and a node that is merely off burns its request's full timeout; rows
-  past the deadline are named (`budget-spent`) and audited once, and
-  `PULL_ROTATION` moves the pass's starting row one along every time, so no
-  row starves. A drained `Exited` latches the row with
-  `remote_children::mark_drained` — and so does a PERMANENT answer
-  (`TASK_NOT_FOUND_CODE`: the far node holds neither a record nor a ring for
-  that child, so it is gone for good and retrying it forever would only grow
+  DROPPED rather than clamped into a fabricated `exit 0`), then rendered by the
+  LOCAL `render_line` under `[<node>/<child id>]`. **The claim is atomic, not a
+  read-then-write.** The cursor is advanced through
+  `remote_children::claim_lines_after` — one `with_stage_lock` section that
+  reads the stored value and advances it, returning the cursor the caller may
+  deliver from — and only events with `seq` past that are delivered; two
+  overlapping passes therefore cannot duplicate a line, and a claim that cannot
+  be written delivers NOTHING (losing a line is this lane's safe direction,
+  duplicating one is not). `last` is trusted ONLY under `gap`, where the ring's
+  own doc says it is the resync; without a gap an honest ring cannot report a
+  `last` beyond the events it sent, and believing a peer's number there would
+  silence the child forever. A `gap` buys exactly one arithmetic marker line,
+  and only when the claim left a hole to name. **The pass has a budget and a
+  rotation.** `PULL_BUDGET` (6 s) bounds the whole loop, because the rows are
+  pulled synchronously inside the daemon's tick and a node that is merely off
+  burns its request's full timeout; rows past the deadline are named
+  (`budget-spent`) and audited once, and `PULL_ROTATION` moves the pass's
+  starting row one along every time, so no row starves. A drained `Exited`
+  latches the row with `remote_children::mark_drained` — and so does a PERMANENT
+  answer (`TASK_NOT_FOUND_CODE`: the far node holds neither a record nor a ring
+  for that child, so it is gone for good and retrying it forever would only grow
   the audit log). A refusal or a transport failure is NOT permanent: both stay
   retryable, from the same cursor, with no backoff — one pull per child per
   tick. `deliver`'s gate label is a parameter: `autogate-child` for a local
-  line, `autogate-child remote` for a pulled one. `clean`/`quote`/`reclean`
-  all judge through `common::strip_unsafe` — control, Unicode `Cf`, AND the
+  line, `autogate-child remote` for a pulled one. `clean`/`quote`/`reclean` all
+  judge through `common::strip_unsafe` — control, Unicode `Cf`, AND the
   invisible non-`Cf` fillers (`is_invisible`: variation selectors, Hangul and
-  braille blanks) — and a new sanitizer anywhere in this crate must too, never
-  a copied table (S9's own review found the local lane filtering `is_control`
+  braille blanks) — and a new sanitizer anywhere in this crate must too, never a
+  copied table (S9's own review found the local lane filtering `is_control`
   only, and the fillers missing). `common::clean_line` is `pub` and re-exported
   at `graph::clean_line` for the SAME reason (P-RSA S10 review, L6): the A2A
-  door echoes a caller's illegal slug in its refusal and must clean it with
-  this one, not with a second rule of its own.
-  **Both ends of a child's exit are one input.** `pingback`'s `dropped` slice
-  carries the eidolon sync's own drop set AND (H1 of the S8/S9 review) the
-  end facts of every remote child `reap_inner` took off the roster this same
-  pass — the kill path, the prune, the superseded tombstone — because the
-  roster is re-read after the sweep and a record that left before that read is
-  otherwise never decided over. One pass yields at most ONE event per child
-  (the dropped loop dedupes by id, and the exit `decide` already answered is
-  never pushed a second time): a ring closes with exactly one `Exited`.
-  **`died mid-turn` is the sync's own additive return.**
-  `sync_eidolon_sessions` returns `(bool, Vec<DroppedEidolon>)` — the bool
-  means exactly what it did before, so every existing caller is unchanged in
-  behaviour; the second half names the records that pass removed (id,
-  petname, parent edge, agent, and the trace `TranscriptSpec::locate`
-  resolves for it). Do NOT add a second liveness probe for the dead-pid row:
-  `reap` is the only sweep (`AGENTS.md`'s standing rule), so the ping-back
-  consumes that sweep's own drop list and probes nothing itself.
+  door echoes a caller's illegal slug in its refusal and must clean it with this
+  one, not with a second rule of its own. **Both ends of a child's exit are one
+  input.** `pingback`'s `dropped` slice carries the eidolon sync's own drop set
+  AND (H1 of the S8/S9 review) the end facts of every remote child `reap_inner`
+  took off the roster this same pass — the kill path, the prune, the superseded
+  tombstone — because the roster is re-read after the sweep and a record that
+  left before that read is otherwise never decided over. One pass yields at most
+  ONE event per child (the dropped loop dedupes by id, and the exit `decide`
+  already answered is never pushed a second time): a ring closes with exactly
+  one `Exited`. **`died mid-turn` is the sync's own additive return.**
+  `sync_eidolon_sessions` returns `(bool, Vec<DroppedEidolon>)` — the bool means
+  exactly what it did before, so every existing caller is unchanged in
+  behaviour; the second half names the records that pass removed (id, petname,
+  parent edge, agent, and the trace `TranscriptSpec::locate` resolves for it).
+  Do NOT add a second liveness probe for the dead-pid row: `reap` is the only
+  sweep (`AGENTS.md`'s standing rule), so the ping-back consumes that sweep's
+  own drop list and probes nothing itself.
 - **The ping-back reuses `graph/trace.rs`'s renderers and the roster's own
   extractors, never a second formatter.** `one_line_clip`/
   `tool_result_summary` (widened `pub(in crate::graph)`) render the clipped
@@ -1416,9 +1406,8 @@ in the message.
   stop concatenating. That relay shape is a timing argument, not a message
   boundary: SOCK_STREAM carries none, so a relay thread starved past the
   delay would read both writes back as one concatenated chunk — the delay
-  IS what keeps the two writes distinct at the pty. Two callers pay it
-  beyond the CLI: the a2a door's inject (per-connection thread, fine) and
-  boot auto-resume's restore resubmits, which run serially before the
+  IS what keeps the two writes distinct at the pty. Boot auto-resume's restore
+  resubmits pay it beyond the CLI, and they run serially before the
   daemon's tick loop starts — N undying resubmits delay reaper start by
   N×300ms, bounded and boot-once. `SUBMIT_KEYSTROKE_DELAY` (300ms) is empirically
   pinned, not guessed: a live windowed kimi session on this box reproduced
@@ -1986,50 +1975,34 @@ in the message.
   refresh timer over this file is out of scope here (a later phase's job);
   this command only ever writes it as a side effect of being invoked with
   `--mesh`.
-- **`send::deliver_local`'s success path is ONE of exactly TWO mailbase-filing
-  calls reached through `session_send` — never add a second one on that
-  path.** Every consumer that delivers into an ALREADY-REGISTERED session's
-  socket (`send --id`, `--to` resolving local, `pending approve`'s
-  re-drive, `aoide-server`'s A2A `do_inject`) reaches it through
-  `session_send`; do NOT add a second `aoide_storage::mail::file_receipt`
-  call for any of those — `do_inject` in particular reaches this exact
-  function too, so a call there would double-file every A2A message
-  delivered into an existing session. The OTHER of these two lives OUTSIDE
-  this crate, in `aoide-server`'s `spawn_inject_prompt` (`a2a.rs`) — a
-  brand-new A2A-spawned session's first turn is typed only once that session
-  is READY (`aoide_conduct::graph::wait_ready`, the same gate `spawn
-  --prompt` and `resurrect`'s restore delivery pass), never at the instant its
-  socket appears: a bound socket is a wrapper that registered, not a harness
-  that started — and with no readiness within the budget it is typed at by
-  nothing and files no receipt, so the sender's letter stays unacknowledged
-  rather than acknowledged by a turn that never ran. That readiness fact is
-  per-harness and two-valued (`Readiness`): `Hook` reads THIS launch's
-  harness `SessionStart` (its `sessionStartAt` stamp on a child record of the
-  wrapper, at or after the launch instant — a leftover record from an earlier
-  run under a reused id is not readiness), and `OutputSettled` claims no
-  fact at all: it types once output settles and reports the delivery
-  `delivered-unverified`. (A third value, a prompt-pattern marker, was tried
-  here and withdrawn as unanchorable — branch re-review N1: a banner
-  containing the label bought a false `Verified` plus an early inject.) It is
-  typed before that session
-  has a `SessionRecord` at all, so it can never reach
-  `deliver_local`/`session_send` and has to file itself (see
-  `aoide_storage::mail`'s module doc for the full two-writer reasoning). The
-  door runs that wait-and-type on its OWN WORKER, never on its connection
-  handler. That budget (20s) plus the socket retry would otherwise park a
-  `MAX_CONN` slot and hand `503 server busy` to every other RPC — read
-  commands included. The worker
-  stamps the outcome on the record (`stamp_opening_turn`), which is what
-  `tasks/get` reports as `status.message` and what the door's own audit line
-  carries, so a peer whose opening turn never ran is told `not-ready` rather
-  than reading a bare `submitted`.
-  **A THIRD, orthogonal filing call exists since P-M2** — `aoide-server`'s
-  `mail_deposit` (`a2a.rs`) calls `aoide_storage::mail::deposit` directly
-  for a letter/receipt arriving over the wire FROM a peer node. It never
-  touches `session_send`/`deliver_local` (there is no local session on
-  either end of that path), so it does not widen this bullet's "exactly
-  two, never a second" rule — that rule is scoped to `session_send`'s own
-  callers, and wire-deposited mail was never one of them.
+- **`send::deliver_local`'s success path is the ONE mailbase-filing call reached
+  through `session_send` — never add a second one on that path.** Every consumer
+  that delivers into an ALREADY-REGISTERED session's socket (`send --id`,
+  `--to` resolving local, `pending approve`'s re-drive) reaches it through
+  `session_send`, and that is where the receipt is filed. A held network send is
+  filed when a local approver releases it, through that same path. A network
+  door never reaches it: `aoide-server`'s A2A `do_inject` parks its send in
+  `pending.json` (`door_can_approve`), and its A2A spawn holds the opening turn
+  the same way, so neither files anything. `aoide-server`'s `mail_deposit`
+  (`a2a.rs`) calls `aoide_storage::mail::deposit` directly for a letter/receipt
+  arriving over the wire FROM a peer node. It never touches
+  `session_send`/`deliver_local` (there is no local session on either end of
+  that path), so it does not widen this bullet's "exactly one" rule — that rule
+  is scoped to `session_send`'s own callers, and wire-deposited mail was never
+  one of them.
+- **Readiness is per-harness and two-valued (`Readiness`); a typed first turn
+  waits on `wait_ready`, and an unready target is never typed at.** `spawn
+  --prompt` and `resurrect`'s restore pass both wait on it, bounded by
+  `READY_BUDGET`, before their send, and report `not-ready` if it never comes.
+  `Hook` reads THIS launch's harness `SessionStart` (its `sessionStartAt` stamp
+  on a child record of the wrapper, at or after the launch instant; a leftover
+  record from an earlier run under a reused id is not readiness).
+  `OutputSettled` claims no fact at all: it types once output settles and
+  reports the delivery `delivered-unverified`. A third value, a prompt-pattern
+  marker, was tried and withdrawn as unanchorable: a banner containing the label
+  bought a false `Verified` and an early inject. An A2A spawn does not wait at
+  all. Its opening turn is handed straight to `hold_pending`, so nothing is
+  typed there.
 - **The doorbell's `.ring.lock` is never `.stage.lock`, and it is the
   ONLY lock this crate ever holds across real socket I/O** (P-M5a-2,
   `graph::doorbell`). `with_ring_lock` and `try_stage_lock` are separate
@@ -2145,55 +2118,50 @@ in the message.
   template parser) is a PURE function on purpose — no env read, no spawn —
   so it stays directly unit-testable; do the env reads (`terminal_template`/
   `require_display`) in the thin callers around it, never inside it.
-- **`SessionRecord.origin` is a PERMANENT birth fact stamped ONCE per
-  record, the same discipline `headless` already holds
-  (P-P3, `docs/architecture/PAIRING.md` decision 7) — never re-derived
-  later. Write AUTHORITY is split by SHAPE, not by caller count, tightened
-  at LANE IDENTITY P-ID0 (G16/G5).**
-  `session_store.rs::stamp_origin` is `pub` (crosses the crate boundary)
-  and is the ONE writer function, with THREE call sites today — but the
-  invariant that matters is narrower than "exactly two callers": **a
+- **`SessionRecord.origin` is a PERMANENT birth fact stamped ONCE per record,
+  the same discipline `headless` already holds (P-P3,
+  `docs/architecture/PAIRING.md` decision 7) — never re-derived later. Write
+  AUTHORITY is split by SHAPE, not by caller count, tightened at LANE IDENTITY
+  P-ID0 (G16/G5).** `session_store.rs::stamp_origin` is `pub` (crosses the crate
+  boundary) and is the ONE writer function, with THREE call sites today — but
+  the invariant that matters is narrower than "exactly two callers": **a
   `node:*` shape may be stamped from exactly ONE place, `aoide-server`'s
   `a2a::do_spawn` (`stamp_spawn_provenance`)**, called DIRECTLY on the
-  just-spawned record — polling for the record's registration the same way
-  `spawn_inject_prompt` already does — from the door where the node name IS
-  authenticated. Every OTHER call site may stamp a LOCAL-CLASS value but
-  MUST refuse a `node:*` shape, because neither has a door behind it:
-  `graph/conduct.rs::session_conduct` reads its own inherited
-  `AOIDE_SESSION_ORIGIN` env (a same-uid process can set that on itself
-  before invoking `aoide conduct` directly) and `graph/
-  resurrect.rs::origin_to_carry` reads a revived session's OWN ledger entry
-  back (`state/session-ledger.jsonl` is a plain, same-uid-writable,
-  append-only file — a same-uid process can append a line claiming
-  `origin:"node:X"` and then run the ungated local `aoide resurrect`,
-  which likewise has no door behind it). Both REFUSE (eprintln, never
-  panic) a `node:*` value from their own untrusted source instead of
-  stamping it. **A future third-plus call site is fine as long as it holds
-  this same refusal** — the invariant is "node:* only from an authenticated
-  door", never "count the callers". No `restage_graph()` — like `headless`,
-  `origin` is consumed internally (`doc.rs::ledger_session_exit`'s
-  projection into the durable ledger, and `origin_to_carry` reading that
-  field back to carry a LOCAL-class session's provenance forward onto its
-  revived record — G6, same phase, `node:*` excluded per above), not
-  rendered into `graph.json`. **This closes the STAMP paths, not the
-  files**: a hand-crafted `sessions.json`/ledger line claiming `node:X` is
-  still a readable, unflagged string on disk — nothing here makes the files
-  tamper-evident; that is P-ID1 (the daemon-signed credential, below) —
-  minted and stored, verified on the per-session control socket's own
-  accept and consumed by the send gate as of P-ID2, and both remaining
-  sockets get a peercred floor of their own as of P-ID3 (below).
-  **The raw `origin` field is attribution, not an
-  authenticated credential** — a same-uid process can still forge a
-  LOCAL-class origin (`stamp_origin` trusts whatever non-`node:*` value it
-  is given). Don't let a consumer gate a security decision on the raw
-  field: the authenticated form is the sealed credential (below), and the
-  secrets broker's origin gate (P-ID4) is the model consumer — it gates on
-  `originClass` read off a VERIFIED seal, never the raw `origin` field.
-  The consumer NAME presenting a request stays unauthenticated either way
-  (a separate, unbuilt axis — CONTRACTS.md's identity-lane accounting).
-  What P-ID0 closes is narrower and real: every
-  record-STAMP path this codebase drives now refuses a `node:*` shape it
-  didn't mint itself at the door — env AND the unsealed ledger both.
+  just-spawned record — polling for the record's registration on its own budget
+  — from the door where the node name IS authenticated. Every OTHER call site
+  may stamp a LOCAL-CLASS value but MUST refuse a `node:*` shape, because
+  neither has a door behind it: `graph/conduct.rs::session_conduct` reads its
+  own inherited `AOIDE_SESSION_ORIGIN` env (a same-uid process can set that on
+  itself before invoking `aoide conduct` directly) and `graph/
+  resurrect.rs::origin_to_carry` reads a revived session's OWN ledger entry back
+  (`state/session-ledger.jsonl` is a plain, same-uid-writable, append-only file
+  — a same-uid process can append a line claiming `origin:"node:X"` and then run
+  the ungated local `aoide resurrect`, which likewise has no door behind it).
+  Both REFUSE (eprintln, never panic) a `node:*` value from their own untrusted
+  source instead of stamping it. **A future third-plus call site is fine as long
+  as it holds this same refusal** — the invariant is "node:* only from an
+  authenticated door", never "count the callers". No `restage_graph()` — like
+  `headless`, `origin` is consumed internally (`doc.rs::ledger_session_exit`'s
+  projection into the durable ledger, and `origin_to_carry` reading that field
+  back to carry a LOCAL-class session's provenance forward onto its revived
+  record — G6, same phase, `node:*` excluded per above), not rendered into
+  `graph.json`. **This closes the STAMP paths, not the files**: a hand-crafted
+  `sessions.json`/ledger line claiming `node:X` is still a readable, unflagged
+  string on disk — nothing here makes the files tamper-evident; that is P-ID1
+  (the daemon-signed credential, below) — minted and stored, verified on the
+  per-session control socket's own accept and consumed by the send gate as of
+  P-ID2, and both remaining sockets get a peercred floor of their own as of
+  P-ID3 (below). **The raw `origin` field is attribution, not an authenticated
+  credential** — a same-uid process can still forge a LOCAL-class origin
+  (`stamp_origin` trusts whatever non-`node:*` value it is given). Don't let a
+  consumer gate a security decision on the raw field: the authenticated form is
+  the sealed credential (below), and the secrets broker's origin gate (P-ID4) is
+  the model consumer — it gates on `originClass` read off a VERIFIED seal, never
+  the raw `origin` field. The consumer NAME presenting a request stays
+  unauthenticated either way (a separate, unbuilt axis — CONTRACTS.md's
+  identity-lane accounting). What P-ID0 closes is narrower and real: every
+  record-STAMP path this codebase drives now refuses a `node:*` shape it didn't
+  mint itself at the door — env AND the unsealed ledger both.
 - **`SessionRecord.remoteParent` is stamped from `aoide-server`'s A2A door
   ONLY (remote sub-agents P-RSA S3, CONTRACTS.md §4) — there is no local
   path, and adding one is the mistake this bullet exists to prevent.**
@@ -2244,42 +2212,40 @@ in the message.
 - **`identity::peer_cred`/`PeerCred` are `pub(crate)`, not `pub(in
   crate::graph)` (LANE IDENTITY P-ID3) — `shellbridge.rs` reuses them
   directly.** Widened once, for exactly the reason `graph.rs`'s own `mod
-  identity` doc comment gives: a sibling module reusing the SAME kernel-
-  truth primitive beats a second `SO_PEERCRED` read in this crate. **That
-  primitive is a Linux/Android capability, never a portable one: every other
-  host takes the SAME UNIDENTIFIED `None` an unreadable creds read gives — a
-  named `cfg` refusal, never a substitute (`getpeereid` reports no pid, so it
-  could not fill the `PeerCred.pid` these gates walk).** Both callers keep
-  their posture: `shellbridge`'s accept-time `cross_uid_gate` REFUSES an
-  unidentified peer, and the control socket's self-injection check reads it as
-  not-self (that narrow guard refuses only true self-injection). Do not
-  widen further to plain `pub` "for convenience" — this stays an internal
-  primitive, never crossing the `aoide-conduct` -> `aoide` crate boundary
-  root's shim re-exports onward; `aoide-server` reuses `aoide_secrets::
-  peercred` instead (already `pub`, already a dependency) rather than
-  reaching into this crate for it, the same "small local reimplementation
-  over a one-fn cross-crate edge" discipline `identity.rs`'s own module doc
-  states for its relationship to `aoide-secrets::peercred`. **The cross-uid
-  floor on shellbridge/`aoided` (`cross_uid_gate` in each file, pure,
-  unit-tested without a real different-uid connection) does NOT stop a
-  same-uid attacker** — every legitimate connector on both sockets already
-  shares the operator's own uid under OQ1-A. Do not add a same-uid
-  restriction to shellbridge's verdict door in this crate to "finish the
-  job": the legitimate verdict caller is the desktop QML process, which is
-  NOT part of any agent session's ancestry, so an ancestry-shaped floor
-  would refuse the real caller, not just an attacker — this residual is
-  documented, not silently left, in `CONTRACTS.md`'s identity section.
-  `send.rs`'s own gate (`real_attested_sender`) stays untouched by this
-  phase — a request dispatched through `aoided`'s socket (or injected
-  through `a2a serve`) resolves the GATE against whichever process is
-  actually running `deliver_local`, which is the daemon's/`a2a serve`'s own
-  ancestry, not the original caller's; don't "fix" this by threading a
-  peercred pid into `send.rs` without opening that as its own scoped phase
-  — P-ID3 closed only the ATTRIBUTION half of that gap (`aoided`'s
-  `invocation_from_dispatch_request` and `a2a::do_inject` both stamp an
-  absent `from` explicit-empty rather than let it fall through to their own
-  process's ambient `AOIDE_SESSION_ID`), not the gate's own identity
-  resolution.
+  identity` doc comment gives: a sibling module reusing the SAME kernel-truth
+  primitive beats a second `SO_PEERCRED` read in this crate. **That primitive is
+  a Linux/Android capability, never a portable one: every other host takes the
+  SAME UNIDENTIFIED `None` an unreadable creds read gives — a named `cfg`
+  refusal, never a substitute (`getpeereid` reports no pid, so it could not fill
+  the `PeerCred.pid` these gates walk).** Both callers keep their posture:
+  `shellbridge`'s accept-time `cross_uid_gate` REFUSES an unidentified peer, and
+  the control socket's self-injection check reads it as not-self (that narrow
+  guard refuses only true self-injection). Do not widen further to plain `pub`
+  "for convenience" — this stays an internal primitive, never crossing the
+  `aoide-conduct` -> `aoide` crate boundary root's shim re-exports onward;
+  `aoide-server` reuses `aoide_secrets:: peercred` instead (already `pub`,
+  already a dependency) rather than reaching into this crate for it, the same
+  "small local reimplementation over a one-fn cross-crate edge" discipline
+  `identity.rs`'s own module doc states for its relationship to
+  `aoide-secrets::peercred`. **The cross-uid floor on shellbridge/`aoided`
+  (`cross_uid_gate` in each file, pure, unit-tested without a real different-uid
+  connection) does NOT stop a same-uid attacker** — every legitimate connector
+  on both sockets already shares the operator's own uid under OQ1-A. Do not add
+  a same-uid restriction to shellbridge's verdict door in this crate to "finish
+  the job": the legitimate verdict caller is the desktop QML process, which is
+  NOT part of any agent session's ancestry, so an ancestry-shaped floor would
+  refuse the real caller, not just an attacker — this residual is documented,
+  not silently left, in `CONTRACTS.md`'s identity section. `send.rs`'s own gate
+  (`real_attested_sender`) resolves identity against whichever process is
+  actually running `deliver_local`: a request dispatched through `aoided`'s
+  socket resolves against the daemon's own ancestry, not the original caller's.
+  Don't "fix" this by threading a peercred pid into `send.rs` without opening
+  that as its own scoped phase. A network door never reaches that resolution,
+  because its send parks first (`door_can_approve`). P-ID3 closed only the
+  ATTRIBUTION half of that gap (`aoided`'s `invocation_from_dispatch_request`
+  and `a2a::do_inject` both stamp an absent `from` explicit-empty rather than
+  let it fall through to their own process's ambient `AOIDE_SESSION_ID`), not
+  the gate's own identity resolution.
 - **Conductability is `is_conductable_now` (`doc.rs`: the stored flag AND
   the socket file's own existence on disk) at every reporting AND acting
   boundary, never the stored flag echoed verbatim.** `build_graph`'s
