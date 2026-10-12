@@ -30,6 +30,7 @@
 //!     takes no IO, so it is exhaustively unit-tested with hand-built byte
 //!     fixtures instead of files on disk.
 
+use aoide_conduct::graph::strip_ansi;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -42,102 +43,6 @@ pub const TAIL_BYTES: u64 = 64 * 1024;
 /// How many rendered lines the overlay shows. [`render_tail`] windows to this
 /// even when the raw read (and thus the stripped line count) holds more.
 pub const TAIL_LINES: usize = 400;
-
-/// The stripper's state machine. [`Csi`](State::Csi) and [`Osc`](State::Osc)
-/// parse to their real terminator; [`EscIntermediate`](State::EscIntermediate)
-/// parses the third ECMA-48 sequence family — an intermediate byte
-/// (`0x20..=0x2F`) followed eventually by a final byte (`0x30..=0x7E`), e.g.
-/// `ESC ( B` (select ASCII as G0). That is still tokenizing by the standard's
-/// byte-class rules, not vt100 emulation — no cursor/colour semantics are
-/// interpreted, only "where does this sequence end." What is left as a
-/// one-byte-and-done heuristic is the two-byte Fp/Fs family (`ESC 7`, `ESC
-/// M`, `ESC =`, ...) — those have no intermediate byte, so "consume the one
-/// byte after ESC" is already exactly correct for them, not a shortcut.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum State {
-    /// Ordinary text.
-    Normal,
-    /// Just saw a lone `ESC` (0x1B); one more byte decides what it was.
-    Esc,
-    /// Inside `ESC [ ... final` (CSI) — swallowing params/intermediates
-    /// until a byte in `0x40..=0x7E` ends it.
-    Csi,
-    /// Inside `ESC ] ...` (OSC) — swallowing until `BEL` or the `ESC \`
-    /// (ST) terminator.
-    Osc,
-    /// Inside OSC, just saw an `ESC`; one more byte decides whether it
-    /// completes the `ESC \` terminator.
-    OscEsc,
-    /// Inside a non-CSI, non-OSC escape that has an ECMA-48 intermediate
-    /// byte (`0x20..=0x2F`), e.g. the `(` of `ESC ( B` — swallowing further
-    /// intermediates until a final byte (`0x30..=0x7E`) ends it.
-    EscIntermediate,
-}
-
-/// Strip terminal escape sequences and non-`\n`/`\t`/`\r` control bytes from
-/// already-lossily-decoded text.
-///
-/// Runs over `char`s of a valid `&str`, not raw bytes: ESC and the other
-/// bytes this state machine keys off of are all single-byte ASCII, so
-/// `from_utf8_lossy` carries them through unchanged (see [`render_tail`]),
-/// and scanning `char`s means every step is on a UTF-8 boundary for free —
-/// no separate byte-boundary bookkeeping, even with multi-byte characters
-/// sitting right next to an escape sequence.
-///
-/// `\r` is kept, not dropped, despite being a control byte: [`render_tail`]
-/// needs it downstream to collapse spinner/progress overwrites (keep only
-/// the segment after the last `\r` on a line). It is the one control byte
-/// with its own explicit rule instead of the blanket drop.
-///
-/// An escape sequence left unterminated at end of input (any state other
-/// than `Normal` when the chars run out) simply stops advancing the output —
-/// nothing after the last complete char was ever pushed, so "consumes to
-/// end and emits nothing" falls out of the loop ending, no special case
-/// needed.
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut state = State::Normal;
-    for ch in input.chars() {
-        state = match (state, ch) {
-            (State::Normal, '\x1b') => State::Esc,
-            (State::Normal, '\n' | '\t' | '\r') => {
-                out.push(ch);
-                State::Normal
-            }
-            (State::Normal, c) if (c as u32) < 0x20 || c as u32 == 0x7f => State::Normal,
-            (State::Normal, c) => {
-                out.push(c);
-                State::Normal
-            }
-            (State::Esc, '[') => State::Csi,
-            (State::Esc, ']') => State::Osc,
-            // ECMA-48 intermediate byte: a non-CSI/OSC escape with a real
-            // terminator to find (e.g. the `(` of `ESC ( B`) — go find it
-            // instead of guessing at one byte.
-            (State::Esc, c) if (0x20..=0x2f).contains(&(c as u32)) => State::EscIntermediate,
-            // Everything else is a two-byte Fp/Fs escape (`ESC 7`, `ESC M`,
-            // `ESC =`, ...) — no intermediate byte, so consuming this one
-            // byte and returning to Normal is exactly correct, not a guess.
-            (State::Esc, _) => State::Normal,
-            (State::Csi, c) if (0x40..=0x7e).contains(&(c as u32)) => State::Normal,
-            (State::Csi, _) => State::Csi,
-            (State::Osc, '\x07') => State::Normal,
-            (State::Osc, '\x1b') => State::OscEsc,
-            (State::Osc, _) => State::Osc,
-            (State::OscEsc, '\\') => State::Normal,
-            // Not a real ST — treat the ESC as more OSC content and keep
-            // swallowing (this byte along with it; a lone stray ESC inside
-            // an OSC body is itself malformed input, not worth a second
-            // heuristic layered on top of the first).
-            (State::OscEsc, _) => State::Osc,
-            // Stay put on further intermediates; a final byte ends the
-            // sequence and drops back to plain text.
-            (State::EscIntermediate, c) if (0x30..=0x7e).contains(&(c as u32)) => State::Normal,
-            (State::EscIntermediate, _) => State::EscIntermediate,
-        };
-    }
-    out
-}
 
 /// Turn raw pty-log bytes into the lines an overlay paints.
 ///
@@ -223,34 +128,6 @@ pub fn tail_file(path: &Path, max_lines: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn sgr_strip() {
-        // `\x1b[1;31m` (bold red) ... `\x1b[0m` (reset) around plain text.
-        let raw = b"plain \x1b[1;31mred bold\x1b[0m plain again";
-        assert_eq!(
-            render_tail(raw, false, 10),
-            vec!["plain red bold plain again"]
-        );
-    }
-
-    #[test]
-    fn osc_to_bel_and_osc_to_st() {
-        // OSC 0 (set window title) terminated by BEL, then the same
-        // terminated by ST (`ESC \`) instead.
-        let raw = b"a\x1b]0;title one\x07b\x1b]0;title two\x1b\\c";
-        assert_eq!(render_tail(raw, false, 10), vec!["abc"]);
-    }
-
-    #[test]
-    fn esc_non_csi_osc_intermediate_sequence_leaks_nothing() {
-        // ESC ( B — select ASCII as G0 — is a real, common terminal
-        // sequence: ESC, then one ECMA-48 intermediate byte ('('), then a
-        // final byte ('B'). EscIntermediate tokenizes to that final byte
-        // instead of guessing at one, so nothing from the sequence prints.
-        let raw = b"before\x1b(Bafter";
-        assert_eq!(render_tail(raw, false, 10), vec!["beforeafter"]);
-    }
 
     #[test]
     fn crlf_terminated_lines_survive_real_pty_shape() {
@@ -379,15 +256,6 @@ mod tests {
         assert!(lines[0].starts_with("before "));
         assert!(lines[0].ends_with(" after"));
         assert!(lines[0].contains('\u{fffd}'));
-    }
-
-    #[test]
-    fn multibyte_utf8_adjacent_to_escapes_stays_on_a_char_boundary() {
-        // A multi-byte character immediately touching SGR sequences on both
-        // sides — exercises the char-boundary-safe design of `strip_ansi`
-        // (scanning `char`s of an already-valid `&str`, never raw bytes).
-        let raw = "café \x1b[31m日本語\x1b[0m more".as_bytes();
-        assert_eq!(render_tail(raw, false, 10), vec!["café 日本語 more"]);
     }
 
     #[test]

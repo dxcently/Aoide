@@ -26,7 +26,7 @@ session out of the box — no opt-in. The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
 (sharing a live parent) autogate each other too; and the reciprocal holds as
 well — a parent automatically hears the children it spawned, as the daemon's
-own one-line report off the child's trace or hook phase, never a prompted send. Headless conduct
+own one-line report off the child's trace, hook phase or screen, never a prompted send. Headless conduct
 (`--headless`, no controlling terminal at all), `spawn` (the detached
 launch command), and sender provenance (a delivered payload carries a `from
 <sender>: ` prefix) round out the no-terminal case without changing the core
@@ -319,6 +319,20 @@ through.
     `parentSessionId` is that wrap, and typing into it would be the child's
     own next prompt), and only over an edge the kernel attested — see
     `Session-Graph.md`'s "And the parent hears it".
+
+    A third source speaks for a conducted program with neither hooks nor a
+    trace (a `codex`, an `aider`, a REPL): the wrap itself, once its screen has
+    held a question still for three seconds (`[y/N]`, a password prompt,
+    `Press Enter`), tells its spawner —
+
+    ```
+    [codex <petname>] asking: "Apply patch? [y/N]"
+    ```
+
+    once per question while it stands, over the same attested spawner edge, with
+    the same delivery, skips and cursor file. A `sudo` password prompt is the human's and
+    is never announced. See `Session-Graph.md`, "Programs with no harness — the
+    screen".
   - **Remote-parent — the same relation across machines.** The A2A door's
     rule, not the local socket's, listed here because it answers the same
     question — is the sender this target's parent? — for the one send that

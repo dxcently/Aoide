@@ -56,7 +56,7 @@
 //! stamp, so any new hook event re-arms it. The first examination of a child
 //! is a baseline only.
 
-use super::{clean, is_false, tracks, ChildClaim, CursorFile};
+use super::{clean, harness_tag, is_false, tracks, ChildClaim, CursorFile};
 use crate::graph::model::{canonical_state, HookRecord, SessionRecord};
 use aoide_protocol::agents::agent_profile;
 use aoide_storage::time::parse_iso_utc;
@@ -136,6 +136,20 @@ fn recipient(
     sealed: &impl Fn(&SessionRecord) -> bool,
 ) -> Option<String> {
     let host = host_wrap(kid, roster, sealed)?;
+    spawner_of(host, &kid.session_id, roster, sealed)
+}
+
+/// Steps 2 and 3 of [`recipient`]: the spawner of a conducted `host` wrap,
+/// over the edge `host`'s registration attested, resolved to the conducted
+/// session that can be written to. Shared with the screen source
+/// (`prompt.rs`), whose child IS the wrap and so has no hook child to climb
+/// from. Never `kid_id` itself and never `host`.
+pub(super) fn spawner_of(
+    host: &SessionRecord,
+    kid_id: &str,
+    roster: &[SessionRecord],
+    sealed: &impl Fn(&SessionRecord) -> bool,
+) -> Option<String> {
     let spawner_id = host.parent_session_id.as_deref()?;
     if host.attested_spawner.as_deref() != Some(spawner_id) {
         return None;
@@ -146,7 +160,7 @@ fn recipient(
     } else {
         host_wrap(spawner, roster, sealed)?
     };
-    (target.session_id != kid.session_id && target.session_id != host.session_id)
+    (target.session_id != kid_id && target.session_id != host.session_id)
         .then(|| target.session_id.clone())
 }
 
@@ -163,10 +177,9 @@ pub(super) fn gather(
         .filter(|rec| tracked(rec))
         .filter_map(|rec| {
             let hook = hooks.iter().find(|h| h.session_id == rec.session_id)?;
-            let name = rec.petname.as_deref().filter(|p| !p.trim().is_empty()).unwrap_or(&rec.session_id);
             Some(HookChild {
                 id: rec.session_id.clone(),
-                tag: format!("[{} {}]", rec.agent, clean(name)),
+                tag: harness_tag(&rec.agent, rec.petname.as_deref(), &rec.session_id),
                 recipient: recipient(rec, roster, sealed)?,
                 phase: canonical_state(&hook.phase).to_string(),
                 at: hook.updated_at.clone(),

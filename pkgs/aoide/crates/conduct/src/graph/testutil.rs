@@ -43,8 +43,10 @@ pub(crate) fn session(
         cwd: cwd.into(),
         state: state.into(),
         // Every fixture here is a harness-shaped record unless a test says
-        // otherwise; `stamp_shell`/`program_is_a_shell` tests set it directly.
+        // otherwise: a claude wrap whose resolved program is `claude`.
+        // `stamp_wrap`/`program_is_a_shell` tests set both fields directly.
         shell: false,
+        wrapped_program: Some("claude".into()),
         started_at: started.into(),
         parent_session_id: parent.map(str::to_string),
         remote_parent: None,
@@ -62,6 +64,7 @@ pub(crate) fn session(
         context_tokens: None,
         context_ceiling: None,
         needs_sudo: None,
+        question: None,
         log_path: None,
         petname: None,
         task: None,
@@ -420,8 +423,20 @@ pub(crate) fn stamp_shell_capture(id: &str) {
     rec.restore = Some(aoide_storage::records::RestoreSnapshot::default());
     write_stage(&sessions_path(), &file).unwrap();
 }
+/// Stamp the wrap's resolved program, as conduct's registration does from its
+/// argv (`wrapped_program`): a spawn-shape wrap of `agent` is `Some(agent)`.
+pub(crate) fn stamp_wrapped_program(id: &str, program: Option<&str>) {
+    let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+    let rec = file
+        .sessions
+        .iter_mut()
+        .find(|s| s.session_id == id)
+        .unwrap_or_else(|| panic!("no stage record for `{id}`"));
+    rec.wrapped_program = program.map(str::to_string);
+    write_stage(&sessions_path(), &file).unwrap();
+}
 /// Stamp the DURABLE half instead: `shell = true` with no capture at all —
-/// what `conduct`'s own registration writes (via `stamp_shell`) and what a
+/// what `conduct`'s own registration writes (via `stamp_wrap`) and what a
 /// record looks like before its first tick. Separate helper, because the two
 /// reads are deliberately independent arms of `wrapped_program_is_a_shell`.
 pub(crate) fn stamp_shell_field(id: &str) {

@@ -52,7 +52,7 @@ fifth (Usage) that draws only when its stage file exists:
     token count and percentage, in the dock's shared gauge grammar — swapping to
     the urgent role past ~85% fill. A session with no turn yet takes zero
     footprint.
-  - **Sudo lock badge.** A conducted shell blocked at a `sudo` **password**
+  - **Sudo lock badge.** A conducted program blocked at a `sudo` **password**
     prompt raises the `needsSudo` signal, which the row renders as a distinct
     monochrome nerd-font **lock badge** — deliberately different from ordinary
     `awaiting` ("the agent wants a permission answer"): this reads as "it's your
