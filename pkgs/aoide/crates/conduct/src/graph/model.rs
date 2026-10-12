@@ -261,6 +261,15 @@ pub fn merged_sessions(sessions: &[SessionRecord], hooks: &[HookRecord]) -> Vec<
 /// onward untouched (`crate::graph::canonical_state` + all its callers).
 pub use aoide_protocol::canonical_state;
 
+/// Clear the screen's episode off a record, together: its `question` and its
+/// `needsSudo` lock badge. Every writer that ends the episode goes through here
+/// (the session's end, the reaper's done write, the wrap's refresh once it is
+/// `done`), so a timed-out `sudo` cannot leave its badge behind.
+pub(crate) fn clear_screen_ask(rec: &mut SessionRecord) {
+    rec.question = None;
+    rec.needs_sudo = None;
+}
+
 pub(in crate::graph) fn sorted_projects(projects: &[Project]) -> Vec<Project> {
     let mut p = projects.to_vec();
     p.sort_by(|a, b| a.name.cmp(&b.name));

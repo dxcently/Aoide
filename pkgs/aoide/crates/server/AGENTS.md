@@ -642,10 +642,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   is the miss.
 - **A shell target takes no auto-delivered inject from ANY rung — loopback
   and remote-parent autogate alike (N1, house rule 4).** The Inject arm
-  reads the TARGET's own record
-  (`session_wrapped_is_a_shell` → `aoide_conduct::graph::
-  wrapped_program_is_a_shell`, the record-side half of
-  `program_is_a_shell`) before it folds `deliver_now`, and holds the line
+  reads the TARGET's own record through `session_inject_hold` →
+  `aoide_conduct::graph::auto_type_refusal` (its shell arm is the record-side
+  half of `program_is_a_shell`) before it folds `deliver_now`, and holds the line
   PENDING when it comes back true — a shell's input is a command line, and
   `--agent <harness> -- bash` names a harness over a pty running a shell, so
   the `agent` label is not the question. Paid only where it can change the
@@ -777,6 +776,14 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the origin can never tell tunnel traffic from door traffic on its own.
   Don't widen the door's detail "for symmetry" — its bytes are pinned by
   existing tests and by operators' greps.
+- **The `spawnAgent` seam: `spawn_agent_harness` is the one judgement.** Its rule
+  and refusals are `CONTRACTS.md`'s spawnAgent paragraph. Locally: the walk is
+  `aoide_conduct::graph::wrapped_harness`, never a copy; `do_spawn`'s prologue and
+  `spawn_inject_prompt` both read it; readiness, the submit key and `spawn_argv`'s
+  `--agent` label take the PROVEN harness's name, never the configured first token
+  (`env claude` is `claude`, not `env`). The opening-turn tests use `eidolon` (a
+  registered harness with output-settled readiness) for the "no declarable fact"
+  branch.
 - **`do_spawn` never acks `submitted` on `cmd.spawn()`'s success alone
   (task #103).** `cmd.spawn()` only proves the WRAPPER `aoide conduct`
   process launched — it says nothing about whether that process's OWN

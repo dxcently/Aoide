@@ -13,17 +13,19 @@
 
 use super::doc::restage_graph;
 use super::model::{
-    canonical_state, load_stage, sessions_path, write_stage, RestoreSnapshot, SessionRecord,
-    SessionsFile, STAGE_GRAPH_VERSION,
+    canonical_state, clear_screen_ask, hooks_path, load_stage, sessions_path, write_stage,
+    HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
+use super::prompt::{Prompt, PromptWatch};
 use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize};
 #[cfg(unix)]
 use super::pty::signal_name;
 use super::session_store::{
     do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
-    stamp_attested_spawner, stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
+    stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task, stamp_wrap,
 };
 use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
+use aoide_protocol::agents::agent_profile;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
 use aoide_storage::attest::is_node_origin;
@@ -33,12 +35,19 @@ use serde_json::json;
 use std::path::PathBuf;
 
 /// The command's basename (the agent-name default), e.g. `/usr/bin/claude` →
-/// `claude`.
+/// `claude`. A login shell's spelling carries a leading `-` (`-bash`, `-zsh`):
+/// it names the same shell, so that `-` is dropped. Only a shell name drops it:
+/// `-claude` names no harness, and stays `-claude`, so it never passes the
+/// ping-back's proof for `claude`.
 fn command_basename(program: &str) -> String {
-    std::path::Path::new(program)
+    let base = std::path::Path::new(program)
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| program.to_string())
+        .unwrap_or_else(|| program.to_string());
+    base.strip_prefix('-')
+        .filter(|shell| SHELL_BASENAMES.contains(shell))
+        .map(str::to_string)
+        .unwrap_or(base)
 }
 
 /// The shell basenames [`program_is_a_shell`] resolves to — the ONE list, in
@@ -52,36 +61,331 @@ const SHELL_BASENAMES: &[&str] = &[
     "busybox", "elvish", "osh", "ash", "yash",
 ];
 
-/// Launchers that only FORWARD to the program after them: skipped whole,
-/// options and all, so `env bash`, `nice -n 5 bash`, `stdbuf -oL bash`,
-/// `timeout 60 bash` and `setsid bash` all resolve to `bash` rather than to
-/// their own basename.
+/// Launchers that only FORWARD to the program after them. The hook door's plumbing
+/// verdict ([`is_invocation_plumbing`]) reads this list; the walk reads each
+/// launcher's own options from [`launcher`].
 const FORWARDING_LAUNCHERS: &[&str] = &[
     "env", "exec", "setsid", "nohup", "stdbuf", "chrt", "ionice", "nice",
 ];
 
-/// Among a launcher's own options, the ones taking their value as a SEPARATE
-/// token (`nice -n 5`, `stdbuf -o L`, `timeout -k 5`) rather than attached
-/// (`stdbuf -oL`). Per LAUNCHER, never one global set: `env -i` takes no value
-/// while `stdbuf -i M` does, and a shared table would have to guess — a guess
-/// here swallows the program name and misses a shell, which is the direction
-/// this predicate must never err in. Anything else merely numeric (a
-/// priority, a duration) is skipped by [`skip_launcher_options`] too.
-fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
-    match launcher {
-        "env" => matches!(arg, "-u" | "--unset" | "-C" | "--chdir" | "-S" | "--split-string"),
-        "nice" => matches!(arg, "-n" | "--adjustment"),
-        "stdbuf" => matches!(arg, "-i" | "-o" | "-e"),
-        "ionice" => matches!(arg, "-c" | "-n" | "-p" | "-u"),
-        "chrt" => matches!(arg, "-p" | "-T" | "-P" | "-D" | "-R" | "-O" | "-b"),
-        "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
-        "script" => matches!(arg, "-c" | "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in"),
-        _ => false,
+/// How a launcher option takes its value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Arity {
+    /// No value: `-i`, `--ignore-environment`.
+    Flag,
+    /// A value, attached (`-n5`, `--adjustment=5`) or as the next token (`-n 5`).
+    Value,
+    /// A value only when attached (`--ignore-signal=PIPE`), never the next token.
+    Attached,
+    /// An option that names no program the walk can resolve: a command line
+    /// (`env -S`), help, version, or a mode that runs nothing (`ionice -p`). Its
+    /// presence refuses the whole launcher.
+    Refuse,
+}
+
+/// One launcher's own options, as its `--help` lists them: coreutils 9.11 (`env`,
+/// `nice`, `stdbuf`, `timeout`, `nohup`), util-linux 2.42 (`chrt`, `ionice`,
+/// `setsid`), sudo 1.9.17, bash's `exec` builtin (`help exec`), and OpenBSD's
+/// `doas(1)`, whose row is unverified here because doas is not installed.
+///
+/// DEFAULT-DENY: an option not listed is unknown, and the walk refuses the whole
+/// launcher rather than guess how many tokens it takes. A wrong arity reads a value
+/// as the program, the one error that could prove a harness the launch does not run,
+/// so nothing is inferred from a missing row. Long names match as `getopt_long`
+/// matches them: exact, else one unique prefix. Every real long option is listed, so
+/// an ambiguous prefix is ambiguous here too.
+struct Launcher {
+    short: &'static [(char, Arity)],
+    long: &'static [(&'static str, Arity)],
+    /// Operands before the program: `timeout`'s duration, `chrt`'s priority.
+    operands: usize,
+    /// `NAME=value` operands before the program, which `env` and `sudo` accept.
+    assignments: bool,
+    /// A bare `-N` is an option: `nice -5` is the adjustment.
+    numeric: bool,
+}
+
+static ENV: Launcher = Launcher {
+    short: &[
+        ('0', Arity::Flag), ('a', Arity::Value), ('C', Arity::Value), ('i', Arity::Flag),
+        ('u', Arity::Value), ('v', Arity::Flag), ('S', Arity::Refuse),
+    ],
+    long: &[
+        ("argv0", Arity::Value), ("block-signal", Arity::Attached), ("chdir", Arity::Value),
+        ("debug", Arity::Flag), ("default-signal", Arity::Attached), ("help", Arity::Refuse),
+        ("ignore-environment", Arity::Flag), ("ignore-signal", Arity::Attached),
+        ("list-signal-handling", Arity::Flag), ("null", Arity::Flag),
+        ("split-string", Arity::Refuse), ("unset", Arity::Value), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: true,
+    numeric: false,
+};
+
+static EXEC: Launcher = Launcher {
+    short: &[('a', Arity::Value), ('c', Arity::Flag), ('l', Arity::Flag)],
+    long: &[],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static NOHUP: Launcher = Launcher {
+    short: &[],
+    long: &[("help", Arity::Refuse), ("version", Arity::Refuse)],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static SETSID: Launcher = Launcher {
+    short: &[
+        ('c', Arity::Flag), ('f', Arity::Flag), ('h', Arity::Refuse), ('V', Arity::Refuse),
+        ('w', Arity::Flag),
+    ],
+    long: &[
+        ("ctty", Arity::Flag), ("fork", Arity::Flag), ("help", Arity::Refuse),
+        ("version", Arity::Refuse), ("wait", Arity::Flag),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static STDBUF: Launcher = Launcher {
+    short: &[
+        ('e', Arity::Value), ('h', Arity::Refuse), ('i', Arity::Value), ('o', Arity::Value),
+        ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("error", Arity::Value), ("help", Arity::Refuse), ("input", Arity::Value),
+        ("output", Arity::Value), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static NICE: Launcher = Launcher {
+    short: &[('n', Arity::Value)],
+    long: &[
+        ("adjustment", Arity::Value), ("help", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: true,
+};
+
+static CHRT: Launcher = Launcher {
+    short: &[
+        ('a', Arity::Refuse), ('b', Arity::Flag), ('d', Arity::Flag), ('D', Arity::Value),
+        ('e', Arity::Flag), ('f', Arity::Flag), ('h', Arity::Refuse), ('i', Arity::Flag),
+        ('m', Arity::Refuse), ('o', Arity::Flag), ('p', Arity::Refuse), ('P', Arity::Value),
+        ('r', Arity::Flag), ('R', Arity::Flag), ('T', Arity::Value), ('v', Arity::Refuse),
+        ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("all-tasks", Arity::Refuse), ("batch", Arity::Flag), ("deadline", Arity::Flag),
+        ("ext", Arity::Flag), ("fifo", Arity::Flag), ("help", Arity::Refuse),
+        ("idle", Arity::Flag), ("max", Arity::Refuse), ("other", Arity::Flag),
+        ("pid", Arity::Refuse), ("reset-on-fork", Arity::Flag), ("rr", Arity::Flag),
+        ("sched-deadline", Arity::Value), ("sched-period", Arity::Value),
+        ("sched-runtime", Arity::Value), ("verbose", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 1,
+    assignments: false,
+    numeric: false,
+};
+
+static IONICE: Launcher = Launcher {
+    short: &[
+        ('c', Arity::Value), ('h', Arity::Refuse), ('n', Arity::Value), ('p', Arity::Refuse),
+        ('P', Arity::Refuse), ('t', Arity::Flag), ('u', Arity::Refuse), ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("class", Arity::Value), ("classdata", Arity::Value), ("help", Arity::Refuse),
+        ("ignore", Arity::Flag), ("pgid", Arity::Refuse), ("pid", Arity::Refuse),
+        ("uid", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+static TIMEOUT: Launcher = Launcher {
+    short: &[
+        ('f', Arity::Flag), ('k', Arity::Value), ('p', Arity::Flag), ('s', Arity::Value),
+        ('v', Arity::Flag),
+    ],
+    long: &[
+        ("foreground", Arity::Flag), ("help", Arity::Refuse), ("kill-after", Arity::Value),
+        ("preserve-status", Arity::Flag), ("signal", Arity::Value), ("verbose", Arity::Flag),
+        ("version", Arity::Refuse),
+    ],
+    operands: 1,
+    assignments: false,
+    numeric: false,
+};
+
+/// `-i`/`-s` and `-e`/`-l`/`-v` land in a shell or run a mode, so they refuse: a
+/// refused launch is heard by the screen and never proven.
+static SUDO: Launcher = Launcher {
+    short: &[
+        ('A', Arity::Flag), ('b', Arity::Flag), ('B', Arity::Flag), ('C', Arity::Value),
+        ('D', Arity::Value), ('e', Arity::Refuse), ('E', Arity::Flag), ('g', Arity::Value),
+        ('h', Arity::Refuse), ('H', Arity::Flag), ('i', Arity::Refuse), ('K', Arity::Flag),
+        ('k', Arity::Flag), ('l', Arity::Refuse), ('n', Arity::Flag), ('P', Arity::Flag),
+        ('p', Arity::Value), ('R', Arity::Value), ('s', Arity::Refuse), ('S', Arity::Flag),
+        ('T', Arity::Value), ('U', Arity::Value), ('u', Arity::Value), ('v', Arity::Refuse),
+        ('V', Arity::Refuse),
+    ],
+    long: &[
+        ("askpass", Arity::Flag), ("background", Arity::Flag), ("bell", Arity::Flag),
+        ("chdir", Arity::Value), ("chroot", Arity::Value), ("close-from", Arity::Value),
+        ("command-timeout", Arity::Value), ("edit", Arity::Refuse), ("group", Arity::Value),
+        ("help", Arity::Refuse), ("host", Arity::Refuse), ("list", Arity::Refuse),
+        ("login", Arity::Refuse), ("non-interactive", Arity::Flag),
+        ("other-user", Arity::Value), ("preserve-env", Arity::Attached),
+        ("preserve-groups", Arity::Flag), ("prompt", Arity::Value),
+        ("remove-timestamp", Arity::Flag), ("reset-timestamp", Arity::Flag),
+        ("set-home", Arity::Flag), ("shell", Arity::Refuse), ("stdin", Arity::Flag),
+        ("user", Arity::Value), ("validate", Arity::Refuse), ("version", Arity::Refuse),
+    ],
+    operands: 0,
+    assignments: true,
+    numeric: false,
+};
+
+static DOAS: Launcher = Launcher {
+    short: &[
+        ('C', Arity::Value), ('L', Arity::Refuse), ('n', Arity::Flag), ('s', Arity::Refuse),
+        ('u', Arity::Value),
+    ],
+    long: &[],
+    operands: 0,
+    assignments: false,
+    numeric: false,
+};
+
+/// The table for a launcher's basename; `None` for a name the walk does not treat
+/// as a launcher.
+fn launcher(base: &str) -> Option<&'static Launcher> {
+    Some(match base {
+        "env" => &ENV,
+        "exec" => &EXEC,
+        "nohup" => &NOHUP,
+        "setsid" => &SETSID,
+        "stdbuf" => &STDBUF,
+        "chrt" => &CHRT,
+        "ionice" => &IONICE,
+        "nice" => &NICE,
+        "timeout" => &TIMEOUT,
+        "sudo" => &SUDO,
+        "doas" => &DOAS,
+        _ => return None,
+    })
+}
+
+/// Where a launcher's argv hands off to the program it runs.
+enum Handoff {
+    /// The program's index in argv.
+    Program(usize),
+    /// No program follows: `env` alone prints the environment.
+    Nothing,
+    /// An option the table refuses or does not list.
+    Refused,
+}
+
+/// Skips a launcher's own options and operands from `start`, as getopt does: an
+/// option-looking token is an option only before the first operand, and `--` ends
+/// the options. The first token after them is the program.
+fn handoff(l: &Launcher, argv: &[String], start: usize) -> Handoff {
+    let (mut i, mut operands, mut options) = (start, l.operands, true);
+    while i < argv.len() {
+        let arg = argv[i].as_str();
+        if options && arg == "--" {
+            options = false;
+            i += 1;
+        } else if options && arg.starts_with('-') {
+            match take_option(l, arg, argv, i) {
+                Some(next) => i = next,
+                None => return Handoff::Refused,
+            }
+        } else if arg == "--" {
+            // A `--` after an operand is not the program: `chrt -o 0 -- bash` skips
+            // it and runs `bash`, while `timeout 5 -- bash` runs `--`. Either way
+            // the walk does not know, so it refuses.
+            return Handoff::Refused;
+        } else {
+            options = false;
+            if l.assignments && is_assignment(arg) {
+                i += 1;
+            } else if operands > 0 {
+                operands -= 1;
+                i += 1;
+            } else {
+                return Handoff::Program(i);
+            }
+        }
+    }
+    Handoff::Nothing
+}
+
+/// The index past the option at `i`, or `None` when the table does not list it or
+/// refuses it.
+fn take_option(l: &Launcher, arg: &str, argv: &[String], i: usize) -> Option<usize> {
+    if let Some(long) = arg.strip_prefix("--") {
+        let (name, attached) = match long.split_once('=') {
+            Some((name, value)) => (name, Some(value)),
+            None => (long, None),
+        };
+        return match (long_arity(l, name)?, attached.is_some()) {
+            (Arity::Flag, false) | (Arity::Value, true) | (Arity::Attached, _) => Some(i + 1),
+            (Arity::Value, false) => value_follows(argv, i),
+            (Arity::Flag, true) | (Arity::Refuse, _) => None,
+        };
+    }
+    let cluster = &arg[1..];
+    if cluster.is_empty() {
+        return None;
+    }
+    if l.numeric && cluster.bytes().all(|b| b.is_ascii_digit()) {
+        return Some(i + 1);
+    }
+    for (at, c) in cluster.char_indices() {
+        match short_arity(l, c)? {
+            Arity::Flag => {}
+            Arity::Value if at + c.len_utf8() < cluster.len() => return Some(i + 1),
+            Arity::Value => return value_follows(argv, i),
+            Arity::Attached | Arity::Refuse => return None,
+        }
+    }
+    Some(i + 1)
+}
+
+/// The index past an option's separate value, when argv has one to give.
+fn value_follows(argv: &[String], i: usize) -> Option<usize> {
+    (i + 2 <= argv.len()).then_some(i + 2)
+}
+
+fn short_arity(l: &Launcher, c: char) -> Option<Arity> {
+    l.short.iter().find(|(s, _)| *s == c).map(|(_, a)| *a)
+}
+
+/// A long option's arity by name: an exact match, else the one name it prefixes.
+fn long_arity(l: &Launcher, name: &str) -> Option<Arity> {
+    if let Some((_, arity)) = l.long.iter().find(|(n, _)| *n == name) {
+        return Some(*arity);
+    }
+    let mut hits = l.long.iter().filter(|(n, _)| !name.is_empty() && n.starts_with(name));
+    match (hits.next(), hits.next()) {
+        (Some((_, arity)), None) => Some(*arity),
+        _ => None,
     }
 }
 
-/// A `VAR=value` prefix (`env FOO=bar bash`, and `env`'s own assignment
-/// form) — never a program name.
+/// A `VAR=value` operand. `env` and `sudo` take one before the program
+/// (`env FOO=bar bash`); anywhere else it is a program name, which no exec runs.
 fn is_assignment(arg: &str) -> bool {
     match arg.split_once('=') {
         Some((name, _)) => {
@@ -91,78 +395,6 @@ fn is_assignment(arg: &str) -> bool {
         }
         None => false,
     }
-}
-
-fn is_number(arg: &str) -> bool {
-    !arg.is_empty() && arg.chars().all(|c| c.is_ascii_digit() || c == '.')
-}
-
-/// Skip a launcher's own leading options: anything dashed, a dashed option's
-/// separate value ([`option_takes_its_value`]), and — when
-/// `numbers_are_options` — any bare number. Stops at the first token that
-/// could be a program.
-///
-/// The flag exists for exactly one caller shape: a bare number is a priority
-/// or a schedule argument for every forwarding launcher, but it is the
-/// DURATION itself in `timeout <duration> <cmd>`, which the caller skips as
-/// its own positional token. Skipping it twice there would step over the
-/// program name.
-fn skip_launcher_options(
-    argv: &[String],
-    mut i: usize,
-    launcher: &str,
-    numbers_are_options: bool,
-) -> usize {
-    while i < argv.len() {
-        let arg = argv[i].as_str();
-        if option_takes_its_value(launcher, arg) {
-            i += 2;
-        } else if arg.starts_with('-') || (numbers_are_options && is_number(arg)) {
-            i += 1;
-        } else {
-            break;
-        }
-    }
-    i
-}
-
-/// `nix develop|shell … -c <cmd>` / `--command[=<cmd>]`: those subcommands
-/// exist to run a command in a dev environment, so their payload is the
-/// question. With no `-c`/`--command` at all, nix opens an INTERACTIVE shell
-/// — which is this predicate's question, and "shell" is the safe answer.
-fn nix_runs_a_shell(argv: &[String], i: usize) -> bool {
-    let sub = argv.get(i + 1).map(|s| command_basename(s)).unwrap_or_default();
-    if sub != "develop" && sub != "shell" {
-        return false;
-    }
-    let mut j = i + 2;
-    while j < argv.len() {
-        match argv[j].as_str() {
-            "-c" | "--command" => return j + 1 >= argv.len() || program_is_a_shell(&argv[j + 1..]),
-            // The attached form carries a whole command LINE in one token.
-            a if a.starts_with("--command=") => {
-                let words: Vec<String> = a["--command=".len()..]
-                    .split_whitespace()
-                    .map(str::to_string)
-                    .collect();
-                return program_is_a_shell(&words);
-            }
-            _ => j += 1,
-        }
-    }
-    true
-}
-
-/// Where `script -q <typescript> [<command> …]`'s payload starts, or `None`
-/// when it carries no command of its own — then `script` runs the user's own
-/// `$SHELL`, which is a shell. (`script -c <cmd>` is caught by the option
-/// skip: it runs its argument through a shell, so both tokens are options.)
-fn script_command(argv: &[String], i: usize) -> Option<usize> {
-    let mut j = skip_launcher_options(argv, i + 1, "script", true);
-    if j < argv.len() {
-        j += 1; // the typescript FILE
-    }
-    (j < argv.len()).then_some(j)
 }
 
 /// Whether a conducted command IS a shell — one question, one list, one
@@ -176,10 +408,10 @@ fn script_command(argv: &[String], i: usize) -> Option<usize> {
 /// because the old gate compared `agent == "shell"` and a caller is free to
 /// label a shell anything it likes). The first token alone could not answer
 /// it either: a shell is routinely reached through a launcher, so the walk
-/// below skips [`FORWARDING_LAUNCHERS`] and their options until it reaches
-/// the program that will actually exec. `su`/`doas`/`sudo` are the one
-/// resolved-TO case — with no command of their own they land in a login
-/// shell — and answering `true` there is the safe direction. A path basename
+/// below resolves each launcher's own options ([`launcher`]) until it reaches
+/// the program that will actually exec. `su` with no command lands in a login
+/// shell, and answering `true` there is the safe direction; `sudo`/`doas` with
+/// no program, or with an option the walk refuses, answer as a command runner. A path basename
 /// counts (`/usr/bin/bash`), so kitty.nix's terminal wrapper needs no
 /// special case: it always execs the resolved login shell explicitly
 /// (`$SHELL`/passwd/`/bin/sh`, `<login_shell> -l`) as the conducted command.
@@ -189,36 +421,205 @@ fn script_command(argv: &[String], i: usize) -> Option<usize> {
 /// execs a shell (`-- ./rig.sh`) is NOT a shell by this predicate and stays
 /// receptive — the allowlisted names above are the whole claim.
 ///
-/// A false POSITIVE (something shell-like that is not) costs a skipped
-/// auto-typing, the silent-safe direction; a false negative is the hole this
-/// exists to close, so every unresolved case errs toward "shell".
+/// The ping-back does not trust this predicate's silence. It delivers only to a
+/// wrap whose RESOLVED program is the harness its agent names
+/// ([`wrapped_program_name`], stamped as `wrapped_program`), so a launcher this
+/// walk does not model (`taskset`, `flock`) is withheld there, whatever this
+/// predicate says. Here, for the forms it models, a shell answers `true`; a
+/// false POSITIVE costs a skipped auto-typing, the silent-safe direction.
 pub fn program_is_a_shell(argv: &[String]) -> bool {
-    let mut i = 0;
-    while i < argv.len() {
-        if is_assignment(&argv[i]) {
-            i += 1;
-            continue;
-        }
-        let base = command_basename(&argv[i]);
-        match base.as_str() {
-            b if FORWARDING_LAUNCHERS.contains(&b) => {
-                i = skip_launcher_options(argv, i + 1, &b, true)
+    shell_verdict(argv).is_some()
+}
+
+/// Whether a conducted command is a shell at its OWN prompt: no `-c` command
+/// string and no script operand (`bash`, `bash --norc -i`, `sudo bash`). A
+/// shell that runs a command or a script (`bash -c "apt install x"`,
+/// `sh ./run.sh`) is a program like any other, and its questions are heard.
+///
+/// Only the prompt case is silenced by the screen (`shell_snapshot`): a `bash
+/// -c` child shares the shell's process group, so the foreground pgid cannot
+/// tell its question from the bare prompt.
+fn program_is_an_interactive_shell(argv: &[String]) -> bool {
+    shell_verdict(argv) == Some(true)
+}
+
+/// What the launcher walk finds in one argv: whether it is a shell (the answer
+/// [`shell_verdict`] gives) and the program it reaches (the answer
+/// [`wrapped_program_name`] gives). One walk for both, so the screen's silence and
+/// the proof cannot disagree about where the command goes.
+#[derive(Default)]
+struct Walked {
+    shell: Option<bool>,
+    program: Option<String>,
+}
+
+/// Walks an argv through its launchers, each resolved by its own table ([`launcher`]).
+/// A form the walk cannot resolve is `Some(false)`: heard by the screen, never proven.
+fn walk(argv: &[String]) -> Walked {
+    let Some(first) = argv.first() else {
+        return Walked::default();
+    };
+    let base = command_basename(first);
+    if let Some(l) = launcher(&base) {
+        // `sudo` and `doas` read as a shell whatever they run, so no automatic
+        // reader types into one: a line typed before its program starts answers
+        // its own password prompt. A shell under it is at its prompt only when it is the
+        // whole command.
+        let wraps = matches!(base.as_str(), "sudo" | "doas");
+        return match handoff(l, argv, 1) {
+            Handoff::Program(p) if wraps => {
+                let inner = walk(&argv[p..]);
+                Walked { shell: Some(inner.shell == Some(true)), program: inner.program }
             }
-            // `timeout <duration> <cmd>`: the duration is a positional, not an
-            // option, so the options are skipped without touching bare
-            // numbers and then exactly one token goes — however the duration
-            // is spelled (`60`, `1m`, `0.5s`).
-            "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
-            "nix" => return nix_runs_a_shell(argv, i),
-            "script" => match script_command(argv, i) {
-                Some(next) => i = next,
-                None => return true,
-            },
-            "su" | "doas" | "sudo" => return true,
-            b => return SHELL_BASENAMES.contains(&b),
+            Handoff::Program(p) => walk(&argv[p..]),
+            Handoff::Nothing => Walked { shell: wraps.then_some(false), program: None },
+            Handoff::Refused => Walked { shell: Some(false), program: None },
+        };
+    }
+    match base.as_str() {
+        "nix" => nix_walk(argv),
+        // `script` runs `$SHELL` at its prompt unless `-c` hands it a command. util-linux
+        // permutes its options, so a `-c` anywhere after it counts; an over-match only
+        // has the screen hear a question.
+        "script" => Walked {
+            shell: Some(!argv[1..].iter().any(|a| a.starts_with('-') && a.contains('c'))),
+            program: None,
+        },
+        "su" => Walked { shell: Some(!su_runs_a_command(argv)), program: None },
+        // `busybox sh` is the shell as one of its applets; `busybox ls` is still a busybox.
+        "busybox" => {
+            let applet = argv.get(1).map(|a| command_basename(a)).unwrap_or_default();
+            Walked {
+                shell: Some(
+                    SHELL_BASENAMES.contains(&applet.as_str())
+                        && shell_args_are_interactive(argv.get(2..).unwrap_or_default()),
+                ),
+                program: Some(base.clone()),
+            }
+        }
+        name if SHELL_BASENAMES.contains(&name) => Walked {
+            shell: Some(shell_args_are_interactive(&argv[1..])),
+            program: Some(base.clone()),
+        },
+        _ => Walked { shell: None, program: Some(base.clone()) },
+    }
+}
+
+/// `nix develop|shell`: the payload after `-c`/`--command` is the question. Only
+/// positional installables may stand before `-c`; any dashed token is an option this
+/// walk does not list, so it refuses. With no `-c`, nix opens an interactive shell.
+fn nix_walk(argv: &[String]) -> Walked {
+    let sub = argv.get(1).map(|s| command_basename(s)).unwrap_or_default();
+    match sub.as_str() {
+        "develop" | "shell" => {}
+        // A dashed option before the subcommand is one the walk does not list.
+        _ if argv.get(1).is_some_and(|s| s.starts_with('-')) => {
+            return Walked { shell: Some(false), program: None }
+        }
+        // Any other subcommand (`build`, `run`) is a launcher the walk does not model.
+        _ => return Walked::default(),
+    }
+    let mut j = 2;
+    while j < argv.len() {
+        let a = argv[j].as_str();
+        match a {
+            // An empty payload is a shell with nothing to run: not at a prompt.
+            "-c" | "--command" if j + 1 >= argv.len() => {
+                return Walked { shell: Some(false), program: None }
+            }
+            "-c" | "--command" => return walk(&argv[j + 1..]),
+            // The attached form carries a whole command LINE in one token.
+            a if a.starts_with("--command=") => {
+                let words: Vec<String> = a["--command=".len()..]
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect();
+                return Walked { shell: walk(&words).shell, program: None };
+            }
+            a if a.starts_with('-') => return Walked { shell: Some(false), program: None },
+            _ => j += 1,
         }
     }
-    false
+    Walked { shell: Some(true), program: None }
+}
+
+/// Whether `su`'s argv hands it a command: `-c` or `--command` in any spelling. Any
+/// dashed token with a `c` counts, an over-match that only has the screen hear.
+fn su_runs_a_command(argv: &[String]) -> bool {
+    argv[1..].iter().any(|a| {
+        a.starts_with("--command") || (a.starts_with('-') && !a.starts_with("--") && a.contains('c'))
+    })
+}
+
+/// [`walk`]'s shell answer. `Some(true)`: a shell at its own prompt. `Some(false)`: a
+/// shell that runs a command or a script, or a form the walk refuses. `None`: not a
+/// shell.
+fn shell_verdict(argv: &[String]) -> Option<bool> {
+    walk(argv).shell
+}
+
+/// Whether a shell's own arguments leave it at its prompt: no `-c` or
+/// `--command` string and no script operand. `bash`, `bash --norc -i`, `bash -o
+/// pipefail`, `fish -C x`, and `bash -` (commands from stdin, on a tty) sit at a
+/// prompt; `bash -c x`, `bash -lc x`, `fish --command=x`, `sh ./run.sh` and
+/// `bash -- run.sh` run a command or a script.
+fn shell_args_are_interactive(args: &[String]) -> bool {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if arg == "--" {
+            return i + 1 >= args.len();
+        }
+        if arg == "-" {
+            return true;
+        }
+        if arg == "--command" || arg.starts_with("--command=") {
+            return false;
+        }
+        if let Some(long) = arg.strip_prefix("--") {
+            i += if matches!(long, "rcfile" | "init-file" | "init-command") { 2 } else { 1 };
+        } else if arg.len() > 1 && (arg.starts_with('-') || arg.starts_with('+')) {
+            if arg.starts_with('-') && arg.contains('c') {
+                return false;
+            }
+            i += if matches!(arg, "-o" | "+o" | "-O" | "+O" | "-C") { 2 } else { 1 };
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+/// The program a wrapped argv runs, by basename: the one [`walk`] reaches. `None` when
+/// the walk names no program: `script` (a shell whatever its argv), `env -S` (a command
+/// line), `su`, a `nix` form without a `-c` payload, and any form a launcher's table
+/// refuses. A launcher the walk does not model names itself (`taskset`), which is never
+/// a harness. Stamped at registration as `wrapped_program`, the proof every reader checks.
+fn wrapped_program_name(argv: &[String]) -> Option<String> {
+    walk(argv).program
+}
+
+/// The label a wrap takes when no `--agent` names one: the program the launcher
+/// walk resolves to (`env claude` is `claude`), else the command's own basename
+/// (`taskset`, `script`). `conduct` and `spawn` both default through it, so the
+/// label is the name [`is_its_harness`] checks against `wrappedProgram`.
+pub(in crate::graph) fn default_label(argv: &[String]) -> String {
+    wrapped_program_name(argv).unwrap_or_else(|| argv.first().map(|p| command_basename(p)).unwrap_or_default())
+}
+
+/// The registered harness a conducted argv runs, by the launcher walk: the
+/// walked program must BE a profile's own launch token. `None` for everything
+/// else — a shell, a launcher the walk does not model (`taskset`, `flock`), a
+/// wrapper script, a name with no profile. The positive half of
+/// [`program_is_a_shell`]: a caller that may only type into a harness asks for
+/// this proof, never for the mere absence of a shell.
+///
+/// `pub` for `aoide-server`'s spawn arm, which refuses a `spawnAgent` without it
+/// and then reads readiness and the submit key off the name it returns.
+pub fn wrapped_harness(argv: &[String]) -> Option<&'static str> {
+    let program = wrapped_program_name(argv)?;
+    let profile = agent_profile(&program)?;
+    (profile.launch.first().copied() == Some(program.as_str())).then_some(profile.name)
 }
 
 /// [`program_is_a_shell`]'s verdict, read back off a RECORD: `shell` (the
@@ -257,13 +658,53 @@ pub fn wrapped_program_is_a_shell(rec: &SessionRecord) -> bool {
     rec.shell || rec.restore.is_some()
 }
 
+/// Whether a wrap is a harness the launcher walk PROVES: its walked program
+/// (`wrapped_program`, stamped at registration) is the launch token of the profile
+/// its `agent` names. The positive half of [`wrapped_program_is_a_shell`]. A shell is
+/// never a harness, and neither is a launcher form the walk refuses, a wrapper with
+/// another name, or a name with no profile: none of them has a proof.
+///
+/// The AUTOMATIC readers (the ping-back, the doorbell's PTY arm, the A2A door's
+/// inject) reach this through [`auto_type_refusal`], the one place their typed
+/// lines are refused. `aoide send` is the human's own command and is not gated by
+/// this proof.
+pub fn is_its_harness(rec: &SessionRecord) -> bool {
+    agent_profile(&rec.agent)
+        .and_then(|p| p.launch.first().copied())
+        .is_some_and(|bin| rec.wrapped_program.as_deref() == Some(bin))
+}
+
+/// Why an AUTOMATIC reader may not type a line into this wrap, or `None` when it may.
+/// The ping-back, the doorbell's PTY arm and the A2A door's inject all ask this one
+/// question and name the answer in their own audit vocabulary. A shell is named
+/// first: it is the worse fact, and a `""`/`"shell"` label is a shell whatever the
+/// walk says. A harness label alone never clears a wrap; the proof does.
+pub fn auto_type_refusal(rec: &SessionRecord) -> Option<AutoTypeRefusal> {
+    if matches!(rec.agent.as_str(), "" | "shell") || wrapped_program_is_a_shell(rec) {
+        Some(AutoTypeRefusal::Shell)
+    } else if !is_its_harness(rec) {
+        Some(AutoTypeRefusal::Unproven)
+    } else {
+        None
+    }
+}
+
+/// The two refusals [`auto_type_refusal`] gives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoTypeRefusal {
+    /// The wrap is a shell, by its label or by its walked argv.
+    Shell,
+    /// The launcher walk does not prove the wrap is its harness.
+    Unproven,
+}
+
 /// Whether a process is invocation plumbing rather than a harness: a shell or a
 /// forwarding launcher, by argv[0]'s basename (a leading `-` marks a login shell,
 /// `-zsh`). The hook door's harness walk reads this verdict, and this verdict reads only
 /// [`SHELL_BASENAMES`] and [`FORWARDING_LAUNCHERS`], so no other name is plumbing here.
-/// [`program_is_a_shell`] has its own arms for `timeout`, `nix`, `script`, `su`, `doas` and
-/// `sudo`: those names are not in either list, so a hook behind one of them takes that
-/// launcher as its harness.
+/// [`program_is_a_shell`] resolves `timeout`, `sudo`, `doas`, `nix`, `script` and `su`
+/// through its own tables and forms: those names are not in either list, so a hook
+/// behind one of them takes that launcher as its harness.
 /// `None` (a pid whose argv cannot be read, or an empty one) is plumbing too:
 /// a process nobody can read is not a live harness.
 pub(in crate::graph) fn is_invocation_plumbing(argv: Option<&[String]>) -> bool {
@@ -667,78 +1108,126 @@ fn proc_has_children(pid: i32) -> Option<bool> {
     }
 }
 
-/// Is a conducted SHELL currently blocked on a `sudo` password prompt? A
-/// conducted shell is sudo-blocked iff the `[sudo] password for` prompt was
-/// just seen (booster), OR the foreground process IS `sudo` AND it has not yet
-/// forked its command child (`Some(false)` children == still in the PAM
-/// conversation, i.e. at the prompt). `Some(true)` (command already running,
-/// e.g. cached-cred `sudo nixos-rebuild`) and `None` (children unreadable →
-/// don't trust the primary, rely on the booster) both DON'T fire the primary.
-/// Pure and unit-tested; the real caller passes `proc_comm(fg) == Some("sudo")`,
-/// `proc_has_children(fg)`, and the booster's recency check.
+/// Is the foreground process a `sudo` still at its password prompt? True iff
+/// the foreground process IS `sudo` AND it has not yet forked its command child
+/// (`Some(false)` children == still in the PAM conversation, i.e. at the
+/// prompt). `Some(true)` (command already running, e.g. cached-cred `sudo
+/// nixos-rebuild`) and `None` (children unreadable, or no process table at all)
+/// both DON'T fire. The text of the prompt is a different witness, read by the
+/// `sudo` row of `prompt.rs`'s table; this is the process table's own. Pure and
+/// unit-tested; the real caller passes `proc_comm(fg) == Some("sudo")` and
+/// `proc_has_children(fg)`.
 ///
 /// WHY the children gate: `sudo` stays the process-group leader for the WHOLE
 /// runtime of `sudo <cmd>` on a PAM system (it forks the command/monitor
 /// child; it never execs in place), so `comm(fg) == "sudo"` alone would also
 /// be true for a multi-minute `sudo nixos-rebuild switch` running on CACHED
 /// credentials — no prompt at all. Gating on "sudo has not yet forked a
-/// child" narrows the primary signal to the actual PAM conversation window.
-fn sudo_awaiting(fg_is_sudo: bool, fg_has_children: Option<bool>, booster_recent: bool) -> bool {
-    booster_recent || (fg_is_sudo && fg_has_children == Some(false))
+/// child" narrows the signal to the actual PAM conversation window.
+fn sudo_awaiting(fg_is_sudo: bool, fg_has_children: Option<bool>) -> bool {
+    fg_is_sudo && fg_has_children == Some(false)
 }
 
-/// Update a conducted session's live shell fields — `cwd`, `activity` (the
-/// current foreground command, or cleared), `state` (idle at the prompt,
-/// working while a command runs, or forced `awaiting` while blocked on
-/// `sudo`), `needsSudo`, and `restore` (the P-C5 continuous capture snapshot,
-/// see [`RestoreSnapshot`]) — CHANGE-ONLY, under the stage lock, and re-stage
-/// graph.json only when it actually wrote. Called ~1 Hz from conduct's PTY
-/// tick for SHELL sessions (an agent's state/activity come from hooks, so
-/// conduct never drives those). No-op for an unregistered id.
+/// What a conducted SHELL's tick reads off its terminal: the cwd, the current
+/// foreground command (`None` clears it), the idle/working/awaiting state and
+/// the P-C5 continuous capture snapshot (see [`RestoreSnapshot`]).
+struct ShellFacts<'a> {
+    cwd: Option<&'a str>,
+    activity: Option<&'a str>,
+    state: &'a str,
+    restore: RestoreSnapshot,
+}
+
+/// Update a conducted session's live fields off its terminal — CHANGE-ONLY,
+/// under the stage lock, and re-stage graph.json only when it actually wrote.
+/// No-op for an unregistered id.
+///
+/// A SHELL (`shell: Some`) writes everything [`ShellFacts`] names, ~1 Hz from
+/// conduct's PTY tick; its `state` already folds the screen in
+/// ([`shell_snapshot`]). Any other wrap is harness-less here (an agent's
+/// state/activity come from hooks, so conduct never drives those): it writes
+/// only what the SCREEN says, and only when the screen's verdict changes. A
+/// question held makes the record `awaiting`; once it is gone the record
+/// returns to `idle`, the state it was registered with, and only if the
+/// question is what moved it. A wrap that has a hook record answers to that
+/// phase alone: the screen never sets over it, and clears what it set.
+///
+/// `question` is the one screen line kept on the record (`prompt.rs`);
+/// `needs_sudo` is the `sudo` row or the process table's witness. A record that
+/// is `done` keeps neither and is never set `awaiting`: its episode is over.
 fn do_session_refresh(
     id: &str,
-    cwd: Option<&str>,
-    activity: Option<&str>,
-    state: &str,
+    shell: Option<ShellFacts<'_>>,
     needs_sudo: bool,
-    restore: RestoreSnapshot,
+    question: Option<&str>,
 ) {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return,
         };
+        let hooked = shell.is_none()
+            && load_stage::<HooksFile>(&hooks_path())
+                .is_ok_and(|h| h.hooks.iter().any(|x| x.session_id == id));
+        let (needs_sudo, question) = if hooked { (false, None) } else { (needs_sudo, question) };
         let mut changed = false;
         for s in file.sessions.iter_mut() {
             if s.session_id != id {
                 continue;
             }
-            if let Some(c) = cwd {
-                if s.cwd != c {
-                    s.cwd = c.to_string();
+            let done = canonical_state(&s.state) == "done";
+            if let Some(t) = &shell {
+                if let Some(c) = t.cwd {
+                    if s.cwd != c {
+                        s.cwd = c.to_string();
+                        changed = true;
+                    }
+                }
+                let act = t.activity.filter(|a| !a.is_empty()).map(str::to_string);
+                if s.activity != act {
+                    s.activity = act;
+                    changed = true;
+                }
+                let canon = canonical_state(t.state);
+                if s.state != canon && !(done && canon == "awaiting") {
+                    s.state = canon.to_string();
+                    changed = true;
+                }
+                if s.restore.as_ref() != Some(&t.restore) {
+                    s.restore = Some(t.restore.clone());
+                    changed = true;
+                }
+            } else if !hooked && !done {
+                let screen_state = if question.is_some() {
+                    Some("awaiting")
+                } else if s.question.is_some() && canonical_state(&s.state) == "awaiting" {
+                    Some("idle")
+                } else {
+                    None
+                };
+                if let Some(state) = screen_state.filter(|state| s.state != *state) {
+                    s.state = state.to_string();
                     changed = true;
                 }
             }
-            let act = activity.filter(|a| !a.is_empty()).map(str::to_string);
-            if s.activity != act {
-                s.activity = act;
-                changed = true;
-            }
-            let canon = canonical_state(state);
-            if s.state != canon {
-                s.state = canon.to_string();
-                changed = true;
-            }
-            // Change-only, and cleared to `None` (never written as
-            // `Some(false)`) so the key disappears the moment the prompt clears.
-            let want = if needs_sudo { Some(true) } else { None };
-            if s.needs_sudo != want {
-                s.needs_sudo = want;
-                changed = true;
-            }
-            if s.restore.as_ref() != Some(&restore) {
-                s.restore = Some(restore.clone());
-                changed = true;
+            if done {
+                if s.question.is_some() || s.needs_sudo.is_some() {
+                    clear_screen_ask(s);
+                    changed = true;
+                }
+            } else {
+                // Change-only, and cleared to `None` (never written as
+                // `Some(false)`) so the key disappears the moment the prompt clears.
+                let want = if needs_sudo { Some(true) } else { None };
+                if s.needs_sudo != want {
+                    s.needs_sudo = want;
+                    changed = true;
+                }
+                let want = question.map(str::to_string);
+                if s.question != want {
+                    s.question = want;
+                    changed = true;
+                }
             }
         }
         if changed {
@@ -771,26 +1260,36 @@ fn cwd_for(fg: i32, shell_pid: i32, cwd_of: impl Fn(i32) -> Option<String>) -> O
     }
 }
 
-/// Pure resolution of a conducted shell's (state, activity, needs_sudo) from
-/// the pty foreground pgid. Injected lookups make it unit-testable. Real caller
-/// passes (proc_comm, proc_command, proc_has_children). The shell (spawned
-/// under `setsid`) is its own process group leader, so a foreground pgid equal
-/// to the shell pid means "at the bare prompt" (idle); anything else is a
-/// command running in the foreground (working, its command captured as
-/// `activity`). `booster_recent` is the text-scan signal from
-/// `conduct_multiplex` (a `[sudo] password for` prompt seen crossing
-/// master→stdout within the last ~2s); when [`sudo_awaiting`] is true off
-/// either signal, `state` is FORCED to `awaiting` regardless of the
-/// idle/working computation above — a sudo prompt needs the user NOW.
+/// Pure resolution of a conducted shell's (state, activity, needs_sudo,
+/// question) from the pty foreground pgid and the screen. Injected lookups make
+/// it unit-testable. Real caller passes (proc_comm, proc_command,
+/// proc_has_children). The shell (spawned under `setsid`) is its own process
+/// group leader, so a foreground pgid equal to the shell pid means "at the bare
+/// prompt" (idle); anything else is a command running in the foreground
+/// (working, its command captured as `activity`).
+///
+/// `prompt` is the screen's verdict (`prompt.rs`), from `conduct_multiplex`.
+/// An INTERACTIVE shell (`interactive`, see `program_is_an_interactive_shell`)
+/// is never `awaiting` off what it printed at its bare prompt: its own `read -p`
+/// or `select` shares the shell's process, which the process table cannot tell
+/// from the prompt, so it goes unseen. A shell that runs a command or a script
+/// (`bash -c "…"`) has no prompt to silence, and its question is heard. When
+/// [`sudo_awaiting`] (the process table's witness) or the screen says so,
+/// `state` is FORCED to `awaiting` regardless of the idle/working computation
+/// above — a prompt needs the user NOW — and `needs_sudo` is set when either
+/// witness was the `sudo` prompt.
 fn shell_snapshot(
     fg: i32,
     shell_pid: i32,
-    booster_recent: bool,
+    interactive: bool,
+    prompt: Option<&Prompt>,
     comm_of: impl Fn(i32) -> Option<String>,
     command_of: impl Fn(i32) -> Option<String>,
     children_of: impl Fn(i32) -> Option<bool>,
-) -> (&'static str, Option<String>, bool) {
-    let (mut state, activity) = if fg <= 0 || fg == shell_pid {
+) -> (&'static str, Option<String>, bool, Option<String>) {
+    let at_prompt = fg <= 0 || fg == shell_pid;
+    let prompt = prompt.filter(|_| !(interactive && at_prompt));
+    let (mut state, activity) = if at_prompt {
         // At the bare prompt: idle, but label the row with the shell PROCESS
         // itself (e.g. `bash`) so the terminal roster is never blank.
         ("idle", comm_of(shell_pid))
@@ -801,11 +1300,11 @@ fn shell_snapshot(
     };
     let fg_is_sudo = fg > 0 && comm_of(fg).as_deref() == Some("sudo");
     let children = if fg_is_sudo { children_of(fg) } else { None };
-    let needs_sudo = sudo_awaiting(fg_is_sudo, children, booster_recent);
-    if needs_sudo {
+    let needs_sudo = sudo_awaiting(fg_is_sudo, children) || prompt.is_some_and(Prompt::sudo);
+    if needs_sudo || prompt.is_some() {
         state = "awaiting";
     }
-    (state, activity, needs_sudo)
+    (state, activity, needs_sudo, prompt.map(|p| p.question.clone()))
 }
 
 /// Pure resolution of a conducted shell's P-C5 restore snapshot from the pty
@@ -838,11 +1337,11 @@ fn restore_snapshot(
 
 /// One conduct-tick refresh for a SHELL session: read the child terminal's
 /// foreground process group and the live cwd, and push cwd + the current
-/// command + the idle/working state via [`shell_snapshot`], plus the P-C5
-/// restore snapshot via [`restore_snapshot`]. `typed` comes from
-/// `conduct_multiplex`'s own typed-line buffer (`None` for a headless session,
-/// which never reads stdin) — this function has no access to the keystroke
-/// stream itself.
+/// command + the idle/working/awaiting state via [`shell_snapshot`], plus the
+/// P-C5 restore snapshot via [`restore_snapshot`]. `prompt` is the screen's
+/// standing question, if any. `typed` comes from `conduct_multiplex`'s own
+/// typed-line buffer (`None` for a headless session, which never reads stdin) —
+/// this function has no access to the keystroke stream itself.
 ///
 /// The foreground process group comes from the seam
 /// ([`Pty::foreground_pgid`]), which is `tcgetpgrp(2)` on Unix and `0` — "no
@@ -855,34 +1354,24 @@ fn conduct_refresh_shell(
     id: &str,
     pty: &Pty,
     shell_pid: i32,
-    booster_recent: bool,
+    interactive: bool,
+    prompt: Option<&Prompt>,
     typed: Option<String>,
 ) {
     let fg = pty.foreground_pgid();
     let cwd = cwd_for(fg, shell_pid, proc_cwd);
-    let (state, activity, needs_sudo) = shell_snapshot(
+    let (state, activity, needs_sudo, question) = shell_snapshot(
         fg,
         shell_pid,
-        booster_recent,
+        interactive,
+        prompt,
         proc_comm,
         proc_command,
         proc_has_children,
     );
     let restore = restore_snapshot(fg, shell_pid, cwd.clone(), typed, proc_argv);
-    do_session_refresh(id, cwd.as_deref(), activity.as_deref(), state, needs_sudo, restore);
-}
-
-/// True iff the `[sudo] password for` prompt appears at the start of a line in
-/// `chunk` (buffer start, or right after `\n`/`\r`). The line-start guard keeps
-/// `grep '[sudo] password'` / `cat auth.log`-style output from false-triggering,
-/// while real sudo prints its prompt at line start. A needle split across two
-/// reads is tolerated (missed here, caught next tick by the primary).
-fn scan_for_sudo_prompt(chunk: &[u8]) -> bool {
-    const NEEDLE: &[u8] = b"[sudo] password for";
-    chunk
-        .windows(NEEDLE.len())
-        .enumerate()
-        .any(|(i, w)| w == NEEDLE && (i == 0 || chunk[i - 1] == b'\n' || chunk[i - 1] == b'\r'))
+    let facts = ShellFacts { cwd: cwd.as_deref(), activity: activity.as_deref(), state, restore };
+    do_session_refresh(id, Some(facts), needs_sudo, question.as_deref());
 }
 
 /// Cap on the P-C5 typed-line buffer, bytes.
@@ -1038,6 +1527,8 @@ fn conduct_multiplex(
     child: &mut PtyChild,
     id: &str,
     is_shell: bool,
+    interactive: bool,
+    watch_prompts: bool,
     read_stdin: bool,
     sink: &mut OutputSink,
     deadline: Option<std::time::Instant>,
@@ -1056,12 +1547,12 @@ fn conduct_multiplex(
     const WAIT_TIMEOUT_MS: i32 = 1000;
     let tick_period = std::time::Duration::from_millis(950);
     let mut last_tick = std::time::Instant::now();
-    // The sudo-prompt TEXT-SCAN booster: the instant a `[sudo] password for`
-    // prompt is seen crossing terminal→stdout, latch a timestamp so the next
-    // tick(s) within `SUDO_BOOSTER_WINDOW` treat the shell as sudo-blocked
-    // even if the foreground pgid read hasn't caught `sudo` yet.
-    let mut sudo_prompt_seen_at: Option<std::time::Instant> = None;
-    const SUDO_BOOSTER_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+    // The screen: what the terminal last said and when, for a shell and for a
+    // wrap with no hook or trace of its own (`prompt.rs`). The tick asks it
+    // whether the child has gone quiet on a question; a shell folds the answer
+    // into its own refresh, any other wrap publishes it when it changes.
+    let mut watch = watch_prompts.then(|| PromptWatch::new(std::time::Instant::now()));
+    let mut published: Option<Prompt> = None;
     // P-C5: the typed-line buffer only exists for an interactive shell — a
     // headless conduct never reads stdin (no prompt line to reconstruct) and
     // an agent harness has no shell prompt at all.
@@ -1072,7 +1563,7 @@ fn conduct_multiplex(
     };
     if is_shell {
         let typed = typed_buf.as_ref().and_then(|b| b.typed());
-        conduct_refresh_shell(id, pty, shell_pid, false, typed); // stamp initial cwd/state now.
+        conduct_refresh_shell(id, pty, shell_pid, interactive, None, typed); // stamp initial cwd/state now.
     }
 
     let mut timed_out = false;
@@ -1139,14 +1630,23 @@ fn conduct_multiplex(
             }
         };
         let ready = wait_ready(pty, console, inbox.as_deref(), !stdin_eof, wait_ms);
-        // Refresh the conducted shell's live cwd/command/state on the ~1s clock
-        // (a plain timeout also ticks; a busy shell ticks at most this often).
-        if is_shell && last_tick.elapsed() >= tick_period {
-            let booster_recent = sudo_prompt_seen_at
-                .map(|t| t.elapsed() < SUDO_BOOSTER_WINDOW)
-                .unwrap_or(false);
-            let typed = typed_buf.as_ref().and_then(|b| b.typed());
-            conduct_refresh_shell(id, pty, shell_pid, booster_recent, typed);
+        // Refresh the conducted shell's live cwd/command/state, and any watched
+        // wrap's screen question, on the ~1s clock (a plain timeout also ticks;
+        // a busy shell ticks at most this often). A child that has exited asks
+        // nothing, whatever its last line said.
+        if watch.is_some() && last_tick.elapsed() >= tick_period {
+            let standing = watch
+                .as_ref()
+                .filter(|_| !child_exited)
+                .and_then(|w| w.standing(std::time::Instant::now()));
+            if is_shell {
+                let typed = typed_buf.as_ref().and_then(|b| b.typed());
+                conduct_refresh_shell(id, pty, shell_pid, interactive, standing.as_ref(), typed);
+            } else if standing != published {
+                let question = standing.as_ref().map(|p| p.question.as_str());
+                do_session_refresh(id, None, standing.as_ref().is_some_and(Prompt::sudo), question);
+                published = standing;
+            }
             last_tick = std::time::Instant::now();
         }
 
@@ -1155,11 +1655,8 @@ fn conduct_multiplex(
             match pty.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    // Booster text-scan: shells only, a cheap byte-substring search
-                    // (never a String allocation of the whole buffer) over exactly
-                    // what was just read, gated to a line-start match.
-                    if is_shell && scan_for_sudo_prompt(&buf[..n]) {
-                        sudo_prompt_seen_at = Some(std::time::Instant::now());
+                    if let Some(w) = watch.as_mut() {
+                        w.output(&buf[..n], std::time::Instant::now());
                     }
                     sink.write(&buf[..n]);
                     // A byte that arrived is the settle window's own reset: it
@@ -1183,6 +1680,9 @@ fn conduct_multiplex(
                     if let Some(tb) = typed_buf.as_mut() {
                         tb.feed(&buf[..n]);
                     }
+                    if let Some(w) = watch.as_mut() {
+                        w.input(&buf[..n]);
+                    }
                     pty.write(&buf[..n]);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -1200,6 +1700,9 @@ fn conduct_multiplex(
                     // them would preload a line no human composed.
                     if let Some(tb) = typed_buf.as_mut() {
                         tb.feed_injected(&chunk);
+                    }
+                    if let Some(w) = watch.as_mut() {
+                        w.input(&chunk);
                     }
                     pty.write(&chunk);
                 }
@@ -1260,7 +1763,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         .flags
         .get("agent")
         .cloned()
-        .unwrap_or_else(|| command_basename(&program));
+        .unwrap_or_else(|| default_label(&inv.args));
     let id = inv
         .flags
         .get("id")
@@ -1471,7 +1974,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // once-only like the two above — a re-registration of the same id must
     // follow the CURRENT argv, setting it for `-- env bash` and clearing it
     // for a harness.
-    stamp_shell(&id, program_is_a_shell(&inv.args));
+    stamp_wrap(&id, program_is_a_shell(&inv.args), wrapped_program_name(&inv.args));
     // Managed task wrapper: stamp the run's own two task keys (`task` =
     // the slug AND its mailbox name, `instructionsPath` = the write-once
     // sidecar the spawner wrote). One writer — this child — so there is no
@@ -1561,13 +2064,19 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // is the honest answer — a kill is never dressed as a numeric code on the
     // record or in the report (plan §3.1: absent, never 0).
     let mut inbox = inbox;
+    let is_shell = program_is_a_shell(&inv.args);
     let end = conduct_multiplex(
         &mut pty,
         &mut console,
         inbox.as_mut(),
         &mut child,
         &id,
-        program_is_a_shell(&inv.args),
+        is_shell,
+        program_is_an_interactive_shell(&inv.args),
+        // The screen speaks for a shell, and for a wrap whose harness has no
+        // hook or trace profile to speak for itself. A harness that reports
+        // through hooks or a trace is never touched by it.
+        is_shell || agent_profile(&agent).is_none(),
         !headless,
         &mut sink,
         deadline,
@@ -1986,34 +2495,33 @@ mod tests {
         assert_eq!(generic_command_label(&argv(&[])), None);
     }
     #[test]
-    fn sudo_awaiting_gates_the_primary_signal_on_children() {
-        // The booster fires regardless of the primary signal's inputs.
-        assert!(sudo_awaiting(false, None, true));
-        assert!(sudo_awaiting(true, Some(true), true));
-        assert!(sudo_awaiting(true, Some(false), true));
-        assert!(sudo_awaiting(true, None, true));
+    fn sudo_awaiting_gates_the_process_table_signal_on_children() {
         // fg IS sudo, and it has forked NO children yet: still at the PAM
-        // prompt — the primary signal fires.
-        assert!(sudo_awaiting(true, Some(false), false));
+        // prompt — the signal fires.
+        assert!(sudo_awaiting(true, Some(false)));
         // fg IS sudo, but it HAS forked a child: auth already succeeded and the
         // command is running (e.g. cached-cred `sudo nixos-rebuild switch` — a
-        // multi-minute build with no prompt at all). The primary must NOT fire.
-        assert!(!sudo_awaiting(true, Some(true), false));
-        // fg IS sudo but children are unreadable: don't trust the primary,
-        // fall back to the booster alone (which is false here).
-        assert!(!sudo_awaiting(true, None, false));
-        // fg is not sudo at all: primary never fires, no booster.
-        assert!(!sudo_awaiting(false, None, false));
-        assert!(!sudo_awaiting(false, Some(false), false));
-        assert!(!sudo_awaiting(false, Some(true), false));
+        // multi-minute build with no prompt at all). It must NOT fire.
+        assert!(!sudo_awaiting(true, Some(true)));
+        // fg IS sudo but children are unreadable: don't trust it (the screen's
+        // `sudo` row is the other witness).
+        assert!(!sudo_awaiting(true, None));
+        // fg is not sudo at all: never.
+        assert!(!sudo_awaiting(false, None));
+        assert!(!sudo_awaiting(false, Some(false)));
+        assert!(!sudo_awaiting(false, Some(true)));
+    }
+    fn asking(question: &str, sudo: bool) -> Prompt {
+        Prompt { question: question.to_string(), row: if sudo { "sudo" } else { "y-n" } }
     }
     #[test]
     fn shell_snapshot_idle_at_bare_prompt() {
         // fg == shell_pid: idle, activity from comm_of(shell_pid), no sudo.
-        let (state, activity, needs_sudo) = shell_snapshot(
+        let (state, activity, needs_sudo, question) = shell_snapshot(
             100,
             100,
-            false,
+            true,
+            None,
             |_| Some("bash".to_string()),
             |_| panic!("command_of should not be consulted at the bare prompt"),
             |_| panic!("children_of should not be consulted when fg isn't sudo"),
@@ -2021,14 +2529,16 @@ mod tests {
         assert_eq!(state, "idle");
         assert_eq!(activity.as_deref(), Some("bash"));
         assert!(!needs_sudo);
+        assert_eq!(question, None);
     }
     #[test]
     fn shell_snapshot_working_reads_foreground_command() {
         // fg != shell_pid, and it's not sudo: working, activity from command_of(fg).
-        let (state, activity, needs_sudo) = shell_snapshot(
+        let (state, activity, needs_sudo, question) = shell_snapshot(
             200,
             100,
-            false,
+            true,
+            None,
             |_| Some("cargo".to_string()),
             |pid| {
                 assert_eq!(pid, 200);
@@ -2039,16 +2549,18 @@ mod tests {
         assert_eq!(state, "working");
         assert_eq!(activity.as_deref(), Some("cargo test"));
         assert!(!needs_sudo);
+        assert_eq!(question, None);
     }
     #[test]
     fn shell_snapshot_forces_awaiting_while_sudo_has_no_children() {
         // fg IS sudo, with no children yet (still at the password prompt):
         // state is FORCED to awaiting and needs_sudo is true, regardless of
-        // what command_of would have said.
-        let (state, activity, needs_sudo) = shell_snapshot(
+        // what command_of would have said. No screen text, so no question.
+        let (state, activity, needs_sudo, question) = shell_snapshot(
             300,
             100,
-            false,
+            true,
+            None,
             |_| Some("sudo".to_string()),
             |_| Some("sudo nixos-rebuild switch".to_string()),
             |pid| {
@@ -2059,16 +2571,18 @@ mod tests {
         assert_eq!(state, "awaiting");
         assert_eq!(activity.as_deref(), Some("sudo nixos-rebuild switch"));
         assert!(needs_sudo);
+        assert_eq!(question, None);
     }
     #[test]
     fn shell_snapshot_cached_cred_sudo_does_not_force_awaiting() {
         // fg IS sudo, but it has already forked its command child (cached
         // creds, no prompt): state stays "working" off the normal computation,
         // needs_sudo is false — the F1 fix's whole point.
-        let (state, activity, needs_sudo) = shell_snapshot(
+        let (state, activity, needs_sudo, _) = shell_snapshot(
             300,
             100,
-            false,
+            true,
+            None,
             |_| Some("sudo".to_string()),
             |_| Some("sudo nixos-rebuild switch".to_string()),
             |pid| {
@@ -2081,25 +2595,73 @@ mod tests {
         assert!(!needs_sudo);
     }
     #[test]
-    fn scan_for_sudo_prompt_requires_line_start() {
-        const NEEDLE: &str = "[sudo] password for";
-        // At the very start of the buffer: true.
-        assert!(scan_for_sudo_prompt(NEEDLE.as_bytes()));
-        // Right after a newline: true.
-        let after_nl = format!("hello\n{NEEDLE}");
-        assert!(scan_for_sudo_prompt(after_nl.as_bytes()));
-        // Right after a carriage return (a pty commonly emits \r\n): true.
-        let after_cr = format!("hello\r{NEEDLE}");
-        assert!(scan_for_sudo_prompt(after_cr.as_bytes()));
-        // Mid-line — e.g. a compiler error message or `grep` output quoting the
-        // needle — must NOT false-trigger.
-        let mid_line = format!("foo.rs:9:{NEEDLE} x");
-        assert!(!scan_for_sudo_prompt(mid_line.as_bytes()));
-        // No needle at all.
-        assert!(!scan_for_sudo_prompt(b"just some ordinary shell output"));
-        // Empty / too-short buffers must not panic.
-        assert!(!scan_for_sudo_prompt(b""));
-        assert!(!scan_for_sudo_prompt(b"[sudo]"));
+    fn shell_snapshot_folds_the_screens_question_into_awaiting() {
+        let ask = asking("Overwrite? [y/N]", false);
+        // A foreground command asking: awaiting, the question carried, no lock.
+        let (state, activity, needs_sudo, question) = shell_snapshot(
+            200,
+            100,
+            true,
+            Some(&ask),
+            |_| Some("cp".to_string()),
+            |_| Some("cp -i a b".to_string()),
+            |_| panic!("children_of should not be consulted when fg isn't sudo"),
+        );
+        assert_eq!(state, "awaiting");
+        assert_eq!(activity.as_deref(), Some("cp -i a b"));
+        assert!(!needs_sudo);
+        assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
+        // An interactive shell's own `read -p` runs in the shell process: at its
+        // bare prompt the screen does not speak for the shell, so it is not heard.
+        let (state, _, needs_sudo, question) = shell_snapshot(
+            100,
+            100,
+            true,
+            Some(&ask),
+            |_| Some("bash".to_string()),
+            |_| panic!("command_of should not be consulted at the bare prompt"),
+            |_| panic!("children_of should not be consulted when fg isn't sudo"),
+        );
+        assert_eq!((state, needs_sudo, question), ("idle", false, None));
+    }
+    #[test]
+    fn shell_snapshot_takes_the_lock_badge_from_the_sudo_row_alone() {
+        // A command of the shell's own is in the foreground (a `make` that runs
+        // `sudo` under a wrapper): awaiting AND needs_sudo, without the process
+        // table having caught `sudo` yet.
+        let comm = |pid: i32| Some(if pid == 200 { "make" } else { "bash" }.to_string());
+        let sudo = asking("[sudo] password for khoa:", true);
+        let (state, _, needs_sudo, question) =
+            shell_snapshot(200, 100, true, Some(&sudo), comm, |_| None, |_| None);
+        assert_eq!(state, "awaiting");
+        assert!(needs_sudo);
+        assert_eq!(question.as_deref(), Some("[sudo] password for khoa:"));
+        // Any other row is a question, not the human's sudo password.
+        let other = asking("Password:", false);
+        let (state, _, needs_sudo, _) = shell_snapshot(200, 100, true, Some(&other), comm, |_| None, |_| None);
+        assert_eq!((state, needs_sudo), ("awaiting", false));
+        // At the bare prompt the sudo row is not the shell's question either.
+        let (state, _, needs_sudo, _) = shell_snapshot(100, 100, true, Some(&sudo), comm, |_| None, |_| None);
+        assert_eq!((state, needs_sudo), ("idle", false));
+    }
+    #[test]
+    fn shell_snapshot_hears_the_question_of_a_shell_that_runs_a_command() {
+        // `bash -c "read -p …"`: the shell is the program, so its own read sits at
+        // fg == shell_pid. Not interactive, so the bare-prompt guard is off.
+        let ask = asking("Overwrite? [y/N]", false);
+        let (state, activity, needs_sudo, question) = shell_snapshot(
+            100,
+            100,
+            false,
+            Some(&ask),
+            |_| Some("bash".to_string()),
+            |_| panic!("command_of should not be consulted at the bare prompt"),
+            |_| panic!("children_of should not be consulted when fg isn't sudo"),
+        );
+        assert_eq!(state, "awaiting");
+        assert_eq!(activity.as_deref(), Some("bash"));
+        assert!(!needs_sudo);
+        assert_eq!(question.as_deref(), Some("Overwrite? [y/N]"));
     }
     #[test]
     fn cwd_for_prefers_foreground_process_then_falls_back_to_shell() {
@@ -2220,6 +2782,316 @@ mod tests {
     }
 
     #[test]
+    fn an_interactive_shell_is_one_at_its_own_prompt_and_no_command_runner() {
+        // The bare-prompt guard's question. A shell given `-c` or a script runs a
+        // command, so its questions are heard; a bare shell sits at a prompt.
+        let at_prompt: &[&[&str]] = &[
+            &["bash"],
+            &["/bin/bash", "--norc", "-i"],
+            &["bash", "-l"],
+            &["sh"],
+            &["bash", "-o", "pipefail"],
+            &["env", "bash"],
+            &["nix", "develop"],
+            &["nix", "develop", "-c", "bash"],
+            &["sudo", "bash"],
+            &["sudo", "-u", "root", "bash"],
+            &["su", "-"],
+            &["su", "-", "khoa"],
+            &["script", "-q", "/dev/null"],
+            // `-` reads commands from stdin, which on a tty is a prompt.
+            &["bash", "-"],
+            &["busybox", "sh"],
+            &["busybox", "ash"],
+            &["sudo", "--user", "root", "bash"],
+            &["sudo", "-D", "/tmp", "bash"],
+            &["-bash"],
+            &["/usr/bin/-zsh"],
+            &["sudo", "-T", "5", "bash"],
+            &["fish", "-C", "x"],
+        ];
+        let runs_a_command: &[&[&str]] = &[
+            &["bash", "-c", "read -p 'Overwrite? [y/N] ' x"],
+            &["bash", "-lc", "apt install x"],
+            &["bash", "-ic", "x"],
+            &["sh", "./run.sh"],
+            &["bash", "--", "run.sh"],
+            &["script", "-c", "make", "out.log"],
+            &["script", "-qc", "make", "out.log"],
+            &["script", "-qfc", "make", "out.log"],
+            &["script", "--command", "make", "out.log"],
+            &["script", "--command=make", "out.log"],
+            &["script", "--command", "bash"],
+            // util-linux script permutes its options, so a `-c` after the typescript
+            // file is still the command to run, not an operand.
+            &["script", "-q", "/dev/null", "-c", "make"],
+            &["env", "-S", "bash"],
+            &["env", "--split-string=bash -c x"],
+            &["env", "-iS", "bash"],
+            &["fish", "--command=make"],
+            &["fish", "-c", "x"],
+            // A launcher option the table does not list is refused: heard, never silenced.
+            &["sudo", "-i"],
+            &["sudo", "-h", "host", "bash"],
+            &["busybox", "sh", "-c", "x"],
+            &["busybox", "ls"],
+            &["sudo", "--user", "root", "bash", "-c", "x"],
+            &["env", "bash", "-c", "x"],
+            &["timeout", "60", "bash", "-c", "x"],
+            &["sudo", "bash", "-c", "x"],
+            &["sudo", "apt", "install"],
+            &["su", "-c", "x", "khoa"],
+            &["nix", "develop", "-c", "bash", "-c", "x"],
+            &["nix", "develop", "-c", "make"],
+            &["claude"],
+            &["cargo", "test"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in at_prompt {
+            assert!(program_is_an_interactive_shell(&owned(case)), "{case:?} sits at its prompt");
+        }
+        for case in runs_a_command {
+            assert!(!program_is_an_interactive_shell(&owned(case)), "{case:?} runs a command");
+        }
+    }
+    #[test]
+    fn wrapped_program_names_what_the_launcher_walk_resolves_to() {
+        // The ping-back's positive proof reads this name. A launcher the walk
+        // does not model names itself (never a harness); a form that eats or
+        // lacks the program names nothing.
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&["claude"], Some("claude")),
+            (&["/usr/bin/claude", "--resume", "x"], Some("claude")),
+            (&["env", "FOO=1", "claude"], Some("claude")),
+            (&["nice", "-n", "5", "claude"], Some("claude")),
+            (&["timeout", "600", "claude"], Some("claude")),
+            (&["sudo", "-u", "root", "claude"], Some("claude")),
+            (&["nix", "develop", "-c", "claude"], Some("claude")),
+            (&["script", "-q", "/dev/null", "claude"], None),
+            (&["taskset", "-c", "0", "claude"], Some("taskset")),
+            (&["taskset", "-c", "0", "bash"], Some("taskset")),
+            (&["env", "-S", "bash"], None),
+            (&["env", "-S", "claude"], None),
+            (&["env", "--split-string=claude"], None),
+            (&["env", "-iS", "claude"], None),
+            (&["env", "-u", "FOO", "claude"], Some("claude")),
+            (&["script", "-c", "claude", "out.log"], None),
+            (&["script", "-qc", "claude", "out.log"], None),
+            (&["script", "--command", "claude", "out.log"], None),
+            (&["script", "--command=claude", "out.log"], None),
+            (&["script", "--command", "claude"], None),
+            (&["-bash"], Some("bash")),
+            // A login-looking spelling of a harness is not the harness: only a
+            // shell name loses its `-`.
+            (&["-claude"], Some("-claude")),
+            (&["/usr/bin/-claude"], Some("-claude")),
+            (&["su", "-", "khoa"], None),
+            (&["nix", "develop"], None),
+            (&["env"], None),
+            (&[], None),
+        ];
+        for (argv, want) in cases {
+            let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            assert_eq!(wrapped_program_name(&argv).as_deref(), *want, "wrapped_program_name({argv:?})");
+        }
+    }
+
+    #[test]
+    fn a_launcher_option_the_table_does_not_list_is_refused_never_guessed() {
+        // Default-deny: an option the table does not list refuses the whole launcher.
+        // It names no program, is never proven, and is heard by the screen.
+        let refused: &[&[&str]] = &[
+            &["nix", "develop", "--impure", "-c", "claude"],
+            &["nix", "develop", "--option", "x", "y", "-c", "bash"],
+            &["nix", "--option", "x", "y", "develop", "-c", "bash"],
+            &["sudo", "-h", "host", "bash"],
+            &["sudo", "-i"],
+            &["sudo", "-s", "claude"],
+            &["ionice", "-p", "1", "claude"],
+            &["chrt", "-p", "1", "claude"],
+            &["env", "-"],
+            &["env", "-", "claude"],
+            &["nice", "-h", "claude"],
+            &["timeout", "-x", "5", "claude"],
+            &["env", "-S", "claude"],
+            &["env", "--split-string=claude"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in refused {
+            let argv = owned(case);
+            assert_eq!(wrapped_program_name(&argv), None, "{case:?} names no program");
+            assert_eq!(wrapped_harness(&argv), None, "{case:?} is never proven");
+            assert!(program_is_a_shell(&argv), "{case:?} is heard as a command runner");
+            assert!(!program_is_an_interactive_shell(&argv), "{case:?} is never silenced");
+        }
+    }
+
+    #[test]
+    fn a_value_an_option_takes_is_never_the_program() {
+        // The bypasses the review named. Each option takes its value, so the token
+        // that looks like a harness is that option's argument, and the program that
+        // runs is the shell after it. Long names are read the way getopt reads them,
+        // so an abbreviation (`--adj`, `--arg`) takes a value too.
+        let shells: &[&[&str]] = &[
+            &["env", "-a", "claude", "bash"],
+            &["env", "--argv0", "claude", "bash"],
+            &["env", "-ia", "claude", "bash"],
+            &["env", "--arg", "claude", "bash"],
+            &["nice", "--adj", "claude", "bash"],
+            &["nice", "--adjustment", "claude", "bash"],
+            &["timeout", "--sig", "KILL", "5", "bash"],
+            &["stdbuf", "--output", "L", "bash"],
+            &["stdbuf", "-o", "L", "bash"],
+            &["exec", "-a", "claude", "bash"],
+            &["ionice", "-c", "3", "bash"],
+            &["chrt", "-T", "5", "10", "bash"],
+            &["sudo", "-u", "claude", "bash"],
+            &["doas", "-u", "claude", "bash"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in shells {
+            let argv = owned(case);
+            assert_eq!(wrapped_program_name(&argv).as_deref(), Some("bash"), "{case:?}");
+            assert!(program_is_an_interactive_shell(&argv), "{case:?} sits at its prompt");
+            assert_eq!(wrapped_harness(&argv), None, "{case:?} is never proven as claude");
+        }
+    }
+
+    #[test]
+    fn a_dash_dash_after_an_operand_is_refused_and_sudo_is_never_auto_typed() {
+        // `chrt` skips a `--` after its priority and `timeout` runs it as the
+        // program: the walk cannot tell which, so it names nothing and reads a shell.
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in [&["chrt", "-o", "0", "--", "bash"][..], &["chrt", "-o", "0", "--", "claude"], &["timeout", "5", "--", "bash"]] {
+            let argv = owned(case);
+            assert_eq!(wrapped_program_name(&argv), None, "{case:?}");
+            assert!(program_is_a_shell(&argv), "{case:?} is never typed into");
+            assert_eq!(wrapped_harness(&argv), None, "{case:?}");
+        }
+        // A harness under `sudo` is still a `sudo`: its password prompt would read
+        // the first line typed.
+        for case in [&["sudo", "claude"][..], &["sudo", "-u", "root", "claude"], &["doas", "claude"]] {
+            assert!(program_is_a_shell(&owned(case)), "{case:?} is never auto-typed");
+        }
+    }
+
+    #[test]
+    fn the_forms_a_launcher_really_runs_are_the_ones_proven() {
+        // Controls: every form whose exec resolves to the harness is proven.
+        let proven: &[&[&str]] = &[
+            &["env", "FOO=1", "claude"],
+            &["env", "-i", "FOO=1", "claude"],
+            &["env", "-u", "FOO", "claude"],
+            &["env", "--unset=FOO", "claude"],
+            &["env", "--", "claude"],
+            &["nice", "-n", "5", "claude"],
+            &["nice", "-5", "claude"],
+            &["nice", "--adjustment=5", "claude"],
+            &["timeout", "5", "claude"],
+            &["timeout", "--kill-after=1", "5", "claude"],
+            &["stdbuf", "-oL", "claude"],
+            &["stdbuf", "--output=L", "claude"],
+            &["nix", "develop", "-c", "claude"],
+            &["nix", "develop", "nixpkgs#claude", "-c", "claude"],
+            &["chrt", "-f", "10", "claude"],
+            &["ionice", "-c", "3", "claude"],
+            &["setsid", "-w", "claude"],
+            &["exec", "-a", "x", "claude"],
+            &["nohup", "claude"],
+            &["sudo", "-E", "claude"],
+        ];
+        let owned = |case: &[&str]| case.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        for case in proven {
+            assert_eq!(wrapped_harness(&owned(case)), Some("claude"), "{case:?} runs the harness");
+        }
+    }
+
+    #[test]
+    fn an_env_s_after_the_program_is_the_programs_own_argument() {
+        // GNU env stops reading options at its first operand (`env echo claude -S x`
+        // prints `claude -S x`), so an -S after the program is that program's argument.
+        let argv: Vec<String> = ["env", "claude", "-S", "x"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(wrapped_harness(&argv), Some("claude"));
+        assert!(!program_is_a_shell(&argv));
+    }
+
+    #[test]
+    fn an_option_after_an_assignment_is_a_program_name_as_getopt_reads_it() {
+        // The first operand ends env's options, so `-i` after `FOO=1` is the program
+        // env would try to exec: no such program, and no proof.
+        let argv: Vec<String> = ["env", "FOO=1", "-i", "claude"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(wrapped_program_name(&argv).as_deref(), Some("-i"));
+        assert_eq!(wrapped_harness(&argv), None);
+    }
+
+    #[test]
+    fn a_top_level_assignment_is_a_program_name_because_conduct_execs_argv_directly() {
+        // conduct runs argv[0] with `Command::new` and no shell, so `FOO=1 claude`
+        // names a program that does not exist. The walk does not skip it.
+        let argv: Vec<String> = ["FOO=1", "claude"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(wrapped_program_name(&argv).as_deref(), Some("FOO=1"));
+        assert_eq!(wrapped_harness(&argv), None);
+    }
+
+    #[test]
+    fn an_unlabelled_wrap_is_named_by_the_program_the_walk_resolves_to() {
+        // The label is the name the positive proof checks, so a launcher in front
+        // of the harness must not become it; a form the walk names nothing for
+        // keeps its own basename, which is never a harness.
+        let cases: &[(&[&str], &str)] = &[
+            (&["claude"], "claude"),
+            (&["env", "claude"], "claude"),
+            (&["/usr/bin/env", "FOO=1", "claude", "--resume"], "claude"),
+            (&["nix", "develop", "-c", "claude"], "claude"),
+            (&["taskset", "-c", "0", "claude"], "taskset"),
+            (&["script", "-q", "/dev/null"], "script"),
+            (&["env", "-S", "claude"], "env"),
+            (&["bash"], "bash"),
+        ];
+        for (argv, label) in cases {
+            let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            assert_eq!(default_label(&argv), *label, "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn wrapped_harness_accepts_only_a_registered_harness_the_walk_proves() {
+        // The spawn arm's positive proof. A launcher the walk forwards through
+        // resolves to the harness; a launcher it does not model, a shell, a
+        // wrapper, or a script that hands a command to `--command` names no
+        // harness at all.
+        let cases: &[(&[&str], Option<&str>)] = &[
+            (&["claude"], Some("claude")),
+            (&["claude", "--dangerously-skip-permissions"], Some("claude")),
+            (&["/usr/bin/claude", "--resume", "x"], Some("claude")),
+            (&["env", "claude"], Some("claude")),
+            (&["env", "FOO=1", "claude"], Some("claude")),
+            (&["nice", "-n", "5", "claude"], Some("claude")),
+            (&["timeout", "600", "claude"], Some("claude")),
+            (&["nix", "develop", "-c", "claude"], Some("claude")),
+            (&["script", "-q", "/dev/null", "claude"], None),
+            (&["kimi"], Some("kimi")),
+            (&["pi"], Some("pi")),
+            (&["eidolon"], Some("eidolon")),
+            (&["bash"], None),
+            (&["bash", "-lc", "claude"], None),
+            (&["env", "bash"], None),
+            (&["env", "-S", "claude"], None),
+            (&["env", "--split-string=claude"], None),
+            (&["taskset", "-c", "0", "claude"], None),
+            (&["/opt/x/my-wrapper"], None),
+            (&["no-such-agent"], None),
+            (&["-claude"], None),
+            (&["script", "--command", "claude", "out.log"], None),
+            (&[], None),
+        ];
+        for (argv, want) in cases {
+            let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            assert_eq!(wrapped_harness(&argv), *want, "wrapped_harness({argv:?})");
+        }
+    }
+
+    #[test]
     fn program_is_a_shell_reads_the_wrapped_argv_never_the_agent_label() {
         // The task #100 defect, table-driven: shell-likeness is a property of
         // WHAT is being conducted (the wrapped argv), never of WHO it is
@@ -2228,6 +3100,20 @@ mod tests {
         // conduct — the old `agent == "shell"` gate missed exactly this case.
         let cases: &[(&[&str], bool)] = &[
             (&["bash"], true),
+            // A login shell's spelling (`-bash`) is the same shell.
+            (&["-bash"], true),
+            (&["-claude"], false),
+            (&["script", "-qc", "make", "out.log"], true),
+            (&["script", "--command", "bash", "out.log"], true),
+            (&["script", "--command", "claude", "out.log"], true),
+            (&["script", "--command", "bash"], true),
+            (&["script", "--command=bash", "out.log"], true),
+            // A script is a shell whatever its argv: the wrapped harness never
+            // reads past it, so it is never typed into.
+            (&["script", "-q", "/dev/null", "claude"], true),
+            (&["env", "-S", "claude"], true),
+            (&["env", "--split-string=claude"], true),
+            (&["env", "-iS", "claude"], true),
             (&["zsh"], true),
             (&["fish"], true),
             (&["sh"], true),
@@ -3776,8 +4662,13 @@ mod tests {
             typed: None,
         };
 
+        let refresh = |activity, state, needs_sudo, question, restore: &RestoreSnapshot| {
+            let facts = ShellFacts { cwd: Some("/proj"), activity, state, restore: restore.clone() };
+            do_session_refresh("sh", Some(facts), needs_sudo, question);
+        };
+
         // At the prompt: idle, no activity, cwd tracked.
-        do_session_refresh("sh", Some("/proj"), None, "idle", false, idle_restore.clone());
+        refresh(None, "idle", false, None, &idle_restore);
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s.sessions[0].state, "idle");
         assert_eq!(s.sessions[0].cwd, "/proj");
@@ -3787,9 +4678,7 @@ mod tests {
 
         // A foreground command: working + the command as activity, and the
         // restore snapshot's raw argv persists change-only alongside it.
-        do_session_refresh(
-            "sh", Some("/proj"), Some("cargo test"), "working", false, working_restore.clone(),
-        );
+        refresh(Some("cargo test"), "working", false, None, &working_restore);
         let s2: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s2.sessions[0].state, "working");
         assert_eq!(s2.sessions[0].activity.as_deref(), Some("cargo test"));
@@ -3800,21 +4689,30 @@ mod tests {
         // `state` string passed in (the caller already resolves the force in
         // `conduct_refresh_shell`, but do_session_refresh itself just persists
         // both fields change-only).
-        do_session_refresh("sh", Some("/proj"), Some("sudo"), "awaiting", true, idle_restore.clone());
+        refresh(Some("sudo"), "awaiting", true, Some("[sudo] password for khoa:"), &idle_restore);
         let s3: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s3.sessions[0].state, "awaiting");
         assert_eq!(s3.sessions[0].needs_sudo, Some(true));
+        assert_eq!(s3.sessions[0].question.as_deref(), Some("[sudo] password for khoa:"));
 
         // The prompt clears: needs_sudo=false CLEARS the field back to None
         // (never left as Some(false)) — change-only, so the key disappears.
-        do_session_refresh("sh", Some("/proj"), None, "idle", false, idle_restore.clone());
+        refresh(None, "idle", false, None, &idle_restore);
         let s4: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s4.sessions[0].needs_sudo, None);
+        assert_eq!(s4.sessions[0].question, None);
         let raw = std::fs::read_to_string(sessions_path()).unwrap();
         assert!(!raw.contains("needsSudo"), "cleared key must be absent: {raw}");
+        assert!(!raw.contains("question"), "cleared key must be absent: {raw}");
 
         // An unknown id is a safe no-op (never panics, never inserts).
-        do_session_refresh("nope", Some("/x"), Some("x"), "working", false, idle_restore);
+        let facts = ShellFacts {
+            cwd: Some("/x"),
+            activity: Some("x"),
+            state: "working",
+            restore: idle_restore,
+        };
+        do_session_refresh("nope", Some(facts), false, None);
         let s5: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(s5.sessions.len(), 1);
 
@@ -3823,5 +4721,339 @@ mod tests {
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A wrap with no hook or trace of its own (a codex, an aider): a screen
+    /// question makes its record `awaiting` with the line beside it, and taking
+    /// the question back returns it to the `idle` it registered with. Nothing
+    /// else on the record moves — it is not a shell and gains no snapshot.
+    #[test]
+    fn a_harnessless_wrap_publishes_its_screens_question_and_takes_it_back() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-screen");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            Some(std::process::id()), "2026-01-01T00:00:00Z",
+        );
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+        let record = || {
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            s.sessions.into_iter().next().unwrap()
+        };
+
+        do_session_refresh("wrap", None, false, Some("Apply patch? [y/N]"));
+        let rec = record();
+        assert_eq!(rec.state, "awaiting");
+        assert_eq!(rec.question.as_deref(), Some("Apply patch? [y/N]"));
+        assert_eq!(rec.needs_sudo, None);
+        assert_eq!((rec.restore, rec.activity, rec.shell), (None, None, false));
+
+        // A different question is the same episode's record, rewritten.
+        do_session_refresh("wrap", None, false, Some("Run the tests? [Y/n]"));
+        assert_eq!(record().question.as_deref(), Some("Run the tests? [Y/n]"));
+
+        // The `sudo` row asks for the lock badge beside it, and loses it with it.
+        do_session_refresh("wrap", None, true, Some("[sudo] password for khoa:"));
+        assert_eq!(record().needs_sudo, Some(true));
+        do_session_refresh("wrap", None, false, None);
+        let rec = record();
+        assert_eq!((rec.state.as_str(), rec.question, rec.needs_sudo), ("idle", None, None));
+        let raw = std::fs::read_to_string(sessions_path()).unwrap();
+        assert!(!raw.contains("question") && !raw.contains("needsSudo"), "{raw}");
+
+        // With nothing standing and nothing to take back, a tick writes nothing.
+        let before = std::fs::read_to_string(sessions_path()).unwrap();
+        do_session_refresh("wrap", None, false, None);
+        assert_eq!(std::fs::read_to_string(sessions_path()).unwrap(), before);
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A record reaped to `done` keeps its task record, not its episode: a
+    /// late screen verdict neither sets it `awaiting` nor writes a question or a
+    /// lock badge onto it.
+    #[test]
+    fn a_done_record_is_never_set_awaiting_by_the_screen() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-done");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            Some(std::process::id()), "2026-01-01T00:00:00Z",
+        );
+        sessions[0].state = "done".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+
+        do_session_refresh("wrap", None, true, Some("[sudo] password for khoa:"));
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = &s.sessions[0];
+        assert_eq!(rec.state, "done");
+        assert_eq!((rec.question.as_deref(), rec.needs_sudo), (None, None));
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The screen only takes back a state it set: a wrap whose `state` came from
+    /// somebody else (an adapter's `session phase`) and which holds no question
+    /// keeps that state through every tick.
+    #[test]
+    fn the_screen_returns_only_a_state_its_own_question_set() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-screen-own");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            None, "2026-01-01T00:00:00Z",
+        );
+        sessions[0].state = "working".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+
+        do_session_refresh("wrap", None, false, None);
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(s.sessions[0].state, "working");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Precedence: hook phase > screen. A wrap that has a hook record answers to
+    /// that phase alone — the screen never sets a state or a question over it,
+    /// and takes back what it had set before the hook record existed.
+    #[test]
+    fn the_screen_never_sets_over_a_hook_phase() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("refresh-screen-hooked");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut sessions = Vec::new();
+        upsert_session(
+            &mut sessions, "wrap", Some("codex"), Some("/w"), None, None, Some(true), None, None,
+            None, "2026-01-01T00:00:00Z",
+        );
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions }).unwrap();
+
+        // Before any adapter reports: the screen speaks.
+        do_session_refresh("wrap", None, true, Some("[sudo] password for khoa:"));
+        let record = || {
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            s.sessions.into_iter().next().unwrap()
+        };
+        assert_eq!(record().state, "awaiting");
+
+        // An adapter reports a phase for the wrap's own id: now it is the authority.
+        let mut hooks = Vec::new();
+        crate::graph::session_store::upsert_hook(&mut hooks, "wrap", "working", "2026-01-01T00:01:00Z");
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+        do_session_refresh("wrap", None, true, Some("Apply patch? [y/N]"));
+        let rec = record();
+        assert_eq!(rec.question, None, "what the screen had set is taken back");
+        assert_eq!(rec.needs_sudo, None);
+        assert_eq!(rec.state, "awaiting", "…but the state is the hook door's to write, not the screen's");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Poll `ready` against the first record of `sessions.json` until it holds
+    /// or `budget` runs out; the record that satisfied it, or the last one read.
+    #[cfg(unix)]
+    fn wait_for_record(
+        id: &str,
+        budget: std::time::Duration,
+        ready: impl Fn(&SessionRecord) -> bool,
+    ) -> Option<SessionRecord> {
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline {
+            if let Ok(f) = load_stage::<SessionsFile>(&sessions_path()) {
+                if let Some(rec) = f.sessions.into_iter().find(|r| r.session_id == id) {
+                    if ready(&rec) {
+                        return Some(rec);
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        None
+    }
+
+    /// A real conducted pty end to end: the child prints a question and blocks,
+    /// the record goes `awaiting` carrying the line after the quiet, an answer
+    /// typed into the session's inbox ends it while the child is still running,
+    /// and the record returns to a state that is not `awaiting`.
+    ///
+    /// The session is a real `aoide conduct --headless` PROCESS, driven exactly
+    /// as `aoide send` drives one, and the connection comes from this test
+    /// process, the session's parent: an in-process `session_conduct` would
+    /// register this very pid, and the inbox refuses a connector whose own
+    /// nearest session is the one being typed into.
+    ///
+    /// GATED on Unix with its reason: the children are POSIX programs
+    /// (`sh -c`, `awk`) and the answer goes through the Unix-domain inbox.
+    ///
+    /// `heard` false is an interactive shell at its own prompt: the question is
+    /// typed there and never submitted, and the record must stay off `awaiting`
+    /// through the whole wait.
+    #[cfg(unix)]
+    fn a_blocked_child_is_asking_until_answered(
+        tag: &str,
+        argv: &[&str],
+        agent: &str,
+        shell: bool,
+        heard: bool,
+    ) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let mut conducting = std::process::Command::new(built_aoide_bin())
+            .args(["conduct", "--headless", "--id", tag, "--agent", agent, "--"])
+            .args(argv)
+            .env("AOIDE_STAGE_DIR", &stage)
+            .env("AOIDE_STATE_DIR", &state)
+            .env("AOIDE_AUDIT_LOG", root.join("log"))
+            .env("XDG_RUNTIME_DIR", &root)
+            .env_remove("AOIDE_SESSION_ID")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("aoide conduct starts");
+        let reap = |child: &mut std::process::Child| {
+            let _ = child.kill();
+            let _ = child.wait();
+        };
+
+        if !heard {
+            // The session must be recorded first, or the negative proves nothing.
+            let recorded = wait_for_record(tag, std::time::Duration::from_secs(10), |_| true);
+            // Typed at the bare prompt and never submitted: on the screen, not asked.
+            use std::io::Write as _;
+            let mut door = std::os::unix::net::UnixStream::connect(conduct_socket_path(tag))
+                .expect("the session's inbox is bound once it is recorded");
+            door.write_all(b"Proceed? [y/N] ").unwrap();
+            drop(door);
+            // Past QUIET plus a tick: a heard question would be awaiting by now.
+            let seen = wait_for_record(tag, std::time::Duration::from_secs(8), |r| r.state == "awaiting");
+            reap(&mut conducting);
+            assert!(recorded.is_some(), "the session was never recorded");
+            assert!(seen.is_none(), "the interactive shell's bare prompt was heard as a question");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+
+        // QUIET plus a tick; the budget has room for a loaded box.
+        let Some(asking) = wait_for_record(tag, std::time::Duration::from_secs(30), |r| {
+            r.state == "awaiting" && r.question.is_some()
+        }) else {
+            reap(&mut conducting);
+            panic!("the quiet question never made the record awaiting");
+        };
+        assert_eq!(asking.question.as_deref(), Some("Overwrite? [y/N]"));
+        assert_eq!(asking.needs_sudo, None, "an ordinary question is not the human's password");
+        assert_eq!(asking.shell, shell);
+        assert_eq!(asking.restore.is_some(), shell, "only a shell is ticked as one");
+
+        use std::io::Write as _;
+        let mut door = std::os::unix::net::UnixStream::connect(conduct_socket_path(tag))
+            .expect("the session's inbox is bound while its child runs");
+        door.write_all(b"y\n").unwrap();
+        drop(door);
+
+        let Some(answered) = wait_for_record(tag, std::time::Duration::from_secs(30), |r| {
+            r.state != "awaiting" && r.question.is_none()
+        }) else {
+            reap(&mut conducting);
+            panic!("the answered question never left the record");
+        };
+        assert_ne!(answered.state, "done", "the child is still running its sleep");
+
+        let status = conducting.wait().expect("conduct returns");
+        assert!(status.success(), "conduct exited {status:?}");
+        let rec = wait_for_record(tag, std::time::Duration::from_secs(5), |r| r.state == "done").unwrap();
+        assert_eq!(rec.question, None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A shell given a command string runs it, and its `read` is a question like
+    /// any program's: the screen hears it even though the shell's own process
+    /// is the foreground group (`shell_snapshot`).
+    #[cfg(unix)]
+    #[test]
+    fn a_shell_running_a_command_string_is_heard() {
+        a_blocked_child_is_asking_until_answered(
+            "screen-bash-c-read",
+            &["bash", "-c", "read -p 'Overwrite? [y/N] ' x; sleep 4"],
+            "worker",
+            true,
+            true,
+        );
+    }
+
+    /// An interactive shell at its own prompt: a question typed there is on the
+    /// screen but is not asked, because its `read` would share the prompt's
+    /// process (`shell_snapshot`).
+    #[cfg(unix)]
+    #[test]
+    fn an_interactive_shell_at_its_own_prompt_is_never_asked() {
+        a_blocked_child_is_asking_until_answered(
+            "screen-interactive-bash",
+            &["bash", "--norc", "--noprofile", "-i"],
+            "worker",
+            true,
+            false,
+        );
+    }
+
+    /// A program that is not a shell and reports through neither hooks nor a
+    /// trace: the wrap itself speaks for it, and writes no shell snapshot.
+    #[cfg(unix)]
+    #[test]
+    fn a_harnessless_program_blocked_on_a_question_is_asking_until_answered() {
+        a_blocked_child_is_asking_until_answered(
+            "screen-awk-read",
+            &["awk", "BEGIN { printf \"Overwrite? [y/N] \"; fflush(); getline x < \"-\"; system(\"sleep 4\") }"],
+            "awk",
+            false,
+            true,
+        );
     }
 }
