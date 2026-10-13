@@ -8408,7 +8408,6 @@ operations cross which way is a rule of the wire, not of any command:
 | --- | --- | --- |
 | the pairing ceremony (`pairRequest`, `pairReveal`, `pairPoll`) | **works** — its own signatures carry no mesh (`wire_auth::canonical_string("PAIRPOLL", …, None)`, byte-identical on both sides) | **works** |
 | every signed command (`node pull`, `send` to `node/<q>`, `node spawn`, `tasks get`/`history` on a node, `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) | **refused `-32007` "signature verification failed"** — the sixth field is not in the bytes the older verifier rebuilds | **works**, judged in `[pairing] homeMesh`, so a grant that lives only in a NAMED mesh is still refused |
-| the answer to a mail call (`aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) | **held, not parked** — the older door's `-32007` carries no answer signature, so it is `unauthenticated`: the letter stays spooled and is retried on back-off, not parked | **works** — the new door signs its answer to a verified request, and an older client does not read the header |
 
 So a pair across the versions succeeds and looks healthy in `node list` while
 being **one-way**: the older node reaches the newer one and the newer node
@@ -8421,6 +8420,51 @@ request judged in the receiving box's home mesh — precisely the re-aiming the
 sixth field exists to stop. **The remedy is upgrading every node**; the
 `aoide-storage` pin for it is
 `wire_auth::tests::wire_encoding_skew_the_five_and_six_field_signatures_never_interchange`.
+
+**The answer signature is a second boundary, named by its header, not by a
+version.** A door that sends `X-Aoide-Answer-Signature` on its answers to
+verified requests ("Signed answers", above) and a door that does not both
+report `0.0.26`: the release version moves only in a completed phase's
+landing commit ("Versioning", "Release version"), so the header names this
+line. Every door without it answers unsigned. One before `0.0.26` refuses the
+new request `-32007`; a `0.0.26` door without the header answers `200` with
+an ordinary body. A client that checks answers treats the two alike:
+
+- **New client to a door without the header: held, never lost.** Every mail
+  answer is `unauthenticated` (`no answer signature … upgrade aoide on
+  <node>`). Letters, receipts, charter letters and transit containers stay
+  spooled and live: nothing is parked or retired, the link backs off, and the
+  drain asks again. A poll files and clears nothing, so the far side keeps
+  what it holds and the record of what this box filed survives to the next
+  poll. A binding exchange learns nothing. `aoide mail outbox` reads
+  `retrying` with the `unauthenticated:` reason, and `aoide mail poll <node>`
+  reports the node unreachable with the same reason.
+- **Old client to a door with the header: works.** The header is one more
+  response line, and an older client never reads it.
+
+A node's client and door upgrade together, so the rule is a door before the
+clients that dial it, in this order:
+
+1. Charter-mesh relays and their mail adapters (`aoide mail serve`). Whatever
+   fronts an adapter (a TLS edge, a reverse proxy) must pass the response
+   header through: a front that strips it fails closed, exactly like an old
+   door. One upgraded member's `aoide mail poll <relay>` reading `polled`
+   proves a relay and its front together.
+2. The other charter-mesh members, poll-only ones first. Nothing dials a
+   poll-only member, so only its client changes; a member the relays dial is
+   held by them until it follows.
+3. Pair-mesh peers, in one window: the first peer upgraded holds its mail to
+   the others until they follow.
+4. A node that sits in both kinds of mesh follows its relay role: with step 1
+   when it relays a charter mesh, otherwise with its pair-mesh peers.
+5. Then pair every keyless record (`aoide pair <node>`), or give its charter
+   line a key. A record with no key on file (a `node add`, a declaration that
+   names none) is never dialled by a client that checks answers.
+
+Nothing needs re-sending. A held link's next drain comes within the back-off
+ceiling (`outbox::BACKOFF_CEILING_SECS`, 900 s) of the last peer's upgrade; a
+poll is never held off, so `aoide mail poll <node>` confirms an upgraded door
+at once.
 
 **`aoide/charterFetch` (P-CHARTER) — the LAN join's one read.** `params` is
 `{ "mesh": "<name>" }`; the result is
