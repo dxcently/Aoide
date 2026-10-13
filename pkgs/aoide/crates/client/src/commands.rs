@@ -6273,7 +6273,9 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
             if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") },
             if busy == 0 { String::new() } else { format!(", {busy} busy (another poll of it is already running and does the asking)") },
             if not_dialled == 0 { String::new() } else { format!(", {not_dialled} not dialled (declared `down`)") },
-            if targets.len() > 1 { format!("\n  {}", results.join("\n  ")) } else { String::new() }
+            // Each node's own line, and for a single node whenever it was
+            // unreachable: the count alone would leave out why.
+            if targets.len() > 1 || unreachable > 0 { format!("\n  {}", results.join("\n  ")) } else { String::new() }
         )
     };
     Outcome::ok(cmd, message)
@@ -10207,6 +10209,37 @@ mod tests {
         assert!(results.iter().any(|l| l.starts_with("aaa: refused")), "{results:?}");
         assert!(results.iter().any(|l| l.starts_with("bbb: polled")), "{results:?}");
         assert!(said(&out).contains("results:\n    aaa: refused"), "the text render lists every node: {}", said(&out));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **One unreachable node says why.** A relay that answers unsigned leaves
+    /// a poll of it unreachable, and the operator must see the reason: the
+    /// count alone gave them nothing to act on.
+    #[test]
+    fn mail_poll_of_one_unreachable_node_says_why() {
+        use std::io::{Read, Write};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-one-unreachable");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let body = r#"{"jsonrpc":"2.0","id":1,"result":{"envelopes":[]}}"#;
+            while let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.read(&mut [0u8; 4096]);
+                let _ = stream.write_all(
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes(),
+                );
+            }
+        });
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+
+        let out = handle_mail_poll(&mail_inv(&["mail", "poll"], &["relay"]));
+        let text = said(&out);
+        assert!(text.contains("1 unreachable"), "{text}");
+        assert!(
+            text.contains("relay: unreachable — `relay` answered `aoide/mailPoll` with no answer signature"),
+            "the one node's reason is in the text: {text}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -8852,9 +8852,11 @@ two triggers, and they are the same call:
   has to clear to be spooled there, so "a node this box sends to" and "a node
   this box asks" stay one set), plus every relay a charter in force names for
   this box and has NO record here. Per node the answer reports
-  `polled`/`filed` or `unreachable`/`reason`; one node's failure never stops
-  the sweep, and the command's own status reports that the ASK was made
-  (write-is-the-report), never the far end's outcome. This is the receive
+  `polled`/`filed` or `unreachable`/`reason`, and the text prints each node's
+  line, its reason included, whenever several were asked or one was
+  unreachable; one node's failure never stops the sweep, and the command's
+  own status reports that the ASK was made (write-is-the-report), never the
+  far end's outcome. This is the receive
   trigger a node with nothing to send needs: an empty outbox never dials, so
   poll-on-contact alone can never reach it, and an OS timer driving this
   command is H1's own scope. A charter line's `address` IS a dial target
