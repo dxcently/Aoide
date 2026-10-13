@@ -1019,11 +1019,15 @@ in the message.
   `parentSessionId` is the wrap, whose `hookAncestry` holds the wrap's pid,
   whose harness is dead, and whose hook phase still reads `working` or
   `awaiting`. Per harness, the newest hook id gets `phase: "done"` with the fact
-  (`record_death`: the tool in flight as `lastTool`, and the wrap's exit fact,
-  `exit`, `signal`, or `timeout`) in one upsert; the older ids of the same
-  process are closed as `done` with no fact. Each child's session is set to
-  `done` (presence reads the process as over, and the held rules spare the
-  record until the death is claimed). `aoide session phase` folds the phase it
+  (`record_death`: the tool in flight as `lastTool`, the wrap's exit fact,
+  `exit`, `signal`, or `timeout`, and the `spawner` the line goes to) in one
+  upsert; the older ids of the same process are closed as `done` with no fact.
+  The spawner is resolved here, while the wrap's own record still stands to
+  climb through (`hook::recipient_of`: the route climb with no seal check, since
+  the wrap holds no daemon key; the claim verifies it), so a child no tick saw
+  before its wrap ended is still told. Each child's session is set to `done`
+  (presence reads the process as over, and the held rules spare the record
+  until the death is claimed). `aoide session phase` folds the phase it
   is given and never writes `death`, so only the wrap writes one. A closed phase
   is never written. The tick says the fact when the wrap wrote it, and infers a
   death only when none was written (SIGKILL), so each death is said once.

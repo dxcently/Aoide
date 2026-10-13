@@ -812,6 +812,11 @@ pub struct HookDeath {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal: Option<i32>,
+    /// The session the death is said to, resolved by the recorder while the
+    /// child's wrap still ran; absent when its edge named nobody. Data, not a
+    /// proof: the ping-back verifies it before it says anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawner: Option<String>,
 }
 
 /// `projects.json` container.

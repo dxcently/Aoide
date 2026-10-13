@@ -298,7 +298,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   by the same `deliver` — it adds a cursor half and four lines, never a second
   transport. A death the wrap records (`done` with a `death` fact on the
   child's hook record, written by `session_store::record_hook_deaths`) is said
-  once, with its status; one the tick infers carries none. The recipient is the child's SPAWNER, resolved
+  once, with its status; one the tick infers carries none. The fact names its
+  spawner (`hook::recipient_of`), so a child no tick saw before its wrap ended
+  is still told. The recipient is the child's SPAWNER, resolved
   through the wrap that hosts it and only over an edge the kernel attested
   (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can no
   longer route is judged from the route its entry kept (`hook::gone`). Its

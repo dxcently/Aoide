@@ -75,7 +75,9 @@
 //! the cursor carries the route: the host wrap and the spawner resolved while
 //! the child was live (both sealed then, the only way a route is written), the
 //! harness it was seen alive as (pid and start time), and the tag and tool in
-//! flight. Its rules, the orphan case included, are stated once in
+//! flight. A recorded death also names its spawner on the fact, so a child no
+//! tick saw before its wrap ended still has one. Its rules, the orphan case
+//! included, are stated once in
 //! `CONTRACTS.md` under `state/stage/pingback.json`; `hook::gone` is their code.
 //!
 //! `pingback.json` is unsealed data: a same-uid writer can fabricate a route and
@@ -223,6 +225,15 @@ fn route_of(
     Some((host.session_id.clone(), to))
 }
 
+/// The spawner a recorded death names, written onto the fact by whoever records
+/// it while the child's wrap still runs: the [`route_of`] climb over the roster
+/// as it stands, with no seal check, since the recorder holds no daemon key. The
+/// claim verifies this recipient's seal before it says anything, as it does a
+/// cached route's.
+pub(in crate::graph) fn recipient_of(kid: &SessionRecord, roster: &[SessionRecord]) -> Option<String> {
+    route_of(kid, roster, &|_: &SessionRecord| true).map(|(_, to)| to)
+}
+
 /// Steps 2 and 3 of [`route_of`]: the spawner of a conducted `host` wrap,
 /// over the edge `host`'s registration attested, resolved to the conducted
 /// session that can be written to. Shared with the screen source
@@ -359,9 +370,9 @@ fn recorded_death(hook: &HookRecord) -> Option<&HookDeath> {
 /// cursor the eidolon half just built: advance every gathered child's `hook`
 /// cursor in `next` and return the lines now owed, and the children whose
 /// recorded death those lines say (the caller clears each one's fact with
-/// [`clear_said`]). Every other entry in `old` that holds a hook half is judged
-/// by [`gone`]: said of, kept, or dropped, and the first two of those leave its
-/// half in `next` only for a keep.
+/// [`clear_said`]). Every other entry in `old` that holds a hook half, and every
+/// recorded death no entry holds yet (a child whose wrap ended before any tick
+/// saw it), is judged by [`gone`]: said of, kept, or dropped.
 pub(super) fn claim(
     roster: &[SessionRecord],
     hooks: &[HookRecord],
@@ -384,8 +395,16 @@ pub(super) fn claim(
             lines.push(ChildClaim { parent: child.to.clone(), line: render(&child.tag, &event) });
         }
     }
-    for (id, prev) in old {
-        let Some(hook) = prev.hook.as_ref() else { continue };
+    let unseen = hooks
+        .iter()
+        .filter(|h| recorded_death(h).is_some() && !old.get(&h.session_id).is_some_and(|e| e.hook.is_some()))
+        .map(|h| {
+            let first = HookCursor { phase: canonical_state(&h.phase).to_string(), at: h.updated_at.clone(), ..Default::default() };
+            (h.session_id.clone(), first)
+        });
+    let judged: Vec<(String, HookCursor)> =
+        old.iter().filter_map(|(id, e)| Some((id.clone(), e.hook.clone()?))).chain(unseen).collect();
+    for (id, hook) in &judged {
         if children.iter().any(|c| c.id == *id) {
             continue;
         }
@@ -414,29 +433,21 @@ pub(super) fn clear_said(hooks: &mut [HookRecord], said: &[String]) {
 }
 
 /// The deaths the reaper and every prune must spare until the claim has said
-/// them: a recorded death under a day old that the tick can still say. It can
-/// say one it gathers now (a tracked child whose route resolves), or one it says
-/// over a route cached while the child was live. A record with neither has no
-/// line to wait for, so nothing holds it.
-pub(crate) fn unclaimed_deaths(roster: &[SessionRecord], hooks: &[HookRecord], now_ms: i64) -> HashSet<String> {
-    unclaimed_in(roster, hooks, &super::read_cursor(), now_ms)
+/// them: a recorded death under a day old with someone to say it to, the
+/// spawner its fact names or a route cached while the child was live. A record
+/// with neither has no line to wait for, so nothing holds it. Neither is checked
+/// against a seal here (the callers hold the stage lock and no daemon key), so a
+/// death whose recipient never verifies is held until its stamp is a day old.
+pub(crate) fn unclaimed_deaths(hooks: &[HookRecord], now_ms: i64) -> HashSet<String> {
+    unclaimed_in(hooks, &super::read_cursor(), now_ms)
 }
 
-fn unclaimed_in(roster: &[SessionRecord], hooks: &[HookRecord], cursor: &CursorFile, now_ms: i64) -> HashSet<String> {
+fn unclaimed_in(hooks: &[HookRecord], cursor: &CursorFile, now_ms: i64) -> HashSet<String> {
+    let cached = |id: &str| cursor.get(id).and_then(|e| e.hook.as_ref()).is_some_and(|c| c.route.is_some());
     hooks
         .iter()
-        .filter(|h| recorded_death(h).is_some())
+        .filter(|h| recorded_death(h).is_some_and(|d| d.spawner.is_some() || cached(&h.session_id)))
         .filter(|h| parse_iso_utc(&h.updated_at).is_some_and(|at| now_ms - at * 1000 < STALE_MS))
-        .filter(|h| {
-            let cached = cursor
-                .get(&h.session_id)
-                .and_then(|e| e.hook.as_ref())
-                .is_some_and(|c| c.route.is_some());
-            let gathered = roster.iter().find(|r| r.session_id == h.session_id).is_some_and(|rec| {
-                tracked(rec) && route_of(rec, roster, &|_: &SessionRecord| true).is_some()
-            });
-            cached || gathered
-        })
         .map(|h| h.session_id.clone())
         .collect()
 }
@@ -511,7 +522,8 @@ fn decide(child: &HookChild, entry: Option<&HookCursor>, now_ms: i64) -> (Option
 /// record is still on the roster with its harness alive is the roster's
 /// business: kept while it is tracked, dropped once it is not, so a live child
 /// that merely lost its edge is never said of. Anything else is judged on the
-/// route cached while the child was live, in the order of the body: no hook
+/// route cached while the child was live, or, with none cached, the route a
+/// recorded death names ([`fact_route`]), in the order of the body: no hook
 /// record, or a stamp a day old, drops the entry. A recorded death is then said
 /// over that route, whatever phase the entry last saw. Without a recorded death
 /// the entry must still be an open turn, not latched, with its record still open:
@@ -539,7 +551,7 @@ fn gone(
     if !recent || (fact.is_none() && (prev.died || !is_open(&prev.phase) || !open)) {
         return Gone::Drop;
     }
-    let Some(route) = prev.route.as_ref() else {
+    let Some(route) = prev.route.clone().or_else(|| fact.and_then(|f| fact_route(id, roster, f))) else {
         return Gone::Drop;
     };
     if fact.is_none() && (route.harness.as_ref().is_some_and(harness_still_alive) || !host_gone(roster, &route.host)) {
@@ -557,6 +569,21 @@ fn gone(
         },
         recorded: fact.is_some(),
     }
+}
+
+/// The route a recorded death names when no sighting cached one: the spawner
+/// its fact carries ([`recipient_of`]), under the child's own record, which gives
+/// the host wrap and the tag. The tool is the fact's own.
+fn fact_route(id: &str, roster: &[SessionRecord], fact: &HookDeath) -> Option<Route> {
+    let to = fact.spawner.clone()?;
+    let rec = roster.iter().find(|r| r.session_id == id)?;
+    Some(Route {
+        host: rec.parent_session_id.clone().unwrap_or_default(),
+        to,
+        tag: harness_tag(&rec.agent, rec.petname.as_deref(), id),
+        last: "working".to_string(),
+        harness: None,
+    })
 }
 
 /// One event as its line. Every value is cleaned again here, not only where the
@@ -865,29 +892,26 @@ mod tests {
         assert!(claim(&roster, &cleared, &sealed, &said, &mut after, at_ms() + 180_000).is_empty());
     }
 
-    /// Which recorded deaths the reaper and every prune must hold: only those the
-    /// tick can still say, over a route it gathers now or one cached while the
-    /// child was live. A record with neither, or one a day old, is not held.
+    /// Which recorded deaths the reaper and every prune must hold: only those with
+    /// someone to say them to, the spawner the fact names or a route cached while
+    /// the child was live. A record with neither, or one a day old, is not held.
     #[test]
-    fn a_death_is_held_only_while_the_tick_can_still_say_it() {
-        let roster = spawned_shape();
-        let held = [HookRecord { death: Some(died_fact("signal")), ..hook_rec("K", "done", AT) }];
+    fn a_death_is_held_only_while_it_has_someone_to_be_said_to() {
+        let named = [HookRecord {
+            death: Some(HookDeath { spawner: Some("P".into()), ..died_fact("signal") }),
+            ..hook_rec("K", "done", AT)
+        }];
+        let unnamed = [HookRecord { death: Some(died_fact("signal")), ..hook_rec("K", "done", AT) }];
         let none = CursorFile::new();
-        assert_eq!(unclaimed_in(&roster, &held, &none, at_ms()), HashSet::from(["K".to_string()]), "gathered: held");
-
-        let mut untracked = roster.clone();
-        untracked[2].parent_session_id = None;
-        assert!(unclaimed_in(&untracked, &held, &none, at_ms()).is_empty(), "no route will ever gather it");
-
-        let gone: Vec<SessionRecord> = roster.iter().filter(|r| r.session_id != "K").cloned().collect();
-        assert!(unclaimed_in(&gone, &held, &none, at_ms()).is_empty(), "gone with no route cached");
         let mut cached = CursorFile::new();
         cached.insert("K".into(), super::super::CursorEntry { hook: Some(cursor("working", AT, false)), ..Default::default() });
-        assert_eq!(unclaimed_in(&gone, &held, &cached, at_ms()), HashSet::from(["K".to_string()]), "gone, a route cached");
+        let k = HashSet::from(["K".to_string()]);
 
-        assert!(unclaimed_in(&roster, &held, &none, at_ms() + STALE_MS).is_empty(), "a day old");
-        let plain = [hook_rec("K", "done", AT)];
-        assert!(unclaimed_in(&roster, &plain, &none, at_ms()).is_empty(), "no fact, nothing to hold");
+        assert_eq!(unclaimed_in(&named, &none, at_ms()), k, "the fact names its spawner");
+        assert_eq!(unclaimed_in(&unnamed, &cached, at_ms()), k, "a route cached");
+        assert!(unclaimed_in(&unnamed, &none, at_ms()).is_empty(), "nobody to say it to");
+        assert!(unclaimed_in(&named, &cached, at_ms() + STALE_MS).is_empty(), "a day old");
+        assert!(unclaimed_in(&[hook_rec("K", "done", AT)], &cached, at_ms()).is_empty(), "no fact, nothing to hold");
     }
 
     /// The real two-record shape a spawned claude leaves: a spawner `P` (a
@@ -1602,6 +1626,41 @@ mod tests {
         assert!(kept.contains_key("K"), "a fact whose spawner does not verify is kept, not said");
     }
 
+    /// A death recorded before any tick saw its child (no cursor entry, and the
+    /// wrap already gone) is said to the spawner its fact names, once, and only
+    /// while that spawner verifies. A fact that names nobody says nothing.
+    #[test]
+    fn a_recorded_death_no_tick_saw_is_said_once_to_the_spawner_its_fact_names() {
+        let mut roster = spawned_shape();
+        harness_died(&mut roster);
+        wrap_exited(&mut roster);
+        roster[2].state = "done".into();
+        let fact = HookDeath { spawner: Some("P".into()), exit_code: Some(3), ..died_fact("exit") };
+        let named = [HookRecord { death: Some(fact), ..hook_rec("K", "done", AT) }];
+        let only_spawner = |r: &SessionRecord| r.session_id == "P";
+
+        let mut kept = CursorFile::new();
+        assert!(claim(&roster, &named, &(|_: &SessionRecord| false), &CursorFile::new(), &mut kept, at_ms()).is_empty());
+        assert!(kept.contains_key("K"), "a spawner that does not verify yet: kept");
+
+        let mut next = CursorFile::new();
+        let (lines, said) = super::claim(&roster, &named, &only_spawner, &kept, &mut next, at_ms() + 12_000);
+        assert_eq!(
+            lines,
+            vec![ChildClaim { parent: "P".into(), line: "[claude fond-aspen] died mid-turn (exit 3) · last: Bash".into() }]
+        );
+        assert_eq!(said, vec!["K".to_string()]);
+        let mut hooks = named.to_vec();
+        clear_said(&mut hooks, &said);
+        let mut again = CursorFile::new();
+        assert!(claim(&roster, &hooks, &only_spawner, &next, &mut again, at_ms() + 24_000).is_empty(), "once");
+
+        let unnamed = [HookRecord { death: Some(died_fact("signal")), ..hook_rec("K", "done", AT) }];
+        let mut none = CursorFile::new();
+        assert!(claim(&roster, &unnamed, &only_spawner, &CursorFile::new(), &mut none, at_ms()).is_empty());
+        assert!(none.is_empty(), "nobody to say it to: no entry");
+    }
+
     /// The wrap's death is `done` with its fact, so every reader that folds
     /// `hooks.json` (presence, the graph, the widgets) reads the process as over,
     /// and not as an idle or online session.
@@ -1813,8 +1872,14 @@ mod tests {
         assert_eq!(rec.phase, "done");
         assert_eq!(
             rec.death,
-            Some(HookDeath { last_tool: Some("Bash".into()), outcome: Some("signal".into()), signal: Some(9), ..Default::default() }),
-            "the fact names the tool in flight and the signal"
+            Some(HookDeath {
+                last_tool: Some("Bash".into()),
+                outcome: Some("signal".into()),
+                signal: Some(9),
+                spawner: Some(SPAWNER.into()),
+                ..Default::default()
+            }),
+            "the fact names the tool in flight, the signal and the spawner"
         );
 
         assert_eq!(
@@ -1909,7 +1974,7 @@ mod tests {
         crate::reap::reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
         let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
         assert_eq!(hook_record().death.and_then(|d| d.signal), Some(9), "the reaper leaves the fact");
-        assert_eq!(crate::graph::held_deaths(&load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions, &hooks.hooks), HashSet::from([HOOK.to_string()]), "held until said");
+        assert_eq!(crate::graph::held_deaths(&hooks.hooks), HashSet::from([HOOK.to_string()]), "held until said");
         assert_eq!(
             tick(&mut cursor),
             vec![ChildClaim {
@@ -1918,7 +1983,7 @@ mod tests {
             }]
         );
         let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
-        assert!(crate::graph::held_deaths(&load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions, &hooks.hooks).is_empty(), "claimed, so no longer held");
+        assert!(crate::graph::held_deaths(&hooks.hooks).is_empty(), "claimed, so no longer held");
 
         crate::reap::reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
         assert!(tick(&mut cursor).is_empty(), "said once, and still once after a later pass");
@@ -1985,6 +2050,31 @@ mod tests {
         assert!(tick(&mut cursor).is_empty(), "once");
     }
 
+    /// The wrap records the death and ends before any tick has seen the child, so
+    /// no cursor entry caches a route: the fact names its spawner, and the first
+    /// tick says the death once over it.
+    #[cfg(unix)]
+    #[test]
+    fn a_death_whose_wrap_ends_before_any_tick_saw_the_child_is_said_once() {
+        let (root, _env, _guard) = e2e_stage("dmt-unseen");
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
+        std::fs::write(root.join("go"), "").unwrap();
+        wait_exit(&mut wrap);
+        assert_eq!(hook_record().death.and_then(|d| d.spawner).as_deref(), Some(SPAWNER), "recorded while the wrap ran");
+
+        let mut cursor = CursorFile::new();
+        assert_eq!(
+            tick(&mut cursor),
+            vec![ChildClaim {
+                parent: SPAWNER.into(),
+                line: "[claude fond-aspen] died mid-turn (signal 9) · last: Bash".into(),
+            }]
+        );
+        crate::reap::reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert!(tick(&mut cursor).is_empty(), "once");
+    }
+
     /// The reaper runs between a shell-hosted harness's death and its wrap's end:
     /// the child's record names the dead harness, but its wrap still runs with
     /// the turn open, so the reaper leaves the child to the wrap. The wrap then
@@ -2040,7 +2130,13 @@ mod tests {
         assert_eq!(hook_record().phase, "done");
         assert_eq!(
             hook_record().death,
-            Some(HookDeath { last_tool: Some("Bash".into()), outcome: Some("signal".into()), signal: Some(15), ..Default::default() }),
+            Some(HookDeath {
+                last_tool: Some("Bash".into()),
+                outcome: Some("signal".into()),
+                signal: Some(15),
+                spawner: Some(SPAWNER.into()),
+                ..Default::default()
+            }),
         );
         assert_eq!(
             tick(&mut cursor),

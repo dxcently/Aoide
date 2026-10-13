@@ -324,7 +324,7 @@ fn do_session_start_inner(
         let mut h_file: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
         // A held death is a wrap's fact the tick has not said yet. `upsert_hook`
         // clears a record's fact, so an eviction skips it, held before any write.
-        let held = crate::graph::pingback::held_deaths(&file.sessions, &h_file.hooks);
+        let held = crate::graph::pingback::held_deaths(&h_file.hooks);
         let evicted: Vec<String> = evicted.into_iter().filter(|eid| !held.contains(eid)).collect();
         let done_at = now_iso_utc();
         for eid in &evicted {
@@ -1684,6 +1684,7 @@ fn do_session_phase_if_inner(id: &str, phase: &str, expected: &str) -> Outcome {
 struct Doomed {
     id: String,
     last_tool: Option<String>,
+    spawner: Option<String>,
     harness: u32,
     at: String,
 }
@@ -1726,7 +1727,9 @@ pub(crate) fn owned_by_live_wraps(sessions: &[SessionRecord], hooks: &[HookRecor
 /// whose harness is gone. Pure over the roster and `hooks.json`, so the rule is
 /// table-testable. Its harness must be gone, so a harness still running under a
 /// descendant that outlived the wrap is not reported dead. The tool in flight is
-/// read here, before the session is marked done and its activity cleared.
+/// read here, before the session is marked done and its activity cleared, and
+/// so is the spawner the death is said to, while this wrap's record still stands
+/// to climb through.
 fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: &str, host_pid: u32) -> Vec<Doomed> {
     sessions
         .iter()
@@ -1737,6 +1740,7 @@ fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: 
             turn_open(&hook.phase).then(|| Doomed {
                 id: s.session_id.clone(),
                 last_tool: s.activity.clone().filter(|a| !a.is_empty()),
+                spawner: super::pingback::recipient_of(s, sessions),
                 harness,
                 at: hook.updated_at.clone(),
             })
@@ -1746,12 +1750,12 @@ fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: 
 
 /// The wrap's own exit, recorded before the wrap ends its own record
 /// (`session_conduct`). Each hosted child [`hosted_open_children`] names gets the
-/// death fact `end`, carrying the tool it was in, and is marked `done` in
-/// `sessions.json`: it is dead, and presence must read it so. Written under the
-/// stage lock. One harness is one death: a `/clear` gives the same process a new
-/// hook id, so the newest id carries the fact and the older ids are closed as
-/// `done`. A closed phase is left exactly as it is, and when nothing is open the
-/// files are not touched at all.
+/// death fact `end`, carrying the tool it was in and its spawner, and is marked
+/// `done` in `sessions.json`: it is dead, and presence must read it so. Written
+/// under the stage lock. One harness is one death: a `/clear` gives the same
+/// process a new hook id, so the newest id carries the fact and the older ids are
+/// closed as `done`. A closed phase is left exactly as it is, and when nothing is
+/// open the files are not touched at all.
 pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &HookDeath) {
     with_stage_lock(|| {
         let Ok(mut sessions) = load_stage::<SessionsFile>(&sessions_path()) else { return };
@@ -1771,7 +1775,7 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
             for d in older {
                 upsert_hook(&mut hooks.hooks, &d.id, "done", &now);
             }
-            let fact = HookDeath { last_tool: newest.last_tool.clone(), ..end.clone() };
+            let fact = HookDeath { last_tool: newest.last_tool.clone(), spawner: newest.spawner.clone(), ..end.clone() };
             record_death(&mut hooks.hooks, &newest.id, fact, &now);
         }
         for s in sessions.sessions.iter_mut().filter(|s| doomed.iter().any(|d| d.id == s.session_id)) {

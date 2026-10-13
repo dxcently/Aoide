@@ -79,6 +79,8 @@
 mod hook;
 mod prompt;
 
+pub(in crate::graph) use hook::recipient_of;
+
 use super::common::{clean_line, clip_flat, strip_unsafe};
 use super::conduct::{auto_type_refusal, channel_socket_path, AutoTypeRefusal};
 use super::doorbell::{connect_for_ring, write_channel};
@@ -610,14 +612,11 @@ fn claim_locked(
 /// The wrap-written deaths the tick has not claimed yet, as of now (see
 /// `hook::unclaimed_deaths`). The reaper and every prune spare these records, so
 /// the fact survives until the tick has said it once.
-pub(crate) fn held_deaths(
-    roster: &[SessionRecord],
-    hooks: &[crate::graph::model::HookRecord],
-) -> std::collections::HashSet<String> {
+pub(crate) fn held_deaths(hooks: &[crate::graph::model::HookRecord]) -> std::collections::HashSet<String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64);
-    hook::unclaimed_deaths(roster, hooks, now)
+    hook::unclaimed_deaths(hooks, now)
 }
 
 /// Read the cursor file; any unreadable/unparseable content reads as an EMPTY

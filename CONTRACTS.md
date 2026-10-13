@@ -2150,18 +2150,22 @@ updatedAt }`.
 
 **`death` — a turn its harness ended, recorded by the wrap.** A hook record of a
 child that a conducted wrap hosts MAY carry `phase: "done"` and `death`:
-`{ lastTool?, outcome?, exitCode?, signal? }`. The wrap writes both in one
-upsert under the stage lock when its harness is seen to end while the child's
-phase reads `working` or `awaiting`; a closed phase is left alone. The end is
-named as an exit code (`exit`), a signal number (`signal`), or the wrap's own
-deadline (`timeout`); `death` is absent when the wrap cannot name it. `lastTool`
-is the tool in flight, when there was one. A wrap sent SIGTERM, SIGHUP or
-SIGINT (only one sent to its own pid, by `kill(2)`) forwards it to its harness
-once, SIGKILLs the harness after five seconds if it has not gone, records the
-death, and then ends by that same signal. A signal the terminal raised keeps its
-default action, and a disposition that was ignored on entry stays ignored, since
-the harness inherits it. A wrap killed by SIGKILL writes nothing; its death is
-inferred by the ping-back instead, with no status.
+`{ lastTool?, outcome?, exitCode?, signal?, spawner? }`. The wrap writes both in
+one upsert under the stage lock when its harness is seen to end while the
+child's phase reads `working` or `awaiting`; a closed phase is left alone. The
+end is named as an exit code (`exit`), a signal number (`signal`), or the wrap's
+own deadline (`timeout`); `outcome` is absent when the wrap cannot name it.
+`lastTool` is the tool in flight, when there was one. `spawner` is the session
+the death is said to, resolved while the wrap still runs by the same climb a
+route takes (§ `pingback.json`) over the roster as it stands, with no seal
+check: the recorder holds no daemon key, so the ping-back verifies the spawner
+before it says anything. It is absent when the edge names nobody. A wrap sent
+SIGTERM, SIGHUP or SIGINT (only one sent to its own pid, by `kill(2)`) forwards
+it to its harness once, SIGKILLs the harness after five seconds if it has not
+gone, records the death, and then ends by that same signal. A signal the
+terminal raised keeps its default action, and a disposition that was ignored on
+entry stays ignored, since the harness inherits it. A wrap killed by SIGKILL
+writes nothing; its death is inferred by the ping-back instead, with no status.
 
 `death` is the unclaimed state. The ping-back says it once and then clears it
 from the record (§ `pingback.json`), so a record that reads `phase: "done"`
@@ -3683,16 +3687,19 @@ Lines are delivered after the lock is released. Because a said fact is cleared
 from its record, deleting `pingback.json` after a death went out cannot repeat
 it.
 
-**Held.** A recorded death under 24 hours old is held while the tick can still
-say it: the child is gathered now, or the cursor caches a route for it. A held
-record is spared by the reaper, the superseded-tombstone pass, the orphan sweep,
-`session prune`, and the session-start eviction (which skips it, rather than
-rewrite its record). A record with neither has no line to wait for, and is not
-held.
+**Held.** A recorded death under 24 hours old is held while it has someone to
+be said to: its fact names a `spawner`, or the cursor caches a route for it. A
+held record is spared by the reaper, the superseded-tombstone pass, the orphan
+sweep, `session prune`, and the session-start eviction (which skips it, rather
+than rewrite its record). A record with neither has no line to wait for, and is
+not held. Neither is checked against a seal here, since every caller holds the
+stage lock and no daemon key: a death whose recipient never verifies is held
+until its stamp is 24 hours old, and is then pruned unsaid.
 
-**The gone path.** An entry whose child the tick did not gather this pass is
-judged from its cached route and from what the tick reads (the roster,
-`hooks.json`, the seals), in this order:
+**The gone path.** An entry whose child the tick did not gather this pass, and
+a recorded death no entry holds yet (its wrap ended before any tick saw the
+child), is judged from its cached route and from what the tick reads (the
+roster, `hooks.json`, the seals), in this order:
 
 - its record is on the roster with its pid alive: kept while the child is
   tracked, dropped once it is not. A live child that only lost its edge is
@@ -3703,7 +3710,9 @@ judged from its cached route and from what the tick reads (the roster,
 - the stamp is a day old or more, or there is no fact and the entry is latched
   `died`, or its cursor phase or its record's phase is not `working` or
   `awaiting`: dropped silently;
-- no cached route: dropped silently;
+- no cached route: a recorded death is said over the `spawner` its fact names
+  instead, with the child's own record giving the host wrap and the tag; with
+  no spawner, or no record, dropped silently;
 - no fact, and the cached route's `harness` still runs under its recorded
   `start` (an orphan): kept, and nothing is said while that harness lives;
 - no fact, and the route's host wrap is not gone (its record is on the roster
@@ -3749,9 +3758,11 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
   deleting a recorded `death` fact, or the record, before the tick reads it.
   Both are the same class as editing the cursor's latches;
 - **fabricate a death** by writing a child's `hooks.json` record as `phase:
-  "done"` with a `death` fact: it is said as a death on the child's route.
-  `aoide session phase` cannot write a fact (§ `sessions.json`), so only a file
-  edit can. This is the same class as editing the `hooks.json` phase itself;
+  "done"` with a `death` fact: it is said as a death on the child's route, or
+  to the `spawner` the fact names once that session verifies, the same reach as
+  a fabricated cursor entry. `aoide session phase` cannot write a fact
+  (§ `sessions.json`), so only a file edit can. This is the same class as
+  editing the `hooks.json` phase itself;
 - **redirect** a live child's lines. On the live path the recipient is read
   through the host's `parentSessionId` and `attestedSpawner`, which live in
   `sessions.json` and are not under the seal (the seal covers the wrap's own

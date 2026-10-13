@@ -1604,7 +1604,7 @@ fn reap_inner(
     // `done` record on the desktop, which stays `session prune`'s job.
     // A wrap-written death the tick has not claimed is held: no pass below may
     // take its record, the only place its fact lives (see `held_deaths`).
-    let held = crate::graph::held_deaths(&s_file.sessions, &h_file.hooks);
+    let held = crate::graph::held_deaths(&h_file.hooks);
     let superseded_done: Vec<String> = superseded_done_siblings(&s_file.sessions)
         .into_iter()
         .filter(|id| !held.contains(id))
