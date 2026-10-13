@@ -64,8 +64,9 @@
 //! first `hookAncestry` pid, the process the hook door walked to, or the
 //! record's own `pid` where it stamps none, probed with the reaper's own
 //! `pid_is_alive`). The inferred line carries no status, since no one saw the
-//! exit. A live wrap is the one that tells: while a sealed host runs, a dead
-//! harness under it is not a death yet. It is the hook source's twin of the trace
+//! exit. A live wrap is the one that tells: while its host runs, sealed or not, a
+//! dead harness under it is not a death yet, and the tick infers one only once
+//! the host is gone. It is the hook source's twin of the trace
 //! source's `died mid-turn` (an eidolon record dropped with its turn open), and
 //! says that the turn did not end, not why. A `done` phase with no fact is a
 //! session ending by its own hook and says nothing.
@@ -515,10 +516,11 @@ fn decide(child: &HookChild, entry: Option<&HookCursor>, now_ms: i64) -> (Option
 /// over that route, whatever phase the entry last saw. Without a recorded death
 /// the entry must still be an open turn, not latched, with its record still open:
 /// a route whose harness still runs under the start time it was seen with is the
-/// orphan, and is kept. Either way the route must be distinct, its spawner must
-/// verify (checked here, inside the stage lock), and the host wrap must be gone or
-/// still verify. Only then is the child said of; any other case is kept, until a
-/// drop rule applies.
+/// orphan, and is kept, and so is a route whose host wrap is not gone, since a
+/// live host records the death itself. Either way the route must be distinct, its
+/// spawner must verify (checked here, inside the stage lock), and the host wrap
+/// must be gone or still verify. Only then is the child said of; any other case is
+/// kept, until a drop rule applies.
 fn gone(
     prev: &HookCursor,
     id: &str,
@@ -540,7 +542,7 @@ fn gone(
     let Some(route) = prev.route.as_ref() else {
         return Gone::Drop;
     };
-    if fact.is_none() && route.harness.as_ref().is_some_and(harness_still_alive) {
+    if fact.is_none() && (route.harness.as_ref().is_some_and(harness_still_alive) || !host_gone(roster, &route.host)) {
         return Gone::Keep;
     }
     let distinct = route.host != id && route.to != id && route.to != route.host;
@@ -1143,10 +1145,18 @@ mod tests {
         let mut next = CursorFile::new();
         assert!(claim(&roster, &hooks, &sealed, &CursorFile::new(), &mut next, at_ms()).is_empty());
 
-        // The harness dies, then the reaper takes the record; its hook file still says working.
+        // The harness dies, then its record leaves the roster; its hook file still
+        // says working. The host still runs, and a live host records the death
+        // itself: the tick infers nothing and keeps the entry.
         die(harness);
-        let gone_roster: Vec<SessionRecord> = roster.iter().filter(|r| r.session_id != "K").cloned().collect();
-        let old = next.clone();
+        let mut gone_roster: Vec<SessionRecord> = roster.iter().filter(|r| r.session_id != "K").cloned().collect();
+        let mut kept = CursorFile::new();
+        assert!(claim(&gone_roster, &hooks, &sealed, &next, &mut kept, at_ms() + 30_000).is_empty());
+        assert_eq!(kept["K"].hook, next["K"].hook, "withheld while the host runs");
+
+        // The host ends without having found the child to record: now it is inferred.
+        wrap_exited(&mut gone_roster);
+        let old = kept.clone();
         let mut after = CursorFile::new();
         let lines = claim(&gone_roster, &hooks, &sealed, &old, &mut after, at_ms() + 60_000);
         assert_eq!(
@@ -1159,10 +1169,10 @@ mod tests {
         assert!(claim(&gone_roster, &hooks, &sealed, &after, &mut again, at_ms() + 72_000).is_empty());
     }
 
-    /// The orphan: the record was reaped (or its wrap died) and the harness it was
-    /// seen alive as still runs under that start time. Its entry is kept while the
-    /// harness lives, said of once if it dies with the turn open, and dropped
-    /// silently otherwise.
+    /// The orphan: its wrap died without writing (SIGKILL), its record left the
+    /// roster, and the harness it was seen alive as still runs under that start
+    /// time. Its entry is kept while the harness lives, said of once if it dies
+    /// with the turn open, and dropped silently otherwise.
     #[test]
     fn an_orphan_whose_harness_still_runs_is_kept_and_said_of_once_when_it_dies_open() {
         let mut roster = spawned_shape();
@@ -1171,7 +1181,8 @@ mod tests {
         let sealed = |_: &SessionRecord| true;
         let mut next = CursorFile::new();
         claim(&roster, &hooks, &sealed, &CursorFile::new(), &mut next, at_ms());
-        let gone_roster: Vec<SessionRecord> = roster.iter().filter(|r| r.session_id != "K").cloned().collect();
+        let mut gone_roster: Vec<SessionRecord> = roster.iter().filter(|r| r.session_id != "K").cloned().collect();
+        wrap_exited(&mut gone_roster);
 
         let mut kept = CursorFile::new();
         assert!(claim(&gone_roster, &hooks, &sealed, &next, &mut kept, at_ms() + 60_000).is_empty());
@@ -1233,7 +1244,8 @@ mod tests {
 
     #[test]
     fn a_harness_pid_reused_since_the_sighting_is_a_dead_harness() {
-        let gone_roster: Vec<SessionRecord> = spawned_shape().into_iter().filter(|r| r.session_id != "K").collect();
+        let mut gone_roster: Vec<SessionRecord> = spawned_shape().into_iter().filter(|r| r.session_id != "K").collect();
+        wrap_exited(&mut gone_roster);
         let sealed = |_: &SessionRecord| true;
         let me = std::process::id();
         let start = aoide_storage::attest::pid_starttime(me as i32).unwrap();
@@ -1254,26 +1266,28 @@ mod tests {
         }
     }
 
+    /// A recorded death over a cached route whose host still runs but reads
+    /// `done`: the host is judged by its seal, never by its state.
     #[test]
     fn a_done_host_whose_pid_still_runs_is_judged_by_its_seal_not_by_its_state() {
         let mut roster = spawned_shape();
         let harness = sleeper(&mut roster);
-        let hooks = [hook_rec("K", "working", AT)];
         let sealed = |_: &SessionRecord| true;
         let mut next = CursorFile::new();
-        claim(&roster, &hooks, &sealed, &CursorFile::new(), &mut next, at_ms());
+        claim(&roster, &[hook_rec("K", "working", AT)], &sealed, &CursorFile::new(), &mut next, at_ms());
         die(harness);
         // The host still runs (its pid is this process) but says `done`.
         let mut gone_roster: Vec<SessionRecord> = roster.iter().filter(|r| r.session_id != "K").cloned().collect();
         gone_roster[1].state = "done".into();
+        let recorded = [HookRecord { death: Some(died_fact("exit")), ..hook_rec("K", "done", "2026-10-07T10:01:00Z") }];
 
         let mut said = CursorFile::new();
-        let lines = claim(&gone_roster, &hooks, &sealed, &next, &mut said, at_ms() + 60_000);
+        let lines = claim(&gone_roster, &recorded, &sealed, &next, &mut said, at_ms() + 60_000);
         assert_eq!(lines.len(), 1, "a done host that verifies is said of: {lines:?}");
 
         let unsealed_host = |r: &SessionRecord| r.session_id != "W";
         let mut kept = CursorFile::new();
-        assert!(claim(&gone_roster, &hooks, &unsealed_host, &next, &mut kept, at_ms() + 60_000).is_empty());
+        assert!(claim(&gone_roster, &recorded, &unsealed_host, &next, &mut kept, at_ms() + 60_000).is_empty());
         assert!(kept.contains_key("K"), "a done host that does not verify is kept, not said");
     }
 
@@ -1419,8 +1433,11 @@ mod tests {
         assert!(!next.contains_key("K"), "the spawner does not verify: no route to cache");
     }
 
+    /// A death nobody recorded is inferred only once the host is gone, since a
+    /// live host records the death itself, whether its seal verifies or not; and
+    /// then only to a spawner that verifies.
     #[test]
-    fn a_gone_child_is_said_of_only_while_its_host_verifies_or_is_gone_and_its_spawner_verifies() {
+    fn a_gone_child_is_inferred_dead_only_once_its_host_is_gone_and_its_spawner_verifies() {
         let mut roster = spawned_shape();
         let harness = sleeper(&mut roster);
         let hooks = [hook_rec("K", "working", AT)];
@@ -1429,15 +1446,22 @@ mod tests {
         die(harness);
         let gone_roster: Vec<SessionRecord> = roster.iter().filter(|r| r.session_id != "K").cloned().collect();
 
-        // The live host no longer verifies: nothing is said, and the entry is
-        // kept, so a later tick with the seal back can still say it.
-        let unsealed_host = |r: &SessionRecord| r.session_id != "W";
+        for host_seal in [true, false] {
+            let sealed = |r: &SessionRecord| host_seal || r.session_id != "W";
+            let mut kept = CursorFile::new();
+            assert!(claim(&gone_roster, &hooks, &sealed, &next, &mut kept, at_ms() + 60_000).is_empty(), "seal {host_seal}");
+            assert_eq!(kept["K"].hook, next["K"].hook, "withheld, not forgotten (seal {host_seal})");
+        }
+
+        let mut exited = gone_roster.clone();
+        wrap_exited(&mut exited);
+        let unsealed_spawner = |r: &SessionRecord| r.session_id != "P";
         let mut kept = CursorFile::new();
-        assert!(claim(&gone_roster, &hooks, &unsealed_host, &next, &mut kept, at_ms() + 60_000).is_empty());
-        assert!(kept.contains_key("K"), "withheld, not forgotten");
+        assert!(claim(&exited, &hooks, &unsealed_spawner, &next, &mut kept, at_ms() + 72_000).is_empty());
+        assert!(kept.contains_key("K"), "a spawner that does not verify: kept");
 
         let mut said = CursorFile::new();
-        let lines = claim(&gone_roster, &hooks, &(|_: &SessionRecord| true), &kept, &mut said, at_ms() + 72_000);
+        let lines = claim(&exited, &hooks, &(|_: &SessionRecord| true), &kept, &mut said, at_ms() + 84_000);
         assert_eq!(lines.len(), 1, "{lines:?}");
     }
 
@@ -1652,6 +1676,15 @@ mod tests {
     #[cfg(unix)]
     fn fake_harness(before: &str, after: &str) -> String {
         format!("{before}\necho $$ > \"$PIDFILE\"\nwhile [ ! -f \"$GO\" ]; do sleep 0.05; done\n{after}\n")
+    }
+
+    /// The harness as a shell host runs it: `before` runs in the wrap's own child,
+    /// a shell, and the harness is that shell's child. It announces its pid, waits
+    /// for `GO` and kills itself, while the shell outlives it, so the wrap is
+    /// still up once the harness is gone. The shell ends with the wrap's signal.
+    #[cfg(unix)]
+    fn shell_host(before: &str) -> String {
+        format!("{before}\nsh -c 'echo $$ > \"$PIDFILE\"; while [ ! -f \"$GO\" ]; do sleep 0.05; done; kill -9 $$'\nexec sleep 60\n")
     }
 
     /// Stage the spawner and the hook child, run a real `aoide conduct` over the
@@ -1917,6 +1950,39 @@ mod tests {
         assert!(poll_until(|| harness_gone(harness as u32).then_some(())).is_some(), "the harness is gone");
         wait_exit(&mut wrap);
         assert!(tick(&mut cursor).is_empty(), "no death is said, whatever the harness did later");
+    }
+
+    /// A harness that dies under a wrap that outlives it, and whose child record
+    /// then leaves the roster: nothing is inferred while the host runs, because a
+    /// live host records the death itself. The host then ends with no child left
+    /// to record, and only then is the death inferred, once, with no status.
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_harness_whose_record_left_is_not_inferred_while_its_host_runs() {
+        let (root, _env, _guard) = e2e_stage("dmt-live-host");
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let (mut wrap, harness) = start_wrap(&root, &shell_host(&before));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty(), "the first examination is a baseline");
+
+        std::fs::write(root.join("go"), "").unwrap();
+        assert!(poll_until(|| harness_gone(harness as u32).then_some(())).is_some(), "the harness is gone");
+        aoide_storage::fs::with_stage_lock(|| {
+            let mut sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+            sessions.sessions.retain(|s| s.session_id != HOOK);
+            write_stage(&sessions_path(), &sessions).unwrap();
+        });
+        assert!(wrap.try_wait().unwrap().is_none(), "the host still runs");
+        assert!(tick(&mut cursor).is_empty(), "no inference while a live host can record it");
+
+        unsafe { libc::kill(wrap.id() as libc::pid_t, libc::SIGTERM) };
+        wait_exit(&mut wrap);
+        assert_eq!(hook_record().death, None, "the host found no child to record");
+        assert_eq!(
+            tick(&mut cursor),
+            vec![ChildClaim { parent: SPAWNER.into(), line: "[claude fond-aspen] died mid-turn · last: Bash".into() }]
+        );
+        assert!(tick(&mut cursor).is_empty(), "once");
     }
 
     /// An end signal sent to the wrap itself is forwarded to its harness, and the

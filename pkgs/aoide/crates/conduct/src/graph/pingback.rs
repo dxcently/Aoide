@@ -2618,7 +2618,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hook_child_reaped_mid_turn_is_reported_once_through_the_route_it_was_last_seen_on() {
+    fn a_hook_child_gone_mid_turn_is_reported_once_its_host_is_gone_through_the_route_it_was_last_seen_on() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -2631,8 +2631,8 @@ mod tests {
         ]);
         let (root, spawner, _host) = died_fixture("pingback-hook-reaped");
 
-        // The harness the sighting saw is a real process, and it dies before the
-        // reaper takes the record; its hooks.json entry still reads working.
+        // The harness the sighting saw is a real process, and it dies before its
+        // record leaves the roster; its hooks.json entry still reads working.
         let mut harness = std::process::Command::new("sleep").arg("60").spawn().unwrap();
         set_harness("kid", harness.id());
         assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the sighting says nothing");
@@ -2641,6 +2641,20 @@ mod tests {
         {
             let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
             file.sessions.retain(|r| r.session_id != "kid");
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        // The host wrap still runs: it records the death itself, so nothing is
+        // inferred while it does.
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "a live host tells, not the tick");
+
+        // The host exits without having recorded it.
+        {
+            let gone = reaped_pid();
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            for rec in file.sessions.iter_mut().filter(|r| r.session_id == "wrap-w") {
+                rec.state = "done".into();
+                rec.pid = Some(gone);
+            }
             write_stage(&sessions_path(), &file).unwrap();
         }
         let (text, report) = heard_by(&spawner);

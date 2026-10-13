@@ -3698,12 +3698,17 @@ judged from its cached route and from what the tick reads (the roster,
 - no cached route: dropped silently;
 - no fact, and the cached route's `harness` still runs under its recorded
   `start` (an orphan): kept, and nothing is said while that harness lives;
+- no fact, and the route's host wrap is not gone (its record is on the roster
+  with its pid alive): kept, whether its seal verifies or not. A live host
+  records the death itself when its own child ends, so nothing is inferred
+  while it runs;
 - otherwise the route must be distinct (child, spawner and host are three
   sessions), its spawner must verify at the claim (inside the stage lock), and
   its host wrap must be gone (absent, or its pid dead) or still verify. Then the
   child is said of as `died mid-turn` over `route`, with the fact's status and
   tool when a fact is recorded, and with no status when it is inferred. A host
-  that is still up but no longer verifies keeps the entry instead.
+  that is still up but no longer verifies keeps a recorded death's entry
+  instead.
 
 A `done` host whose pid still runs is judged by its seal, like any live host.
 

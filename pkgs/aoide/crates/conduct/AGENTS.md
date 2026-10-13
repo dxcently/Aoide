@@ -1002,11 +1002,12 @@ in the message.
   `updatedAt` age on a `working` phase, latched per stamp. There is NO inferred
   death on the gathered path: a dead harness under a sealed, live host is not a
   death, because the live host is the one that records it. The gone path
-  (`hook::gone`) infers a death only once the host is gone or no longer verifies,
-  with no status. Its rules, and the held rules that spare a recorded death from
-  every prune (`held_deaths`, `unclaimed_deaths`), are stated once in
-  `CONTRACTS.md` under `state/stage/pingback.json`: change that section and the
-  code in `hook.rs` in one commit. The seal key is fetched whenever a hook
+  (`hook::gone`) infers a death only once the host is gone (its record absent or
+  its pid dead), whatever its seal says, with no status. Its rules, and the held
+  rules that spare a recorded death from every prune (`held_deaths`,
+  `unclaimed_deaths`), are stated once in `CONTRACTS.md` under
+  `state/stage/pingback.json`: change that section and the code in `hook.rs` in
+  one commit. The seal key is fetched whenever a hook
   candidate exists, a tracked record or a hook entry the cursor still holds, so a
   child pruned in the same pass as its wrap is still judged. Every value read
   back from the cursor is cleaned again where it is rendered, and the whole line
