@@ -2015,6 +2015,118 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A Stop hook from a door that cannot approve never reaches the daemon,
+    /// which runs whatever it receives as `Door::Daemon` and would ring the
+    /// parent's armed mailbox. The stand-in daemon below serves a dispatch the
+    /// way `aoided` does (the wire's flags verbatim, `Door::Daemon` stamped)
+    /// through the same handler, so a forwarded hook would really ring.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_from_a_door_that_cannot_approve_never_rings_through_the_daemon() {
+        use std::io::BufRead as _;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("ring-stop-no-forward");
+        let daemon_socket = root.join("d.sock");
+        let daemon = UnixListener::bind(&daemon_socket).unwrap();
+        daemon.set_nonblocking(true).unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &daemon_socket);
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let served = std::sync::Arc::new(AtomicUsize::new(0));
+        // One thread per connection, as `aoided` serves them: the hook a
+        // forwarded dispatch runs pings this same socket for the seal key.
+        let serve = |conn: UnixStream, served: std::sync::Arc<AtomicUsize>| {
+            conn.set_nonblocking(false).unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(&conn).read_line(&mut line).unwrap();
+            let req: serde_json::Value = serde_json::from_str(&line).unwrap();
+            // The seal-key `ping` gets no answer, as from no daemon at all:
+            // only a forwarded dispatch is under test.
+            if req["op"] != "dispatch" {
+                return;
+            }
+            served.fetch_add(1, Ordering::SeqCst);
+            let flags = req["flags"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect();
+            let inv = Invocation {
+                path: vec!["session".to_string(), "hook".to_string()],
+                args: Vec::new(),
+                flags,
+                door: Door::Daemon,
+            };
+            let out = super::super::send::session_hook(&inv);
+            let reply = format!("{}\n", json!({ "outcome": out }));
+            (&conn).write_all(reply.as_bytes()).unwrap();
+        };
+        let acceptor = {
+            let (stop, served) = (stop.clone(), served.clone());
+            std::thread::spawn(move || {
+                let mut workers = Vec::new();
+                while !stop.load(Ordering::SeqCst) {
+                    match daemon.accept() {
+                        Ok((conn, _)) => {
+                            let served = served.clone();
+                            workers.push(std::thread::spawn(move || serve(conn, served)));
+                        }
+                        Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                    }
+                }
+                for w in workers {
+                    w.join().unwrap();
+                }
+            })
+        };
+
+        let name = "claude-mail";
+        let wrap_id = "wrap-1";
+        let child_id = "wrap-1-child";
+        let listener = headless_wrap(wrap_id);
+        listener.set_nonblocking(true).unwrap();
+        hook_child(child_id, wrap_id, "claude");
+        do_session_phase(child_id, "working");
+        aoide_storage::mail::enrol_reader(name, wrap_id).unwrap();
+        aoide_storage::mail::file_letter("someone", name, "hello").unwrap();
+
+        let claude = aoide_protocol::agents::agent_profile("claude").unwrap();
+        let payload = format!(r#"{{"session_id":"{child_id}","hook_event_name":"Stop"}}"#);
+        for door in [Door::Mcp, Door::A2a] {
+            let inv = Invocation {
+                path: vec!["session".to_string(), "hook".to_string()],
+                args: Vec::new(),
+                flags: Default::default(),
+                door,
+            };
+            let out = super::super::send::hook_as_read(&inv, claude, payload.clone());
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{door:?}: {}", out.message);
+        }
+        stop.store(true, Ordering::SeqCst);
+        acceptor.join().unwrap();
+        let served = served.load(Ordering::SeqCst);
+
+        let targets = aoide_storage::mail::ring_targets(name).unwrap();
+        assert_eq!(targets.armed.len(), 1, "nothing rang, so the latch stays armed");
+        assert!(listener.accept().is_err(), "and nothing was typed into the wrap");
+        assert_eq!(served, 0, "no hook from MCP or the network door reaches the daemon");
+        let hooks: crate::graph::model::HooksFile = load_stage(&crate::graph::model::hooks_path()).unwrap();
+        let phase = hooks.hooks.iter().find(|h| h.session_id == child_id).map(|h| h.phase.as_str());
+        assert_eq!(phase, Some("stopped"), "the hook ran here, on its own door");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_hundred_letters_ring_once_until_the_reader_reads() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

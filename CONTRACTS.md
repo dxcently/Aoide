@@ -1132,7 +1132,10 @@ one final reply line. Three ops, a closed set:
   build an `Invocation { door: Door::Daemon, .. }` LITERALLY — no dotted
   tool-name lookup the way MCP's `tools/call` resolves one. The final
   reply is one `{"outcome": <the full Outcome envelope, this section's own
-  shape>}` line.
+  shape>}` line. The request carries no caller door, so the client half
+  (`aoide_client::daemon::daemon_dispatch`) forwards a `Door::Cli`
+  invocation only. A handler reached through MCP or the A2A door runs its
+  direct path under its own door and never arrives here as `Door::Daemon`.
 
 **No new allowlist.** `Door::Daemon` (`aoide-protocol`) is audited exactly
 like the other three; the per-command door policy already in force for

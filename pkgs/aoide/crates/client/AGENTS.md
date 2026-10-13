@@ -183,18 +183,24 @@
   `aoide_storage::attest` with this module delegating — edit the body
   there; a change to the daemon socket's resolution rule updates that body
   AND `aoide-server`'s bind-side copy in the same commit.
-- **`daemon_dispatch` carries no door.** The request is `op`, `path`, `args`
-  and `flags`, and the daemon stamps `Door::Daemon` on every dispatch it runs
+- **`daemon_dispatch` carries no door, so only `Door::Cli` hops.** The
+  request is `op`, `path`, `args` and `flags`, and the daemon stamps
+  `Door::Daemon` on every dispatch it runs
   (`server::daemon::invocation_from_dispatch_request`). Nothing the daemon
-  receives can say which door the caller came through, so a forwarder that
-  holds a non-approving caller's door checks `Door::can_approve` BEFORE it
-  forwards. `handle_mail_send`'s self-ring does, and reports `"refused"`.
+  receives can say which door the caller came through, so `daemon_dispatch`
+  answers `None` for every door but `Cli` and that caller runs its own local
+  path, where its real door still decides. Keep the check inside
+  `daemon_dispatch`, never at its call sites: a forwarder added later inherits
+  it. A caller that must REFUSE a non-approving door rather than run locally
+  checks `Door::can_approve` first: `handle_mail_send`'s self-ring does, and
+  reports `"refused"`.
 - **`daemon_dispatch` returning `None` is not the same as an error, and the
-  distinction is load-bearing.** `None` means "nothing usable answered" —
-  dead socket, refused connect, or `inv.door == Door::Daemon` (the
-  reentrancy guard: a handler already running INSIDE the daemon must take
-  its direct path, never try to connect to itself) — and the caller's own
-  pre-existing direct path must run unchanged. Once a connection is
+  distinction is load-bearing.** `None` means "the hop was not taken or
+  nothing usable answered" — a non-CLI door, a dead socket, a refused
+  connect; `Door::Daemon` is the reentrancy case (a handler already running
+  INSIDE the daemon must take its direct path, never try to connect to
+  itself) — and the caller's own pre-existing direct path must run
+  unchanged. Once a connection is
   actually made, every other failure becomes `Some(Outcome::error(...))`
   instead, since a daemon that answered but broke is a real anomaly, not
   something to paper over with a fallback that would mask a daemon-side

@@ -2840,6 +2840,57 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+
+    /// A session write from a door other than the CLI never reaches the daemon,
+    /// which would run it as `Door::Daemon`; it lands through the direct path
+    /// here. The daemon socket is LIVE and never accepted, so a forward would
+    /// wait out its reply bound, fail, and leave a connection behind.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_write_from_a_non_cli_door_never_reaches_the_daemon() {
+        use aoide_protocol::output::Status;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
+        let stage = unique_stage("sess-door-local");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let socket = stage.join("d.sock");
+        let daemon = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        daemon.set_nonblocking(true).unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &socket);
+
+        for door in [aoide_protocol::Door::Mcp, aoide_protocol::Door::A2a] {
+            let id = format!("{door:?}-write").to_lowercase();
+            let call = |path: &[&str], args: &[&str], flags: &[(&str, &str)]| {
+                let mut inv = flag_invocation(path, flags);
+                inv.args = args.iter().map(|a| a.to_string()).collect();
+                inv.door = door;
+                inv
+            };
+            let outs = [
+                session_start(&call(&["session", "start"], &[], &[("id", &id)])),
+                session_phase(&call(&["session", "phase"], &[], &[("id", &id), ("phase", "working")])),
+                crate::graph::grant::session_grant(&call(
+                    &["session", "grant"],
+                    &["exempt", "on"],
+                    &[("id", &id)],
+                )),
+                session_end(&call(&["session", "end"], &[], &[("id", &id)])),
+            ];
+            for out in outs {
+                assert_eq!(out.status, Status::Ok, "{door:?} {}: {}", out.command, out.message);
+            }
+            assert!(
+                matches!(daemon.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "{door:?} must never connect to the daemon"
+            );
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            let rec = s.sessions.iter().find(|r| r.session_id == id).expect("written locally");
+            assert_eq!(rec.state, "done", "{door:?}: the direct path ran every write");
+            assert!(rec.exempt, "{door:?}: including the exempt mark");
+        }
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
     #[test]
     fn session_end_unknown_id_is_ok_noop() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

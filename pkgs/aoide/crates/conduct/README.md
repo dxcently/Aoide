@@ -125,7 +125,8 @@ CONTRACTS.md's approval-doors section has the table.
   session-write family — `session start/phase/end`, `session
   hook`, and `session reap` (below) — each try `aoide_client::daemon::
   daemon_dispatch(inv)` FIRST and fall back to their pre-existing direct
-  stage-write path byte-identically on `None`. The daemon executes the
+  stage-write path byte-identically on `None`. Only the CLI door makes the
+  hop; any other door runs the direct path under its own door. The daemon executes the
   SAME registered handler code (its `dispatch` fn IS `cli::dispatch::
   dispatch`) — no logic forks, no daemon-specific policy anywhere in this
   crate. `session_hook` smuggles its already-read stdin payload through

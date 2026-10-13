@@ -2506,7 +2506,9 @@ const HOOK_PARENT_FLAG: &str = "__daemon-hook-parent";
 /// second time on the daemon's side, so the already-read bytes ride along
 /// on [`STDIN_PAYLOAD_FLAG`] instead of the wire growing a new field. The
 /// daemon-side invocation (flag present) skips both the routing attempt AND
-/// the real stdin read, using the forwarded payload directly.
+/// the real stdin read, using the forwarded payload directly. Only the CLI
+/// door routes ([`hook_as_read`]): any other door runs the hook here, where
+/// `may_ring` is false.
 ///
 /// **The two arms, and the one rule between them.** The hook is the only
 /// process that can read what a harness reports about itself — its own pid and
@@ -2531,9 +2533,9 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
     // the same ruling `doorbell.rs`'s own module doc states. `invocation_
     // from_dispatch_request` (`aoide-server`'s `daemon.rs`) builds a
     // `Door::Daemon` invocation LITERALLY, never off the wire, so this is
-    // trustworthy on both branches below: the STDIN_PAYLOAD_FLAG branch is
-    // exactly that routed invocation, and the local-fallback branch's `inv`
-    // is whatever door the ORIGINAL caller actually used.
+    // trustworthy on both arms: the STDIN_PAYLOAD_FLAG branch below is
+    // exactly that routed invocation, and `hook_as_read`'s `inv` is whatever
+    // door the ORIGINAL caller actually used.
     let may_ring = inv.door == Door::Daemon;
     if let Some(payload) = inv.flags.get(STDIN_PAYLOAD_FLAG) {
         // Daemon side: the ONLY pid this arm may walk is the door's own
@@ -2558,6 +2560,18 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
     }
     let mut buf = String::new();
     let _ = std::io::stdin().lock().read_to_string(&mut buf);
+    hook_as_read(inv, profile, buf)
+}
+
+/// The hook process's own arm, once its payload is read: route it to the
+/// daemon or run it here. Only the CLI door routes. The daemon runs whatever
+/// it receives as `Door::Daemon`, which is the one door whose Stop hook rings
+/// a parent's armed mailboxes (`may_ring`), so a hook from MCP or the network
+/// door that reached it would ring as the daemon's own.
+/// `aoide_client::daemon::daemon_dispatch` answers `None` for every other
+/// door, and the hook runs below with `may_ring` false.
+pub(in crate::graph) fn hook_as_read(inv: &Invocation, profile: &'static AgentProfile, buf: String) -> Outcome {
+    let may_ring = inv.door == Door::Daemon;
     // THIS process is the hook: its own pid IS the kernel fact, and its own env
     // claim is the harness's launcher. Read once, so a daemon appearing or dying
     // between two events cannot change the answer.
@@ -2577,7 +2591,8 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
     if let Some(outcome) = aoide_client::daemon::daemon_dispatch(&routed) {
         return outcome;
     }
-    // Local, no-daemon fallback: THIS process is the hook itself.
+    // Local: a door other than the CLI, or no daemon answered. THIS process is
+    // the hook itself.
     hook_for_profile_gated(profile, &buf, may_ring, Some(hook_pid), claim.as_deref())
 }
 

@@ -62,10 +62,11 @@ never the inbound/serve half (that's `aoide-server`).
   pre-existing direct stage-write path runs unchanged; any OTHER failure
   once a connection exists becomes `Some(Outcome::error(...))` instead of a
   silent fallback, since a daemon that answered but broke is a real bug
-  worth surfacing. `inv.door == Door::Daemon` short-circuits to `None`
-  immediately — the reentrancy guard that stops a handler running INSIDE
-  the daemon (because a remote caller's request just landed) from trying
-  to connect to itself.
+  worth surfacing. Only `Door::Cli` hops: every other door short-circuits
+  to `None` with no connect, because the wire carries no door and the
+  daemon runs each dispatch as `Door::Daemon` (MCP and A2A would arrive
+  holding the daemon's approvals). `Door::Daemon` is the reentrancy case: a
+  handler already running INSIDE the daemon never connects to itself.
 - `wire` — client-side A2A JSON-RPC message builders
   (`build_message_send_body` and `resolve_card_url`).
 - `adapter` — the melete neutral-event adapter (consumes events, stays

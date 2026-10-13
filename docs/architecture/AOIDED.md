@@ -358,6 +358,13 @@ current direct stage-write path on `None`. The daemon executes the SAME
 handler code (its dispatch is the same registry); no logic forks. This
 keeps "runs anywhere with a shell" true: no daemon, no difference.
 
+Only the CLI door routes. The wire carries no door, and the daemon runs
+every dispatch as `Door::Daemon`, the door whose Stop hook rings a parent's
+armed mailboxes and which may approve a send. A call from MCP or the A2A
+door that crossed would run with those powers, so `daemon_dispatch`
+answers `None` for every door but `Cli`, and that caller runs the direct
+path under its own door.
+
 ### Ownership and reconciliation
 
 - While the daemon runs, its in-memory roster is the working truth; every

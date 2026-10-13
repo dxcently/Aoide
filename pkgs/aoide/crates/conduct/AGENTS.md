@@ -113,7 +113,9 @@ in the message.
   `Door`, so a new door must be decided there. The door is the invocation's
   own `Door`, set where the request arrived: a caller's claim about itself is
   never read. A routed command (`daemon_dispatch`) reaches aoided as
-  `Door::Daemon`, so a routed command must never be the approving path.
+  `Door::Daemon`, so only the CLI door routes: `daemon_dispatch` answers
+  `None` for every other door, which runs its own local path. A routed
+  command must never be the approving path.
   `pkgs/aoide/crates/conduct/src/graph/send.rs`'s door tests pin each path.
 
 ## Invariants
@@ -732,8 +734,12 @@ in the message.
   daemon_dispatch(inv)` FIRST, as its own first line, falling back to its
   pre-existing direct stage-write path byte-identically on `None` (P-D6,
   `docs/architecture/AOIDED.md`'s "L4").** `session start/phase/end`,
-  `session hook`, and `reap::reap_and_announce` all follow this exact
-  one-line prefix. A new session-write handler joins the family the same
+  `session hook`, `session grant exempt` and `reap::reap_and_announce` all
+  follow this exact one-line prefix. Only the CLI door routes:
+  `daemon_dispatch` answers `None` for any other door, so an MCP or A2A
+  write runs the direct path under its own door and never reaches the
+  daemon as `Door::Daemon` (whose Stop hook rings). Never add a door check
+  at the call site; the hop owns it. A new session-write handler joins the family the same
   way — see `client`'s own `AGENTS.md` extension-point note. **`graph/
   undying.rs`'s `undying_grant`, `graph/spawn.rs`'s `--undying` mark, and
   `graph/resurrect.rs`'s undying transfer are a deliberate exception, not an
