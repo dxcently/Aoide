@@ -2441,8 +2441,16 @@ mod tests {
             unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) };
             old
         }
+        /// Puts a disposition back when the test ends, a failed assert included,
+        /// so no later test in this process inherits what this one set.
+        struct Restore(libc::c_int, libc::sigaction);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe { libc::sigaction(self.0, &self.1, std::ptr::null_mut()) };
+            }
+        }
+        let _restore = [libc::SIGTERM, libc::SIGHUP, libc::SIGINT].map(|sig| Restore(sig, current(sig)));
         let term_before = current(libc::SIGTERM).sa_sigaction;
-        let hup_before = current(libc::SIGHUP);
         unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN) };
         let listener = super::on_wrap_signal as *const () as libc::sighandler_t;
         {
@@ -2456,6 +2464,5 @@ mod tests {
             assert!(mask.is_some_and(|m| m & bit != 0), "the harness inherits the ignored HUP: {line}");
         }
         assert_eq!(current(libc::SIGTERM).sa_sigaction, term_before, "TERM is restored by the last drop");
-        unsafe { libc::sigaction(libc::SIGHUP, &hup_before, std::ptr::null_mut()) };
     }
 }

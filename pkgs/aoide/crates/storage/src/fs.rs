@@ -3306,6 +3306,14 @@ mod tests {
         let waiter = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         assert_eq!(unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX) }, 0);
 
+        /// Puts the disposition back when the test ends, a panic included, so no
+        /// later test in this process inherits the handler.
+        struct Restore(libc::c_int, libc::sigaction);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe { libc::sigaction(self.0, &self.1, std::ptr::null_mut()) };
+            }
+        }
         let usr2 = libc::SIGUSR2;
         let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
         let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
@@ -3314,6 +3322,7 @@ mod tests {
             libc::sigemptyset(&mut sa.sa_mask);
             libc::sigaction(usr2, &sa, &mut old);
         }
+        let _restore = Restore(usr2, old);
         let (tid_tx, tid_rx) = std::sync::mpsc::channel();
         let blocked = std::thread::spawn(move || {
             tid_tx.send(unsafe { libc::pthread_self() }).unwrap();
@@ -3325,7 +3334,6 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         drop(holder);
         let taken = blocked.join().unwrap();
-        unsafe { libc::sigaction(usr2, &old, std::ptr::null_mut()) };
         let _ = std::fs::remove_dir_all(&home);
         assert!(taken, "the interrupted wait retries and takes the lock");
     }
