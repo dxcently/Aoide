@@ -1741,6 +1741,17 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     };
     let _tunnel_teardown = TunnelTeardownGuard(node_name.to_string());
 
+    // A link held off is not dialled at all, so the back-off is read before the
+    // binding exchange. The exchange is a dial and, against a door that answers
+    // unsigned, an audit line; the daemon drains every few seconds, so a
+    // held-off link that still exchanged would pay both on every tick.
+    let now_epoch = unix_now();
+    if let Some(link) = aoide_storage::outbox::read_link_state(node_name)? {
+        if aoide_storage::outbox::is_held_off(&link, now_epoch) {
+            return Ok(());
+        }
+    }
+
     // P-SEAL: the binding exchange rides the drain's own session, before
     // the first deposit — one contact, both directions, and every entry in
     // this pass is sealed to whatever binding that round trip left in
@@ -1769,13 +1780,6 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
             }
         };
         let _ = exchange_bindings(&node, Some(&mesh));
-    }
-
-    let now_epoch = unix_now();
-    if let Some(link) = aoide_storage::outbox::read_link_state(node_name)? {
-        if aoide_storage::outbox::is_held_off(&link, now_epoch) {
-            return Ok(());
-        }
     }
 
     // Parked entries are filtered BEFORE the cap, never skipped inside the
@@ -3357,6 +3361,42 @@ mod tests {
         assert!(aoide_storage::outbox::is_held_off(&link, unix_now()), "and it is held off");
         let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
         assert!(log.contains("mail.answer.unsigned"), "the unsigned answer is audited: {log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A held-off node is neither dialled nor audited.** The first pass meets a
+    /// door that answers unsigned and backs the link off. Every later pass while
+    /// the back-off stands, which the daemon makes every few seconds, sends no
+    /// request (the binding exchange included) and writes no audit line.
+    #[test]
+    fn a_held_off_node_is_neither_dialled_nor_audited() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("held-off-undialled");
+        let asked = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = asked.clone();
+        spool_letter_to(
+            "elsewhere",
+            scripted_door(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                reply_with(ACCEPTED, &[])
+            }),
+        );
+        let audit_lines = || std::fs::read_to_string(dir.join("log")).unwrap_or_default().lines().count();
+
+        drain_node("elsewhere").unwrap();
+        let link = aoide_storage::outbox::read_link_state("elsewhere").unwrap().expect("the unsigned answer backs the link off");
+        assert!(aoide_storage::outbox::is_held_off(&link, unix_now()));
+        let (requests, lines) = (asked.load(Ordering::SeqCst), audit_lines());
+        assert!(requests > 0 && lines > 0, "the first pass dialled and audited: {requests} requests, {lines} lines");
+
+        for _ in 0..3 {
+            drain_node("elsewhere").unwrap();
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), requests, "a held-off node is not dialled, not even for its binding");
+        assert_eq!(audit_lines(), lines, "and nothing is audited");
+        assert_eq!(aoide_storage::outbox::list_entries("elsewhere").unwrap()[0].tries, 1, "no attempt is recorded");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -705,6 +705,10 @@
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a
   response directly.
+- **`drain_node` reads the link's back-off before the binding exchange.** The
+  exchange is a dial, and an unsigned answer to it is an audit line; above the
+  back-off it would cost both on every daemon tick for as long as the link is
+  held off. Keep every dial of a drain below that check.
 - **`charter`'s handlers render; `aoide_storage::charter` acts (P-CHARTER).**
   The document, its validation, the five accept steps, the operator key, the
   trust record, the high-water mark and the spool all live in storage —

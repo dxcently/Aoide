@@ -573,7 +573,9 @@ never the inbound/serve half (that's `aoide-server`).
   empty spool, or a completed pass regardless of outcome mix; `Err` is
   reserved for a genuine local I/O failure, never for "the remote node was
   unreachable," which is an ordinary outcome recorded in entry/link state
-  instead of surfaced as an error to the caller. **A drain tears its own
+  instead of surfaced as an error to the caller. A held-off link is read
+  before the binding exchange, so a drain of it sends nothing at all and
+  writes no audit line, however often the daemon ticks. **A drain tears its own
   tunnel down before returning, unconditionally, on every path (ruling
   10)** — `TunnelTeardownGuard` is a Drop guard mirroring
   `commands::ScratchBodyFile`'s pattern; see the `tunnel` bullet above for
