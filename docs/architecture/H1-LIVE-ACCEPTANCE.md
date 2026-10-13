@@ -141,10 +141,14 @@ and state, and `aoide.config.settings` is whole-file-or-nothing
 
    - `no pair record of it here, and no charter in force declares it`: the
      charter on yomi (step 3) does not name sakaki. Stop and report.
-   - `answered as a key that the charter of mesh home does not give it`: the
-     machine answering at sakaki's address is not the one the charter names.
-     Stop and report; nothing was polled, and the audit line
-     `mail.poll.relay-key-mismatch` is in yomi's log.
+   - `answered its identity check with a key the charter of mesh home does
+     not give it, or with no proof at all`: the machine answering at sakaki's
+     address is not the one the charter names, or it runs an aoide that does
+     not sign its answers. The reason in brackets says which: `does not verify
+     as signed by the key on file` for the first, `no answer signature` and
+     `upgrade aoide on sakaki` for the second. Stop and report; nothing was
+     polled, and yomi's log holds `mail.poll.relay-key-mismatch` beside
+     `mail.answer.key-mismatch` or `mail.answer.unsigned`.
 
    A verified record of sakaki from an earlier LAN pairing, if yomi holds one,
    answers first, with its own key and grants. Its `url` must then be the HTTPS

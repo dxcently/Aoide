@@ -532,10 +532,12 @@ door's audit name whitelist gains both names so they never log as bare
   A poll that cannot reach its relay this way is refused, naming what is
   missing and the one fix (`aoide pair <node>`, or a charter that declares the
   relay); it is never an empty answer. A relay the charter declares `down` is
-  not asked, and a relay whose answer contradicts its charter line is refused
-  and audited (`mail.poll.relay-key-mismatch` when a verified binding names
-  another key; `mail.answer.key-mismatch` when the answer is not signed by the
-  key on file at all).
+  not asked, and a relay whose answer contradicts its charter line is refused,
+  and every such refusal is audited `mail.poll.relay-key-mismatch`. When the
+  answer itself does not verify under the charter's key, the answer check
+  writes its own line as well, so both words appear:
+  `mail.answer.key-mismatch` for another key's signature,
+  `mail.answer.unsigned` for none.
 - **An answer is believed only when it is signed.** Every mail call's answer
   (`aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) is read only once its
   signature verifies under the key on file for that node, over the exact body
