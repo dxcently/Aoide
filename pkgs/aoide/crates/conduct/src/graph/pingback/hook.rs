@@ -1611,16 +1611,25 @@ mod tests {
 
     /// One real tick over what is on disk: the roster and `hooks.json` as they are,
     /// the seal as a daemon with the wrap's pid alive would answer it, and the
-    /// cursor carried from the previous tick.
+    /// cursor carried from the previous tick. The next cursor starts as the old
+    /// one, as the daemon's claim seeds it (`claim_locked` carries every tracked
+    /// entry over); every entry here has a hook half, which the claim judges
+    /// whether its child is still tracked or not.
     #[cfg(unix)]
     fn tick(cursor: &mut CursorFile) -> Vec<ChildClaim> {
+        tick_at(cursor, now_ms())
+    }
+
+    /// [`tick`] at a given instant, for a line that waits on the clock.
+    #[cfg(unix)]
+    fn tick_at(cursor: &mut CursorFile, now_ms: i64) -> Vec<ChildClaim> {
         let roster: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions;
         let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
         let sealed = |r: &SessionRecord| {
             r.session_id == SPAWNER || (r.session_id == WRAP && r.pid.is_some_and(aoide_storage::fs::pid_is_alive))
         };
-        let mut next = CursorFile::new();
-        let (lines, said) = super::claim(&roster, &hooks.hooks, &sealed, &cursor.clone(), &mut next, now_ms());
+        let mut next = cursor.clone();
+        let (lines, said) = super::claim(&roster, &hooks.hooks, &sealed, &cursor.clone(), &mut next, now_ms);
         std::fs::write(super::super::pingback_path(), serde_json::to_string(&next).unwrap()).unwrap();
         if !said.is_empty() {
             clear_said(&mut hooks.hooks, &said);
@@ -1719,6 +1728,39 @@ mod tests {
     fn hook_record() -> HookRecord {
         let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
         hooks.hooks.into_iter().find(|h| h.session_id == HOOK).expect("the hook child has a record")
+    }
+
+    /// The live lines over a real wrap, each said once to the spawner: a `working`
+    /// turn quiet for 12 minutes is `silent`, entering a prompt is `awaiting`, and
+    /// stopping after it is `settled`. A harness that then exits says nothing more.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_child_is_heard_silent_then_awaiting_then_settled_once_each() {
+        let (root, _env, _guard) = e2e_stage("dmt-live");
+        let phase = |p: &str| format!("\"$AOIDE\" session phase --id {HOOK} --phase {p}");
+        let gate = |n: u8| format!("while [ ! -f \"$GO.{n}\" ]; do sleep 0.05; done");
+        let after = [phase("awaiting"), gate(2), phase("stopped"), gate(3)].join("\n");
+        let (mut wrap, _) = start_wrap(&root, &fake_harness(&phase("working"), &after));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty(), "the first examination is a baseline");
+        let heard = |line: &str| vec![ChildClaim { parent: SPAWNER.into(), line: line.into() }];
+
+        let quiet = now_ms() + SILENCE_MS;
+        assert_eq!(tick_at(&mut cursor, quiet), heard("[claude fond-aspen] silent 12 min · last: Bash"));
+        assert!(tick_at(&mut cursor, quiet + 60_000).is_empty(), "once per stamp");
+
+        std::fs::write(root.join("go"), "").unwrap();
+        poll_until(|| (hook_record().phase == "awaiting").then_some(())).expect("the harness asks");
+        assert_eq!(tick(&mut cursor), heard("[claude fond-aspen] awaiting"));
+
+        std::fs::write(root.join("go.2"), "").unwrap();
+        poll_until(|| (hook_record().phase == "stopped").then_some(())).expect("the harness stops");
+        assert_eq!(tick(&mut cursor), heard("[claude fond-aspen] settled"));
+        assert!(tick(&mut cursor).is_empty(), "settled once");
+
+        std::fs::write(root.join("go.3"), "").unwrap();
+        wait_exit(&mut wrap);
+        assert!(tick(&mut cursor).is_empty(), "a closed turn's exit says nothing");
     }
 
     /// A real wrap whose harness dies by signal 9 mid-turn: the wrap writes the
