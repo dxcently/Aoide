@@ -1126,10 +1126,11 @@ in the message.
   invisible non-`Cf` fillers (`is_invisible`: variation selectors, Hangul and
   braille blanks) — and a new sanitizer anywhere in this crate must too, never
   a copied table (S9's own review found the local lane filtering `is_control`
-  only, and the fillers missing). `common::clean_line` is `pub` and re-exported
-  at `graph::clean_line` for the SAME reason (P-RSA S10 review, L6): the A2A
-  door echoes a caller's illegal slug in its refusal and must clean it with
-  this one, not with a second rule of its own.
+  only, and the fillers missing). The table and its filters are
+  `aoide_protocol::untrusted`'s, re-exported through `common` so these paths
+  stand, and `graph::clean_line` re-exports `clean_line` for the SAME reason
+  (P-RSA S10 review, L6): the A2A door echoes a caller's illegal slug in its
+  refusal and must clean it with this one, not with a second rule of its own.
   **Both ends of a child's exit are one input.** `pingback`'s `dropped` slice
   carries the eidolon sync's own drop set AND (H1 of the S8/S9 review) the
   end facts of every remote child `reap_inner` took off the roster this same

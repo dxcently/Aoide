@@ -1466,7 +1466,7 @@ pub fn send_message_to_node(
 /// this side — `aoide_conduct::graph::Frame` owns that shape), bounded by
 /// [`FRAME_MAX_RESPONSE_BYTES`]. The failure text is the peer's OWN bytes,
 /// verbatim: this is a transport, and the door that PRINTS it is the one that
-/// sanitizes it (`aoide_conduct::graph::common::clean_line`, one definition,
+/// sanitizes it (`aoide_protocol::untrusted::clean_line`, one definition,
 /// both doors) — a second sanitizer down here is how the two would drift.
 pub fn task_get_on_node(
     node: &aoide_storage::node_store::Node,

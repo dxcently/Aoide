@@ -37,6 +37,7 @@ pub mod registry;
 pub mod state;
 pub mod style;
 pub mod suggest;
+pub mod untrusted;
 pub mod wire;
 
 pub use audit::{append_audit, audit, aoide_home, audit_log_path, default_audit_log, AuditRecord, Door, EventClass};
