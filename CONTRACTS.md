@@ -7311,14 +7311,15 @@ answer_string("ab"*64, "abcd1234", 200, b"{}")
 
 **Which answers the door signs.** The door signs an answer only when the
 request's own signature verified, and only for a JSON-RPC `POST /`
-(`a2a.rs`, `answer_headers`). The `config-invalid` answer is signed only when
-the request verified under the charter `charter::governing` accepts for its
-mesh. That function reads the same `config.toml` whose failure produces
-`config-invalid`, so that answer is never signed in practice. Everything else
-is unsigned, and each write site says why in a comment there: an unparsed or
-unsigned request, every GET (the card included, even one carrying a valid
-signature), every refusal (`-32007`, `-32008`, and the replay `-32009`), the
-busy 503s, and the SSE stream. A door whose identity key is not on disk, or
+(`a2a.rs`, `answer_headers`). Everything else is unsigned, and each write site
+says why in a comment there: an unparsed or unsigned request, every GET (the
+card included, even one carrying a valid signature), every refusal (`-32007`,
+`-32008`, and the replay `-32009`), the `config-invalid` answer, the busy
+503s, and the SSE stream. The `config-invalid` answer is checked only against
+the raw charter file in force, never under a charter this node governs:
+`charter::governing` reads the operator line of the same `config.toml` whose
+failure produces `config-invalid`, so while that answer is given the node
+governs nothing to sign under. A door whose identity key is not on disk, or
 will not load, answers unsigned and audits `a2a.answer-unsigned`, and never
 mints a key to answer. A client refuses an unsigned answer.
 

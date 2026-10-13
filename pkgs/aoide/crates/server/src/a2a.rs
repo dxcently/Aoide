@@ -5287,10 +5287,13 @@ fn mail_method_of(body: &[u8]) -> Option<&'static str> {
 /// What the door answers a mail method with BEFORE dispatch, when this host's
 /// declarations will not load — or that it should keep the refusal it has.
 enum PreDispatch {
-    /// The refused `config-invalid` result. `governed` is true only when the
-    /// request verified under the charter [`aoide_storage::charter::governing`]
-    /// accepts for its mesh: only then is the answer signed.
-    Unloadable { detail: String, governed: bool },
+    /// The refused `config-invalid` result, which is never signed. It is reached
+    /// only when `config.toml` will not load, and the charter this node governs
+    /// is decided through that same file
+    /// ([`aoide_storage::charter::governing`] reads its operator line), so the
+    /// raw in-force read below is the only key it can be checked against, and
+    /// the door signs nothing under a charter it does not govern.
+    Unloadable { detail: String },
     /// A JSON-RPC error instead: a nonce this request reused.
     Error(i64, String),
     /// Leave the door's own `-32007` standing.
@@ -5303,8 +5306,7 @@ enum PreDispatch {
 /// under the key the charter IN FORCE for that mesh gives THAT node. `Keep` in
 /// every other case — a genuinely bad signature, a name the charter does not
 /// carry, a pair mesh (its keys need no declaration and would have resolved) —
-/// which leaves the door's own `-32007` standing. `Unloadable` carries
-/// `governed`, which decides whether the caller may sign that answer.
+/// which leaves the door's own `-32007` standing.
 ///
 /// **A verified request still CONSUMES its nonce** (`nonce_is_replay`, keyed
 /// exactly as the ladder keys it: the signer's lowercase key hex plus the nonce),
@@ -5372,17 +5374,9 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
         );
         return PreDispatch::Error(-32009, message);
     }
-    // Signed only under the charter this node GOVERNS for the mesh: in force,
-    // parsed, naming this mesh, and under a trusted operator. The raw read
-    // above trusts nothing, so a charter this node would not honour, or one
-    // with no operator key to decide it, gets the same taught word unsigned,
-    // and the client refuses it.
-    let governed = aoide_storage::charter::governing(mesh)
-        .and_then(|c| c.nodes.get(node).map(|l| l.key.clone()))
-        .is_some_and(|key| aoide_storage::wire_auth::verify_signature_hex(&key, canonical.as_bytes(), signature));
     let detail = format!("{CONFIG_INVALID}: {refusal}");
     let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
-    PreDispatch::Unloadable { detail: CONFIG_INVALID_DETAIL.to_string(), governed }
+    PreDispatch::Unloadable { detail: CONFIG_INVALID_DETAIL.to_string() }
 }
 
 fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
@@ -7044,17 +7038,16 @@ fn handle_connection(
             if code == -32007 {
                 if let Some(method) = mail_method_of(&req.body) {
                     match mail_unloadable_declaration(&req, method, audit_log) {
-                        PreDispatch::Unloadable { detail, governed } => {
+                        PreDispatch::Unloadable { detail } => {
                             let body_val = JsonRpcResponse::ok(
                                 request_id(&req.body),
                                 json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }),
                             );
                             let body = serde_json::to_vec(&body_val).unwrap_or_default();
-                            // Signed only when `mail_unloadable_declaration` verified the request
-                            // under the charter this node governs. An ungoverned charter gets the
-                            // same word, unsigned, and the client refuses it.
-                            let extra = if governed { answer_headers(&req, 200, &body, audit_log) } else { Vec::new() };
-                            return write_http_response_with(&mut writer, 200, &body, &extra);
+                            // Never signed: the request was checked only against the raw
+                            // in-force charter, which this node does not govern while its
+                            // config will not load (`PreDispatch::Unloadable`).
+                            return write_http_response(&mut writer, 200, &body);
                         }
                         PreDispatch::Error(err, message) => {
                             let body_val = jsonrpc_error_value(err, message);
@@ -19999,11 +19992,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The config-invalid answer stays UNSIGNED even when the charter is one the
+    /// The config-invalid answer is UNSIGNED even when the charter is one the
     /// operator signed and this node accepted. The config-invalid word only comes
     /// from `config::load` failing, and `charter::governing` reads that same
-    /// config (its operator line) before it will name any charter. So no
-    /// config-invalid answer can be governed. This pins that consequence.
+    /// config (its operator line) before it will name any charter, so no
+    /// config-invalid answer is ever made under a charter this node governs, and
+    /// the door never signs one. This pins both facts.
     #[test]
     fn a_config_invalid_answer_is_unsigned_even_under_an_accepted_charter() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

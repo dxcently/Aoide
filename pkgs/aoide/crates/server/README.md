@@ -622,16 +622,17 @@ the inbound half of the two-door contract (the outbound half is
   `wire_auth::answer_string` over the request's own signature and nonce, the
   status and the exact body bytes (`answer_headers`). A signed request is a
   POST and nothing else: any other method is refused `-32007` before its
-  signature is checked. The `config-invalid` answer above is signed only when
-  the request verified under the charter `charter::governing` accepts. That
-  function reads the same config that failed to load, so the answer is never
-  signed in practice. Everything else is unsigned, and each write site says
+  signature is checked. Everything else is unsigned, and each write site says
   why in a comment there: an unparsed or unsigned request, every GET (the card
   included), every refusal (`-32007`, `-32008`, and the replay `-32009`), the
-  busy 503s, and the SSE stream. The door's key signs nothing an unverified
-  sender chose. A key that is not on disk, or will not load, leaves the answer
-  unsigned and audited (`a2a.answer-unsigned`), and the answer path never mints
-  one (`identity::load_existing`). The client refuses an unsigned answer.
+  `config-invalid` answer above, the busy 503s, and the SSE stream. That
+  answer is checked only against the raw charter in force: the charter a node
+  governs is read through the same config that failed to load
+  (`charter::governing`), so there is none to sign under. The door's key
+  signs nothing an unverified sender chose. A key that is not on disk, or will
+  not load, leaves the answer unsigned and audited (`a2a.answer-unsigned`),
+  and the answer path never mints one (`identity::load_existing`). The client
+  refuses an unsigned answer.
 - **Nonces are single-use in any letter case.** `nonce_is_replay` keys both the
   pubkey and the nonce trimmed and lowercased, the form `canonical_string`
   signs. A captured request whose nonce header is upper-cased is therefore a
