@@ -196,24 +196,28 @@ fn default_root() -> std::path::PathBuf {
 /// `$AOIDE_AUDIT_LOG` for `log` — independently of one another, so a host
 /// (or test) that relocated only one tree never has ITS sibling moved out
 /// from under it.
-pub fn migrate_root_once() {
+///
+/// `Err` when a tree moved but the `state/` it landed in could not then be
+/// locked owner-only ([`migrate_dir`]). `aoide` and `aoided` exit on it rather
+/// than read a tree they could not make private.
+pub fn migrate_root_once() -> std::io::Result<()> {
     let old_root = aoide_protocol::aoide_home().join("Aoide");
     let new_root = root();
     if old_root == new_root {
-        return;
+        return Ok(());
     }
 
     if std::env::var("AOIDE_STAGE_DIR").is_err() {
-        migrate_dir(&old_root.join("song").join("stage"), &new_root.join("song").join("stage"));
+        migrate_dir(&old_root.join("song").join("stage"), &new_root.join("song").join("stage"))?;
     }
     if std::env::var("AOIDE_STATE_DIR").is_err() {
-        migrate_dir(&old_root.join("state"), &new_root.join("state"));
+        migrate_dir(&old_root.join("state"), &new_root.join("state"))?;
     }
     if std::env::var("AOIDE_AUDIT_LOG").map(|v| v.is_empty()).unwrap_or(true) {
         migrate_file(&old_root.join("log"), &new_root.join("log"));
     }
 
-    migrate_node_state_names();
+    migrate_node_state_names()
 }
 
 /// The peer -> node vocabulary rename (User ruling, 2026-09-07): the four
@@ -224,10 +228,10 @@ pub fn migrate_root_once() {
 /// already written under its new name is left alone, and the old one is
 /// never deleted out from under a box that hasn't opened the new binary
 /// yet.
-fn migrate_node_state_names() {
+fn migrate_node_state_names() -> std::io::Result<()> {
     let state = state_dir();
     migrate_file(&state.join("peers.json"), &state.join("nodes.json"));
-    migrate_dir(&state.join("peer-cache"), &state.join("node-cache"));
+    migrate_dir(&state.join("peer-cache"), &state.join("node-cache"))?;
     migrate_file(
         &state.join("peer-pairing-inbound.json"),
         &state.join("node-pairing-inbound.json"),
@@ -236,6 +240,7 @@ fn migrate_node_state_names() {
         &state.join("peer-pairing-outbound.json"),
         &state.join("node-pairing-outbound.json"),
     );
+    Ok(())
 }
 
 /// Move `old` → `new` wholesale: a no-op unless `old` exists AND `new` is
@@ -243,21 +248,24 @@ fn migrate_node_state_names() {
 /// at the new root). `rename` first (same filesystem, the common case); a
 /// cross-filesystem rename falls back to a recursive copy, removed from the
 /// source only once the copy fully lands — a crash mid-copy leaves `old`
-/// intact rather than a half-moved tree with `new` looking "done." Narrates
-/// failure, never panics — a botched migration must not take boot down with
-/// it, and the pre-migration path stays usable in the meantime.
-fn migrate_dir(old: &std::path::Path, new: &std::path::Path) {
+/// intact rather than a half-moved tree with `new` looking "done." A move
+/// that fails is narrated, never a panic: the tree stays at the pre-migration
+/// path, still usable, and boot goes on. A tree that moved is then locked
+/// (the rename made `new` with the legacy tree's mode), and a `state/` that
+/// cannot be locked is the one `Err`: the tree is now wide where every reader
+/// looks.
+fn migrate_dir(old: &std::path::Path, new: &std::path::Path) -> std::io::Result<()> {
     if !old.exists() || new.exists() {
-        return;
+        return Ok(());
     }
-    let Some(parent) = new.parent() else { return };
+    let Some(parent) = new.parent() else { return Ok(()) };
     if let Err(e) = ensure_write_dir(parent) {
         eprintln!(
             "aoide: cannot create {} ({e}) — {} stays at the pre-L-C2 root",
             parent.display(),
             old.display()
         );
-        return;
+        return Ok(());
     }
     if std::fs::rename(old, new).is_err() {
         let tmp = new.with_extension(format!("migrate-tmp.{}", std::process::id()));
@@ -270,14 +278,11 @@ fn migrate_dir(old: &std::path::Path, new: &std::path::Path) {
                 old.display(),
                 new.display()
             );
-            return;
+            return Ok(());
         }
     }
-    // The rename made `new` with the legacy tree's mode, and nothing locked it
-    // first. When `new` is `state/`, this locks it before anything reads it.
-    if let Err(e) = ensure_write_dir(new) {
-        eprintln!("aoide: {e} — the migrated tree is at {}", new.display());
-    }
+    ensure_write_dir(new)
+        .map_err(|e| std::io::Error::new(e.kind(), format!("{e} (migrated from {})", old.display())))
 }
 
 /// Move one file `old` → `new` — the single-file counterpart to
@@ -1333,13 +1338,25 @@ pub fn open_private_append(path: &std::path::Path) -> std::io::Result<std::fs::F
 /// idempotent on an already-present directory, and so is the chmod that
 /// follows it — calling this on every mint (not only the very first one)
 /// costs nothing and never regresses a directory some earlier run already
-/// locked down.
+/// locked down. On Unix the chmod acts on a descriptor opened without
+/// following a link at `dir` itself, so a `dir` that is a symlink is refused
+/// and its target keeps its mode.
 pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        ensure_write_dir(dir)?;
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+        ensure_write_dir(dir)?;
+        let opened = open_dir_nofollow(dir).map_err(|e| match e.raw_os_error() {
+            Some(libc::ELOOP) | Some(libc::ENOTDIR) => std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "{}: refusing to make it owner-only, it is a symlink or not a directory; replace it with a real directory",
+                    dir.display()
+                ),
+            ),
+            _ => e,
+        })?;
+        opened.set_permissions(std::fs::Permissions::from_mode(0o700))
     }
     // Windows: the ancestors go through `ensure_write_dir` (their mode is not
     // this function's business), and the leaf gets its policy attached AT
@@ -1357,57 +1374,100 @@ pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 
 /// Create `dir` and its missing ancestors for a write. A `dir` under
 /// [`state_dir`] locks `state/` owner-only first; anywhere else it is a plain
-/// `create_dir_all`.
+/// `create_dir_all`. Under is judged by name and again by where the kernel
+/// will put `dir` ([`resolve_nearest`]), so a path through a symlinked alias,
+/// or one with a `..` in it, is under `state/` when it lands there.
 pub fn ensure_write_dir(dir: &std::path::Path) -> std::io::Result<()> {
     let state = state_dir();
-    if dir.starts_with(&state) {
+    if dir.starts_with(&state) || resolve_nearest(dir).starts_with(resolve_nearest(&state)) {
         lock_state_dir(&state)?;
     }
     std::fs::create_dir_all(dir)
 }
 
 /// The directory `state/` may never be, judged on the paths it is given:
-/// [`lock_state_dir`] passes both canonical, so a symlink cannot name one of
-/// these by another spelling. A filesystem root, or the home directory or one
+/// [`lock_state_dir`] passes them all canonical, so a symlink cannot name one
+/// of these by another spelling. A filesystem root, or a home directory or one
 /// of its parents: a chmod there would lock a directory aoide does not own.
-fn shallow_state_reason(state: &std::path::Path, home: Option<&std::path::Path>) -> Option<&'static str> {
+fn shallow_state_reason(state: &std::path::Path, homes: &[std::path::PathBuf]) -> Option<&'static str> {
     if state.parent().is_none() {
         return Some("it is a filesystem root");
     }
-    if home.is_some_and(|home| home.starts_with(state)) {
+    if homes.iter().any(|home| home.starts_with(state)) {
         return Some("it is the home directory or one of its parents");
     }
     None
 }
 
-/// The home directory the shallow rule protects, or `None` when neither
-/// `$AOIDE_USER` nor a non-empty `$HOME` names one. On Unix [`aoide_home`]
-/// then answers the literal `/home/khoa` (its fallback, kept for the audit log
-/// and the root default, which depend on it), a guess about some other
-/// machine's home, so the guard does not use it. With no home to name, the
-/// root, relative and `..` rules still apply, and nothing else.
-fn guard_home() -> Option<std::path::PathBuf> {
-    let named = |var: &str| std::env::var_os(var).is_some_and(|v| !v.is_empty());
-    if cfg!(unix) && !named("AOIDE_USER") && !named("HOME") {
-        return None;
-    }
-    Some(aoide_protocol::aoide_home())
+/// Every home the shallow rule protects, each with its parents: a non-empty
+/// `$HOME`, the passwd home of the effective uid, and `/home/$AOIDE_USER` (the
+/// home [`aoide_home`] names) when `$AOIDE_USER` is non-empty. A run may mean
+/// any of them, so all are guarded together. [`aoide_home`]'s literal
+/// `/home/khoa` fallback, a guess about some other machine, is never one.
+#[cfg(unix)]
+fn guard_homes() -> Vec<std::path::PathBuf> {
+    let named = |var: &str| std::env::var_os(var).filter(|v| !v.is_empty());
+    let home = named("HOME").map(std::path::PathBuf::from);
+    let user = named("AOIDE_USER").map(|user| std::path::Path::new("/home").join(user));
+    home.into_iter().chain(passwd_home()).chain(user).collect()
 }
 
-/// `path` with its longest existing prefix resolved through `canonicalize`,
-/// so every symlink on that prefix is followed, and the components below it,
-/// which do not exist yet, appended as written. Only ever given an absolute
-/// path with no `..`: [`lock_state_dir`] refuses both before it asks.
+#[cfg(windows)]
+fn guard_homes() -> Vec<std::path::PathBuf> {
+    vec![aoide_protocol::aoide_home()]
+}
+
+/// The effective uid's home from the passwd database (`getpwuid_r`), or
+/// `None` when it has no entry or an empty one.
+#[cfg(unix)]
+fn passwd_home() -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf: Vec<libc::c_char> = vec![0; 1024];
+    loop {
+        // SAFETY: `passwd` is integers and raw pointers, for which all-zero is
+        // a valid value; `getpwuid_r` fills it before anything reads it.
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        // SAFETY: `pwd`, `buf` and `found` are the out-parameters
+        // `getpwuid_r` documents, `buf` passed with its own length.
+        let ret = unsafe { libc::getpwuid_r(libc::geteuid(), &mut pwd, buf.as_mut_ptr(), buf.len(), &mut found) };
+        if ret == libc::ERANGE && buf.len() < 1 << 20 {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        if ret != 0 || found.is_null() || pwd.pw_dir.is_null() {
+            return None;
+        }
+        // SAFETY: on success `pw_dir` is a NUL-terminated string inside `buf`,
+        // which is still alive here.
+        let dir = unsafe { std::ffi::CStr::from_ptr(pwd.pw_dir) }.to_bytes();
+        return (!dir.is_empty()).then(|| std::ffi::OsStr::from_bytes(dir).into());
+    }
+}
+
+/// Where the kernel puts `path`: its longest existing prefix resolved through
+/// `canonicalize`, so every symlink and `..` on that prefix is followed, and
+/// the components below it, which do not exist yet, applied as written. A
+/// `..` among those steps back over the one before it, since that one will be
+/// a real directory `create_dir_all` makes (`/a/missing/../state` lands at
+/// `/a/state`).
 fn resolve_nearest(path: &std::path::Path) -> std::path::PathBuf {
     let mut missing = Vec::new();
     let mut prefix = path;
     loop {
         if let Ok(real) = prefix.canonicalize() {
-            return missing.iter().rev().fold(real, |acc, part| acc.join(part));
+            return missing.iter().rev().fold(real, |mut acc, part| {
+                if *part == std::ffi::OsStr::new("..") {
+                    acc.pop();
+                } else {
+                    acc.push(part);
+                }
+                acc
+            });
         }
-        match (prefix.parent(), prefix.file_name()) {
-            (Some(parent), Some(name)) => {
-                missing.push(name);
+        match (prefix.parent(), prefix.components().next_back()) {
+            (Some(parent), Some(last)) => {
+                missing.push(last.as_os_str());
                 prefix = parent;
             }
             _ => return path.to_path_buf(),
@@ -1415,12 +1475,13 @@ fn resolve_nearest(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
-/// `(dev, ino)` of `/` and of the home directory with each of its parents:
-/// the objects [`owner_only_state`] will not change once it has opened one.
+/// `(dev, ino)` of `/` and of each guarded home with each of its parents: the
+/// objects [`owner_only_state`] will not change once it has opened one.
 #[cfg(unix)]
-fn shallow_identities(home: Option<&std::path::Path>) -> Vec<(u64, u64)> {
+fn shallow_identities(homes: &[std::path::PathBuf]) -> Vec<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
-    home.into_iter()
+    homes
+        .iter()
         .flat_map(|home| home.ancestors())
         .chain(std::iter::once(std::path::Path::new("/")))
         .filter_map(|dir| std::fs::metadata(dir).ok())
@@ -1442,14 +1503,14 @@ fn lock_state_dir(state: &std::path::Path) -> std::io::Result<()> {
     if state.components().any(|part| part == std::path::Component::ParentDir) {
         return Err(refused(state, "its path has a `..` in it; name the directory itself, such as ~/.aoide/state"));
     }
-    let home = guard_home().map(|home| resolve_nearest(&home));
-    if let Some(why) = shallow_state_reason(&resolve_nearest(state), home.as_deref()) {
+    let homes: Vec<_> = guard_homes().iter().map(|home| resolve_nearest(home)).collect();
+    if let Some(why) = shallow_state_reason(&resolve_nearest(state), &homes) {
         return Err(refused(
             state,
             &format!("{why}; point AOIDE_STATE_DIR (or AOIDE_ROOT) at a directory aoide owns, such as ~/.aoide/state"),
         ));
     }
-    owner_only_state(state, home.as_deref())
+    owner_only_state(state, &homes)
 }
 
 /// The one refusal a state lock returns: the path, the reason, and the fix.
@@ -1461,17 +1522,34 @@ fn refused(state: &std::path::Path, why: &str) -> std::io::Error {
 }
 
 /// A lock the OS would not make, with its kind kept. A permission refusal
-/// names the one fix an owner can make without aoide.
+/// names the one fix an owner can make without aoide: a `state/` this user
+/// already owns needs its own permission bits back (the open reads it), one
+/// another user owns needs a chown.
 fn unlockable(state: &std::path::Path, e: std::io::Error) -> std::io::Error {
-    let hint = if e.kind() == std::io::ErrorKind::PermissionDenied {
-        "; chown it to you or point AOIDE_ROOT elsewhere"
+    let hint = if e.kind() != std::io::ErrorKind::PermissionDenied {
+        String::new()
+    } else if owned_by_me(state) {
+        format!("; chmod u+rwx {}", state.display())
     } else {
-        ""
+        "; chown it to you or point AOIDE_ROOT elsewhere".to_string()
     };
     std::io::Error::new(
         e.kind(),
         format!("{}: state/ cannot be made owner-only (0700): {e}{hint}", state.display()),
     )
+}
+
+/// Whether `path` itself (never a link's target) is owned by the effective uid.
+#[cfg(unix)]
+fn owned_by_me(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: `geteuid` takes nothing and cannot fail.
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.uid() == unsafe { libc::geteuid() })
+}
+
+#[cfg(windows)]
+fn owned_by_me(_path: &std::path::Path) -> bool {
+    false
 }
 
 /// Unix: opens `state` (see [`open_state`]), refuses the object it opened if it
@@ -1482,11 +1560,11 @@ fn unlockable(state: &std::path::Path, e: std::io::Error) -> std::io::Error {
 /// would strip the inherited ACEs of children already in it, which is not
 /// verified here.
 #[cfg(unix)]
-fn owner_only_state(state: &std::path::Path, home: Option<&std::path::Path>) -> std::io::Result<()> {
+fn owner_only_state(state: &std::path::Path, homes: &[std::path::PathBuf]) -> std::io::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let dir = open_state(state)?;
     let meta = dir.metadata().map_err(|e| unlockable(state, e))?;
-    if shallow_identities(home).contains(&(meta.dev(), meta.ino())) {
+    if shallow_identities(homes).contains(&(meta.dev(), meta.ino())) {
         return Err(refused(state, "it resolves to the filesystem root, the home directory or one of its parents"));
     }
     if meta.mode() & 0o777 != 0o700 {
@@ -1502,13 +1580,8 @@ fn owner_only_state(state: &std::path::Path, home: Option<&std::path::Path>) -> 
 /// the symlink refusal. The chmod acts on this descriptor, never on the name.
 #[cfg(unix)]
 fn open_state(state: &std::path::Path) -> std::io::Result<std::fs::File> {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-    let open = || {
-        std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-            .open(state)
-    };
+    use std::os::unix::fs::DirBuilderExt;
+    let open = || open_dir_nofollow(state);
     let opened = match open() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if let Some(parent) = state.parent() {
@@ -1533,8 +1606,19 @@ fn open_state(state: &std::path::Path) -> std::io::Result<std::fs::File> {
     })
 }
 
+/// `dir` opened read-only as a directory, refusing a link at its last component:
+/// `ELOOP` for a link, `ENOTDIR` for anything that is not a directory.
+#[cfg(unix)]
+fn open_dir_nofollow(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(dir)
+}
+
 #[cfg(windows)]
-fn owner_only_state(state: &std::path::Path, _home: Option<&std::path::Path>) -> std::io::Result<()> {
+fn owner_only_state(state: &std::path::Path, _homes: &[std::path::PathBuf]) -> std::io::Result<()> {
     if std::fs::symlink_metadata(state).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(refused(
             state,
@@ -2837,7 +2921,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_filesystem_root_or_home_or_its_parent_is_never_a_state_dir() {
-        let home = Some(std::path::Path::new("/home/someone"));
+        let home = &[std::path::PathBuf::from("/home/someone")][..];
         let why_home = Some("it is the home directory or one of its parents");
         assert_eq!(shallow_state_reason(std::path::Path::new("/"), home), Some("it is a filesystem root"));
         assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone"), home), why_home);
@@ -2845,9 +2929,12 @@ mod tests {
         assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone/.aoide/state"), home), None);
         assert_eq!(shallow_state_reason(std::path::Path::new("/home/someonelse"), home), None);
         assert_eq!(shallow_state_reason(std::path::Path::new("/tmp/x/state"), home), None);
+        // Every home given is guarded, not only the first.
+        let two = &[std::path::PathBuf::from("/home/someone"), std::path::PathBuf::from("/srv/other")][..];
+        assert_eq!(shallow_state_reason(std::path::Path::new("/srv"), two), why_home);
         // With no home to name, the root is still refused and nothing else is.
-        assert_eq!(shallow_state_reason(std::path::Path::new("/"), None), Some("it is a filesystem root"));
-        assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone"), None), None);
+        assert_eq!(shallow_state_reason(std::path::Path::new("/"), &[]), Some("it is a filesystem root"));
+        assert_eq!(shallow_state_reason(std::path::Path::new("/home/someone"), &[]), None);
     }
 
     /// `lock_state_dir` on a temp `HOME`, never the real one: a state dir that
@@ -2951,20 +3038,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// An empty `HOME` is no home: `guard_home` answers `None` for it and for an
-    /// unset one. With no home, a relative default root is refused before
+    /// The guard covers every home a run could mean, together: a non-empty
+    /// `HOME`, the effective uid's passwd home, and `/home/$AOIDE_USER`. An
+    /// empty `HOME` counts as unset and leaves the passwd home guarded, never a
+    /// guessed one. With `HOME` empty, a relative default root is refused before
     /// anything is created in the working directory, and `/` still is.
     #[cfg(unix)]
     #[test]
-    fn an_empty_home_is_no_home_and_a_relative_default_root_writes_nowhere() {
+    fn every_home_is_guarded_and_a_relative_default_root_writes_nowhere() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = MigrationEnvGuard::capture_and_clear();
+        // A sandbox may run as a uid with no passwd entry; the rest still holds.
+        let passwd: Vec<_> = passwd_home().into_iter().collect();
+        assert!(passwd.iter().all(|home| home.is_absolute()), "a passwd home is an absolute path: {passwd:?}");
         std::env::set_var("HOME", "");
-        assert!(guard_home().is_none(), "an empty HOME must count as unset");
+        assert_eq!(guard_homes(), passwd, "an empty HOME counts as unset; the passwd home stays");
         std::env::remove_var("HOME");
-        assert!(guard_home().is_none(), "an unset HOME must not fall back to a guessed home");
+        assert_eq!(guard_homes(), passwd, "an unset HOME leaves the passwd home, never a guess");
         std::env::set_var("HOME", "/home/someone");
-        assert_eq!(guard_home(), Some(std::path::PathBuf::from("/home/someone")));
+        std::env::set_var("AOIDE_USER", "other");
+        let mut all = vec![std::path::PathBuf::from("/home/someone")];
+        all.extend(passwd.iter().cloned());
+        all.push(std::path::PathBuf::from("/home/other"));
+        assert_eq!(guard_homes(), all, "HOME, the passwd home and the AOIDE_USER home are guarded together");
+        std::env::remove_var("AOIDE_USER");
 
         std::env::set_var("HOME", "");
         let _scratch = Scratch::absent(".aoide");
@@ -3040,9 +3137,171 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let err = owner_only_state(&home, Some(&home)).expect_err("the home directory must be refused by identity");
+        let err =
+            owner_only_state(&home, &[home.clone()]).expect_err("the home directory must be refused by identity");
         assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
         assert_eq!(unix_mode(&home), 0o755, "the home directory was chmodded past the path checks");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `HOME` is guarded while `AOIDE_USER` names another home: every home a
+    /// run could mean is guarded together, so the one [`aoide_home`] does not
+    /// answer keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn a_home_aoide_user_does_not_name_is_still_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-two-homes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("AOIDE_USER", format!("aoide-no-such-user-{}", std::process::id()));
+        std::env::set_var("AOIDE_STATE_DIR", &home);
+
+        let err = ensure_write_dir(&home.join("x")).expect_err("HOME must be refused when AOIDE_USER names another");
+        assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
+        assert_eq!(unix_mode(&home), 0o755, "HOME was chmodded because AOIDE_USER named another home");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The canonical check's own job: refusing a shallow `state/` before
+    /// anything is created. A home that does not exist yet, spelled through a
+    /// symlinked parent on either side, is refused by its real path and nothing
+    /// is made. The identity check after the open would refuse it too, but only
+    /// after the open had created it.
+    #[cfg(unix)]
+    #[test]
+    fn a_state_through_a_symlinked_home_not_yet_made_is_refused_and_nothing_is_created() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-unmade-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let unmade = real.join("home");
+
+        std::env::set_var("HOME", link.join("home"));
+        std::env::set_var("AOIDE_STATE_DIR", &unmade);
+        let err = ensure_write_dir(&unmade.join("x")).expect_err("HOME through a link must be refused by its real path");
+        assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
+        assert!(!unmade.exists(), "the refused state/ was created (HOME spelled through the link)");
+
+        std::env::set_var("HOME", &unmade);
+        std::env::set_var("AOIDE_STATE_DIR", link.join("home"));
+        let err = ensure_write_dir(&link.join("home").join("x")).expect_err("a state/ through a link must be refused");
+        assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
+        assert!(!unmade.exists(), "the refused state/ was created (state/ spelled through the link)");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `secure_private_dir` chmods through a descriptor opened without following
+    /// a link at `dir`. A `dir` that is a link to a directory outside `state/` is
+    /// refused, and that directory keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn secure_private_dir_refuses_a_linked_leaf_and_never_chmods_its_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-private-leaf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let state = base.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&outside, state.join("identity")).unwrap();
+        std::env::set_var("HOME", base.join("home"));
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let err = secure_private_dir(&state.join("identity")).expect_err("a linked identity/ must be refused");
+        assert!(err.to_string().contains("symlink"), "the refusal must name the link: {err}");
+        assert_eq!(unix_mode(&outside), 0o755, "the link's target outside state/ was chmodded");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A write under `state/` spelled through an alias of one of its parents
+    /// locks `state/`: under is judged by where the directory lands, not by how
+    /// its path is spelled.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_an_alias_locks_the_state_it_lands_in() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-state-alias-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        let state = real.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let alias = base.join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        std::env::set_var("HOME", base.join("home"));
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        ensure_write_dir(&alias.join("state").join("sub")).unwrap();
+        assert!(state.join("sub").is_dir(), "the write landed under the real state/");
+        assert_eq!(unix_mode(&state), 0o700, "a write through an alias left state/ wide");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `..` write is judged where the kernel puts it: `a/missing/../state/x`
+    /// is created under `a/state` (`create_dir_all` makes `a/missing` on the
+    /// way), so it locks `state/` first.
+    #[cfg(unix)]
+    #[test]
+    fn a_dot_dot_write_that_lands_under_state_locks_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-state-dotdot-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let a = base.join("a");
+        let state = a.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("HOME", base.join("home"));
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        ensure_write_dir(&a.join("missing").join("..").join("state").join("x")).unwrap();
+        assert!(state.join("x").is_dir(), "the kernel put the write under state/");
+        assert_eq!(unix_mode(&state), 0o700, "a .. write that lands under state/ left it wide");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `state/` this user owns but cannot open (`0300`, no read bit) is
+    /// refused with the fix its owner can make, a chmod, never a chown.
+    #[cfg(unix)]
+    #[test]
+    fn an_owned_state_it_cannot_open_names_chmod_not_chown() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: `geteuid` takes nothing and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipped an_owned_state_it_cannot_open_names_chmod_not_chown: root opens a 0300 directory");
+            return;
+        }
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-state-0300-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let state = base.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o300)).unwrap();
+        std::env::set_var("HOME", base.join("home"));
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let result = ensure_write_dir(&state.join("x"));
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let msg = result.expect_err("a state/ it cannot open is refused").to_string();
+        assert!(msg.contains(&format!("chmod u+rwx {}", state.display())), "the fix must be the owner's chmod: {msg}");
+        assert!(!msg.contains("chown"), "a state/ this user owns needs no chown: {msg}");
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -3473,8 +3732,7 @@ mod tests {
             ("migrate_dir", |s| {
                 let old = s.parent().unwrap().join("legacy");
                 std::fs::create_dir_all(old.join("sub"))?;
-                migrate_dir(&old, s);
-                Ok(())
+                migrate_dir(&old, s)
             }),
             ("migrate_file", |s| {
                 let old = s.parent().unwrap().join("legacy.log");
@@ -3602,12 +3860,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// A `state/` that is a symlink is refused by name, and the link's target
-    /// is never chmodded: a chmod would follow the link to a directory the
-    /// boundary does not cover.
+    /// A `state/` that is a symlink is refused at the open (`O_NOFOLLOW` fails
+    /// `ELOOP`), and the link's target is never chmodded: a chmod would follow
+    /// the link to a directory the boundary does not cover.
     #[cfg(unix)]
     #[test]
-    fn ensure_write_dir_refuses_a_symlinked_state_by_name() {
+    fn ensure_write_dir_refuses_a_symlinked_state_at_the_open() {
         use std::os::unix::fs::PermissionsExt;
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = MigrationEnvGuard::capture_and_clear();
@@ -3818,7 +4076,7 @@ mod tests {
         std::fs::create_dir_all(&home.join("Aoide")).unwrap();
         std::fs::write(&old_log, "audit-line\n").unwrap();
 
-        migrate_root_once();
+        migrate_root_once().unwrap();
 
         let new_root = home.join(".aoide");
         assert_eq!(
@@ -3837,6 +4095,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// The rename keeps the legacy tree's mode, and [`migrate_root_once`] locks
+    /// the `state/` it moved before anything reads it.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_root_once_leaves_the_state_it_moves_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-root-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let old_state = home.join("Aoide").join("state");
+        std::fs::create_dir_all(old_state.join("identity")).unwrap();
+        std::fs::set_permissions(&old_state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        migrate_root_once().unwrap();
+
+        let state = home.join(".aoide").join("state");
+        assert!(state.join("identity").is_dir(), "the state tree moved");
+        assert_eq!(unix_mode(&state), 0o700, "the migrated state/ kept the legacy tree's mode");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A tree that moved but whose `state/` cannot then be locked fails the
+    /// migration instead of being narrated past. The legacy `state/` here is a
+    /// symlink, so the moved one is too, and the lock refuses it at the open.
+    /// The link's target keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_root_once_fails_when_the_state_it_moved_cannot_be_locked() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-root-unlockable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let target = home.join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir_all(home.join("Aoide")).unwrap();
+        std::os::unix::fs::symlink(&target, home.join("Aoide").join("state")).unwrap();
+
+        let err = migrate_root_once().expect_err("a moved state/ that cannot be locked must fail the migration");
+        let state = home.join(".aoide").join("state");
+        assert!(err.to_string().contains(&*state.to_string_lossy()), "the error must name the path: {err}");
+        assert!(err.to_string().contains("symlink"), "the error must say why: {err}");
+        assert_eq!(unix_mode(&target), 0o755, "the link's target was chmodded");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     #[test]
     fn migrate_root_once_second_run_is_a_no_op() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3849,14 +4157,14 @@ mod tests {
         std::fs::create_dir_all(&old_stage).unwrap();
         std::fs::write(old_stage.join("livery.json"), "first-boot").unwrap();
 
-        migrate_root_once();
+        migrate_root_once().unwrap();
         let new_stage = home.join(".aoide").join("song").join("stage");
         assert_eq!(std::fs::read_to_string(new_stage.join("livery.json")).unwrap(), "first-boot");
         assert!(!old_stage.exists());
 
         // Second call: nothing left at the old path — must run cleanly and
         // change nothing.
-        migrate_root_once();
+        migrate_root_once().unwrap();
         assert_eq!(
             std::fs::read_to_string(new_stage.join("livery.json")).unwrap(),
             "first-boot",
@@ -3884,7 +4192,7 @@ mod tests {
         std::fs::write(old_stage.join("livery.json"), "stale").unwrap();
         std::fs::write(new_stage.join("livery.json"), "fresh").unwrap();
 
-        migrate_root_once();
+        migrate_root_once().unwrap();
 
         assert_eq!(std::fs::read_to_string(new_stage.join("livery.json")).unwrap(), "fresh");
         assert_eq!(std::fs::read_to_string(old_stage.join("livery.json")).unwrap(), "stale");
@@ -3913,7 +4221,7 @@ mod tests {
         std::fs::create_dir_all(&old_state).unwrap();
         std::fs::write(old_state.join("usage.json"), "moves").unwrap();
 
-        migrate_root_once();
+        migrate_root_once().unwrap();
 
         assert_eq!(
             std::fs::read_to_string(old_stage.join("livery.json")).unwrap(),
@@ -3956,7 +4264,7 @@ mod tests {
         std::fs::create_dir_all(&old_stage).unwrap();
         std::fs::write(old_stage.join("livery.json"), "custom-root-bound").unwrap();
 
-        migrate_root_once();
+        migrate_root_once().unwrap();
 
         assert_eq!(
             std::fs::read_to_string(custom_root.join("song").join("stage").join("livery.json")).unwrap(),
@@ -3992,7 +4300,7 @@ mod tests {
         std::fs::write(state.join("peer-pairing-inbound.json"), "inbound").unwrap();
         std::fs::write(state.join("peer-pairing-outbound.json"), "outbound").unwrap();
 
-        migrate_root_once();
+        migrate_root_once().unwrap();
 
         assert_eq!(std::fs::read_to_string(state.join("nodes.json")).unwrap(), "old-registry");
         assert_eq!(
@@ -4028,7 +4336,7 @@ mod tests {
         std::fs::write(state.join("peers.json"), "stale").unwrap();
         std::fs::write(state.join("nodes.json"), "fresh").unwrap();
 
-        migrate_root_once();
+        migrate_root_once().unwrap();
 
         assert_eq!(std::fs::read_to_string(state.join("nodes.json")).unwrap(), "fresh");
         assert_eq!(

@@ -313,12 +313,13 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    /// An export into a `state/` left wide leaves it owner-only. This pins the
-    /// outcome, not the routing: `mail::read_base` locks `state/` before the
-    /// export makes its notes directory, so the test passes with or without
-    /// the `ensure_write_dir` call (checked by reverting it).
+    /// An export makes its notes directory itself, even with no thread to
+    /// write, and leaves the wide `state/` it sits under owner-only. The lock
+    /// alone cannot tell the export's own `ensure_write_dir` apart, since
+    /// `mail::read_base` locks the same `state/` first; the directory can, and
+    /// without the call an empty export makes none.
     #[test]
-    fn export_locks_a_wide_state_its_notes_dir_is_under() {
+    fn export_makes_its_notes_dir_under_a_wide_state_and_locks_it() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let base = std::env::temp_dir().join(format!("aoide-export-lock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -340,7 +341,9 @@ mod tests {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
         }
-        result.expect("an export of an empty mail tree runs");
+        let report = result.expect("an export of an empty mail tree runs");
+        assert_eq!(report.threads, 0, "the fixture has no mail");
+        assert!(state.join("notes").is_dir(), "the export did not make its notes directory");
         let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700, "the export left state/ at {mode:o}");
         let _ = std::fs::remove_dir_all(&base);

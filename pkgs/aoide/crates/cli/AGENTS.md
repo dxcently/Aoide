@@ -59,6 +59,10 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
   `migrate_root_once` or any bind; an unknown argument is a refusal, never a
   start (`tests/aoided_argv.rs` asserts nothing is created). A new `aoided`
   flag extends `parse` and the usage page together.
+- **A migration `Err` stops both binaries before any command runs.**
+  `migrate_root_once` errs only when a tree it moved lands in a `state/` the
+  lock refuses; `aoide` and `aoided` print it and exit 1 rather than read
+  that tree (`tests/migrate_root.rs`).
 - **SIGPIPE stays ignored in BOTH binaries.** Writes to a child's stdin
   (`secrets` backends, `curl`, `qrencode`) must return their error, not kill
   the process. A closed stdout (`aoide … | head`) is handled where the result
