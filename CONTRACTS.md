@@ -2169,6 +2169,14 @@ with no `death` is an ordinary finished session. Until it is said, the reaper,
 the session-start eviction, the superseded-tombstone pass, the orphan sweep and
 `session prune` spare the record (see *Held* under `pingback.json`).
 
+Before the death is written, the wrap owns it. The reaper leaves a hook child
+alone while the conducted wrap that hosts it runs (its pid alive) and the
+child's phase reads `working` or `awaiting`, even when the child's harness is
+dead: the wrap records the death when its own child ends, and a reap would close
+the phase first and leave nothing to record. The cost is the card: a harness that
+dies under a wrap that outlives it (a shell host, whose own child is the shell)
+leaves the child reading `working` until that wrap ends.
+
 The child's session record in `sessions.json` is set to `done`: the process is
 dead, and presence reads it so. `done`, not `idle`: `done` says the process is
 over, and the claim, not the state, decides when the record may go. Nothing

@@ -304,7 +304,7 @@ a silence), `[claude <petname>] settled` when a child last seen `working` or
 `awaiting` stops through its own hook, and
 `[claude <petname>] died mid-turn · last: <the tool in flight, else "working">`
 when that open turn ends with its harness gone. The hosting wrap records that
-end itself, the moment its harness exits: the child's hook record becomes
+end itself, the moment its own child exits: the child's hook record becomes
 `done` with a fact naming the tool in flight and how the process ended (`exit
 1`, `signal 9`, or `timeout`), and the line names that status in parentheses,
 as in `… died mid-turn (exit 1) · last: …`. A wrap sent SIGTERM, SIGHUP or
@@ -312,7 +312,9 @@ SIGINT forwards it to its harness, records the fact, and then exits by that
 signal, so the death carries its signal. When the wrap is SIGKILLed before it
 writes (SIGKILL is never caught), the tick infers the death instead, once the
 wrap is gone and the child's route still stands; that inferred line carries no
-status. The tick says each fact once, then clears it, and a recorded death is
+status. The reaper leaves an open child to its running wrap, so a harness that
+dies under a wrap that outlives it (a shell host) reads `working` until the wrap
+ends. The tick says each fact once, then clears it, and a recorded death is
 held against every prune until it is said. A `done` phase with no fact is a
 session ending through its own hook and says nothing. A silence before a death
 does not hide it. The first look at a child is a baseline and says nothing,

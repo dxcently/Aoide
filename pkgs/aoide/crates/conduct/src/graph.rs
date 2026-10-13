@@ -321,7 +321,7 @@ pub(crate) use self::pingback::held_deaths;
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
-    lineage_of, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
+    lineage_of, owned_by_live_wraps, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };
 pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;

@@ -1688,24 +1688,53 @@ struct Doomed {
     at: String,
 }
 
-/// The hook children a wrap hosts whose turn is still open and whose harness is
-/// gone. Pure over the roster and `hooks.json`, so the rule is table-testable.
-///
-/// A child is hosted when its `parentSessionId` is this wrap and its
-/// `hookAncestry` holds this wrap's pid, the same kernel edge the ping-back's
-/// route needs. Its harness must be gone, so a harness still running under a
+/// Does the conducted wrap `host`, running as `host_pid`, host the hook child
+/// `s`: its `parentSessionId` is the wrap, and its `hookAncestry` holds the wrap's
+/// pid, the same kernel edge the ping-back's route needs.
+fn hosted_by(s: &SessionRecord, host: &str, host_pid: u32) -> bool {
+    s.parent_session_id.as_deref() == Some(host)
+        && i32::try_from(host_pid).is_ok_and(|pid| s.hook_ancestry.contains(&pid))
+}
+
+fn turn_open(phase: &str) -> bool {
+    matches!(canonical_state(phase), "working" | "awaiting")
+}
+
+/// Of `ids`, the hook children a running wrap still owns: a child whose host is a
+/// conducted wrap with a live pid (and not itself in `ids`), and whose turn is
+/// open. That wrap records the child's death when its own child exits
+/// ([`record_hook_deaths`]); a pass that closed the phase first would leave it
+/// nothing to record. The cost: a harness that dies under a wrap that outlives it
+/// (a shell host) leaves its child reading `working` until the wrap ends.
+pub(crate) fn owned_by_live_wraps(sessions: &[SessionRecord], hooks: &[HookRecord], ids: &[String]) -> HashSet<String> {
+    let owned = |s: &SessionRecord| {
+        let host = s.parent_session_id.as_deref().filter(|h| !ids.iter().any(|id| id == h));
+        let wrap = host.and_then(|h| sessions.iter().find(|w| w.session_id == h));
+        let live = wrap.is_some_and(|w| {
+            w.conductable == Some(true) && w.pid.is_some_and(|pid| pid_is_alive(pid) && hosted_by(s, &w.session_id, pid))
+        });
+        live && hooks.iter().any(|h| h.session_id == s.session_id && turn_open(&h.phase))
+    };
+    sessions
+        .iter()
+        .filter(|s| ids.contains(&s.session_id) && owned(s))
+        .map(|s| s.session_id.clone())
+        .collect()
+}
+
+/// The hook children a wrap hosts ([`hosted_by`]) whose turn is still open and
+/// whose harness is gone. Pure over the roster and `hooks.json`, so the rule is
+/// table-testable. Its harness must be gone, so a harness still running under a
 /// descendant that outlived the wrap is not reported dead. The tool in flight is
 /// read here, before the session is marked done and its activity cleared.
 fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: &str, host_pid: u32) -> Vec<Doomed> {
-    let Ok(host_pid) = i32::try_from(host_pid) else { return Vec::new() };
     sessions
         .iter()
-        .filter(|s| s.parent_session_id.as_deref() == Some(host))
-        .filter(|s| s.hook_ancestry.contains(&host_pid))
+        .filter(|s| hosted_by(s, host, host_pid))
         .filter_map(|s| {
             let harness = harness_pid(s).filter(|&pid| !pid_is_alive(pid))?;
             let hook = hooks.iter().find(|h| h.session_id == s.session_id)?;
-            matches!(canonical_state(&hook.phase), "working" | "awaiting").then(|| Doomed {
+            turn_open(&hook.phase).then(|| Doomed {
                 id: s.session_id.clone(),
                 last_tool: s.activity.clone().filter(|a| !a.is_empty()),
                 harness,
@@ -3941,6 +3970,56 @@ mod enduring_binding_tests {
 #[cfg(test)]
 mod hosted_death_tests {
     use super::*;
+
+    /// Which reaped ids a running wrap still owns: a hosted child with its turn
+    /// open, under a conducted wrap whose pid is alive and that is not itself
+    /// being reaped. Every other id stays the reaper's.
+    #[test]
+    fn a_live_wrap_owns_only_its_hosted_children_with_an_open_turn() {
+        let me = std::process::id();
+        let wrap = |id: &str, pid: u32| {
+            let mut w = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", None);
+            w.conductable = Some(true);
+            w.pid = Some(pid);
+            w
+        };
+        let child = |id: &str, parent: &str, host_pid: u32| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", Some(parent));
+            s.hook_ancestry = vec![999_999, host_pid as i32];
+            s
+        };
+        let mut bare = wrap("bare", me);
+        bare.conductable = None;
+        let sessions = vec![
+            wrap("live", me),
+            wrap("dead", 999_998),
+            wrap("dying", me),
+            bare,
+            child("open", "live", me),
+            child("awaits", "live", me),
+            child("closed", "live", me),
+            child("under-dead", "dead", 999_998),
+            child("under-dying", "dying", me),
+            child("under-bare", "bare", me),
+            child("unhosted", "live", 7),
+        ];
+        let hook = |id: &str, phase: &str| HookRecord {
+            session_id: id.into(),
+            phase: phase.into(),
+            updated_at: "2026-10-07T10:00:00Z".into(),
+            ..Default::default()
+        };
+        let mut hooks: Vec<HookRecord> = ["open", "under-dead", "under-dying", "under-bare", "unhosted"]
+            .iter()
+            .map(|id| hook(id, "working"))
+            .collect();
+        hooks.push(hook("awaits", "awaiting"));
+        hooks.push(hook("closed", "stopped"));
+        let reaped: Vec<String> = sessions.iter().skip(4).map(|s| s.session_id.clone()).chain(["dying".to_string()]).collect();
+        let mut owned: Vec<String> = owned_by_live_wraps(&sessions, &hooks, &reaped).into_iter().collect();
+        owned.sort();
+        assert_eq!(owned, ["awaits", "open"]);
+    }
 
     /// Which hook children a wrap's own exit records as died: the hosted ones
     /// whose turn is open and whose harness is gone, each with the tool in flight.

@@ -1051,11 +1051,18 @@ in the message.
   Open gap, not checked here: a wrap that is SIGKILLed (no fact) whose child's
   record and hook entry are both pruned before any tick sees them is never said
   of. The inference reads that record, and an absent record drops the entry.
-  Also open: the reaper marks a reaped child `done` (`hooks.json` included)
-  before its wrap writes the death. A wrap that then finds no open phase writes
-  nothing, and the tick drops the entry, so that death is not said. The hook
-  source emits no `PingEvent` and never spools: a child that belongs on a ring
-  is `remoteParent`-stamped and so is not its child.
+  **A live wrap owns its open child's end.** `reap_inner` takes out of its
+  reaped set every hook child whose conducted host wrap still runs with the
+  child's turn open (`session_store::owned_by_live_wraps`, which shares
+  `hosted_by` with `record_hook_deaths`), because a reap would close the phase
+  before the wrap writes the death and the wrap would then find nothing to
+  record. Keep the hosting test one (`hosted_by`): a child the reaper spares
+  must be one the wrap's exit can record. The cost is stated in `CONTRACTS.md` (`death`): a
+  harness that dies under a wrap that outlives it reads `working` until the wrap
+  ends. Shortening that wait belongs to the wrap (watching its own harness),
+  never to the reaper. The hook source emits no `PingEvent` and never spools: a
+  child that belongs on a ring is `remoteParent`-stamped and so is not its
+  child.
   **The screen source is the third, as a child module
   (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
   harness has neither profile (`prompt::tracked`: `agent_profile` is none, and

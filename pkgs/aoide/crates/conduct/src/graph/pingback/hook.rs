@@ -1985,6 +1985,44 @@ mod tests {
         assert!(tick(&mut cursor).is_empty(), "once");
     }
 
+    /// The reaper runs between a shell-hosted harness's death and its wrap's end:
+    /// the child's record names the dead harness, but its wrap still runs with
+    /// the turn open, so the reaper leaves the child to the wrap. The wrap then
+    /// records the death, and the spawner hears it once.
+    #[cfg(unix)]
+    #[test]
+    fn a_reap_while_the_wrap_runs_leaves_the_death_to_the_wrap_and_it_is_said_once() {
+        let (root, _env, _guard) = e2e_stage("dmt-reap-live");
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let (mut wrap, harness) = start_wrap(&root, &shell_host(&before));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty(), "the first examination is a baseline");
+        // The record's own pid names the harness, as a hook-registered claude's does.
+        aoide_storage::fs::with_stage_lock(|| {
+            let mut f: SessionsFile = load_stage(&sessions_path()).unwrap();
+            f.sessions.iter_mut().find(|s| s.session_id == HOOK).unwrap().pid = Some(harness as u32);
+            write_stage(&sessions_path(), &f).unwrap();
+        });
+
+        std::fs::write(root.join("go"), "").unwrap();
+        assert!(poll_until(|| harness_gone(harness as u32).then_some(())).is_some(), "the harness is gone");
+        crate::reap::reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert!(wrap.try_wait().unwrap().is_none(), "the wrap still runs");
+        assert_eq!(child_state(), "working", "the reaper leaves a live wrap's open child to it");
+        assert_eq!(hook_record().phase, "working");
+
+        unsafe { libc::kill(wrap.id() as libc::pid_t, libc::SIGTERM) };
+        wait_exit(&mut wrap);
+        assert_eq!(
+            tick(&mut cursor),
+            vec![ChildClaim {
+                parent: SPAWNER.into(),
+                line: "[claude fond-aspen] died mid-turn (signal 15) · last: Bash".into(),
+            }]
+        );
+        assert!(tick(&mut cursor).is_empty(), "once");
+    }
+
     /// An end signal sent to the wrap itself is forwarded to its harness, and the
     /// harness's end is the wrap's own death fact, with the signal it ended by.
     #[cfg(unix)]

@@ -1577,6 +1577,13 @@ fn reap_inner(
         }
     }
 
+    // A hook child whose conducted wrap still runs, with its turn open, is that
+    // wrap's to end: the wrap records the death when its own child exits
+    // (`record_hook_deaths`), and a reap here would close the phase first and
+    // leave it nothing to record (see `owned_by_live_wraps`).
+    let owned = crate::graph::owned_by_live_wraps(&s_file.sessions, &h_file.hooks, &reaped);
+    reaped.retain(|id| !owned.contains(id));
+
     // The exempt idle spawned shells the waived arm just skipped — a human
     // gesture only (`spawned_shell_band.is_none()` iff `--now`); the
     // unattended pass reports nothing here (module doc's "Sweep
