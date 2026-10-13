@@ -177,12 +177,12 @@ should follow).
   descendant of a dropped session cascades away with it (see "Sub-agent
   cascade" below), and children that survive get `parentSessionId` cleared
   (un-orphaned rather than dangling). The exception is a protected live wrap:
-  it is alive, so it keeps its `parentSessionId` and `attestedSpawner` while
-  the dropped spawner's id names no record, and every reader treats that as
-  no parent (CONTRACTS, rule 3). Everything else removed or cleared is
-  reported. A `done` record that is still a protected live wrap (its own
-  process still runs under its sealed starttime) is kept and named in the
-  reply (see the live-wrap rules in CONTRACTS.md).
+  it is alive, so it keeps its `parentSessionId`, and it loses its
+  `attestedSpawner`, so a later registration under the dropped spawner's id
+  earns no autogate over it (CONTRACTS, rule 3). Everything else removed or
+  cleared is reported. A `done` record that is still a protected live wrap
+  (its own process still runs under its sealed starttime) is kept and named
+  in the reply (see the live-wrap rules in CONTRACTS.md).
 - **`spawn`** and **`send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].

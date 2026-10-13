@@ -954,7 +954,8 @@ pub(crate) fn drop_remote_child_rows(removed: &[String]) {
 
 /// Drop exactly `roots` (+ their subagent descendants, + their hook records)
 /// from the roster; clear `parentSessionId` on surviving children of anything
-/// removed, except a protected live wrap, which keeps its edge (CONTRACTS,
+/// removed, except a protected live wrap, which keeps its edge and loses its
+/// spawn stamp, since the id it names may be registered again (CONTRACTS,
 /// rule 3). [`prune_done`] is this over the whole `done` set — factored apart
 /// because the reaper needs the same drop over a NARROWER one (the superseded
 /// `done` agent siblings of a terminal that still holds a live agent — see
@@ -995,11 +996,13 @@ pub(crate) fn drop_sessions(
         .filter(|s| !gone.contains(s.session_id.as_str()))
         .cloned()
         .map(|mut s| {
-            if matches!(&s.parent_session_id, Some(p) if gone.contains(p.as_str()))
-                && !super::identity::is_protected_live_wrap(&s)
-            {
-                s.set_parent_session(None);
-                cleared.push(s.session_id.clone());
+            if matches!(&s.parent_session_id, Some(p) if gone.contains(p.as_str())) {
+                if super::identity::is_protected_live_wrap(&s) {
+                    s.attested_spawner = None;
+                } else {
+                    s.set_parent_session(None);
+                    cleared.push(s.session_id.clone());
+                }
             }
             s
         })

@@ -959,10 +959,11 @@ in the message.
   **The hook source is the same lane, as a child module
   (`graph/pingback/hook.rs`).** A local-parented child of any registered
   harness that is not an `eidolon` (`hook::tracked`: no `remoteParent`, not a
-  shell, sub-agent node or app thread) is read off its `hooks.json` phase and
-  stamp, never a trace, and its lines (`awaiting`, `silent 12 min · last: …`,
-  `settled`) join the SAME `claims.lines` the eidolon source fills, so
-  `deliver` and its skips are one implementation. Its claim runs inside the
+  shell, sub-agent node, app thread or conducted wrap) is read off its
+  `hooks.json` phase and stamp, never a trace, and its lines (`awaiting`,
+  `silent 12 min · last: …`, `settled`) join the SAME `claims.lines` the
+  eidolon source fills, so `deliver` and its skips are one implementation.
+  Its claim runs inside the
   SAME `with_stage_lock` section over the cursor `claim_locked` just built
   (`hook::claim`), reading the roster and `hooks.json` inside that lock and
   writing the entry's `hook` half — `{phase, at, silent?}` — so the two
@@ -1188,10 +1189,15 @@ in the message.
   hook's `SessionEnd` arm, `session prune`, the reaper's spare, and `graph
   link` (as the child). The start door (`session_store`'s `session_start`,
   after the daemon hop) and the hook door's SessionStart
-  (`do_hook_session_start`) both ask it before any write, and a refused hook
-  start is audited on the door the hook arrived on. `drop_sessions` keeps a
-  protected survivor's `parentSessionId` and `attestedSpawner` when its
-  spawner is dropped. `identity::live_sealed_wrap_ids` is the
+  (`do_hook_session_start`) both ask it before any write, through one
+  verdict (`live_wrap_verdict`), and a refused hook start is audited on the
+  door the hook arrived on. A start judged on a protected wrap writes
+  nothing, refused or not, and the hook door returns that judgement beside
+  its outcome so `send.rs` lands no stamp after it. `drop_sessions` and
+  `do_subagent_rekey` keep a protected survivor's `parentSessionId` and drop
+  its `attestedSpawner` when the record its edge names leaves the roster.
+  `graph link` and `session prune` load and write under the stage lock.
+  `identity::live_sealed_wrap_ids` is the
   set the doors and the reaper test. The wrap's own exit path (`do_session_end`
   from `session_conduct`) is the one legitimate end and stays unrefused. A new
   door that can finish or re-register a record asks the same predicate first,
@@ -1635,7 +1641,8 @@ in the message.
   so does the end of the chain: the door then moves no chain and binds no window. An
   unreadable pid counts as plumbing. It lands
   in the same locked write as three events: the registration
-  (`do_hook_session_start`), a first window bind (`ensure_session_window`), and
+  (`do_hook_session_start`, except on a protected live wrap, whose start
+  writes nothing), a first window bind (`ensure_session_window`), and
   a per-turn heal (`ensure_session_window` again, through
   `session_store::chain_is_stale`). Registration is a SessionStart, or the first
   hook event of an unknown id, so a resumed harness that runs in a new process

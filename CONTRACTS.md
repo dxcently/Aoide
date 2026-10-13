@@ -2593,14 +2593,15 @@ forms and round-trip fields they do not know.
 carry an optional `sessionStartAt` (string, ISO-8601 UTC) — WHEN that
 harness's own `SessionStart` hook was recorded for this record. One writer:
 the hook door's `SessionStart` arm (`send.rs`), on every SessionStart a
-resume included. It exists so a launch can tell "this harness said hello, to
-THIS launch" from "a record exists, from some earlier run": `aoide spawn
---prompt`, `resurrect`'s restore delivery and the A2A door's opening turn all
-wait on a child record of their wrapper carrying a stamp at or after their
-own start instant, and an unstamped (or older-stamped) leftover under a
-reused id is not readiness. Absent means "this harness's hooks never claimed
-this record" — never a readiness fact; readers must tolerate both forms and
-round-trip fields they do not know.
+resume included, except one judged on a protected live wrap, which writes
+nothing (rule 2 below). It exists so a launch can tell "this harness said
+hello, to THIS launch" from "a record exists, from some earlier run":
+`aoide spawn --prompt`, `resurrect`'s restore delivery and the A2A door's
+opening turn all wait on a child record of their wrapper carrying a stamp at
+or after their own start instant, and an unstamped (or older-stamped)
+leftover under a reused id is not readiness. Absent means "this harness's
+hooks never claimed this record" — never a readiness fact; readers must
+tolerate both forms and round-trip fields they do not know.
 
 **Additive in v0 (A2A opening turn, 2026-09-26):** a session record MAY also
 carry an optional `openingTurn` (string) — what became of the first turn the
@@ -2823,9 +2824,10 @@ Three rules hold, each on the doors named:
    as it always has.
 2. *A protected live wrap is re-registered only as it is.* The start door
    (`session start --id`) and the harness hook's SessionStart (`session hook`,
-   `do_hook_session_start`) compare four fields of the wrap: `agent`, `cwd`,
+   `do_hook_session_start`) are one act, judged once before any write
+   (`live_wrap_verdict`). It compares four fields of the wrap: `agent`, `cwd`,
    `window` and `parent`. A start that supplies none of them differently answers
-   `ok` and writes none of them, so a harness may register again (`--agent`,
+   `ok` and writes nothing, so a harness may register again (`--agent`,
    `--cwd`) and keep the seal and the starttime. A start that would change one
    is refused with reason `live-sealed-wrap` and writes nothing. A refused hook
    start also appends an audit line on the door the hook arrived on, since the
@@ -2834,45 +2836,32 @@ Three rules hold, each on the doors named:
    `enduringAgentId`: the first bind writes it, the same value is a no-op, and a
    different value is refused as `conflicting-binding`, as on every record.
 
-   A same-fields hook SessionStart still writes these, and nothing else on the
-   roster: `sessionStartAt`, stamped on every SessionStart, which is the
-   readiness fact a spawned wrap's first turn waits on (`wait_ready`);
-   `harnessSessionId` and `contextCeiling`, each change-only and present when
-   the payload carries it; and `hookAncestry` when `ancestry_may_move` allows
-   the move, through the full path, which also backfills a missing `kind`. Its
-   phase lives in `hooks.json`. It never writes `pid`, the seal, the starttime,
-   the boot id, `parentSessionId` or `attestedSpawner`.
+   On the hook door that covers the whole SessionStart arm. A hook start
+   judged on a protected wrap, refused or not, leaves `sessions.json` and
+   `hooks.json` as they were: no `sessionStartAt`, `harnessSessionId`,
+   `contextCeiling`, `hookAncestry` or `kind`, no phase fold, and no
+   check-lane run. Spawn readiness (`wait_ready`) never reads the wrap's own
+   `sessionStartAt`: it reads the harness child's record under the wrap.
 
-   The hook chain is not an identity field, and the check above does not read
-   it. A wrap's own process usually sits in its harness's chain, so the chain is
-   empty until a first hook fills it, and that fill is the need. Two readers see
-   the chain. Window binding reads the hook process's own ancestry and fills
-   only an empty window, so a stored chain cannot re-bind it. The ping-back host
-   lookup (`pingback/hook.rs`, `host_wrap`) reads a child's chain to decide
-   whether its parent is its host, and it does not filter conducted records, so
-   a set chain on a protected child decides whether that child's trace reaches
-   its spawner. Fill-only (a set chain never changes) would close that. It is
-   not built: the User has it on the docket.
+   `window` counts as a change even from empty, so a protected wrap stored with
+   no window refuses a hook that discovers one.
 
-   `window` counts as a change even from empty. A protected wrap stored with no
-   window therefore refuses a hook that discovers one, and the refusal is
-   audited, and the chain is not filled by that start. Conduct registers a
-   headless wrap with no window, so a headless wrap under a windowed spawner can
-   reach this. Filling an empty window is open for the User's ruling, with
-   fill-only.
+   The hook chain (`hookAncestry`) is not one of the four fields, and on a
+   conducted wrap it routes nothing: the ping-back's hook source never tracks a
+   conducted record (`pingback/hook.rs`, `tracked`), whatever chain it carries.
+   A rule on when a protected wrap's chain may change would guard nothing.
 3. *The autogate reads only the spawn-time edge.* A target's parent counts for
    the parent-of-target and sibling rules only where its `attestedSpawner` names
    that parent (§ `sessions.json`). A bare `session start --parent`, a `graph
    link`, or a moved edge earns no autogate: the send is held pending. `graph
    link` refuses a protected wrap as its child, with reason `live-sealed-wrap`.
    The hook door attests nothing, and it never moves a conducted wrap's edge.
-   A prune or a reap that drops the spawner leaves a protected survivor's
-   `parentSessionId` and `attestedSpawner` in place, since the survivor is
-   alive. The pruned id then names no record, and every reader treats that as no
-   parent: graph placement falls back to project anchoring, the ping-back to it
-   fails as `no-parent-record`, and the autogate needs a sender with that id,
-   which no longer runs. The residual: a new registration under the same id
-   would match the stale stamp, and nothing stops it.
+   When the record a protected wrap's edge names leaves the roster (a prune or
+   a reap drops it, or a sub-agent re-key renames it), the wrap keeps
+   `parentSessionId`, since it is alive, and loses `attestedSpawner`, as a
+   moved edge does. A later registration under that id is not the spawner, and
+   a send from it is held pending. Graph placement treats the missing parent as
+   none and falls back to project anchoring.
 
 **Who can set the marker.** `sealedPidStarttime` and `sealedBootId` are written
 in one place, `stamp_seal`. Two callers reach it: the daemon's tick, and the
@@ -2921,9 +2910,6 @@ checks none of them, and an infected agent can do each one.
 - Keep a window-gone wrap live. This is the cost of the reaper rule: a wrap whose
   window has vanished, but whose process still lives, stays live and deliverable
   until that process exits.
-- Set a protected child's hook chain (`hookAncestry`). The chain does not move
-  the protection, but it decides whether the child's ping-back host resolves
-  (rule 2). A set chain is writable until the User rules on fill-only.
 - Speak in the mesh. The grant side gates sends (`send.rs`). A send it admits
   carries whatever text its sender chose, and nothing here limits that text.
 

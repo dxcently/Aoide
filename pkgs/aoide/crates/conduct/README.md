@@ -298,8 +298,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `deliver` — it adds a cursor half and three lines, never a second transport.
   The recipient is the child's SPAWNER, resolved through the wrap that hosts
   it and only over an edge the kernel attested (`hook::recipient`; the climb
-  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell and a
-  sub-agent node are not its children.
+  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell, a
+  sub-agent node and a conducted wrap are not its children, so a chain
+  stamped on a wrap routes nothing.
 - **`graph::prompt`** is the screen source of `awaiting`, for a conducted
   program that reports through neither hooks nor a trace (a `codex`, an
   `aider`, a REPL, an installer in a plain conducted shell). The wrap's
@@ -1342,12 +1343,14 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `session_store::live_wrap_refusal_for` is the refusal every finishing door
   (`session end`, a terminal `session phase`, the hook's `SessionEnd` arm) asks
   first, and so does `graph link` as the child. The start door
-  (`live_wrap_start`) and the hook's SessionStart (`live_wrap_hook_start`, in
-  `do_hook_session_start`) apply the start rule before any write, and the
-  hook's refusal is audited on the door it arrived on.
+  (`session_start`) and the hook's SessionStart (`do_hook_session_start`)
+  take one verdict (`live_wrap_verdict`) before any write, and the hook's
+  refusal is audited on the door it arrived on. A start judged on a
+  protected wrap writes nothing, and the hook arm lands nothing after it.
   `doc.rs::prune_done_keeping` keeps such a record out of every prune, and
-  `reap_inner` spares it. `doc.rs::drop_sessions` keeps a protected
-  survivor's edge when its spawner is dropped. The autogate reads a parent edge
+  `reap_inner` spares it. `doc.rs::drop_sessions` and `do_subagent_rekey`
+  keep a protected survivor's edge and drop its spawn stamp when the record
+  the edge names leaves the roster. The autogate reads a parent edge
   only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner`
   to name the same id. Only `conduct` registration writes that stamp, and
   `SessionRecord::set_parent_session` drops it whenever the edge moves. The

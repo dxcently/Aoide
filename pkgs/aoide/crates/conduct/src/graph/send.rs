@@ -2107,7 +2107,7 @@ fn hook_for_profile_gated(
             // boundary.
             let mid_turn = stored_phase(&id) == "working";
             let pid = vouched_payload_pid(&payload, hook_pid);
-            let out = do_hook_session_start(
+            let (out, protected) = do_hook_session_start(
                 door,
                 &id,
                 Some(profile.name),
@@ -2117,6 +2117,12 @@ fn hook_for_profile_gated(
                 pid,
                 &chain,
             );
+            // A start judged on a protected live wrap wrote nothing, so nothing
+            // lands after it: no `sessionStartAt`, no lane run, no phase fold,
+            // and none of the stamps after this match (CONTRACTS, rule 2).
+            if protected {
+                return fold_hook_outcome(cmd, out, None, claim_note);
+            }
             // The harness's own hello, timestamped: the one writer of
             // `sessionStartAt`, and the fact a first-turn injection waits on
             // (`wait_ready`). Stamped AFTER `do_hook_session_start` above, so the
@@ -2415,13 +2421,22 @@ fn hook_for_profile_gated(
             refresh_subagent_says(profile, sid, cwd);
         }
     }
-    // Fold the inner outcome into an ok envelope — exit 0, no matter what.
-    // The check lane's note (if SessionStart or the PromptSubmit drain
-    // produced one — Stop itself never does, see the `phase == "stopped"`
-    // gate above) rides on the SAME message, separated by an em dash: this is
-    // the one text channel that actually reaches the harness
-    // (`hooks::door_command`'s claude wrapper stopped swallowing stdout for
-    // exactly this reason), so the note has nowhere else to go.
+    fold_hook_outcome(cmd, inner, lane_note, claim_note)
+}
+
+/// Fold the inner outcome into an ok envelope — exit 0, no matter what.
+/// The check lane's note (if SessionStart or the PromptSubmit drain
+/// produced one — Stop itself never does, see the `phase == "stopped"`
+/// gate in [`hook_for_profile_gated`]) rides on the SAME message, separated
+/// by an em dash: this is the one text channel that actually reaches the
+/// harness (`hooks::door_command`'s claude wrapper stopped swallowing stdout
+/// for exactly this reason), so the note has nowhere else to go.
+fn fold_hook_outcome(
+    cmd: &str,
+    inner: Outcome,
+    lane_note: Option<String>,
+    claim_note: Option<String>,
+) -> Outcome {
     let note_for_data = lane_note.clone();
     let claim_for_data = claim_note.clone();
     let message = match (lane_note, claim_note) {
@@ -7675,6 +7690,183 @@ mod tests {
 
         assert_eq!(out.data.as_ref().unwrap()["gate"], "pending", "{}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A pruned spawner's id registered again is not the spawner. The protected
+    /// survivor keeps its edge to that id, but the prune dropped its spawn
+    /// stamp, so a send from the id's new holder is held pending. The first
+    /// send proves the stamp did autogate while the spawner stood.
+    #[test]
+    fn a_spawner_id_registered_again_after_a_prune_earns_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = unique_stage("send-pruned-spawner-reused");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("no-such-aoided.sock"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        let register_spawner = || {
+            do_session_start("P", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+            seal_test_session("P", me, "", &kp);
+        };
+        register_spawner();
+        // The survivor runs as a child of this process, so the sender walk from
+        // this process finds `P` and never the survivor.
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let wrap_pid = child.id() as i32;
+        let id = "survivor";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("P"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            Some(wrap_pid as u32),
+        );
+        stamp_attested_spawner(id, Some("P"));
+        seal_test_session(id, wrap_pid, "", &kp);
+        let load = |sid: &str| {
+            load_stage::<SessionsFile>(&sessions_path())
+                .unwrap()
+                .sessions
+                .into_iter()
+                .find(|s| s.session_id == sid)
+        };
+        assert!(crate::graph::identity::is_protected_live_wrap(&load(id).unwrap()), "control: protected");
+        let send = || {
+            deliver_local_with(
+                &send_invocation(&["go"], &[("id", id)]),
+                id,
+                test_resolver(kp.info().pubkey_hex.clone()),
+            )
+        };
+        let stamped = send();
+        assert_eq!(stamped.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", stamped.message);
+
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == "P").unwrap().state = "done".into();
+        write_stage(&sessions_path(), &file).unwrap();
+        let pruned = crate::graph::prune(&flag_invocation(&["session", "prune"], &[]));
+        assert_eq!(pruned.data.as_ref().unwrap()["removed"], json!(["P"]), "{}", pruned.message);
+        register_spawner();
+
+        let reused = send();
+        assert_eq!(reused.data.as_ref().unwrap()["gate"], "pending", "{}", reused.message);
+        assert_eq!(reused.data.as_ref().unwrap()["delivered"], false);
+        let survivor = load(id).expect("the protected survivor is kept");
+        assert_eq!(survivor.parent_session_id.as_deref(), Some("P"), "it keeps its edge");
+        assert_eq!(survivor.attested_spawner, None, "and the prune dropped its spawn stamp");
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A protected live wrap registered as this process, with its `hooks.json`
+    /// phase `stopped`, for the hook start tests below.
+    fn protected_wrap_for_hook_start(kp: &aoide_storage::identity::Keypair) {
+        let me = std::process::id() as i32;
+        do_session_start(
+            "wrap",
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some("/nonexistent/wrap.sock"),
+            None,
+            Some(me as u32),
+        );
+        seal_test_session("wrap", me, "", kp);
+        let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        crate::graph::upsert_hook(&mut hooks.hooks, "wrap", "stopped", &now_iso_utc());
+        write_stage(&hooks_path(), &hooks).unwrap();
+    }
+
+    /// The whole hook door's SessionStart on a protected wrap, with `cwd`: the
+    /// verdict is `inner`, and nothing lands after it. No `sessionStartAt`, no
+    /// `harnessSessionId`, no `contextCeiling`, no phase fold, and both roster
+    /// files byte-identical.
+    fn assert_a_protected_hook_start_lands_nothing(tag: &str, cwd: &str, inner: &str) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root(tag);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        protected_wrap_for_hook_start(&kp);
+        let sessions = std::fs::read(sessions_path()).unwrap();
+        let phases = std::fs::read(hooks_path()).unwrap();
+        let payload = format!(
+            r#"{{ "session_id": "wrap", "hook_event_name": "SessionStart", "cwd": "{cwd}", "context_ceiling": 200000 }}"#
+        );
+
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let out = hook_for_profile_gated(Door::Cli, claude, &payload, false, Some(me), None);
+
+        assert_eq!(out.data.as_ref().unwrap()["innerStatus"], inner, "{}", out.message);
+        let rec = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == "wrap")
+            .unwrap();
+        assert_eq!(rec.session_start_at, None, "no sessionStartAt");
+        assert_eq!(rec.harness_session_id, None, "no harnessSessionId");
+        assert_eq!(rec.context_ceiling, None, "no contextCeiling");
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), sessions, "sessions.json is byte-identical");
+        assert_eq!(std::fs::read(hooks_path()).unwrap(), phases, "the stopped phase is not folded");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refused_hook_start_on_a_protected_wrap_lands_nothing() {
+        assert_a_protected_hook_start_lands_nothing("hook-start-refused-lands", "/elsewhere", "Error");
+    }
+
+    #[test]
+    fn a_same_fields_hook_start_on_a_protected_wrap_lands_nothing() {
+        assert_a_protected_hook_start_lands_nothing("hook-start-no-op-lands", "/w", "Ok");
+    }
+
+    /// Spawn readiness reads the harness child's own record, never the wrap's,
+    /// so under a protected wrap the child's SessionStart still opens it.
+    #[test]
+    fn a_protected_wraps_harness_child_still_opens_readiness() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root("hook-start-protected-ready");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        protected_wrap_for_hook_start(&kp);
+        let since = now_iso_utc();
+
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = r#"{ "session_id": "harness-uuid", "hook_event_name": "SessionStart", "cwd": "/w" }"#;
+        hook_for_profile_gated(Door::Cli, claude, payload, false, Some(me), Some("wrap"));
+
+        let ready = crate::graph::wait_ready("claude", "wrap", &since, std::time::Duration::from_millis(500));
+        assert_eq!(ready, crate::graph::Ready::Verified);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
