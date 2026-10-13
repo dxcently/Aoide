@@ -3511,6 +3511,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **An answer cut short is a transport failure, not a forged one.** A door
+    /// that promises the whole signed body and closes halfway leaves curl with a
+    /// 200 and a fragment. Checked as an answer, that fragment would fail its
+    /// signature and blame the key; it is the link that failed, so the entry is
+    /// recorded `transport:` and no key mismatch is audited.
+    #[test]
+    fn an_answer_cut_short_is_a_transport_failure_not_a_key_mismatch() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("answer-cut-short");
+        let key = own_key();
+        spool_letter_to(
+            "elsewhere",
+            scripted_door(move |request| {
+                let whole = signed_reply(request, &key, 200, ACCEPTED);
+                whole[..whole.len() - ACCEPTED.len() / 2].to_string()
+            }),
+        );
+
+        drain_node("elsewhere").unwrap();
+
+        let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
+        assert!(!entry.refused, "{entry:?}");
+        assert!(entry.last_outcome.starts_with("transport:"), "{}", entry.last_outcome);
+        assert!(entry.last_outcome.contains("cut short"), "{}", entry.last_outcome);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(!log.contains("mail.answer.key-mismatch"), "a cut transfer blames no key: {log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **An answer bound to another request is refused.** The signature covers
     /// the request's own signature and nonce, so a genuine key signing over a
     /// different request's bytes has not answered this request.

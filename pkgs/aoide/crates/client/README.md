@@ -265,7 +265,11 @@ never the inbound/serve half (that's `aoide-server`).
   in the read loop itself, killing the child the moment the running total
   crosses the limit rather than waiting for it to finish. An over-cap
   response refuses with a taught error naming the cap; every existing
-  caller's own node/url context still wraps it, unchanged. `run_curl_capped`
+  caller's own node/url context still wraps it, unchanged. curl's exit status
+  is read too: a transfer it did not finish (a status came back, then the far
+  side closed early or the clock ran out mid-body) is a transport failure,
+  never a fragment handed on as a body, and a dial that never connected keeps
+  its `could not reach the agent` wording. `run_curl_capped`
   / `post_json_capped` are the same transport with the cap STATED by the
   caller, and the watch frame is their one caller today
   (`FRAME_MAX_RESPONSE_BYTES`, 512 KiB): the far door bounds a frame to

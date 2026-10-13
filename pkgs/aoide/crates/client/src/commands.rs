@@ -173,7 +173,7 @@ fn run_curl_capped(
         }
     }
     drop(stdout_pipe);
-    let _ = child.wait(); // exit status was never checked before this fix either — %{http_code} below is the real signal
+    let exit = child.wait();
     let stdout = String::from_utf8_lossy(&buf);
     let (body, code_str) = match stdout.rsplit_once('\n') {
         Some((b, c)) => (b, c.trim()),
@@ -185,7 +185,17 @@ fn run_curl_capped(
     if code == 0 {
         return Err("could not reach the agent (connection failed or timed out)".to_string());
     }
-    Ok((code, body.to_string()))
+    // A status came back, but curl did not finish the transfer (the far side
+    // closed early, the clock ran out mid-body, its own size cap): the body is
+    // a fragment, so it is a transport failure and never an answer to read.
+    match exit {
+        Ok(status) if status.success() => Ok((code, body.to_string())),
+        Ok(status) => Err(format!(
+            "the answer was cut short (curl exit {}): the transfer did not complete",
+            status.code().map_or_else(|| "by signal".to_string(), |c| c.to_string())
+        )),
+        Err(_) => Err("curl failed (its exit could not be read)".to_string()),
+    }
 }
 
 // ── Outbound bearer presentation (task #84) ──────────────────────────────────
