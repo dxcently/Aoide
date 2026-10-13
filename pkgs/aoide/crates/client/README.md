@@ -470,7 +470,12 @@ never the inbound/serve half (that's `aoide-server`).
   entry stays live and the link backs off), and `Unauthenticated(reason)` (an
   answer that did not verify under the key on file: nothing in it is read, so
   the entry is recorded `unauthenticated:`, neither settled nor parked, and the
-  link backs off). `drain_node`'s loop walks up
+  link backs off). The one thing an unsigned answer contributes is what it
+  said, for the operator: its `error.message`, else its result's `reason`
+  (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
+  and clipped to 120 characters before it reaches the entry, the link record
+  or the refusal, and labelled `(it said: …; not acted on)`. `drain_node`'s
+  loop walks up
   to `DRAIN_BATCH_CAP` (50) non-refused entries oldest first — a per-call
   bound so one tick's cost never scales with an unbounded backlog (mail
   register §26 outbox fix; a stuck link that had piled up 16k+ undelivered

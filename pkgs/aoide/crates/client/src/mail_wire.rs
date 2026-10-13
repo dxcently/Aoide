@@ -118,10 +118,27 @@ fn audit_answer(event: &str, message: &str) {
     );
 }
 
-/// The JSON-RPC `error.message` of a body that is one, for the refusal text of
-/// an unsigned answer. Shown to the operator and never acted on.
-fn rpc_error_message(body: &str) -> Option<String> {
-    serde_json::from_str::<Value>(body).ok()?.get("error")?.get("message")?.as_str().map(str::to_string)
+/// The most of a far door's own words an unsigned answer's refusal carries, in
+/// characters.
+const SAID_MAX: usize = 120;
+
+/// What an unsigned answer said, for its refusal text: the JSON-RPC
+/// `error.message`, else the result's `reason` (a door's `config-invalid` is a
+/// refused result, not an error, and is the far end's word that its own config
+/// is broken rather than old). Shown to the operator and never acted on. The
+/// words are a stranger's, and they are written into the entry's
+/// `last_outcome` and the link record that `mail outbox` prints, so they are
+/// cleaned of every character [`aoide_protocol::untrusted::is_unsafe`] refuses
+/// and clipped to [`SAID_MAX`].
+fn unsigned_said(body: &str) -> Option<String> {
+    let answer: Value = serde_json::from_str(body).ok()?;
+    let said = answer
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .or_else(|| answer.get("result").and_then(|r| r.get("reason")))?
+        .as_str()?;
+    let said = aoide_protocol::untrusted::clip_flat(&aoide_protocol::untrusted::strip_unsafe(said), SAID_MAX);
+    (!said.is_empty()).then_some(said)
 }
 
 /// Build, sign and send one method call to `node`, mirroring
@@ -194,7 +211,7 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
     let signature = match signatures.as_slice() {
         [one] => *one,
         [] => {
-            let said = rpc_error_message(&answer.body).map(|m| format!(" (it said: {m}; not acted on)")).unwrap_or_default();
+            let said = unsigned_said(&answer.body).map(|m| format!(" (it said: {m}; not acted on)")).unwrap_or_default();
             let msg = format!(
                 "`{}` answered `{method}` with no answer signature (X-Aoide-Answer-Signature), so nothing in it was \
                  used: an aoide older than this box's answers unsigned, and so does anything else standing at {} — \
@@ -3573,6 +3590,55 @@ mod tests {
         assert!(!entries[0].refused, "an error nobody signed parks nothing");
         assert!(entries[0].last_outcome.starts_with("unauthenticated:"), "{}", entries[0].last_outcome);
         assert!(entries[0].last_outcome.contains("lacks message"), "{}", entries[0].last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **What an unsigned answer said is kept inert.** Its words reach the
+    /// entry's `last_outcome` and the link record, which `mail outbox` prints,
+    /// so a carriage return, an escape sequence and a bidi override are gone,
+    /// and a 10 KB message is clipped to [`SAID_MAX`] characters.
+    #[test]
+    fn an_unsigned_answers_words_are_cleaned_and_clipped_before_they_are_kept() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-words-inert");
+        let words = format!("over\rwritten \u{1b}[2J\u{1b}]0;title\u{7}cleared \u{202e}desrever {}", "x".repeat(10_000));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": words } }).to_string();
+        spool_letter_to("elsewhere", scripted_door(move |_| reply_with(&body, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
+        let link = aoide_storage::outbox::read_link_state("elsewhere").unwrap().expect("the link backs off");
+        for kept in [&entry.last_outcome, &link.last_outcome] {
+            assert!(kept.starts_with("unauthenticated:"), "{kept}");
+            assert!(!kept.chars().any(aoide_protocol::untrusted::is_unsafe), "no control, escape or bidi character is kept: {kept:?}");
+            let said = kept.split_once("(it said: ").and_then(|(_, rest)| rest.strip_suffix("; not acted on)")).expect("labelled");
+            assert!(said.starts_with("overwritten [2J]0;titlecleared desrever x"), "{said:?}");
+            assert_eq!(said.chars().count(), SAID_MAX, "clipped: {said:?}");
+            assert!(said.ends_with('…'));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A config-invalid answer says so.** The far end's own word for a config
+    /// it cannot load is a refused result, not a JSON-RPC error. Unsigned, it is
+    /// still not acted on, but the operator sees the word, so a broken config is
+    /// not read as an old aoide.
+    #[test]
+    fn an_unsigned_config_invalid_answer_shows_the_far_ends_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-config-invalid");
+        let body = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"config-invalid","detail":"this host's declaration will not load"}}"#;
+        spool_letter_to("elsewhere", scripted_door(move |_| reply_with(body, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
+        assert!(!entry.refused, "{entry:?}");
+        assert!(entry.last_outcome.starts_with("unauthenticated:"), "{}", entry.last_outcome);
+        assert!(entry.last_outcome.ends_with("(it said: config-invalid; not acted on)"), "{}", entry.last_outcome);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

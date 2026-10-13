@@ -704,7 +704,10 @@
 - **Every mail answer is verified before it is read.** `post_signed` is the one
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a
-  response directly.
+  response directly. What an unsigned answer said reaches the refusal, the
+  entry and the link record only through `unsigned_said`, which cleans it
+  with `aoide_protocol::untrusted` and clips it to `SAID_MAX`; never format
+  the raw body's words into a stored outcome.
 - **`drain_node` reads the link's back-off before the binding exchange.** The
   exchange is a dial, and an unsigned answer to it is an audit line; above the
   back-off it would cost both on every daemon tick for as long as the link is
