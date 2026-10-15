@@ -10,7 +10,12 @@ the inbound half of the two-door contract (the outbound half is
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`
-  execs: bind the control socket
+  execs: lock `state/` owner-only first (`tighten_state_tree`, refusing to
+  start when it cannot; CONTRACTS.md §4), then take the socket lock
+  `<socket>.lock` (`daemon::acquire_daemon_lock`) and the state lock
+  `aoided.lock` in the state dir (`daemon::acquire_state_lock`), both
+  non-blocking `flock`s held for the process's life, so a held lock
+  refuses the start before anything is bound. Then bind the control socket
   (`$AOIDE_DAEMON_SOCKET`, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`,
   `daemon::socket_path`), spawn a thread-per-connection accept loop
   (fallible `Builder::spawn`, accept-error backoff — the secrets broker's
@@ -129,16 +134,18 @@ the inbound half of the two-door contract (the outbound half is
   `daemon::mint_seal(session_id, pid, origin_class)` builds a
   `SealedIdentity` (reading `pid_starttime` via `aoide_conduct::
   graph::pid_starttime`, no second `/proc` parse) and signs it under that
-  key (`aoide_storage::sealed_id::mint_seal`). `handle_conn`'s `dispatch`
-  op calls `daemon::seal_freshly_registered_session` right after a
-  successful `session start` dispatch: if the just-written record already
-  carries a `pid` (today, only `session_conduct`'s own direct
-  registration does — the bare wire path does not), it mints a seal and
-  stamps it via `aoide_conduct::graph::stamp_seal`. **This is honest
-  scaffolding, not a security boundary**: the pid sealed over is
+  key (`aoide_storage::sealed_id::mint_seal`), and returns the starttime it
+  signed over as well. `handle_conn`'s `dispatch` op calls
+  `daemon::seal_freshly_registered_session` right after a successful
+  `session start` dispatch: if the just-written record already carries a
+  `pid` (today, only `session_conduct`'s own direct registration does — the
+  bare wire path does not), it mints a seal and stamps it, with that
+  starttime as `sealedPidStarttime`, via `aoide_conduct::graph::stamp_seal`.
+  The start door (`aoide_conduct::graph::session_start`) decides a start on a
+  protected wrap, and it never reads the signature. **This
+  is honest scaffolding, not a security boundary**: the pid sealed over is
   whatever the record already carries, not yet a peercred-verified
-  CONNECTING pid, and nothing anywhere reads `seal` back to gate a
-  decision. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
+  CONNECTING pid. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
   own README for the full mechanism.
 - **The dispatch socket's own accept gets a cross-uid floor, and two
   attribution leaks close (LANE IDENTITY P-ID3).** `daemon::accept_loop`

@@ -825,10 +825,8 @@ count.
   snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
   running re-execs with `--yes --submit` (never for a recorded `sudo …`,
-  which only restores the cwd); an idle session's clean unsubmitted
-  `typed` line preloads with `--yes` and permanently no `--submit`,
-  so it sits in the new prompt until a human presses Enter; idle with no
-  `typed` delivers nothing. Also the command core the daemon's own boot-time
+  which only restores the cwd); an idle session delivers nothing, its cwd
+  alone is restored. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -1113,9 +1111,12 @@ interleave on the wire.
 
 `aoided`'s own control socket (`$AOIDE_DAEMON_SOCKET`, else
 `$XDG_RUNTIME_DIR/aoide/aoided.sock`, `0600` user-private — no cross-uid
-audience) speaks the secrets wire's framing verbatim: one newline-delimited
-JSON request line → zero or more interim lines (`"interim":true`) → exactly
-one final reply line. Three ops, a closed set:
+audience) is owned by the holder of two exclusive `flock`s, `<socket>.lock`
+and `aoided.lock` in the state dir, for that process's life. A second
+`aoided` refuses to start rather than replace either (`docs/architecture/
+AOIDED.md` "Socket"). It speaks the secrets wire's framing verbatim: one
+newline-delimited JSON request line → zero or more interim lines
+(`"interim":true`) → exactly one final reply line. Three ops, a closed set:
 
 ```json
 {"v":0,"op":"ping"}
@@ -1177,6 +1178,30 @@ applied to the stage tree itself):
   tree — the `aoide`/`aoided` binaries alone read and write it, never
   `lyra`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
   never writes it.
+
+`state/` is owner-only and is the privacy boundary for everything under it;
+file and subdirectory modes inside it are not relied on. Every storage write
+under it locks `state/` first, and `aoided` does the same before it binds,
+refusing to start when it cannot. Under is judged by where the write lands,
+so a path through a symlinked alias or with a `..` in it counts when the
+kernel puts it inside `state/`. The lock refuses, before any chmod, a
+`state/` that is relative, whose path has a `..` in it, or that is a symlink
+(the open never follows the last component). It also refuses a filesystem
+root, and a home directory or one of its parents. Those are judged on
+canonical paths, and again on the directory the open returns, so a symlinked
+home is protected by its real path. Every home a run could mean is guarded
+together: a non-empty `$HOME`, the passwd home of the effective uid, and
+`/home/$AOIDE_USER` when `$AOIDE_USER` is set. A `state/` the OS will not make
+`0700` fails the write and names the path and the fix: a chmod when this user
+owns it, a chown when another user does. Start-up locks a `state/` that
+exists, and a tree the start-up migration moves into `state/` is locked there
+too; when it cannot be, `aoide`, `aoided` and `lyra` exit on every run rather
+than read it, the run that moved the tree and each run after. On Windows the
+boundary holds only for a `state/` aoide created: an existing one is never
+re-tightened.
+
+The boundary is against other users. A process running as the same user reads
+and writes all of `state/` whatever its mode, and nothing here stops it.
 
 **The runtime root (L-C2, lyra-carrier lane, task #107).** Every runtime
 tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,
@@ -2185,13 +2210,15 @@ outside this proof, each under its own rule. `aoide send` and `aoide spawn
 --prompt` passes `--yes`, so no human approves it); the caller is whatever process
 ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
-boot resurrect retypes a shell's own recorded line, never for `sudo`
-(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
-that execs a shell, passes it. It rejects the launchers the walk does not model
-and a label that does not match the wrap. It does not stop a same-uid process
-that names a shell after a harness; for that class the defence is inert content,
-since every line takes one pass as it is written (`wire_line`), and every shell
-metacharacter in it is made inert, with `!` and `"` among them.
+boot resurrect re-executes a session's recorded foreground command with Enter,
+never for `sudo`; an idle session gets its cwd only, with nothing typed
+(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated
+as one: a symlink named `claude` that points at `bash`, or a script named
+`claude` that execs a shell, passes it. It rejects the launchers the walk does
+not model and a label that does not match the wrap. It does not stop a same-uid
+process that names a shell after a harness; for that class the defence is inert
+content, since every line takes one pass as it is written (`wire_line`), and
+every shell metacharacter in it is made inert, with `!` and `"` among them.
 
 The refusals, in order, are `conduct.rs::auto_type_refusal`'s: a shell first
 (`agent` `""` or `shell`, a `restore` snapshot, or a `wrappedProgram` that is a
@@ -2227,9 +2254,13 @@ registration (a parent counts when its pid is really above the registering
 process, or it is the agent whose `hookAncestry` matched; a registration made
 after the spawner returned, such as a detached spawn that was reparented to
 init first, has no ancestry left and gets no stamp), and holds the id itself
-rather than a flag: `parentSessionId` can be rewritten by a bare `session start --parent` with no evidence at all, and a
-reader trusts the edge only while `attestedSpawner == parentSessionId`. It
-exists because a detached `aoide spawn` leaves its child reparented to init, so
+rather than a flag. Every writer of `parentSessionId` goes through one setter,
+which drops the stamp whenever the edge moves to a different id or to none, so a
+stamp names only the edge it was minted for. The send gate's parent and sibling
+autogate read the pair (`attestedSpawner == parentSessionId`). The hook door's
+sealed-ancestry walk moves a hook-registered record's edge without attesting it,
+and never moves a conducted wrap's edge.
+It exists because a detached `aoide spawn` leaves its child reparented to init, so
 the ancestry cannot be re-derived later. Absent for every parent the kernel did
 not back (an explicit `--parent` or ambient `AOIDE_SESSION_ID` naming a session
 the registering process does not run beneath, and every wrap registered by
@@ -2466,10 +2497,14 @@ infers it from the `agent` string: `agent` (a Claude/agent session), `shell`
 (a conducted terminal), `subagent` (a Task the agent spawned — a leaf of the
 conductor tree, its own child record with its own harness-native-subagent
 classifier, parented to the harness session from the hook payload, closed on
-its own stop event and swept if its parent ends), `a2a` (§6 — an external
-A2A agent folded into the session DAG), or `app` (a task inside an app aoide
-does not conduct — e.g. a desktop Codex/ChatGPT thread, keyed by the app's
-own native thread id, `agent:"codex"`, `state:"idle"` at enrolment and
+its own stop event and swept if its parent ends; its id is `sub:<tool_use_id>`
+or `sub:<agent_id>`, and the `sub:` prefix is reserved to the hook door's
+sub-agent arms: `conduct`, `spawn`, `session start` and a hook's SessionStart
+refuse an id under it with reason `reserved-id`, and the eidolon and Codex-app
+reconcilers, which read their ids off disk, enrol none under it), `a2a` (§6 —
+an external A2A agent folded into the session DAG), or `app` (a task inside an
+app aoide does not conduct — e.g. a desktop Codex/ChatGPT thread, keyed by the
+app's own native thread id, `agent:"codex"`, `state:"idle"` at enrolment and
 thereafter `working`/`idle` read off its own rollout's turn bracket by the
 capture merge (`codex_app.rs::apply_codex_capture`), never `awaiting`; no
 `agent` profile, hook, `conductable`, or `socket` exists for it). `app` is explicitly
@@ -2591,14 +2626,15 @@ forms and round-trip fields they do not know.
 carry an optional `sessionStartAt` (string, ISO-8601 UTC) — WHEN that
 harness's own `SessionStart` hook was recorded for this record. One writer:
 the hook door's `SessionStart` arm (`send.rs`), on every SessionStart a
-resume included. It exists so a launch can tell "this harness said hello, to
-THIS launch" from "a record exists, from some earlier run": `aoide spawn
---prompt`, `resurrect`'s restore delivery and the A2A door's opening turn all
-wait on a child record of their wrapper carrying a stamp at or after their
-own start instant, and an unstamped (or older-stamped) leftover under a
-reused id is not readiness. Absent means "this harness's hooks never claimed
-this record" — never a readiness fact; readers must tolerate both forms and
-round-trip fields they do not know.
+resume included, except one judged on a protected live wrap, which writes
+nothing (rule 2 below). It exists so a launch can tell "this harness said
+hello, to THIS launch" from "a record exists, from some earlier run":
+`aoide spawn --prompt`, `resurrect`'s restore delivery and the A2A door's
+opening turn all wait on a child record of their wrapper carrying a stamp at
+or after their own start instant, and an unstamped (or older-stamped)
+leftover under a reused id is not readiness. Absent means "this harness's
+hooks never claimed this record" — never a readiness fact; readers must
+tolerate both forms and round-trip fields they do not know.
 
 **Additive in v0 (A2A opening turn, 2026-09-26):** a session record MAY also
 carry an optional `openingTurn` (string) — what became of the first turn the
@@ -2628,7 +2664,9 @@ harness's OWN session id, straight off the raw hook payload's own
 `session_id` field. Stamped by `aoide session hook` on EVERY event
 that carries one — not only at registration, and not gated on whether the
 event maps to a graph action at all (an event the door has no other use for
-still stamps it, as long as a record with that id already exists) — and
+still stamps it, as long as a record with that id already exists, and bar an
+event that names a protected live wrap, which the door ignores whole, rule 2 of
+"Same-uid processes and the live sealed wrap" below) — and
 regardless of whether it equals this record's own `sessionId` (for a
 hook-registered record the two values are the same today, since the record's
 own id is minted FROM this field; the field is still stamped unconditionally
@@ -2723,8 +2761,17 @@ stamped alongside `seal` in the SAME call. `sealedIssuedAt` exists because
 `issuedAt` has no live fact a verifier can re-derive it from (unlike
 `pidStarttime`, below): without storing it, checking a signature would mean
 brute-forcing every plausible mint instant, which P-ID1's own original test
-suite did as a test-only expedient before this field existed. Both fields
-share ONE lifecycle — always `Some` together, always `None` together.
+suite did as a test-only expedient before this field existed. `seal` and
+`sealedIssuedAt` share ONE lifecycle — always `Some` together, always `None`
+together. `sealedPidStarttime` (number, additive) is the `pidStarttime` above
+in plain text, and `sealedBootId` (string, additive) is the kernel's boot id at
+seal time (`/proc/sys/kernel/random/boot_id`; the constant `windows` on Windows,
+see "Platform" below). Both are stamped in the SAME call
+as `seal`. They are the protection fact for a conducted wrap (see "Same-uid
+processes and the live sealed wrap" below). Neither is authenticated, so a
+same-uid writer can set or clear them. A record that lacks either one predates
+the field, or had no readable boot id, and is never protected. Nothing
+backfills them.
 **`sessionId`/`originClass` ride VERBATIM — no trim, no case-folding**
 (review fix: the original shape copied `wire_auth::canonical_string`'s
 trim+lowercase wholesale, but `sessionId` is the session store's own
@@ -2761,19 +2808,186 @@ sealed id>` is refused: a conducted id is born once, and a restart registers a
 fresh id. Sealing happens once per record: `everSealed` (bool, additive,
 set by `stamp_seal`, never cleared) bars the daemon — both the tick and the
 dispatched-`session start` path — from sealing a record that ever carried a
-seal, so a seal that goes missing can never be re-minted over another pid. A
-dispatched `session start --id <id>` is refused BEFORE it runs (taught error,
-`seal_refused` event on the events feed) when the record is sealed over a live
-pid that no longer verifies; a sealed record whose process merely died is
-not refused, and is not re-sealed.
+seal, so a seal that goes missing can never be re-minted over another pid.
+A `session start --id <id>` on a protected live wrap is decided by the start
+door itself, after the daemon hop, by rule 2 below, so no daemon, daemon key or
+`AOIDE_DAEMON_SOCKET` decides it. A record whose pid was reused, whose process
+has ended, or that is not a conducted wrap is not refused, and is not re-sealed.
 
-**Open, and not this lane's** (the same-uid trust question, identity OQ1-A /
-P-ID3, awaiting a design decision): `session end` plus `session prune` delete
-a LIVE sealed wrap's record, after which its id can be re-registered and
-sealed over another process; `session start --id C --parent X` rewrites a
-parent edge and so can forge the autogate-parent relation; and a same-uid
-process can hand-edit `sessions.json` (the hand-edit watcher reports it, and
-nothing here stops it).
+**Same-uid processes and the live sealed wrap.** The rules in this section are
+read by the CLI's own doors. They are not a boundary against a process that runs
+as the operator. Assume an infected agent is already on the box and in the
+mesh: it can run any command the operator can, and nothing below stops it.
+
+A record is a *protected live wrap* only when all six hold.
+`identity::is_protected_live_wrap` is the one predicate that decides it, and
+every refusal below asks it:
+
+```
+conductable == true
+seal present
+sealedPidStarttime present and nonzero
+sealedBootId == this boot's id (/proc/sys/kernel/random/boot_id)
+pid alive: /proc/<pid>/stat state is not Z or X (read with the starttime)
+sealedPidStarttime == the live pid's current starttime (field 22)
+```
+
+No key, no daemon socket, and no signature check sit on this path. A daemon
+restart, or an `AOIDE_DAEMON_SOCKET` that answers nothing, cannot lift it. It
+holds while the process with that pid and start time lives, whatever the daemon
+can verify. A zombie (exited, not yet reaped) is not alive, and a record from an
+earlier boot is never protected.
+
+Platform: the predicate works on Linux, and on Windows through its own arm. On
+other unixes `pid_starttime` is `None`, so nothing is protected there. On
+Windows `sealedBootId` is the constant `windows` (`attest::boot_id`), so that
+clause always holds and is not a boot check. The Windows starttime is the
+process's absolute creation `FILETIME`, unique per process instance, so an
+earlier boot's value cannot match a live process; the starttime clause carries
+the check there. Rated low.
+
+Three rules hold, each on the doors named:
+
+1. *A protected live wrap is ended only by its own exit.* `session end`, a
+   `session phase` carrying a terminal token (`exit`, `finished`, `complete`,
+   `done`), and `session prune` refuse it with a taught error that names the
+   wrap and `aoide session kill --id`; prune keeps the record and reports it as
+   held. A hook's `SessionEnd` naming it is ignored like every hook that names
+   it (rule 2), and leaves the record to its own exit. The reaper spares it
+   whichever liveness signal named it. The wrap's
+   own exit path, and the reaper once the pid is gone, end it. A record that is
+   dead, unsealed, not conducted, or whose starttime or boot does not match ends
+   as it always has.
+2. *A protected live wrap is re-registered only as it is, and no hook reports
+   under its id.* The start door
+   (`session start --id`) and the harness hook's SessionStart (`session hook`,
+   `do_hook_session_start`) are one act, judged once before any write
+   (`live_wrap_verdict`). It compares four fields of the wrap: `agent`, `cwd`,
+   `window` and `parent`. A start that supplies none of them differently answers
+   `ok` and writes nothing, so a harness may register again (`--agent`,
+   `--cwd`) and keep the seal and the starttime. A start that would change one
+   is refused with reason `live-sealed-wrap` and writes nothing. A refused hook
+   start also appends an audit line on the door the hook arrived on, since the
+   hook discards its outcome at one call site. The daemon route and the direct
+   route run the same check. `session bind` follows the same shape for
+   `enduringAgentId`: the first bind writes it, the same value is a no-op, and a
+   different value is refused as `conflicting-binding`, as on every record.
+
+   On the hook door that covers the whole SessionStart arm. A hook start
+   judged on a protected wrap, refused or not, leaves `sessions.json` and
+   `hooks.json` as they were: no `sessionStartAt`, `harnessSessionId`,
+   `contextCeiling`, `hookAncestry` or `kind`, no phase fold, and no
+   check-lane run. Spawn readiness (`wait_ready`) never reads the wrap's own
+   `sessionStartAt`: it reads the harness child's record under the wrap.
+
+   `window` counts as a change even from empty, so a protected wrap stored with
+   no window refuses a hook that discovers one.
+
+   Every other hook arm refuses the same record outright. A harness never
+   reports under its wrap's own id: what a wrap hosts is a hook child, which
+   reports under an id of its own. So a hook whose payload `session_id` names a
+   protected live wrap is ignored whole, whatever its event, before any arm
+   runs, and answers `no-op (live-sealed-wrap)`. That covers a phase, a
+   permission prompt (which would otherwise raise the herald's approve/deny
+   card, carrying the payload's text, for the wrap), a tool start or end, a
+   sub-agent event, a session end and an event the profile does not map. None
+   of them writes a phase, `contextCeiling`, `harnessSessionId`, a window, a
+   chain, a sub-agent node or an end, and none raises a summons. Each is
+   audited on the door the hook arrived on, naming the wrap and never the
+   payload. SessionStart is the one event left to its arm, which judges it
+   field by field against the same record (`session_store::protected_wrap`) and
+   writes nothing either way, as above. A harness child's hooks name the child,
+   so they are unaffected, and so is the readiness that reads the child.
+
+   That guard reads `session_id` alone. A sub-agent event also names a
+   `sub:<id>` through `tool_use_id`, `parent_tool_use_id` or `agent_id`, and a
+   wrap registered under the prefix before it was reserved is still a protected
+   wrap. The four writers those fields reach (a sub-agent spawn, end and
+   re-key, and an owner's phase and activity) each skip an id that names one,
+   so a forged payload cannot re-kind, rename, drop or write to it. A re-key is
+   judged on its source id.
+
+   The hook chain (`hookAncestry`) is not one of the four fields, and on a
+   conducted wrap it routes nothing: the ping-back's hook source never tracks a
+   conducted record (`pingback/hook.rs`, `tracked`), whatever chain it carries.
+   A rule on when a protected wrap's chain may change would guard nothing.
+3. *The autogate reads only the spawn-time edge.* A target's parent counts for
+   the parent-of-target and sibling rules only where its `attestedSpawner` names
+   that parent (§ `sessions.json`). A bare `session start --parent`, a `graph
+   link`, or a moved edge earns no autogate: the send is held pending. `graph
+   link` refuses a protected wrap as its child, with reason `live-sealed-wrap`.
+   The hook door attests nothing, and it never moves a conducted wrap's edge.
+   When a prune or a reap drops the record a protected wrap's edge names, the
+   wrap keeps `parentSessionId`, since it is alive, and loses `attestedSpawner`,
+   as a moved edge does. A later registration under that id is not the spawner,
+   and a send from it is held pending. Graph placement treats the missing parent
+   as none and falls back to project anchoring.
+
+   A sub-agent record leaving the roster (a sub-agent end, a re-key, or the
+   cascade of its owner's end) leaves no stamp to drop. A `sub:` record is never
+   a spawner: `conduct`, `spawn`, `session start` and a hook's SessionStart
+   refuse the prefix and the native-id reconcilers skip it (the `kind` field
+   above), so a sub-agent node is made only by the sub-agent hooks, and
+   `spawner_is_attested` stamps a parent only when its pid stands in the
+   registering process's ancestry or its hook chain covers it, which a
+   sub-agent node, with neither, does not have. A re-key still never
+   re-parents a protected wrap.
+
+**Who can set the marker.** `sealedPidStarttime` and `sealedBootId` are written
+in one place, `stamp_seal`. Two callers reach it: the daemon's tick, and the
+daemon's mint after a successful dispatched `session start`
+(`seal_freshly_registered_session`, `server/src/daemon.rs`). So a CLI `session
+start`, routed through the daemon, can seal a record that carries a pid and no
+seal. The mint does not set `conductable`, and the predicate needs it, so only a
+conduct registration or a hand edit makes a protected wrap. A hand edit of
+`sessions.json` can do all of it: it can give ANY live same-uid process's
+record `conductable`, a `seal`, that process's starttime, and this boot's id,
+and that record is then protected
+from end, prune, phase, and start until the process exits. It can also clear
+the fields and unprotect a live wrap. Neither is stopped. The marker is unkeyed
+by design: the seal's key is the grant side's concern, not this one's.
+
+The seal proves one thing: `aoided` saw pid P at starttime S when it minted. It
+does not prove where the wrap came from. The tick seals every unsealed,
+pid-bearing, live record it finds, including one a hand wrote, so a hand-edited
+roster is NOT a barrier. The real fix is the daemon-owned session identity
+(stance B), specified in `docs/architecture/SESSION-IDENTITY.md` on branch
+`design/session-identity-b`. That file is not in this tree, and it is not built.
+
+**The accepted loss.** A protected wrap whose seal no longer verifies, because
+`aoided` restarted and minted a new key, stays protected. It ends only when its
+process exits. Its `aoide session kill` and its autogate still verify the seal,
+so they refuse it until it registers again. A legacy record, with no
+`sealedPidStarttime` or no `sealedBootId`, is never protected. Nothing backfills
+it.
+
+**What a same-uid process can still do.** None of these is stopped. The daemon
+checks none of them, and an infected agent can do each one.
+
+- Signal the wrap's own process. `SIGKILL` ends a wrap whatever its record says:
+  the marker protects the record, not the process.
+- Hand-edit `sessions.json`, as described above. The hand-edit watcher reports
+  it; nothing stops it. `parentSessionId` and `attestedSpawner` are not under
+  the seal, which covers only `sessionId`, `pid`, start time, `origin`, and
+  `issuedAt`.
+- Rewrite a record that is not protected through `session start`. The seal
+  covers none of `agent`, `cwd`, or `window`.
+- Name a different daemon. The grant side (`session kill`, the autogate, the
+  broker's origin gate) reads its key from the caller's `AOIDE_DAEMON_SOCKET`.
+  Pointed at a socket that answers nothing, those grants refuse, which is fail
+  closed. Pointed at a fake daemon, a process can pass only a seal its own key
+  signed, and that needs a hand-edited roster, already listed above.
+- Keep a window-gone wrap live. This is the cost of the reaper rule: a wrap whose
+  window has vanished, but whose process still lives, stays live and deliverable
+  until that process exits.
+- Speak in the mesh. The grant side gates sends (`send.rs`). A send it admits
+  carries whatever text its sender chose, and nothing here limits that text.
+
+This is an accident guard for the cooperating CLI paths. It stops a process that
+is not hostile, or a bug, from ending or rewriting a live wrap by mistake. It is
+not a containment boundary against an infected agent on the box. The
+predicate reads no daemon state. The grant rules (`session kill`, the autogate,
+the broker's origin gate) read the daemon's key.
 
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)
@@ -2805,15 +3019,12 @@ beside it in the same module, shared by the send gate and the secrets
 broker's origin gate — the credential's consumers, see the "Secrets home"
 section's origin-gate paragraph for the second one). **This channel is
 only as trustworthy as the daemon socket's same-uid exclusivity, and under
-OQ1-A that is NOT attacker-proof**: `bind_socket` unlink-then-binds with
-no `flock`/pidfile guard, so a same-uid attacker can already race or evict
-the real listener and bind its own in its place, serving a forged
+OQ1-A that is NOT attacker-proof**: the open hole (`docs/architecture/
+AOIDED.md` "Socket") lets a same-uid process serve a forged
 `sealPubkeyHex` from an impostor `ping` reply. **P-ID3's dispatch-socket
-peercred floor does NOT close this** — it is a CROSS-uid floor (see
-below); a same-uid attacker racing or evicting the real listener is by
-definition the SAME uid the floor admits, so this residual is
-OQ1-A-inherent and stays open (a `flock`/pidfile guard on `bind_socket`
-would be the actual fix, not attempted here). This buys the attacker
+peercred floor does NOT close this** — it is a CROSS-uid floor (see below);
+a same-uid attacker is by definition the SAME uid the floor admits, so this
+residual is OQ1-A-inherent and stays open. This buys the attacker
 nothing beyond the door already open (the raw per-session socket a
 same-uid process can already connect to directly, OQ1-A-inherent): the
 seal's value is against a caller that follows its OWN tooling honestly
@@ -2978,7 +3189,7 @@ captured restore snapshot, written change-only by `aoide-conduct`'s PTY
 tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 
 ```json
-"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null, "typed": "cargo test -p aoide-conduct" }
+"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null }
 ```
 
 - `cwd` — the shell's live working directory at the last tick (`None` when
@@ -2994,15 +3205,15 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.
-- `typed` — the reconstructed unsubmitted prompt line, REFUSAL-based: `Some`
-  only for a clean, unedited keystroke run since the last submit (bytes from
-  BOTH real stdin and an injection connection count, since both land in the
-  same shell readline buffer); any readline-editing byte (an escape
-  sequence, `^R`, Tab, `^U`/`^W`) or invalid UTF-8 poisons it to `None`
-  instead of guessing. Only ever populated when `idle` is true — a shell
-  mid-command has no prompt line. A silently WRONG `typed` would put text
-  the operator never composed one keystroke from running; `None` is a fully
-  acceptable product of this capture, a guess is not.
+
+A record that still carries a `typed` key inside `restore` loads with that
+key dropped; no writer emits it.
+
+`argv` and the session log (`state/sessions/<id>.log`) are a terminal record,
+like shell history: a secret written on a command line is stored with `argv`,
+here and in the ledger line, and whatever the pty echoed is in the log. The log
+holds the pty's output only, so input a program reads with echo off never
+reaches it. Both are private to the user under `state/`.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like
@@ -4462,7 +4673,7 @@ this field existed, tolerated on read the same as any other field here).
 
 `restore` (P-C5, durable-sessions plan) is `null` for every non-shell
 session and every line predating this field, and otherwise the SAME
-`{cwd, idle, argv, typed}` object `sessions.json`'s own `restore` field
+`{cwd, idle, argv}` object `sessions.json`'s own `restore` field
 carries (see above) — projected verbatim off `SessionRecord.restore` at the
 exact instant `ledger_session_exit` appends this line, never re-derived and
 never a `/proc` read here: the reap sweep's own ordering

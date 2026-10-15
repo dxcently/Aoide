@@ -116,6 +116,20 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   allowlist a review-blocking violation; a new per-command policy need is
   proved by a failing test against the EXISTING handler's `inv.door`
   branch, never by a new table in this crate.
+- **`daemon::run_loop` takes two locks before `bind_socket`, and a held lock
+  is a refusal, never a takeover.** `acquire_daemon_lock` (`<socket>.lock`:
+  one daemon per socket) runs first, then `acquire_state_lock`
+  (`aoided.lock` in `state_dir()`: one daemon per root), directly before
+  `bind_socket`. Both go through `take_daemon_lock`, a non-blocking
+  `flock` via `aoide_storage::fs::try_lock_exclusive`. Each `File` lives for
+  the whole `run_loop` (`let _socket_lock`, never `_`: dropping one early
+  re-opens the hole). `bind_socket`'s unconditional stale-socket unlink is
+  safe only behind both. `serve_daemon` takes neither lock because only tests
+  call it. New startup work that prepares the socket's directory goes after
+  the socket lock. `bin/aoided.rs` runs `migrate_root_once` before
+  `run_loop`, so the state lock resolves under the migrated root; moving the
+  migration after the locks would mean splitting `run_loop`, and was not done.
+  The open hole is named once, in `docs/architecture/AOIDED.md` "Socket".
 - **`daemon::accept_loop` refuses a CROSS-uid connection before it ever
   reaches `handle_conn` (LANE IDENTITY P-ID3, G8).** `cross_uid_gate` is a
   pure decision fn (`Option<PeerCred>` in, `Option<String>` refusal reason
@@ -178,19 +192,21 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   its whole secrecy claim is "this process is still alive, and `ptrace`
   against it is blocked" (Yama `ptrace_scope>=1`), which a disk copy would
   destroy outright.
-- **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for
-  a successful `session start` dispatch whose record already carries a
-  `pid`, and it seals a record ONCE.** A record that already carries a
-  `seal`, or ever did (`everSealed`), is never sealed again — by this
-  function or by the `seal_unsealed_live_sessions` tick. `session_start_
-  refusal` refuses a dispatched `session start` BEFORE it runs when the
-  record is sealed over a live pid that no longer verifies (taught error +
-  `seal_refused` event); a sealed record whose process merely died is not
-  refused. Never refuse after mutating, and never add a path that re-mints
-  over a record that has ever been sealed; the pid it mints over is the
-  record's OWN `pid`
-  field (kept immutable by `aoide_storage::session::pid_may_move`), not a
-  peercred-verified connecting pid.
+- **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for a
+  successful `session start` dispatch whose record already carries a `pid`, and
+  it seals a record ONCE.** A record that already carries a `seal`, or ever did
+  (`everSealed`), is never sealed again — by this function or by the
+  `seal_unsealed_live_sessions` tick. Both stamp the plaintext
+  `sealedPidStarttime` and `sealedBootId` in the same call as the seal. The
+  start door (`aoide_conduct::graph::session_start`) decides a start on a
+  protected live wrap, after the daemon hop: a start that changes none of agent,
+  cwd, window or parent is a no-op, and one that would change any of them is
+  refused. The decision is the door's,
+  not this crate's, and no key is read. Never refuse after mutating, and never
+  add a path that re-mints over a record that has ever been sealed; the pid it
+  mints over is the record's OWN `pid` field (kept immutable by
+  `aoide_storage::session::pid_may_move`), not a peercred-verified connecting
+  pid.
 - **Request-line reads on the daemon socket go through
   `daemon::read_capped_line` (a hand-rolled `fill_buf`/`consume` loop),
   never `BufReader::read_line` (P-D4, closing a P-D2-flagged gap).**

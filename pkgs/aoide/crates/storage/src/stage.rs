@@ -54,3 +54,41 @@ pub fn write_stage<T: Serialize>(path: &std::path::Path, value: &T) -> Result<()
         .map_err(|e| format!("{}: serialize: {e}", path.display()))?;
     atomic_write(path, &body).map_err(|e| format!("{}: {e}", path.display()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::records::{RestoreSnapshot, SessionsFile};
+
+    /// A `sessions.json` whose `restore` still carries a `typed` key loads with
+    /// the key dropped, and the real writer never puts it back on disk.
+    #[test]
+    fn a_legacy_typed_key_in_sessions_json_loads_and_is_never_written_back() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir()
+            .join(format!("aoide-stage-legacy-typed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        std::env::set_var("AOIDE_STAGE_DIR", &dir);
+
+        let path = sessions_path();
+        std::fs::write(
+            &path,
+            r#"{ "schemaVersion": "0", "sessions": [ { "sessionId": "s", "restore": { "cwd": "/w", "idle": true, "argv": null, "typed": "cargo test" } } ] }"#,
+        )
+        .unwrap();
+
+        let loaded: SessionsFile = load_stage(&path).unwrap();
+        assert_eq!(
+            loaded.sessions[0].restore,
+            Some(RestoreSnapshot { cwd: Some("/w".into()), idle: true, argv: None })
+        );
+        write_stage(&path, &loaded).unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(!on_disk.contains("typed"), "on disk: {on_disk}");
+        assert!(!on_disk.contains("cargo test"), "on disk: {on_disk}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

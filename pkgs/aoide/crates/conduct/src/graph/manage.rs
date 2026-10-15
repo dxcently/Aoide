@@ -3,7 +3,7 @@
 //! [`super::doc::restage_graph`] so the read path never drifts.
 
 use super::common::{load_inputs, require_args, stage_error};
-use super::doc::{build_graph, drop_remote_child_rows, prune_done_scoped, render, restage_graph, would_cycle};
+use super::doc::{build_graph, drop_remote_child_rows, prune_done_keeping, render, restage_graph, would_cycle};
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
     write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, STAGE_GRAPH_VERSION,
@@ -951,13 +951,24 @@ fn set_lead(name: &str, lead: Option<&str>) -> Outcome {
     })
 }
 
-/// `graph link <child> <parent>` — set the spawned-by edge on the child.
+/// `graph link <child> <parent>` — set the spawned-by edge on the child. A
+/// protected live wrap's edge is never set here (CONTRACTS, rule 3). The check
+/// and the write run in one stage-lock hold, so a concurrent locked writer (a
+/// seal stamp) is never overwritten by a stale roster.
 pub fn link(inv: &Invocation) -> Outcome {
     let args = match require_args(inv, &["child", "parent"]) {
         Ok(a) => a,
         Err(e) => return e,
     };
     let (child, parent) = (args[0].clone(), args[1].clone());
+    with_stage_lock(|| link_inner(child, parent))
+}
+
+fn link_inner(child: String, parent: String) -> Outcome {
+    if let Some(message) = super::session_store::live_wrap_refusal_for(&child) {
+        return Outcome::error("graph.link", message)
+            .with_data(json!({ "reason": "live-sealed-wrap", "id": child }));
+    }
     if child == parent {
         return Outcome::error(
             "graph.link",
@@ -992,7 +1003,7 @@ pub fn link(inv: &Invocation) -> Outcome {
     if rec.parent_session_id.as_deref() == Some(parent.as_str()) {
         message = format!("`{child}` already linked to `{parent}` (no change)");
     } else {
-        rec.parent_session_id = Some(parent.clone());
+        rec.set_parent_session(Some(parent.clone()));
         changed.push(format!("session {child}: parentSessionId → {parent}"));
         message = format!("linked `{child}` (spawned by `{parent}`)");
         file.schema_version = if file.schema_version.is_empty() {
@@ -1019,8 +1030,13 @@ pub fn link(inv: &Invocation) -> Outcome {
 }
 
 /// `session prune` — drop `done` sessions (+ their hooks); clear orphaned
-/// `parentSessionId`s. Idempotent; writes only when something changed.
+/// `parentSessionId`s. Idempotent; writes only when something changed. The
+/// whole load-drop-write runs in one stage-lock hold, as `link` does.
 pub fn prune(_inv: &Invocation) -> Outcome {
+    with_stage_lock(prune_inner)
+}
+
+fn prune_inner() -> Outcome {
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
         Err(e) => return stage_error("session.prune", e),
@@ -1030,7 +1046,26 @@ pub fn prune(_inv: &Invocation) -> Outcome {
         Err(e) => return stage_error("session.prune", e),
     };
 
-    let (kept_s, kept_h, removed, cleared) = prune_done_scoped(
+    // A finished record whose sealed wrap process still runs is held, not
+    // dropped. Its exit (or the reaper, once the pid is gone) ends it.
+    let live = super::identity::live_sealed_wrap_ids(&s_file.sessions);
+    let held: Vec<String> = s_file
+        .sessions
+        .iter()
+        .filter(|s| s.state == "done" && live.contains(&s.session_id))
+        .map(|s| s.session_id.clone())
+        .collect();
+    let held_note = if held.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; kept {} finished record(s) whose sealed wrap still runs ({}), they end when that process exits",
+            held.len(),
+            held.join(", ")
+        )
+    };
+
+    let (kept_s, kept_h, removed, cleared) = prune_done_keeping(
         std::mem::take(&mut s_file.sessions),
         std::mem::take(&mut h_file.hooks),
         // The user's OWN sweep: the one path allowed to drop a finished task
@@ -1038,11 +1073,15 @@ pub fn prune(_inv: &Invocation) -> Outcome {
         // the durable history — ledger, letters, transcript, sidecar — stays on
         // disk either way).
         true,
+        &live,
     );
 
     if removed.is_empty() {
-        return Outcome::ok("session.prune", "nothing to prune (no `done` sessions)")
-            .with_data(json!({ "removed": [], "clearedParents": [] }));
+        return Outcome::ok(
+            "session.prune",
+            format!("nothing to prune (no `done` sessions){held_note}"),
+        )
+        .with_data(json!({ "removed": [], "clearedParents": [], "held": held }));
     }
 
     s_file.sessions = kept_s;
@@ -1073,13 +1112,13 @@ pub fn prune(_inv: &Invocation) -> Outcome {
     Outcome::ok(
         "session.prune",
         format!(
-            "pruned {} session(s); cleared {} orphaned parent link(s)",
+            "pruned {} session(s); cleared {} orphaned parent link(s){held_note}",
             removed.len(),
             cleared.len()
         ),
     )
     .changed(changed)
-    .with_data(json!({ "removed": removed, "clearedParents": cleared }))
+    .with_data(json!({ "removed": removed, "clearedParents": cleared, "held": held }))
 }
 
 #[cfg(test)]
@@ -2541,6 +2580,66 @@ mod tests {
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         let file: ProjectsFile = load_stage(&projects_path()).unwrap();
         assert!(!file.projects.iter().any(|p| p.name == name));
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// `graph link` and `session prune` load, change and write the roster in
+    /// one stage-lock hold. A writer that holds the lock (a seal stamp) keeps
+    /// its write: each waits for it, then works on the roster it left.
+    #[test]
+    fn link_and_prune_wait_for_a_writer_holding_the_stage_lock() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("link-prune-lock");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let ops: [(&str, fn() -> Outcome); 2] = [
+            ("link", || link(&invocation(&["graph", "link"], &["c", "p"]))),
+            ("prune", || prune(&invocation(&["session", "prune"], &[]))),
+        ];
+        for (name, op) in ops {
+            let roster = SessionsFile {
+                sessions: vec![
+                    session("c", "/w", "idle", "t", None),
+                    session("p", "/w", "idle", "t", None),
+                    session("gone", "/w", "done", "t", None),
+                ],
+                ..Default::default()
+            };
+            write_stage(&sessions_path(), &roster).unwrap();
+            let (held_tx, held_rx) = std::sync::mpsc::channel();
+            let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+            let holder = std::thread::spawn(move || {
+                with_stage_lock(|| {
+                    let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+                    held_tx.send(()).unwrap();
+                    // An unlocked op finishes inside this window, and the write
+                    // below lands over it. A locked one waits the window out.
+                    let _ = done_rx.recv_timeout(std::time::Duration::from_millis(500));
+                    file.sessions[0].seal = Some("stamped".into());
+                    write_stage(&sessions_path(), &file).unwrap();
+                })
+            });
+            held_rx.recv().unwrap();
+            let out = op();
+            let _ = done_tx.send(());
+            holder.join().unwrap();
+
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{name}: {}", out.message);
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            let by = |id: &str| file.sessions.iter().find(|s| s.session_id == id);
+            assert_eq!(by("c").unwrap().seal.as_deref(), Some("stamped"), "{name}: the stamp is kept");
+            if name == "link" {
+                assert_eq!(by("c").unwrap().parent_session_id.as_deref(), Some("p"), "the link is kept");
+            } else {
+                assert!(by("gone").is_none(), "the prune is kept");
+            }
+        }
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),

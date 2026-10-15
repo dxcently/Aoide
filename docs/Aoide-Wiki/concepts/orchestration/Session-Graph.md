@@ -176,8 +176,13 @@ should follow).
   the merged hook phase) along with their hook records; any `kind:"subagent"`
   descendant of a dropped session cascades away with it (see "Sub-agent
   cascade" below), and children that survive get `parentSessionId` cleared
-  (un-orphaned rather than dangling). Everything removed or cleared is
-  reported.
+  (un-orphaned rather than dangling). The exception is a protected live wrap:
+  it is alive, so it keeps its `parentSessionId`, and it loses its
+  `attestedSpawner`, so a later registration under the dropped spawner's id
+  earns no autogate over it (CONTRACTS, rule 3). Everything else removed or
+  cleared is reported. A `done` record that is still a protected live wrap
+  (its own process still runs under its sealed starttime) is kept and named
+  in the reply (see the live-wrap rules in CONTRACTS.md).
 - **`spawn`** and **`send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].
@@ -534,6 +539,15 @@ subagent-of-subagent nesting) backs both paths, so a session that dies
 rather than exiting through `session end` — loses its sub-agent
 children exactly as cleanly as an orderly exit does.
 
+The `sub:` id prefix belongs to these nodes. Only the hook door's sub-agent
+arms create, re-key or close one, each on a harness's word, so `conduct`,
+`spawn`, `session start` and a hook's SessionStart refuse an id under the
+prefix, and the eidolon and Codex-app reconcilers enrol none: a wrap
+registered there would answer to a forged sub-agent hook. A wrap that already
+holds such an id is left alone by those arms. For the same reason a `sub:`
+node is never a spawner, and its ending or re-keying leaves no spawn stamp
+orphaned (CONTRACTS, rule 3).
+
 The same pass also retires **same-window agent duplicates**. A window hosts
 any number of agents: one desktop app window runs several headless claudes,
 and one kitty window can run several tabs. So a shared `windowAddress` never
@@ -669,8 +683,13 @@ are consumed internally and get no `graph.json` projection:
   A ledger row leaves with its parent: both roster-exit paths call
   `drop_remote_child_rows` over the ids they removed, after their own
   `sessions.json` write lands.
-- **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
-  one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
+- **`seal` + `sealedIssuedAt` + `sealedPidStarttime` + `sealedBootId`** — the
+  sealed session credential. `seal` and `sealedIssuedAt` share one lifecycle
+  (always both or neither). `sealedPidStarttime` and `sealedBootId` are the
+  minted starttime and boot id in plain text, written with them. The refusal
+  predicate reads those two fields, and CONTRACTS.md's identity section states
+  it once. Neither is authenticated, so a hand edit can set it. `aoided` mints
+  an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate
   key from `state/identity/`'s on-disk node-wire key, which any same-uid
   reader could sign with. The signature covers a canonical NUL-separated
@@ -698,7 +717,7 @@ liveness (the lane's answered threat-model fork, OQ1-A): with Yama off the
 seal degrades to liveness-only. An unreachable or impostor daemon leaves
 every seal unverifiable — never a fallback to trust.
 
-**The lane's accounting — enforced vs open.** Enforced end to end:
+**Enforced, and open.** Enforced end to end:
 `origin` is write-once and door-stamped (P-ID0); every live, pid-carrying
 session carries the seal (P-ID1); the send gate and the per-session
 socket's accept key on kernel facts plus a verified seal, never env
@@ -706,8 +725,12 @@ socket's accept key on kernel facts plus a verified seal, never env
 cross-uid `SO_PEERCRED` floor (P-ID3, [[shellbridge]], [[aoided]]); the
 secrets broker's `allowRemoteOrigin` gate is the credential's first policy
 consumer (P-ID4); the node wire resolves identity by verifying key, never
-claimed name (P-ID5, [[Node-Federation]]). Open, each named rather than
-implied closed: (1) **consumer-name authentication** — the seal
+claimed name (P-ID5, [[Node-Federation]]). The live-wrap rules in CONTRACTS.md
+refuse a same-uid end, prune, phase, or changed-field start of a protected live
+wrap (judged by the plaintext starttime and no key), ignore every hook that
+reports under such a wrap's own id, and the autogate reads a parent edge only
+where `attestedSpawner` names it. Open, each
+named: (1) **consumer-name authentication** — the seal
 authenticates the session and its class, never a self-asserted consumer
 string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker
 can race or evict the daemon's listener (`bind_socket` unlink-then-binds,
@@ -718,7 +741,11 @@ residual); (3) **a cross-uid attestation channel** — the packaged
 `aoide-secrets` broker cannot reach the operator's daemon socket or roster,
 so the origin gate is dormant in that deployment; (4) **an authenticated
 registration path** — the closer for the sweep-relaunder shape; (5)
-**per-surface dispatch-door gates** riding the attested-caller lookup.
+**per-surface dispatch-door gates** riding the attested-caller lookup; (6) **the live-wrap residuals** listed in CONTRACTS.md: a same-uid process can
+hand-edit `sessions.json`, rewrite a live record's `agent`, `cwd` or `window`,
+point the verifier at another daemon through `AOIDE_DAEMON_SOCKET`, or kill
+`aoided`. A daemon-owned session identity is the planned change for these; it is
+not built.
 
 ## Contracts (CONTRACTS.md §4, still v0)
 
@@ -734,7 +761,8 @@ registration path** — the closer for the sweep-relaunder shape; (5)
   headless-conducted session's pty-master log — [[Conductor-Channel]]),
   `hookAncestry` (up to 8 self-first `/proc` pids, the chain of the latest
   registration, bind, or heal, the auto-parenting seam above), and the identity pair `origin` and
-  `seal`/`sealedIssuedAt` (the lane's provenance and credential, above).
+  `seal`/`sealedIssuedAt`/`sealedPidStarttime`/`sealedBootId` (the lane's
+  provenance and credential, above).
   The full field list — `kind`/`conductable`,
   `contextTokens`/`contextCeiling`/`tool`/`petname` and more — is CONTRACTS.md
   §4; each is round-tripped by every rewriter regardless of whether it
