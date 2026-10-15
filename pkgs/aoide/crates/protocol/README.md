@@ -23,9 +23,12 @@ other crate in this workspace sits above.
   stub head under "Not yet implemented".
   `Flag` also declares `value` (placeholder), `required`, `default`,
   `values` and `conflicts`, `Arg` declares `values` and `required_after`,
-  `Command` declares `one_of` and `brief`;
-  `Command::check` enforces them (defaults applied first) and
-  `Command::invoke` is check-then-handler, the entry every `dispatch()` uses.
+  `Command` declares `one_of` and `brief`, and `doors` (which doors may call
+  it; `CLI_DOORS` = `[cli, daemon]` when absent). `Flag` declares `doors` too
+  (empty = the command's doors). `Command::opens(door)` is the predicate.
+  `Command::check` enforces the other declarations (defaults applied first)
+  and `Command::invoke` is check-then-handler, the entry every `dispatch()`
+  uses.
 - `style` — terminal manners, decided in one place: `Style` (the role
   vocabulary — `heading`, `name`, `args`, `required`, `error`, `usage`, `why`,
   `fix`, `suggest`, `stub` — over the ANSI 16 base colors, or plain), `Color`

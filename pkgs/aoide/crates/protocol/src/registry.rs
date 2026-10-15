@@ -14,10 +14,19 @@
 //! MCP tool list must never reorder). Nothing outside those `register()`
 //! functions enumerates commands.
 
+use crate::audit::Door;
 use crate::invocation::Invocation;
 use crate::output::{Fix, Kind, Outcome, Refusal};
 use crate::suggest::{closest, lead};
 use serde::Serialize;
+
+/// The doors a command answers when it declares none: the terminal, and the
+/// aoided socket the terminal forwards through. The daemon hop carries no door
+/// on the wire, so it must be in the default (CONTRACTS.md §3, "doors").
+pub const CLI_DOORS: &[Door] = &[Door::Cli, Door::Daemon];
+fn is_cli_doors(d: &&'static [Door]) -> bool {
+    *d == CLI_DOORS
+}
 
 /// Contract versions (CONTRACTS.md "Versioning").
 pub const SCHEMA_VERSION: &str = "0";
@@ -89,6 +98,10 @@ pub struct Flag {
     /// Flags that may not be given together with this one.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub conflicts: &'static [&'static str],
+    /// The doors this flag may arrive through; empty = every door the command
+    /// opens. Additive (CONTRACTS.md §3), skipped when empty.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub doors: &'static [Door],
 }
 
 impl Flag {
@@ -102,6 +115,7 @@ impl Flag {
         default: "",
         values: &[],
         conflicts: &[],
+        doors: &[],
     };
 
     /// The `<placeholder>` a valued flag shows in a synopsis: its `value`,
@@ -170,6 +184,11 @@ pub struct Command {
     /// (never invoked) for stub commands — see `commands/stubs.rs`.
     #[serde(skip)]
     pub handler: fn(&Invocation) -> Outcome,
+    /// The doors that may call this command. A command closed to a door is
+    /// refused there before its handler runs. Additive (CONTRACTS.md §3):
+    /// skipped when it is [`CLI_DOORS`].
+    #[serde(skip_serializing_if = "is_cli_doors")]
+    pub doors: &'static [Door],
     /// Reserved for future conditional availability (e.g. env-gated
     /// commands); not yet consulted by `dispatch()`. Defaults to `|| true`.
     #[serde(skip)]
@@ -196,8 +215,14 @@ impl Command {
         brief: "",
         section: "",
         handler: blank_handler,
+        doors: CLI_DOORS,
         available: || true,
     };
+
+    /// Whether `door` may call this command.
+    pub fn opens(&self, door: Door) -> bool {
+        self.doors.contains(&door)
+    }
 
     /// The dotted path used as an MCP tool name, e.g. `rice.lint`.
     pub fn dotted(&self) -> String {
@@ -944,6 +969,28 @@ mod tests {
                 { "name": "Second", "heads": [{ "name": "a" }] }
             ])
         );
+    }
+
+    #[test]
+    fn doors_default_to_the_terminal_and_the_daemon_hop_and_serialize_only_when_declared() {
+        let plain = cmd!(path: ["plain"], summary: "Plain.", args: [], flags: [], gated: false, implemented: true, handler: noop);
+        assert!(plain.opens(Door::Cli) && plain.opens(Door::Daemon));
+        assert!(!plain.opens(Door::Mcp) && !plain.opens(Door::A2a));
+        let v = serde_json::to_value(&plain).unwrap();
+        assert!(v.get("doors").is_none(), "{v}");
+
+        let open = cmd!(
+            path: ["open"], summary: "Open.", args: [], flags: [], gated: false, implemented: true, handler: noop,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        );
+        assert!(open.opens(Door::Mcp) && !open.opens(Door::A2a));
+        let v = serde_json::to_value(&open).unwrap();
+        assert_eq!(v["doors"], serde_json::json!(["cli", "daemon", "mcp"]));
+
+        let f = serde_json::to_value(&flag!("x", "bool", "d")).unwrap();
+        assert!(f.get("doors").is_none(), "{f}");
+        let f = serde_json::to_value(&flag!("x", "bool", "d", doors: CLI_DOORS)).unwrap();
+        assert_eq!(f["doors"], serde_json::json!(["cli", "daemon"]));
     }
 
     #[test]
