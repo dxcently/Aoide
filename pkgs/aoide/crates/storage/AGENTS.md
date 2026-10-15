@@ -241,7 +241,14 @@
   at the top of their own `main()` instead (`crates/cli/src/bin/{aoide,
   aoided}.rs`, `crates/lyra/src/bin/lyra.rs`) — a test may call it directly
   too (it is a plain idempotent function, no `Once`/env-isolation dance
-  needed, unlike `migrate_conducting_stage`'s own test suite).
+  needed, unlike `migrate_conducting_stage`'s own test suite). A move that
+  fails is narrated and leaves the old tree in place. Its one `Err` is a
+  `state/` that exists and cannot be locked owner-only, on EVERY run: it
+  locks `state_dir()` first, before any move, and the tree a move lands in
+  is locked again. All three binaries exit on it rather than read a tree
+  they could not make private. A `state/` that is absent is not created
+  there, and one whose parent is not a directory counts as absent, so the
+  narrated failure stays the failure.
 - **A checkout-relative source path is named ONCE, here — `fs::LYRA_SHELL_SRC`
   (`"pkgs/lyra-shell"`) is the pattern, not an exception.** The lyra shell's
   QML/icons/preview tree is read by `aoide-lyra`'s `commands::preview` (which
@@ -489,26 +496,46 @@
   reason: `aoide-conduct` probes with it instead of a second `flock`. Each of
   these has a native test on both hosts, or states its limit.
 - **`fs::atomic_write_private` is the ONE way a sensitive file gets written
-  in this crate** (`identity.rs`'s `ed25519.key` is its first caller) — the
-  TEMP file is created ALREADY at `0600` (`OpenOptions::mode`, not
-  `File::create`-then-`chmod`), so a `rename(2)` onto the live path never
-  passes through a wider-mode window, mirroring `aoide-secrets/src/
-  store.rs`'s `save_policies`/`save_totp_secret` (secure the temp BEFORE
-  the rename, never the final path after it). Never write a sensitive
-  file as a `File::create` + post-rename `set_permissions` pair — the
-  temp inherits the umask-derived default mode and the live path sits
-  world/group-readable until the `chmod` lands; that window is exactly
-  what this function exists to close, and
-  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`
-  pins the invariant directly against the temp, not just the end state.
+  in this crate** (`identity.rs`'s `ed25519.key` is its first caller). The
+  TEMP is created ALREADY at `0600` (`OpenOptions::mode`, never
+  `File::create`-then-`chmod`), so the `rename(2)` onto the live path never
+  passes a wider-mode window, mirroring `aoide-secrets/src/store.rs`'s
+  `save_policies`/`save_totp_secret` (secure the temp BEFORE the rename,
+  never the final path after it). A leftover temp of the same name is
+  removed first and the create is exclusive (`O_EXCL`): `O_TRUNC` would keep
+  the leftover's wider mode, and `O_EXCL` refuses a link planted at that
+  name. Never write a sensitive file as a `File::create` + post-rename
+  `set_permissions` pair. The temp's mode is pinned directly, not just the
+  end state, by
+  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`,
+  and a leftover at the temp's name is pinned by
+  `fs::tests::a_private_write_never_publishes_a_leftover_temps_wider_mode`.
 - **`fs::secure_private_dir` locks the DIRECTORY a sensitive file lives
   in, not only the file** (`identity.rs`'s `mint()` calls it on
-  `identity_dir()` before writing anything into it) — a `0600` file inside
-  a `create_dir_all`-default (`0755`) directory still leaves that
-  directory's entries world-listable. A future sensitive file that lives
-  in its OWN new subdirectory (not an existing already-secured one) calls
-  this on that subdirectory the same way, before the first
-  `atomic_write_private` into it.
+  `identity_dir()` before writing anything into it). A `0600` file in a
+  `0755` directory still leaves that directory's entries world-listable.
+  The directory is created through `ensure_write_dir`, so one under
+  `state/` locks `state/` first. On Unix the chmod acts on a descriptor
+  opened `O_NOFOLLOW`, never on the name: a directory that is a symlink is
+  refused and its target keeps its mode, and a `dir` with a `..` in it is
+  refused before anything is created, since the directory it climbs to is
+  not one this call was asked to own. A future sensitive file in its OWN
+  new subdirectory calls this on that subdirectory the same way, before the
+  first `atomic_write_private` into it.
+- **`state/` is the privacy boundary for the state tree** (CONTRACTS.md §4
+  states what the lock checks and what it does not cover). Every storage
+  creator whose directory lies under `state/` goes through
+  `fs::ensure_write_dir`, which locks `state/` before it creates anything.
+  Accepted gap: a raw creator outside this crate can make a fresh `state/`
+  wide until the next storage write or the next `aoide`, `aoided` or `lyra`
+  start. Two are known.
+  `aoide-conduct`'s `graph/spawn.rs` makes `state/sessions/` with
+  `create_dir_all`, and in that spawn path the very next call,
+  `create_new_private`, locks it. `aoide-lyra`'s preview fixture
+  (`commands/preview.rs`'s `stage_fixture`) makes `<root>/state/stage` with
+  `create_dir_all`; its default root is a preview runtime dir, not
+  `state_dir()`, so only an explicit `--root` at the live root reaches
+  `state/`.
 - **`ledger` is append-only and never a lookup key for live state (P-D8).**
   `append_ledger_entry` only ever opens `state/session-ledger.jsonl` in
   append mode — nothing in this crate truncates, rewrites, or prunes it;

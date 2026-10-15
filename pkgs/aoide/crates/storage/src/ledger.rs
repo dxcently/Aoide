@@ -97,7 +97,7 @@ pub fn session_ledger_path() -> PathBuf {
 pub fn append_ledger_entry(entry: &LedgerEntry) -> std::io::Result<()> {
     let path = session_ledger_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::fs::ensure_write_dir(parent)?;
     }
     let mut line = serde_json::to_string(entry)
         .unwrap_or_else(|e| format!("{{\"v\":0,\"error\":\"{e}\"}}"));
@@ -173,6 +173,44 @@ mod tests {
         assert_eq!(back[0].resumed_from, None);
         assert_eq!(back[0].origin.as_deref(), Some("node:yomi-strix"));
         assert_eq!(back[0].restore, entry.restore);
+
+        std::env::remove_var("AOIDE_STATE_DIR");
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    /// The ledger's parent is `state/`: an append creates it owner-only, and
+    /// tightens one an earlier run left wide.
+    #[cfg(unix)]
+    #[test]
+    fn append_keeps_state_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let state = unique_state("owner-only");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        let entry = LedgerEntry {
+            v: 0,
+            session_id: "s1".to_string(),
+            enduring_agent_id: None,
+            project: None,
+            agent: "claude".to_string(),
+            harness_session_id: None,
+            cwd: "/tmp".to_string(),
+            title: None,
+            petname: None,
+            started_at: "2026-08-24T00:00:00Z".to_string(),
+            ended_at: "2026-08-24T01:00:00Z".to_string(),
+            resumed_from: None,
+            origin: None,
+            restore: None,
+        };
+        let mode = || std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+
+        append_ledger_entry(&entry).unwrap();
+        assert_eq!(mode(), 0o700);
+
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        append_ledger_entry(&entry).unwrap();
+        assert_eq!(mode(), 0o700);
 
         std::env::remove_var("AOIDE_STATE_DIR");
         let _ = std::fs::remove_dir_all(&state);

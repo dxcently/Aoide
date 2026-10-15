@@ -1176,6 +1176,30 @@ applied to the stage tree itself):
   `lyra`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
   never writes it.
 
+`state/` is owner-only and is the privacy boundary for everything under it;
+file and subdirectory modes inside it are not relied on. Every storage write
+under it locks `state/` first, and `aoided` does the same before it binds,
+refusing to start when it cannot. Under is judged by where the write lands,
+so a path through a symlinked alias or with a `..` in it counts when the
+kernel puts it inside `state/`. The lock refuses, before any chmod, a
+`state/` that is relative, whose path has a `..` in it, or that is a symlink
+(the open never follows the last component). It also refuses a filesystem
+root, and a home directory or one of its parents. Those are judged on
+canonical paths, and again on the directory the open returns, so a symlinked
+home is protected by its real path. Every home a run could mean is guarded
+together: a non-empty `$HOME`, the passwd home of the effective uid, and
+`/home/$AOIDE_USER` when `$AOIDE_USER` is set. A `state/` the OS will not make
+`0700` fails the write and names the path and the fix: a chmod when this user
+owns it, a chown when another user does. Start-up locks a `state/` that
+exists, and a tree the start-up migration moves into `state/` is locked there
+too; when it cannot be, `aoide`, `aoided` and `lyra` exit on every run rather
+than read it, the run that moved the tree and each run after. On Windows the
+boundary holds only for a `state/` aoide created: an existing one is never
+re-tightened.
+
+The boundary is against other users. A process running as the same user reads
+and writes all of `state/` whatever its mode, and nothing here stops it.
+
 **The runtime root (L-C2, lyra-carrier lane, task #107).** Every runtime
 tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,
 the composed `songbook/` — hangs off ONE root: `$AOIDE_ROOT` when set to an
