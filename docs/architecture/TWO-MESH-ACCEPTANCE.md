@@ -26,13 +26,18 @@ over a unix socket to a host bridge. Nothing else leaves the namespace.
 The harness is `crates/cli/tests/two_mesh_https.rs`, ignored by default:
 
 ```sh
-cargo test -p aoide-cli --test two_mesh_https -- --ignored --nocapture
+nix develop -c cargo test -p aoide-cli --test two_mesh_https -- --ignored --nocapture
 ```
 
 It needs unprivileged user namespaces (`unshare -rn`), and `socat`, `curl`,
-`ip` and `openssl` on `PATH`. It skips with a printed reason when one is
-missing. A passing run removes its roots; a failing run keeps them and prints
-the path, with every command's stdout and stderr under `runs/`.
+`ip` and `openssl` on `PATH`. The flake's dev shell carries all four. A missing
+tool fails the run and names it: nothing is skipped, since a skip in an ignored
+test would read as a pass. `openssl` is needed unless the run uses a live gate.
+A passing run removes its roots; a failing run keeps them and prints the path,
+with every command's stdout and stderr under `runs/`.
+
+Until the cross-mesh receipt route is built, the run fails on A6b alone. Every
+other assertion passes.
 
 ## Run it against a live gate
 
@@ -48,7 +53,8 @@ then dial the gate you name:
 Steps that read the gate's own box are skipped there and print a skip line:
 A1 (the gate's charter), A2b, A4, A9a, A9b and A9c. Two checks inside A5n and
 A7 (the gate's outbox, and the gate's front and adapter from a fence) are left
-out without a line. The rest run unchanged.
+out without a line. These skips are about state that is not on this box. The
+rest run unchanged, and a missing tool still fails the run.
 
 ## What each assertion proves
 
@@ -61,7 +67,7 @@ out without a line. The rest run unchanged.
 | A5n | Without the origin's charter the destination refuses the letter `unverified-origin`, and the gate keeps it. |
 | A5 | With the origin's charter the destination files exactly that letter, origin verified. |
 | A6 | A reply travels back the same way and is filed. |
-| A6b | The receipt for the first letter returns and retires it from the sender's outbox. **Fails until cross-mesh receipts route.** |
+| A6b | The receipt for the first letter returns to homebox and retires it from homebox's outbox: the ack takes the same four steps back across the gate. **Expected to fail until the cross-mesh receipt route is built.** |
 | A7 | From inside each fence the gate answers. 1.1.1.1:443, UDP 8.8.8.8:53, TCP port 22 (on 1.1.1.1 and on the gate's address), and the gate's front and adapter ports on 127.0.0.1 do not. The host reaches the front and the adapter, so the refusals are the fence's. |
 | A8 | With no CA bundle, https fails at verification (exit 60), nothing is filed, and a send stays spooled. |
 | A9b | A letter to a mesh with no gate is refused `no-route` at the gate. The sender hands it to its relay first. |

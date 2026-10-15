@@ -1117,17 +1117,15 @@ impl Drop for Lab {
 #[ignore = "two charter meshes, a gate and two fenced boxes over real HTTPS: run with --ignored (cargo test -p aoide-cli --test two_mesh_https -- --ignored --nocapture)"]
 fn two_mesh_mail_round_trips_over_https_with_443_only_boxes() {
     let external = external_gate_env();
-    if external.is_none() {
-        if let Some(missing) = tools_missing() {
-            eprintln!("two_mesh_https: SKIPPED. {missing}");
-            return;
-        }
-        if openssl_missing() {
-            eprintln!(
-                "two_mesh_https: SKIPPED. `openssl` is not on PATH, so the test CA cannot be made. Put an openssl bin directory on PATH, or set {ENV_GATE_URL}, {ENV_GATE_CA} and {ENV_GATE_LINE} to run against an external gate."
-            );
-            return;
-        }
+    // A missing tool fails the run with its reason. The test is ignored, so it runs
+    // only when asked for: a skip here would read as a pass that checked nothing.
+    if let Some(missing) = tools_missing() {
+        panic!("two_mesh_https: cannot run: {missing}");
+    }
+    if external.is_none() && openssl_missing() {
+        panic!(
+            "two_mesh_https: cannot run: `openssl` does not run here, so the test CA cannot be made. Put openssl on PATH (the dev shell carries it), or set {ENV_GATE_URL}, {ENV_GATE_CA} and {ENV_GATE_LINE} to run against an external gate."
+        );
     }
     let mut lab = Lab::build(external);
     lab.a1();
