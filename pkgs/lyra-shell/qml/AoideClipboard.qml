@@ -144,10 +144,12 @@ QtObject {
             property var clipArgs: []
             command: ["lyra", "clipboard"].concat(clipArgs).concat(["--json"])
             stdout: StdioCollector { id: lyraOut }
+            stderr: StdioCollector { id: lyraErr }
             onExited: function (exitCode, exitStatus) {
                 if (exitCode !== 0) {
+                    // a refusal's JSON arrives on stderr; stdout is the fallback
                     var message = "lyra clipboard " + lyraRun.clipArgs[0] + " failed"
-                    try { message = JSON.parse(lyraOut.text).message || message } catch (e) {}
+                    try { message = JSON.parse(lyraErr.text || lyraOut.text).message || message } catch (e) {}
                     root.actionError = message
                 }
                 root.refresh()

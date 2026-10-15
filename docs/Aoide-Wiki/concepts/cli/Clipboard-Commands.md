@@ -40,7 +40,7 @@ Every refusal carries a stable `data.reason` beside the taught
 |---|---|---|---|
 | `bad-id` | usage | 2 | the id is not a whole number that fits a u64 (signs, spaces, decimals refused) |
 | `no-such-entry` | refused | 1 | cliphist holds no entry with that id |
-| `cliphist-missing` | refused | 1 | no `cliphist` on `PATH`; fix sets `aoide.clipboard.enable = true` |
+| `cliphist-missing` | refused | 1 | no `cliphist` on `PATH`; fix sets `habit.dendrites.clipboard.enable = true` |
 | `cliphist-failed` | failed | 1 | cliphist exited non-zero; its stderr is `data.detail` |
 | `preview-remove-failed` | failed | 1 | the history changed but a thumbnail could not be removed |
 

@@ -145,7 +145,7 @@ fn cliphist(cmd: &str, args: &[&str], stdin: Option<String>) -> Result<String, O
                     "cliphist-missing",
                     "cliphist is not installed",
                     "no `cliphist` on PATH holds the clipboard history",
-                    Fix::Set("aoide.clipboard.enable = true".into()),
+                    Fix::Set("habit.dendrites.clipboard.enable = true".into()),
                 )
             } else {
                 failed(cmd, &verb, format!("spawn cliphist: {e}"))
@@ -367,7 +367,7 @@ esac
         for o in [handle_delete(&inv(&["clipboard", "delete"], &["42"])), handle_clear(&inv(&["clipboard", "clear"], &[]))] {
             assert_eq!(o.status, Status::Error, "{o:?}");
             assert_eq!(reason(&o), "cliphist-missing");
-            assert_eq!(o.data.unwrap()["refusal"]["fix"]["set"], "aoide.clipboard.enable = true");
+            assert_eq!(o.data.unwrap()["refusal"]["fix"]["set"], "habit.dendrites.clipboard.enable = true");
         }
         assert!(rig.path("cache/aoide-clipboard/previews").exists(), "no thumbnail touched");
     }
