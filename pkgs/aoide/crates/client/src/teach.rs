@@ -12,7 +12,7 @@ use std::path::Path;
 
 /// Flags of these commands that take no value, for re-quoting a line.
 const BOOLS: &[&str] = &[
-    "all-names", "autogate", "clear", "hold", "no-verify", "popup", "reread", "refused", "replace", "yes",
+    "all-names", "clear", "hold", "no-verify", "popup", "reread", "refused", "replace", "yes",
 ];
 
 /// Where in the invocation the mistyped name sits.
@@ -318,7 +318,7 @@ mod tests {
         assert_eq!(o.status, aoide_protocol::output::Status::Error, "a name the world lacks is exit 1");
         assert!(o.message.contains("no node named `sakak`"), "{}", o.message);
         assert!(o.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().contains("did you mean `sakaki`"));
-        assert_eq!(fix_of(&o), "aoide node pull sakaki --mesh home");
+        assert_eq!(fix_of(&o), "aoide node pull sakaki --mesh=home");
     }
 
     #[test]
@@ -352,7 +352,7 @@ mod tests {
     fn a_flag_slot_is_corrected_in_place() {
         let i = inv(&["mail", "read"], &[], &[("for", "conductr")]);
         let o = unknown_name(&i, "mail.read", "mailbox", Slot::Flag("for"), "conductr", &names(&["conductor"]), "mailboxes with mail", "aoide mail", Fix::None("x"));
-        assert_eq!(fix_of(&o), "aoide mail read --for conductor");
+        assert_eq!(fix_of(&o), "aoide mail read --for=conductor");
     }
 
     #[test]

@@ -281,7 +281,6 @@ fn node_add_against_an_unreachable_url_never_registers_and_pull_of_a_down_node_m
     nodes.push(aoide_storage::node_store::Node {
         name: "flaky".to_string(),
         url: dead_url.clone(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,
@@ -849,7 +848,7 @@ fn node_pair_approve_on_an_outbound_entry_awaiting_confirm_with_yes_alone_is_the
 /// never wipe a `via` a previous ceremony (e.g. `node invite`) already
 /// recorded — `set_node_via` is only called at all when the entry names
 /// one, mirroring `upsert_paired_node`'s own "untouched unless this call
-/// names a change" stance for `autogate`/`tokenFile`/`bearerSecret`/`hub`/
+/// names a change" stance for `tokenFile`/`bearerSecret`/`hub`/
 /// `allows`. Seeds `box-b` already paired WITH a `via` (as if a prior
 /// `node invite` had run), then re-pairs it through an outbound entry
 /// carrying `via: None` — the re-pair's own pubkey/url land as usual, but
@@ -870,7 +869,6 @@ fn node_pair_approve_on_an_outbound_entry_with_no_via_leaves_a_previously_record
     aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
         name: "box-b".to_string(),
         url: "http://old-b/".to_string(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,

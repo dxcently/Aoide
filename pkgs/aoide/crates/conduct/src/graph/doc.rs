@@ -1945,7 +1945,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "yomi-strix".into(),
             url: "http://yomi-strix:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2012,7 +2011,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "never-pulled".into(),
             url: "http://never:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2035,7 +2033,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "flaky".into(),
             url: "http://flaky:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2069,7 +2066,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "expired".into(),
             url: "http://expired:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2335,7 +2331,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "yomi-renamed".into(),
             url: "http://yomi-strix:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2382,7 +2377,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "nodeb".into(),
             url: "http://nodeb:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2549,7 +2543,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "nodeb".into(),
             url: "http://nodeb:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

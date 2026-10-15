@@ -62,10 +62,11 @@ never the inbound/serve half (that's `aoide-server`).
   pre-existing direct stage-write path runs unchanged; any OTHER failure
   once a connection exists becomes `Some(Outcome::error(...))` instead of a
   silent fallback, since a daemon that answered but broke is a real bug
-  worth surfacing. `inv.door == Door::Daemon` short-circuits to `None`
-  immediately — the reentrancy guard that stops a handler running INSIDE
-  the daemon (because a remote caller's request just landed) from trying
-  to connect to itself.
+  worth surfacing. Only `Door::Cli` hops: every other door short-circuits
+  to `None` with no connect, because the wire carries no door and the
+  daemon runs each dispatch as `Door::Daemon` (MCP and A2A would arrive
+  holding the daemon's approvals). `Door::Daemon` is the reentrancy case: a
+  handler already running INSIDE the daemon never connects to itself.
 - `wire` — client-side A2A JSON-RPC message builders
   (`build_message_send_body` and `resolve_card_url`).
 - `adapter` — the melete neutral-event adapter (consumes events, stays
@@ -348,12 +349,11 @@ never the inbound/serve half (that's `aoide-server`).
   ordinary dead-pid arm. Both key shapes converge on one sweep; neither is
   a special case of it.
   Every tunneled request reaches the far door as `ConnOrigin::Loopback`
-  (`aoide-server::a2a::classify_origin`), which carries an unconditional
-  delivery free pass for an UNSIGNED request. `aoide-server::a2a` narrows
-  that free pass for a request carrying a verified per-request signature
-  (`origin_for_inject`, CONTRACTS.md §6) — a signed caller is a remote node
-  by construction and never rides Loopback's trust, so tunneled delivery is
-  safe against a real, non-autogate node, not merely possible.
+  (`aoide-server::a2a::classify_origin`). Loopback earns nothing by its
+  address: the door parks every admitted Inject in `pending.json` whether it
+  arrives tunneled or direct, and a human or the conductor approves it there
+  (CONTRACTS.md §6). A verified signature proves a node's identity; it never
+  skips the queue.
   **`mail_wire`'s drain (P-M2) is the one deliberate exception to "this
   crate never closes a tunnel itself."** A rarely-contacted outbox target
   should not accumulate a standing forward just because a background daemon
@@ -542,7 +542,9 @@ never the inbound/serve half (that's `aoide-server`).
   envelope's own `header.from.node`), then through `settle_deposit`:
   filing a letter spools its ack toward the letter's origin, a receipt
   retires the entry it confirms, and a re-poll before the ack files
-  nothing twice and spools nothing twice. **`aoide mail poll [<node>]` is
+  nothing twice and spools nothing twice. A re-ack of a letter already
+  filed files nothing either, and the write-back after a deposit never
+  re-spools a letter the ack has retired. **`aoide mail poll [<node>]` is
   the second caller of `poll_node`, and the reason it exists: an empty
   outbox never dials, so `drain_node`'s poll-on-contact can never reach a
   node with nothing to send — the one receive path the relay model needs
@@ -666,7 +668,11 @@ never the inbound/serve half (that's `aoide-server`).
   `daemon_dispatch` always answers `None` for) reports the outcome's own
   `ring` field as the literal string `"no-daemon"`, never an error — the
   letter is filed and the latch stays armed for the next trigger either
-  way, so a self-send's own status never depends on ring's success.
+  way, so a self-send's own status never depends on ring's success. A caller
+  on a door that cannot approve (`Door::can_approve` is false: MCP, the
+  network door) forwards nothing and reports `ring` as `"refused"`: the
+  dispatch request carries no door, so the daemon would run the forwarded
+  ring as its own door and type it into the reader's pty.
   `handle_mail_outbox` (`mail outbox [node]`) is the spool's own read-only
   status view — an optional node arg narrows to one, otherwise every node
   `outbox::nodes_with_outbox` reports — rendering each `list_entries` row's

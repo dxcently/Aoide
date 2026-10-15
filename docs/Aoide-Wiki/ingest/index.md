@@ -27,7 +27,7 @@ updated: 2026-09-27
 - [[A2A-Door]] — the bidirectional Agent2Agent door: `a2a serve` agent, the `node` group as the outbound client, concept mapping, rebuild-time admission, pairing-gated spawn with signed requests
 - [[Node-Federation]] — folding another instance's session graph in as a subtree: `state/nodes.json`, the node-cache TTL, the `node` CLI group; direct dial by default
 - [[Pairing-Ceremony|Pairing Ceremony]] — the one verification between two instances: commit-then-reveal over the A2A door, a locally-derived SAS both humans confirm, the three-command `aoide pair` family, the gate-classed events feed
-- [[Node-Transport|Node Transport]] — reaching a loopback-bound door from another box: the `Node.via` marker, dial resolution through a session-scoped ssh tunnel, signature-outranks-loopback for Inject
+- [[Node-Transport|Node Transport]] — reaching a loopback-bound door from another box: the `Node.via` marker, dial resolution through a session-scoped ssh tunnel, signed Inject verdicts (held at the door)
 - [[Secrets-Broker]] — the `aoide secrets` door: socket-only broker, TOTP-gated parked resolves, `secrets watch`/`--popup`, age default backend
 - [[Desktop-Architecture]] — how aoided, shellbridge, Quickshell, and the compositor compose into the live desktop; each component's responsibility
 - [[Content-Pipeline]] — the pipeline stages (discover → propose → approve → ingest → lint → query), the approve gate, Mneme integration

@@ -98,6 +98,12 @@
   writes that song's own default, so `rice stage`, the `rice mode` re-pins,
   `cover set --clear` and the lane's activation seed never need to know what
   was staged a moment ago — the seed touches `cover.json` not at all.
+- **`cover::pick_tiles` is the one tile rule, and `stage_pick` is its one
+  writer.** `tile` and `position` are decided for a still by `cover set`
+  alone: the record door (`--from-skwd`) and the song defaults never carry
+  them, and every copy (a take, a draft, a kept pick) carries them verbatim
+  without recomputing. Nothing reading the PICK re-derives the `_tile` name
+  rule; it takes `tile` as written (CONTRACTS.md §4).
 - **Who PAINTS a pick is the HOST's choice — a provider, never a song's
   field.** The fact is `aoide.wallpaper.provider` (nucleus), read at runtime by
   `wallpaper_provider::provider()` off the one word the `lyra` lane publishes at

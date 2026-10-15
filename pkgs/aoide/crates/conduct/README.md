@@ -45,6 +45,52 @@ there names an fd, a signal or a `HANDLE`. What differs by host is named in
 that module's own table, and each difference is a fact of the host rather than
 a stub: a signal-less host has no `Ended::Signal` variant at all.
 
+Approval is decided by the door a send arrived through. `Door::can_approve`
+(re-exported from `graph`) says which doors may approve a gated send: the local
+CLI and aoided's own dispatch. `DOOR_CANNOT_APPROVE` is the taught line a
+refused approval carries, and `hold_pending` parks a text a non-approving door
+asked to inject (A2A's spawn opening turn). The same predicate refuses
+`session permit` (no summons card) and `mail ring` (no ring) on those doors.
+CONTRACTS.md's approval-doors section has the table.
+
+The MCP door cannot approve, but it is attested like the CLI. `aoide mcp serve
+--stdio` dispatches in its own process, so the gate walks that process's
+ancestry to a sealed session (`real_attested_sender`), and a send from a server
+launched under one earns that session's parent and sibling rules and delivers.
+It never reads `--yes` or the autogate switch. A send with no sealed ancestor,
+or to a session the sealed one has no rule for, parks, and so does every send
+from the A2A door, which runs inside aoided with no sealed ancestor. A spawn
+follows the send: an attested MCP caller's child is parented by its session and
+its `--prompt` is a parent-to-child send that delivers, and an unattested
+caller's whole spawn is held in `pending.json` (`PendingSend::spawn`) until a
+human approves it. A `resurrect --project …` follows the spawn: an attested
+caller revives the sessions it names, any other has the whole command held
+(`PendingSpawn` with `path` `resurrect`) until a human approves it, and a bare
+`resurrect`, which would launch the working directory's manifest commands
+unseen, is refused there with a line naming `--project`. A restore is not a send
+a caller makes, and stays held over MCP for every caller. Neither door can adopt
+a session: re-parenting an existing session (`session start --parent`, `graph
+link`), `session hook` and `conduct` refuse (`reason`
+`door-cannot-approve`, audited), because the parent rule reads the very field
+they write, and `pending deny` refuses like `pending approve`. A new session id
+may still register under a parent.
+
+The queue holds at most `PENDING_CAP_PER_SOURCE` entries per `from`, and the
+door a send arrived through derives that source: the A2A door's own
+`node:<name>` or `addr:<address>`, `mcp:<session>` (the caller's kernel-attested
+session) or `mcp` on the MCP door, and the resolved attribution on the CLI and
+daemon doors. What an MCP caller typed as `--from` rides as a cleaned `claimed`
+label, never as the source, and a `--from` that spells a source only a door
+derives (`node:`, `addr:`, `mcp`) is refused with `reason` `reserved-from`. A
+held send past the cap is refused with `reason` `PENDING_FULL` and audited, and
+`hold_pending` answers `HoldRefused::Full`, so the network door can answer its
+own caller (`aoide-server`'s `do_inject` and opening turn). One entry is bounded
+too: past `PENDING_ENTRY_MAX_BYTES` it is refused the same way
+(`PENDING_TOO_LARGE`, `HoldRefused::TooLarge`). What an approver reads is what
+replays: `pending list` and the conductor spell every unsafe character of an
+entry as a visible escape (`visible`: `\n`, `\x1b`, `\u{202e}`), never
+stripping one, and a held spawn shows as its whole command.
+
 ## Named seams (what it exposes)
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements
@@ -114,16 +160,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   executor-specific mail readers. Resurrection does not implicitly bind it.
 
 - **Graph residency (P-D6, `docs/architecture/AOIDED.md`'s "L4")**: the
-  session-write family — `session start/phase/end`, `session
-  hook`, and `session reap` (below) — each try `aoide_client::daemon::
-  daemon_dispatch(inv)` FIRST and fall back to their pre-existing direct
-  stage-write path byte-identically on `None`. The daemon executes the
-  SAME registered handler code (its `dispatch` fn IS `cli::dispatch::
-  dispatch`) — no logic forks, no daemon-specific policy anywhere in this
-  crate. `session_hook` smuggles its already-read stdin payload through
-  the routed `Invocation`'s `flags` map under an internal-only key
-  (`STDIN_PAYLOAD_FLAG`) rather than growing the daemon wire a stdin
-  channel — the daemon-side handler reads that flag first and never
+  session-write family — `session start/phase/end`, `session hook`, and `session
+  reap` (below) — each try `aoide_client::daemon::daemon_dispatch(inv)` FIRST
+  and fall back to their pre-existing direct stage-write path byte-identically
+  on `None`. Only the CLI door makes the hop; any other door runs the direct
+  path under its own door. The daemon executes the SAME registered handler code
+  (its `dispatch` fn IS `cli::dispatch::dispatch`) — no logic forks, no
+  daemon-specific policy anywhere in this crate. `session_hook` smuggles its
+  already-read stdin payload through the routed `Invocation`'s `flags` map under
+  an internal-only key (`STDIN_PAYLOAD_FLAG`) rather than growing the daemon
+  wire a stdin channel — the daemon-side handler reads that flag first and never
   touches its own stdin.
 - `graph/spawn.rs` — `spawn [--windowed] [--undying]` (P-D7,
   `docs/architecture/AOIDED.md`'s "L5"): the child is always `aoide conduct
@@ -142,8 +188,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   READY to take a turn (`wait_ready`, a per-harness fact: `Hook` reads THIS
   launch's timestamped `SessionStart`; `OutputSettled` claims no fact at all,
   so its deliveries are unverified — the same gate
-  `resurrect`'s restore delivery and `aoide-server`'s
-  `a2a::spawn_inject_prompt` pass). The result says which it was:
+  `resurrect`'s restore delivery passes). The result says which it was:
   `delivered`, `delivered-unverified` (no declared fact for that name — the
   text went out once output settled and whether it submitted is unknown), or
   `not-ready` (nothing typed). `--undying` (P-C3, durable-sessions
@@ -215,39 +260,35 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `Stop` stays swallowed on purpose (blocking the turn to force the note
   through was rejected on design grounds — see `door_command`'s own doc).
 - `graph` — the session DAG: build/merge/send/spawn/wrap, `normalize_addr`
-  (widened to `pub` at P-A1 so `screen` could reach it without duplicating
-  it), `SessionRecord`/`SessionsFile`/`load_stage`/`write_stage`. `--id`
-  accepts a bare session id OR the exact `session:<id>` form bare `graph
-  --json` emits for a node id (a known prefix stripped before matching,
-  same discipline `focus_session` already used) — bare `graph`'s own
-  emitted contract is unchanged, only what `--id`/`--to` accept
-  as input widened; an id with any OTHER prefix still errors as unknown,
-  unchanged. `send` gained `--to <target>` (messaging plan P-C3, mutually exclusive
-  with `--id`): resolves via `aoide_storage::addr::resolve` (itself
-  `session:`-prefix-tolerant on its exact-id tier) against local
-  sessions + registered nodes — a LOCAL match re-drives the exact `--id`
-  path unchanged, a REMOTE match (`node/<query>`, resolved against that
-  node's CACHED graph, never a live pull) delivers over A2A `message/send`
-  instead, gated entirely on the RECEIVING node's side (this door's own
+  (widened to `pub` at P-A1 so `screen` could reach it without duplicating it),
+  `SessionRecord`/`SessionsFile`/`load_stage`/`write_stage`. `--id` accepts a
+  bare session id OR the exact `session:<id>` form bare `graph --json` emits for
+  a node id (a known prefix stripped before matching, same discipline
+  `focus_session` already used) — bare `graph`'s own emitted contract is
+  unchanged, only what `--id`/`--to` accept as input widened; an id with any
+  OTHER prefix still errors as unknown, unchanged. `send` gained `--to <target>`
+  (messaging plan P-C3, mutually exclusive with `--id`): resolves via
+  `aoide_storage::addr::resolve` (itself `session:`-prefix-tolerant on its
+  exact-id tier) against local sessions + registered nodes — a LOCAL match
+  re-drives the exact `--id` path unchanged, a REMOTE match (`node/<query>`,
+  resolved against that node's CACHED graph, never a live pull) sends over A2A
+  `message/send` instead, and the RECEIVING node parks it (this door's own
   `--yes`/pending/autogate machinery is a local-socket concept and does not
-  apply to a remote delivery). A `--to` query that resolves against neither
-  a local session nor any node/prefix form falls through to a registered
-  **hub node** (P-D5's `node hub`, wired here at P-D6 —
-  `aoide_storage::addr::resolve_with_hub`, given the one node with
-  `hub: true` if any) instead of erroring `not-found` — the ONE routing
-  consumer of the hub preference in this crate; `who.rs`'s own listing
-  filter deliberately keeps the plain, hub-blind `addr::resolve`. `send::deliver_local`'s success path is ONE
-  of exactly TWO seams that file a delivered message into
+  apply to a remote send). A `--to` query that resolves against neither a local
+  session nor any node/prefix form falls through to a registered **hub node**
+  (P-D5's `node hub`, wired here at P-D6 —
+  `aoide_storage::addr::resolve_with_hub`, given the one node with `hub: true`
+  if any) instead of erroring `not-found` — the ONE routing consumer of the hub
+  preference in this crate; `who.rs`'s own listing filter deliberately keeps the
+  plain, hub-blind `addr::resolve`. `send::deliver_local`'s success path is the
+  one seam in this crate that files a delivered message into
   `aoide_storage::mail` as a receipt (messaging plan P-M1,
   `state/mail/base.jsonl`) — every route that lands a message into an
-  ALREADY-REGISTERED session (direct `--id`, `--to` local, `pending
-  approve`'s re-drive, AND `aoide-server`'s A2A `do_inject`, which reaches
-  this same function through `session_send`) is covered by that one call
-  (`mail::file_receipt`). The OTHER seam lives in `aoide-server` itself
-  (`spawn_inject_prompt`, `a2a.rs`): a brand-new A2A-spawned session's
-  first turn is typed before that session has a `SessionRecord` at all,
-  so it can't reach `deliver_local` and files itself instead — see
-  `aoide_storage::mail`'s module doc for the full two-writer reasoning.
+  ALREADY-REGISTERED session (direct `--id`, `--to` local, `pending approve`'s
+  re-drive) is covered by that one call (`mail::file_receipt`). A network door
+  never lands one: its send parks in `pending.json`, and a held send is filed
+  when a local approver releases it. `aoide-server`'s A2A spawn holds its
+  opening turn the same way, so it files nothing either.
 - **`send.rs::write_delivery`** is the one place a delivered payload actually
   reaches a target's control socket (task #124): the text write, then — on
   `--submit` — a SEPARATE, later write of the target's own submit keystroke,
@@ -268,7 +309,7 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   a dedicated `.ring.lock` file (`aoide_storage::mail::with_ring_lock`) —
   never `.stage.lock`, and only the daemon's own serializer, not a second
   policy boundary. The PTY fallback is refused by `auto_type_refusal`, the one
-  refusal the ping-back and the A2A inject make too: a wrap whose WRAPPED program is
+  refusal the ping-back makes too: a wrap whose WRAPPED program is
   a shell (`shell-parent`), and a wrap the walk does not prove is its harness
   (`unverified-wrap`, the proof `is_its_harness` checks). The line is submitted, so
   a shell would RUN it. The channel arm is not that
@@ -1041,23 +1082,26 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   The outcome is a toast through the shared `notify`, on success and failure;
   the audit line is `ricemode action <stage|declarative>: <ok|failed>` and
   carries no song name.
-  `{"cmd":"ricedraft","action":"enter|new|save","name"?}` is fire-and-forget
-  like `ricemode`, its outcome a toast through the shared `notify`. The set is
-  closed (`RiceDraftAction::from_wire`: `enter` takes a `name` that is one argv
-  token, `new` and `save` refuse one, so a mistaken caller is dropped rather
+  `{"cmd":"ricedraft","action":"enter|new|save|drop","name"?}` is
+  fire-and-forget like `ricemode`, its outcome a toast through the shared
+  `notify`. The set is closed (`RiceDraftAction::from_wire`: `enter` and `drop`
+  take a `name` that is one argv token, `new` and `save` refuse one, so a mistaken caller is dropped rather
   than read as success), planned by the pure `rice_draft_plan` and run step by
   step by `dispatch_rice_draft`, each step `lyra rice … --json`, unbounded,
   stopping at the first failure — `partial` when an earlier step had
   succeeded, which nothing rolls back. From declarative, `enter` and `new` first
   run a BARE `rice mode stage` (house rule 10: it restores `stagingSong`,
-  never the declared song), and `save` is a
-  taught refusal, `declarative mode is locked — unlock first, then save the
-  draft`: the stage there is the declared song, `rice draft save` nests under
-  the song the stage names, and the listing names `stagingSong`, so a save
-  would land where the menu never looks. `enter` is enter-or-create: `rice
-  mode draft` forks the stage into a name that does not exist yet, and the
-  bridge cannot tell. The audit line is one per action
-  (`ricedraft action <enter|new|save>: <ok|partial|failed>`) and carries
+  never the declared song), and `save` and `drop` are taught refusals,
+  `declarative mode is locked — unlock first, then save the draft` / `…then
+  delete the draft`: the stage there is the declared song, `rice draft
+  save`/`drop` act on the song the stage names, and the listing names
+  `stagingSong`, so a save would land, and a drop would delete, where the menu
+  never looks (unlocking first would change the mode as a side effect).
+  Elsewhere `drop` is one step, `rice draft drop <name>`; a missing draft or
+  the draft in force is the CLI's refusal, toasted as its own message.
+  `enter` is enter-or-create: `rice mode draft` forks the stage into a name
+  that does not exist yet, and the bridge cannot tell. The audit line is one
+  per action (`ricedraft action <enter|new|save|drop>: <ok|partial|failed>`) and carries
   neither a draft nor a song name.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE
@@ -1222,48 +1266,44 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
 - **Session origin (P-P3, `docs/architecture/PAIRING.md` decision 7;
   write-authority tightened at LANE IDENTITY P-ID0, G16/G5):**
   `session_store.rs::stamp_origin` (now `pub`, crossing the crate boundary)
-  stamps `SessionRecord.origin` — `"node:<name>"` for a session
-  `aoide-server`'s A2A door spawned on behalf of an identified, paired node.
-  It has exactly two legitimate STAMP callers: `aoide-server`'s
-  `a2a::do_spawn` calls it DIRECTLY on the just-spawned record
-  (`stamp_spawn_provenance`, polling for the record's registration the same way
-  `spawn_inject_prompt` already does), from the door where the node name is
-  actually authenticated — the only place a `node:*` value may originate.
-  `graph/conduct.rs::session_conduct` calls it for a LOCAL-CLASS value off
-  its own inherited `AOIDE_SESSION_ORIGIN` env, right after
-  `do_session_start`, same seam `stamp_headless` uses — and REFUSES a
-  `node:*` shape read from that env (a taught refusal, never a panic):
-  inherited env is exactly what a same-uid process can set on itself before
-  invoking `aoide conduct` directly, so a `node:*` value threaded that way
-  was never trustworthy. A THIRD path reads `origin` back rather than
-  stamping it fresh: `doc.rs::ledger_session_exit` projects
-  `SessionRecord.origin` verbatim into the durable session ledger's own
+  stamps `SessionRecord.origin` — `"node:<name>"` for a session `aoide-server`'s
+  A2A door spawned on behalf of an identified, paired node. It has exactly two
+  legitimate STAMP callers: `aoide-server`'s `a2a::do_spawn` calls it DIRECTLY
+  on the just-spawned record (`stamp_spawn_provenance`, polling for the record's
+  registration on its own budget), from the door where the node name is actually
+  authenticated — the only place a `node:*` value may originate.
+  `graph/conduct.rs::session_conduct` calls it for a LOCAL-CLASS value off its
+  own inherited `AOIDE_SESSION_ORIGIN` env, right after `do_session_start`, same
+  seam `stamp_headless` uses — and REFUSES a `node:*` shape read from that env
+  (a taught refusal, never a panic): inherited env is exactly what a same-uid
+  process can set on itself before invoking `aoide conduct` directly, so a
+  `node:*` value threaded that way was never trustworthy. A THIRD path reads
+  `origin` back rather than stamping it fresh: `doc.rs::ledger_session_exit`
+  projects `SessionRecord.origin` verbatim into the durable session ledger's own
   `origin` field at exit (no `graph.json` projection — like
   `headless`/`hookAncestry`, consumed internally, not rendered), and
   `graph/resurrect.rs::origin_to_carry` reads that field BACK on a revival to
-  carry a LOCAL-class session's own provenance forward onto its revived
-  record (G6, same phase). It REFUSES a `node:*` shape found there too
-  (eprintln, never carried): `state/session-ledger.jsonl` is a plain,
-  same-uid-writable, append-only file — a same-uid process can append a line
-  claiming `origin:"node:X"` and then run the ungated local `aoide
-  resurrect`, which has no door and no seal behind it to re-mint that
-  authority. `origin_to_carry` is pure and directly unit-tested for exactly
-  this refusal. **This closes the STAMP paths, not the files**: a
-  hand-crafted `sessions.json`/ledger line claiming `node:X` is still a
-  readable, unflagged string on disk — nothing here makes the files
-  tamper-evident; that is P-ID1 (the daemon-signed credential, below) —
-  minted and stored, verified on the per-session control socket's own
-  accept and consumed by the send gate as of P-ID2, and both remaining
-  sockets get a peercred floor of their own as of P-ID3 (below).
-  **The raw field is attribution, never a gate**: a same-uid process can
-  still forge a LOCAL-class `origin` string, so nothing gates a security
-  decision on the field as read off disk — the authenticated form is the
-  `originClass` carried inside a VERIFIED seal (below), which is what the
-  secrets broker's origin gate (P-ID4) consumes; the consumer NAME
-  presenting a request stays unauthenticated either way (a separate,
-  unbuilt axis — CONTRACTS.md's identity-lane accounting). What P-ID0
-  closes: every record-STAMP path this codebase drives refuses a `node:*`
-  shape it didn't mint itself at the door — env AND ledger both.
+  carry a LOCAL-class session's own provenance forward onto its revived record
+  (G6, same phase). It REFUSES a `node:*` shape found there too (eprintln, never
+  carried): `state/session-ledger.jsonl` is a plain, same-uid-writable,
+  append-only file — a same-uid process can append a line claiming
+  `origin:"node:X"` and then run the ungated local `aoide resurrect`, which has
+  no door and no seal behind it to re-mint that authority. `origin_to_carry` is
+  pure and directly unit-tested for exactly this refusal. **This closes the
+  STAMP paths, not the files**: a hand-crafted `sessions.json`/ledger line
+  claiming `node:X` is still a readable, unflagged string on disk — nothing here
+  makes the files tamper-evident; that is P-ID1 (the daemon-signed credential,
+  below) — minted and stored, verified on the per-session control socket's own
+  accept and consumed by the send gate as of P-ID2, and both remaining sockets
+  get a peercred floor of their own as of P-ID3 (below). **The raw field is
+  attribution, never a gate**: a same-uid process can still forge a LOCAL-class
+  `origin` string, so nothing gates a security decision on the field as read off
+  disk — the authenticated form is the `originClass` carried inside a VERIFIED
+  seal (below), which is what the secrets broker's origin gate (P-ID4) consumes;
+  the consumer NAME presenting a request stays unauthenticated either way (a
+  separate, unbuilt axis — CONTRACTS.md's identity-lane accounting). What P-ID0
+  closes: every record-STAMP path this codebase drives refuses a `node:*` shape
+  it didn't mint itself at the door — env AND ledger both.
 - **Remote parent (remote sub-agents P-RSA S3, CONTRACTS.md §4):**
   `session_store.rs::stamp_remote_parent` is the ONE stamp function for
   `SessionRecord.remoteParent` (`pub`, crossing the crate boundary), and its
@@ -1404,8 +1444,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   same for an unattributed remote inject, so it never picks up `aoide a2a
   serve`'s own ambient env either (G9). Neither closes the GATE itself —
   `real_attested_sender`'s `std::process::id()` walks whichever process is
-  actually running `deliver_local`, which for a dispatched/injected send is
-  the daemon's/`a2a serve`'s own ancestry, not the original caller's; in
+  actually running `deliver_local`, which for a dispatched send is
+  the daemon's own ancestry, not the original caller's; in
   production that ancestry never resolves a live sealed session, so this
   already fails closed to `pending` by construction, not because either fix
   re-derives the real caller's identity — threading the connecting peer's
@@ -1457,12 +1497,25 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   is probed and before any rendering or filter, joins each `remoteChildren` row
   to the probed fold by `(node name, sessionId)` and marks it `Fold::Fresh`,
   `Fold::Stale` (the fold's own `NodeView.stale`, i.e. a cache past
-  `node_store::NODE_CACHE_TTL_SECS`) or `Fold::Absent` (no fold at all). Both
+  `node_store::NODE_CACHE_TTL_SECS`) or `Fold::Absent` (no fold at all: the
+  node is not registered, or it is registered and never pulled). Both
   renderings then draw the far chain indented under the parent's own row —
   `par1`, `nodeb/C`, then C's far descendants from that fold's own `spawned`
   edges — and `session_view_json` carries the same join as `fold` + `subtree` on
   the entry, so the view and `--json` cannot disagree; a row the fold cannot
-  back is shown `(not pulled)`, never hidden. A ledger row leaves with its
+  back is shown `(not pulled)`, never hidden. The far document is the far
+  node's to arrange, so the join is bounded by its size and not by its shape:
+  each fold is indexed once (parent to children), and within one linking node
+  each far session is drawn under the first of that node's links that reaches
+  it, so another node's link to the same session keeps its own rows. A link
+  from a far node into this box's own fold draws no rows: a far document may
+  not re-home a local session. A link's `subtree` is a flat
+  preorder list of `{sessionId, depth}` rows walked on an explicit stack. A
+  chain a hundred thousand levels deep therefore costs its length, never the
+  stack. Indentation is drawn to 32 levels and then `…` (every row keeps its
+  line); the JSON nests to the same 32 levels, and a row below that sits in
+  preorder in the deepest nested list with `"subtree": []` and its true
+  `"depth"`. A ledger row leaves with its
   parent: `doc.rs::drop_remote_child_rows` retains `remote-children.json` against
   the removed ids, and BOTH roster-exit paths call it after their own
   `sessions.json` write has landed (`reap_inner`, for its automatic pass and for

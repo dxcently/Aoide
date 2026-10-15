@@ -93,7 +93,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["graph", "link"],
-        summary: "Record a spawned-by edge: set parentSessionId on the child session (cycle-checked).",
+        summary: "Record a spawned-by edge: set parentSessionId on the child session (cycle-checked). Moving the parent of a session that exists needs a door that can approve (the CLI); the MCP and A2A doors are refused.",
         args: [
             arg!("child", "string", true, "Session id of the spawned (child) session."),
             arg!("parent", "string", true, "Session id of the spawning (parent) session."),
@@ -113,7 +113,7 @@ pub fn register(r: &mut Registry) {
                 flag!("agent", "string", "Agent name driving the session (default claude)."),
                 flag!("cwd", "string", "Working directory; the session anchors under the longest-prefix project."),
                 flag!("window", "string", "Hyprland window address for the focus jump (`focus_session`) to use."),
-                flag!("parent", "string", "Spawning session id — records the spawned-by edge (cycle-checked)."),
+                flag!("parent", "string", "Spawning session id — records the spawned-by edge (cycle-checked). On a session that already exists it re-parents it, which a door that cannot approve (MCP, A2A) is refused; any door may register a new session under a parent."),
             ],
             gated: false,
             implemented: true,
@@ -157,7 +157,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "hook"],
-            summary: "Hook door for agent harnesses: read one hook JSON from stdin and map it to a session command through the agent's profile (never exits non-zero for a payload problem).",
+            summary: "Hook door for agent harnesses: read one hook JSON from stdin and map it to a session command through the agent's profile (never exits non-zero for a payload problem). A door that cannot approve (MCP, the network door) is refused before stdin is read.",
             args: [],
             flags: [
                 flag!("agent", "string", "Agent harness the payload comes from: claude (default), kimi, or pi."),
@@ -171,12 +171,12 @@ pub fn register(r: &mut Registry) {
     });
     r.insert(cmd!(
         path: ["spawn"],
-        summary: "Spawn ANY agent command as a DETACHED conducted session that outlives this call — headless by default (re-execs `conduct --headless`), or in a real terminal with --windowed (execs $AOIDE_TERMINAL running the same conducted command) — waits briefly for it to register its control socket, and returns. Exports AOIDE_SESSION_ID to the child same as `conduct`/`wrap`. For a FOREGROUND wait-and-stream wrapper, `aoide conduct --task …` is the same wrapper without detaching. An optional --prompt is injected through the one gated injection door (`send --yes --submit`) once registration succeeds; skipped (honestly reported) if it never does.",
+        summary: "Spawn ANY agent command as a DETACHED conducted session that outlives this call — headless by default (re-execs `conduct --headless`), or in a real terminal with --windowed (execs $AOIDE_TERMINAL running the same conducted command) — waits briefly for it to register its control socket, and returns. Exports AOIDE_SESSION_ID to the child same as `conduct`/`wrap`. For a FOREGROUND wait-and-stream wrapper, `aoide conduct --task …` is the same wrapper without detaching. An optional --prompt is injected through the one gated injection door (`send --yes --submit`) once registration succeeds; skipped (honestly reported) if it never does. Over MCP the caller must be attested: a server launched under a sealed session spawns the child as that session's child and its --prompt is a parent-to-child send; any other MCP spawn is held whole in pending.json for `session pending approve` and nothing launches.",
         args: [arg!("command", "string", true, "The wrapped command and its args — put them after `--` so the child's own flags pass through verbatim.")],
         flags: [
             flag!("agent", "string", "Agent name for the roster (default: the command's basename)."),
             flag!("parent", "string", "Spawning session id — records the spawned-by edge (passed through to `conduct`)."),
-            flag!("id", "string", "Session id override (default spawn-<pid>-<unixts>)."),
+            flag!("id", "string", "Session id override (default spawn-<pid>-<unixts>). Over MCP it must be plain (A-Z a-z 0-9 . _ : -, at most 128 characters) and must not name a live session or an existing control socket."),
             flag!("prompt", "string", "A first turn to inject once the session registers (skipped, honestly reported, if it never does)."),
             flag!("windowed", "bool", "Open a real terminal (from $AOIDE_TERMINAL, a whitespace-split argv with a `{cmd}` placeholder) instead of a detached headless child. A bare `{cmd}` splices the conducted argv as separate arguments (`kitty -e {cmd}`); a quote-wrapped `'{cmd}'` joins it shell-quoted into one word for `sh -c` templates (`foot sh -c '{cmd}'`). Taught errors when unset, or when no display is present."),
             flag!("cwd", "string", "Working directory for the spawned child (default: this process's own cwd) — for --windowed, the terminal emulator's own cwd, which its own shell inherits."),
@@ -197,7 +197,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["resurrect"],
-        summary: "Revive sessions. BARE (no --project/--all/--id): walk up from cwd for the nearest .aoide/project.json and revive THAT manifest's specs directly — no projects.json registration needed. Each local-host spec (a spec whose host doesn't match this host's own name is skipped, remote summoning lands in a later phase) enriches off the newest matching state/session-ledger.jsonl entry (same cwd/agent) through the exact --id path below when one exists, else clean-spawns windowed from the spec's own command or the agent's default launch. WITH --project (resolved against projects.json by exact name; --all/--id ignore the manifest entirely): anchors ledger entries to it (longest-prefix, same rule the bare `graph` render uses), then selects — bare (no --all/--id) resumes the project's WHOLE undying set (state/undying.json, `session grant undying on|off`) minus any id already alive; --all widens to every anchored entry; --id narrows to one. Each candidate resolves through two arms: a harness with a verified resume argv spawns windowed running `<harness> --resume <id>`; a conducted TERMINAL (no harness profile, but a captured `restore` snapshot) spawns windowed running its login shell, then — once registered — types its last foreground command at the prompt (`--yes`, never `--submit`: a human presses Enter; only when it was demonstrably running one, and not when the restore refuses it, as for a recorded `sudo …`); an idle one restores its cwd alone and delivers nothing. Neither arm resolving is skipped with a taught message. The revived session always mints a NEW sessionId (ids are never recycled) and is stamped resumedFrom, rendered as a `resumed` graph edge; an undying old id transfers its mark onto the new one. A windowed-spawn failure (no $AOIDE_TERMINAL / no display) is folded into `failed` rather than erroring the command, so a headless host degrades gracefully.",
+        summary: "Revive sessions. BARE (no --project/--all/--id): walk up from cwd for the nearest .aoide/project.json and revive THAT manifest's specs directly — no projects.json registration needed. Each local-host spec (a spec whose host doesn't match this host's own name is skipped, remote summoning lands in a later phase) enriches off the newest matching state/session-ledger.jsonl entry (same cwd/agent) through the exact --id path below when one exists, else clean-spawns windowed from the spec's own command or the agent's default launch. WITH --project (resolved against projects.json by exact name; --all/--id ignore the manifest entirely): anchors ledger entries to it (longest-prefix, same rule the bare `graph` render uses), then selects — bare (no --all/--id) resumes the project's WHOLE undying set (state/undying.json, `session grant undying on|off`) minus any id already alive; --all widens to every anchored entry; --id narrows to one. Each candidate resolves through two arms: a harness with a verified resume argv spawns windowed running `<harness> --resume <id>`; a conducted TERMINAL (no harness profile, but a captured `restore` snapshot) spawns windowed running its login shell, then — once registered — types its last foreground command at the prompt (`--yes`, never `--submit`: a human presses Enter; only when it was demonstrably running one, and not when the restore refuses it, as for a recorded `sudo …`); an idle one restores its cwd alone and delivers nothing. Neither arm resolving is skipped with a taught message. The revived session always mints a NEW sessionId (ids are never recycled) and is stamped resumedFrom, rendered as a `resumed` graph edge; an undying old id transfers its mark onto the new one. A windowed-spawn failure (no $AOIDE_TERMINAL / no display) is folded into `failed` rather than erroring the command, so a headless host degrades gracefully. Over MCP the caller must be attested to revive: with no sealed session (and always from the A2A door) `--project …` is held whole in pending.json for `session pending approve` and nothing launches, and BARE mode is refused (it would run the manifest's commands from a directory the approver never sees).",
         args: [],
         flags: [
             flag!("project", "string", "Project name to resurrect a session for; resolved against projects.json by exact name. Omit entirely, along with --all/--id, to use bare-manifest mode instead (walk up from cwd for .aoide/project.json)."),
@@ -216,13 +216,13 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["send"],
-        summary: "Inject text into a conducted session's control socket (the one gated injection door). Held pending approval by default; --yes (or an autogate policy) delivers and auto-renames the node to a one-line form of the text — except for a bare keystroke answer (text with no letters, e.g. a permission verdict digit), which is not a task and leaves the node's name alone. Siblings (sharing a live parent) autogate each other by default too — opt out with AOIDE_CONDUCT_SIBLING_AUTOGATE={0,false,no}. The reciprocal also holds: a parent automatically hears the children it spawned — the daemon delivers ONE line off a child's own trace (settled, cancelled, died mid-turn, asking, wrapping up, failing, silent) straight to the parent's transport, never prompted, never pending, and never through this door. Every outcome is audited. --to resolves a name (local id/tail4/petname, or node/<query> for a remote session over A2A) instead of a raw --id; mutually exclusive with --id — a remote send is always attempted (the receiving node gates its own delivery) and never queues locally.",
+        summary: "Inject text into a conducted session's control socket (the one gated injection door). Held pending approval by default; --yes (or an autogate policy) delivers and auto-renames the node to a one-line form of the text — except for a bare keystroke answer (text with no letters, e.g. a permission verdict digit), which is not a task and leaves the node's name alone. Siblings (sharing a live parent) autogate each other by default too — opt out with AOIDE_CONDUCT_SIBLING_AUTOGATE={0,false,no}. Over MCP the same parent and sibling rules apply to the sealed session the MCP server runs under, found the way the CLI finds its own; --yes and the autogate environment never apply, and a send with no sealed session behind it is held. The reciprocal also holds: a parent automatically hears the children it spawned — the daemon delivers ONE line off a child's own trace (settled, cancelled, died mid-turn, asking, wrapping up, failing, silent) straight to the parent's transport, never prompted, never pending, and never through this door. Every outcome is audited. --to resolves a name (local id/tail4/petname, or node/<query> for a remote session over A2A) instead of a raw --id; mutually exclusive with --id — a remote send is always attempted (the receiving node gates its own delivery) and never queues locally.",
         args: [arg!("text", "string", true, "The text to inject — put it after `--` so its own words/flags pass through verbatim.")],
         flags: [
             flag!("id", "string", "Target session id (required unless --to is given); its socket is resolved from sessions.json.", value: "session-id", conflicts: &["to"]),
             flag!("submit", "bool", "Append the target harness's own submit keystroke (Enter for most agents, \\r for kimi — resolved from the target session's agent profile at delivery time). No-op for a --to remote send (the receiving node always submits its own way)."),
-            flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). No-op for a --to remote send — the receiving node gates its own delivery."),
-            flag!("from", "string", "Sender attribution override for the delivered provenance prefix (default: AOIDE_SESSION_ID). ATTRIBUTION ONLY, not authentication — unauthenticated and as spoofable as the env var it defaults from."),
+            flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). Never authorises over MCP, which cannot approve. No-op for a --to remote send — the receiving node gates its own delivery."),
+            flag!("from", "string", "Sender attribution override for the delivered provenance prefix (default: AOIDE_SESSION_ID). ATTRIBUTION ONLY, not authentication — unauthenticated and as spoofable as the env var it defaults from. Over MCP a send is recorded and delivered under the attested session (else the door's own source) and this rides beside it as a cleaned claim; a value spelling a source a door derives (`node:`, `addr:`, `mcp`) is refused."),
             flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id.", value: "target", conflicts: &["id"]),
             flag!("mesh", "string", "For a `node/<query>` target: the mesh this request acts in (P-CHARTER) — the far door reads the caller's grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh. Unused by a local send."),
         ],
@@ -240,7 +240,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],
-        summary: "Enumerate held `send` / A2A entries in state/stage/pending.json (id is the entry's position — re-list after any approve/deny, positions shift). A malformed entry (a stale hand-edited line) is listed with state `malformed` rather than failing the whole read.",
+        summary: "Enumerate held `send` / A2A entries in state/stage/pending.json (id is the entry's position — re-list after any approve/deny, positions shift). A malformed entry (a stale hand-edited line) is listed with state `malformed` rather than failing the whole read. The human line spells every control, bidi and invisible character as a visible escape (`\\n`, `\\x1b`, `\\u{202e}`) and shows a held spawn as its whole command; `data.pending[].text` keeps the bytes as they replay.",
         args: [],
         flags: [],
         gated: false,
@@ -288,7 +288,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "pending", "approve"],
-        summary: "Approve one held pending entry: re-drive it through the one gated injection door (`send`, in-process, --yes) and remove it from the queue. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
+        summary: "Approve one held pending entry: re-drive it through the one gated injection door (`send`, in-process, --yes) and remove it from the queue. A held spawn whose `--id` has since gone live is refused and stays queued. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
         args: [arg!("id", "string", true, "Pending entry id — its position from `session pending list`.")],
         flags: [],
         gated: false,
@@ -298,7 +298,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "pending", "deny"],
-        summary: "Reject one held pending entry: remove it from the queue and inject nothing. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
+        summary: "Reject one held pending entry: remove it from the queue and inject nothing. A door that cannot approve (MCP, the network door) is refused, as for approve. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
         args: [arg!("id", "string", true, "Pending entry id — its position from `session pending list`.")],
         flags: [],
         gated: false,
@@ -308,7 +308,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "permit"],
-        summary: "Publish the herald's permission SUMMONS for a session blocked on a permission prompt. The card is filed into the herald ledger (stage/herald.json) and this command RETURNS — the Quickshell herald draws it with real approve/deny buttons, and the click routes back through the shellbridge to type the verdict in. The hook door raises it automatically when a session goes `awaiting`. Only ever raised for a conductable session whose harness has verified prompt keys, and the verdict is only typed while the session is still awaiting.",
+        summary: "Publish the herald's permission SUMMONS for a session blocked on a permission prompt. The card is filed into the herald ledger (stage/herald.json) and this command RETURNS — the Quickshell herald draws it with real approve/deny buttons, and the click routes back through the shellbridge to type the verdict in. The hook door raises it automatically when a session goes `awaiting`. Only ever raised for a conductable session whose harness has verified prompt keys, and only while that session is awaiting. A door that cannot approve (MCP, the network door) is refused and files no card. The verdict is only typed while the session is still awaiting.",
         args: [],
         flags: [
             flag!("id", "string", "Target session id (required); its socket is resolved from sessions.json."),
@@ -348,7 +348,7 @@ pub fn register(r: &mut Registry) {
     // ── conduct: the PTY-backed conductable wrap (concepts/Conductor-Channel) ─
     r.insert(cmd!(
         path: ["conduct"],
-        summary: "Run an agent command on its own PTY as a CONDUCTABLE session: spawn, register running, wait, end (exit mirrored, AOIDE_SESSION_ID exported), with a controlling tty + a per-session control socket, so `send` can type into the running agent while its TUI runs undisturbed. WITH --task it is also the FOREGROUND managed-task wrapper: it blocks, streams the child's own output, prints the task's instruction/unread context, and returns one deterministic outcome (exit | signal | timeout | stopped) — the same wrapper `spawn --task` runs detached.",
+        summary: "Run an agent command on its own PTY as a CONDUCTABLE session (a door that cannot approve, MCP and A2A, is refused: it launches through `spawn`): spawn, register running, wait, end (exit mirrored, AOIDE_SESSION_ID exported), with a controlling tty + a per-session control socket, so `send` can type into the running agent while its TUI runs undisturbed. WITH --task it is also the FOREGROUND managed-task wrapper: it blocks, streams the child's own output, prints the task's instruction/unread context, and returns one deterministic outcome (exit | signal | timeout | stopped) — the same wrapper `spawn --task` runs detached.",
         args: [arg!("command", "string", true, "The wrapped command and its args — put them after `--` so the child's own flags pass through verbatim.")],
         flags: [
             flag!("agent", "string", "Agent name for the roster (default: the command's basename)."),

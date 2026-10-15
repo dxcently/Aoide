@@ -518,6 +518,21 @@ pub(in crate::graph) fn ended_code(child: &mut crate::graph::pty::PtyChild) -> O
 /// points `AOIDE_DAEMON_SOCKET` at the returned path.
 #[cfg(unix)]
 pub(crate) fn fake_seal_daemon(pubkey_hex: &str) -> PathBuf {
+    serve_seal_daemon(pubkey_hex, false)
+}
+
+/// [`fake_seal_daemon`] that answers ONE connection and then unlinks its
+/// socket. For a test whose subject launches a child that inherits
+/// `AOIDE_DAEMON_SOCKET`: the child must find no daemon, as it would not find
+/// one it never asked, rather than a stand-in that answers every request with
+/// a `ping`.
+#[cfg(unix)]
+pub(crate) fn fake_seal_daemon_once(pubkey_hex: &str) -> PathBuf {
+    serve_seal_daemon(pubkey_hex, true)
+}
+
+#[cfg(unix)]
+fn serve_seal_daemon(pubkey_hex: &str, once: bool) -> PathBuf {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -529,11 +544,16 @@ pub(crate) fn fake_seal_daemon(pubkey_hex: &str) -> PathBuf {
         "{}\n",
         serde_json::json!({ "ok": true, "daemon": "aoide", "sealPubkeyHex": pubkey_hex })
     );
+    let socket = path.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut line = String::new();
             let _ = BufReader::new(stream.try_clone().unwrap()).read_line(&mut line);
             let _ = (&stream).write_all(reply.as_bytes());
+            if once {
+                let _ = std::fs::remove_file(&socket);
+                break;
+            }
         }
     });
     path

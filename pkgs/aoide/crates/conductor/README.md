@@ -54,6 +54,7 @@ whenever it holds more rows than fit, and stays gone otherwise.
 | `q` / Ctrl-C | Quit outside text entry / quit globally |
 | Review: `j` / `k` | Walk session approvals, pairing requests and TOTP asks |
 | Review: `a` / `d` / `r` | Approve or resume / deny, reject or dismiss / re-list every queue |
+| Review on a held entry: `a`, then `y` | Open the whole entry, then approve it; `n` or Esc cancels, arrows and PgUp/PgDn scroll, a right click cancels, Ctrl-C quits and approves nothing |
 | Mesh: `e` / right-click | Pair, toggle a node's read/spawn/message grant, or unregister it |
 | Status: Enter or `e` | Edit the selected config key, or a secret's consumer grant |
 
@@ -131,7 +132,9 @@ Every registered node stands after this box's forest as a host card (border
 session(s)` or `last seen <age>`), with the
 sessions the roster reports for it beneath — ranked under a same-node
 spawner when the row carries `parentSessionId`, flat under the node
-otherwise. The rows are the same `session --hosts`
+otherwise, however deep or wide the node's roster runs: the pane builds, lays
+out and steps through it in time linear in its sessions. The rows are the
+same `session --hosts`
 probe Mesh paints, refreshed on the same ~15 s throttle while Graph is open;
 a cached row under an unreachable node wears the cache's word (`last-seen`)
 as its state and `was <state>` as its activity, never a live glyph, and is
@@ -224,7 +227,17 @@ own read's refusal, so a failed read never renders as an empty, all-clear
 queue. The cursor follows a row's identity, so a resolve that shortens the list
 moves the cursor with the rows that remain.
 
-`a` acts on whatever the cursor names. Approving or resuming a pairing request,
+`a` acts on whatever the cursor names. On any held entry (send, spawn or
+resurrect) it opens a confirm that shows the whole entry, wrapped and
+scrollable, instead of approving from the one row; only `y` approves, `n` and
+Esc cancel, arrows scroll, a right click cancels, and Ctrl-C quits without
+approving. A held resurrect's confirm lists each candidate and the restore it
+would type. The confirm's header leads with `from`, so the sender is read
+first. `y` re-reads the queue and approves only if the entry at that position
+is still the one on screen. Every row and the confirm
+spell a control, bidi or invisible character of the text as a visible escape
+(`\n`, `\x1b`, `\u{202e}`; `aoide_conduct::graph::visible`), never raw and
+never dropped. Approving or resuming a pairing request,
 like approving a TOTP ask, opens a masked prompt that names its exact target: a
 pairing code is read off the other screen and typed once. An empty field and
 Escape dispatch nothing, and submitting drops the prompt, so a rejected code or

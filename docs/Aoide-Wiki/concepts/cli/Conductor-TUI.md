@@ -130,8 +130,10 @@ log, `⚙` status, `◌` past session.
   `sas` fields and never scanned out of text.
 - **Review (`6`)** — three queues under one cursor: session send/A2A
   approvals (`session pending list`), parked pairing requests (`pair
-  --json`), parked secrets TOTP asks (`secrets pending --json`). `a`
-  approves / resumes, `d` denies / rejects / dismisses, `r` re-lists. A
+  --json`), parked secrets TOTP asks (`secrets pending --json`). `a` opens the
+  whole held entry and `y` approves it (a second key, so one keystroke cannot
+  send a held text); `a` resumes a pairing or a TOTP ask, `d` denies / rejects /
+  dismisses, `r` re-lists. A
   pairing code or a TOTP is typed once into a masked prompt and dropped on
   submit; nothing is replayed. Each queue's read failure renders as its own
   refusal line, never as an empty all-clear.

@@ -67,7 +67,6 @@ mod tests {
         Node {
             name: name.to_string(),
             url: "http://127.0.0.1:1".to_string(), // nothing listens here
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

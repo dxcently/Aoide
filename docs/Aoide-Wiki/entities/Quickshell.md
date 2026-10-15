@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-29
+updated: 2026-10-12
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -41,18 +41,21 @@ itself after an output blip): **`AoideWallpaper`** (the background layer,
 widget loaded through `WidgetSlot` (`slot: "bar"`) rather than a lane
 component — the song owns its own footprint. **`AoidePanel`** (the
 [[Gadget-Dock]]) owns its PanelWindow, layer, and toggle shortcut
-internally. Three more surfaces are **`SurfaceSlot`**-rooted overlays —
-`powermenu`, `launcher`, and `herald` (the notification popup) — each
-resolving a song widget through the same baseline-fallback chain
-`WidgetSlot` uses (song override → sonata, the shipped baseline every song
-falls back to → nothing), but as a non-visual `QtObject` sibling instead of
+internally. Four more surfaces are **`SurfaceSlot`**-rooted overlays —
+`powermenu`, `launcher`, `herald` (the notification popup) and `switcher`
+(the window switcher) — each resolving a song widget through the same
+baseline-fallback chain `WidgetSlot` uses (song override → sonata, the
+shipped baseline every song falls back to → the anchor's lane-side
+`fallback`, which only `switcher` gives: the plain `AoideSwitcher`), but as a
+non-visual `QtObject` sibling instead of
 a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
 content parented into an existing layout. `SongSurfaces` hosts one more
 `SurfaceSlot` per surface-kind entry the active song's `aoide.arrangement`
 declares (empty for sonata today, so a no-op). `AoideClipboard` and
 `GrimoireLedger` are lane-owned utility singletons injected into the
-launcher slot as extras; `AoideWallpaperPicker` is the `SUPER+W` wallpaper
-switcher.
+launcher slot as extras; `AoideWallpaperPicker` answers `aoide:wallpaper`
+(`SUPER+W`), handing it to the launcher body's `openPictures()` when it has
+one and opening its own plain cover picker otherwise.
 
 The repo root carries no `qml/` directory — widget source lives in
 `pkgs/lyra-shell/qml/` and each active song's `widgets/`, and the lyra lane's
@@ -329,7 +332,8 @@ source-of-truth is the live-watched `stage/cover.json` (written by `lyra rice
 stage` when the song's cover derives or, for a direct hot-swap, `lyra cover set
 <path-or-name>`; it carries the song it was staged for, so a cover for another
 song is ignored, and its `"pick": true` marks the user's own choice, which the
-shell refuses to draw the song's live board over), falling back to the baked `AOIDE_WALLPAPER` env store path so the
+shell refuses to draw the song's live board over, and its `"tile": true` repeats
+a picked still at 1:1 instead of cropping it), falling back to the baked `AOIDE_WALLPAPER` env store path so the
 background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
 hard cut — no crossfade.
 

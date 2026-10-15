@@ -3,6 +3,7 @@
 ## Invariants
 
 - A fresh structured letter mints one secure random thread ID before fanout; all copies share it. Replies explicitly retain the thread and name the parent; forwarding starts fresh.
+- **An ack is signed as `routing::own_name_in`'s name for this box in the letter's mesh** (`own_name`), the rule a letter's sender uses. A charter mesh that does not carry this box's key mints no ack and audits `mail.ack.withheld`; the hostname is never the fallback there.
 - Structured letter fanout reuses the scalar mail handler. Validate all recipients before effects, report every copy, and never retry accepted copies as a group. Metadata remains inside signed text, never unsigned envelope fields.
 
 - **`context` is daemon-owned and local-only.** The CLI must route to aoided
@@ -110,14 +111,12 @@
   the SPAWN path's business alone (the User's ruling, 2026-09-25):** `node spawn` fails
   the call it was asked to make, while `send --to` DROPS the claim, sends
   unclaimed and names the reason on one warning line (`not claiming parent:
-  <reason>`) — `send` never named a parentage, the claim is an autogate
-  shortcut rather than the request, and the door's Inject arm reads a
-  malformed claim as a non-match, never as a refusal, so an unruly id costs
-  that send its autogate and nothing else. Don't "restore" a refusal on the
-  send path. `remote_child_row` holds the far node's
-  ack id to that predicate too: it is a string this node did not mint and
-  cannot vouch for. `build_message_send_body` is the one writer of the key;
-  the claim rides inside the signed body, so never add it to headers or
+  <reason>`) — `send` never named a parentage, and the door's Inject arm never
+  reads the claim at all, so an unruly id costs that send its claim and nothing
+  else. Don't "restore" a refusal on the send path. `remote_child_row` holds
+  the far node's ack id to that predicate too: it is a string this node did not
+  mint and cannot vouch for. `build_message_send_body` is the one writer of the
+  key; the claim rides inside the signed body, so never add it to headers or
   the top-level `params.metadata`.
 - **Forwarded event text from `adapter` is untrusted data**, same as root
   `AGENTS.md` house rule 4 — an adapter never lets forwarded text execute as
@@ -185,12 +184,24 @@
   `aoide_storage::attest` with this module delegating — edit the body
   there; a change to the daemon socket's resolution rule updates that body
   AND `aoide-server`'s bind-side copy in the same commit.
+- **`daemon_dispatch` carries no door, so only `Door::Cli` hops.** The
+  request is `op`, `path`, `args` and `flags`, and the daemon stamps
+  `Door::Daemon` on every dispatch it runs
+  (`server::daemon::invocation_from_dispatch_request`). Nothing the daemon
+  receives can say which door the caller came through, so `daemon_dispatch`
+  answers `None` for every door but `Cli` and that caller runs its own local
+  path, where its real door still decides. Keep the check inside
+  `daemon_dispatch`, never at its call sites: a forwarder added later inherits
+  it. A caller that must REFUSE a non-approving door rather than run locally
+  checks `Door::can_approve` first: `handle_mail_send`'s self-ring does, and
+  reports `"refused"`.
 - **`daemon_dispatch` returning `None` is not the same as an error, and the
-  distinction is load-bearing.** `None` means "nothing usable answered" —
-  dead socket, refused connect, or `inv.door == Door::Daemon` (the
-  reentrancy guard: a handler already running INSIDE the daemon must take
-  its direct path, never try to connect to itself) — and the caller's own
-  pre-existing direct path must run unchanged. Once a connection is
+  distinction is load-bearing.** `None` means "the hop was not taken or
+  nothing usable answered" — a non-CLI door, a dead socket, a refused
+  connect; `Door::Daemon` is the reentrancy case (a handler already running
+  INSIDE the daemon must take its direct path, never try to connect to
+  itself) — and the caller's own pre-existing direct path must run
+  unchanged. Once a connection is
   actually made, every other failure becomes `Some(Outcome::error(...))`
   instead, since a daemon that answered but broke is a real anomaly, not
   something to paper over with a fallback that would mask a daemon-side
@@ -550,15 +561,11 @@
   one-shot, self-contained shape first — being merely "called less often"
   than `pull_node_live`/`send_message_to_node`/`spawn_on_node` is not that.
 - **A tunneled request is safe against a real node, not merely possible.**
-  Every request delivered through an ssh forward reaches the far A2A door
-  as `ConnOrigin::Loopback` (`aoide-server::a2a::classify_origin`), which
-  carries an unconditional Inject delivery free pass for an UNSIGNED
-  request. This module makes the tunnel work; `aoide-server` narrows that
-  free pass (`origin_for_inject`, CONTRACTS.md §6) so a verified per-request
-  signature never rides Loopback's trust, with a like-for-like
-  signature-rung autogate restoring delivery for a node the operator
-  already marked auto-deliver. `--via`/`Node.via` are safe to recommend for
-  a real cross-box pair.
+  Every request delivered through an ssh forward reaches the far A2A door as
+  `ConnOrigin::Loopback` (`aoide-server::a2a::classify_origin`). The far door
+  parks every Inject it admits, whatever the origin, so the tunnel is only
+  reachability: this module makes the tunnel work. `--via`/`Node.via` are safe
+  to recommend for a real cross-box pair.
 - **The self-pair guard (`discover::is_self_target`) runs BEFORE the
   proceed-confirm and BEFORE the ceremony, in `pair_via_hostname`, never
   inside `run_pair_request` (P-S1).** `run_pair_request` is shared with
@@ -595,15 +602,7 @@
     row is also where a paired record in a charter mesh is REPORTED inert
     (`CharterRow::inert`) — the record's own grant entry is not what the door
     reads there, and an operator must not have to infer that from the door's
-    code. **An `autogate` record is inert as a grant and not as a whole**: the
-    door's unsigned address/token rail still resolves it, judged by the
-    record's HOME mesh (`aoide-server::a2a::rail_admits`), so
-    `CharterRow::autogated` names those records on the HOME mesh's row (and
-    nowhere else — a rail carries no signed mesh, so another mesh's charter
-    has no say over it) and `render_charter` prints them with what this charter
-    decides: line with `message` ⇒ delivered, otherwise held PENDING. Don't
-    drop that line back to a bare `inert` list: it was the surface calling such
-    a record untrusted when its rail was still live.
+    code.
   - **`Node` gains no field for this.** A mesh's shape lives entirely in
     `config.toml`'s `[mesh.*]`; the live registry (`node_store::Node`) is
     read, never written, by this comparison, and never grows a
@@ -700,7 +699,22 @@
   be; a `transit` container is the hub's custody, ended by the next hop's
   acceptance. Widening that set to letters would retire a letter on a delivery
   nobody acked. **Only a VERIFIED answer reaches it**: an unsigned, forged or
-  replayed `accepted` leaves all three kinds spooled.
+  replayed `accepted` leaves all three kinds spooled. Its letter write-back
+  goes through `outbox::update_entry`, so a letter a receipt retired during
+  the dial is not re-spooled; every post-dial write in `drain_node` does the
+  same. The reseal writes the same way, and an entry is attempted only after
+  `outbox::still_spooled` says it is spooled. The check comes AFTER the reseal,
+  so a reseal write cannot re-spool an entry past it.
+- **A receipt retires its letter on first filing, and on a duplicate of one.**
+  `settle_deposit` calls `retire_by_ack` for a receipt in either outcome; the
+  retire is idempotent. `mail::deposit` answers a second receipt from the same
+  signer for the same msgid `duplicate` and files it nothing. **The hub's
+  custody ends (`record_filed`) for a container this box filed, already held,
+  or refused for good** (`refusal_clears_on_retry` decides "for good": every
+  refusal of the bytes, and not a refusal of the box's own state, which keeps
+  custody). Every outcome that files nothing is named in `refused` and audited
+  by `refuse_container` or `refuse_envelope`, and the `DepositOutcome` match in
+  `poll_through` has no catch-all.
 - **Every mail answer is verified before it is read.** `post_signed` is the one
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a
@@ -839,7 +853,8 @@
   node.** Do not add a second address test for this, and do not push the
   decision back out to callers. `settle_deposit` is the ONE place an outcome
   turns into spool side effects (ack minted and spooled on a filed letter
-  or a letter duplicate, `retire_by_ack` on a filed receipt, a `transit`
+  or a letter duplicate, `retire_by_ack` on a receipt (filed, or a duplicate
+  of one), a `transit`
   entry retired on the hop that took it); the door
   reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
   `aoide-server` never keeps a second copy — do not put the ack mint back

@@ -43,7 +43,7 @@ curl -sS https://aoide.necoconeco.net/.well-known/agent-card.json     # the same
 
 sakaki's A2A door (8710) must be bearer-gated, or off, before any public
 ingress goes live: a caller behind cloudflared or a proxy arrives from loopback
-and loopback is otherwise trusted (CONTRACTS.md §6, the bearer-token amendment).
+and the address says nothing about who sent it (CONTRACTS.md §6).
 Either:
 
 ```sh

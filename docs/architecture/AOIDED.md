@@ -313,20 +313,21 @@ Remote reach composes what already exists:
 
 - **Ingress**: the Tier-3 Aoide MCP connector, user-enabled only, never by
   an agent (root `AGENTS.md`, Tier 3). A claude.ai session lands on some
-  mesh host's door.
+  mesh host's door. Its unit has no sealed ancestor, so every send, spawn and
+  `resurrect --project` through it parks for a local human.
 - **Enumerate**: `aoide session --hosts` / the node registry
   (`storage/src/node_store.rs:35` `Node`, `:61` `NodeRegistry`) name the
   mesh; each node's capability card is its A2A AgentCard, derived from that
   binary's own `schema --json` with `implemented`-only skills
   (`CONTRACTS.md §6`, "AgentCard"). No second inventory.
-- **Route**: `send --to node/<query>` already delivers over A2A
+- **Route**: `send --to node/<query>` already sends over A2A
   `message/send` (`conduct/src/graph/send.rs:8-16`, `deliver_remote`), and
-  the receiving node's own gate governs (`a2a.rs:566` `decide_send_action`,
-  `:724` `do_inject`, `:790` `spawn_inject_prompt`). Bearer auth is the
+  the receiving node's own door governs: the network door parks every inject
+  for a human (`a2a.rs` `decide_send_action`, `do_inject`, and the spawn's
+  opening turn in `opening_turn_worker`). Bearer auth is the
   landing-in-parallel bearer lane on the existing token surface
-  (`a2a.rs:348` `token_authorized`, `node_store.rs:196` `token_bytes_eq`,
-  `:216` `autogated_node_token`); this workstream consumes it, never
-  reimplements it.
+  (`a2a.rs` `token_authorized`, `node_store.rs` `token_bytes_eq`); this
+  workstream consumes it, never reimplements it.
 
 ### The hub option
 
@@ -377,6 +378,13 @@ Each routed handler tries `daemon_dispatch` first and falls back to the
 current direct stage-write path on `None`. The daemon executes the SAME
 handler code (its dispatch is the same registry); no logic forks. This
 keeps "runs anywhere with a shell" true: no daemon, no difference.
+
+Only the CLI door routes. The wire carries no door, and the daemon runs
+every dispatch as `Door::Daemon`, the door whose Stop hook rings a parent's
+armed mailboxes and which may approve a send. A call from MCP or the A2A
+door that crossed would run with those powers, so `daemon_dispatch`
+answers `None` for every door but `Cli`, and that caller runs the direct
+path under its own door.
 
 ### Ownership and reconciliation
 

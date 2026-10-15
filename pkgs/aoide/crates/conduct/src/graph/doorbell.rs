@@ -60,8 +60,8 @@ use super::conduct::{auto_type_refusal, AutoTypeRefusal};
 use super::doc::is_conductable_now;
 use super::model::{load_stage, sessions_path, SessionRecord, SessionsFile};
 use super::permit::profile_for_agent;
-use super::send::{write_delivery, SUBMIT_KEYSTROKE_DELAY};
-use aoide_protocol::output::Outcome;
+use super::send::{write_delivery, DOOR_CANNOT_APPROVE, SUBMIT_KEYSTROKE_DELAY};
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::{Door, Invocation};
 use serde_json::json;
 use std::collections::HashSet;
@@ -375,6 +375,10 @@ pub fn ring(name: &str, exclude: Option<&str>) -> Result<RingReport, String> {
 /// `ring` field as the literal string `"no-daemon"` and writes nothing to
 /// any socket. `--from` is the filer's own session id, excluded from the
 /// ring exactly like [`ring`]'s own `exclude` parameter.
+///
+/// A ring types a submitted nudge into the reader's pty, so a door that cannot
+/// approve (`Door::can_approve`: MCP, the network door) is refused before the
+/// forward. The daemon would otherwise ring as its own door and type it.
 pub fn mail_ring(inv: &Invocation) -> Outcome {
     let cmd = "mail.ring";
     let name = match inv.flags.get("for").map(|s| s.trim()).filter(|s| !s.is_empty()) {
@@ -388,6 +392,19 @@ pub fn mail_ring(inv: &Invocation) -> Outcome {
             .with_data(json!({ "reason": "invalid-name" }));
     }
     let exclude = inv.flags.get("from").map(String::as_str).filter(|s| !s.is_empty());
+
+    // Refused before any forward, so the daemon never sees a ring it would
+    // have to type as its own door.
+    if !inv.door.can_approve() {
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("no ring for `{name}`: this door cannot approve a gated send"),
+            DOOR_CANNOT_APPROVE,
+            Fix::Run(format!("aoide mail ring --for {name}")),
+        )
+        .with_fields(json!({ "reason": "door-cannot-approve", "name": name, "ring": "refused" }));
+    }
 
     if inv.door != Door::Daemon {
         return match aoide_client::daemon::daemon_dispatch(inv) {
@@ -1998,6 +2015,118 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A Stop hook from a door that cannot approve never reaches the daemon,
+    /// which runs whatever it receives as `Door::Daemon` and would ring the
+    /// parent's armed mailbox. The stand-in daemon below serves a dispatch the
+    /// way `aoided` does (the wire's flags verbatim, `Door::Daemon` stamped)
+    /// through the same handler, so a forwarded hook would really ring.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_from_a_door_that_cannot_approve_never_rings_through_the_daemon() {
+        use std::io::BufRead as _;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("ring-stop-no-forward");
+        let daemon_socket = root.join("d.sock");
+        let daemon = UnixListener::bind(&daemon_socket).unwrap();
+        daemon.set_nonblocking(true).unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &daemon_socket);
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let served = std::sync::Arc::new(AtomicUsize::new(0));
+        // One thread per connection, as `aoided` serves them: the hook a
+        // forwarded dispatch runs pings this same socket for the seal key.
+        let serve = |conn: UnixStream, served: std::sync::Arc<AtomicUsize>| {
+            conn.set_nonblocking(false).unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(&conn).read_line(&mut line).unwrap();
+            let req: serde_json::Value = serde_json::from_str(&line).unwrap();
+            // The seal-key `ping` gets no answer, as from no daemon at all:
+            // only a forwarded dispatch is under test.
+            if req["op"] != "dispatch" {
+                return;
+            }
+            served.fetch_add(1, Ordering::SeqCst);
+            let flags = req["flags"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect();
+            let inv = Invocation {
+                path: vec!["session".to_string(), "hook".to_string()],
+                args: Vec::new(),
+                flags,
+                door: Door::Daemon,
+            };
+            let out = super::super::send::session_hook(&inv);
+            let reply = format!("{}\n", json!({ "outcome": out }));
+            (&conn).write_all(reply.as_bytes()).unwrap();
+        };
+        let acceptor = {
+            let (stop, served) = (stop.clone(), served.clone());
+            std::thread::spawn(move || {
+                let mut workers = Vec::new();
+                while !stop.load(Ordering::SeqCst) {
+                    match daemon.accept() {
+                        Ok((conn, _)) => {
+                            let served = served.clone();
+                            workers.push(std::thread::spawn(move || serve(conn, served)));
+                        }
+                        Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                    }
+                }
+                for w in workers {
+                    w.join().unwrap();
+                }
+            })
+        };
+
+        let name = "claude-mail";
+        let wrap_id = "wrap-1";
+        let child_id = "wrap-1-child";
+        let listener = headless_wrap(wrap_id);
+        listener.set_nonblocking(true).unwrap();
+        hook_child(child_id, wrap_id, "claude");
+        do_session_phase(child_id, "working");
+        aoide_storage::mail::enrol_reader(name, wrap_id).unwrap();
+        aoide_storage::mail::file_letter("someone", name, "hello").unwrap();
+
+        let claude = aoide_protocol::agents::agent_profile("claude").unwrap();
+        let payload = format!(r#"{{"session_id":"{child_id}","hook_event_name":"Stop"}}"#);
+        for door in [Door::Mcp, Door::A2a] {
+            let inv = Invocation {
+                path: vec!["session".to_string(), "hook".to_string()],
+                args: Vec::new(),
+                flags: Default::default(),
+                door,
+            };
+            let out = super::super::send::hook_as_read(&inv, claude, payload.clone());
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{door:?}: {}", out.message);
+        }
+        stop.store(true, Ordering::SeqCst);
+        acceptor.join().unwrap();
+        let served = served.load(Ordering::SeqCst);
+
+        let targets = aoide_storage::mail::ring_targets(name).unwrap();
+        assert_eq!(targets.armed.len(), 1, "nothing rang, so the latch stays armed");
+        assert!(listener.accept().is_err(), "and nothing was typed into the wrap");
+        assert_eq!(served, 0, "no hook from MCP or the network door reaches the daemon");
+        let hooks: crate::graph::model::HooksFile = load_stage(&crate::graph::model::hooks_path()).unwrap();
+        let phase = hooks.hooks.iter().find(|h| h.session_id == child_id).map(|h| h.phase.as_str());
+        assert_eq!(phase, Some("stopped"), "the hook ran here, on its own door");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_hundred_letters_ring_once_until_the_reader_reads() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2050,6 +2179,73 @@ mod tests {
         let report2 = ring(name, None).unwrap();
         acc.join().unwrap();
         assert_eq!(report2.rung, vec![wrap_id.to_string()], "re-armed after the read, rings again");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 2: an MCP `mail ring` types and submits into a reader, so the
+    /// door that cannot approve is refused before the forward, and nothing is
+    /// written. The control is the same reader rung by a Daemon-door ring
+    /// straight after, which proves the fixture really would have been typed
+    /// into.
+    #[test]
+    fn an_mcp_door_mail_ring_is_refused_and_writes_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("ring-mcp-refused");
+        // No daemon reachable: a forward would answer `no-daemon`, so the
+        // refusal's own reason is what proves the check ran before the forward.
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("dead.sock"));
+        let name = "claude-mail";
+        let wrap_id = "wrap-1";
+        let child_id = "wrap-1-child";
+        let listener = headless_wrap(wrap_id);
+        hook_child(child_id, wrap_id, "claude");
+        do_session_phase(child_id, "idle");
+        aoide_storage::mail::enrol_reader(name, wrap_id).unwrap();
+        aoide_storage::mail::file_letter("someone", name, "hello").unwrap();
+
+        let mut flags = std::collections::BTreeMap::new();
+        flags.insert("for".to_string(), name.to_string());
+        let mcp = Invocation {
+            path: vec!["mail".to_string(), "ring".to_string()],
+            args: Vec::new(),
+            flags,
+            door: Door::Mcp,
+        };
+        let out = mail_ring(&mcp);
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "door-cannot-approve", "data: {data}");
+        assert_eq!(data["refusal"]["why"], DOOR_CANNOT_APPROVE, "taught: {data}");
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.accept().is_err(), "the reader's socket received a ring from an MCP door");
+        let targets = aoide_storage::mail::ring_targets(name).unwrap();
+        assert_eq!(targets.armed.len(), 1, "the latch stays armed: nothing was rung");
+
+        // Control: the same reader, rung from the Daemon door, is typed into.
+        listener.set_nonblocking(false).unwrap();
+        let mut daemon_flags = std::collections::BTreeMap::new();
+        daemon_flags.insert("for".to_string(), name.to_string());
+        let daemon = Invocation {
+            path: vec!["mail".to_string(), "ring".to_string()],
+            args: Vec::new(),
+            flags: daemon_flags,
+            door: Door::Daemon,
+        };
+        let acc = std::thread::spawn(move || read_all(listener));
+        let out = mail_ring(&daemon);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let bytes = acc.join().unwrap();
+        assert!(String::from_utf8_lossy(&bytes).starts_with(&nudge_line(name)), "the control rings");
 
         let _ = std::fs::remove_dir_all(&root);
     }

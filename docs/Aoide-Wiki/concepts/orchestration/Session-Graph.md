@@ -402,8 +402,9 @@ at most once.
 
 A parent is heard only on the positive proof of `CONTRACTS.md`'s `wrappedProgram`
 paragraph: its wrapped program must be the harness its agent names. The ping-back
-is one of the readers of that rule (the doorbell's PTY arm, the A2A inject and the
-A2A spawn are the others), and its refusals are `shell-parent` and `unverified-wrap`, plus
+is one of the readers of that rule (the doorbell's PTY arm is the other;
+the A2A door types nothing, so it is not a reader), and its refusals are
+`shell-parent` and `unverified-wrap`, plus
 `not-conductable` and `parent-done` for a wrap whose record is gone, not
 conductable, or already `done`. The leading `-` of a login spelling is dropped
 for a shell name only: `-bash` is `bash`, and `-claude` stays `-claude`, which is
@@ -739,7 +740,10 @@ are consumed internally and get no `graph.json` projection:
   its own — and `aoide session` renders exactly that chain: each
   `remoteChildren` row joins the probed fold by `(node name, sessionId)` and is
   drawn indented under the parent's own row, its far descendants beneath it,
-  with the same join feeding `--json`'s `fold`/`subtree` on the entry. A row
+  with the same join feeding `--json`'s `fold`/`subtree` on the entry. The
+  far node picks the document's shape, so each far session is drawn once,
+  under the first link that reaches it, and indentation stops at 32 levels
+  (`…`) however deep the chain runs. A row
   the fold does not carry is shown `(not pulled)`, never hidden; one behind an
   expired cache TTL is shown `(stale)`, because the ledger link itself never
   expires. The conductor TUI's DAG reads neither key yet — terminal-only.

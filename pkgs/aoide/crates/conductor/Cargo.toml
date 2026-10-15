@@ -21,3 +21,8 @@ aoide-storage = { workspace = true }
 # the root `[workspace.dependencies]` — the rationale comment lives there.
 crossterm = { workspace = true }
 ratatui = { workspace = true }
+
+[dev-dependencies]
+# The far-document tests run on `aoide-test-support`'s small stack and time
+# bound -- dev-only edge.
+aoide-test-support = { workspace = true }

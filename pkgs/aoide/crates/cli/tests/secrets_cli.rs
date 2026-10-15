@@ -119,7 +119,7 @@ fn exec_of_an_unregistered_secret_names_it_suggests_a_near_one_and_honours_json(
     assert_eq!(out.code, 1, "{}", out.stderr);
     assert!(out.stderr.contains("secret `db-prd` is not registered"), "{}", out.stderr);
     assert!(out.stderr.contains("did you mean `db-prod`?"), "{}", out.stderr);
-    assert!(out.stderr.contains("fix: aoide secrets exec --as a --secret db-prod -- true"), "{}", out.stderr);
+    assert!(out.stderr.contains("fix: aoide secrets exec --as=a --secret=db-prod -- true"), "{}", out.stderr);
     assert!(!out.stderr.contains("secrets exec: secrets exec:"), "{}", out.stderr);
 
     let far = rig.aoide(&["secrets", "exec", "--as", "a", "--secret", "nope", "--", "true"], None);

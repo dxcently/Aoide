@@ -588,6 +588,39 @@ pub struct PendingRow {
     pub queued_at: String,
     pub from: Option<String>,
     pub state: String,
+    /// The entry is a held launch (`spawn`/`resurrect`), not a held send: its
+    /// `text` is the whole command line approving it would run.
+    pub spawn: bool,
+    /// `send`, `spawn` or `resurrect`: what approving the entry runs, and so
+    /// what its confirm is titled.
+    pub kind: String,
+    /// What a human reads, spelled by the one escape rule in `conduct`.
+    pub shown: String,
+    /// A held resurrect's candidates, one spelled line each (empty otherwise).
+    pub plan: Vec<String>,
+    /// The entry's fingerprint as `session pending list` prints it. Approve and
+    /// deny send it as `--expect`, so the entry taken is the one drawn here.
+    pub fingerprint: String,
+}
+
+/// The approval of one held spawn, waiting on its second key. `a` on a spawn
+/// row opens this instead of approving: a clipped one-line row is not enough
+/// to approve a command by, so the full command is shown (escaped, wrapped,
+/// scrollable) and only `y` approves. `id` is the entry's array POSITION, so
+/// the whole row is kept as the snapshot the second key is checked against.
+#[derive(Debug, Clone)]
+pub struct SpawnConfirm {
+    pub id: String,
+    pub session_id: String,
+    pub text: String,
+    pub from: Option<String>,
+    pub kind: String,
+    pub plan: Vec<String>,
+    pub fingerprint: String,
+    pub scroll: usize,
+    /// The furthest `scroll` that still shows the last line, written by the
+    /// draw that wrapped the command to the popup's width.
+    pub max_scroll: std::cell::Cell<usize>,
 }
 
 /// One pending pairing request — reshaped straight from `pair --json`'s
@@ -679,7 +712,6 @@ pub struct NodeTrustRow {
     /// The last pull's recorded error, when the cache carries one.
     pub error: Option<String>,
     pub hub: bool,
-    pub autogate: bool,
     /// The effective home mesh the CLI reported (`node status --json`'s
     /// `data.homeMesh`) — the default [`NodeTrustRow::acted_mesh`] answers
     /// with, so this pane never restates the rule with a literal of its own.
@@ -1010,6 +1042,8 @@ pub struct App {
     /// The dedicated human pairing-ceremony popup, when open. See
     /// [`PairCeremony`] — the crate's only code custody.
     pub pair_ceremony: Option<PairCeremony>,
+    /// The held spawn whose approval is waiting on its second key, when open.
+    pub spawn_confirm: Option<SpawnConfirm>,
     /// `Some` while a background pair dispatch (a new request, or an outbound
     /// resume's single door poll) is in flight. Same non-blocking channel shape
     /// the roster fetch uses.
@@ -1137,6 +1171,7 @@ impl App {
             secrets_pending_at: None,
             secrets_pending_rx: None,
             pair_ceremony: None,
+            spawn_confirm: None,
             pair_rx: None,
             nodes: None,
             mesh: None,
@@ -1828,6 +1863,24 @@ impl App {
                 queued_at: v["queuedAt"].as_str().unwrap_or("").to_string(),
                 from: v["from"].as_str().map(String::from),
                 state: v["state"].as_str().unwrap_or("pending").to_string(),
+                spawn: v.get("spawn").is_some_and(|s| !s.is_null()),
+                kind: match v["spawn"]["path"][0].as_str() {
+                    Some("resurrect") => "resurrect",
+                    _ if v.get("spawn").is_some_and(|s| !s.is_null()) => "spawn",
+                    _ => "send",
+                }
+                .to_string(),
+                // A row from a `pending list` that predates `shown` is spelled here,
+                // by the same rule, so the row never paints the raw text.
+                shown: v["shown"]
+                    .as_str()
+                    .map(String::from)
+                    .unwrap_or_else(|| graph::visible(v["text"].as_str().unwrap_or(""))),
+                plan: v["plan"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|l| l.as_str().map(String::from)).collect())
+                    .unwrap_or_default(),
+                fingerprint: v["fingerprint"].as_str().unwrap_or("").to_string(),
             })
             .collect()
     }
@@ -2339,6 +2392,47 @@ impl App {
         }
     }
 
+    /// The keys of an open spawn confirm. Only `y` approves; `n` and Esc
+    /// cancel; the arrows and page keys scroll the command; every other key,
+    /// `a` included, does nothing, so a held or repeated key cannot approve.
+    /// `y` re-reads the queue first and approves only when the entry at that
+    /// position is still the very one on screen, since positions shift when
+    /// anything resolves.
+    fn handle_spawn_confirm_key(&mut self, key: KeyEvent) {
+        let Some(confirm) = self.spawn_confirm.as_mut() else {
+            return;
+        };
+        let top = confirm.max_scroll.get();
+        match key.code {
+            KeyCode::Char('n') | KeyCode::Esc => self.spawn_confirm = None,
+            KeyCode::Down | KeyCode::Char('j') => confirm.scroll = (confirm.scroll + 1).min(top),
+            KeyCode::Up | KeyCode::Char('k') => confirm.scroll = confirm.scroll.saturating_sub(1),
+            KeyCode::PageDown => confirm.scroll = (confirm.scroll + 10).min(top),
+            KeyCode::PageUp => confirm.scroll = confirm.scroll.saturating_sub(10),
+            KeyCode::Char('y') => {
+                let Some(confirm) = self.spawn_confirm.take() else {
+                    return;
+                };
+                self.refresh_pending();
+                let unchanged = self
+                    .pending_rows()
+                    .iter()
+                    .any(|r| r.id == confirm.id && r.fingerprint == confirm.fingerprint);
+                if unchanged {
+                    let flags = BTreeMap::from([("expect".to_string(), confirm.fingerprint)]);
+                    self.dispatch_with_flags(&["session", "pending", "approve"], &[confirm.id], flags);
+                    self.clamp_review();
+                } else {
+                    self.last_outcome = Some(Outcome::error(
+                        "session.pending.approve",
+                        "the held entry changed while the confirm was open; nothing was approved, re-open it",
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Act on the selected Review row, by that row's own kind. A no-op on a
     /// header or an empty pane (nothing is selected), never a panic and never a
     /// guessed target.
@@ -2348,9 +2442,26 @@ impl App {
         };
         match row {
             ReviewRow::Header(_) => {}
+            // Every held entry, a send included, waits on a second key: a row
+            // cannot show a whole command, and a send's `[submit]` and sender
+            // must be read before the text is typed.
+            ReviewRow::Pending(r) if accept => {
+                self.spawn_confirm = Some(SpawnConfirm {
+                    id: r.id,
+                    session_id: r.session_id,
+                    text: r.shown,
+                    from: r.from,
+                    kind: r.kind,
+                    plan: r.plan,
+                    fingerprint: r.fingerprint,
+                    scroll: 0,
+                    max_scroll: std::cell::Cell::new(0),
+                });
+            }
             ReviewRow::Pending(r) => {
                 let command = if accept { "approve" } else { "deny" };
-                self.dispatch(&["session", "pending", command], &[r.id]);
+                let flags = BTreeMap::from([("expect".to_string(), r.fingerprint)]);
+                self.dispatch_with_flags(&["session", "pending", command], &[r.id], flags);
                 self.clamp_review();
             }
             ReviewRow::Pairing(r) => {
@@ -2468,7 +2579,6 @@ impl App {
                 state: n["state"].as_str().unwrap_or("").to_string(),
                 error: n["error"].as_str().map(String::from),
                 hub: n["hub"].as_bool().unwrap_or(false),
-                autogate: n["autogate"].as_bool().unwrap_or(false),
                 home_mesh: data.get("homeMesh").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 url: n["url"].as_str().unwrap_or("").to_string(),
             })
@@ -3569,6 +3679,10 @@ impl App {
     // ── Key handling for the active panel / inline input ────────────────────
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        if self.spawn_confirm.is_some() {
+            self.handle_spawn_confirm_key(key);
+            return;
+        }
         if self.mail_draft.is_some() {
             self.handle_mail_draft_key(key);
             return;
@@ -6743,10 +6857,17 @@ mod tests {
                     .iter()
                     .enumerate()
                     .map(|(i, (sid, text))| {
-                        json!({
+                        let mut entry = json!({
                             "id": i.to_string(), "sessionId": sid, "text": text, "submit": false,
                             "queuedAt": "t", "from": Value::Null, "state": "pending",
-                        })
+                            "fingerprint": format!("{sid}|{text}"),
+                        });
+                        // A queued text that is a `spawn` command line is a held
+                        // spawn, as the real list marks one.
+                        if text.starts_with("aoide spawn ") {
+                            entry["spawn"] = json!({ "path": ["spawn"], "args": [], "flags": {} });
+                        }
+                        entry
                     })
                     .collect();
                 let n = pending.len();
@@ -6767,6 +6888,33 @@ mod tests {
         }
     }
 
+    /// A held send is not approved by its row's one key: `a` opens the confirm
+    /// with the whole entry, nothing is dispatched, and `n` cancels it. Before
+    /// the change `a` alone dispatched the approve.
+    #[test]
+    fn a_held_send_opens_its_confirm_on_a_and_dispatches_nothing_until_y() {
+        let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        PENDING_CALLS.lock().unwrap().clear();
+        *PENDING_QUEUE.lock().unwrap() = vec![("s0".into(), "a".into())];
+
+        with_isolated_stage(|| {
+            let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
+            app.select_panel(Panel::Pending);
+            app.select_first_pending_row();
+
+            app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            assert!(app.spawn_confirm.is_some(), "a held send waits on a second key");
+            assert!(
+                !PENDING_CALLS.lock().unwrap().iter().any(|(p, _)| p == "session.pending.approve"),
+                "nothing approved on the first key"
+            );
+
+            app.handle_key(KeyEvent::from(KeyCode::Char('n')));
+            assert!(app.spawn_confirm.is_none());
+            assert!(!PENDING_CALLS.lock().unwrap().iter().any(|(p, _)| p == "session.pending.approve"));
+        });
+    }
+
     #[test]
     fn approve_dispatches_pending_approve_then_relists_and_positions_shift() {
         let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -6783,7 +6931,8 @@ mod tests {
             assert_eq!(app.pending_rows().len(), 3);
             app.select_first_pending_row(); // s0, the entry at position 0
 
-            app.handle_key(KeyEvent::from(KeyCode::Char('a'))); // approve
+            app.handle_key(KeyEvent::from(KeyCode::Char('a'))); // opens the confirm
+            app.handle_key(KeyEvent::from(KeyCode::Char('y'))); // approves
 
             let calls = PENDING_CALLS.lock().unwrap();
             // `reload_all` also refreshes the pair/node/mesh reads this slice
@@ -6869,7 +7018,9 @@ mod tests {
             app.select_first_pending_row();
 
             app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
             app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
 
             let rows = app.pending_rows();
             assert_eq!(rows.len(), 1);
@@ -6877,6 +7028,146 @@ mod tests {
                 rows[0].session_id, "s2",
                 "s0 then s1 were taken — never a stale re-resolve"
             );
+        });
+    }
+
+    /// The review pane's row index of the held spawn in the fake queue.
+    fn select_spawn_row(app: &mut App) {
+        let i = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Pending(p) if p.spawn))
+            .expect("a held spawn row");
+        app.select_review_row(i);
+    }
+
+    fn approvals() -> Vec<Vec<String>> {
+        PENDING_CALLS
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _)| p == "session.pending.approve")
+            .map(|(_, a)| a.clone())
+            .collect()
+    }
+
+    /// A spawn is a command, and one clipped row is not enough to approve it by:
+    /// `a` on a spawn row opens a confirm holding the whole command, and ONLY `y`
+    /// approves. `a` again, Enter and every other key leave it open and approve
+    /// nothing, so a held or repeated key cannot. A send row is unchanged: one
+    /// `a` still approves it.
+    #[test]
+    fn a_on_a_held_spawn_opens_a_confirm_and_only_a_second_explicit_key_approves() {
+        let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        PENDING_CALLS.lock().unwrap().clear();
+        let command = "aoide spawn --id held -- sh -c 'a\nb\u{1b}[2J'";
+        *PENDING_QUEUE.lock().unwrap() = vec![
+            ("s0".into(), "hello".into()),
+            ("held".into(), command.into()),
+            ("s2".into(), "later".into()),
+        ];
+
+        with_isolated_stage(|| {
+            let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
+            app.select_panel(Panel::Pending);
+            select_spawn_row(&mut app);
+
+            app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            assert!(approvals().is_empty(), "the first key approves nothing");
+            let confirm = app.spawn_confirm.as_ref().expect("a confirm view opened");
+            assert_eq!(confirm.id, "1");
+            assert_eq!(confirm.text, graph::visible(&command), "it holds the whole command as it replays");
+
+            for key in [KeyCode::Char('a'), KeyCode::Char('A'), KeyCode::Enter, KeyCode::Char('x'), KeyCode::Tab] {
+                app.handle_key(KeyEvent::from(key));
+            }
+            assert!(approvals().is_empty(), "no other key approves: {:?}", approvals());
+            assert!(app.spawn_confirm.is_some(), "and the confirm stays open");
+
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+            assert_eq!(approvals(), vec![vec!["1".to_string()]], "the second explicit key approves, once");
+            assert!(app.spawn_confirm.is_none());
+            let rows = app.pending_rows();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[1].session_id, "s2", "the queue was re-listed");
+
+            // A send row takes the same second key: `a` opens its confirm, `y` approves.
+            app.select_first_pending_row();
+            app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            assert!(app.spawn_confirm.is_some(), "a send row opens its confirm");
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+            assert_eq!(approvals().len(), 2, "the send row was approved by its second key");
+        });
+    }
+
+    /// `n` and Esc close the confirm and approve nothing; deny of a spawn row
+    /// stays one key, since it launches nothing.
+    #[test]
+    fn a_held_spawn_confirm_cancels_on_n_and_esc_and_deny_stays_one_key() {
+        let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        PENDING_CALLS.lock().unwrap().clear();
+        *PENDING_QUEUE.lock().unwrap() = vec![("held".into(), "aoide spawn --id held -- true".into())];
+
+        with_isolated_stage(|| {
+            let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
+            app.select_panel(Panel::Pending);
+            select_spawn_row(&mut app);
+
+            for cancel in [KeyCode::Char('n'), KeyCode::Esc] {
+                app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+                assert!(app.spawn_confirm.is_some());
+                app.handle_key(KeyEvent::from(cancel));
+                assert!(app.spawn_confirm.is_none(), "{cancel:?} cancels");
+            }
+            assert!(approvals().is_empty());
+            assert_eq!(app.pending_rows().len(), 1, "the entry is still queued");
+
+            app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+            assert!(app.pending_rows().is_empty(), "deny took it with one key");
+            assert!(app.spawn_confirm.is_none());
+        });
+    }
+
+    /// Entries are addressed by position, and positions shift when anything
+    /// resolves. `y` re-reads the queue and approves only the very entry that is
+    /// on screen; if the position now names another command, or nothing, nothing
+    /// is approved and the status says why.
+    #[test]
+    fn y_approves_nothing_when_the_entry_changed_under_the_open_confirm() {
+        let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        PENDING_CALLS.lock().unwrap().clear();
+        *PENDING_QUEUE.lock().unwrap() = vec![
+            ("s0".into(), "hello".into()),
+            ("held".into(), "aoide spawn --id held -- true".into()),
+        ];
+
+        with_isolated_stage(|| {
+            let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
+            app.select_panel(Panel::Pending);
+            select_spawn_row(&mut app);
+
+            // Another command now sits at the position the human read.
+            app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            *PENDING_QUEUE.lock().unwrap() = vec![
+                ("s0".into(), "hello".into()),
+                ("held".into(), "aoide spawn --id held -- rm -rf ~".into()),
+            ];
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+            assert!(approvals().is_empty(), "a different command at that position is not approved");
+            assert!(app.spawn_confirm.is_none());
+            assert!(app.status_message().contains("changed"), "{}", app.status_message());
+
+            // The position is gone altogether.
+            *PENDING_QUEUE.lock().unwrap() = vec![
+                ("s0".into(), "hello".into()),
+                ("held".into(), "aoide spawn --id held -- true".into()),
+            ];
+            app.refresh_pending();
+            select_spawn_row(&mut app);
+            app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            *PENDING_QUEUE.lock().unwrap() = vec![("s0".into(), "hello".into())];
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+            assert!(approvals().is_empty(), "a missing entry is not approved");
         });
     }
 
@@ -7009,10 +7300,10 @@ mod tests {
                 .with_data(json!({ "nodes": [
                     { "name": "osaka", "verified": true, "grants": { "home": ["read", "spawn"] },
                       "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
-                      "autogate": true, "error": Value::Null },
+                      "error": Value::Null },
                     { "name": "box", "verified": false, "grants": {},
                       "state": "never-pulled", "url": "http://box:8710/", "hub": true,
-                      "autogate": false, "error": "unreachable" },
+                      "error": "unreachable" },
                 ] })),
             "node.allow" => Outcome::ok("node.allow", "capability updated"),
             "node.remove" => Outcome::ok("node.remove", "node unregistered"),
@@ -8185,10 +8476,10 @@ mod tests {
                 "nodes": [
                     { "name": "osaka", "verified": true, "grants": { "home": ["read", "spawn"] },
                       "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
-                      "autogate": true, "error": Value::Null },
+                      "error": Value::Null },
                     { "name": "yomi", "verified": false, "grants": {},
                       "state": "never-pulled", "url": "http://yomi:8710/", "hub": false,
-                      "autogate": false, "error": Value::Null },
+                      "error": Value::Null },
                 ],
             })),
         );

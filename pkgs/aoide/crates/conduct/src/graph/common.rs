@@ -9,8 +9,29 @@ use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, HooksFile, ProjectsFile, SessionsFile,
 };
 use aoide_protocol::Invocation;
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use serde_json::json;
+
+/// The taught refusal of a command only a door that can approve
+/// ([`aoide_protocol::Door::can_approve`]) may run, audited under that
+/// command's own name, or `None` when the invocation's door may. One place, so
+/// the commands that carry a human's approval (resolving a held entry, moving a
+/// session's parent, launching with no spawn gate) refuse in one shape.
+pub(in crate::graph) fn refuse_unapproving_door(
+    inv: &Invocation,
+    cmd: &str,
+    what: String,
+    why: &str,
+    fix: Fix,
+) -> Option<Outcome> {
+    if inv.door.can_approve() {
+        return None;
+    }
+    let out = Outcome::refuse(cmd, Kind::Refused, what, why, fix)
+        .with_fields(json!({ "reason": "door-cannot-approve" }));
+    super::pending::audit_pending(inv, cmd, "refused", &out.message, "");
+    Some(out)
+}
 
 /// Positional-arg check → structured usage error (exit 2) on a miss.
 /// Names the missing positionals (not just "you're short") — this crate has
@@ -89,6 +110,68 @@ pub(in crate::graph) fn require_flag(inv: &Invocation, name: &str) -> Result<Str
 // re-exports the first).
 pub use aoide_protocol::untrusted::clean_line;
 pub(in crate::graph) use aoide_protocol::untrusted::{clip_flat, is_unsafe, strip_unsafe, LINE_MAX};
+
+/// One character as a human reads it: itself when it is safe to print, else a
+/// visible escape. A backslash is doubled, so an escape in the output is never
+/// mistaken for text that spelled one (`printf '\x1b'` and a real ESC read
+/// differently).
+fn visible_char(c: char) -> String {
+    match c {
+        '\\' => "\\\\".to_string(),
+        '\n' => "\\n".to_string(),
+        '\r' => "\\r".to_string(),
+        '\t' => "\\t".to_string(),
+        c if c.is_ascii() && c.is_control() => format!("\\x{:02x}", c as u32),
+        c if is_unsafe(c) || (c.is_whitespace() && c != ' ') || is_mark_or_ignorable(c) => {
+            format!("\\u{{{:x}}}", c as u32)
+        }
+        c => c.to_string(),
+    }
+}
+
+/// Text someone else wrote, shown to a human who is about to act on it: every
+/// character [`is_unsafe`] says a terminal must not be handed, and every
+/// whitespace but a plain space (a no-break space reads as one and is not),
+/// spelled as a visible escape (`\n`, `\x1b`, `\u{202e}`) instead of being
+/// stripped or printed. What replays is what is shown, never a cleaner
+/// version of it. `pub` so the conductor's approval views reach the one rule.
+pub fn visible(s: &str) -> String {
+    s.chars().map(visible_char).collect()
+}
+
+/// [`visible`] for a held launch, every non-ASCII character spelled too: a
+/// Cyrillic `а` or a combining mark looks like the ASCII text it imitates, so an
+/// approver of a command reads only the ASCII it is shown. A held spawn's
+/// command goes through this, and nothing else does.
+pub fn visible_held(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii() { visible_char(c) } else { format!("\\u{{{:x}}}", c as u32) })
+        .collect()
+}
+
+/// Marks that draw over or into their neighbours (combining diacritics, the
+/// Mn/Me blocks that carry most overlays) and the default-ignorable code points
+/// a terminal or a font may draw as nothing. A reader cannot tell these from
+/// the text around them, so they are spelled, never printed.
+fn is_mark_or_ignorable(c: char) -> bool {
+    matches!(c as u32,
+        0x034F
+        | 0x0300..=0x036F
+        | 0x115F..=0x1160
+        | 0x17B4..=0x17B5
+        | 0x180B..=0x180F
+        | 0x1AB0..=0x1AFF
+        | 0x1DC0..=0x1DFF
+        | 0x2060..=0x206F
+        | 0x20D0..=0x20FF
+        | 0x3164
+        | 0xFE00..=0xFE0F
+        | 0xFE20..=0xFE2F
+        | 0xFEFF
+        | 0xFFA0
+        | 0xFFF0..=0xFFF8
+        | 0xE0000..=0xE0FFF)
+}
 
 /// How many characters of a field [`clip`] reads. [`clean_line`] keeps at most
 /// `LINE_MAX`, so a few lines' worth is all it can use of a field of any length.
@@ -206,6 +289,43 @@ pub fn typed_text(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `visible` spells what `clean_line` would drop, so an approver sees
+    /// every byte that will replay: controls, the bidi override, a no-break
+    /// space. A backslash is doubled so a literal `\x1b` and a real ESC differ.
+    #[test]
+    fn visible_spells_every_unsafe_character_and_never_drops_one() {
+        assert_eq!(visible("a\nb\r\tc"), "a\\nb\\r\\tc");
+        assert_eq!(visible("\u{1b}[31m\u{7}"), "\\x1b[31m\\x07");
+        assert_eq!(visible("evil\u{202e}txt\u{200b}"), "evil\\u{202e}txt\\u{200b}");
+        assert_eq!(visible("a\u{a0}b\u{2028}c\u{85}"), "a\\u{a0}b\\u{2028}c\\u{85}");
+        assert_eq!(visible("printf '\\x1b'"), "printf '\\\\x1b'");
+        assert_ne!(visible("\\x1b"), visible("\u{1b}"), "a spelled escape is not an ESC");
+        assert_eq!(visible("plain text é 日本 — ok"), "plain text é 日本 — ok");
+        assert!(visible("a\nb\u{1b}\u{202e}").chars().all(|c| !is_unsafe(c)));
+    }
+
+    /// A combining mark and a default-ignorable are spelled, where they used to
+    /// print raw: a mark draws over its neighbour and an ignorable can hide
+    /// one, so neither may read as the text it sits in. Before the change each
+    /// of these came out byte-identical.
+    #[test]
+    fn visible_spells_combining_marks_and_default_ignorables() {
+        assert_eq!(visible("pro\u{34f}ject"), "pro\\u{34f}ject");
+        assert_eq!(visible("c\u{336}u\u{336}rl"), "c\\u{336}u\\u{336}rl");
+        assert_eq!(visible("\u{180b}x\u{fe0f}"), "\\u{180b}x\\u{fe0f}");
+        assert_eq!(visible("e\u{301}"), "e\\u{301}", "a precomposed-free accent is spelled too");
+        assert_eq!(visible("é 日本"), "é 日本", "plain letters and CJK are not marks");
+    }
+
+    /// A held launch's view is ASCII: a Cyrillic letter that looks like an ASCII
+    /// one is spelled, so the approver reads the command as it runs.
+    #[test]
+    fn visible_held_spells_every_non_ascii_character() {
+        assert_eq!(visible_held("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\\u{43e}ject");
+        assert_eq!(visible_held("a b\nc"), "a b\\nc");
+        assert_eq!(visible("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\u{43e}ject", "the general view keeps letters");
+    }
 
     #[test]
     fn a_field_cut_after_padding_still_says_it_was_cut() {

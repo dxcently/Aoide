@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-09-28
-updated: 2026-09-28
+updated: 2026-10-12
 tags: [aoide, wallpaper, paint, engine, provider]
 source: "[[entities/livery]]"
 ---
@@ -50,15 +50,19 @@ key is the one thing that decides which of the two is in front of the other.
   a provider which has not answered yet — up to ~5 s, because the unit's
   `ExecStartPost` races the daemon's own socket — while `cover set`, `--clear`,
   `rice stage` and `rice back` each make a single attempt. It is what the
-  lane's unit runs in `ExecStartPost`, and what every pick write runs.
+  lane's unit runs in `ExecStartPost`, and what every pick write runs. Only
+  the identity crosses: a still's `tile` and `position` (CONTRACTS.md §4) are
+  the shell's own layer's to paint, so the engine lays out a picture named
+  `*_tile*` or set with `--position tile` the way it lays out every other.
 - **Engine → Aoide.** The daemon's `postProcessing` hook runs exactly one
   command, `lyra cover set --from-skwd --kind %type% %path%`, which RECORDS what
   the engine now shows and applies nothing back — that asymmetry is what makes
   the round trip terminate (the engine is source-blind: it cannot tell an Aoide
   apply from the user's own pick, so a hook that re-applied would loop
-  unbounded). This door is also the ONE writer exempt from the `declarative`
-  lock: a pick made in the engine's own picker is recorded while nix owns the
-  declared state, because what shows IS the pick (CONTRACTS.md §4).
+  unbounded), and it records no `tile` or `position`. This door is also the
+  ONE writer exempt from the `declarative` lock: a pick made in the engine's
+  own picker is recorded while nix owns the declared state, because what shows
+  IS the pick (CONTRACTS.md §4).
 
 The shell's own layer stands down while the engine has a pick on screen: the
 `wallpaper` surface stays mapped and transparent, and `AoideWallpaper.qml`

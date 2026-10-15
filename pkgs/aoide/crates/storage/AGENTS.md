@@ -46,6 +46,7 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
+- **An ack's `from.node` is this box's name in the letter's mesh, never its hostname.** `mint_ack_from` takes the name; `mint_ack_in_mesh` is the hostname form, for callers with no charter to read. The origin verifies the ack against the key it holds for that name, so a hostname-signed ack is refused and its letter never retires.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -295,19 +296,15 @@
   this box writes there is the REFUSAL (`narrowed`) — never copy the charter
   into `grants` at accept time, which would make every later charter version
   silently re-grant what an operator turned off.
-- **`autogated_node_addr`/`autogated_node_token` return the MATCHED record,
-  and a match is never a trust decision.** They answer only "which `autogate`
-  record does this address/bearer resolve to" (registry order, the same
-  tie-break `resolve_node` uses), so the door can ask its second question —
-  whether that record earns auto-delivery under its HOME mesh's rules
-  (`aoide-server::a2a::rail_admits`, which reads the charter and
-  `Node::narrowed` the door already reads). **Don't fold a grant, a charter or
-  a `verified` check into these folds:** the door's #50 guard exemption asks
-  "did the rail match" as `.is_some()` on the record, and narrowing the MATCH
-  would answer a charter-unlisted caller with the guard's synthetic
-  `submitted` Task (no delivery, no queue entry) instead of the PENDING entry
-  the rail's ruling asks for. `Node.autogate`'s own field doc carries the same
-  statement.
+- **`resolve_node` returns the MATCHED record, and a match is never a trust
+  decision.** It answers only "which registered node does this bearer or
+  address resolve to": the `Token` rung first (a presented bearer against a
+  node's own `tokenFile`), then the `Addr` rung, registry order within each.
+  The door decides what the match admits: an address match admits nothing once
+  a door-wide token is configured, and only the `Signature` rung may spawn
+  (`aoide-server::a2a`). **Don't fold a grant, a charter or a `verified` check
+  into `resolve_node`:** it is a lookup, and every admission question is asked
+  of its result by the door.
 - **`config::SCHEMA` is the ONE place a config key is described — walk it,
   never restate it in a match arm.** The table carries each key's name,
   `ValueKind` vocabulary, summary, and a `read` fn projecting it off a typed
@@ -574,7 +571,7 @@
   `Node.verified` (P-P2).** `node add` never sets either field; a caller
   wanting to record a verified key relationship goes through this function,
   which touches only `pubkey`/`verified`/`url` on an existing entry and
-  leaves `autogate`/`tokenFile`/`bearerSecret`/`hub` untouched — don't widen
+  leaves `tokenFile`/`bearerSecret`/`hub` untouched — don't widen
   it to a general-purpose node editor, and don't set those two fields via a
   raw `Node { .. }` literal anywhere outside `node_store.rs` itself.
   **Its `grant` parameter is the caller's, and this module never resolves
@@ -598,7 +595,7 @@
   all when the ceremony resolved an actual via; a re-pair that named none
   leaves a previously-recorded `via` (e.g. one `aoide pair`'s hostname arm set) exactly
   as it was, the same untouched-unless-named stance `upsert_paired_node`
-  itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`grants`.
+  itself holds for `tokenFile`/`bearerSecret`/`hub`/`grants`.
 - **`node_store::set_node_address` is the ONE write site for `Node.url` after
   registration, and writes `via` with it** (the two are one address). It is never
   called from a ceremony. `Node::declared` is never saved: a declaration's key
@@ -971,6 +968,9 @@
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
+  Its `text` must be exactly one msgid (`mail::is_msgid`) before anything
+  is looked up: the text becomes a path, so a non-msgid retires nothing and
+  builds no path.
   A
   `refused: bool` entry (a JSON-RPC admission refusal, distinct from an
   ordinary transport failure) stops a drain from retrying it but still
@@ -1008,6 +1008,18 @@
   unbounded answer is a single JSON array of whole envelopes and walks
   straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
   can clear.
+- **A receipt is filed only against a spooled letter, and by a bounded
+  check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
+  it with the receipt's `to.node`; that read is lock-free because the caller
+  holds the stage lock, which the outbox lock shares and does not nest. Do not
+  replace it with a base scan, and do not move the `to` check after the
+  index: an unknown msgid must not reach a write.
+- **`update_entry` is the only write-back a drain makes to an entry it has
+  already read.** It writes only when the entry is still spooled. The drain
+  reads an entry, dials, and writes the answer back; a receipt that lands
+  during the dial retires the entry first, and a plain `write_entry` would
+  re-spool it. Every post-dial bookkeeping write in `mail_wire` goes through
+  it; `write_entry` stays for entries the caller just created.
 - **`write_ack_if_absent` gates on PENDING state, never a permanent
   ledger (mail register §26 outbox fix).** A duplicate letter redelivery
   mints a fresh ack via `mail::mint_ack` on every call — the gate lives

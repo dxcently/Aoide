@@ -3592,7 +3592,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: name.into(),
             url: "http://nodeb:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

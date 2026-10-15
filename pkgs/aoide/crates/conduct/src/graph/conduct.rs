@@ -28,7 +28,7 @@ use super::session_store::{
 use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
 use aoide_protocol::agents::agent_profile;
 use aoide_protocol::Invocation;
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Outcome};
 use aoide_storage::attest::is_node_origin;
 use aoide_storage::fs::with_stage_lock;
 use aoide_storage::time::now_iso_utc;
@@ -1938,6 +1938,21 @@ fn killed_with_label(ended: &Ended) -> String {
 /// `super::pty`'s seam.
 pub fn session_conduct(inv: &Invocation) -> Outcome {
     let cmd = "conduct";
+    // `conduct` runs its command in the foreground of this call and registers
+    // it under any `--parent` and over any non-conductable `--id`, with no
+    // spawn gate in front of it. A door that cannot approve launches through
+    // `spawn`, which attributes the launch to a sealed session or holds it for
+    // a human.
+    if let Some(refusal) = super::common::refuse_unapproving_door(
+        inv,
+        cmd,
+        "conduct is not run for this door".to_string(),
+        "conduct launches a command at once and registers it under any parent, and a door that \
+         cannot approve launches only through spawn, which a sealed session attributes or a human approves",
+        Fix::Run("aoide spawn -- <command>".to_string()),
+    ) {
+        return refusal;
+    }
     // The wrap answers an end signal from the moment it runs: one that lands
     // before its child exists is forwarded at the first pass of the multiplex.
     let _wrap_signals = WrapSignals::install();

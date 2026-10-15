@@ -12,7 +12,7 @@
 //! seam on both hosts, so the `allow(dead_code)` this module carried while the
 //! PTY was refused on native Windows is gone with the refusal.
 
-use super::common::{require_flag, stage_error};
+use super::common::{refuse_unapproving_door, require_flag, stage_error};
 use super::doc::{
     doomed_subagent_descendants, ledger_session_exit, prune_done_sparing, restage_graph, would_cycle,
 };
@@ -219,6 +219,37 @@ pub(in crate::graph) fn chain_is_stale(
         && chain
             .iter()
             .any(|&p| !rec.hook_ancestry.contains(&p) && u32::try_from(p).is_ok_and(&alive))
+}
+
+/// The refusal of a door that cannot approve changing the parent of a session
+/// that already exists to `parent`, or `None` when nothing would change or the
+/// door may. The parent is what the send gate's parent and sibling rules read
+/// to let one session command another without a human, so moving it is moving
+/// that authority, and a caller that could do it would be approving. Any door
+/// may still REGISTER a session under a parent: a new record has no earlier
+/// parent to take it from. `sessions` is the roster the write will be made
+/// from, so the check and the write judge the same record.
+pub(in crate::graph) fn reparent_refusal(
+    inv: &Invocation,
+    cmd: &str,
+    sessions: &[SessionRecord],
+    id: &str,
+    parent: &str,
+) -> Option<Outcome> {
+    let held = sessions.iter().find(|s| s.session_id == id)?.parent_session_id.as_deref();
+    if held == Some(parent) {
+        return None;
+    }
+    let was = held.map_or("no parent".to_string(), |p| format!("parent `{p}`"));
+    refuse_unapproving_door(
+        inv,
+        cmd,
+        format!("`{id}` is not re-parented to `{parent}`: it already exists with {was}"),
+        "the parent decides which session may command this one without a human, so only a door \
+         that can approve moves it; any door may register a NEW session under a parent",
+        Fix::None("re-parent from a terminal with the CLI, or register a new session id under the parent"),
+    )
+    .map(|out| out.with_fields(json!({ "sessionId": id, "parent": parent })))
 }
 
 /// Core of `session start`: cycle-check a parent, UPSERT, re-stage.
@@ -2268,8 +2299,15 @@ pub fn session_start(inv: &Invocation) -> Outcome {
     if let Some(refusal) = reserved_id_refusal("session.start", &id) {
         return refusal;
     }
-    // The refusal and the write share one lock, so no other writer lands between them.
+    // The judgement and the write share one stage lock, so a record registered
+    // between them cannot be re-parented by an upsert that judged it new.
     with_stage_lock(|| {
+        if let Some(parent) = parent {
+            let sessions = load_stage::<SessionsFile>(&sessions_path()).map(|f| f.sessions).unwrap_or_default();
+            if let Some(refusal) = reparent_refusal(inv, "session.start", &sessions, &id, parent) {
+                return refusal;
+            }
+        }
         if let Some((rec, changed)) = live_wrap_verdict(&id, agent, cwd, window, parent) {
             return if changed.is_empty() {
                 live_wrap_unchanged(&id, &rec)
@@ -3400,6 +3438,57 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A session write from a door other than the CLI never reaches the daemon,
+    /// which would run it as `Door::Daemon`; it lands through the direct path
+    /// here. The daemon socket is LIVE and never accepted, so a forward would
+    /// wait out its reply bound, fail, and leave a connection behind.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_write_from_a_non_cli_door_never_reaches_the_daemon() {
+        use aoide_protocol::output::Status;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
+        let stage = unique_stage("sess-door-local");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let socket = stage.join("d.sock");
+        let daemon = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        daemon.set_nonblocking(true).unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &socket);
+
+        for door in [aoide_protocol::Door::Mcp, aoide_protocol::Door::A2a] {
+            let id = format!("{door:?}-write").to_lowercase();
+            let call = |path: &[&str], args: &[&str], flags: &[(&str, &str)]| {
+                let mut inv = flag_invocation(path, flags);
+                inv.args = args.iter().map(|a| a.to_string()).collect();
+                inv.door = door;
+                inv
+            };
+            let outs = [
+                session_start(&call(&["session", "start"], &[], &[("id", &id)])),
+                session_phase(&call(&["session", "phase"], &[], &[("id", &id), ("phase", "working")])),
+                crate::graph::grant::session_grant(&call(
+                    &["session", "grant"],
+                    &["exempt", "on"],
+                    &[("id", &id)],
+                )),
+                session_end(&call(&["session", "end"], &[], &[("id", &id)])),
+            ];
+            for out in outs {
+                assert_eq!(out.status, Status::Ok, "{door:?} {}: {}", out.command, out.message);
+            }
+            assert!(
+                matches!(daemon.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "{door:?} must never connect to the daemon"
+            );
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            let rec = s.sessions.iter().find(|r| r.session_id == id).expect("written locally");
+            assert_eq!(rec.state, "done", "{door:?}: the direct path ran every write");
+            assert!(rec.exempt, "{door:?}: including the exempt mark");
+        }
+
         let _ = std::fs::remove_dir_all(&stage);
     }
     #[test]

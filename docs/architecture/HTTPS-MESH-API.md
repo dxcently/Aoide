@@ -197,27 +197,26 @@ when both meshes contain the same third machine. A mesh is one of two kinds:
 Rules:
 
 - **Every signed request names the mesh it acts in**, inside the per-request
-  signature. The door checks the caller's grant in that mesh and in no other: the
-  caller's charter line for a charter mesh, the paired record's grant in that mesh
-  for a pair mesh. For mail, the request's mesh must equal the envelope's `mesh`.
-  The remote sub-agent rules (register §32: any-frame read, spawn, the
-  remote-parent inject match) read the grant in the request's mesh.
-- **The unsigned autogate rail is judged by the record's HOME mesh.** The door
-  has one delivery rail with no request signature behind it: an inbound
-  `message/send` whose source address resolves to an `autogate` record's `url`,
-  or whose bearer matches that record's own `tokenFile`, auto-delivers without
-  pending. It names no mesh — there is no signed request to name one — so it is
-  judged exactly as a request that names none: `[pairing] homeMesh`'s rules.
-  Where a charter governs home, the record must be `verified` AND its key must
-  be on the charter's line with `message` (minus the box's own local narrowing);
-  a charter-shaped home whose operator key is undecidable delivers nothing on
-  this rail; a pair-mesh home keeps the record's own `autogate` flag as the
-  whole rule, as it always was. A `config.toml` that will not load delivers
-  nothing here either: home is read through `home_mesh_fallible` (a swallowed
-  load error would judge the record by the built-in default mesh instead of the
-  real `[pairing] homeMesh`). A record the charter does not answer for is held
-  PENDING — never refused — and the queue entry names it (`node:<name>`).
-  `aoide mesh` reports those records on the home mesh's charter row.
+  signature. Where the door checks a grant, it reads it in that mesh and in
+  no other: the caller's charter line for a charter mesh, the paired record's
+  grant in that mesh for a pair mesh. For mail, the request's mesh must equal
+  the envelope's `mesh`. The remote sub-agent rules (register §32: any-frame
+  read, spawn, and the ping-back history read) read the grant in the request's
+  mesh.
+- **An Inject is never delivered by the network door.** Every Inject parks in
+  `pending.json` for a human, whatever mesh the request names; the mesh is
+  read for spawn and reads only. A queued Inject carries `from` as
+  `node:<name>` for whichever rung resolved the caller, and attribution is
+  not a gate. Admission to the queue is the only decision an Inject makes:
+  with no door token configured every Inject reaches the queue; once one is
+  configured, a `contextId` send from a caller that proved neither that token
+  nor a node identity gets the uniform synthetic `submitted` Task and queues
+  nothing. A node identity is a `verified` node's own bearer, matched against
+  its `tokenFile`, or a verified per-request signature whose grant in the
+  signed mesh holds `message`. An address match proves no identity and admits
+  nothing once a door token is configured. The queue holds at most 32 entries
+  per source; past that a proven node is refused `-32000` and any other
+  caller gets the uniform answer.
 - **An unreadable config grants nothing and refuses with the reason.** The same
   resolution decides every unnamed request, so it fails closed at the grant too:
   `aoide-server::a2a::effective_mesh` is failable, an unnamed request's grant is

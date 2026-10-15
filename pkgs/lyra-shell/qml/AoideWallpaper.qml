@@ -9,7 +9,8 @@
 // stage/cover.json contract (CONTRACTS.md §4): the staged cover — `path` for a
 // still or a video, `weId` for a scene — with `pick: true` when it is the
 // user's own choice and `song` naming the song it was staged for. A cover
-// naming another song is ignored.
+// naming another song is ignored. A pick with `tile: true` repeats its image
+// at 1:1 instead of cropping it to fill.
 //
 // Who PAINTS that pick is the host's: while an external provider is active and
 // a pick applies, this layer paints nothing and the provider's own surface has
@@ -44,6 +45,7 @@ Item {
     property string stagedCoverSong: ""
     property string stagedCoverWeId: ""
     property bool stagedCoverPick: false
+    property bool stagedCoverTile: false
     readonly property bool stagedCoverApplies:
         root.stagedCoverSong.length === 0 || root.stagedCoverSong === root.livery.songName
 
@@ -57,6 +59,11 @@ Item {
     // paints nothing at all: no image, no board, no palette rectangle.
     readonly property bool externalProviderShowsPick:
         root.livery.wallpaperProvider === "skwd-wall" && root.pickApplies
+
+    // A tile is the pick's own: it lays out the picked path and nothing the
+    // layer falls back to.
+    readonly property bool pickTiles:
+        root.pickApplies && root.stagedCoverTile && root.stagedCoverPath.length > 0
 
     readonly property string wallpaperPath:
         root.stagedCoverApplies && root.stagedCoverPath.length > 0 ? root.stagedCoverPath : root.bakedWallpaper
@@ -75,11 +82,13 @@ Item {
                 root.stagedCoverSong = (d && d.song) ? ("" + d.song) : ""
                 root.stagedCoverWeId = (d && d.weId) ? ("" + d.weId) : ""
                 root.stagedCoverPick = !!(d && d.pick === true)
+                root.stagedCoverTile = !!(d && d.tile === true)
             } catch (e) {
                 root.stagedCoverPath = ""
                 root.stagedCoverSong = ""
                 root.stagedCoverWeId = ""
                 root.stagedCoverPick = false
+                root.stagedCoverTile = false
             }
         }
         onFileChanged: coverFile.reload()
@@ -97,7 +106,7 @@ Item {
         id: wallpaperImage
         anchors.fill: parent
         source: root.wallpaperPath.length > 0 ? "file://" + root.wallpaperPath : ""
-        fillMode: Image.PreserveAspectCrop
+        fillMode: root.pickTiles ? Image.Tile : Image.PreserveAspectCrop
         smooth: true
         asynchronous: true
         visible: status === Image.Ready && !root.externalProviderShowsPick

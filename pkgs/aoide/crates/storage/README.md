@@ -245,8 +245,8 @@ by decision — no embedded database yet
   `skip_serializing_if` false, so every record written before it stays
   byte-identical): whether this session's wrapped command IS a shell, written
   by the conducting process at registration from its own argv. It exists so a
-  lane that refuses to type a line into a shell — the ping-back, the
-  doorbell's PTY arm, the A2A door's injects and spawn arm — can read that
+  lane that refuses to type a line into a shell — the ping-back and the
+  doorbell's PTY arm — can read that
   answer off a record instead of trusting the `agent` label, which a caller
   chooses freely (`--agent pi -- bash`). Re-registration re-stamps it, so an
   id re-conducted as a harness stops claiming to be one.
@@ -362,7 +362,8 @@ by decision — no embedded database yet
   `allows` folds into `grants[<home>]` byte-identical, one-shot and
   idempotent, and a malformed value costs that ONE record its grant (the
   record, its other fields and every other record are kept, and the skip is
-  reported). `set_node_allow` (`node allow
+  reported). A `nodes.json` that still carries an `autogate` key loads: the key
+  is ignored and never written back. `set_node_allow` (`node allow
   <name> <cap> on|off [--mesh <m>]`'s library half) is the only OTHER writer —
   idempotent, refuses an unknown node or an unknown capability (the
   capability check runs first), and **writes a different map in a charter
@@ -381,10 +382,9 @@ by decision — no embedded database yet
   caller-identity ladder the A2A door keys off, returning WHICH `NodeRung`
   matched alongside the `Node`: a presented bearer against a node's own
   `token_file` first (`NodeRung::Token`), an origin address against that
-  node's `url` second (`NodeRung::Addr`) — unlike `autogated_node_token`/
-  `autogated_node_addr` above, it looks at EVERY registered node, not
-  only `autogate`-marked ones, since resolving WHICH node is calling is a
-  different question from "should this node skip the pending queue."
+  node's `url` second (`NodeRung::Addr`). It looks at EVERY registered node,
+  because resolving WHICH node is calling is the question. Whether that node may
+  reach the pending queue is the A2A door's decision, made from the rung.
   `NodeRung` carries a THIRD variant, `Signature` (P-P4) — the strongest
   rung, never produced by `resolve_node` itself (it has no access to the
   raw HTTP request a signature needs); it is yielded only by
@@ -394,27 +394,16 @@ by decision — no embedded database yet
   only — see `wire_auth` below, CONTRACTS.md §6's P-P4 amendment for the
   full wire shape). None of the three rungs are interchangeable strength:
   `aoide-server`'s spawn arm (`spawn_admitted`) accepts ONLY
-  `NodeRung::Signature` — a bare address match carries no possession
-  proof, and a bare token match is replayable and identical across every
-  request the real node or an impersonator ever sends; both remain fine
-  for attribution/origin-stamping and the ordinary autogate question, just
-  never for Spawn. The autogate rail's own two matches are the OTHER half of
-  the ladder, and they are deliberately not `resolve_node`:
-  `autogated_node_addr`/`autogated_node_token` return the RECORD a source
-  address or a presented bearer resolves to among the `autogate`-marked
-  subset (registry order, first match wins — the door folds ip then token,
-  and only `resolve_node` tries the token rung first). `aoide-server`'s #50
-  guard exemption asks the same question as `.is_some()` on that result, so
-  there is no separate `is_autogated_node_*` predicate to drift against.
-  **A match is not a delivery:** the rail carries no signed mesh, so the door
-  judges the matched record by its HOME mesh
-  (`aoide-server::a2a::rail_admits` — the charter's line for its key where a
-  charter governs home, nothing where home is charter-shaped or `config.toml`
-  will not load, the record's own flag where home is a pair mesh). Ambiguity resolves deterministically: `node add` refuses only a
-  duplicate NAME (CONTRACTS.md §7), so two nodes can share a URL host or
-  hold byte-identical `token_file` contents, and `resolve_node` then
-  answers with whichever matches FIRST in registry (array) order — not
-  the last, not random. `via` (P-S4, ssh-transport lane) is the
+  `NodeRung::Signature` — a bare address match carries no possession proof, and
+  a bare token match is replayable and identical across every request the real
+  node or an impersonator ever sends; both remain fine for attribution, just
+  never for Spawn. Once a door-wide token is configured, only the `Token` and
+  `Signature` rungs admit an Inject: `Addr` proves no identity and admits
+  nothing (`aoide-server::a2a`). Ambiguity resolves deterministically:
+  `node add` refuses only a duplicate NAME (CONTRACTS.md §7), so two nodes can
+  share a URL host or hold byte-identical `token_file` contents, and
+  `resolve_node` then answers with whichever matches FIRST in registry (array)
+  order — not the last, not random. `via` (P-S4, ssh-transport lane) is the
   `Option<String>` transport marker `aoide-client`'s dial resolution reads
   before every outbound POST to this node (an `ssh://[user@]host[:port]`
   string, `crate::tunnel::parse_via`'s own shape) — additive,
@@ -731,29 +720,31 @@ by decision — no embedded database yet
   a tested library function only; `send --to`'s live call site still
   calls plain `resolve` (the same "land the function, wire a caller later"
   order this module's own tier-5 `node/<rest>` grammar went through).
-- `mail` — the addressed, signed, append-only mailbase (messaging plan
-  P-M1, `docs/architecture/MAIL.md`, CONTRACTS.md §4's `state/mail/`
-  subsection): `base.jsonl`/`cursors.json`/`seen.jsonl` under
-  `state/mail/`, one entry per envelope (header, text, ed25519 `sig`,
-  sha256 `msgid` over the signed bytes — MAIL.md's "The envelope" is the
-  formula). Every write funnels through one `with_lock` choke point —
-  under `fs::try_stage_lock`, migrate a legacy `inbox.json` if not yet
-  done (skipping any row whose `msgid` is already in `seen.jsonl`, so a
-  retry after a crash mid-migration never re-files one), truncate any torn
-  tail, append, fsync, then append `seen.jsonl` — so a crash between the
-  two appends is re-accepted next time, never lost. `mail::file_receipt` is the shared seam both `conduct`'s
-  `deliver_local` and the A2A door's `spawn_inject_prompt` file a
-  delivered message through; `mail::file_letter` is `mail send`'s own
-  engine. Keep-all: `mail rm --older-than` is the only pruning, and it
-  never touches `seen.jsonl`.
+- `mail` — the addressed, signed, append-only mailbase (messaging plan P-M1,
+  `docs/architecture/MAIL.md`, CONTRACTS.md §4's `state/mail/` subsection):
+  `base.jsonl`/`cursors.json`/`seen.jsonl` under `state/mail/`, one entry per
+  envelope (header, text, ed25519 `sig`, sha256 `msgid` over the signed bytes —
+  MAIL.md's "The envelope" is the formula). Every write funnels through one
+  `with_lock` choke point — under `fs::try_stage_lock`, migrate a legacy
+  `inbox.json` if not yet done (skipping any row whose `msgid` is already in
+  `seen.jsonl`, so a retry after a crash mid-migration never re-files one),
+  truncate any torn tail, append, fsync, then append `seen.jsonl` — so a crash
+  between the two appends is re-accepted next time, never lost.
+  `mail::file_receipt` is the shared seam `conduct`'s `deliver_local` files a
+  delivered message through; `mail::file_letter` is `mail send`'s own engine.
+  Keep-all: `mail rm --older-than` is the only pruning, and it never touches
+  `seen.jsonl`.
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
-  (`from.node` always `display::local_node_name()` — `self` never crosses
-  the wire, and the form it crosses as is the ADDRESS one: an OS host name is
-  case-preserved and native Windows' is conventionally upper-case while a node
-  name is grammar-lowercase, so the folded name is the single name this box
-  mints, declares and is looked up under); `verify_origin_signature` is the OTHER lookup a P-P4 caller
+  (`from.node` is the name the caller states: `mint_outbound_letter_from` and
+  `mint_ack_from` take it, and the unnamed forms state `display::local_node_name()`
+  — `self` never crosses the wire, and the form it crosses as is the ADDRESS
+  one: an OS host name is case-preserved and native Windows' is
+  conventionally upper-case while a node name is grammar-lowercase, so the
+  folded name is the single name this box mints, declares and is looked up
+  under; a caller on a charter mesh states the name its line gives this box).
+  `verify_origin_signature` is the OTHER lookup a P-P4 caller
   doesn't need — not the connection's signer (`ctx.signed_caller`, a
   door concern) but `header.from.node`'s own key, tried against the ONE
   entry `node_store` has on record under that exact name, never every
@@ -762,7 +753,10 @@ by decision — no embedded database yet
   policy in one function — recompute `msgid`, verify the origin
   signature, dedup against `seen.jsonl` (a filed `letter`'s duplicate
   reports whether it was ever filed, so the caller knows to re-spool the
-  ack), then file via the new `file_received_entry`. Both mint functions
+  ack), then file via the new `file_received_entry`. A receipt is filed
+  only against a letter still spooled here under its own name
+  (`outbox::spooled_letter_sender`), and a repeat of one already filed is
+  caught by `receipts.seen`, keyed on (signer, mesh, acked msgid). Both mint functions
   and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
   exactly P-M1's shape, addressed at a real node instead of `self`.
 
@@ -825,12 +819,13 @@ by decision — no embedded database yet
   file mutations and a SEPARATE, non-blocking per-node `.bsy` flock a
   drain holds across its whole dial cycle — two locks, two jobs, never
   conflated (this module's own doc has the full reasoning). Pure spool
-  CRUD only: `write_entry`/`list_entries`/`remove_entry`, `retire_by_ack`
-  (spec item 7's two checks — verified signer is the entry's `to.node`,
-  text names the entry's `msgid` — folded into ONE path lookup: an entry
-  is always spooled under its own `to.node`, so indexing by the ack's
-  already-origin-verified `from.node` IS the signer check, and keying by
-  `msgid` makes a wrong `text` a plain miss) and the link-state
+  CRUD only: `write_entry`/`update_entry`/`list_entries`/`remove_entry`,
+  `retire_by_ack` (spec item 7's two checks — verified signer is the
+  entry's `to.node`, text names the entry's `msgid` — folded into ONE path
+  lookup: an entry is always spooled under its own `to.node`, so indexing
+  by the ack's already-origin-verified `from.node` IS the signer check, and
+  keying by `msgid` makes a wrong `text` a plain miss; a `text` that is not
+  one msgid retires nothing before that lookup is made) and the link-state
   trio (`read_link_state`/`back_off`/`clear_link_state`, backoff off a
   `DRAIN_BACKOFF_FLOOR_SECS` floor doubling up to its own
   `BACKOFF_CEILING_SECS` (15 min) ceiling — deliberately not

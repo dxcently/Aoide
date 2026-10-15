@@ -209,11 +209,14 @@ pub(super) struct RemoteChild {
 
 /// One row of a remote child's subtree: a session on the SAME far node,
 /// reached from the fold by that node's own `spawned` edges. Identity is the
-/// link's `node` plus this id, so only the nesting lives here.
+/// link's `node` plus this id. A link's rows run in preorder and each says how
+/// deep it sits (`0` is a direct child of the link), so a far chain of any
+/// depth is a flat list: nothing that builds, draws, clones or drops it
+/// recurses per level.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct SubtreeRow {
     pub(super) session_id: String,
-    pub(super) children: Vec<SubtreeRow>,
+    pub(super) depth: usize,
 }
 
 /// How the node fold stands behind one remote-child link — the join
@@ -342,6 +345,21 @@ pub(super) fn build_local_node(sessions: &[SessionRecord], hooks: &[HookRecord],
     NodeView { name: host.to_string(), is_local: true, presence: "online", fetched_at: None, error: None, stale: false, sessions }
 }
 
+/// The first `spawned` edge into each id of a graph document's `edges`, in one
+/// pass. A role or a parent is then a hash probe per session, not a scan of
+/// every edge: the document is a far node's bytes and its edge count is its
+/// own to choose, so a scan per session would be quadratic in what it sends.
+/// `remote.rs`'s twin reads the same edges through the same map.
+pub(super) fn spawned_into(edges: &[Value]) -> HashMap<&str, &Value> {
+    let mut by_child: HashMap<&str, &Value> = HashMap::new();
+    for e in edges.iter().filter(|e| e["kind"] == "spawned") {
+        if let Some(to) = e["to"].as_str() {
+            by_child.entry(to).or_insert(e);
+        }
+    }
+    by_child
+}
+
 /// Extract every `kind:"session"` node from a (local or node) resolved graph
 /// document into [`SessionView`]s, `role` (root/child, for
 /// `display::session_label`) derived from the SAME document's own
@@ -354,22 +372,14 @@ pub(super) fn sessions_from_graph(graph: &Value, host: &str) -> Vec<SessionView>
     let empty: Vec<Value> = Vec::new();
     let nodes = graph.get("nodes").and_then(Value::as_array).unwrap_or(&empty);
     let edges = graph.get("edges").and_then(Value::as_array).unwrap_or(&empty);
-    // Each child's spawned edge, found once: the first edge naming a `to`
-    // wins, as the scan it replaces did. A per-node scan of every edge is
-    // quadratic on a large graph.
-    let mut spawned: HashMap<&str, &Value> = HashMap::new();
-    for e in edges.iter().filter(|e| e["kind"] == "spawned") {
-        if let Some(to) = e["to"].as_str() {
-            spawned.entry(to).or_insert(e);
-        }
-    }
+    let spawned = spawned_into(edges);
     nodes
         .iter()
         .filter(|n| n["kind"] == "session")
         .map(|n| {
             let full_id = n["id"].as_str().unwrap_or("");
             let session_id = full_id.strip_prefix("session:").unwrap_or(full_id).to_string();
-            let spawned_edge = spawned.get(full_id).copied();
+            let spawned_edge = spawned.get(full_id);
             let role = if spawned_edge.is_some() { "child" } else { "root" };
             let parent = spawned_edge
                 .and_then(|e| e["from"].as_str())
@@ -564,54 +574,112 @@ pub(super) fn probe_nodes(nodes: &[Node], pull: PullFn) -> Vec<(Node, Result<Val
 /// a fold past its TTL is `Fold::Stale` (the `NodeView`'s own `stale`, straight
 /// off `node_store::is_cache_fresh`), shown and marked rather than dressed up
 /// as current.
+///
+/// Every fold and link here is a far node's choice, so the cost is bounded by
+/// the document and not by what it arranges: each fold is indexed once, and
+/// within one linking node each of its sessions is drawn under the FIRST of
+/// that node's links that reaches it. A link aimed at a session an earlier
+/// link of the same node already drew keeps its own row and has no rows under
+/// it, so a node's rows under a fold never outnumber the fold's sessions.
+/// Claims are scoped to the linking node, so one far node's links cannot
+/// blank another's subtree. A far node's link into this box's own fold draws
+/// no rows at all: a far document is never allowed to re-home a local session.
 pub(super) fn attach_subtrees(nodes: &mut [NodeView]) {
-    // Every fold is read once, before any of them is written through: the
-    // links live on sessions, and the folds ARE sessions, so the join needs
-    // both at once and a clone per node is cheaper than a second roster walk.
-    let folds: Vec<(String, bool, Vec<SessionView>)> = nodes
-        .iter()
-        .map(|n| (n.name.clone(), n.stale, n.sessions.clone()))
-        .collect();
-    for n in nodes.iter_mut() {
-        for sv in n.sessions.iter_mut() {
-            for child in sv.remote_children.iter_mut() {
-                match folds.iter().find(|(name, _, _)| *name == child.node) {
-                    Some((_, stale, fold)) => {
-                        child.fold = Some(if *stale { Fold::Stale } else { Fold::Fresh });
-                        child.subtree = subtree_of(fold, &child.session_id);
-                    }
-                    None => {
-                        child.fold = Some(Fold::Absent);
-                        child.subtree = Vec::new();
-                    }
+    let joins = {
+        let mut by_name: HashMap<&str, usize> = HashMap::new();
+        for (i, n) in nodes.iter().enumerate() {
+            by_name.entry(n.name.as_str()).or_insert(i);
+        }
+        let mut indexes: HashMap<usize, FoldIndex> = HashMap::new();
+        let mut joins: Vec<(usize, usize, usize, Fold, Vec<SubtreeRow>)> = Vec::new();
+        for (ni, n) in nodes.iter().enumerate() {
+            for (si, sv) in n.sessions.iter().enumerate() {
+                for (ci, child) in sv.remote_children.iter().enumerate() {
+                    let (fold, rows) = match by_name.get(child.node.as_str()) {
+                        Some(&fi) => {
+                            let far = &nodes[fi];
+                            let fold = match far.presence {
+                                "never-pulled" => Fold::Absent,
+                                _ if far.stale => Fold::Stale,
+                                _ => Fold::Fresh,
+                            };
+                            // A far node's link never draws this box's own
+                            // sessions: a far document may not re-home them.
+                            let reaches_local = far.is_local && !nodes[ni].is_local;
+                            if reaches_local {
+                                (fold, Vec::new())
+                            } else {
+                                let index = indexes.entry(fi).or_insert_with(|| FoldIndex::new(&far.sessions));
+                                (fold, index.rows_under(ni, &child.session_id))
+                            }
+                        }
+                        None => (Fold::Absent, Vec::new()),
+                    };
+                    joins.push((ni, si, ci, fold, rows));
                 }
             }
         }
+        joins
+    };
+    for (ni, si, ci, fold, rows) in joins {
+        let child = &mut nodes[ni].sessions[si].remote_children[ci];
+        child.fold = Some(fold);
+        child.subtree = rows;
     }
 }
 
-/// The rows under one session id in a fold, by that fold's own parentage
-/// (`SessionView.parent`, a `spawned` edge on the far node) — recursive,
-/// because a far child's own child has a child. `seen` bounds the walk: a
-/// fold whose parentage loops (`graph link` mints a parent id unchecked) must
-/// cost a wrong row, never a hung render.
-fn subtree_of(fold: &[SessionView], id: &str) -> Vec<SubtreeRow> {
-    rows_under(fold, id, &mut HashSet::new())
+/// One node's fold, indexed for the join: who each session spawned (by that
+/// fold's own `spawned` edges, `SessionView.parent`), and which sessions each
+/// linking node's links have already drawn. Built once per fold, so a walk is
+/// one probe per session however many links reach in.
+struct FoldIndex<'a> {
+    sessions: &'a [SessionView],
+    kids: HashMap<&'a str, Vec<usize>>,
+    drawn: HashSet<(usize, &'a str)>,
 }
 
-fn rows_under(fold: &[SessionView], id: &str, seen: &mut HashSet<String>) -> Vec<SubtreeRow> {
-    seen.insert(id.to_string());
-    let mut rows: Vec<SubtreeRow> = Vec::new();
-    for s in fold {
-        if s.parent.as_deref() != Some(id) || seen.contains(&s.session_id) {
-            continue;
+impl<'a> FoldIndex<'a> {
+    fn new(sessions: &'a [SessionView]) -> Self {
+        let mut kids: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (i, s) in sessions.iter().enumerate() {
+            if let Some(parent) = s.parent.as_deref() {
+                kids.entry(parent).or_default().push(i);
+            }
         }
-        rows.push(SubtreeRow {
-            session_id: s.session_id.clone(),
-            children: rows_under(fold, &s.session_id, seen),
-        });
+        FoldIndex { sessions, kids, drawn: HashSet::new() }
     }
-    rows
+
+    /// The rows under one session id for the link of node `linker`, in
+    /// preorder, by that fold's own parentage — an explicit stack, because a
+    /// far child's own child has a child and a hostile fold chains them as
+    /// deep as it likes. `drawn` bounds the walk: a fold whose parentage loops
+    /// (`graph link` mints a parent id unchecked) must cost a wrong row, never
+    /// a hung render.
+    fn rows_under(&mut self, linker: usize, id: &'a str) -> Vec<SubtreeRow> {
+        let mut rows: Vec<SubtreeRow> = Vec::new();
+        if !self.drawn.insert((linker, id)) {
+            return rows;
+        }
+        let sessions = self.sessions;
+        let kids = &self.kids;
+        let drawn = &mut self.drawn;
+        let kids_of = |id: &str| kids.get(id).map_or(&[][..], Vec::as_slice);
+        let mut stack: Vec<(&[usize], usize)> = vec![(kids_of(id), 0)];
+        while let Some((siblings, next)) = stack.last_mut() {
+            let Some(&i) = siblings.get(*next) else {
+                stack.pop();
+                continue;
+            };
+            *next += 1;
+            let s = &sessions[i];
+            if !drawn.insert((linker, s.session_id.as_str())) {
+                continue;
+            }
+            rows.push(SubtreeRow { session_id: s.session_id.clone(), depth: stack.len() - 1 });
+            stack.push((kids_of(&s.session_id), 0));
+        }
+        rows
+    }
 }
 
 fn session_matches_substring(sv: &SessionView, needle: &str) -> bool {
@@ -743,12 +811,46 @@ fn subtree_lines(s: &SessionView, under: &str) -> Vec<String> {
     out
 }
 
+/// How many levels of a far chain's indentation are drawn. A row deeper than
+/// this keeps its line — none is dropped — and wears this many levels then
+/// `…`, so a chain of any depth costs a bounded prefix per row rather than one
+/// that grows with it. The JSON nests to the same depth ([`subtree_json`]).
+const INDENT_LEVELS: usize = 32;
+
+/// One line per row, in the row's preorder. The `├─`/`└─` grammar is the
+/// recursive one's: a row's prefix is what each ancestor leaves to its right.
 fn push_rows(out: &mut Vec<String>, under: &str, node: &str, rows: &[SubtreeRow]) {
-    for (i, r) in rows.iter().enumerate() {
-        let last = i + 1 == rows.len();
-        out.push(marked_row(under, last, &endpoint(node, &r.session_id), None));
-        push_rows(out, &deeper(under, last), node, &r.children);
+    let last = last_siblings(rows);
+    // Whether each row on the path to the current one is the last of its group.
+    let mut path: Vec<bool> = Vec::new();
+    for (r, &is_last) in rows.iter().zip(&last) {
+        path.truncate(r.depth);
+        path.push(is_last);
+        let drawn = (path.len() - 1).min(INDENT_LEVELS);
+        let mut prefix = under.to_string();
+        for &ancestor_last in &path[..drawn] {
+            prefix.push_str(if ancestor_last { "   " } else { "│  " });
+        }
+        if path.len() - 1 > INDENT_LEVELS {
+            prefix.push('…');
+        }
+        out.push(marked_row(&prefix, is_last, &endpoint(node, &r.session_id), None));
     }
+}
+
+/// For each row of a preorder subtree: is it the last child of its parent?
+fn last_siblings(rows: &[SubtreeRow]) -> Vec<bool> {
+    let mut last = vec![true; rows.len()];
+    // The row at each depth of the path to the current one.
+    let mut path: Vec<usize> = Vec::new();
+    for (i, r) in rows.iter().enumerate() {
+        if let Some(&earlier) = path.get(r.depth) {
+            last[earlier] = false;
+        }
+        path.truncate(r.depth);
+        path.push(i);
+    }
+    last
 }
 
 /// The continuation an `├─`/`└─` row leaves for the lines under it.
@@ -868,16 +970,48 @@ fn child_json(c: &RemoteChild) -> Value {
     let mut v = json!({ "node": shown(&c.node), "sessionId": shown(&c.session_id) });
     if let Some(fold) = c.fold {
         v["fold"] = json!(fold.as_str());
-        v["subtree"] = json!(c.subtree.iter().map(subtree_json).collect::<Vec<_>>());
+        v["subtree"] = subtree_json(&c.subtree);
     }
     v
 }
 
-fn subtree_json(r: &SubtreeRow) -> Value {
-    json!({
-        "sessionId": shown(&r.session_id),
-        "subtree": r.children.iter().map(subtree_json).collect::<Vec<_>>(),
-    })
+/// A link's subtree as the nested JSON it has always been — each row
+/// `{ sessionId, subtree: [its children] }` — down to [`INDENT_LEVELS`]. A row
+/// deeper than that stays in the list of its deepest nested ancestor, in
+/// preorder, with its true `depth` beside it: every consumer's JSON parser has
+/// a recursion limit, so a far chain may cost the document only a bounded
+/// nesting, and it loses no row.
+fn subtree_json(rows: &[SubtreeRow]) -> Value {
+    let mut top: Vec<Value> = Vec::new();
+    // The nested rows still open, each with the children gathered under it.
+    let mut open: Vec<(Value, Vec<Value>)> = Vec::new();
+    for r in rows {
+        let id = shown(&r.session_id);
+        if r.depth < INDENT_LEVELS {
+            close_rows(&mut open, &mut top, r.depth);
+            open.push((json!({ "sessionId": id }), Vec::new()));
+        } else {
+            let deep = json!({ "sessionId": id, "subtree": [], "depth": r.depth });
+            match open.last_mut() {
+                Some((_, kids)) => kids.push(deep),
+                None => top.push(deep),
+            }
+        }
+    }
+    close_rows(&mut open, &mut top, 0);
+    Value::Array(top)
+}
+
+/// Finish the open rows deeper than `keep`, each into its parent's list.
+fn close_rows(open: &mut Vec<(Value, Vec<Value>)>, top: &mut Vec<Value>, keep: usize) {
+    while open.len() > keep {
+        let Some((mut row, kids)) = open.pop() else { break };
+        row["subtree"] = Value::Array(kids);
+        match open.last_mut() {
+            Some((_, siblings)) => siblings.push(row),
+            None => top.push(row),
+        }
+    }
 }
 
 /// The roster line's cross-machine tags: `↑ <node>/<parent>` for a session
@@ -938,8 +1072,27 @@ pub(super) fn project_bucket(cwd: &str, projects: &[Project]) -> Option<String> 
         // run, not by anything the session itself carries.
         return None;
     }
-    let (root, _manifest) = aoide_storage::manifest::walk_up(path)?;
+    let (root, _manifest) = aoide_storage::manifest::walk_up(std::path::Path::new(within_path_max(cwd)))?;
     Some(root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| root.to_string_lossy().into_owned()))
+}
+
+/// The longest directory path the manifest walk is started from: `PATH_MAX`
+/// less its NUL, less the `/.aoide/project.json` a manifest adds beneath it.
+/// A directory this long still holds one; a longer one cannot.
+const WALK_PATH_MAX: usize = 4095 - "/.aoide/project.json".len();
+
+/// `cwd`, or its deepest ancestor short enough to hold a manifest. A pulled
+/// cwd is a far node's string and may be any length, while `walk_up` copies the
+/// path and `stat`s it once per ancestor — a megabyte of `/a/a/a…` would cost
+/// minutes. No directory on this host has a path past `PATH_MAX`, so none of
+/// those ancestors can hold a manifest: the first place the full walk could
+/// have answered is where this one starts.
+fn within_path_max(cwd: &str) -> &str {
+    if cwd.len() <= WALK_PATH_MAX {
+        return cwd;
+    }
+    let cut = cwd.as_bytes()[..=WALK_PATH_MAX].iter().rposition(|&b| b == b'/').unwrap_or(0);
+    &cwd[..cut.max(1)]
 }
 
 /// One project's bucket in bare `session`'s roster — a registered name, a
@@ -1123,12 +1276,12 @@ pub fn session_roster(inv: &Invocation) -> Outcome {
 mod tests {
     use super::*;
     use crate::graph::testutil::*;
+    use std::time::Duration;
 
     fn node(name: &str) -> Node {
         Node {
             name: name.to_string(),
             url: format!("http://{name}/"),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1233,7 +1386,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "nodeb-renamed".into(),
             url: "http://nodeb/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2320,6 +2472,438 @@ mod tests {
         assert_eq!(child["nativeRole"], "subagent");
         // Built from the SAME `session_view_json`, so the project grouping
         // agrees by construction — no second check needed.
+    }
+
+    // ── a far document at scale: the join, the rows and the JSON stay flat ──
+
+    /// A far node's resolved document: `(id, spawner)` sessions in order, each
+    /// with the `spawned` edge its spawner implies, and `(host, node, id)`
+    /// remote-child links riding the session named `host`.
+    fn far_doc(sessions: &[(String, Option<String>)], links: &[(String, String, String)]) -> Value {
+        let mut kids: HashMap<&str, Vec<Value>> = HashMap::new();
+        for (host, node, sid) in links {
+            kids.entry(host.as_str()).or_default().push(json!({ "node": node, "sessionId": sid }));
+        }
+        let nodes: Vec<Value> = sessions
+            .iter()
+            .map(|(id, _)| {
+                let mut n = json!({ "id": format!("session:{id}"), "kind": "session", "state": "idle" });
+                if let Some(links) = kids.remove(id.as_str()) {
+                    n["remoteChildren"] = json!(links);
+                }
+                n
+            })
+            .collect();
+        let edges: Vec<Value> = sessions
+            .iter()
+            .filter_map(|(id, parent)| {
+                parent.as_ref().map(|p| json!({ "from": format!("session:{p}"), "to": format!("session:{id}"), "kind": "spawned" }))
+            })
+            .collect();
+        json!({ "schemaVersion": "0", "nodes": nodes, "edges": edges })
+    }
+
+    fn tree(rows: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
+        rows.iter().map(|(id, p)| (id.to_string(), p.map(str::to_string))).collect()
+    }
+
+    fn link(host: &str, node: &str, id: &str) -> (String, String, String) {
+        (host.to_string(), node.to_string(), id.to_string())
+    }
+
+    /// `nodea/P` spawned `nodeb/C` and `nodeb/D`; on nodeb, C spawned G and G2
+    /// and G spawned H — a three-level far chain under one local-looking row.
+    fn three_level_roster() -> Vec<NodeView> {
+        let a = far_doc(&tree(&[("P", None)]), &[link("P", "nodeb", "C"), link("P", "nodeb", "D")]);
+        let b = far_doc(
+            &tree(&[("C", None), ("G", Some("C")), ("H", Some("G")), ("G2", Some("C")), ("D", None)]),
+            &[],
+        );
+        let mut nodes = vec![
+            build_mesh_node(&node("nodea"), Ok(a), None),
+            build_mesh_node(&node("nodeb"), Ok(b), None),
+        ];
+        attach_subtrees(&mut nodes);
+        nodes
+    }
+
+    #[test]
+    fn a_three_level_far_chain_renders_and_serializes_as_it_always_did() {
+        let nodes = three_level_roster();
+        assert_eq!(
+            render_nodes(&nodes),
+            [
+                "● nodea",
+                "└─ nodea/root/P    idle    ↓ 2 remote",
+                "   ├─ nodeb/C",
+                "   │  ├─ nodeb/G",
+                "   │  │  └─ nodeb/H",
+                "   │  └─ nodeb/G2",
+                "   └─ nodeb/D",
+                "● nodeb",
+                "├─ nodeb/root/C    idle  ",
+                "├─ nodeb/child/G    idle  ",
+                "├─ nodeb/child/H    idle  ",
+                "├─ nodeb/child/G2    idle  ",
+                "└─ nodeb/root/D    idle  ",
+            ]
+            .join("\n")
+        );
+        let links = node_json(&nodes[0])["sessions"][0]["remoteChildren"].clone();
+        assert_eq!(
+            links,
+            json!([
+                {
+                    "fold": "fresh", "node": "nodeb", "sessionId": "C",
+                    "subtree": [
+                        { "sessionId": "G", "subtree": [{ "sessionId": "H", "subtree": [] }] },
+                        { "sessionId": "G2", "subtree": [] },
+                    ],
+                },
+                { "fold": "fresh", "node": "nodeb", "sessionId": "D", "subtree": [] },
+            ])
+        );
+    }
+
+    /// `s0 → s1 → … → s(n-1)` on one far node, `links` riding their hosts.
+    fn far_chain(n: usize, links: &[(String, String, String)]) -> Value {
+        let sessions: Vec<(String, Option<String>)> =
+            (0..n).map(|i| (format!("s{i}"), (i > 0).then(|| format!("s{}", i - 1)))).collect();
+        far_doc(&sessions, links)
+    }
+
+    /// A heap-shaped far fold of `n` sessions (`s(i)` spawned by `s((i-1)/2)`)
+    /// with `n / 10` remote-child links riding `s0`, aimed at `s1..` — many
+    /// links, one big overlapping subtree.
+    fn far_tree(n: usize) -> Value {
+        let sessions: Vec<(String, Option<String>)> =
+            (0..n).map(|i| (format!("s{i}"), (i > 0).then(|| format!("s{}", (i - 1) / 2)))).collect();
+        let links: Vec<(String, String, String)> = (1..=n / 10).map(|k| link("s0", "far", &format!("s{k}"))).collect();
+        far_doc(&sessions, &links)
+    }
+
+    fn far_roster(doc: Value) -> Vec<NodeView> {
+        let mut nodes = vec![build_mesh_node(&node("far"), Ok(doc), None)];
+        attach_subtrees(&mut nodes);
+        nodes
+    }
+
+    /// The nesting depth of a JSON value, measured with a stack of its own.
+    fn json_depth(v: &Value) -> usize {
+        let (mut deepest, mut stack) = (0, vec![(v, 1usize)]);
+        while let Some((v, depth)) = stack.pop() {
+            deepest = deepest.max(depth);
+            match v {
+                Value::Array(a) => stack.extend(a.iter().map(|c| (c, depth + 1))),
+                Value::Object(o) => stack.extend(o.values().map(|c| (c, depth + 1))),
+                _ => {}
+            }
+        }
+        deepest
+    }
+
+    /// Every `sessionId` under a link's `subtree` JSON, with the row's `depth`
+    /// when it carries one, in no particular order — an explicit stack, since
+    /// the document this reads is the one under test.
+    fn subtree_rows(link: &Value) -> Vec<(String, Option<u64>)> {
+        let mut rows = Vec::new();
+        let mut stack: Vec<&Value> = link["subtree"].as_array().into_iter().flatten().collect();
+        while let Some(row) = stack.pop() {
+            rows.push((row["sessionId"].as_str().unwrap().to_string(), row["depth"].as_u64()));
+            stack.extend(row["subtree"].as_array().into_iter().flatten());
+        }
+        rows
+    }
+
+    #[test]
+    fn a_far_chain_past_the_indent_bound_keeps_every_row_and_clips_only_the_prefix() {
+        // s0 → s1 → … → s39, the link aimed at s1: rows s2.. at depth 0..=37.
+        let nodes = far_roster(far_chain(40, &[link("s0", "far", "s1")]));
+        let rendered = render_nodes(&nodes);
+        let line = |name: &str| rendered.lines().find(|l| l.ends_with(&format!("└─ far/{name}"))).unwrap().to_string();
+        // s0 is not the last session of its node, so its rows sit under `│  `;
+        // each chain row is its parent's only child, so each ancestor leaves
+        // three spaces.
+        let indent = |levels: usize| format!("│     {}", "   ".repeat(levels));
+        assert_eq!(line("s2"), format!("{}└─ far/s2", indent(0)));
+        assert_eq!(line("s33"), format!("{}└─ far/s33", indent(31)));
+        assert_eq!(line("s34"), format!("{}└─ far/s34", indent(32)), "the bound itself still draws whole");
+        assert_eq!(line("s35"), format!("{}…└─ far/s35", indent(32)), "past it the indent is clipped");
+        assert_eq!(line("s39"), format!("{}…└─ far/s39", indent(32)), "and stays clipped, row after row");
+        let drawn = (2..40).filter(|i| rendered.contains(&format!("└─ far/s{i}"))).count();
+        assert_eq!(drawn, 38, "no row was dropped to bound the indent");
+
+        // The JSON nests the same 32 levels and keeps the rest in the deepest
+        // list, each with its true depth.
+        let link = node_json(&nodes[0])["sessions"][0]["remoteChildren"][0].clone();
+        let rows = subtree_rows(&link);
+        assert_eq!(rows.len(), 38);
+        let depth_of = |id: &str| rows.iter().find(|(s, _)| s == id).unwrap().1;
+        assert_eq!(depth_of("s33"), None, "nested rows carry no depth");
+        assert_eq!(depth_of("s34"), Some(32));
+        assert_eq!(depth_of("s39"), Some(37));
+        assert!(json_depth(&link) <= 2 * INDENT_LEVELS + 6, "bounded nesting: {}", json_depth(&link));
+    }
+
+    #[test]
+    fn a_session_is_drawn_under_the_first_link_that_reaches_it_and_no_later_one() {
+        // R spawned A and B, A spawned A1. Three links, in order: A, R, A1.
+        let fold = tree(&[("R", None), ("A", Some("R")), ("B", Some("R")), ("A1", Some("A"))]);
+        let host = tree(&[("P", None)]);
+        let doc = far_doc(&host, &[link("P", "nodeb", "A"), link("P", "nodeb", "R"), link("P", "nodeb", "A1")]);
+        let mut nodes = vec![
+            build_mesh_node(&node("nodea"), Ok(doc), None),
+            build_mesh_node(&node("nodeb"), Ok(far_doc(&fold, &[])), None),
+        ];
+        attach_subtrees(&mut nodes);
+        let rows: Vec<Vec<(&str, usize)>> = nodes[0].sessions[0]
+            .remote_children
+            .iter()
+            .map(|c| c.subtree.iter().map(|r| (r.session_id.as_str(), r.depth)).collect())
+            .collect();
+        assert_eq!(rows[0], vec![("A1", 0)], "the first link draws A's subtree");
+        assert_eq!(rows[1], vec![("B", 0)], "R's own subtree skips what A already drew");
+        assert!(rows[2].is_empty(), "a link into a drawn session keeps its row and has none under it");
+        let rendered = render_nodes(&nodes);
+        for id in ["A", "R", "A1"] {
+            assert!(rendered.contains(&format!("nodeb/{id}")), "every link is still a row ({id}):\n{rendered}");
+        }
+    }
+
+    #[test]
+    fn one_far_nodes_link_does_not_blank_another_nodes_rows_in_the_same_fold() {
+        // nodea and nodec both link to nodeb's X. nodea is first, so its link
+        // is the first to reach X; nodec's link keeps X's subtree all the same.
+        let fold_b = far_doc(&tree(&[("X", None), ("Y", Some("X"))]), &[]);
+        let mut nodes = vec![
+            build_mesh_node(&node("nodea"), Ok(far_doc(&tree(&[("P", None)]), &[link("P", "nodeb", "X")])), None),
+            build_mesh_node(&node("nodeb"), Ok(fold_b), None),
+            build_mesh_node(&node("nodec"), Ok(far_doc(&tree(&[("Q", None)]), &[link("Q", "nodeb", "X")])), None),
+        ];
+        attach_subtrees(&mut nodes);
+        let rows = |n: usize| -> Vec<(&str, usize)> {
+            nodes[n].sessions[0].remote_children[0].subtree.iter().map(|r| (r.session_id.as_str(), r.depth)).collect()
+        };
+        assert_eq!(rows(0), vec![("Y", 0)], "the first node's link draws X's subtree");
+        assert_eq!(rows(2), vec![("Y", 0)], "the second node's link keeps its own rows");
+    }
+
+    #[test]
+    fn a_far_link_into_this_box_draws_none_of_its_sessions() {
+        // L2 was spawned here by L1. A far document claiming L1 as its own
+        // remote child keeps the row and draws nothing of this box's own.
+        let _env = Env::set_up("far-link-into-local");
+        let local = build_local_node(
+            &[session("L1", "/x", "idle", "1", None), session("L2", "/x", "idle", "2", Some("L1"))],
+            &[],
+            &[],
+            &[],
+            "yomi",
+        );
+        let far = build_mesh_node(&node("nodea"), Ok(far_doc(&tree(&[("P", None)]), &[link("P", "yomi", "L1")])), None);
+        let mut nodes = vec![local, far];
+        attach_subtrees(&mut nodes);
+        let link = &nodes[1].sessions[0].remote_children[0];
+        assert_eq!(link.fold, Some(Fold::Fresh), "the fold is this box's own, and it answers");
+        assert!(link.subtree.is_empty(), "L2 is this box's own session, and a far document cannot draw it");
+    }
+
+    #[test]
+    fn a_link_into_a_registered_node_never_pulled_is_not_pulled() {
+        // nodeb is registered, its probe failed and it has no cache: the link
+        // has no fold behind it, so it is shown as not pulled, not as fresh.
+        let mut nodes = vec![
+            build_mesh_node(&node("nodea"), Ok(far_doc(&tree(&[("P", None)]), &[link("P", "nodeb", "C")])), None),
+            build_mesh_node(&node("nodeb"), Err("HTTP 000".into()), None),
+        ];
+        attach_subtrees(&mut nodes);
+        let link = &nodes[0].sessions[0].remote_children[0];
+        assert_eq!(link.fold, Some(Fold::Absent));
+        assert!(render_nodes(&nodes).contains("nodeb/C (not pulled)"), "{}", render_nodes(&nodes));
+    }
+
+    #[test]
+    fn a_fold_whose_parentage_loops_costs_a_wrong_row_never_a_hang() {
+        // a ↔ b spawned each other; c is a's. A link into the loop draws each
+        // member once and stops.
+        let looped = far_doc(&tree(&[("a", Some("b")), ("b", Some("a")), ("c", Some("a"))]), &[]);
+        let host = far_doc(&tree(&[("P", None)]), &[link("P", "nodeb", "a")]);
+        let mut nodes = vec![
+            build_mesh_node(&node("far"), Ok(host), None),
+            build_mesh_node(&node("nodeb"), Ok(looped), None),
+        ];
+        attach_subtrees(&mut nodes);
+        let rows: Vec<(&str, usize)> =
+            nodes[0].sessions[0].remote_children[0].subtree.iter().map(|r| (r.session_id.as_str(), r.depth)).collect();
+        assert_eq!(rows, vec![("b", 0), ("c", 0)], "b once (its way back to a is skipped), then a's other child");
+    }
+
+    #[test]
+    fn however_many_links_point_into_a_fold_its_rows_never_outnumber_its_sessions() {
+        // 3,000 links, every one aimed at the root of a 3,000-session chain.
+        let n = 3_000;
+        let links: Vec<_> = (0..n).map(|_| link("s0", "far", "s1")).collect();
+        let nodes = far_roster(far_chain(n, &links));
+        let rows: usize = nodes[0].sessions[0].remote_children.iter().map(|c| c.subtree.len()).sum();
+        assert_eq!(rows, n - 2, "the chain is drawn once, under the first link");
+        assert_eq!(nodes[0].sessions[0].remote_children.len(), n, "and every link is still a row");
+    }
+
+    #[test]
+    fn the_first_spawned_edge_into_a_session_names_its_parent() {
+        // Two `spawned` edges into `k`: the first wins, as `find` did.
+        let graph = json!({
+            "nodes": [{ "id": "session:k", "kind": "session" }, { "id": "session:a", "kind": "session" }, { "id": "session:b", "kind": "session" }],
+            "edges": [
+                { "from": "session:a", "to": "session:k", "kind": "resumed" },
+                { "from": "session:a", "to": "session:k", "kind": "spawned" },
+                { "from": "session:b", "to": "session:k", "kind": "spawned" },
+            ],
+        });
+        let views = sessions_from_graph(&graph, "far");
+        assert_eq!(views.iter().find(|s| s.session_id == "k").unwrap().parent.as_deref(), Some("a"));
+        assert_eq!(views.iter().find(|s| s.session_id == "a").unwrap().parent, None);
+    }
+
+    #[test]
+    fn the_far_join_and_its_renderings_cost_linear_in_the_document() {
+        // Everything a far document of `n` sessions and `n / 10` links costs
+        // bare `session` before the project grouping: the extraction, the
+        // join, both renderings. Eight times the sessions must cost about
+        // eight times the time; a quadratic walk costs sixty-four.
+        fn cost(n: usize) -> impl FnOnce() -> usize + Send + 'static {
+            move || {
+                let doc = far_tree(n);
+                let views = sessions_from_graph(&doc, "far");
+                let mut nodes =
+                    vec![NodeView { name: "far".into(), is_local: false, presence: "online", fetched_at: None, error: None, stale: false, sessions: views }];
+                attach_subtrees(&mut nodes);
+                render_nodes(&nodes).len() + node_json(&nodes[0]).to_string().len()
+            }
+        }
+        // An absolute ceiling, not a linearity proof: a ratio against a
+        // baseline that runs in milliseconds is just the ceiling again.
+        let limit = Duration::from_secs(10);
+        let (big, _) = aoide_test_support::finishes_within(limit, cost(32_000))
+            .unwrap_or_else(|| panic!("32k sessions took over {limit:?}: the far join is too slow"));
+        println!("far join: 32k sessions {big:?}");
+    }
+
+    /// Both renderings of a far document through `pull`, on a small stack and
+    /// timed. The env lock is taken on THIS thread: a render that outlives
+    /// `limit` is left running, but the lock is released when this returns, so
+    /// one slow test fails alone instead of holding every env-locked test.
+    /// The lock is not observed by a test: 526 call sites share it, and a
+    /// check of it races the legitimate holders, so this is structural.
+    fn render_far_within(limit: Duration, pull: PullFn) -> Option<(Duration, (Outcome, Outcome))> {
+        let _env = Env::set_up("far-render");
+        aoide_storage::node_store::save_nodes(&[node("far")]).unwrap();
+        let second = pull.clone();
+        aoide_test_support::finishes_within(limit, move || {
+            aoide_test_support::on_small_stack(move || {
+                let bare = session_roster_with(&project_invocation(), pull);
+                let hosts = session_roster_with(&hosts_invocation(&[], &[]), second);
+                (bare, hosts)
+            })
+        })
+    }
+
+    #[test]
+    fn a_200k_deep_far_chain_renders_bare_session_and_its_json_on_a_small_stack() {
+        // The hostile shape: a chain as deep as a document allows, one link
+        // into it, and a stack on which a walk that recurses per level dies
+        // within a few thousand levels.
+        const N: usize = 200_000;
+        let doc = Arc::new(far_chain(N, &[link("s0", "far", "s1")]));
+        let serve = |doc: Arc<Value>| -> PullFn { Arc::new(move |_: &Node| Ok((*doc).clone())) };
+        let (_, (bare, hosts)) = render_far_within(Duration::from_secs(180), serve(doc))
+            .expect("a chain two hundred thousand deep renders in seconds, not in the square of its depth");
+        for out in [&bare, &hosts] {
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+            assert!(out.message.lines().count() >= 2 * N - 8, "every session and every row: {}", out.message.lines().count());
+            let last = out.message.lines().find(|l| l.ends_with(&format!("far/s{}", N - 1)) && l.contains('…')).unwrap();
+            assert!(last.chars().count() < 160, "the indent is clipped: {} chars", last.chars().count());
+        }
+        // The JSON a consumer reads must be readable by one: bounded nesting,
+        // so it survives a parser's recursion limit, and every row present.
+        let data = hosts.data.unwrap();
+        let text = aoide_test_support::on_small_stack(move || serde_json::to_string(&data).unwrap());
+        let parsed: Value = serde_json::from_str(&text).expect("the roster JSON parses under serde_json's recursion limit");
+        let far = parsed["nodes"].as_array().unwrap().iter().find(|n| n["name"] == "far").unwrap();
+        let link = &far["sessions"][0]["remoteChildren"][0];
+        let rows = subtree_rows(link);
+        assert_eq!(rows.len(), N - 2, "every far row survives into the JSON");
+        assert_eq!(rows.iter().find(|(s, _)| *s == format!("s{}", N - 1)).unwrap().1, Some((N - 3) as u64));
+        drop(bare);
+    }
+
+    #[test]
+    fn a_hostile_cwd_a_megabyte_long_is_bucketed_without_walking_every_component() {
+        // `/a/a/a/…` half a million components deep: a walk that copies the
+        // path and stats it once per ancestor costs minutes.
+        let cwd = format!("/{}", "a/".repeat(512 * 1024));
+        let (took, bucket) = aoide_test_support::finishes_within(Duration::from_secs(10), move || project_bucket(&cwd, &[]))
+            .expect("a megabyte cwd is bucketed in moments, not walked component by component");
+        assert_eq!(bucket, None, "it names no directory here, so it names no manifest");
+        println!("project_bucket of a 1 MiB cwd: {took:?}");
+    }
+
+    #[test]
+    fn within_path_max_starts_at_the_deepest_ancestor_that_can_hold_a_manifest() {
+        // Without the cut the result is the whole cwd, past what any manifest
+        // path can reach. With it, the result is the longest prefix on a
+        // component boundary that still fits, so the next component would not.
+        let cwd = format!("/{}", "a/".repeat(2_100));
+        let cut = within_path_max(&cwd);
+        assert!(cut.len() <= WALK_PATH_MAX, "{} bytes is past the bound", cut.len());
+        assert_eq!(cwd.as_bytes()[cut.len()], b'/', "the cut lands on a component boundary");
+        assert!(cut.len() + 2 > WALK_PATH_MAX, "the next component would still have fit");
+        assert_eq!(within_path_max("/short/cwd"), "/short/cwd", "a cwd that fits is walked whole");
+    }
+
+    #[test]
+    fn a_manifest_in_a_directory_just_inside_the_bound_is_found() {
+        // The manifest path of a 4070-byte directory is 4090 bytes, which a
+        // real stat accepts. A bound that stopped at 4064 would walk past it.
+        let base = std::env::temp_dir().join(format!("aoide-who-bound-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let target_len = 4070;
+        let mut dir = base.clone();
+        let mut left = target_len - base.as_os_str().len();
+        while left > 0 {
+            // Each component costs its name plus one '/'; never leave a lone '/'.
+            let cost = match left {
+                202 => 200,
+                203.. => 201,
+                _ => left,
+            };
+            dir.push("d".repeat(cost - 1));
+            left -= cost;
+        }
+        std::fs::create_dir_all(dir.join(".aoide")).unwrap();
+        let manifest = serde_json::to_string(&aoide_storage::manifest::Manifest::default()).unwrap();
+        std::fs::write(aoide_storage::manifest::manifest_path(&dir), manifest).unwrap();
+        assert_eq!(dir.as_os_str().len(), target_len);
+        let cwd = format!("{}/{}", dir.to_str().unwrap(), "z".repeat(10));
+        assert!(cwd.len() > WALK_PATH_MAX);
+        assert_eq!(project_bucket(&cwd, &[]), Some("d".repeat(dir.file_name().unwrap().len())));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_cwd_past_path_max_still_finds_the_manifest_above_it() {
+        // A regression guard, not the bound's proof: the ancestors past the
+        // cut could not hold a manifest, so the answer is the same with or
+        // without it. `within_path_max_starts_at_the_deepest_ancestor...` and
+        // `a_manifest_in_a_directory_just_inside_the_bound...` prove the cut.
+        let root = std::env::temp_dir().join(format!("aoide-who-long-cwd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        aoide_storage::manifest::save_manifest(&root, &aoide_storage::manifest::Manifest::default()).unwrap();
+        let cwd = format!("{}/{}", root.to_str().unwrap(), "a/".repeat(3_000));
+        assert!(cwd.len() > 4096);
+        assert_eq!(project_bucket(&cwd, &[]), root.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A far node's graph of one session with `task` published as given.

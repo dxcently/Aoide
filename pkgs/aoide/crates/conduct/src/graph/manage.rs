@@ -962,10 +962,10 @@ pub fn link(inv: &Invocation) -> Outcome {
         Err(e) => return e,
     };
     let (child, parent) = (args[0].clone(), args[1].clone());
-    with_stage_lock(|| link_inner(child, parent))
+    with_stage_lock(|| link_inner(inv, child, parent))
 }
 
-fn link_inner(child: String, parent: String) -> Outcome {
+fn link_inner(inv: &Invocation, child: String, parent: String) -> Outcome {
     if let Some(message) = super::session_store::live_wrap_refusal_for(&child) {
         return Outcome::error("graph.link", message)
             .with_data(json!({ "reason": "live-sealed-wrap", "id": child }));
@@ -984,6 +984,9 @@ fn link_inner(child: String, parent: String) -> Outcome {
     if !file.sessions.iter().any(|s| s.session_id == child) {
         return Outcome::error("graph.link", format!("child session `{child}` not found"))
             .with_data(json!({ "reason": "child-not-found", "child": child }));
+    }
+    if let Some(refusal) = super::session_store::reparent_refusal(inv, "graph.link", &file.sessions, &child, &parent) {
+        return refusal;
     }
     if would_cycle(&file.sessions, &child, &parent) {
         return Outcome::error(
@@ -1165,7 +1168,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "yomi-strix".into(),
             url: "http://yomi-strix:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1457,7 +1459,6 @@ mod tests {
         aoide_storage::node_store::Node {
             name: name.into(),
             url: format!("http://{name}.invalid:8710/"),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

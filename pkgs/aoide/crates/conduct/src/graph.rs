@@ -180,16 +180,22 @@ pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::DAEMON_PEER_PID_FLAG;
 // `session_hook`/`session_send`/`pending_path`: the hook door and the injection
 // door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
-// registry, `aoide-server`'s dispatch).
-pub use self::send::{pending_path, session_hook, session_send};
+// registry, `aoide-server`'s dispatch). `PENDING_FULL` is the reason a send
+// refused at the queue's per-source cap carries, which the network door turns
+// into its own answer; `PENDING_FILE_FULL` and `PENDING_TOO_LARGE` are the
+// file-bound and per-entry refusals the same door answers by their own codes.
+pub use self::send::{
+    hold_pending, pending_path, session_hook, session_send, HoldRefused, DOOR_CANNOT_APPROVE,
+    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_FILE_FULL, PENDING_FULL,
+    PENDING_TOO_LARGE,
+};
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile
 // resolver that picks that key (`profile_for_agent`, claude's fallback for an
 // unregistered name) and the gap itself (`SUBMIT_KEYSTROKE_DELAY`). `pub` for
-// the third caller, in another crate: `aoide-server`'s
-// `a2a::spawn_inject_prompt` used to hand-roll `{prompt}\n` at a spawned
-// session's socket, which is a keystroke spelling of its own — and the wrong
-// one for every harness whose `submit_key` is `\r`.
+// the test-support rig in another crate. A hand-rolled `{prompt}\n` at a
+// session's socket is a keystroke spelling of its own, and the wrong one for
+// every harness whose `submit_key` is `\r`.
 pub use self::send::{write_delivery, SUBMIT_KEYSTROKE_DELAY};
 pub use self::permit::profile_for_agent;
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};
@@ -239,9 +245,9 @@ pub use self::spawn::build_conduct_args;
 pub use self::spawn::{live_run_for, live_run_refusal};
 // `wait_ready`/`READY_BUDGET` — WHEN a just-launched target may be typed at,
 // and for how long the tree waits for it (the per-harness fact is
-// `AgentProfile::readiness`). `pub` for the third first-turn caller outside
-// this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
-// would otherwise be the one injection path with no readiness gate at all.
+// `AgentProfile::readiness`). `pub` for first-turn callers outside this crate.
+// The A2A door holds its opening turns for a human and never waits, so none
+// exists today.
 pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
 // `harness_session_started` — the hook arm's readiness PREDICATE itself
 // (`wait_ready`'s `Readiness::Hook` clause), `pub` for the door-policy
@@ -260,6 +266,9 @@ pub use self::common::clean_line;
 // `strip_ansi`: the one escape stripper, shared with `aoide-conductor`'s log tail
 // (`conductor/src/logtail.rs`) and the screen source's own line reader.
 pub use self::common::strip_ansi;
+// `visible`: the one escaper for text a human is about to approve, shared with
+// `aoide-conductor`'s pending views so no surface renders an entry another way.
+pub use self::common::{visible, visible_held};
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a

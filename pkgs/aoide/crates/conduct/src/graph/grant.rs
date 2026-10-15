@@ -626,7 +626,6 @@ mod tests {
         Node {
             name: name.to_string(),
             url: format!("http://{name}/"),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
