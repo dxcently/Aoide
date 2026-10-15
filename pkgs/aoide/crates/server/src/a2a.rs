@@ -377,7 +377,9 @@ pub fn resolve_node_name(inv: &Invocation) -> String {
 //
 // A connection's ORIGIN (not any client-supplied field — TCP `peer_addr()`,
 // which a hostile client cannot spoof from off-box) is an attribution input
-// only. Nothing here delivers: every network send parks in `pending.json`.
+// only, and the key of an unproven caller's bucket in the pending queue
+// ([`inject_source`]). Nothing here delivers: every network send parks in
+// `pending.json`.
 
 /// Where one `message/send` (or `message/stream`) request's TCP connection
 /// came from.
@@ -387,9 +389,10 @@ pub enum ConnOrigin {
     /// nothing by its address: a tunnel that ends on loopback looks local, so
     /// the address proves no identity.
     Loopback,
-    /// A non-loopback peer IP. The address can name a registered node for
-    /// attribution (see [`aoide_storage::node_store::resolve_node`]); it proves
-    /// no identity by itself.
+    /// A non-loopback peer IP. The address can name a registered node (see
+    /// [`aoide_storage::node_store::resolve_node`]); it proves no identity by
+    /// itself, and an inject from it is recorded under `addr:<address>`, not
+    /// under that node.
     Remote(IpAddr),
     /// The peer address could not be determined (e.g. `peer_addr()` failed).
     Unknown,
@@ -1806,40 +1809,19 @@ fn submitted_task(session_id: &str) -> Value {
 /// The send goes through [`session_send`], as `send` does, so approval and the
 /// mailbase filing at delivery (`deliver_local`) belong to the conductor. This
 /// invocation never carries `--to`, so `session_send` takes its local branch.
-fn do_inject(
-    session_id: &str,
-    prompt: &str,
-    audit_log: &Path,
-    from: Option<&str>,
-) -> Result<Value, (i64, String)> {
+/// `from` is the source [`inject_source`] derived, which `session_send` records
+/// on this door as given.
+fn do_inject(session_id: &str, prompt: &str, audit_log: &Path, from: &str) -> Result<Value, (i64, String)> {
     let mut flags = std::collections::BTreeMap::new();
     flags.insert("id".to_string(), session_id.to_string());
     flags.insert("submit".to_string(), "true".to_string());
     flags.insert("audit-log".to_string(), audit_log.to_string_lossy().into_owned());
-    // The resolved node's identity (P-P3, PAIRING.md decision 7), when the
-    // caller resolved to one (`aoide_storage::node_store::resolve_node` —
-    // ATTRIBUTION, not a gate, same posture `send --from` already
-    // documents): rides straight into `send`'s own EXISTING `--from`
-    // flag, so a node-driven send that lands in `pending.json` carries
-    // `"from": "node:<name>"` through the exact same field a local
-    // `--from`/`AOIDE_SESSION_ID` attribution already populates — no second
-    // attribution field invented.
-    // LANE IDENTITY P-ID3 (G9): when the caller resolved to NO attributable
-    // identity (`from` is `None` — an unpaired/unsigned node, or a resolved
-    // node this door chose not to attribute), the flag is stamped
-    // EXPLICITLY EMPTY rather than left absent. `session_send`'s own
-    // `resolve_sender` falls back to `AOIDE_SESSION_ID` off the calling
-    // process's env whenever `--from` is absent — and the "calling process"
-    // for an inbound A2A message is `aoide a2a serve` ITSELF, a long-lived
-    // process whose own ambient env has nothing to do with the remote node
-    // that just sent this message. Left alone, a remote inject could
-    // misattribute to whatever session id `a2a serve` happened to inherit
-    // at launch. `--from ""` is `resolve_sender`'s own documented
-    // "explicit no attribution" form (the same mechanism `session pending
-    // approve`'s re-drive already relies on) — it skips the env fallback
-    // outright rather than merely overwriting it, so this holds regardless
-    // of what `a2a serve`'s own env carries.
-    flags.insert("from".to_string(), from.unwrap_or_default().to_string());
+    // The source this door derived ([`inject_source`]): `session_send` reads
+    // `--from` as the entry's source on this door only because nothing a remote
+    // caller sends can reach a flag. It is never empty, so `resolve_sender`'s
+    // `AOIDE_SESSION_ID` fallback, off `a2a serve`'s own long-lived env, never
+    // applies.
+    flags.insert("from".to_string(), from.to_string());
     let inv = Invocation {
         path: vec!["send".to_string()],
         args: vec![prompt.to_string()],
@@ -1853,6 +1835,30 @@ fn do_inject(
         return Err((code, outcome.message));
     }
     Ok(submitted_task(session_id))
+}
+
+/// The source a held inject is recorded under: this door's own account of who
+/// sent it, which the queue counts against its per-source cap and shows the
+/// approver as the sender. A caller that PROVED a node gets `node:<name>`: a
+/// verified signature, or the bearer of a `verified` node (the rungs that name
+/// a node only the real one can speak as). Every other caller, the address
+/// rung included, gets `addr:<address>`: an address match names a node's URL,
+/// not the caller behind it, so it neither borrows the node's name nor fills
+/// the node's bucket. `loopback` and `unknown` are one bucket each. Pure.
+fn inject_source(
+    resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+    origin: ConnOrigin,
+) -> String {
+    use aoide_storage::node_store::NodeRung;
+    match resolved {
+        Some((node, NodeRung::Signature)) => format!("node:{}", node.name),
+        Some((node, NodeRung::Token)) if node.verified => format!("node:{}", node.name),
+        _ => match origin {
+            ConnOrigin::Remote(ip) => format!("addr:{}", ip.to_canonical()),
+            ConnOrigin::Loopback => "addr:loopback".to_string(),
+            ConnOrigin::Unknown => "addr:unknown".to_string(),
+        },
+    }
 }
 
 /// The refusal a held inject gets when its source already holds the pending
@@ -2469,12 +2475,17 @@ fn do_spawn(
 ///   whose grant in the signed mesh holds `message` (the Signature rung). An
 ///   address match alone admits nothing.
 /// - **The per-source cap.** The queue holds at most
-///   `aoide_conduct::graph::PENDING_CAP_PER_SOURCE` entries per `from`. A
-///   proven node past it is refused `-32000` ([`QUEUE_FULL_CODE`]); any other
-///   caller gets the uniform answer. Either way nothing is queued, nothing
-///   queued is touched, and `session_send` audits the refusal.
-/// - **Attribution.** A queued Inject carries the resolved node's name in its
-///   `from` field, whichever rung resolved it. Attribution is not a gate.
+///   `aoide_conduct::graph::PENDING_CAP_PER_SOURCE` entries per `from`, the
+///   source [`inject_source`] derives. A proven node past it is refused
+///   `-32000` ([`QUEUE_FULL_CODE`]); any other caller gets the uniform answer.
+///   Either way nothing is queued, nothing queued is touched, and
+///   `session_send` audits the refusal.
+/// - **The source.** A queued Inject carries `node:<name>` in its `from`
+///   field when the caller proved the node (a verified signature, or a
+///   `verified` node's own bearer), and `addr:<address>` for every other
+///   caller, the address rung included. An address match never borrows the
+///   node's name, so it neither shows an approver a node that did not send it
+///   nor fills that node's bucket. The source is not a gate.
 /// - **Spawn.** [`spawn_admitted`]: the caller must resolve by a verified
 ///   signature and hold `spawn` in the mesh its request names. The door-wide
 ///   bearer is not consulted, and a bare address or a token match never
@@ -2503,8 +2514,8 @@ fn message_send(
     let nodes = aoide_storage::node_store::load_nodes();
 
     // The caller's resolved node IDENTITY, and which rung resolved it. The
-    // Inject arm stamps whichever rung resolved it onto `pending.json`'s `from`
-    // field, for attribution only (admission is `node_proved`, below). The
+    // Inject arm derives the entry's source from it (`inject_source`: the node's
+    // name only for a proven rung), and admission is `node_proved`, below. The
     // Spawn arm's `spawn_admitted` requires the SIGNATURE rung, because neither
     // a bare address nor a bare token may authorize launching a process
     // attributed to a node.
@@ -2608,10 +2619,10 @@ fn message_send(
 
     match decide_send_action(context_id.as_deref(), spawn_asked, spawn_agent, session_ref_lookup) {
         SendAction::Inject { session_id } => {
-            // Every inject queues, so the resolved node's identity always rides
-            // the pending entry (P-P3 decision 7).
-            let from = resolved_node.map(|(p, _rung)| format!("node:{}", p.name));
-            match do_inject(&session_id, &prompt, audit_log, from.as_deref()) {
+            // Every inject queues, so a source always rides the pending entry
+            // (P-P3 decision 7): the proven node, else the caller's address.
+            let from = inject_source(resolved_node, origin);
+            match do_inject(&session_id, &prompt, audit_log, &from) {
                 // A full source: a proven node is told so. Anyone else gets the
                 // uniform answer, as a caller the guard above did not admit
                 // would. `session_send` has already audited the refusal.
@@ -2668,7 +2679,7 @@ fn may_spawn(grant: &Grant) -> bool {
 /// no possession proof at all, and a bare shared-secret token is not bound
 /// to any one request — replayable, and identical across every request the
 /// true node or an impersonator ever sends. Both rungs keep resolving a
-/// node identity for every OTHER purpose (Inject's `from` attribution,
+/// node identity for every OTHER purpose (Inject's source, [`inject_source`],
 /// origin-stamping); this function is the ONE place the narrowing to
 /// signature-only lives, rather than re-derived at each call site — and with
 /// it the GRANT, read in the request's mesh and no other
@@ -8441,6 +8452,11 @@ mod tests {
         // this suite already follows). No node is registered at all, so
         // NEITHER the old door-wide-token gate NOR the new pairing gate can
         // possibly pass — -32006, not the old -32005.
+        //
+        // The spawn gate reads the process-global config and node registry, so
+        // this holds the env lock like every test that sets either: unlocked,
+        // it raced the bad-config tests and read their unparseable file.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let params = json!({
             "message": { "parts": [{ "kind": "text", "text": "hi" }] }
         });
@@ -9996,11 +10012,13 @@ mod tests {
     }
 
     #[test]
-    fn a_held_pending_send_from_a_resolved_node_carries_its_origin() {
-        // P-P3 decision 7: a pending-queue entry a NODE's send creates
-        // carries that resolved node's identity — even an UNPAIRED one
-        // (attribution, not a gate — same "ATTRIBUTION,
-        // NOT SECURITY" posture `resolve_sender`/`--from` already document).
+    fn an_address_matched_inject_is_recorded_under_its_address_not_the_nodes_name() {
+        // No door token is configured, so a caller whose address matches a
+        // registered node's URL reaches the queue with no credential at all:
+        // the address rung is the case that can actually happen. The entry is
+        // recorded under the address it came from, never `node:<name>`, so an
+        // approver is not shown a node that did not send it and the node's own
+        // bucket is not the one it counts against.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -10017,8 +10035,7 @@ mod tests {
         std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
         std::env::remove_var("AOIDE_SESSION_ID");
 
-        // Registered and resolvable by address. The send still queues, and
-        // now RESOLVES to a name.
+        // Registered and resolvable by address. The send still queues.
         aoide_storage::node_store::save_nodes(&[fixture_node("watching-node", "http://10.0.0.9:8710/")]).unwrap();
 
         let id = "attributed-target";
@@ -10045,7 +10062,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["from"], "node:watching-node", "the resolved node's identity stamps the pending entry");
+        assert_eq!(entries[0]["from"], "addr:10.0.0.9", "an address match is recorded as the address, not as the node");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -10205,10 +10222,9 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert!(
-            entries[0].get("from").is_none() || entries[0]["from"].is_null(),
-            "a signed_caller resolving to nothing must NOT fall back to the token-resolved `real-node` — got {:?}",
-            entries[0].get("from")
+        assert_eq!(
+            entries[0]["from"], "addr:10.0.0.9",
+            "a signed_caller resolving to nothing must NOT fall back to the token-resolved `real-node`: it is recorded by address"
         );
 
         let _ = std::fs::remove_dir_all(&root);
@@ -10222,19 +10238,15 @@ mod tests {
         }
     }
 
-    /// LANE IDENTITY P-ID3 (G9): the exact `from: None` shape the test above
-    /// already produces (an unresolvable `signed_caller`), but with
-    /// `AOIDE_SESSION_ID` set in THIS PROCESS's own env first — standing in
-    /// for whatever `aoide a2a serve` might have inherited at launch. Before
-    /// the fix, `do_inject`'s bare `if let Some(f) = from` left `--from`
-    /// entirely absent on an unattributed inject, so `session_send`'s
-    /// `resolve_sender` fell back to reading THIS env var and misattributed
-    /// the pending entry to it. The fix stamps `--from ""` explicitly
-    /// whenever `from` is `None`, which `resolve_sender` documents as
-    /// skipping the env fallback outright — so the pending entry's `from`
-    /// must stay unattributed no matter what `AOIDE_SESSION_ID` says.
+    /// LANE IDENTITY P-ID3 (G9): the unresolvable `signed_caller` of the test
+    /// above, but with `AOIDE_SESSION_ID` set in THIS PROCESS's own env first
+    /// — standing in for whatever `aoide a2a serve` might have inherited at
+    /// launch. The pending entry's `from` is the door's own `addr:<address>`
+    /// and never that variable: the door stamps `--from` on every inject, so
+    /// `session_send`'s `resolve_sender` env fallback has nothing to fall back
+    /// from.
     #[test]
-    fn an_unattributed_inject_never_falls_back_to_this_processs_own_ambient_session_id() {
+    fn an_unproven_inject_never_falls_back_to_this_processs_own_ambient_session_id() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -10278,9 +10290,8 @@ mod tests {
             "message": { "parts": [{ "kind": "text", "text": "hi" }], "contextId": id }
         });
         let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
-        // An unresolvable `signed_caller` ("ghost") — `do_inject` sees
-        // `from: None`, exactly the shape that used to fall through to the
-        // env.
+        // An unresolvable `signed_caller` ("ghost"): the caller proved
+        // nothing, the shape that used to fall through to the env.
         let result = message_send(
             &params,
             &audit_log,
@@ -10298,10 +10309,9 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert!(
-            entries[0].get("from").is_none() || entries[0]["from"].is_null(),
-            "an unattributed inject must NEVER pick up this process's own ambient AOIDE_SESSION_ID — got {:?}",
-            entries[0].get("from")
+        assert_eq!(
+            entries[0]["from"], "addr:10.0.0.9",
+            "an unproven inject must NEVER pick up this process's own ambient AOIDE_SESSION_ID"
         );
 
         let _ = std::fs::remove_dir_all(&root);
@@ -12157,9 +12167,10 @@ mod tests {
     #[test]
     fn a_full_source_answers_a_caller_that_is_not_proven_uniformly() {
         // With no door token every caller reaches the queue, so the cap is the
-        // only bound. A caller named by address alone proves nothing, so a full
-        // source answers it with the same synthetic `submitted` Task the guard
-        // gives an unauthenticated send, and nothing is queued.
+        // only bound. A caller named by address alone proves nothing, so when
+        // its own address already holds the cap the answer is the same
+        // synthetic `submitted` Task the guard gives an unauthenticated send,
+        // and nothing is queued.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -12167,8 +12178,8 @@ mod tests {
         let (root, stage, listener) = uniform_guard_box("cap-unproven", id);
 
         aoide_storage::node_store::save_nodes(&[fixture_node("addr-node", "http://192.0.2.89:8710/")]).unwrap();
-        fill_source(id, "node:addr-node");
-        let before = queued_from(&stage, "node:addr-node");
+        fill_source(id, "addr:192.0.2.89");
+        let before = queued_from(&stage, "addr:192.0.2.89");
 
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "address only, one too many" }], "contextId": id }
@@ -12190,13 +12201,166 @@ mod tests {
             uniform["status"]["timestamp"] = task["status"]["timestamp"].clone();
             uniform
         });
-        assert_eq!(queued_from(&stage, "node:addr-node"), before, "nothing queued, nothing moved");
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89"), before, "nothing queued, nothing moved");
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
         assert!(log.contains("\"status\":\"refused\""), "the refusal is still audited: {log}");
         assert!(listener.accept().is_err());
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// One registered node at `192.0.2.89` that can prove itself with its own
+    /// bearer (`node-secret`), for the tests that put an address-only caller
+    /// at the same address.
+    fn bearer_node_at_the_callers_address(root: &std::path::Path) {
+        let path = root.join("addr-node.token");
+        std::fs::write(&path, "node-secret\n").unwrap();
+        let mut node = fixture_node("addr-node", "http://192.0.2.89:8710/");
+        node.token_file = Some(path.to_string_lossy().into_owned());
+        node.verified = true;
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+    }
+
+    #[test]
+    fn an_address_only_caller_fills_its_own_bucket_and_never_the_nodes() {
+        // With no door token an address-only caller at a registered node's
+        // address parks. It counts against `addr:<address>`: 32 entries fill
+        // that bucket, the next is answered uniformly and queues nothing, no
+        // entry ever carries the node's name, and the real node, proving itself
+        // with its own bearer from the same address, still queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "addr-bucket-target";
+        let (root, stage, listener) = uniform_guard_box("addr-bucket", id);
+        bearer_node_at_the_callers_address(&root);
+
+        let audit_log = root.join("log");
+        let send = |text: &str, bearer: Option<&str>| {
+            let params = serde_json::json!({
+                "message": { "parts": [{ "kind": "text", "text": text }], "contextId": id }
+            });
+            message_send(
+                &params,
+                &audit_log,
+                "",
+                "",
+                ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+                "",
+                bearer,
+                None,
+            )
+        };
+        let cap = aoide_conduct::graph::PENDING_CAP_PER_SOURCE;
+        for n in 0..cap + 1 {
+            send(&format!("address only {n}"), None).expect("an unproven caller always gets a task");
+        }
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89").len(), cap, "the address's bucket stops at the cap");
+        assert!(
+            queued_from(&stage, "node:addr-node").is_empty(),
+            "an address match never lands in the node's bucket"
+        );
+
+        send("the node itself", Some("node-secret")).expect("the proven node is not told its bucket is full");
+        assert_eq!(queued_from(&stage, "node:addr-node"), ["the node itself"]);
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89").len(), cap, "and the address's bucket did not move");
+        assert!(listener.accept().is_err(), "nothing is delivered either way");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_full_node_bucket_does_not_turn_an_address_only_caller_away() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "node-full-target";
+        let (root, stage, _listener) = uniform_guard_box("node-full", id);
+        bearer_node_at_the_callers_address(&root);
+        fill_source(id, "node:addr-node");
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "from the address" }], "contextId": id }
+        });
+        message_send(
+            &params,
+            &root.join("log"),
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+            "",
+            None,
+            None,
+        )
+        .expect("a task");
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89"), ["from the address"]);
+        assert_eq!(
+            queued_from(&stage, "node:addr-node").len(),
+            aoide_conduct::graph::PENDING_CAP_PER_SOURCE,
+            "the node's own bucket is untouched"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_door_token_holder_at_a_nodes_address_is_recorded_by_address() {
+        // The other way an address-matched caller can park: it presents the
+        // door-wide token. That token names no node, so the address rung still
+        // resolves and still proves nothing.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "door-token-target";
+        let (root, stage, _listener) = uniform_guard_box("door-token", id);
+        bearer_node_at_the_callers_address(&root);
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "door token" }], "contextId": id }
+        });
+        message_send(
+            &params,
+            &root.join("log"),
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+            "server-secret",
+            Some("server-secret"),
+            None,
+        )
+        .expect("a task");
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89"), ["door token"]);
+        assert!(queued_from(&stage, "node:addr-node").is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn an_injects_source_is_the_node_only_for_a_proven_rung() {
+        use aoide_storage::node_store::NodeRung::{Addr, Signature, Token};
+        let mut node = fixture_node("peer", "http://192.0.2.7:8710/");
+        let remote = ConnOrigin::Remote("192.0.2.7".parse().unwrap());
+        assert_eq!(inject_source(Some((&node, Signature)), remote), "node:peer");
+        assert_eq!(
+            inject_source(Some((&node, Token)), remote),
+            "addr:192.0.2.7",
+            "the bearer of an unverified node proves nothing"
+        );
+        node.verified = true;
+        assert_eq!(inject_source(Some((&node, Token)), remote), "node:peer");
+        assert_eq!(inject_source(Some((&node, Addr)), remote), "addr:192.0.2.7");
+        assert_eq!(inject_source(None, remote), "addr:192.0.2.7");
+        assert_eq!(inject_source(None, ConnOrigin::Loopback), "addr:loopback");
+        assert_eq!(inject_source(None, ConnOrigin::Unknown), "addr:unknown");
+        assert_eq!(
+            inject_source(None, ConnOrigin::Remote("::ffff:192.0.2.7".parse().unwrap())),
+            "addr:192.0.2.7",
+            "an IPv4 caller on a dual-stack socket is one source, not two"
+        );
     }
 
     #[test]

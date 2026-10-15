@@ -53,8 +53,14 @@ asked to inject (A2A's spawn opening turn). The same predicate refuses
 `session permit` (no summons card) and `mail ring` (no ring) on those doors.
 CONTRACTS.md's approval-doors section has the table.
 
-The queue holds at most `PENDING_CAP_PER_SOURCE` entries per `from`. A held
-send past it is refused with `reason` `PENDING_FULL` and audited, and
+The queue holds at most `PENDING_CAP_PER_SOURCE` entries per `from`, and the
+door a send arrived through derives that source: the A2A door's own
+`node:<name>` or `addr:<address>`, `mcp:<session>` (the caller's kernel-attested
+session) or `mcp` on the MCP door, and the resolved attribution on the CLI and
+daemon doors. What an MCP caller typed as `--from` rides as a cleaned `claimed`
+label, never as the source, and a `--from` that spells a source only a door
+derives (`node:`, `addr:`, `mcp`) is refused with `reason` `reserved-from`. A
+held send past the cap is refused with `reason` `PENDING_FULL` and audited, and
 `hold_pending` answers `HoldRefused::Full`, so the network door can answer its
 own caller (`aoide-server`'s `do_inject` and opening turn).
 

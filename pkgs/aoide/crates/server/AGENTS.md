@@ -536,8 +536,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `uniform_response_hides_existence_and_never_queues_when_unauthenticated` the
   nothing-queues case.
 - **A full source answers by proof (`message_send`'s Inject arm).** Conduct's
-  `record_pending` refuses a send past `PENDING_CAP_PER_SOURCE` for its `from`
-  (`reason` `PENDING_FULL`), audits it, and touches nothing queued. `do_inject`
+  `record_pending` refuses a send past `PENDING_CAP_PER_SOURCE` for its `from`,
+  the source `inject_source` derived (`reason` `PENDING_FULL`), audits it, and
+  touches nothing queued. `do_inject`
   maps that refusal to `QUEUE_FULL_CODE` (`-32000`), which only a caller that
   proved a node identity sees; any other caller gets the uniform answer, so the
   queue's state is no oracle. Tests:
@@ -551,27 +552,38 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   arm, because a submitted line in a shell RUNS. Pinned by
   `a_shell_wrapped_target_takes_no_auto_delivered_inject`, whose two arms (a
   plain target and the same record with the P-C5 capture) both stay held.
-- **`do_inject`'s `from` attribution (P-P3 decision 7) is always the resolved
-  node's identity.** Every inject queues, so `message_send`'s Inject arm passes
-  `Some("node:<name>")` whenever a node resolved and `None` otherwise. The
-  attribution rides the `pending.json` entry; nothing at this door delivers a
-  payload, so nothing here prefixes one.
-- **`do_inject` stamps the `from` flag EXPLICIT-EMPTY when its own `from`
-  parameter is `None` (LANE IDENTITY P-ID3, G9) — never leaves the flag
-  absent.** `session_send`'s `resolve_sender` falls back to `AOIDE_SESSION_ID`
-  off the CALLING process's env whenever `--from` is absent, and `do_inject`
-  calls `session_send` DIRECTLY, in-process — the "calling process" for a remote
-  A2A inject is `aoide a2a serve` itself, a long-lived process whose own ambient
-  env has nothing to do with whichever remote node just sent the message.
-  `from.unwrap_or_default()` (an empty `String` when `None`) is
-  `resolve_sender`'s own documented "explicit no attribution" form (`--from ""`)
-  — it skips the env fallback outright, rather than merely overwriting whatever
-  the env currently holds, so this holds regardless of what `a2a serve`'s own
-  env carries at any given moment. Don't revert to a bare `if let Some(f) = from
-  { flags.insert(...) }` "for symmetry with reading `from`" — that shape is
-  exactly what let the daemon's own ambient `AOIDE_SESSION_ID` leak into an
-  unattributed inject's pending record before this fix
-  (`an_unattributed_inject_never_falls_back_to_this_processs_own_ambient_session_id`
+- **`do_inject`'s `from` is the source this door derives, and it names a node
+  only for a caller that proved one (P-P3 decision 7).** `inject_source` is the
+  one place the Inject arm chooses it: `node:<name>` for the signature rung and
+  for the bearer of a `verified` node, `addr:<address>` for every other caller
+  (the address rung, an unverified node's bearer, a door-token holder, a caller
+  that resolved to nothing), with `loopback` and `unknown` one bucket each and
+  an IPv4 peer on a dual-stack socket canonicalised to its IPv4 form. An address
+  match names a node's URL, not the caller behind it, so it must never borrow
+  the node's name: it would show an approver a node that did not send the entry
+  and let an address-only caller fill that node's bucket. The source rides the
+  `pending.json` entry and keys the cap; nothing at this door delivers a
+  payload, so nothing here prefixes one. Pinned by
+  `an_injects_source_is_the_node_only_for_a_proven_rung`,
+  `an_address_matched_inject_is_recorded_under_its_address_not_the_nodes_name`,
+  `an_address_only_caller_fills_its_own_bucket_and_never_the_nodes`,
+  `a_full_node_bucket_does_not_turn_an_address_only_caller_away` and
+  `a_door_token_holder_at_a_nodes_address_is_recorded_by_address`. Admission is
+  separate: `node_proved` decides who reaches the queue behind a door token.
+- **`do_inject` stamps a non-empty `from` flag on every inject (LANE IDENTITY
+  P-ID3, G9) — never leaves the flag absent.** `session_send`'s
+  `resolve_sender` falls back to `AOIDE_SESSION_ID` off the CALLING process's
+  env whenever `--from` is absent, and `do_inject` calls `session_send`
+  DIRECTLY, in-process — the "calling process" for a remote A2A inject is
+  `aoide a2a serve` itself, a long-lived process whose own ambient env has
+  nothing to do with whichever remote node just sent the message. The source is
+  always `node:` or `addr:`, so the fallback has nothing to fall back from, and
+  conduct's `pending_origin` reads only the flag on `Door::A2a` in any case.
+  Don't make the flag conditional: a bare `if let Some(f) = from {
+  flags.insert(...) }` is exactly what let the daemon's own ambient
+  `AOIDE_SESSION_ID` leak into an unattributed inject's pending record before
+  this fix
+  (`an_unproven_inject_never_falls_back_to_this_processs_own_ambient_session_id`
   is the regression pin). This closes only the ATTRIBUTION leak, not the GATE.
   The gate never reads the ancestry for this door: a non-approving door parks
   its send before any identity is resolved (`Door::can_approve`,

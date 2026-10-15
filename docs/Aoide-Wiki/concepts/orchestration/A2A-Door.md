@@ -165,11 +165,13 @@ the conductor) approves it there. Enabling the door is admitted at
   channel would have been skipped. All of it is the local wrapper's own
   semantics, reached through this door — not a second set of rules.
 - **Inject never delivers at this door.** An inject that is admitted parks in
-  `pending.json`, the same queue the local `send` uses. Attribution is not a
-  gate: a node caller's entry carries `node:<name>`, whichever rung resolved
-  the node. The door cannot approve, because `Door::can_approve` is true only
-  for the local CLI and the daemon. A network caller therefore queues a steer
-  and cannot release it. A human releases it with
+  `pending.json`, the same queue the local `send` uses. The door records the
+  entry's source itself, from what the caller proved: `node:<name>` for a
+  verified signature or a `verified` node's own bearer, `addr:<address>` for
+  every other caller, whichever node its address happens to match. The source
+  is not a gate. The door cannot approve, because `Door::can_approve` is true
+  only for the local CLI and the daemon. A network caller therefore queues a
+  steer and cannot release it. A human releases it with
   `aoide session pending approve`, or the conductor does.
 - **Inject admission.** What an inject decides is only whether the caller
   reaches that queue at all. With no door-wide token configured, every inject
@@ -183,9 +185,11 @@ the conductor) approves it there. Enabling the door is admitted at
   mesh holds `message` (the Signature rung). An address match alone admits
   nothing.
 - **The queue is capped per source.** `pending.json` holds at most 32 entries
-  per `from`. Past that, a caller that proved a node identity is refused
-  `-32000`, any other caller gets the uniform answer, and nothing queued is
-  touched. A spawn's opening turn at the cap records `queue-full`.
+  per `from`, the source the door derived above, so an address-only caller can
+  fill only its own `addr:<address>` bucket and never a node's. Past that, a
+  caller that proved a node identity is refused `-32000`, any other caller gets
+  the uniform answer, and nothing queued is touched. A spawn's opening turn at
+  the cap records `queue-full`.
 - **Pairing gates Spawn; the door-wide bearer gates only unsigned reads.**
   A spawn runs only for an identified, paired node: `spawn_admitted`
   requires a request resolved on the Signature rung (a verified per-request
@@ -250,9 +254,10 @@ the conductor) approves it there. Enabling the door is admitted at
   per node, not one flag for the whole door. The node's own token authenticates
   no read and never reaches Spawn.
 - **An address match names a node and proves nothing.** The address rung
-  (`NodeRung::Addr`) resolves a node for attribution only, with an address
-  match's own limits: a first-match tie-break, live DNS, and spoofability from
-  where it matches (CONTRACTS.md §6, review F5). Once a door-wide token is
+  (`NodeRung::Addr`) resolves a node's record only, with an address match's own
+  limits: a first-match tie-break, live DNS, and spoofability from where it
+  matches (CONTRACTS.md §6, review F5). An inject from it is recorded as
+  `addr:<address>`, never under the node's name. Once a door-wide token is
   configured it admits nothing.
 - **The `aoide/from` claim is honoured only on the signature rung.** A claim
   from any other caller is ignored with one audit line. A spawn stamps an

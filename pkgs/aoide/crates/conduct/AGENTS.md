@@ -126,6 +126,28 @@ in the message.
   approval queue. A refused send carries `reason: PENDING_FULL` and is
   audited. Pinned by
   `a_full_source_is_refused_and_audited_and_another_source_still_queues`.
+- **A parked send's source is derived by its door, never read off the caller.**
+  `pending_origin` (`graph/send.rs`) is the one place an entry's `from` is
+  chosen: the A2A door's own `--from` (`node:<name>` or `addr:<address>`, set
+  by `aoide-server`'s `do_inject`, which no remote caller can reach), `mcp:<the
+  caller's attested session>` else `mcp` on the MCP door, and the resolved
+  attribution on the CLI and daemon doors. The cap counts that value and the
+  approver is shown it, so a caller-chosen one would let a caller rotate its
+  way past the cap, fill another source's bucket, or show an approver a sender
+  it is not. What an MCP caller typed rides as `claimed`, cleaned
+  (`common::clean_line`), shown under its own name and keying nothing. A
+  `--from` spelling a door-derived form (`is_door_source`: `node:`, `addr:`,
+  `mcp`, `mcp:`) on any door but the one that derives it is refused with
+  `reason: RESERVED_FROM` where an entry is created; `pending approve` re-drives
+  an entry with its recorded source and delivers, which parks nothing. A new
+  door is decided in `pending_origin` as it is in `Door::can_approve`. The
+  audit line of a send names the derived source as `from` and the MCP label as
+  `claims` (`audit_send`), never the label as the sender. Pinned by
+  `an_mcp_caller_cannot_name_a_node_as_its_source`,
+  `rotating_from_over_mcp_does_not_escape_the_cap`,
+  `an_mcp_callers_attested_session_has_a_bucket_of_its_own`,
+  `a_cli_send_cannot_spell_a_source_only_a_door_derives` and
+  `the_a2a_doors_own_source_is_recorded_as_given`.
 
 ## Invariants
 

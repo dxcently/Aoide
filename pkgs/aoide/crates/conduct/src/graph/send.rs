@@ -120,13 +120,19 @@ pub struct PendingSend {
     pub submit: bool,
     #[serde(rename = "queuedAt", default)]
     pub queued_at: String,
-    /// The sender attribution [`resolve_sender`] resolved at queue time (see
-    /// its doc — attribution, not security). `skip_serializing_if` keeps an
+    /// The source of this entry: who the door it arrived through says sent
+    /// it (see [`PendingOrigin`]). It is the key the per-source cap counts and
+    /// the only identity an approver is shown. `skip_serializing_if` keeps an
     /// unattributed entry's JSON byte-identical to before this field existed;
     /// `default` on read means a LEGACY entry written before this field
     /// existed deserializes with `from: None`, not a parse failure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
+    /// The label a caller typed as `--from` on a door that derives its own
+    /// source, cleaned. A claim, never an identity: it keys nothing and is
+    /// shown only under that name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed: Option<String>,
 }
 
 /// `pending.json` container.
@@ -326,7 +332,10 @@ fn sanitize_sender(raw: &str) -> String {
 /// same-uid process connecting directly (bypassing `aoide send`
 /// altogether) still injects with no gate and no attribution at all. This
 /// label remains strictly additive display information, never a trust
-/// boundary, for exactly that reason.
+/// boundary, for exactly that reason. For the same reason a send that PARKS
+/// on the MCP or the A2A door does not take it as its source:
+/// [`pending_origin`] derives the source from the door, and on MCP this label
+/// rides only as a cleaned `claimed`.
 fn resolve_sender(inv: &Invocation) -> Option<String> {
     match inv.flags.get("from") {
         Some(f) if f.is_empty() => None, // explicit anonymous — env fallback skipped.
@@ -404,16 +413,22 @@ fn one_line_title(text: &str) -> String {
 }
 
 /// The most entries `pending.json` holds for one source. The source is the
-/// `from` an entry records: `node:<name>` for the network door, the attributed
-/// session for a local door, and every entry that names none counts as one
-/// more source. A send past it is refused and audited, and nothing already
-/// queued is touched, so one sender cannot fill a human's approval queue.
+/// `from` an entry records, and the door a send arrived through derives it
+/// ([`PendingOrigin`]): `node:<name>` or `addr:<address>` for the network door,
+/// `mcp` or `mcp:<session>` for MCP, the attributed session for a local door,
+/// and every entry that names none counts as one more source. A send past it
+/// is refused and audited, and nothing already queued is touched, so one
+/// sender cannot fill a human's approval queue.
 pub const PENDING_CAP_PER_SOURCE: usize = 32;
 
 /// The `reason` a send refused at [`PENDING_CAP_PER_SOURCE`] carries, so a
 /// door that answers its own callers (`aoide-server`'s `do_inject`) can tell
 /// it from any other failure.
 pub const PENDING_FULL: &str = "pending-full";
+
+/// The `reason` a send refused for a `--from` that spells a source only a door
+/// derives carries ([`is_door_source`]).
+const RESERVED_FROM: &str = "reserved-from";
 
 /// Why a send was not queued.
 #[derive(Debug, PartialEq, Eq)]
@@ -424,12 +439,81 @@ pub enum HoldRefused {
     Stage(String),
 }
 
+/// Who a held send is recorded as coming from, derived by the door it arrived
+/// through and never read off what the caller typed. `from` is the source: the
+/// key [`PENDING_CAP_PER_SOURCE`] counts and the only identity an approver is
+/// shown. `claimed` is the label a caller on an MCP door typed as `--from`,
+/// cleaned: a claim, kept apart, never a key and never shown as the source.
+///
+/// The spellings a door derives (`node:<name>`, `addr:<address>`, `mcp`,
+/// `mcp:<session>`) are its alone. A `--from` that spells one on any other
+/// door is refused ([`is_door_source`]), so a caller can neither fill another
+/// source's bucket nor show an approver a source it does not have.
+#[derive(Debug, PartialEq, Eq)]
+struct PendingOrigin {
+    from: Option<String>,
+    claimed: Option<String>,
+}
+
+impl PendingOrigin {
+    /// The audit line's account of the caller: the derived source first, the
+    /// claim under its own name.
+    fn note(&self) -> Option<String> {
+        match (&self.from, &self.claimed) {
+            (Some(from), Some(claimed)) => Some(format!("from {from}, claims {claimed:?}")),
+            (Some(from), None) => Some(format!("from {from}")),
+            (None, Some(claimed)) => Some(format!("claims {claimed:?}")),
+            (None, None) => None,
+        }
+    }
+}
+
+/// Is `from` spelled the way a door derives its own source? Only that door may
+/// record it.
+fn is_door_source(from: &str) -> bool {
+    from == "mcp" || ["node:", "addr:", "mcp:"].iter().any(|prefix| from.starts_with(prefix))
+}
+
+/// Derive the origin of a send this invocation is about to park. `attested`
+/// is the kernel-attested session of the calling process
+/// ([`deliver_local_with`]'s resolver), read only on the MCP door.
+///
+/// - `A2a`: the `from` the door itself put on the invocation
+///   (`aoide-server`'s `do_inject`): `node:<name>` for a caller that proved
+///   a node, `addr:<address>` for one that did not. No caller of that door can
+///   set a flag.
+/// - `Mcp`: `mcp:<attested session>`, else `mcp`, one bucket for every caller
+///   with no session behind it. The `--from` the caller typed rides as
+///   `claimed`.
+/// - `Cli`, `Daemon`: the attribution [`resolve_sender`] resolved, as always.
+///
+/// `Err` carries the `--from` that spells a source only a door derives.
+fn pending_origin(inv: &Invocation, attested: impl FnOnce() -> Option<String>) -> Result<PendingOrigin, String> {
+    if inv.door == Door::A2a {
+        let from = inv.flags.get("from").filter(|f| !f.is_empty()).map(|f| sanitize_sender(f));
+        return Ok(PendingOrigin { from, claimed: None });
+    }
+    let typed = resolve_sender(inv);
+    if let Some(spelled) = typed.as_deref().filter(|t| is_door_source(t)) {
+        return Err(spelled.to_string());
+    }
+    if inv.door != Door::Mcp {
+        return Ok(PendingOrigin { from: typed, claimed: None });
+    }
+    let from = match attested() {
+        Some(session) => format!("mcp:{session}"),
+        None => "mcp".to_string(),
+    };
+    let claimed = typed.map(|t| common::clean_line(&t)).filter(|t| !t.is_empty());
+    Ok(PendingOrigin { from: Some(from), claimed })
+}
+
 /// Queue one held send. The cap is counted and the entry appended under ONE
 /// stage lock, so two callers racing for the last slot cannot both take it.
-fn record_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
+fn record_pending(id: &str, text: &str, submit: bool, origin: &PendingOrigin) -> Result<(), HoldRefused> {
     with_stage_lock(|| {
         let mut file: PendingFile = load_stage(&pending_path()).map_err(HoldRefused::Stage)?;
-        if file.pending.iter().filter(|p| p.from.as_deref() == from).count() >= PENDING_CAP_PER_SOURCE {
+        if file.pending.iter().filter(|p| p.from == origin.from).count() >= PENDING_CAP_PER_SOURCE {
             return Err(HoldRefused::Full);
         }
         file.schema_version = STAGE_GRAPH_VERSION.to_string();
@@ -438,19 +522,21 @@ fn record_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Res
             text: text.to_string(),
             submit,
             queued_at: now_iso_utc(),
-            from: from.map(str::to_string),
+            from: origin.from.clone(),
+            claimed: origin.claimed.clone(),
         });
         write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)
     })
 }
 
-/// Park a send in `pending.json` without touching any socket: the one seam a
-/// door that cannot approve uses to hold text it was asked to inject, such as
-/// the A2A spawn's opening turn (`aoide-server`'s `opening_turn_worker`). Same
-/// queue, same `record_pending` shape and cap, so `session pending approve`
-/// treats it exactly like any other held send.
+/// Park a send in `pending.json` without touching any socket: the one seam the
+/// A2A door uses to hold text it was asked to inject outside `session_send`,
+/// its spawn's opening turn (`aoide-server`'s `opening_turn_worker`). `from` is
+/// that door's own resolution, `node:<name>` for the node whose signature it
+/// verified; no other door calls this. Same queue, same cap, so `session
+/// pending approve` treats it exactly like any other held send.
 pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
-    record_pending(id, text, submit, from)
+    record_pending(id, text, submit, &PendingOrigin { from: from.map(str::to_string), claimed: None })
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -512,22 +598,34 @@ fn set_session_name_if_unset(id: &str, name: &str) {
 /// One audit line per send outcome, through aoided's audit path. The injected
 /// text rides as `untrusted_data` (never the message) — forwarded agent-bound
 /// text is data, never re-interpreted as a command (the house rule). The
-/// resolved [`resolve_sender`] attribution (when present) is folded into the
-/// audit MESSAGE — never into `untrusted_data`, which stays exactly the
-/// injected text — so the audit trail names who claimed to send it.
+/// caller is folded into the audit MESSAGE — never into `untrusted_data`, which
+/// stays exactly the injected text. A caller on the MCP door typed its
+/// `--from` itself, so the line records it as a claim (`claims "…"`, cleaned),
+/// never as `from`: the record names the door the line carries and what the
+/// caller said, not an identity nobody checked.
 ///
 /// `pub(in crate::graph)`: the ping-back (`graph/pingback.rs`, P-EIDOLON
 /// slice E5b) audits its own automated line through this SAME helper — one
 /// audit shape for anything that reaches a session's input, the sibling
 /// `audit_pending`/`audit_resurrect` precedent.
 pub(in crate::graph) fn audit_send(inv: &Invocation, status: &str, message: &str, text: &str) {
+    let note = resolve_sender(inv).map(|sender| match inv.door {
+        Door::Mcp => format!("claims {:?}", common::clean_line(&sender)),
+        _ => format!("from {sender}"),
+    });
+    audit_send_noted(inv, status, message, text, note);
+}
+
+/// [`audit_send`] with the caller's account already derived: a send that
+/// parks has its [`PendingOrigin`], the source the queue will hold it under.
+fn audit_send_noted(inv: &Invocation, status: &str, message: &str, text: &str, note: Option<String>) {
     let log = inv
         .flags
         .get("audit-log")
         .map(PathBuf::from)
         .unwrap_or_else(aoide_protocol::default_audit_log);
-    let message = match resolve_sender(inv) {
-        Some(sender) => format!("{message} (from {sender})"),
+    let message = match note {
+        Some(note) => format!("{message} ({note})"),
         None => message.to_string(),
     };
     let _ = aoide_protocol::append_audit(
@@ -946,16 +1044,34 @@ fn deliver_local_with(
     };
     // The provenance attribution — `--from` or `AOIDE_SESSION_ID` (see
     // [`resolve_sender`]) — is resolved once here, from the ORIGINAL
-    // invocation, and reused for both the pending record and (below) the
-    // delivered payload's prefix, so a queued-then-approved send still names
-    // whoever queued it, not whoever approved it.
+    // invocation, and reused for the delivered payload's prefix (below), so a
+    // queued-then-approved send still names whoever queued it, not whoever
+    // approved it. What a PARKED send is recorded under is not this: the door
+    // derives it ([`pending_origin`]), because the queue's cap and the
+    // approver's screen must not take a caller's word for who it is.
     let attributed_sender = resolve_sender(inv);
     if !gate.delivers() {
-        match record_pending(&id, &text, submit, attributed_sender.as_deref()) {
+        let origin = match pending_origin(inv, || resolve_sender_id(&file.sessions)) {
+            Ok(origin) => origin,
+            Err(spelled) => {
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    format!("send to `{id}` not queued: `--from {spelled}` names a source only a door can derive"),
+                    "`node:`, `addr:` and `mcp` sources are recorded by the door a send arrives through, \
+                     so a caller cannot claim one",
+                    Fix::None("leave --from off, or give a label of your own"),
+                )
+                .with_fields(json!({ "reason": RESERVED_FROM, "id": id, "from": spelled }));
+                audit_send(inv, "refused", &out.message, &text);
+                return out;
+            }
+        };
+        match record_pending(&id, &text, submit, &origin) {
             Ok(()) => {}
             Err(HoldRefused::Stage(e)) => return stage_error(cmd, e),
             Err(HoldRefused::Full) => {
-                let what = match attributed_sender.as_deref() {
+                let what = match origin.from.as_deref() {
                     Some(from) => format!(
                         "send to `{id}` not queued: `{from}` already holds {PENDING_CAP_PER_SOURCE} pending sends"
                     ),
@@ -973,10 +1089,10 @@ fn deliver_local_with(
                 .with_fields(json!({
                     "reason": PENDING_FULL,
                     "id": id,
-                    "from": attributed_sender,
+                    "from": origin.from,
                     "cap": PENDING_CAP_PER_SOURCE,
                 }));
-                audit_send(inv, "refused", &out.message, &text);
+                audit_send_noted(inv, "refused", &out.message, &text, origin.note());
                 return out;
             }
         }
@@ -998,7 +1114,7 @@ fn deliver_local_with(
                 "gate": gate.label(),
                 "approvalRefused": refused,
             }));
-        audit_send(inv, "pending", &out.message, &text);
+        audit_send_noted(inv, "pending", &out.message, &text, origin.note());
         return out;
     }
 
@@ -4002,20 +4118,43 @@ mod tests {
         }
     }
 
+    fn queued() -> Vec<PendingSend> {
+        load_stage::<PendingFile>(&pending_path()).map(|f| f.pending).unwrap_or_default()
+    }
+
+    fn queued_from(from: &str) -> Vec<String> {
+        queued().into_iter().filter(|p| p.from.as_deref() == Some(from)).map(|p| p.text).collect()
+    }
+
+    fn audit_lines(root: &Path) -> Vec<Value> {
+        std::fs::read_to_string(root.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .collect()
+    }
+
+    /// Fill `from`'s bucket the way the A2A door does, through the one seam it
+    /// uses for text it holds outside `session_send`.
+    fn fill_bucket(id: &str, from: &str) -> Vec<String> {
+        let texts: Vec<String> = (0..PENDING_CAP_PER_SOURCE).map(|n| format!("{from} #{n}")).collect();
+        for text in &texts {
+            hold_pending(id, text, true, Some(from)).unwrap();
+        }
+        texts
+    }
+
     /// The pending queue holds at most `PENDING_CAP_PER_SOURCE` sends per
-    /// `from`. The next one from a full source is refused and audited, the
-    /// first N stay exactly as queued, and another source still queues.
+    /// source. On the CLI door the source is the attribution the send resolved.
+    /// The next one from a full source is refused and audited, the first N stay
+    /// exactly as queued, and another source still queues.
     #[test]
     fn a_full_source_is_refused_and_audited_and_another_source_still_queues() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(DOOR_ENV);
         let (root, id, listener) = door_fixture("pending-cap", None);
         let send_from = |from: &str, text: &str| {
-            session_send(&send_on(Door::Mcp, &[text], &[("id", &id), ("from", from)]))
-        };
-        let queued_from = |from: &str| -> Vec<String> {
-            let pf: PendingFile = load_stage(&pending_path()).unwrap();
-            pf.pending.into_iter().filter(|p| p.from.as_deref() == Some(from)).map(|p| p.text).collect()
+            session_send(&send_on(Door::Cli, &[text], &[("id", &id), ("from", from)]))
         };
         let first: Vec<String> = (0..PENDING_CAP_PER_SOURCE).map(|n| format!("send {n}")).collect();
         for text in &first {
@@ -4030,10 +4169,8 @@ mod tests {
         assert_eq!(data["from"], "flooder");
         assert_eq!(data["cap"], PENDING_CAP_PER_SOURCE);
         assert_eq!(queued_from("flooder"), first, "the first N are intact, in order");
-        let log = std::fs::read_to_string(root.join("log")).unwrap();
-        let refused = log
-            .lines()
-            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        let refused = audit_lines(&root)
+            .into_iter()
             .find(|r| r["status"] == "refused")
             .expect("the refusal is audited");
         assert_eq!(refused["untrusted_data"], "one too many", "{refused}");
@@ -4043,6 +4180,175 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
         assert_eq!(queued_from("someone-else"), ["still welcome"]);
         assert!(nothing_connected(&listener), "a door that cannot approve delivers nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The MCP door derives its own source, so an MCP caller cannot name
+    /// another's. `--from node:victim` is refused with a taught refusal: nothing
+    /// of it is queued, the victim's bucket (full, written by the A2A door's own
+    /// seam) is exactly as it was, and the approver is shown no `node:victim`
+    /// entry the victim did not send. The refusal is audited with the door and
+    /// the claim, not as a `from`.
+    #[test]
+    fn an_mcp_caller_cannot_name_a_node_as_its_source() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("mcp-node-claim", None);
+        let victim = fill_bucket(&id, "node:victim");
+
+        let out = session_send(&send_on(Door::Mcp, &["phish"], &[("id", &id), ("from", "node:victim")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], RESERVED_FROM);
+        assert!(out.message.contains("node:victim"), "{}", out.message);
+        assert!(data["refusal"]["why"].as_str().unwrap().contains("door"), "taught why: {data}");
+        assert!(data["refusal"]["fix"]["none"].is_string(), "taught fix: {data}");
+        assert_eq!(queued_from("node:victim"), victim, "the victim's bucket is exactly as it was");
+        assert!(queued().iter().all(|p| p.text != "phish"), "nothing of the refused send is queued");
+
+        let refused = audit_lines(&root)
+            .into_iter()
+            .find(|r| r["status"] == "refused")
+            .expect("the refusal is audited");
+        let message = refused["message"].as_str().unwrap();
+        assert_eq!(refused["door"], "mcp", "{refused}");
+        assert!(message.contains("claims \"node:victim\""), "the claim is named as a claim: {message}");
+        assert!(!message.contains("(from node:victim)"), "and never as the sender: {message}");
+
+        let out = session_send(&send_on(Door::Mcp, &["honest"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("mcp"), ["honest"], "an MCP caller is queued under the MCP door");
+        assert!(nothing_connected(&listener));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every other door is held to the same rule for the spellings a door
+    /// derives: a CLI caller cannot claim a node, an address, or the MCP door.
+    #[test]
+    fn a_cli_send_cannot_spell_a_source_only_a_door_derives() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("cli-door-source", None);
+        for spelled in ["node:victim", "addr:192.0.2.9", "mcp", "mcp:some-session"] {
+            let out = session_send(&send_on(Door::Cli, &["phish"], &[("id", &id), ("from", spelled)]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{spelled}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], RESERVED_FROM, "{spelled}");
+        }
+        assert!(queued().is_empty(), "none of them queued");
+
+        let out = session_send(&send_on(Door::Cli, &["fine"], &[("id", &id), ("from", "orchestrator-1")]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("orchestrator-1"), ["fine"], "an ordinary label still keys its own bucket");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Rotating `--from` over MCP escapes nothing: the cap key is the door's,
+    /// so every label lands in one bucket and the next send is refused. The
+    /// labels survive as claims, a node's own bucket is not touched, and the
+    /// refusal names the bucket the caller really sits in.
+    #[test]
+    fn rotating_from_over_mcp_does_not_escape_the_cap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("mcp-rotate", None);
+        for n in 0..PENDING_CAP_PER_SOURCE {
+            let out = session_send(&send_on(
+                Door::Mcp,
+                &[&format!("send {n}")],
+                &[("id", &id), ("from", &format!("label-{n}"))],
+            ));
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{n}: {}", out.message);
+        }
+        let held = queued();
+        assert!(held.iter().all(|p| p.from.as_deref() == Some("mcp")), "one bucket for every label");
+        assert_eq!(held[3].claimed.as_deref(), Some("label-3"), "the label is kept, as a claim");
+
+        let out = session_send(&send_on(Door::Mcp, &["one more"], &[("id", &id), ("from", "label-fresh")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], PENDING_FULL);
+        assert_eq!(data["from"], "mcp");
+        assert_eq!(queued().len(), PENDING_CAP_PER_SOURCE, "nothing was added");
+
+        hold_pending(&id, "from a node", true, Some("node:peer")).expect("a node's own bucket is unaffected");
+        assert_eq!(queued_from("node:peer"), ["from a node"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An MCP caller with an attested session behind it is bucketed by that
+    /// session, so one agent filling its bucket does not turn another away.
+    /// A caller with none shares the MCP bucket.
+    #[test]
+    fn an_mcp_callers_attested_session_has_a_bucket_of_its_own() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("mcp-attested", None);
+        let send_as = |attested: Option<&str>, text: &str| {
+            let attested = attested.map(str::to_string);
+            deliver_local_with(&send_on(Door::Mcp, &[text], &[("id", &id), ("from", "same-label")]), &id, move |_| {
+                attested.clone()
+            })
+        };
+        for n in 0..PENDING_CAP_PER_SOURCE {
+            send_as(Some("sess-a"), &format!("a {n}"));
+        }
+        assert_eq!(queued_from("mcp:sess-a").len(), PENDING_CAP_PER_SOURCE);
+
+        let out = send_as(Some("sess-a"), "a too many");
+        assert_eq!(out.data.as_ref().unwrap()["reason"], PENDING_FULL, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["from"], "mcp:sess-a");
+
+        send_as(Some("sess-b"), "b 0");
+        send_as(None, "nobody 0");
+        assert_eq!(queued_from("mcp:sess-b"), ["b 0"]);
+        assert_eq!(queued_from("mcp"), ["nobody 0"]);
+
+        let log = audit_lines(&root);
+        let pending = log.iter().find(|r| r["status"] == "pending").expect("a parked send is audited");
+        assert!(
+            pending["message"].as_str().unwrap().contains("from mcp:sess-a, claims \"same-label\""),
+            "the audit names the derived source first and the claim as a claim: {pending}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The label an MCP caller typed is cleaned before it is stored, so it
+    /// cannot carry a control sequence or a second line to an approver's screen.
+    #[test]
+    fn an_mcp_claim_is_cleaned_and_never_the_source() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("mcp-claim-clean", None);
+        let out = session_send(&send_on(
+            Door::Mcp,
+            &["hi"],
+            &[("id", &id), ("from", "boss\u{1b}[2J\nsecond line\u{202e}")],
+        ));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        let held = queued();
+        assert_eq!(held[0].from.as_deref(), Some("mcp"));
+        assert_eq!(held[0].claimed.as_deref(), Some("boss[2J second line"), "control and bidi marks gone, one line");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The A2A door's own resolution is recorded as the door gave it, and it
+    /// never falls back to the serving process's environment.
+    #[test]
+    fn the_a2a_doors_own_source_is_recorded_as_given() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("a2a-own-source", None);
+        std::env::set_var("AOIDE_SESSION_ID", "a-stray-session");
+        for (from, text) in [("node:peer", "from a node"), ("addr:192.0.2.9", "from an address")] {
+            let out = session_send(&send_on(Door::A2a, &[text], &[("id", &id), ("from", from)]));
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+            assert_eq!(queued_from(from), [text]);
+        }
+        let out = session_send(&send_on(Door::A2a, &["no source"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        let held = queued();
+        assert_eq!(held.last().unwrap().from, None, "no source stays none; the ambient session is not one");
+        assert!(held.iter().all(|p| p.claimed.is_none()));
         let _ = std::fs::remove_dir_all(&root);
     }
 

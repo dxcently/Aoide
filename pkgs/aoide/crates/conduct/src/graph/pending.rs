@@ -25,7 +25,7 @@
 //! for.
 //!
 //! Addressing: `pending.json`'s `PendingSend` carries no id of its own (only
-//! `sessionId`/`text`/`submit`/`queuedAt`/`from` — see
+//! `sessionId`/`text`/`submit`/`queuedAt`/`from`/`claimed` — see
 //! [`super::send::PendingSend`]), so `list`'s `id` is the entry's POSITION in
 //! the array. Positions shift the
 //! moment any entry resolves, so `approve`/`deny` always re-read the file
@@ -39,7 +39,7 @@
 //! fail cleanly (a structured error, never a panic) without touching it —
 //! the entry stays exactly where it was for a human to inspect by hand.
 
-use super::common::{require_args, stage_error};
+use super::common::{clean_line, require_args, stage_error};
 use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
@@ -119,7 +119,12 @@ fn grammar_label(
 /// tail only (never host/role — matches `send.rs`'s composer-prefix grammar,
 /// not the fuller tree-line one `grammar_label` above renders), falling back
 /// to the raw sender id when it does not resolve to a live petnamed record.
+/// An MCP source (`mcp:<session>`) keeps its door in front of the session's
+/// name.
 fn from_label(id: &str, by_id: &BTreeMap<&str, &SessionRecord>) -> String {
+    if let Some(session) = id.strip_prefix("mcp:") {
+        return format!("mcp:{}", from_label(session, by_id));
+    }
     match by_id.get(id).and_then(|r| r.petname.as_deref()) {
         Some(petname) => format!("{petname} (…{})", aoide_storage::display::short_tail(id)),
         None => id.to_string(),
@@ -127,10 +132,11 @@ fn from_label(id: &str, by_id: &BTreeMap<&str, &SessionRecord>) -> String {
 }
 
 /// One JSON view of a pending entry for `list`'s `data.pending`, and the text
-/// line for its human render. `from` is the sender attribution
-/// [`super::send::resolve_sender`] resolved at queue time — `None`/absent for
-/// an unattributed send AND for a LEGACY entry written before this field
-/// existed (serde default on read, see [`super::send::PendingSend`]).
+/// line for its human render. `from` is the source the door derived at queue
+/// time (see [`super::send::PendingSend`]) — `None`/absent for an unattributed
+/// send AND for a LEGACY entry written before this field existed (serde
+/// default on read). `claimed` is the label an MCP caller typed, cleaned
+/// again here and rendered under its own name, never as the source.
 ///
 /// `by_id`/`ids`/`host` are the CURRENT session roster, loaded once by the
 /// caller ([`pending_list`]) and threaded through every entry — the JSON
@@ -153,6 +159,7 @@ fn entry_view(
             "submit": false,
             "queuedAt": "",
             "from": Value::Null,
+            "claimed": Value::Null,
             "state": "malformed",
         });
         let line = format!("[{index}] <malformed entry — cannot resolve; edit state/stage/pending.json by hand>");
@@ -168,6 +175,11 @@ fn entry_view(
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
+    let claimed = o
+        .get("claimed")
+        .and_then(Value::as_str)
+        .map(clean_line)
+        .filter(|s| !s.is_empty());
     let json = json!({
         "id": index.to_string(),
         "sessionId": session_id,
@@ -175,16 +187,18 @@ fn entry_view(
         "submit": submit,
         "queuedAt": queued_at,
         "from": from,
+        "claimed": claimed,
         "state": "pending",
     });
     let line = format!(
-        "[{index}] {} ← {}{}{} ({queued_at})",
+        "[{index}] {} ← {}{}{}{} ({queued_at})",
         grammar_label(&session_id, by_id, ids, host),
         preview(&text),
         if submit { " [submit]" } else { "" },
         from.as_deref()
             .map(|f| format!(" (from {})", from_label(f, by_id)))
             .unwrap_or_default(),
+        claimed.as_deref().map(|c| format!(" (claims {c:?})")).unwrap_or_default(),
     );
     (json, line)
 }
@@ -671,6 +685,96 @@ mod tests {
         // The entry is gone from the queue.
         let arr = load_pending_array().unwrap();
         assert!(arr.is_empty(), "a resolved entry leaves the queue");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn approve_delivers_an_entry_a_door_derived_source_queued_and_names_it() {
+        // The A2A door queues under `node:<name>`; the CLI door refuses that
+        // spelling as a `--from`, but approval re-drives the entry with its own
+        // recorded source and must still deliver it, naming whoever queued it.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pnd-src");
+
+        let id = "apt-src";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        crate::graph::hold_pending(id, "hello from afar", true, Some("node:peer")).unwrap();
+
+        let acc = expect_delivery(listener, "an approved entry delivers under the source it was queued with");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let got = acc.join().unwrap();
+
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(String::from_utf8(got).unwrap(), "from node:peer: hello from afar\r");
+        assert!(load_pending_array().unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_shows_an_mcp_claim_under_its_own_label_and_never_as_the_source() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-claim");
+
+        let sender_id = "claim-sender";
+        do_session_start(sender_id, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        let petname = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|r| r.session_id == sender_id)
+            .and_then(|r| r.petname)
+            .expect("every minted session carries a petname (P2)");
+
+        // `claimed` is hand-written here with a control sequence in it: the
+        // queue is a file, and the screen cleans what it shows whatever wrote it.
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[
+                    {{"sessionId":"s1","text":"x","submit":false,"queuedAt":"t","from":"mcp:{sender_id}","claimed":"node:victim\u001b[2J"}},
+                    {{"sessionId":"s2","text":"y","submit":false,"queuedAt":"t","from":"mcp"}}
+                ]}}"#
+            ),
+        )
+        .unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        let data = out.data.as_ref().unwrap();
+        let arr = data["pending"].as_array().unwrap();
+        assert_eq!(arr[0]["from"], format!("mcp:{sender_id}"), "JSON from stays the raw source");
+        assert_eq!(arr[0]["claimed"], "node:victim[2J", "the claim is cleaned again on the way out");
+        assert!(arr[1]["claimed"].is_null());
+        let lines: Vec<&str> = out.message.lines().collect();
+        assert!(
+            lines[1].contains(&format!("(from mcp:{petname} (…")) && lines[1].contains("(claims \"node:victim[2J\")"),
+            "the source first, the claim under its own name: {}",
+            lines[1]
+        );
+        assert!(!lines[1].contains("(from node:victim"), "{}", lines[1]);
+        assert!(lines[2].contains("(from mcp)") && !lines[2].contains("claims"), "{}", lines[2]);
 
         let _ = std::fs::remove_dir_all(&root);
     }

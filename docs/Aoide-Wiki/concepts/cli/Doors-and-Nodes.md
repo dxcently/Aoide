@@ -295,8 +295,8 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   (task/session state), `state/nodes.json` (signed-request verification —
   the signature tried against every `verified` node's stored pubkey — and
   node identity: a bearer matched against a node's own `tokenFile`, or an
-  address matched against a node's `url`, which names the caller for
-  attribution and proves nothing; read fresh off disk per request).
+  address matched against a node's `url`, which resolves the record and proves
+  nothing; read fresh off disk per request).
   The `aoide-a2a` systemd unit
   (`modules/nucleus/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
@@ -327,9 +327,10 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     configured, a `contextId` send from a caller that proved neither that token
     nor a node identity (a `verified` node's own bearer, or a signature
     holding `message` in its mesh) gets the uniform synthetic `submitted` Task
-    and queues nothing. The queue holds at most 32 entries per source: past
-    that a proven node is refused `-32000` and any other caller gets the
-    uniform answer. Spawn answers to
+    and queues nothing. The queue holds at most 32 entries per source, which
+    the door derives (`node:<name>` for a proven node, `addr:<address>` for any
+    other caller): past that a proven node is refused `-32000` and any other
+    caller gets the uniform answer. Spawn answers to
     pairing alone: the caller must resolve on the Signature rung — a verified
     per-request signature against some `verified` node's stored pubkey — with
     `spawn` among the caller's grants IN THE MESH ITS REQUEST NAMES; every
@@ -397,7 +398,8 @@ aoide node add <name> <url|poll> [--no-verify]
   `Authorization: Bearer`. It is how the door identifies the node behind a
   reverse proxy or tunnel, where every caller's address is the proxy's; the
   caller's address alone proves nothing. An inbound `message/send` that
-  presents it is attributed `node:<name>` and parks in `pending.json`.
+  presents it is recorded as `node:<name>` (when the node is `verified`) and
+  parks in `pending.json`.
   `--bearer-secret
   <name>` is the mirror direction: a secret this instance resolves through
   the [[Secrets-Broker|secrets broker]] (consumer `a2a-client`, fresh on

@@ -204,7 +204,9 @@ Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
   nothing, so neither files into the mailbase (messaging plan P-M1,
   `state/mail/base.jsonl`). `do_inject` (Inject, an EXISTING session) reuses
   `aoide_conduct::graph::session_send` with `Door::A2a`, which parks the send in
-  `pending.json` attributed to the node. Nothing reaches the session's socket,
+  `pending.json` under the source the door derived (`inject_source`:
+  `node:<name>` for a caller that proved the node, `addr:<address>` for every
+  other). Nothing reaches the session's socket,
   so no receipt is filed. `do_spawn` (Spawn, a BRAND-NEW session) queues its
   opening turn the same way: `opening_turn_worker` stamps `pending`, then
   `hold_pending` queues the prompt attributed `node:<name>` and the verdict is
