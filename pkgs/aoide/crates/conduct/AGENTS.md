@@ -1303,7 +1303,8 @@ in the message.
   verdict or a restore. `run0`, `runuser`, `pkexec`, `sudoedit`, `setpriv`,
   `chroot`, `sg`, `newgrp`, `dzdo`, `ksu` and `busybox su` are non-shell wraps
   with no restore, so they are not detected here. `PRIVILEGE_PROGRAMS` is the
-  restore refusal's list, wider than this rule's scope.
+  restore refusal's list, wider than this rule's scope. The accepted losses,
+  the no-pty one among them, are in CONTRACTS.md's shell-state paragraph.
 - **The executable baseline is the file the spawn started, read from its path
   (`resolve_program`, once; `PtyChild::image`; `shell_baseline`), never from
   `/proc`.** A `/proc/<pid>/exe` read can land after the shell has exec'd its
@@ -1418,6 +1419,14 @@ in the message.
   second list beside it. `PRIVILEGE_PROGRAMS` is the one list of privilege
   programs. `shell_join`'s bare-safe set keeps `=` (`spawn`'s `{cmd}` needs
   it); the assignment refusal is what keeps a restore from reading it.
+- **A resurrected row's `restoreDelivery` is `Restore::label`, and
+  `restore_step` is the only place that chooses it.** The wait and the send
+  are injected into `restore_step`, so its order (nothing waited on or sent for
+  an unregistered, refused or empty restore; nothing sent to a target that is
+  not ready) is a table test:
+  `a_restore_step_is_labelled_and_runs_its_effects_only_when_due`. A new label
+  is a new `Restore` variant with its row there and its entry in CONTRACTS.md's
+  `resurrect` paragraph; don't write the string at the call site.
 - **The terminal candidate arm is gated on `entry.restore.is_some()`, never
   on `agent == "shell"` (P-C6).** `resolve_candidate` tries the harness arm
   first (`AgentProfile.resume_args`, unchanged) and only falls to the

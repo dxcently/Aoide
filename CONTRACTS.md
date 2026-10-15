@@ -836,7 +836,13 @@ count.
   Never submitted, because an argv is attacker-choosable: a same-uid process
   can rewrite its own `/proc` cmdline, and reading argv cannot prove that
   nothing in it waits on a password prompt, so the human who reads the line
-  presses Enter. An idle session delivers nothing, its cwd
+  presses Enter. Each `resurrected[]` row reports the step as
+  `restoreDelivery`: `command` (typed, the target's readiness a fact),
+  `command-unverified` (typed on a settled guess, for an agent with no
+  profile), `refused: <why>` (a refusal above), `none` (nothing to deliver, an
+  idle session included), `not-ready` (nothing typed), `skipped-unregistered`
+  (no live pty) or `failed: <reason>` (the send failed).
+  An idle session delivers nothing, its cwd
   alone is restored. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
@@ -2460,12 +2466,19 @@ is never an interactive shell either, so its password prompt is heard and reads
 `awaiting`: by sudo's own witness for `sudo`, and by the screen's password row
 for `doas` and `su`. The accepted losses: a quiet root prompt reads
 `working · <line>` (`working · sudo bash`); while a root command runs, the dock
-label shows the privilege line, not the command; resurrect refuses it, since its
-recorded argv is a privilege program, and restores the cwd only; and a `sudo` or
-`su` that takes no pty of its own hands the terminal to its command, so typed at
-an interactive shell's prompt, where this rule does not apply, it records the
-root foreground's argv, which names no privilege program, and resurrect types
-that line without the `sudo`.
+label shows the privilege line, not the command; and resurrect refuses it, since
+its recorded argv is a privilege program, and restores the cwd only.
+
+One further loss lies outside this rule, in a session that does not itself run
+`sudo`, `doas` or `su`, where the foreground group is read as it is. A `sudo` or
+`su` typed at an interactive shell's prompt that takes no pty of its own hands
+the terminal to its command, so the recorded argv is the root command's, with no
+privilege word in it, and resurrect types that line without the `sudo`. That
+holds for `su`, and for `sudo` only with `!use_pty`: sudo 1.9.14 and later
+default to `use_pty`, so `sudo` stays in the foreground, its argv reads `sudo …`
+and resurrect refuses it. This mechanism is inferred from the process-table
+reads and unverified against a real `sudo` or `su`. It is harmless either way,
+because the line is typed and never submitted.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the

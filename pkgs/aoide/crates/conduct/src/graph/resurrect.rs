@@ -158,7 +158,7 @@ use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
 use super::send::session_send;
 use super::session_store::{stamp_origin, stamp_resumed_from};
-use super::spawn::{session_spawn, shell_join};
+use super::spawn::{session_spawn, shell_join, Ready};
 use aoide_protocol::agents::agent_profile;
 use aoide_protocol::output::{Outcome, Status};
 use aoide_protocol::Invocation;
@@ -365,6 +365,70 @@ fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreS
     })
 }
 
+/// How one resurrected terminal's restore ended, which is the `restoreDelivery`
+/// of its row in `resurrected[]` ([`Restore::label`] is the whole vocabulary).
+#[derive(Debug, PartialEq, Eq)]
+enum Restore {
+    /// The spawn never registered, so there was no live pty to deliver into.
+    Unregistered,
+    /// [`restore_refused_because`] refused the recorded foreground argv.
+    Refused(&'static str),
+    /// Nothing to deliver: an idle session, or an entry with no `restore`.
+    Nothing,
+    /// The target never became ready, so nothing was typed.
+    NotReady,
+    /// The send into the new pty failed.
+    Failed(String),
+    /// The command was typed, never submitted. `verified` is whether the
+    /// readiness was a fact or a settled guess.
+    Typed { verified: bool },
+}
+
+impl Restore {
+    fn label(&self) -> String {
+        match self {
+            Restore::Unregistered => "skipped-unregistered".to_string(),
+            Restore::Refused(why) => format!("refused: {why}"),
+            Restore::Nothing => "none".to_string(),
+            Restore::NotReady => "not-ready".to_string(),
+            Restore::Failed(why) => format!("failed: {why}"),
+            Restore::Typed { verified: true } => "command".to_string(),
+            Restore::Typed { verified: false } => "command-unverified".to_string(),
+        }
+    }
+}
+
+/// The restore step of one resurrected terminal, in the order its effects may
+/// run: nothing is waited on or sent for an unregistered, refused or empty
+/// restore, and nothing is sent to a target that is not ready. The wait and the
+/// send are injected, so the whole decision is a table test.
+fn restore_step(
+    registered: bool,
+    restore: Option<&RestoreSnapshot>,
+    door: aoide_protocol::Door,
+    new_id: &str,
+    wait_ready: impl FnOnce() -> Ready,
+    send: impl FnOnce(&Invocation) -> Result<(), String>,
+) -> Restore {
+    if !registered {
+        return Restore::Unregistered;
+    }
+    if let Some(why) = restore.and_then(restore_refused_because) {
+        return Restore::Refused(why);
+    }
+    let Some(inv) = restore.and_then(|r| restore_delivery(door, new_id, r)) else {
+        return Restore::Nothing;
+    };
+    let ready = wait_ready();
+    if ready == Ready::NotReady {
+        return Restore::NotReady;
+    }
+    match send(&inv) {
+        Ok(()) => Restore::Typed { verified: ready == Ready::Verified },
+        Err(why) => Restore::Failed(why),
+    }
+}
+
 /// What `resurrect_one` does with a ledger entry's `origin` field when
 /// reviving it (LANE IDENTITY P-ID0, G6 MUST-FIX). `Carry` for anything
 /// EXCEPT a `node:*` shape — a `node:*` value gets `RefusedNode` instead of
@@ -509,44 +573,23 @@ fn resurrect_one(
     // registered AND became READY: an unregistered session has no live pty to
     // deliver into, and a registered-but-unstarted one has a pty whose harness
     // is still coming up, where the same early-typing defect `spawn --prompt`
-    // just fixed would lose the line. `restore_delivery` is pure and decides
-    // the whole shape: it is `Some` only for a busy session's command.
-    let restore_result = if !registered {
-        "skipped-unregistered".to_string()
-    } else if let Some(why) = c.entry.restore.as_ref().and_then(restore_refused_because) {
+    // just fixed would lose the line. `restore_step` runs the wait and the send
+    // in order and names the outcome; `restore_delivery` is pure and decides the
+    // whole shape: it is `Some` only for a busy session's command.
+    let restore = restore_step(
+        registered,
+        c.entry.restore.as_ref(),
+        door,
+        &new_id,
+        || super::spawn::wait_ready(&c.entry.agent, &new_id, &launch_at, super::spawn::READY_BUDGET),
+        |inv| {
+            let inner = session_send(inv);
+            if inner.status == Status::Ok { Ok(()) } else { Err(inner.message) }
+        },
+    );
+    if let Restore::Refused(why) = &restore {
         changed.push(format!("session {new_id}: restore refused — {why}"));
-        format!("refused: {why}")
-    } else {
-        match c.entry.restore.as_ref().and_then(|r| restore_delivery(door, &new_id, r)) {
-            None => "none".to_string(),
-            Some(inv) => {
-                let ready = super::spawn::wait_ready(
-                    &c.entry.agent,
-                    &new_id,
-                    &launch_at,
-                    super::spawn::READY_BUDGET,
-                );
-                if ready == super::spawn::Ready::NotReady {
-                    "not-ready".to_string()
-                } else {
-                    let inner = session_send(&inv);
-                    if inner.status != Status::Ok {
-                        format!("failed: {}", inner.message)
-                    } else {
-                        // Whether the readiness was a fact or a settled guess:
-                        // a terminal candidate whose agent has no profile is
-                        // typed at on the guess, and says so. Either way the
-                        // line is typed and never submitted.
-                        if ready == super::spawn::Ready::Verified {
-                            "command".to_string()
-                        } else {
-                            "command-unverified".to_string()
-                        }
-                    }
-                }
-            }
-        }
-    };
+    }
 
     changed.push(format!(
         "session {new_id}: resurrected from {} ({}){}",
@@ -554,10 +597,10 @@ fn resurrect_one(
         c.entry.agent,
         if registered { "" } else { " (not yet registered)" }
     ));
-    if matches!(restore_result.as_str(), "command" | "command-unverified") {
-        changed.push(format!("session {new_id}: restore {restore_result}"));
+    if let Restore::Typed { .. } = restore {
+        changed.push(format!("session {new_id}: restore {}", restore.label()));
     }
-    if restore_result == "not-ready" {
+    if restore == Restore::NotReady {
         changed.push(format!(
             "session {new_id}: restore not injected — `{}` was not ready",
             c.entry.agent
@@ -568,7 +611,7 @@ fn resurrect_one(
         "resumedFrom": c.entry.session_id,
         "agent": c.entry.agent,
         "registered": registered,
-        "restoreDelivery": restore_result,
+        "restoreDelivery": restore.label(),
     }));
 }
 
@@ -1403,6 +1446,49 @@ mod tests {
     fn an_idle_restore_delivers_nothing_it_restores_the_cwd_alone() {
         let restore = RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None };
         assert!(restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none());
+    }
+
+    /// The `restoreDelivery` vocabulary and the order of its effects, one row
+    /// per label: nothing is waited on or sent for an unregistered, refused or
+    /// empty restore, and nothing is sent to a target that is not ready.
+    #[test]
+    fn a_restore_step_is_labelled_and_runs_its_effects_only_when_due() {
+        use std::cell::Cell;
+        let idle = RestoreSnapshot { cwd: Some("/p".into()), idle: true, argv: None };
+        let busy = busy_restore(&["nvim", "notes.md"]);
+        let sudo = busy_restore(&["sudo", "reboot"]);
+        let ok = || Ok(());
+        // (registered, restore, readiness, send result, label, waited, sent)
+        let rows: Vec<(bool, Option<&RestoreSnapshot>, Ready, Result<(), String>, &str, bool, bool)> = vec![
+            (false, Some(&busy), Ready::Verified, ok(), "skipped-unregistered", false, false),
+            (true, Some(&sudo), Ready::Verified, ok(), "refused: a privilege program", false, false),
+            (true, Some(&idle), Ready::Verified, ok(), "none", false, false),
+            (true, None, Ready::Verified, ok(), "none", false, false),
+            (true, Some(&busy), Ready::NotReady, ok(), "not-ready", true, false),
+            (true, Some(&busy), Ready::Verified, Err("no socket".into()), "failed: no socket", true, true),
+            (true, Some(&busy), Ready::Verified, ok(), "command", true, true),
+            (true, Some(&busy), Ready::Unverified, ok(), "command-unverified", true, true),
+        ];
+        for (registered, restore, ready, sent, label, waited, did_send) in rows {
+            let (waits, sends) = (Cell::new(false), Cell::new(false));
+            let step = restore_step(
+                registered,
+                restore,
+                aoide_protocol::Door::Daemon,
+                "new-id",
+                || {
+                    waits.set(true);
+                    ready
+                },
+                |inv| {
+                    assert_eq!(inv.args, vec!["nvim notes.md".to_string()]);
+                    sends.set(true);
+                    sent
+                },
+            );
+            assert_eq!(step.label(), label);
+            assert_eq!((waits.get(), sends.get()), (waited, did_send), "effects for {label}");
+        }
     }
 
     /// The orchestrator ruling (open knob 5): a recorded foreground of

@@ -320,7 +320,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   child runs, once its executable is no longer the one it started as (or
   cannot be read), or while its CPU time rises. A session whose argv runs
   `sudo`, `doas` or `su` is never idle, and is labelled and recorded by its own
-  conducted line. The wrap keeps that line, the executable and the CPU memory
+  conducted line; the privilege programs it does not detect are listed in
+  CONTRACTS.md. The wrap keeps that line, the executable and the CPU memory
   for it (`ShellWatch`; see AGENTS.md and CONTRACTS.md, the shell-state
   paragraph).
 - **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape

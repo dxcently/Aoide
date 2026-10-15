@@ -448,10 +448,11 @@ it runs itself goes unseen. A shell given a command or a script (`bash -c "apt
 install x"`, `sh ./run.sh`) is a program like any other, and its questions are
 heard. `sudo`, `doas` and `su` (`sudo bash`, `su`) are never silenced and never
 idle: the first prompt asks for a password, and nothing tells that prompt from
-the root shell's after it, so the password prompt is heard. `script` is a shell
-at its prompt unless `-c` or `--command` appears after it (any dashed token with
-a `c` counts, so the screen only ever hears more). A form the launcher walk
-refuses (`env -S`, `sudo -i`, an option its
+the root shell's after it, so the password prompt is heard. The privilege
+programs this does not cover are listed in `CONTRACTS.md`'s shell-state
+paragraph. `script` is a shell at its prompt unless `-c` or `--command` appears
+after it (any dashed token with a `c` counts, so the screen only ever hears
+more). A form the launcher walk refuses (`env -S`, `sudo -i`, an option its
 table does not list) is answered as a command runner, so its questions are heard
 too: where the walk cannot resolve a form, the over-match goes toward hearing,
 never toward silence. The argv decides which, read by the walk that classes a shell; no
