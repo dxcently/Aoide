@@ -1940,25 +1940,29 @@ fn session_remote_parent(id: &str) -> Option<RemoteParent> {
     sf.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.remote_parent.clone())
 }
 
-/// Whether `id`'s record is conducting a SHELL — the same read the ping-back
-/// and doorbell lanes make (`aoide_conduct::graph::wrapped_program_is_a_shell`,
-/// the record-side half of `program_is_a_shell`), so the whole box agrees
-/// on which sessions a submitted line must never reach.
+/// Why the A2A door will not type a line into `id` by itself, read off its
+/// record through [`aoide_conduct::graph::auto_type_refusal`], the one refusal
+/// the ping-back and doorbell make too: `shell-wrapped` for a SHELL,
+/// `unverified-wrap` for a wrap the launcher walk does not prove to be its harness.
+/// The whole box agrees on which sessions a submitted line must never reach.
 ///
-/// Unlike [`session_remote_parent`], an unreadable stage answers **true**:
-/// this is a refusal's input, so "cannot tell" takes the safe arm — the same
-/// fail-safe direction `should_deliver_now(ConnOrigin::Unknown, _)` already
-/// takes one screen up. An unknown id (no record) answers `false` and is
-/// unreachable anyway: `decide_send_action` resolves through
-/// [`session_ref_lookup`] first, and a missing record is its own `Error` arm.
-fn session_wrapped_is_a_shell(id: &str) -> bool {
+/// Unlike [`session_remote_parent`], an unreadable stage answers a hold, and
+/// `unverified-wrap` is the reason: this is a refusal's input, so "cannot tell"
+/// takes the safe arm, the same fail-safe direction
+/// `should_deliver_now(ConnOrigin::Unknown, _)` takes one screen up. An unknown
+/// id (no record) answers `None` and is unreachable anyway: `decide_send_action`
+/// resolves through [`session_ref_lookup`] first, and a missing record is its
+/// own `Error` arm.
+fn session_inject_hold(id: &str) -> Option<&'static str> {
     match load_stage::<SessionsFile>(&sessions_path()) {
-        Ok(sf) => sf
-            .sessions
-            .iter()
-            .find(|s| s.session_id == id)
-            .is_some_and(aoide_conduct::graph::wrapped_program_is_a_shell),
-        Err(_) => true,
+        Ok(sf) => {
+            let rec = sf.sessions.iter().find(|s| s.session_id == id)?;
+            aoide_conduct::graph::auto_type_refusal(rec).map(|why| match why {
+                aoide_conduct::graph::AutoTypeRefusal::Shell => "shell-wrapped",
+                aoide_conduct::graph::AutoTypeRefusal::Unproven => "unverified-wrap",
+            })
+        }
+        Err(_) => Some("unverified-wrap"),
     }
 }
 
@@ -2163,6 +2167,11 @@ fn do_inject(
 /// own and the wrong one wherever the target submits on `\r` (claude, kimi):
 /// the opening turn landed in the composer and never submitted.
 ///
+/// **Only a proven harness takes the opening turn.** A configured command that
+/// is a shell is `skipped-shell`; any other that the launcher walk does not
+/// prove to be a registered harness is `skipped-unverified`. Nothing is typed in
+/// either case ([`spawn_agent_harness`]).
+///
 /// **Messaging plan P-M1, `state/mail/base.jsonl`**: because of the above,
 /// this is the SECOND (and last) mailbase-filing site in the tree, alongside
 /// `deliver_local`'s (see `aoide_storage::mail`'s module doc) — a spawned
@@ -2184,28 +2193,18 @@ fn spawn_inject_prompt(
     if prompt.is_empty() {
         return "skipped-empty";
     }
-    // Belt and braces on H1: `decide_send_action` already refuses a shell
-    // `spawnAgent` before anything starts, and this is the last gate before a
-    // REMOTE prompt becomes a line on a pty — so the write asks the same
-    // question itself instead of trusting its caller to have asked it (the
-    // same `program_is_a_shell` walk `-32004` above and the ping-back,
-    // doorbell and inject lanes all read). Silent by construction: this
-    // function's contract is best-effort, and a refusal that cannot be
-    // reported here would only be noise — the caller's own refusal is the
-    // taught one.
-    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    if aoide_conduct::graph::program_is_a_shell(&configured) {
-        return "skipped-shell";
-    }
-    // WHICH harness the configured command IS decides what readiness means
-    // (an unconfigured/unknown program has no profile and takes the hookless
-    // answer, the same fallback every other profile lookup in the tree takes)
-    // and which keystroke SUBMITS a line in it.
-    let agent = configured
-        .first()
-        .map(|program| aoide_conduct::graph::command_basename(program))
-        .unwrap_or_default();
-    let ready = aoide_conduct::graph::wait_ready(&agent, id, &launch_at, ready_budget);
+    // The last gate before a REMOTE prompt becomes a line on a pty, so it asks
+    // the same question `do_spawn`'s prologue asked instead of trusting its
+    // caller to have asked it. Silent by construction: this function's contract
+    // is best-effort, and the caller's own refusal is the taught one.
+    let agent = match spawn_agent_harness(agent_cmd) {
+        Ok(harness) => harness,
+        Err(SpawnAgentRefusal::Shell) => return "skipped-shell",
+        Err(SpawnAgentRefusal::Unproven) => return "skipped-unverified",
+    };
+    // The PROVEN harness decides what readiness means and which keystroke
+    // SUBMITS a line in it.
+    let ready = aoide_conduct::graph::wait_ready(agent, id, &launch_at, ready_budget);
     if ready == aoide_conduct::graph::Ready::NotReady {
         return "not-ready";
     }
@@ -2214,7 +2213,7 @@ fn spawn_inject_prompt(
     // unregistered). Never a byte spelled here: claude's is `\r`, and a bare
     // `\n` only inserts a newline in its composer — the exact way this door
     // used to type an opening turn that never submitted.
-    let submit_key = aoide_conduct::graph::profile_for_agent(&agent).submit_key;
+    let submit_key = aoide_conduct::graph::profile_for_agent(agent).submit_key;
     let socket = aoide_conduct::graph::conduct_socket_path(id);
     for _ in 0..300 {
         if socket.exists() {
@@ -2339,13 +2338,12 @@ fn poll_bounded_exit(
 /// always because ITS OWN attempt to exec the configured agent
 /// (`aoide-conduct::graph::pty::spawn_on_pty`) failed, since that
 /// function's own "spawn FIRST" discipline means a failed exec there returns
-/// almost instantly with no session ever registered. Names the configured
-/// program (never the full command line — no flag values, no env, no
-/// secrets) and the observed exit status only.
-fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitStatus) -> String {
-    let program = agent_cmd.split_whitespace().next().unwrap_or(agent_cmd);
+/// almost instantly with no session ever registered. Names the PROVEN harness
+/// the configured command runs (never the full command line — no flag values,
+/// no env, no secrets) and the observed exit status only.
+fn spawn_died_immediately_message(harness: &str, status: std::process::ExitStatus) -> String {
     format!(
-        "the configured agent (`{program}`) exited immediately after launch ({status}) — \
+        "the configured agent (`{harness}`) exited immediately after launch ({status}) — \
          it is likely missing from this unit's PATH, or the configured spawnAgent command line is wrong"
     )
 }
@@ -2387,9 +2385,39 @@ fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitSta
 /// addressed to its own slug (Q5's ruling). Pure — the split of the configured
 /// agent command is the same `split_whitespace` the pre-S10 argv did, so what
 /// runs is byte-identical.
-fn spawn_argv(id: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
+///
+/// `--agent` is the PROVEN `harness` (`spawn_agent_harness`), never a fixed
+/// label: the wrap's record carries it, and the ping-back, doorbell and inject
+/// readers type into the wrap only when its walked program is that harness.
+fn spawn_argv(id: &str, harness: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
     let command: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    aoide_conduct::graph::build_conduct_args(true, "a2a", id, None, task, None, None, None, &command)
+    aoide_conduct::graph::build_conduct_args(true, harness, id, None, task, None, None, None, &command)
+}
+
+/// Why a configured `spawnAgent` may not be typed into: a shell (the first turn
+/// would RUN as a command) or a command the walk does not prove to be a
+/// registered harness. Both refuse before any process starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpawnAgentRefusal {
+    Shell,
+    Unproven,
+}
+
+/// The one judgement every spawn guard reads: the registered harness a
+/// configured `spawnAgent` runs, or why it may not run at all. A shell is refused
+/// as `Shell`, and so is everything the walk reads as one without naming a
+/// program it proves: a launcher option its table does not list or refuses
+/// (`env -S`, `nice --bogus`), `sudo`/`doas`, and `busybox`. Default-deny for the rest:
+/// a wrapper with another name, a launcher the walk does not model (`taskset`), or
+/// a name with no profile is `Unproven`, because its first turn would be typed into a pty the
+/// door cannot prove is a harness. The walk itself is
+/// `aoide_conduct::graph::wrapped_harness`, never a copy of it.
+fn spawn_agent_harness(agent_cmd: &str) -> Result<&'static str, SpawnAgentRefusal> {
+    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    if aoide_conduct::graph::program_is_a_shell(&configured) {
+        return Err(SpawnAgentRefusal::Shell);
+    }
+    aoide_conduct::graph::wrapped_harness(&configured).ok_or(SpawnAgentRefusal::Unproven)
 }
 
 /// Build the spawned child's `Command`, env-sanitized, cwd-bound (when
@@ -2551,33 +2579,52 @@ fn do_spawn(
 ) -> Result<Value, (i64, String)> {
     // Refused FIRST and for free, the slug refusal's own shape below: a
     // `spawnAgent` that IS a shell must cost one RPC, never a process and
-    // never a line typed into a shell (H1, house rule 4). The spawn arm's
-    // first turn is written straight into the child's pty by
-    // `spawn_inject_prompt`, and a shell's stdin is a COMMAND LINE: a remote
-    // peer's prompt would RUN. The `agent` label is not the question — the
-    // configured argv is (`program_is_a_shell`, the same walk the ping-back,
-    // doorbell and inject lanes read), so `bash -lc <harness>` is the shell on
-    // its face and a launcher (`env bash`) is resolved rather than skipped.
+    // never a line typed into a shell (H1, house rule 4), and never a line typed
+    // into a pty the walk cannot prove is a harness. The spawn arm's first turn
+    // is written straight into the child's pty by `spawn_inject_prompt`, and a
+    // shell's stdin is a COMMAND LINE: a remote peer's prompt would RUN. The
+    // `agent` label is not the question — the configured argv is
+    // (`spawn_agent_harness`), so `bash -lc <harness>` is the shell on its face,
+    // `env claude` is resolved to its harness, and `taskset -c 0 claude` or a
+    // wrapper script is refused as unproven.
     // `-32004` is this door's own "spawn cannot be used as configured" family
     // (the empty-`spawnAgent` arm one layer up): nothing about the CALLER's
     // authority is wrong, so `-32005`/`-32006` would blame the wrong party.
-    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    if aoide_conduct::graph::program_is_a_shell(&configured) {
-        let msg = format!(
-            "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which is a SHELL — \
-             a remote prompt typed into it would run as a command. Set it to the harness to \
-             conduct (e.g. `claude`), not to a shell that launches one."
-        );
-        let _ = audit(
-            audit_log,
-            Door::A2a,
-            EventClass::Audit,
-            "a2a.message/send",
-            "shell-spawn-agent",
-            &msg,
-        );
-        return Err((-32004, msg));
-    }
+    let harness = match spawn_agent_harness(agent_cmd) {
+        Ok(harness) => harness,
+        Err(refusal) => {
+            let (audit_name, msg) = match refusal {
+                SpawnAgentRefusal::Shell => (
+                    "shell-spawn-agent",
+                    format!(
+                        "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which \
+                         reads as a SHELL — a remote prompt typed into it would run as a command. Set \
+                         it to the harness to conduct (e.g. `claude`), not to a shell that launches one."
+                    ),
+                ),
+                SpawnAgentRefusal::Unproven => (
+                    "unverified-spawn-agent",
+                    format!(
+                        "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which the \
+                         launcher walk does not prove to be a registered harness ({}). A remote prompt \
+                         is typed into the harness's own pty, so only a harness named as its own \
+                         program may run: set it to the harness itself (e.g. `claude`), not a wrapper, \
+                         a launcher the walk does not model (`taskset`), or a script.",
+                        aoide_protocol::agents::known_agents().join(", ")
+                    ),
+                ),
+            };
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                audit_name,
+                &msg,
+            );
+            return Err((-32004, msg));
+        }
+    };
     // Refused FIRST and for free: an unusable slug must cost one RPC, never a
     // process — nothing below these lines has run when either fires.
     let task = match spawn_task_slug(task) {        Ok(task) => task,
@@ -2623,7 +2670,7 @@ fn do_spawn(
     let aoide_bin = std::env::current_exe()
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
-    let argv = spawn_argv(&id, agent_cmd, task);
+    let argv = spawn_argv(&id, harness, agent_cmd, task);
     // This launch's start instant, taken BEFORE the child exists: the worker's
     // readiness wait reads only a harness `SessionStart` stamped at or after
     // it, so a leftover child record from a previous run of a reused id cannot
@@ -2658,7 +2705,7 @@ fn do_spawn(
                 SPAWN_LIVENESS_ATTEMPTS,
                 SPAWN_LIVENESS_INTERVAL,
             ) {
-                let msg = spawn_died_immediately_message(agent_cmd, status);
+                let msg = spawn_died_immediately_message(harness, status);
                 let _ = audit(
                     audit_log,
                     Door::A2a,
@@ -3187,27 +3234,29 @@ fn message_send(
             // however well they proved who they are. A shell's input is a
             // command line, and `--agent <harness> -- bash` is a record that
             // names a harness while running a shell — the door therefore reads
-            // the WRAP (house rule 4, `wrapped_program_is_a_shell`), exactly
-            // as the ping-back and doorbell lanes do, rather than the `agent`
-            // label it was handed. Paid only where it can matter: a decision
+            // the WRAP (house rule 4), exactly as the ping-back and doorbell
+            // lanes do, rather than the `agent` label it was handed. A wrap the
+            // walk does not prove to be its harness is held the same way
+            // (`unverified-wrap`). Paid only where it can matter: a decision
             // that was going to pend anyway is left alone, and its audit line
             // is not written.
             let door_delivers = should_deliver_now(eff_origin, deliver_match || remote_parent_hit);
-            let shell_target = door_delivers && session_wrapped_is_a_shell(&session_id);
-            if shell_target {
+            let hold = if door_delivers { session_inject_hold(&session_id) } else { None };
+            if let Some(reason) = hold {
+                let why = match reason {
+                    "shell-wrapped" => "is conducting a shell — a submitted line would RUN in it as a command",
+                    _ => "is not proven to be its harness by the launcher walk, so a submitted line is held",
+                };
                 let _ = audit(
                     audit_log,
                     Door::A2a,
                     EventClass::Audit,
                     "a2a.message/send",
-                    "shell-wrapped",
-                    &format!(
-                        "holding for a human: `{session_id}` is conducting a shell — a submitted \
-                         line would RUN in it as a command"
-                    ),
+                    reason,
+                    &format!("holding for a human: `{session_id}` {why}"),
                 );
             }
-            let deliver_now = door_delivers && !shell_target;
+            let deliver_now = door_delivers && hold.is_none();
             // The `from` attribution rides ONLY the QUEUED path (P-P3
             // decision 7: "pending-queue entries a node's send creates").
             // `session_send`'s own `from` mechanism ALSO prefixes an
@@ -5238,8 +5287,13 @@ fn mail_method_of(body: &[u8]) -> Option<&'static str> {
 /// What the door answers a mail method with BEFORE dispatch, when this host's
 /// declarations will not load — or that it should keep the refusal it has.
 enum PreDispatch {
-    /// The refused `config-invalid` result.
-    Unloadable(String),
+    /// The refused `config-invalid` result, which is never signed. It is reached
+    /// only when `config.toml` will not load, and the charter this node governs
+    /// is decided through that same file
+    /// ([`aoide_storage::charter::governing`] reads its operator line), so the
+    /// raw in-force read below is the only key it can be checked against, and
+    /// the door signs nothing under a charter it does not govern.
+    Unloadable { detail: String },
     /// A JSON-RPC error instead: a nonce this request reused.
     Error(i64, String),
     /// Leave the door's own `-32007` standing.
@@ -5262,6 +5316,12 @@ enum PreDispatch {
 /// them, and a `mailPoll` retires and hands over entries. The audit line is the
 /// method's own; nothing about the load error goes on the wire.
 fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path) -> PreDispatch {
+    // Only POST is a signed request (`verify_signed_request`). This arm is
+    // reached for every -32007 refusal, so it repeats that gate: a method
+    // spelled `ANSWER` must never reach the canonical string below.
+    if req.method != "POST" {
+        return PreDispatch::Keep;
+    }
     let Some(refusal) = aoide_storage::routing::declarations().err() else {
         return PreDispatch::Keep;
     };
@@ -5316,7 +5376,7 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
     }
     let detail = format!("{CONFIG_INVALID}: {refusal}");
     let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
-    PreDispatch::Unloadable(CONFIG_INVALID_DETAIL.to_string())
+    PreDispatch::Unloadable { detail: CONFIG_INVALID_DETAIL.to_string() }
 }
 
 fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
@@ -5493,7 +5553,8 @@ fn stream_task<W: Write>(
         },
     };
 
-    // SSE response headers — written exactly once, before any event.
+    // SSE response headers — written exactly once, before any event. Never
+    // signed: a stream has no single body for an answer signature to cover.
     write!(
         writer,
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
@@ -5507,6 +5568,7 @@ fn stream_task<W: Write>(
         Err((code, message)) => {
             let err = serde_json::to_value(JsonRpcResponse::err(rpc_id, code, message))
                 .expect("JsonRpcResponse always serializes");
+            // Never signed: an SSE event, part of a stream that is never signed.
             let _ = writer.write_all(sse_event(&err).as_bytes());
             let _ = writer.flush();
             let _ = audit(
@@ -5534,7 +5596,7 @@ fn stream_task<W: Write>(
         if should_emit(last_state.as_deref(), &state) || is_final {
             let event = build_stream_event(&rpc_id, &task, is_final);
             // A write/flush failure means the client hung up — best-effort,
-            // just stop.
+            // just stop. Never signed: an SSE event, as above.
             if writer.write_all(sse_event(&event).as_bytes()).is_err() || writer.flush().is_err() {
                 break;
             }
@@ -5810,14 +5872,69 @@ fn status_reason(status: u16) -> &'static str {
 
 /// Write one HTTP/1.1 response with a JSON body.
 fn write_http_response<W: Write>(w: &mut W, status: u16, body: &[u8]) -> std::io::Result<()> {
-    write!(
-        w,
-        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+    write_http_response_with(w, status, body, &[])
+}
+
+/// [`write_http_response`] with `extra` header lines after `Connection: close`.
+fn write_http_response_with<W: Write>(w: &mut W, status: u16, body: &[u8], extra: &[(&str, String)]) -> std::io::Result<()> {
+    let mut head = format!(
+        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
         status_reason(status),
         body.len(),
-    )?;
+    );
+    for (name, value) in extra {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    w.write_all(head.as_bytes())?;
     w.write_all(body)?;
     w.flush()
+}
+
+/// The answer-signature header for one response (relay-proof), or nothing.
+/// Only a JSON-RPC POST to `/` is ever signed: the card GET and every other
+/// path stay unsigned even when their signature verified, so the door's key
+/// signs nothing a client does not check. The signature covers the request's
+/// own signature and nonce, the status and the exact body bytes; a key that
+/// will not load, or is not on disk, leaves the answer unsigned and audited,
+/// and the client refuses an unsigned answer.
+fn answer_headers(req: &HttpRequest, status: u16, body: &[u8], audit_log: &Path) -> Vec<(&'static str, String)> {
+    if req.method != "POST" || req.path != "/" {
+        return Vec::new();
+    }
+    let (Some(request_signature), Some(request_nonce)) = (req.signed_signature.as_deref(), req.signed_nonce.as_deref()) else {
+        return Vec::new();
+    };
+    // Load only: answering a request must never mint this box's identity. A
+    // missing key is an unsigned answer, audited, like a key that will not load.
+    match aoide_storage::identity::load_existing() {
+        Ok(Some(kp)) => {
+            let signature = aoide_storage::wire_auth::sign_answer(&kp, request_signature, request_nonce, status, body);
+            vec![(aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE, signature)]
+        }
+        Ok(None) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.answer-unsigned",
+                "absent",
+                "no identity key is on disk, so this answer goes out unsigned",
+            );
+            Vec::new()
+        }
+        Err(e) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.answer-unsigned",
+                "error",
+                &format!("the identity key would not load, so this answer goes out unsigned: {e}"),
+            );
+            Vec::new()
+        }
+    }
 }
 
 // ── Routing ──────────────────────────────────────────────────────────────────
@@ -5925,15 +6042,24 @@ static NONCE_CACHE: Mutex<VecDeque<(String, String)>> = Mutex::new(VecDeque::new
 /// lock in this workspace (`pairing.rs`'s `PARK_LOCK` precedent): a panic
 /// inside one caller must never wedge every OTHER signed request behind a
 /// poisoned lock forever.
+///
+/// Both halves are keyed in the form the signature covers.
+/// `wire_auth::canonical_string` trims and lowercases the nonce before it
+/// signs it, so a captured request whose nonce header has only its case
+/// changed still verifies. Keying the raw text would admit that copy as a
+/// fresh nonce and run the request a second time, signed answer included.
+/// One normalisation, here, covers every caller.
 fn nonce_is_replay(key: &str, nonce: &str) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    let nonce = nonce.trim().to_ascii_lowercase();
     let mut cache = NONCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if cache.iter().any(|(p, n)| p == key && n == nonce) {
+    if cache.iter().any(|(p, n)| *p == key && *n == nonce) {
         return true;
     }
     if cache.len() >= NONCE_CACHE_CAP {
         cache.pop_front();
     }
-    cache.push_back((key.to_string(), nonce.to_string()));
+    cache.push_back((key, nonce));
     false
 }
 
@@ -6059,6 +6185,16 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
             ),
         );
     };
+
+    // Domain separation (relay-proof): an answer's signature covers the string
+    // `answer\0…`, and a request's covers its own method first. Canonical
+    // strings fold the method's case, so any token spelling `ANSWER` would
+    // otherwise build the answer's tag. Only POST is a signed request, so
+    // every other method is refused before a signature is looked at. An
+    // unsigned GET of the card returns `Unsigned` above, untouched.
+    if req.method != "POST" {
+        return SignedRequestOutcome::Refused(-32007, "a signed request must be a POST".to_string());
+    }
 
     // Wire-format validity only — the VALUE never selects a record below.
     if !aoide_storage::node_store::valid_node_name(node_name) {
@@ -6674,6 +6810,7 @@ pub fn serve(
                 "server busy: too many in-flight connections, try again shortly",
             );
             let body = serde_json::to_vec(&body).unwrap_or_default();
+            // Never signed: no request was read, so there is nothing to answer.
             if let Err(e) = write_http_response(&mut stream, 503, &body) {
                 eprintln!("aoide a2a: writing 503 (busy) response: {e}");
             }
@@ -6749,6 +6886,7 @@ pub fn serve_mail(port: u16, audit_log: &Path, registry: &'static Registry) -> s
                 "server busy: too many in-flight connections, try again shortly",
             );
             let body = serde_json::to_vec(&body).unwrap_or_default();
+            // Never signed: no request was read, so there is nothing to answer.
             if let Err(e) = write_http_response(&mut stream, 503, &body) {
                 eprintln!("aoide mail serve: writing 503 (busy) response: {e}");
             }
@@ -6829,6 +6967,7 @@ fn handle_connection(
                 "error",
                 &listener.audit_detail(e.status, origin),
             );
+            // Never signed: the request did not parse, so nothing was verified.
             return write_http_response(&mut writer, e.status, &body);
         }
     };
@@ -6899,17 +7038,22 @@ fn handle_connection(
             if code == -32007 {
                 if let Some(method) = mail_method_of(&req.body) {
                     match mail_unloadable_declaration(&req, method, audit_log) {
-                        PreDispatch::Unloadable(detail) => {
+                        PreDispatch::Unloadable { detail } => {
                             let body_val = JsonRpcResponse::ok(
                                 request_id(&req.body),
                                 json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }),
                             );
                             let body = serde_json::to_vec(&body_val).unwrap_or_default();
+                            // Never signed: the request was checked only against the raw
+                            // in-force charter, which this node does not govern while its
+                            // config will not load (`PreDispatch::Unloadable`).
                             return write_http_response(&mut writer, 200, &body);
                         }
                         PreDispatch::Error(err, message) => {
                             let body_val = jsonrpc_error_value(err, message);
                             let body = serde_json::to_vec(&body_val).unwrap_or_default();
+                            // Never signed: a replay answers with a nonce the request already spent,
+                            // and a signature here would bind the door to the old signature.
                             return write_http_response(&mut writer, 200, &body);
                         }
                         PreDispatch::Keep => {}
@@ -6926,6 +7070,8 @@ fn handle_connection(
                 "unauthorized",
                 &listener.audit_detail_with(&message, origin),
             );
+            // Never signed: a refused request was not verified, and the door never signs
+            // bytes an unverified sender chose.
             return write_http_response(&mut writer, 200, &body);
         }
     };
@@ -7004,7 +7150,9 @@ fn handle_connection(
         &listener.audit_detail(status, origin),
     );
 
-    write_http_response(&mut writer, status, &body)
+    // Signed only when the request's own signature verified (see `answer_headers`).
+    let extra = if verified.is_some() { answer_headers(&req, status, &body, audit_log) } else { Vec::new() };
+    write_http_response_with(&mut writer, status, &body, &extra)
 }
 
 #[cfg(test)]
@@ -7248,10 +7396,12 @@ mod tests {
     /// H1: a `spawnAgent` that IS a shell is refused at the ACT boundary, in
     /// `do_spawn`'s own prologue — the shape the illegal-slug refusal beside it
     /// already holds — so the refusal is audited by name and no process, no
-    /// session and no first-turn keystroke ever happens. The exact shell, a
-    /// shell reached through a launcher, and the `bash -lc <harness>` form the
-    /// door's own comment used to call legitimate are all refused; a harness
-    /// (wrapped or not) still spawns.
+    /// session and no first-turn keystroke ever happens. Refused: the exact shell,
+    /// a shell reached through a launcher, `bash -lc <harness>` (a shell that runs
+    /// the harness, so a line typed into it runs as a command), and `env -S
+    /// <harness>` (a command line whose program the walk cannot name). Which
+    /// harnesses DO pass is `spawn_agent_harness`'s own test; the spawn itself
+    /// is never driven here (`do_spawn` launches the test binary).
     #[test]
     fn do_spawn_refuses_a_shell_spawn_agent_before_anything_starts() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -7267,7 +7417,7 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         let audit_log = root.join("log");
 
-        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash"] {
+        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash", "env -S claude"] {
             let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
                 .expect_err("a shell spawnAgent must be refused, not run");
             assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
@@ -7292,6 +7442,122 @@ mod tests {
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// Default-deny, pure: a configured command is accepted only when the launcher
+    /// walk proves it runs a registered harness, and it is accepted AS that
+    /// harness (the name readiness and the submit key use). A shell is refused as
+    /// a shell; anything the walk cannot prove is unproven.
+    #[test]
+    fn spawn_agent_harness_accepts_only_a_registered_harness_the_walk_proves() {
+        let accepted: &[(&str, &str)] = &[
+            ("claude", "claude"),
+            ("claude --dangerously-skip-permissions", "claude"),
+            ("/usr/bin/claude", "claude"),
+            ("env claude", "claude"),
+            ("nix develop -c claude", "claude"),
+        ];
+        for (configured, harness) in accepted {
+            assert_eq!(spawn_agent_harness(configured), Ok(*harness), "`{configured}` runs {harness}");
+        }
+        let refused: &[(&str, SpawnAgentRefusal)] = &[
+            ("bash", SpawnAgentRefusal::Shell),
+            ("bash -lc claude", SpawnAgentRefusal::Shell),
+            ("env bash", SpawnAgentRefusal::Shell),
+            ("env -S claude", SpawnAgentRefusal::Shell),
+            ("env --split-string=claude", SpawnAgentRefusal::Shell),
+            ("taskset -c 0 claude", SpawnAgentRefusal::Unproven),
+            ("/opt/x/my-wrapper", SpawnAgentRefusal::Unproven),
+            ("no-such-agent", SpawnAgentRefusal::Unproven),
+        ];
+        for (configured, why) in refused {
+            assert_eq!(spawn_agent_harness(configured), Err(*why), "`{configured}` is refused");
+        }
+    }
+
+    /// The default-deny refusal in `do_spawn`'s prologue, for a configured command
+    /// the walk cannot prove: a launcher it does not model, a wrapper script, a
+    /// name with no profile. Audited as `unverified-spawn-agent`, and no process,
+    /// session or first-turn keystroke ever happens.
+    #[test]
+    fn do_spawn_refuses_an_unproven_spawn_agent_before_anything_starts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-unverified-spawn-agent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        let audit_log = root.join("log");
+
+        for configured in ["taskset -c 0 claude", "/opt/x/my-wrapper", "no-such-agent"] {
+            let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
+                .expect_err("an unproven spawnAgent must be refused, not run");
+            assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
+            assert!(err.1.contains("aoide.a2a.spawnAgent"), "the refusal names the option: {}", err.1);
+            assert!(err.1.contains(configured), "and the value it saw: {}", err.1);
+            let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+            assert!(log.contains("unverified-spawn-agent"), "the refusal is audited by name: {log}");
+        }
+        let sessions: Vec<aoide_storage::records::SessionRecord> =
+            load_stage::<SessionsFile>(&sessions_path())
+                .map(|f| f.sessions)
+                .unwrap_or_default();
+        assert!(sessions.is_empty(), "no session may exist after a refused spawn: {sessions:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// The second guard, on the write itself: an unproven or shell `spawnAgent`
+    /// is refused before the target's socket is ever dialled, so no byte reaches
+    /// a pty the door cannot prove is a harness. Asserted by a listener that
+    /// would hold a pending connection, and has none.
+    #[test]
+    fn spawn_inject_prompt_types_nothing_into_an_unproven_or_shell_spawn_agent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-spawninject-refused-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "spawn-inject-refused";
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        for (configured, want) in [
+            ("no-such-agent", "skipped-unverified"),
+            ("taskset -c 0 claude", "skipped-unverified"),
+            ("env -S claude", "skipped-shell"),
+            ("bash -lc claude", "skipped-shell"),
+        ] {
+            let got = spawn_inject_prompt(id, configured, "remote prompt", &now_iso_utc(), Duration::from_millis(50));
+            assert_eq!(got, want, "`{configured}`");
+        }
+        assert!(listener.accept().is_err(), "no connection was ever made to the target's socket");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
     }
 
@@ -7937,13 +8203,13 @@ mod tests {
         };
 
         assert_eq!(
-            args_of(&spawn_argv("a2a-11-1790", "claude --dangerously-skip-permissions", None)),
+            args_of(&spawn_argv("a2a-11-1790", "claude", "claude --dangerously-skip-permissions", None)),
             vec![
                 "conduct",
                 "--spawned",
                 "--headless",
                 "--agent",
-                "a2a",
+                "claude",
                 "--id",
                 "a2a-11-1790",
                 "--",
@@ -7954,13 +8220,13 @@ mod tests {
              untouched (still `split_whitespace`, never a shell)"
         );
         assert_eq!(
-            args_of(&spawn_argv("a2a-11-1791", "claude", Some("fix-flaky"))),
+            args_of(&spawn_argv("a2a-11-1791", "claude", "claude", Some("fix-flaky"))),
             vec![
                 "conduct",
                 "--spawned",
                 "--headless",
                 "--agent",
-                "a2a",
+                "claude",
                 "--id",
                 "a2a-11-1791",
                 "--task",
@@ -8007,9 +8273,9 @@ mod tests {
         .into_iter()
         .collect();
 
-        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", None)), expected);
+        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", "claude", None)), expected);
         assert_eq!(
-            env_of(&spawn_argv("a2a-11-2", "claude", Some("fix-flaky"))),
+            env_of(&spawn_argv("a2a-11-2", "claude", "claude", Some("fix-flaky"))),
             expected,
             "S10 adds an argv flag and no environment at all"
         );
@@ -8780,10 +9046,15 @@ mod tests {
     // calls) with a real `UnixListener` standing in for the target session's
     // control socket, exactly like `conduct::graph::send`'s own gate tests.
 
+    /// A conducted harness wrap: labelled `claude`, and the launcher walk resolved
+    /// `claude` (`wrapped_program`), so it carries the proof every pty writer asks.
+    /// A test that needs another shape sets it after this.
     fn conductable_session(id: &str, socket: &std::path::Path) -> SessionRecord {
         let mut rec = fixture_session(id, "working", None);
         rec.conductable = Some(true);
         rec.socket = Some(socket.to_string_lossy().into_owned());
+        rec.agent = "claude".to_string();
+        rec.wrapped_program = Some("claude".to_string());
         rec
     }
 
@@ -9149,10 +9420,11 @@ mod tests {
     }
 
     #[test]
-    fn spawn_died_immediately_message_names_the_program_never_the_full_command_line() {
+    fn spawn_died_immediately_message_names_the_proven_harness_never_the_command_line() {
         let status = exit_one_status(); // exit code 1
-        let msg = spawn_died_immediately_message("claude --dangerously-skip-permissions", status);
-        assert!(msg.contains("`claude`"), "names the configured binary: {msg}");
+        let harness = spawn_agent_harness("claude --dangerously-skip-permissions").unwrap();
+        let msg = spawn_died_immediately_message(harness, status);
+        assert!(msg.contains("`claude`"), "names the proven harness: {msg}");
         assert!(
             !msg.contains("--dangerously-skip-permissions"),
             "never echoes flag values back — taught, not a raw command dump: {msg}"
@@ -10002,6 +10274,18 @@ mod tests {
         assert!(!nonce_is_replay(&tag, "n1"), "first use of a fresh (node, nonce) pair is never a replay");
         assert!(nonce_is_replay(&tag, "n1"), "the SAME pair, reused, is a replay");
         assert!(!nonce_is_replay(&tag, "n2"), "a DIFFERENT nonce for the SAME node tag is not a replay");
+    }
+
+    #[test]
+    fn nonce_is_replay_is_blind_to_letter_case_and_surrounding_space() {
+        // The signature folds the nonce (`canonical_string`), so the cache must
+        // fold it too: every spelling of one nonce is one nonce, and so is every
+        // spelling of one key.
+        let tag = unique_nonce("case-node");
+        assert!(!nonce_is_replay(&tag, "AbC123"), "the first spelling is recorded");
+        assert!(nonce_is_replay(&tag, "abc123"), "the lower-case spelling is the same nonce");
+        assert!(nonce_is_replay(&tag, " ABC123 "), "and surrounding space is not a new nonce");
+        assert!(nonce_is_replay(&tag.to_uppercase(), "abc123"), "and the key's case does not split the namespace");
     }
 
     // ── P-P5b (`node spawn`) — the real signed wire round trip ──────────────
@@ -11186,6 +11470,90 @@ mod tests {
         }
     }
 
+    /// The inject's positive proof: a target labelled `claude` whose walk names
+    /// no program, or names another launcher, is held as `unverified-wrap` and
+    /// nothing is written to it. A target the walk proves is delivered.
+    #[test]
+    fn a_target_the_walk_does_not_prove_is_held_and_a_proven_one_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-unverified-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        // Every label is `claude`; only the walked program differs.
+        let walks = [("proven-target", Some("claude")), ("none-target", None), ("taskset-target", Some("taskset"))];
+        let mut records = Vec::new();
+        let mut listeners = Vec::new();
+        for (id, walked) in walks {
+            let socket = aoide_conduct::graph::conduct_socket_path(id);
+            std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+            listeners.push((id, UnixListener::bind(&socket).unwrap()));
+            let mut rec = conductable_session(id, &socket);
+            rec.agent = "claude".to_string();
+            rec.wrapped_program = walked.map(str::to_string);
+            records.push(rec);
+        }
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".to_string(), sessions: records }).unwrap();
+        let audit_log = root.join("log");
+        let listener_for = |id: &str| listeners.iter().find(|(i, _)| *i == id).unwrap().1.try_clone().unwrap();
+
+        let acc = expect_delivery(listener_for("proven-target"), "the walk-proven harness target is DELIVERED");
+        let result = message_send(
+            &json!({ "message": { "parts": [{ "kind": "text", "text": "proven hello" }], "contextId": "proven-target" } }),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        );
+        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "proven hello\r");
+        assert_eq!(result.unwrap()["id"], "proven-target");
+
+        for id in ["none-target", "taskset-target"] {
+            let listener = listener_for(id);
+            listener.set_nonblocking(true).unwrap();
+            let held = message_send(
+                &json!({ "message": { "parts": [{ "kind": "text", "text": "held" }], "contextId": id } }),
+                &audit_log,
+                "",
+                "",
+                ConnOrigin::Loopback,
+                "",
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(held["status"]["state"], "submitted", "{held}");
+            assert!(listener.accept().is_err(), "`{id}` is never written to");
+        }
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("unverified-wrap"), "the refusal is named, never silent: {log}");
+        assert!(log.contains("is not proven to be its harness"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
     #[test]
     fn a_successfully_delivered_message_send_files_into_the_mailbase() {
         // Messaging plan P-M1: `do_inject` files no entry of its own (see its
@@ -11414,7 +11782,7 @@ mod tests {
         // The wrapper's own record, with a log that has already spoken — what
         // a hookless target's readiness is read off.
         let log = root.join("wrapper.log");
-        std::fs::write(&log, "no-such-agent$ ").unwrap();
+        std::fs::write(&log, "eidolon$ ").unwrap();
         let mut wrap = fixture_session(id, "idle", None);
         wrap.log_path = Some(log.to_string_lossy().into_owned());
         write_stage(
@@ -11427,7 +11795,7 @@ mod tests {
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
 
-        let expected = aoide_protocol::agents::CLAUDE_PROFILE.submit_key;
+        let expected = aoide_protocol::agents::agent_profile("eidolon").expect("a registered harness").submit_key;
         let acc = std::thread::spawn(move || {
             let mut conn = accept_one(&listener, "the opening turn's text-then-keystroke write");
             let mut text = Vec::new();
@@ -11444,8 +11812,8 @@ mod tests {
         });
 
         // A budget comfortably past the quiescence window the readiness wait
-        // uses for a target with no hook.
-        assert_eq!(spawn_inject_prompt(id, "no-such-agent", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this name");
+        // uses for a registered harness with no declarable fact (eidolon).
+        assert_eq!(spawn_inject_prompt(id, "eidolon", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this harness");
         let (text, submit, gap) = acc.join().unwrap();
         assert_eq!(String::from_utf8(text).unwrap(), "first turn", "the text, alone");
         assert_eq!(
@@ -11611,7 +11979,7 @@ mod tests {
         // the verdict is `not-ready`, and that is what the record ends on.
         opening_turn_worker(
             id.to_string(),
-            "no-such-agent".to_string(),
+            "eidolon".to_string(),
             "hi".to_string(),
             now_iso_utc(),
             Duration::from_millis(50),
@@ -11626,7 +11994,7 @@ mod tests {
         aoide_conduct::graph::stamp_opening_turn(id, "delivered");
         opening_turn_worker(
             id.to_string(),
-            "no-such-agent".to_string(),
+            "eidolon".to_string(),
             "hi".to_string(),
             now_iso_utc(),
             Duration::from_millis(50),
@@ -19343,6 +19711,383 @@ mod tests {
         let second_body: Value = serde_json::from_str(second.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(second_body["error"]["code"], -32009, "the same nonce twice is a replay: {second_body}");
 
+        adapter_cleanup(&root, saved);
+    }
+
+    /// The A2A door's own per-connection handler on a background thread: the
+    /// same `handle_connection` `serve` runs for each accepted socket. The
+    /// listener is bound before the thread starts, so a connect cannot race it.
+    fn raise_a2a_door(port: u16, audit_log: &Path) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let audit_log = audit_log.to_path_buf();
+        std::thread::spawn(move || {
+            let registry: &'static Registry = Box::leak(Box::new(full_card_registry()));
+            for stream in listener.incoming().flatten() {
+                let audit_log = audit_log.clone();
+                std::thread::spawn(move || {
+                    let _ = handle_connection(stream, "127.0.0.1", port, &audit_log, "", "", "box-a", None, Listener::A2a, registry);
+                });
+            }
+        });
+    }
+
+    fn epoch_now() -> i64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    }
+
+    /// The check every signed-answer socket test shares: the answer is HTTP
+    /// 200 and carries `X-Aoide-Answer-Signature`, and that signature verifies
+    /// under `key` for the request it answers. A stranger's key, and another
+    /// request's signature, both fail it.
+    fn assert_answer_signed_for(request: &[u8], answer: &str, key: &aoide_storage::identity::Keypair) {
+        use aoide_storage::wire_auth::{verify_answer, HEADER_ANSWER_SIGNATURE, HEADER_NONCE, HEADER_SIGNATURE};
+        use aoide_test_support::raw_header;
+
+        let request = String::from_utf8_lossy(request).to_string();
+        let request_signature = raw_header(&request, HEADER_SIGNATURE).unwrap();
+        let request_nonce = raw_header(&request, HEADER_NONCE).unwrap();
+        assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+        let answer_body = answer.split_once("\r\n\r\n").unwrap().1;
+        let answer_signature = raw_header(answer, HEADER_ANSWER_SIGNATURE).expect("a verified request's answer is signed");
+
+        let door = key.info().pubkey_hex;
+        assert!(
+            verify_answer(&door, &request_signature, &request_nonce, 200, answer_body.as_bytes(), &answer_signature),
+            "the door's own key verifies its answer"
+        );
+        let stranger = aoide_storage::identity::mint_ephemeral().unwrap().info().pubkey_hex;
+        assert!(!verify_answer(&stranger, &request_signature, &request_nonce, 200, answer_body.as_bytes(), &answer_signature));
+        assert!(
+            !verify_answer(&door, &"00".repeat(64), &request_nonce, 200, answer_body.as_bytes(), &answer_signature),
+            "another request's signature does not verify it"
+        );
+    }
+
+    #[test]
+    fn a_verified_mail_request_is_answered_signed_by_the_door_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-signed");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-signed"))), None);
+        let answer = send_raw(port, &request);
+
+        assert_answer_signed_for(&request, &answer, &kp);
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_verified_request_is_answered_signed_on_the_a2a_door_too() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-signed-a2a");
+        let port = free_loopback_port();
+        raise_a2a_door(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/no-such-method"}"#;
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("a2a-answer-signed"))), None);
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert!(answer_body.get("error").is_some(), "an unknown method is an error answer, and it is still signed: {answer}");
+        assert_answer_signed_for(&request, &answer, &kp);
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_tampered_request_gets_an_unsigned_refusal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-tampered");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let mut request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-tampered"))), None);
+        // The same length, with one byte of the body the signature covers changed.
+        let tampered = String::from_utf8(body.to_vec()).unwrap().replace("\"id\":1", "\"id\":9");
+        request.truncate(request.len() - body.len());
+        request.extend_from_slice(tampered.as_bytes());
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(answer_body["error"]["code"], -32007, "{answer_body}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_replayed_request_gets_an_unsigned_refusal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-replayed");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-replayed"))), None);
+
+        let first = send_raw(port, &request);
+        assert_answer_signed_for(&request, &first, &kp);
+
+        let second = send_raw(port, &request);
+        let second_body: Value = serde_json::from_str(second.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(second_body["error"]["code"], -32009, "{second_body}");
+        assert_eq!(aoide_test_support::raw_header(&second, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{second}");
+        adapter_cleanup(&root, saved);
+    }
+
+    /// The nonce is single-use in any letter case (relay-proof review, HIGH).
+    /// The signature folds a nonce's case, so a captured request whose nonce
+    /// header is upper-cased still verifies. The replay cache must key it the
+    /// same way, or that copy runs a second time with a signed answer.
+    #[test]
+    fn a_replayed_request_with_its_nonce_upper_cased_is_refused_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("nonce-case-replay");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let nonce = unique_nonce("NonceCase");
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None);
+        let first = send_raw(port, &request);
+        assert_answer_signed_for(&request, &first, &kp);
+
+        // The captured request, byte for byte, except the nonce header's case.
+        let replay = String::from_utf8(request.clone()).unwrap().replacen(
+            &format!("{}: {nonce}", aoide_storage::wire_auth::HEADER_NONCE),
+            &format!("{}: {}", aoide_storage::wire_auth::HEADER_NONCE, nonce.to_uppercase()),
+            1,
+        );
+        let second = send_raw(port, replay.as_bytes());
+        let second_body: Value = serde_json::from_str(second.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(second_body["error"]["code"], -32009, "the upper-cased copy is a replay: {second_body}");
+        assert_eq!(aoide_test_support::raw_header(&second, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{second}");
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn an_unsigned_request_and_the_card_carry_no_answer_signature() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-unsigned");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let unsigned = send_raw(port, &raw_request("127.0.0.1", "POST", "/", body, None, None));
+        assert_eq!(aoide_test_support::raw_header(&unsigned, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{unsigned}");
+
+        let card = send_raw(port, &raw_request("127.0.0.1", "GET", "/.well-known/agent-card.json", b"", None, None));
+        assert!(card.starts_with("HTTP/1.1 200"), "{card}");
+        assert_eq!(aoide_test_support::raw_header(&card, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{card}");
+        adapter_cleanup(&root, saved);
+    }
+
+    /// Only POST is a signed request: a signed GET is refused before it is
+    /// verified, so the door signs nothing about it. The unsigned card GET
+    /// is served as before, and it is never signed either.
+    #[test]
+    fn a_signed_get_is_refused_and_the_card_stays_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-card-signed");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let signed = send_raw(
+            port,
+            &raw_request(
+                "127.0.0.1",
+                "GET",
+                "/.well-known/agent-card.json",
+                b"",
+                Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-card-signed"))),
+                None,
+            ),
+        );
+        let refused: Value = serde_json::from_str(signed.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(refused["error"]["code"], -32007, "{signed}");
+        assert_eq!(aoide_test_support::raw_header(&signed, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{signed}");
+
+        let card = send_raw(port, &raw_request("127.0.0.1", "GET", "/.well-known/agent-card.json", b"", None, None));
+        assert!(card.starts_with("HTTP/1.1 200"), "{card}");
+        assert_eq!(aoide_test_support::raw_header(&card, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{card}");
+        adapter_cleanup(&root, saved);
+    }
+
+    /// Domain separation (relay-proof, review finding 3): a request whose method
+    /// is spelled `ANSWER` carries a valid signature over the `answer\0…`
+    /// form. It is refused before verification, so it spends no nonce: the
+    /// same nonce sent as a POST is then admitted and answered.
+    #[test]
+    fn a_signed_request_whose_method_is_answer_is_refused_before_verification() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-method-tag");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let nonce = unique_nonce("answer-method-tag");
+        let as_answer = send_raw(
+            port,
+            &raw_request("127.0.0.1", "ANSWER", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None),
+        );
+        let refused: Value = serde_json::from_str(as_answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(refused["error"]["code"], -32007, "{as_answer}");
+        assert_eq!(aoide_test_support::raw_header(&as_answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{as_answer}");
+
+        let post = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None);
+        let as_post = send_raw(port, &post);
+        assert_answer_signed_for(&post, &as_post, &kp);
+        adapter_cleanup(&root, saved);
+    }
+
+    /// A config-invalid answer to a verified mail request, whose charter is in
+    /// force but was never signed for this node (no `.sig`, no operator to decide
+    /// it): nothing governs the charter, so the taught word goes out UNSIGNED.
+    #[test]
+    fn a_config_invalid_answer_without_a_governing_charter_is_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_STATE_DIR",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_CONFIG",
+            "AOIDE_A2A_NODE_NAME",
+        ]);
+        let root = aoide_test_support::unique_tmp("answer-config-invalid");
+        charter_machine(&root, "receiver", "receiverbox");
+        // The receiver's own charter line is the key the request is signed under.
+        let line = aoide_storage::charter::node_line().unwrap();
+        let in_force = aoide_storage::charter::in_force_path("home");
+        std::fs::create_dir_all(in_force.parent().unwrap()).unwrap();
+        std::fs::write(&in_force, format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n")).unwrap();
+        // A declaration set that will not load: the mail methods read config-invalid.
+        std::fs::write(root.join("receiver").join("config.toml"), "[mesh.home.status]\nnobody = \"down\"\n").unwrap();
+        assert!(aoide_storage::charter::governing("home").is_none(), "nothing signed or trusted governs this charter");
+
+        let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &root.join("receiver").join("log"));
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request(
+            "127.0.0.1",
+            "POST",
+            "/",
+            body,
+            Some((&kp, "receiverbox", epoch_now(), &unique_nonce("answer-config-invalid"))),
+            Some("home"),
+        );
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(answer_body["result"]["reason"], "config-invalid", "{answer_body}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The config-invalid answer is UNSIGNED even when the charter is one the
+    /// operator signed and this node accepted. The config-invalid word only comes
+    /// from `config::load` failing, and `charter::governing` reads that same
+    /// config (its operator line) before it will name any charter, so no
+    /// config-invalid answer is ever made under a charter this node governs, and
+    /// the door never signs one. This pins both facts.
+    #[test]
+    fn a_config_invalid_answer_is_unsigned_even_under_an_accepted_charter() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_STATE_DIR",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_CONFIG",
+            "AOIDE_A2A_NODE_NAME",
+        ]);
+        let root = aoide_test_support::unique_tmp("answer-config-invalid-governed");
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let op_line = aoide_storage::charter::node_line().unwrap();
+        charter_machine(&root, "receiver", "receiverbox");
+        let receiver_line = aoide_storage::charter::node_line().unwrap();
+
+        charter_machine(&root, "operator", "opbox");
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{op_line}\n{receiver_line}\n"),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
+        let sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+
+        charter_machine(&root, "receiver", "receiverbox");
+        let config = root.join("receiver").join("config.toml");
+        std::fs::write(&config, format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator)).unwrap();
+        assert_eq!(aoide_storage::charter::accept(&bytes, &sig).unwrap().charter.version, 1);
+        std::fs::write(
+            &config,
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n\n[mesh.home.status]\nnobody = \"down\"\n", init.operator),
+        )
+        .unwrap();
+        assert!(aoide_storage::routing::declarations().is_err(), "the declarations will not load");
+        let refusal = aoide_storage::charter::governing_refusal("home").unwrap_err();
+        assert_eq!(refusal.reason, aoide_storage::charter::CONFIG_UNREADABLE, "governing reads the same unloadable config: {refusal:?}");
+
+        let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &root.join("receiver").join("log"));
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request(
+            "127.0.0.1",
+            "POST",
+            "/",
+            body,
+            Some((&kp, "receiverbox", epoch_now(), &unique_nonce("answer-config-invalid-accepted"))),
+            Some("home"),
+        );
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(answer_body["result"]["reason"], "config-invalid", "{answer_body}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The answer path only LOADS the box's identity. With no key on disk, a
+    /// verified request is answered unsigned, audited, and no key file appears.
+    /// The signer's key is a node on file with the key held only in memory.
+    #[test]
+    fn an_answer_with_no_identity_on_disk_is_unsigned_and_mints_no_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-no-identity");
+        let port = free_loopback_port();
+        let audit_log = root.join("log");
+        raise_mail_adapter(port, &audit_log);
+
+        let signer = aoide_storage::identity::mint_ephemeral().unwrap();
+        let mut node = fixture_node("box-b", "http://node/", false);
+        node.verified = true;
+        node.pubkey = Some(signer.info().pubkey_hex);
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let answer = send_raw(
+            port,
+            &raw_request("127.0.0.1", "POST", "/", body, Some((&signer, "box-b", epoch_now(), &unique_nonce("answer-no-identity"))), None),
+        );
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert!(answer_body.get("result").is_some(), "the request verified and was answered: {answer}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        assert!(!aoide_storage::identity::identity_dir().join("ed25519.key").exists(), "and the answer minted no key");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("a2a.answer-unsigned"), "the unsigned answer is audited: {log}");
         adapter_cleanup(&root, saved);
     }
 }

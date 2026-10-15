@@ -66,6 +66,11 @@ mod remote;
 // per-child at-most-once cursor in `state/stage/pingback.json`.
 mod pingback;
 mod permit;
+// The screen source of `awaiting` (`prompt.rs`'s module doc): the conducted pty's
+// last line against one closed table, once the output has gone quiet. `conduct.rs`
+// drives it from the multiplexer's tick and the ping-back's third source reads the
+// question it publishes.
+mod prompt;
 mod resurrect;
 mod send;
 mod session_store;
@@ -112,15 +117,19 @@ pub use self::conduct::conduct_socket_path;
 // the socket the doorbell will eventually write a nudge line onto — the
 // same way `conduct_socket_path` already crosses this boundary above.
 pub use self::conduct::channel_socket_path;
-// N1 (house rule 4): `aoide-server`'s A2A door reads the target record's own
-// WRAPPED-program shape before an inject — the same read the ping-back and
-// doorbell lanes make, re-exported for the same reason
-// `conduct_socket_path` above is. One predicate, three lanes, no copy.
-pub use self::conduct::wrapped_program_is_a_shell;
 // The same predicate, for the doors that hold an ARGV rather than a record:
 // `aoide-server`'s spawn arm refuses a `spawnAgent` that is a shell, and that
 // decision happens before any record exists.
 pub use self::conduct::program_is_a_shell;
+// The positive half of the same walk: the registered harness an argv runs, for
+// the door that spawns one and must prove what it spawned. Same walk, no copy.
+pub use self::conduct::wrapped_harness;
+// The one refusal every automatic reader makes (the ping-back, the doorbell's PTY
+// arm, the A2A door's inject), so the three cannot drift.
+pub use self::conduct::{auto_type_refusal, AutoTypeRefusal};
+// The screen episode's one clearing write (`question` and the `sudo` lock badge
+// together), shared by the session end, the reaper and the refresh writer.
+pub(crate) use self::model::clear_screen_ask;
 pub use self::doc::{build_graph, render, resolve_graph_document};
 // `mail ring` (P-M5a-2, MAIL.md "Delivery and the doorbell"): the ring
 // itself, callable in-process by any door that has this crate (the daemon
@@ -242,6 +251,9 @@ pub use self::spawn::command_basename;
 // bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
 // refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
 pub use self::common::clean_line;
+// `strip_ansi`: the one escape stripper, shared with `aoide-conductor`'s log tail
+// (`conductor/src/logtail.rs`) and the screen source's own line reader.
+pub use self::common::strip_ansi;
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a

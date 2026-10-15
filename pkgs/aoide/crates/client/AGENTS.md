@@ -693,11 +693,44 @@
   door that answers a word the sender was never taught parks a charter that
   already landed. A new outcome a door wants to report belongs in `data`, never
   as a fourth status.
-- **`settle_delivered`'s retire set is `receipt` and `charter`, and a letter
-  waits.** A receipt's deposit outcome is its confirmation; a `charter` letter
-  is applied rather than filed, so there is no mailbox on the far end to ack
-  from and its own outcome is the whole confirmation there can be. Widening
-  that set to letters would retire a letter on a delivery nobody acked.
+- **`settle_delivered`'s retire set is `receipt`, `charter` and `transit`, and
+  a letter waits.** A receipt's deposit outcome is its confirmation; a
+  `charter` letter is applied rather than filed, so there is no mailbox on the
+  far end to ack from and its own outcome is the whole confirmation there can
+  be; a `transit` container is the hub's custody, ended by the next hop's
+  acceptance. Widening that set to letters would retire a letter on a delivery
+  nobody acked. **Only a VERIFIED answer reaches it**: an unsigned, forged or
+  replayed `accepted` leaves all three kinds spooled.
+- **Every mail answer is verified before it is read.** `post_signed` is the one
+  path to a `SignedCall::Result`, and a node with no key on file is refused
+  before it is dialled (`keyed_record`). Do not add a mail call that parses a
+  response directly.
+- **A far end's words are cleaned where they are read out of its answer,
+  signed or not.** A signature says who spoke, never that the words are safe
+  for a terminal: a relay or a destination can be hostile and hold its own
+  key. `foreign_words` (the strip and clip of `aoide_protocol::untrusted`, in
+  one helper) is the only way a word of an answer reaches a stored outcome
+  (`last_outcome`, the link record), a poll's `Err`, a `PollOutcome` line or an
+  audit line (every `mail.answer.*` and `mail.poll.*` one, a container's
+  `msgid` and a refusal's `detail` included): clipped to `LINE_MAX` (200) for a
+  verified answer, and to `SAID_MAX` (120) for an unsigned one, which is also
+  labelled. An error that quotes the answer (a serde error naming a binding's
+  value) is a word of the answer and passes through it too. A node or mesh
+  name in a line is one this box's own declarations hold and validated, so it
+  is not one. Clean there, so every reader of a record this build writes is
+  safe at once; never format a raw body word, signed or not, into anything a
+  person will read. A record an older build wrote is not clean, so
+  `mail_wire::outcome_line` is the one reader of a stored outcome on the way
+  out: `mail outbox`, a send's `delivery` and the charter drain row print
+  through it. A word that is classified (`down`, `config-invalid`) is judged on
+  the raw string BEFORE it is cleaned, because stripping a format character can
+  turn one word into another.
+- **`drain_node` decides it has nothing to dial before the binding exchange.**
+  The exchange is a dial, and an unsigned answer to it is an audit line. The
+  daemon drains every node that ever had mail (its directory is never removed)
+  every few seconds, so above either check it would cost both on every tick:
+  the link's back-off, and `dialable_entries` (spooled, not parked, not held)
+  being empty. Keep every dial of a drain below both.
 - **`charter`'s handlers render; `aoide_storage::charter` acts (P-CHARTER).**
   The document, its validation, the five accept steps, the operator key, the
   trust record, the high-water mark and the spool all live in storage —
@@ -791,7 +824,14 @@
   node that does not; a box that can only receive must ask. Nothing about
   `drain_node`'s dial policy changes for it (a pass with nothing
   attemptable still dials nothing), and the sweep must never let one
-  node's `Err` stop the next. **A `poll` address is never dialled, and that
+  node's `Err` stop the next. **The relay is resolved in ONE place,
+  `poll_target` (stored record, else `charter_relay`); `poll_node` takes
+  its `PollTarget` and never resolves a relay itself, and a charter relay is
+  identity-checked by `relay_proves_charter_key` before any hand-over.** A
+  refusal is an `Err` of taught text, never `Ok` with zero filed. The one
+  silent answer left is `poll_through`'s early `Ok(default)` for a VERIFIED
+  record the charter declares `down`; a charter-only relay declared `down` is
+  refused taught by `charter_relay`. **A `poll` address is never dialled, and that
   is decided in ONE place: `spool_entry` computes the `hold` flavor itself
   from `node_store::Node::never_dialled`, so no caller can forget it (the
   ack path's literal `false` included), `drain_node` returns before the link

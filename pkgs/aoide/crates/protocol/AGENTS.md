@@ -75,6 +75,12 @@
   never disagree. `Registry::arrange` panics on a head nobody registers or one
   listed twice; a head left out of the layout is a failing test in the app
   crate (`registry_walk::every_head_is_sectioned`), not a silent "Other".
+- **Untrusted text has one table: `untrusted::is_unsafe`.** A crate that
+  prints, stores or echoes bytes a peer sent cleans them through
+  `untrusted` (`clean_line`, or `strip_unsafe` under a clip of its own) and
+  never writes a second filter. A character a terminal renders as nothing or
+  reads as an instruction is added to that table, once, and every caller
+  gets it.
 - **`door::run`'s `special` hook is the only sanctioned one-shot escape.**
   A binary that needs to bypass the generic `Outcome` envelope (raw stdout,
   a long-running server) adds a case to its own `special` closure — never a

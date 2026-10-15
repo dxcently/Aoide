@@ -26,7 +26,7 @@ session out of the box — no opt-in. The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
 (sharing a live parent) autogate each other too; and the reciprocal holds as
 well — a parent automatically hears the children it spawned, as the daemon's
-own one-line report off the child's trace or hook phase, never a prompted send. Headless conduct
+own one-line report off the child's trace, hook phase or screen, never a prompted send. Headless conduct
 (`--headless`, no controlling terminal at all), `spawn` (the detached
 launch command), and sender provenance (a delivered payload carries a `from
 <sender>: ` prefix) round out the no-terminal case without changing the core
@@ -75,7 +75,11 @@ central registry, no single point of failure):
    socket:      "…/session-<id>.sock"
    title:       "<chat title / current task>"
    origin:      "local"-class | "node:<name>"  (write-once; node:* only from the A2A door)
-   seal + sealedIssuedAt:  the daemon-sealed session credential (see [[Session-Graph]])
+   seal + sealedIssuedAt + sealedPidStarttime + sealedBootId:
+                           the daemon-sealed session credential, and the
+                           plaintext fields that protect a wrap (see
+                           [[Session-Graph]] and CONTRACTS.md's identity
+                           section)
 ```
 
 The wrap process is the natural owner: it already holds the `Child`, already
@@ -225,19 +229,23 @@ through.
   sibling-of-target ▸ else pending. The fourth is the daemon's own line,
   never a prompted send: child-of-target.
   - **Parent-of-target.** A send delivers without a prompt when the
-    sender's own session is the target session's `parentSessionId` — an
-    orchestrator freely commanding a child it spawned. Cross-tree or
-    unrelated sends stay pending. This is what makes conduct-by-default a
+    sender's own session is the target session's attested parent — its
+    `parentSessionId`, where its `attestedSpawner` names the same session —
+    an orchestrator freely commanding a child it spawned. Cross-tree or
+    unrelated sends stay pending. A bare `session start --parent` or a `graph
+    link` carries no spawn-time stamp, and moving an edge drops its stamp, so
+    either earns no autogate: the send is held pending. This is what makes conduct-by-default a
     real orchestration mesh: the parent of a subtree can drive it,
     strangers cannot. The sender's session is kernel-attested, never read
     off a forgeable env var: `aoide send` walks its own real `/proc`
     ancestry to a live session whose seal verifies against the daemon's
     current key (the sealed session credential, [[Session-Graph]]), and the
     decision is a pure, unit-tested predicate over that attested pair:
-    `sender_is_parent(sender, target_parent)`. `AOIDE_SESSION_ID` survives
+    `sender_is_parent(sender, attested_parent_of(target))`. `AOIDE_SESSION_ID` survives
     only as sender attribution (below), removed from every gate predicate.
   - **Sibling-of-target.** A send also delivers without a prompt when
-    sender and target are siblings — both parented under the SAME session,
+    sender and target are siblings — both attested under the SAME session (each side's `attestedSpawner` names
+    it),
     and that shared parent is itself still live (not `done`). The sender
     side of the pair is the same kernel-attested session the parent rule
     resolves. Sibling
@@ -247,7 +255,8 @@ through.
     sibling check ever runs — a session is trivially its own sibling on
     paper, and letting that through would let a prompt-injected send
     deliver text straight back into a session's own input stream, bypassing
-    approval. A dead/absent parent or a cross-tree pair stays gated.
+    approval. A dead/absent parent, a cross-tree pair, or an unstamped parent
+    edge on either side stays gated.
   - **Global switch.** `AOIDE_CONDUCT_AUTOGATE` in `{1,true,yes,all}`
     declares a box-wide orchestration mode where every send delivers.
   - **Child-of-target (reciprocal).** The three rules above gate a SEND —
@@ -314,6 +323,20 @@ through.
     `parentSessionId` is that wrap, and typing into it would be the child's
     own next prompt), and only over an edge the kernel attested — see
     `Session-Graph.md`'s "And the parent hears it".
+
+    A third source speaks for a conducted program with neither hooks nor a
+    trace (a `codex`, an `aider`, a REPL): the wrap itself, once its screen has
+    held a question still for three seconds (`[y/N]`, a password prompt,
+    `Press Enter`), tells its spawner —
+
+    ```
+    [codex <petname>] asking: "Apply patch? [y/N]"
+    ```
+
+    once per question while it stands, over the same attested spawner edge, with
+    the same delivery, skips and cursor file. A `sudo` password prompt is the human's and
+    is never announced. See `Session-Graph.md`, "Programs with no harness — the
+    screen".
   - **Remote-parent — the same relation across machines.** The A2A door's
     rule, not the local socket's, listed here because it answers the same
     question — is the sender this target's parent? — for the one send that

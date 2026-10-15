@@ -36,9 +36,10 @@
 //!    died (its record lingers `done`, and nothing here checks state), or a
 //!    pid hand-edited into `sessions.json`, names a process the seal was never
 //!    minted over;
-//! 2. the spawner is that wrap's `parentSessionId`, honoured only while it
-//!    equals the wrap's `attestedSpawner` — the parent `conduct` registration
-//!    saw in its own `/proc` ancestry (`window::spawner_is_attested`). A
+//! 2. the spawner is that wrap's `parentSessionId`, honoured only while
+//!    `attestedSpawner` names it. Only `conduct` registration writes that
+//!    stamp, from its own `/proc` ancestry (`window::spawner_is_attested`);
+//!    the hook door never attests, and a moved edge drops it. A
 //!    detached spawn that registers only after its spawner returned has lost
 //!    that ancestry and gets no stamp: it is silent, never guessed;
 //! 3. a spawner that is itself a conducted wrap (sealed) hears it directly; a
@@ -46,7 +47,9 @@
 //!    spawn`) is resolved to its own sealed host wrap by step 1.
 //!
 //! Anything else — an unattested edge, a spawner that resolves back to the
-//! child or its host — has no recipient and the child is not tracked.
+//! child or its host — has no recipient and the child is not tracked. A
+//! conducted wrap is never a child here: it is the host, so [`tracked`]
+//! refuses it whatever `hookAncestry` it carries.
 //!
 //! A hook record carries only `phase` and `updatedAt`, so the cursor remembers
 //! the phase it last examined: `awaiting` is heard on ENTERING that phase,
@@ -55,7 +58,7 @@
 //! stamp, so any new hook event re-arms it. The first examination of a child
 //! is a baseline only.
 
-use super::{clean, is_false, tracks, ChildClaim, CursorFile};
+use super::{clean, harness_tag, is_false, tracks, ChildClaim, CursorFile};
 use crate::graph::model::{canonical_state, HookRecord, SessionRecord};
 use aoide_protocol::agents::agent_profile;
 use aoide_storage::time::parse_iso_utc;
@@ -101,10 +104,13 @@ enum HookEvent {
 /// Is this roster record one the hook source may speak for? A local-parented,
 /// registered harness that is not an eidolon (its trace is the other source),
 /// not a remote-parented child (its events ride a ring), and not a shell, a
-/// sub-agent node or an app thread. Also what the cursor RETAINS an entry for.
+/// sub-agent node, an app thread or a conducted wrap. A wrap is the host a
+/// hook child runs under, never a hook child itself, so a chain stamped on a
+/// wrap routes nothing. Also what the cursor RETAINS an entry for.
 pub(super) fn tracked(rec: &SessionRecord) -> bool {
     !tracks(rec)
         && !rec.shell
+        && rec.conductable != Some(true)
         && rec.parent_session_id.as_deref().is_some_and(|p| !p.is_empty())
         && !matches!(rec.kind.as_deref(), Some("shell" | "subagent" | "app"))
         && agent_profile(&rec.agent).is_some()
@@ -135,6 +141,20 @@ fn recipient(
     sealed: &impl Fn(&SessionRecord) -> bool,
 ) -> Option<String> {
     let host = host_wrap(kid, roster, sealed)?;
+    spawner_of(host, &kid.session_id, roster, sealed)
+}
+
+/// Steps 2 and 3 of [`recipient`]: the spawner of a conducted `host` wrap,
+/// over the edge `host`'s registration attested, resolved to the conducted
+/// session that can be written to. Shared with the screen source
+/// (`prompt.rs`), whose child IS the wrap and so has no hook child to climb
+/// from. Never `kid_id` itself and never `host`.
+pub(super) fn spawner_of(
+    host: &SessionRecord,
+    kid_id: &str,
+    roster: &[SessionRecord],
+    sealed: &impl Fn(&SessionRecord) -> bool,
+) -> Option<String> {
     let spawner_id = host.parent_session_id.as_deref()?;
     if host.attested_spawner.as_deref() != Some(spawner_id) {
         return None;
@@ -145,7 +165,7 @@ fn recipient(
     } else {
         host_wrap(spawner, roster, sealed)?
     };
-    (target.session_id != kid.session_id && target.session_id != host.session_id)
+    (target.session_id != kid_id && target.session_id != host.session_id)
         .then(|| target.session_id.clone())
 }
 
@@ -162,10 +182,9 @@ pub(super) fn gather(
         .filter(|rec| tracked(rec))
         .filter_map(|rec| {
             let hook = hooks.iter().find(|h| h.session_id == rec.session_id)?;
-            let name = rec.petname.as_deref().filter(|p| !p.trim().is_empty()).unwrap_or(&rec.session_id);
             Some(HookChild {
                 id: rec.session_id.clone(),
-                tag: format!("[{} {}]", rec.agent, clean(name)),
+                tag: harness_tag(&rec.agent, rec.petname.as_deref(), &rec.session_id),
                 recipient: recipient(rec, roster, sealed)?,
                 phase: canonical_state(&hook.phase).to_string(),
                 at: hook.updated_at.clone(),
@@ -521,6 +540,29 @@ mod tests {
         let mut orphan = roster.clone();
         orphan[1].attested_spawner = None;
         assert!(gather(&orphan, &[hook("working")], &|_| true).is_empty(), "no attested recipient, nothing to claim");
+    }
+
+    /// A conducted wrap is never a hook child, whatever chain it carries. A
+    /// hook start that stamped `W`'s chain with its spawner's pid would make `P`
+    /// its host and `P`'s spawner `S` its recipient; nothing is routed.
+    #[test]
+    fn a_forged_chain_on_a_conducted_wrap_routes_no_ping_back() {
+        let mut roster = spawned_shape();
+        let mut s = session("S", "/w", "working", AT, None);
+        s.conductable = Some(true);
+        s.pid = Some(40);
+        roster[0].parent_session_id = Some("S".into());
+        roster[0].attested_spawner = Some("S".into());
+        roster[1].hook_ancestry = vec![999, 50, 1];
+        roster.push(s);
+        let hook = HookRecord {
+            session_id: "W".into(),
+            phase: "working".into(),
+            updated_at: AT.into(),
+            ..Default::default()
+        };
+        assert!(gather(&roster, &[hook], &|_| true).is_empty(), "no ping-back is routed for it");
+        assert!(!tracked(&roster[1]), "the wrap is not a hook child");
     }
 
     #[test]

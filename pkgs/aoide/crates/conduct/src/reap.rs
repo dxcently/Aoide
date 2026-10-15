@@ -705,8 +705,8 @@ fn orphaned_subagents(
 ///     pty log and a session that never ticked has none.)
 ///   * `state == "idle"` (the bare prompt) — never `working` (a live
 ///     foreground command, however quiet) or `awaiting` (a sudo prompt
-///     mid-conversation). Only a terminal doing NOTHING right now is even
-///     considered.
+///     or any other question on the screen, mid-conversation). Only a
+///     terminal doing NOTHING right now is even considered.
 ///   * `!exempt` (task #20, `aoide session grant exempt on|off`) — an agent
 ///     that wants ITS OWN spawned worker terminal safe from this arm marks
 ///     it after spawn; the veto holds banded AND waived alike, so `--now`
@@ -1577,6 +1577,14 @@ fn reap_inner(
         }
     }
 
+    // The reaper ends a record only once its process is dead.
+    // A protected live wrap (`identity::is_protected_live_wrap`) is spared
+    // whichever liveness signal (window, staleness, ghost) named it.
+    if !reaped.is_empty() {
+        let live_wraps = crate::graph::identity::live_sealed_wrap_ids(&s_file.sessions);
+        reaped.retain(|id| !live_wraps.contains(id));
+    }
+
     // The exempt idle spawned shells the waived arm just skipped — a human
     // gesture only (`spawned_shell_band.is_none()` iff `--now`); the
     // unattended pass reports nothing here (module doc's "Sweep
@@ -1717,6 +1725,10 @@ fn reap_inner(
     for s in s_file.sessions.iter_mut() {
         if dead.contains(s.session_id.as_str()) {
             s.state = "done".to_string();
+            // The episode ends with the record: no screen question or lock badge
+            // outlives `awaiting`. Task records are kept after done, so this is
+            // what they keep.
+            crate::graph::clear_screen_ask(s);
             // A managed task run reaped by liveness (never reaching its own
             // exit path) still gets an end instant and the honest `stopped`
             // outcome — but NO `exitCode`: there is no code to report, and an
@@ -3685,6 +3697,48 @@ mod tests {
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
         assert!(reaped.contains(&"worker".to_string()), "reaped: {reaped:?}");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The reaper's done write ends the screen's episode with the record: a task
+    /// run reaped by staleness is kept as history, and keeps neither the question
+    /// it held nor the lock badge beside it.
+    #[test]
+    fn a_reaped_task_record_keeps_no_question_or_lock_badge() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-done-clears-screen");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-done-clears-screen-xdg");
+
+        let log = stage.join("task.log");
+        std::fs::write(&log, b"$ the last thing that ever ran here\n").unwrap();
+        backdate(&log, REAP_SPAWNED_SHELL_STALE_SECS + 3600);
+
+        let mut rec = spawned_shell("task-run", "idle");
+        rec.log_path = Some(log.to_string_lossy().into_owned());
+        rec.task = Some("build-reports".to_string());
+        rec.question = Some("Overwrite? [y/N]".to_string());
+        rec.needs_sudo = Some(true);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".into(), sessions: vec![rec] },
+        )
+        .unwrap();
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let kept: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = kept.sessions.iter().find(|r| r.session_id == "task-run").expect("task record retained");
+        assert_eq!(rec.state, "done");
+        assert_eq!((rec.question.as_deref(), rec.needs_sudo), (None, None));
 
         let _ = std::fs::remove_dir_all(&stage);
     }

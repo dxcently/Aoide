@@ -173,7 +173,7 @@ fn run_curl_capped(
         }
     }
     drop(stdout_pipe);
-    let _ = child.wait(); // exit status was never checked before this fix either — %{http_code} below is the real signal
+    let exit = child.wait();
     let stdout = String::from_utf8_lossy(&buf);
     let (body, code_str) = match stdout.rsplit_once('\n') {
         Some((b, c)) => (b, c.trim()),
@@ -185,7 +185,17 @@ fn run_curl_capped(
     if code == 0 {
         return Err("could not reach the agent (connection failed or timed out)".to_string());
     }
-    Ok((code, body.to_string()))
+    // A status came back, but curl did not finish the transfer (the far side
+    // closed early, the clock ran out mid-body, its own size cap): the body is
+    // a fragment, so it is a transport failure and never an answer to read.
+    match exit {
+        Ok(status) if status.success() => Ok((code, body.to_string())),
+        Ok(status) => Err(format!(
+            "the answer was cut short (curl exit {}): the transfer did not complete",
+            status.code().map_or_else(|| "by signal".to_string(), |c| c.to_string())
+        )),
+        Err(_) => Err("curl failed (its exit could not be read)".to_string()),
+    }
 }
 
 // ── Outbound bearer presentation (task #84) ──────────────────────────────────
@@ -344,10 +354,43 @@ pub(crate) fn post_json_capped(
     timeout_secs: u64,
     max_bytes: usize,
 ) -> Result<(u16, String), String> {
+    post_json_args(url, body, bearer, extra_headers, timeout_secs, max_bytes, false)
+}
+
+/// [`post_json_capped`] that keeps the response's status line and headers:
+/// curl writes them ahead of the body, and [`parse_http_response`] splits them
+/// back out. A mail answer's signature header is read from here.
+pub(crate) fn post_json_answered(
+    url: &str,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    max_bytes: usize,
+) -> Result<HttpResponse, String> {
+    let (status, raw) = post_json_args(url, body, bearer, extra_headers, timeout_secs, max_bytes, true)?;
+    parse_http_response(status, &raw)
+}
+
+/// The one argv both POST shapes build. `include_head` adds `--include` (with
+/// `--suppress-connect-headers`, so a proxy's CONNECT head is never read as the
+/// answer); with `false` the argv is exactly the one `post_json_capped` always
+/// built.
+fn post_json_args(
+    url: &str,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    max_bytes: usize,
+    include_head: bool,
+) -> Result<(u16, String), String> {
     let header_args: Vec<String> = extra_headers.iter().flat_map(|(k, v)| ["-H".to_string(), format!("{k}: {v}")]).collect();
+    let head_args: &[&str] = if include_head { &["--include", "--suppress-connect-headers"] } else { &[] };
     match bearer {
         None => {
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
+            args.extend(head_args);
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["--data-binary", "@-", "--", url]);
             run_curl_capped(timeout_secs, max_bytes, &args, Some(body))
@@ -357,6 +400,7 @@ pub(crate) fn post_json_capped(
             let data_arg = scratch.arg();
             let header_line = format!("Authorization: Bearer {token}\n");
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
+            args.extend(head_args);
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["-H", "@-", "--data-binary", &data_arg, "--", url]);
             run_curl_capped(
@@ -369,8 +413,10 @@ pub(crate) fn post_json_capped(
     }
 }
 
-/// MCP needs response headers as well as the bounded body. Session headers and
-/// credentials use stdin; the shared curl runner remains the only spawn point.
+/// A response's status line, headers and bounded body. MCP reads its session
+/// headers from one, and every mail answer reads its signature header from one
+/// ([`post_json_to_node_answered`]). Session headers and credentials use stdin;
+/// the shared curl runner remains the only spawn point.
 pub(crate) struct HttpResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
@@ -409,12 +455,23 @@ pub(crate) fn request_json_with_headers(
     parse_http_response(status, &raw)
 }
 
+/// Split a response into its head and body at the FIRST blank line, whether
+/// that line ends in CRLF or bare LF. A CRLF boundary found later in the body
+/// must not win over an LF-only head that ends earlier.
+fn split_head(raw: &str) -> Option<(&str, &str)> {
+    let crlf = raw.find("\r\n\r\n").map(|at| (at, 4));
+    let lf = raw.find("\n\n").map(|at| (at, 2));
+    let (at, width) = match (crlf, lf) {
+        (Some(a), Some(b)) => if a.0 <= b.0 { a } else { b },
+        (a, b) => a.or(b)?,
+    };
+    Some((&raw[..at], &raw[at + width..]))
+}
+
 fn parse_http_response(status: u16, raw: &str) -> Result<HttpResponse, String> {
     let mut rest = raw;
     loop {
-        let (block, body) = rest.split_once("\r\n\r\n")
-            .or_else(|| rest.split_once("\n\n"))
-            .ok_or("HTTP response has no header boundary")?;
+        let (block, body) = split_head(rest).ok_or("HTTP response has no header boundary")?;
         let mut lines = block.lines();
         let status_line = lines.next().ok_or("HTTP response has no status line")?;
         let mut parts = status_line.split_whitespace();
@@ -433,7 +490,7 @@ fn parse_http_response(status: u16, raw: &str) -> Result<HttpResponse, String> {
         let mut headers = Vec::new();
         for line in lines {
             let (name, value) = line.split_once(':').ok_or("invalid HTTP response header")?;
-            headers.push((name.to_ascii_lowercase(), value.trim().to_string()));
+            headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
         }
         return Ok(HttpResponse { status, headers, body: body.to_string() });
     }
@@ -595,14 +652,33 @@ pub(crate) fn post_json_to_node_with_tunnel_key(
     tunnel_key: &str,
     cap_bytes: usize,
 ) -> Result<(u16, String), String> {
+    let dial_url = node_dial_url(node, tunnel_key)?;
+    post_json_capped(&dial_url, body, bearer, extra_headers, timeout_secs, cap_bytes)
+}
+
+/// [`post_json_to_node`] that keeps the response head (see
+/// [`post_json_answered`]), dialled the same way.
+pub(crate) fn post_json_to_node_answered(
+    node: &aoide_storage::node_store::Node,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+) -> Result<HttpResponse, String> {
+    let dial_url = node_dial_url(node, &node.name)?;
+    post_json_answered(&dial_url, body, bearer, extra_headers, timeout_secs, MAX_RESPONSE_BYTES)
+}
+
+/// The url a POST to `node` dials: `node.url` as its recorded `via` routes it,
+/// keyed by `tunnel_key`. The one resolution every node POST shares.
+fn node_dial_url(node: &aoide_storage::node_store::Node, tunnel_key: &str) -> Result<String, String> {
     let via = node
         .via
         .as_deref()
         .map(aoide_storage::tunnel::parse_via)
         .transpose()
         .map_err(|e| format!("node `{}`'s recorded via: {e}", node.name))?;
-    let dial_url = resolve_dial_url(&node.url, via.as_ref(), tunnel_key)?;
-    post_json_capped(&dial_url, body, bearer, extra_headers, timeout_secs, cap_bytes)
+    resolve_dial_url(&node.url, via.as_ref(), tunnel_key)
 }
 
 /// [`post_json_to_node`]'s own body, plus an explicit `via_override` that
@@ -1400,7 +1476,7 @@ pub fn send_message_to_node(
 /// this side — `aoide_conduct::graph::Frame` owns that shape), bounded by
 /// [`FRAME_MAX_RESPONSE_BYTES`]. The failure text is the peer's OWN bytes,
 /// verbatim: this is a transport, and the door that PRINTS it is the one that
-/// sanitizes it (`aoide_conduct::graph::common::clean_line`, one definition,
+/// sanitizes it (`aoide_protocol::untrusted::clean_line`, one definition,
 /// both doors) — a second sanitizer down here is how the two would drift.
 pub fn task_get_on_node(
     node: &aoide_storage::node_store::Node,
@@ -5032,14 +5108,6 @@ fn has_delivered_ack(base: &[aoide_storage::mail::Entry], to_node: &str, msgid: 
     })
 }
 
-fn non_empty(s: &str) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
-    }
-}
-
 /// `data.delivery`'s fixed shape — every branch fills all five fields so a
 /// caller never has to guess which are present for which status.
 fn delivery_shape(status: &str, reason: Option<String>, scope: Option<&str>, next_attempt_at: Option<&str>, ack_pending: bool) -> Value {
@@ -5103,7 +5171,7 @@ fn delivery_projection(
     link: Option<&aoide_storage::outbox::LinkState>,
 ) -> Value {
     if entry.refused {
-        return delivery_shape("refused", non_empty(&entry.last_outcome), Some("entry"), None, false);
+        return delivery_shape("refused", crate::mail_wire::outcome_line(&entry.last_outcome), Some("entry"), None, false);
     }
     if has_delivered_ack(base, node, &entry.envelope.msgid) {
         return delivery_shape("delivered", None, None, None, false);
@@ -5111,12 +5179,12 @@ fn delivery_projection(
     let accepted = matches!(entry.last_outcome.as_str(), "accepted" | "duplicate");
     if accepted {
         return match link {
-            Some(l) => delivery_shape("accepted", non_empty(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), true),
+            Some(l) => delivery_shape("accepted", crate::mail_wire::outcome_line(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), true),
             None => delivery_shape("accepted", None, None, None, true),
         };
     }
     if let Some(l) = link {
-        return delivery_shape("retrying", non_empty(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), false);
+        return delivery_shape("retrying", crate::mail_wire::outcome_line(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), false);
     }
     delivery_shape("queued", None, None, None, false)
 }
@@ -5815,7 +5883,7 @@ fn outbox_node_summary(entries: &[aoide_storage::outbox::OutboxEntry]) -> Value 
     let mut refused = 0u64;
     for e in entries {
         *tries_histogram.entry(e.tries.to_string()).or_insert(0) += 1;
-        let outcome_key = if e.last_outcome.is_empty() { "(none)".to_string() } else { e.last_outcome.clone() };
+        let outcome_key = crate::mail_wire::outcome_line(&e.last_outcome).unwrap_or_else(|| "(none)".to_string());
         *last_outcome_counts.entry(outcome_key).or_insert(0) += 1;
         if e.refused {
             refused += 1;
@@ -5887,7 +5955,7 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
                 "sealed": e.is_sealed(),
                 "tries": e.tries,
                 "lastTryAt": e.last_try_at,
-                "lastOutcome": e.last_outcome,
+                "lastOutcome": crate::mail_wire::outcome_line(&e.last_outcome).unwrap_or_default(),
                 "refused": e.refused,
                 "delivery": delivery,
             }));
@@ -6071,11 +6139,11 @@ fn handle_mail_outbox_retry(inv: &Invocation) -> Outcome {
 /// the filing and the acking are one implementation — never a second receive
 /// path.
 ///
-/// With an argument, that ONE node is dialed, and a node this box is not
-/// paired with is refused BEFORE any dial: `unknown-node` when the name means
-/// nothing here, `unpaired-node` when it is registered but never verified —
-/// the identical two refusals `mail send`'s node branch makes, by name, for
-/// the identical reason (a poll of a stranger is not a thing this box does).
+/// With an argument, that ONE node is dialed, and a node this box cannot poll
+/// is refused BEFORE any dial. A stored record that was never verified is
+/// `unpaired-node`, the refusal `mail send`'s node branch makes. A name with no
+/// record is polled through the charter's relay line, or refused taught —
+/// what, why, and the one fix — when no charter in force gives it a relay.
 /// With no argument, every node [`crate::mail_wire::pollable_nodes`] returns
 /// is asked in turn, oldest name first; one node's failure never stops the
 /// sweep — it is reported per node and the next one is still asked.
@@ -6091,18 +6159,22 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
     let named = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
 
     let nodes = aoide_storage::node_store::load_nodes();
+    let mesh_flag = inv.flags.get("mesh").map(String::as_str);
+    // The named node is refused BEFORE any dial when it cannot be polled: an
+    // unverified record is `unpaired-node`, and a name with no record is refused
+    // taught unless the charter in force gives it a relay ([`poll_target`]).
     let targets: Vec<String> = match &named {
-        Some(name) => {
-            match nodes.iter().find(|n| n.name == *name) {
-                None => return unknown_node(inv, cmd, name, &nodes, teach::Slot::Arg(0)),
-                Some(node) if !node.verified => return teach::not_paired(cmd, name, &node.url),
-                Some(_) => vec![name.clone()],
-            }
-        }
+        Some(name) => match nodes.iter().find(|n| n.name == *name) {
+            Some(node) if !node.verified => return teach::not_paired(cmd, name, &node.url),
+            Some(_) => vec![name.clone()],
+            None => match crate::mail_wire::poll_target(name, mesh_flag) {
+                Ok(_) => vec![name.clone()],
+                Err(refusal) => return refusal.into_outcome(cmd),
+            },
+        },
         None => crate::mail_wire::pollable_nodes(),
     };
 
-    let mesh_flag = inv.flags.get("mesh").map(String::as_str);
     let mut rows: Vec<Value> = Vec::new();
     let mut filed = 0usize;
     let mut refused_total = 0usize;
@@ -6203,7 +6275,9 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
             if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") },
             if busy == 0 { String::new() } else { format!(", {busy} busy (another poll of it is already running and does the asking)") },
             if not_dialled == 0 { String::new() } else { format!(", {not_dialled} not dialled (declared `down`)") },
-            if targets.len() > 1 { format!("\n  {}", results.join("\n  ")) } else { String::new() }
+            // Each node's own line, and for a single node whenever it was
+            // unreachable: the count alone would leave out why.
+            if targets.len() > 1 || unreachable > 0 { format!("\n  {}", results.join("\n  ")) } else { String::new() }
         )
     };
     Outcome::ok(cmd, message)
@@ -9588,6 +9662,25 @@ mod tests {
     /// the codebase's established dead-loopback-port fixture) — for tests
     /// that need `mail send`'s node branch to get PAST the verified check
     /// and actually attempt (and fail fast at) a real drain dial.
+    /// This test process's identity key: the key [`verified_node`] holds on file,
+    /// and the one [`spawn_fixed_answer_door`] signs its answers with.
+    fn own_test_key() -> aoide_storage::identity::Keypair {
+        aoide_storage::identity::load_or_mint().unwrap().0
+    }
+
+    /// The full HTTP answer a door sends to `request`, signed with `key` over the
+    /// status and the exact body, bound to the request's own signature and nonce.
+    fn signed_reply(request: &str, key: &aoide_storage::identity::Keypair, status: u16, body: &str) -> String {
+        use aoide_storage::wire_auth::{sign_answer, HEADER_ANSWER_SIGNATURE, HEADER_NONCE, HEADER_SIGNATURE};
+        let request_signature = aoide_test_support::raw_header(request, HEADER_SIGNATURE).expect("the request is signed");
+        let request_nonce = aoide_test_support::raw_header(request, HEADER_NONCE).expect("the request is signed");
+        let signature = sign_answer(key, &request_signature, &request_nonce, status, body.as_bytes());
+        format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{HEADER_ANSWER_SIGNATURE}: {signature}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
     fn verified_node(name: &str, url: &str) -> aoide_storage::node_store::Node {
         aoide_storage::node_store::Node {
             name: name.to_string(),
@@ -9596,7 +9689,7 @@ mod tests {
             token_file: None,
             bearer_secret: None,
             hub: false,
-            pubkey: None,
+            pubkey: Some(own_test_key().info().pubkey_hex),
             verified: true,
             grants: aoide_storage::node_store::grants_in("home", &["message"]),
             narrowed: aoide_storage::node_store::Grants::new(),
@@ -10025,14 +10118,39 @@ mod tests {
                 continue;
             }
             counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes());
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let _ = stream.write_all(signed_reply(&request, &own_test_key(), 200, &body).as_bytes());
         });
         (listener, port, seen)
+    }
+
+    /// The answered POST reads the head curl writes off a real socket: the
+    /// signature a door sends is in `headers`, and `body` is the answer.
+    #[test]
+    fn post_json_to_node_answered_reads_the_answer_header_off_a_real_socket() {
+        use std::io::{Read, Write};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _root = aoide_test_support::isolated_mail_root("answer-header-socket");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else { return };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Aoide-Answer-Signature: abcd\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            );
+        });
+
+        let node = verified_node("relay", &format!("http://127.0.0.1:{port}/"));
+        let answer = post_json_to_node_answered(&node, "{}", None, &[], 5).unwrap();
+        assert_eq!(answer.status, 200);
+        assert_eq!(answer.body, "{}");
+        assert!(
+            answer.headers.contains(&("x-aoide-answer-signature".to_string(), "abcd".to_string())),
+            "the header survives curl's --include: {:?}",
+            answer.headers
+        );
     }
 
 
@@ -10093,6 +10211,177 @@ mod tests {
         assert!(results.iter().any(|l| l.starts_with("aaa: refused")), "{results:?}");
         assert!(results.iter().any(|l| l.starts_with("bbb: polled")), "{results:?}");
         assert!(said(&out).contains("results:\n    aaa: refused"), "the text render lists every node: {}", said(&out));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **One unreachable node says why.** A relay that answers unsigned leaves
+    /// a poll of it unreachable, and the operator must see the reason: the
+    /// count alone gave them nothing to act on.
+    #[test]
+    fn mail_poll_of_one_unreachable_node_says_why() {
+        use std::io::{Read, Write};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-one-unreachable");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let body = r#"{"jsonrpc":"2.0","id":1,"result":{"envelopes":[]}}"#;
+            while let Ok((mut stream, _)) = listener.accept() {
+                let _ = stream.read(&mut [0u8; 4096]);
+                let _ = stream.write_all(
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes(),
+                );
+            }
+        });
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+
+        let out = handle_mail_poll(&mail_inv(&["mail", "poll"], &["relay"]));
+        let text = said(&out);
+        assert!(text.contains("1 unreachable"), "{text}");
+        assert!(
+            text.contains("relay: unreachable — `relay` answered `aoide/mailPoll` with no answer signature"),
+            "the one node's reason is in the text: {text}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A far end's words as a hostile one plants them: a carriage return that
+    /// overwrites the line, a screen clear, a window-title escape with its bell,
+    /// a bidi override, and then 10 KB.
+    fn hostile_words() -> String {
+        format!("over\rwritten \u{1b}[2J\u{1b}]0;title\u{7}cleared \u{202e}desrever {}", "x".repeat(10_000))
+    }
+
+    /// `text` is safe to print as it stands: apart from its own line breaks,
+    /// nothing a terminal obeys, and nowhere near the 10 KB a far end sent.
+    fn assert_printable(text: &str) {
+        let flat = text.replace('\n', " ");
+        assert!(!flat.chars().any(aoide_protocol::untrusted::is_unsafe), "a control, escape or bidi character reached the operator: {flat:?}");
+        assert!(text.chars().count() < 1_500, "clipped, not 10 KB: {} characters", text.chars().count());
+    }
+
+    /// **`mail outbox` prints a signed refusal's words inert.** A relay that
+    /// holds its own key can sign any words, and the entry's `last_outcome` and
+    /// the link record it answered with are what `mail outbox` prints. The text
+    /// and the JSON both carry them cleaned and clipped.
+    #[test]
+    fn mail_outbox_prints_a_signed_refusals_words_inert() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-hostile-words");
+        let body = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": { "status": "refused", "reason": "down", "detail": hostile_words() }
+        })
+        .to_string();
+        let (_listener, port, _hits) = spawn_fixed_answer_door(body);
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "relay", "bob", "hi").unwrap();
+        aoide_storage::outbox::write_entry("relay", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
+
+        crate::mail_wire::drain_node("relay").unwrap();
+
+        let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &["relay"]));
+        let text = said(&out);
+        assert!(text.contains("reason refused: down: overwritten [2J]0;titlecleared desrever x"), "the reason is shown, cleaned: {text}");
+        assert_printable(&text);
+        let row = &out.data.as_ref().unwrap()["entries"][0];
+        assert_printable(row["lastOutcome"].as_str().unwrap());
+        assert_printable(row["delivery"]["reason"].as_str().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **`mail outbox` prints what an older build stored raw inert.** A build
+    /// before a far end's words were cleaned where they are read kept them as
+    /// they came, in an entry's `last_outcome` and in a node's `link.json`, and
+    /// those files are still on disk. Cleaning is not at the store alone: the
+    /// text, the rows, the `delivery` projection and the summary's keys all
+    /// print through the same reader, and the file itself is left as found.
+    #[test]
+    fn mail_outbox_cleans_an_outcome_an_older_build_stored_raw() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-legacy-raw");
+        let raw = format!("refused: {}", hostile_words());
+        let mut parked = aoide_storage::outbox::OutboxEntry::fresh(
+            aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "parked").unwrap(),
+        );
+        parked.refused = true;
+        parked.tries = 1;
+        parked.last_outcome = raw.clone();
+        aoide_storage::outbox::write_entry("peer-node", &parked).unwrap();
+        let waiting = aoide_storage::mail::mint_outbound_letter("here", "other-node", "bob", "waiting").unwrap();
+        aoide_storage::outbox::write_entry("other-node", &aoide_storage::outbox::OutboxEntry::fresh(waiting)).unwrap();
+        aoide_storage::outbox::back_off("other-node", 1_700_000_000, &raw).unwrap();
+
+        let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
+
+        let text = said(&out);
+        assert_eq!(text.matches("reason refused: overwritten [2J]0;titlecleared desrever x").count(), 2, "both reasons are shown, cleaned: {text}");
+        assert_printable(&text);
+        let data = out.data.as_ref().unwrap();
+        let rows = data["entries"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        for row in rows {
+            assert_printable(row["delivery"]["reason"].as_str().unwrap());
+        }
+        let parked_row = rows.iter().find(|row| row["node"] == "peer-node").unwrap();
+        assert_printable(parked_row["lastOutcome"].as_str().unwrap());
+        assert_eq!(parked_row["delivery"]["reasonScope"], "entry");
+        let link_row = rows.iter().find(|row| row["node"] == "other-node").unwrap();
+        assert_eq!(link_row["delivery"]["reasonScope"], "link");
+        for summary in data["summary"].as_object().unwrap().values() {
+            for outcome in summary["lastOutcomeCounts"].as_object().unwrap().keys() {
+                assert_printable(outcome);
+            }
+        }
+        assert_eq!(
+            aoide_storage::outbox::list_entries("peer-node").unwrap()[0].last_outcome,
+            raw,
+            "the stored record is not rewritten: only what is printed is cleaned"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **`mail poll` prints a signed answer's words inert.** The relay's own
+    /// refusal of the poll (the refusal's `what` and the node's row), a
+    /// `withheld` entry, and a JSON-RPC error that leaves the node unreachable
+    /// (the line F2 added to the text) are all a far end's words, signed or not.
+    #[test]
+    fn mail_poll_prints_a_signed_answers_words_inert() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-hostile-words");
+        let hostile = hostile_words();
+        let poll = |body: String| {
+            let (listener, port, _hits) = spawn_fixed_answer_door(body);
+            aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+            (handle_mail_poll(&mail_inv(&["mail", "poll"], &["relay"])), listener)
+        };
+        let result = |result: Value| json!({ "jsonrpc": "2.0", "id": 1, "result": result }).to_string();
+
+        // The relay refuses the poll itself.
+        let (out, _door) = poll(result(json!({ "status": "refused", "reason": "down", "detail": hostile })));
+        assert_eq!(status_of(&out), aoide_protocol::output::Status::Error, "{out:?}");
+        assert!(out.message.starts_with("overwritten [2J]0;titlecleared desrever x"), "{}", out.message);
+        assert_printable(&out.message);
+        assert_printable(&said(&out));
+        assert_printable(out.data.as_ref().unwrap()["nodes"][0]["reason"].as_str().unwrap());
+
+        // It withholds an entry.
+        let (out, _door) = poll(result(json!({ "withheld": [{ "msgid": hostile, "reason": hostile, "detail": hostile }] })));
+        assert_eq!(status_of(&out), aoide_protocol::output::Status::Ok, "{out:?}");
+        assert_printable(&said(&out));
+        let line = out.data.as_ref().unwrap()["nodes"][0]["withheld"][0].as_str().unwrap().to_string();
+        assert!(line.starts_with("overwritten [2J]0;titlecleared desrever x"), "{line}");
+        assert_printable(&line);
+
+        // It answers with a JSON-RPC error, which leaves it unreachable.
+        let (out, _door) = poll(json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": hostile } }).to_string());
+        let text = said(&out);
+        assert!(text.contains("relay: unreachable — overwritten [2J]0;titlecleared desrever x"), "{text}");
+        assert_printable(&text);
+        assert_printable(out.data.as_ref().unwrap()["nodes"][0]["reason"].as_str().unwrap());
+        for line in out.data.as_ref().unwrap()["results"].as_array().unwrap() {
+            assert_printable(line.as_str().unwrap());
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -10290,7 +10579,8 @@ mod tests {
 
         let unknown = handle_mail_poll(&mail_inv(&["mail", "poll"], &["stranger"]));
         assert_eq!(unknown.status, aoide_protocol::output::Status::Error);
-        assert_eq!(unknown.data.unwrap()["reason"], "unknown-node");
+        let why = unknown.data.as_ref().and_then(|d| d["refusal"]["why"].as_str()).unwrap_or_default();
+        assert!(why.contains("charter") && why.contains("pair"), "a taught refusal names the charter and the pair record: {why}");
         assert!(unknown.message.contains("stranger"), "{}", unknown.message);
 
         let unpaired = handle_mail_poll(&mail_inv(&["mail", "poll"], &["half-paired"]));
@@ -11310,6 +11600,50 @@ mod mcp_http_tests {
         assert_eq!(response.body, "{\"result\":\"body: value\"}");
         assert!(parse_http_response(200, "HTTP/1.1 403 Forbidden\r\n\r\ndenied").is_err());
         assert!(parse_http_response(200, "{\"missing\":\"headers\"}").is_err());
+    }
+
+    /// The answer signature a door attaches comes through the parse whatever the
+    /// case of its name, the spacing around its value, the HTTP version, or an
+    /// interim 1xx head ahead of it; an answer without it parses to no header.
+    #[test]
+    fn parse_http_response_keeps_the_answer_signature_header() {
+        let signature = |r: &HttpResponse| r.headers.iter().find(|(n, _)| n.as_str() == "x-aoide-answer-signature").map(|(_, v)| v.clone());
+
+        let plain = parse_http_response(200, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Aoide-Answer-Signature:   abcd  \r\nConnection: close\r\n\r\n{\"result\":{}}").unwrap();
+        assert_eq!(signature(&plain).as_deref(), Some("abcd"));
+        assert_eq!(plain.body, "{\"result\":{}}", "the body is exactly what follows the blank line");
+
+        let http2 = parse_http_response(200, "HTTP/2 200\r\nx-aoide-answer-signature: abcd\r\n\r\n{}").unwrap();
+        assert_eq!(signature(&http2).as_deref(), Some("abcd"));
+
+        let interim = parse_http_response(200, "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nX-AOIDE-Answer-Signature: abcd\r\n\r\n{}").unwrap();
+        assert_eq!(signature(&interim).as_deref(), Some("abcd"));
+        assert_eq!(interim.body, "{}");
+
+        let unsigned = parse_http_response(200, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}").unwrap();
+        assert_eq!(signature(&unsigned), None, "no header means no signature, and the parse does not invent one");
+    }
+
+    #[test]
+    fn parse_http_response_trims_header_names_and_splits_an_lf_only_head() {
+        // A name padded before its colon is the same header, and a head ending in
+        // bare LF splits there, as a CRLF one does.
+        let padded = parse_http_response(200, "HTTP/1.1 200 OK\r\nX-Aoide-Answer-Signature : abcd\r\n\r\n{}").unwrap();
+        assert!(padded.headers.iter().any(|(n, v)| n == "x-aoide-answer-signature" && v == "abcd"), "{:?}", padded.headers);
+
+        let lf_only = parse_http_response(200, "HTTP/1.1 200 OK\nx-aoide-answer-signature: abcd\n\n{\"result\":{}}").unwrap();
+        assert!(lf_only.headers.iter().any(|(n, v)| n == "x-aoide-answer-signature" && v == "abcd"));
+        assert_eq!(lf_only.body, "{\"result\":{}}");
+    }
+
+    #[test]
+    fn parse_http_response_ends_the_head_at_its_first_blank_line_not_one_in_the_body() {
+        // The body carries a CRLF blank line of its own. The head ends at the
+        // LF-only blank line that comes first, so the body is kept whole.
+        let raw = "HTTP/1.1 200 OK\nx-aoide-answer-signature: abcd\n\n{\"a\":\"x\r\n\r\ny\"}";
+        let answer = parse_http_response(200, raw).unwrap();
+        assert_eq!(answer.body, "{\"a\":\"x\r\n\r\ny\"}", "the body is exactly the bytes after the head");
+        assert!(answer.headers.iter().any(|(n, v)| n == "x-aoide-answer-signature" && v == "abcd"));
     }
 
     // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).

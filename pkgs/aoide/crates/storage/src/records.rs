@@ -163,16 +163,6 @@ pub struct RestoreSnapshot {
     /// capture) or when `/proc` is unreadable.
     #[serde(default)]
     pub argv: Option<Vec<String>>,
-    /// The reconstructed unsubmitted prompt line — REFUSAL-based, never a
-    /// guess: `Some` only for a clean, unedited keystroke run since the last
-    /// submit; any readline-editing byte (an escape sequence, `^R`, Tab,
-    /// `^U`/`^W`) or invalid UTF-8 poisons it to `None` instead. Only ever
-    /// populated when `idle` is true — a shell mid-command has no prompt
-    /// line to reconstruct. A silently WRONG `typed` would put text the
-    /// operator never composed one keystroke from running; `None` is a
-    /// fully acceptable product of this capture, a guess is not.
-    #[serde(default)]
-    pub typed: Option<String>,
 }
 
 /// A REMOTE parent: the session that spawned this one ACROSS machines — the
@@ -237,12 +227,25 @@ pub struct SessionRecord {
     /// (ping-back, the doorbell's PTY arm, the A2A door) must be able to tell
     /// a shell from a harness wrap without having been there at spawn time,
     /// and a line submitted into a shell runs as a command. Written by
-    /// `stamp_shell` on both registration arms, so re-registering an id as
+    /// `stamp_wrap` on both registration arms, so re-registering an id as
     /// `-- bash` sets it and re-registering it as a harness clears it.
     /// `false` is skipped, so every record written before this field existed
     /// stays byte-identical.
     #[serde(default, skip_serializing_if = "is_false")]
     pub shell: bool,
+    /// The program the conduct launcher walk resolved the wrapped argv to, by
+    /// basename (`claude` for `aoide spawn -- env claude`), stamped at the same
+    /// registration as `shell`. A launcher the walk does not model names itself
+    /// (`taskset -c 0 claude` is `taskset`). Absent when the walk names no program
+    /// at all: `script` (a shell whatever its argv), `su`, a `nix` form without a
+    /// `-c` payload, and any form the launcher's option table refuses (`env -S`, or
+    /// an option the table does not list). The automatic readers type into a wrap
+    /// only when its program is the harness its agent names
+    /// (`conduct.rs::auto_type_refusal`, which asks `is_its_harness`), so an absent
+    /// or foreign name is never typed into. `skip_serializing_if` keeps every older
+    /// record identical.
+    #[serde(rename = "wrappedProgram", default, skip_serializing_if = "Option::is_none")]
+    pub wrapped_program: Option<String>,
     #[serde(rename = "startedAt", default)]
     pub started_at: String,
     #[serde(
@@ -378,10 +381,11 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub context_ceiling: Option<u64>,
-    /// True while this conducted SHELL is blocked at a `sudo` password prompt
-    /// — detected by conduct's PTY tick (the foreground process is `sudo`, or
-    /// the `[sudo] password for` text was just seen crossing master→stdout)
-    /// and force-published alongside `state:"awaiting"`. Additive/v0-safe:
+    /// True while this conducted program is blocked at a `sudo` password
+    /// prompt — detected by conduct's PTY tick (a shell's foreground process
+    /// is `sudo` with no children, or the screen has gone quiet on the
+    /// `[sudo] password for` row of `graph/prompt.rs`'s table) and
+    /// force-published alongside `state:"awaiting"`. Additive/v0-safe:
     /// absent on a legacy record and cleared back to `None` (never written as
     /// `Some(false)`) the moment the prompt clears — so the key disappears
     /// rather than lingering false. Agents are hook-driven and never set this.
@@ -390,6 +394,18 @@ pub struct SessionRecord {
     /// agent's.
     #[serde(rename = "needsSudo", default, skip_serializing_if = "Option::is_none")]
     pub needs_sudo: Option<bool>,
+    /// The line a conducted program is waiting on while `state` is `awaiting`
+    /// off its SCREEN: the pty's last non-empty line, sanitised and capped at
+    /// 80 characters, set by conduct's tick when output has been quiet on a
+    /// row of the prompt table (`aoide-conduct`'s `graph/prompt.rs`) and cleared
+    /// the moment it is answered or the output moves on. It is the only screen
+    /// text kept anywhere. Written only for a wrap whose harness reports
+    /// through neither hooks nor a trace — never over a hook phase — and read
+    /// by the ping-back's third source, which quotes it to the attested
+    /// spawner. Additive/v0-safe: absent on a legacy record and on every
+    /// session that is not asking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
     /// Absolute path to the pty-master transcript of an `aoide conduct`
     /// session (`state/sessions/<sessionId>.log`, CONTRACTS.md §4) — raw bytes,
     /// append-only, unrotated. Stamped right after `do_session_start` by
@@ -537,10 +553,11 @@ pub struct SessionRecord {
     /// spawner_is_attested`): the claimed parent's pid, or an agent's
     /// `hookAncestry`, was really above the registering process in `/proc`.
     /// A birth fact stamped beside `headless`/`spawned`, holding the id itself
-    /// rather than a flag so a later `session start --parent <other>` — which
-    /// rewrites `parentSessionId` on an existing id without any evidence —
-    /// can never inherit it: a reader trusts the edge only while
-    /// `attestedSpawner == parentSessionId`. It is how a detached spawn's edge
+    /// rather than a flag: a reader trusts the edge only while
+    /// `attestedSpawner == parentSessionId`. Every writer of `parentSessionId`
+    /// goes through [`SessionRecord::set_parent_session`], which drops the
+    /// stamp whenever the edge moves, so a later rewrite can never inherit it.
+    /// It is how a detached spawn's edge
     /// (`aoide spawn` leaves its child reparented to init, so no live `/proc`
     /// walk can re-derive it) stays checkable later; the ping-back's hook
     /// source speaks only for such an edge. Absent for every unconfirmed
@@ -621,8 +638,8 @@ pub struct SessionRecord {
     /// - `busy` — the door's opening-turn worker pool was full (nothing was
     ///   typed; ask again);
     /// - `no-worker` — no worker thread could be started (nothing was typed);
-    /// - `skipped-empty` / `skipped-shell` — nothing to type, or a shell may
-    ///   not be typed at;
+    /// - `skipped-*` — nothing typed; the verdicts and their reasons are listed
+    ///   once, in `CONTRACTS.md`;
     /// - `no-socket` / `write-failed` — the target's control socket never
     ///   answered, or the write failed (no receipt filed in either case);
     /// - `unknown` — the process that owed a verdict died before it could
@@ -703,6 +720,28 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub sealed_issued_at: Option<i64>,
+    /// The `pidStarttime` the seal was minted over, in plain text, written in
+    /// the same call as `seal`. `identity::is_protected_live_wrap` reads this
+    /// value, not the signature, together with `sealedBootId`. It is not
+    /// authenticated: any same-uid writer of `sessions.json` can set or clear
+    /// it. Absent on every record sealed before this field existed, and such a
+    /// record is never protected (no backfill).
+    #[serde(
+        rename = "sealedPidStarttime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sealed_pid_starttime: Option<u64>,
+    /// The kernel's boot id at seal time (`attest::boot_id`), written in the
+    /// same call. A starttime counts ticks since boot, so a record sealed in an
+    /// earlier boot is never protected. Absent when no boot id was readable at
+    /// seal time, and such a record is never protected either.
+    #[serde(
+        rename = "sealedBootId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sealed_boot_id: Option<String>,
     /// Set by `stamp_seal` the first time a seal lands, and never cleared: the
     /// daemon never mints a seal over a record that has EVER carried one, so a
     /// seal that goes missing (hand edit, a bug) can never be laundered into a
@@ -711,7 +750,7 @@ pub struct SessionRecord {
     pub ever_sealed: Option<bool>,
     /// Additive/v0-safe (P-C5, durable-sessions plan): a conducted SHELL's
     /// continuously-captured restore snapshot (`RestoreSnapshot`, above) —
-    /// cwd/idle/argv/typed off the PTY tick. Absent for every non-shell
+    /// cwd/idle/argv off the PTY tick. Absent for every non-shell
     /// session and every legacy record predating this field; readers must
     /// tolerate both forms and round-trip fields they do not know.
     /// Consumed internally (`doc.rs::ledger_session_exit`'s projection into
@@ -751,6 +790,19 @@ pub struct SessionRecord {
     pub native_role: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+impl SessionRecord {
+    /// Move the local parent edge. An attested stamp names the parent it was
+    /// minted for, so the stamp moves with the edge: any change of parent,
+    /// including to none, drops it. A stamp left behind would revive the
+    /// autogate the moment the edge was set back to that id.
+    pub fn set_parent_session(&mut self, parent: Option<String>) {
+        if self.parent_session_id != parent {
+            self.attested_spawner = None;
+            self.parent_session_id = parent;
+        }
+    }
 }
 
 /// One hook record (`state/stage/hooks.json`, written by shellbridge).
@@ -1159,6 +1211,23 @@ mod tests {
         assert_eq!(legacy.needs_sudo, None);
     }
     #[test]
+    fn session_record_question_round_trips_and_stays_absent_when_unset() {
+        let rec = SessionRecord {
+            session_id: "s".into(),
+            question: Some("Overwrite? [y/N]".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"question\":\"Overwrite? [y/N]\""), "serialised: {json}");
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.question.as_deref(), Some("Overwrite? [y/N]"));
+
+        let bare = serde_json::to_string(&SessionRecord { session_id: "s".into(), ..Default::default() }).unwrap();
+        assert!(!bare.contains("question"), "serialised: {bare}");
+        let legacy: SessionRecord = serde_json::from_str(r#"{ "sessionId": "s" }"#).unwrap();
+        assert_eq!(legacy.question, None);
+    }
+    #[test]
     fn session_record_context_tokens_round_trips_and_stays_absent_when_unset() {
         // serde: `contextTokens` serialises as an integer when Some, and is
         // skipped (skip_serializing_if) when None — additive/v0-safe on the
@@ -1443,6 +1512,34 @@ mod tests {
         assert_eq!(legacy.seal, None);
     }
     #[test]
+    fn session_record_sealed_identity_fields_round_trip_and_stay_absent_when_unset() {
+        let rec = SessionRecord {
+            session_id: "s".into(),
+            sealed_pid_starttime: Some(4_242),
+            sealed_boot_id: Some("boot".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"sealedPidStarttime\":4242"), "serialised: {json}");
+        assert!(json.contains("\"sealedBootId\":\"boot\""), "serialised: {json}");
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.sealed_pid_starttime, Some(4_242));
+        assert_eq!(back.sealed_boot_id.as_deref(), Some("boot"));
+
+        let bare = SessionRecord {
+            session_id: "s".into(),
+            ..Default::default()
+        };
+        let bare_json = serde_json::to_string(&bare).unwrap();
+        assert!(!bare_json.contains("sealedPidStarttime"), "serialised: {bare_json}");
+        assert!(!bare_json.contains("sealedBootId"), "serialised: {bare_json}");
+        let legacy: SessionRecord =
+            serde_json::from_str(r#"{ "sessionId": "s", "seal": "ab", "sealedIssuedAt": 1 }"#)
+                .unwrap();
+        assert_eq!(legacy.sealed_pid_starttime, None);
+        assert_eq!(legacy.sealed_boot_id, None);
+    }
+    #[test]
     fn session_record_petname_round_trips_and_stays_absent_when_unset() {
         // serde: `petname` serialises as a string when set, and is skipped
         // (skip_serializing_if) when None — additive/v0-safe on the wire,
@@ -1531,11 +1628,10 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: true,
             argv: None,
-            typed: Some("cargo test -p aoide-conduct".into()),
         });
         let json = serde_json::to_string(&rec).unwrap();
         assert!(json.contains("\"restore\":{"), "serialised: {json}");
-        assert!(json.contains("\"typed\":\"cargo test -p aoide-conduct\""), "serialised: {json}");
+        assert!(json.contains("\"cwd\":\"/home/khoa/Aoide\""), "serialised: {json}");
         let back: SessionRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(back.restore, rec.restore);
 
@@ -1550,5 +1646,24 @@ mod tests {
         let legacy: SessionRecord =
             serde_json::from_str(r#"{ "sessionId": "s", "windowAddress": "0x1" }"#).unwrap();
         assert_eq!(legacy.restore, None);
+    }
+
+    #[test]
+    fn set_parent_session_drops_the_stamp_on_every_move() {
+        let mut rec = SessionRecord {
+            parent_session_id: Some("p".into()),
+            attested_spawner: Some("p".into()),
+            ..Default::default()
+        };
+        rec.set_parent_session(Some("p".into()));
+        assert_eq!(rec.attested_spawner.as_deref(), Some("p"), "the same edge keeps its stamp");
+        rec.set_parent_session(Some("q".into()));
+        assert_eq!(rec.attested_spawner, None, "a moved edge drops its stamp");
+        rec.attested_spawner = Some("q".into());
+        rec.set_parent_session(Some("p".into()));
+        assert_eq!(rec.attested_spawner, None, "setting the old parent back revives nothing");
+        rec.attested_spawner = Some("p".into());
+        rec.set_parent_session(None);
+        assert_eq!(rec.attested_spawner, None, "clearing the edge drops its stamp too");
     }
 }

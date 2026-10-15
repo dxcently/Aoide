@@ -116,6 +116,20 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   allowlist a review-blocking violation; a new per-command policy need is
   proved by a failing test against the EXISTING handler's `inv.door`
   branch, never by a new table in this crate.
+- **`daemon::run_loop` takes two locks before `bind_socket`, and a held lock
+  is a refusal, never a takeover.** `acquire_daemon_lock` (`<socket>.lock`:
+  one daemon per socket) runs first, then `acquire_state_lock`
+  (`aoided.lock` in `state_dir()`: one daemon per root), directly before
+  `bind_socket`. Both go through `take_daemon_lock`, a non-blocking
+  `flock` via `aoide_storage::fs::try_lock_exclusive`. Each `File` lives for
+  the whole `run_loop` (`let _socket_lock`, never `_`: dropping one early
+  re-opens the hole). `bind_socket`'s unconditional stale-socket unlink is
+  safe only behind both. `serve_daemon` takes neither lock because only tests
+  call it. New startup work that prepares the socket's directory goes after
+  the socket lock. `bin/aoided.rs` runs `migrate_root_once` before
+  `run_loop`, so the state lock resolves under the migrated root; moving the
+  migration after the locks would mean splitting `run_loop`, and was not done.
+  The open hole is named once, in `docs/architecture/AOIDED.md` "Socket".
 - **`daemon::accept_loop` refuses a CROSS-uid connection before it ever
   reaches `handle_conn` (LANE IDENTITY P-ID3, G8).** `cross_uid_gate` is a
   pure decision fn (`Option<PeerCred>` in, `Option<String>` refusal reason
@@ -178,19 +192,21 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   its whole secrecy claim is "this process is still alive, and `ptrace`
   against it is blocked" (Yama `ptrace_scope>=1`), which a disk copy would
   destroy outright.
-- **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for
-  a successful `session start` dispatch whose record already carries a
-  `pid`, and it seals a record ONCE.** A record that already carries a
-  `seal`, or ever did (`everSealed`), is never sealed again — by this
-  function or by the `seal_unsealed_live_sessions` tick. `session_start_
-  refusal` refuses a dispatched `session start` BEFORE it runs when the
-  record is sealed over a live pid that no longer verifies (taught error +
-  `seal_refused` event); a sealed record whose process merely died is not
-  refused. Never refuse after mutating, and never add a path that re-mints
-  over a record that has ever been sealed; the pid it mints over is the
-  record's OWN `pid`
-  field (kept immutable by `aoide_storage::session::pid_may_move`), not a
-  peercred-verified connecting pid.
+- **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for a
+  successful `session start` dispatch whose record already carries a `pid`, and
+  it seals a record ONCE.** A record that already carries a `seal`, or ever did
+  (`everSealed`), is never sealed again — by this function or by the
+  `seal_unsealed_live_sessions` tick. Both stamp the plaintext
+  `sealedPidStarttime` and `sealedBootId` in the same call as the seal. The
+  start door (`aoide_conduct::graph::session_start`) decides a start on a
+  protected live wrap, after the daemon hop: a start that changes none of agent,
+  cwd, window or parent is a no-op, and one that would change any of them is
+  refused. The decision is the door's,
+  not this crate's, and no key is read. Never refuse after mutating, and never
+  add a path that re-mints over a record that has ever been sealed; the pid it
+  mints over is the record's OWN `pid` field (kept immutable by
+  `aoide_storage::session::pid_may_move`), not a peercred-verified connecting
+  pid.
 - **Request-line reads on the daemon socket go through
   `daemon::read_capped_line` (a hand-rolled `fill_buf`/`consume` loop),
   never `BufReader::read_line` (P-D4, closing a P-D2-flagged gap).**
@@ -642,10 +658,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   is the miss.
 - **A shell target takes no auto-delivered inject from ANY rung — loopback
   and remote-parent autogate alike (N1, house rule 4).** The Inject arm
-  reads the TARGET's own record
-  (`session_wrapped_is_a_shell` → `aoide_conduct::graph::
-  wrapped_program_is_a_shell`, the record-side half of
-  `program_is_a_shell`) before it folds `deliver_now`, and holds the line
+  reads the TARGET's own record through `session_inject_hold` →
+  `aoide_conduct::graph::auto_type_refusal` (its shell arm is the record-side
+  half of `program_is_a_shell`) before it folds `deliver_now`, and holds the line
   PENDING when it comes back true — a shell's input is a command line, and
   `--agent <harness> -- bash` names a harness over a pty running a shell, so
   the `agent` label is not the question. Paid only where it can change the
@@ -706,7 +721,10 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   VERIFYING PUBKEY, never a node name (#63 P-ID5): `X-Aoide-Node` is
   outside the canonical string, so a name-keyed cache would let a captured
   request replay under a shared-key twin's name — don't "simplify" the key
-  back to a name. `handle_connection`
+  back to a name. Both halves are keyed trimmed and lowercased, the form
+  `canonical_string` signs (`nonce_is_replay`): a nonce's letter case is not
+  part of its identity, so keying the raw text would let an upper-cased copy
+  of a captured request run again. `handle_connection`
   calls `verify_signed_request` exactly ONCE per connection, strictly
   before both the streaming and the plain-JSON-RPC dispatch branches —
   don't duplicate that call inside `route`/`stream_task`/`handle_jsonrpc`;
@@ -735,6 +753,19 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   env/flag "for redundancy": a duplicate advertiser thread would just
   double the send rate and complicate the "both off means silence"
   proof.
+- **The door signs only what it verified, and only a JSON-RPC POST to `/`
+  (relay-proof).** `answer_headers` is the one place an answer is signed, and
+  `handle_connection` calls it from one site: the final write, gated on
+  `verified.is_some()`. The `config-invalid` arm (`PreDispatch::Unloadable`)
+  is never signed: `mail_unloadable_declaration` checks the request only
+  against the raw charter in force, and the charter this node governs is read
+  through the config whose failure produces that arm. Don't widen the gate to
+  a refusal, a replay (`-32009`), the `config-invalid` arm, an unsigned or
+  unparsed request, any GET (the card included), a busy 503, or an SSE event.
+  Each of those is a write site a replayed or unsigned request can reach, and
+  a signature there is a signing oracle for the door's identity key. Every
+  write site in `a2a.rs` carries a one-line comment saying whether it is
+  signed and why; a new write site needs the same comment.
 - **The mail adapter's method table is `mail_rpc`, and nothing may add a
   second entry to it (H1).** `aoide mail serve` is a second LISTENER with its
   own process: `route_mail` → `handle_mail_jsonrpc` → `mail_rpc`, which is the
@@ -777,6 +808,14 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the origin can never tell tunnel traffic from door traffic on its own.
   Don't widen the door's detail "for symmetry" — its bytes are pinned by
   existing tests and by operators' greps.
+- **The `spawnAgent` seam: `spawn_agent_harness` is the one judgement.** Its rule
+  and refusals are `CONTRACTS.md`'s spawnAgent paragraph. Locally: the walk is
+  `aoide_conduct::graph::wrapped_harness`, never a copy; `do_spawn`'s prologue and
+  `spawn_inject_prompt` both read it; readiness, the submit key and `spawn_argv`'s
+  `--agent` label take the PROVEN harness's name, never the configured first token
+  (`env claude` is `claude`, not `env`). The opening-turn tests use `eidolon` (a
+  registered harness with output-settled readiness) for the "no declarable fact"
+  branch.
 - **`do_spawn` never acks `submitted` on `cmd.spawn()`'s success alone
   (task #103).** `cmd.spawn()` only proves the WRAPPER `aoide conduct`
   process launched — it says nothing about whether that process's OWN

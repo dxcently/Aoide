@@ -882,10 +882,30 @@ pub fn prune_done_scoped(
     Vec<String>,
     Vec<String>,
 ) {
+    let live = super::identity::live_sealed_wrap_ids(&sessions);
+    prune_done_keeping(sessions, hooks, explicit, &live)
+}
+
+/// [`prune_done_scoped`] with the live-wrap set supplied by the caller. A
+/// `done` record named in `live` is never dropped: its own sealed process
+/// still runs, so only that process's exit, or the reaper once the pid is
+/// gone, may end it. Every other rule here is unchanged.
+pub(crate) fn prune_done_keeping(
+    sessions: Vec<SessionRecord>,
+    hooks: Vec<HookRecord>,
+    explicit: bool,
+    live: &HashSet<String>,
+) -> (
+    Vec<SessionRecord>,
+    Vec<HookRecord>,
+    Vec<String>,
+    Vec<String>,
+) {
     let unfiled = super::taskreport::unfiled_task_runs(&sessions);
     let doomed: HashSet<&str> = sessions
         .iter()
         .filter(|s| s.state == "done")
+        .filter(|s| !live.contains(s.session_id.as_str()))
         .filter(|s| {
             let is_task_run = s.task.as_deref().is_some_and(|t| !t.is_empty());
             if !is_task_run {
@@ -934,7 +954,9 @@ pub(crate) fn drop_remote_child_rows(removed: &[String]) {
 
 /// Drop exactly `roots` (+ their subagent descendants, + their hook records)
 /// from the roster; clear `parentSessionId` on surviving children of anything
-/// removed. [`prune_done`] is this over the whole `done` set — factored apart
+/// removed, except a protected live wrap, which keeps its edge and loses its
+/// spawn stamp, since the id it names may be registered again (CONTRACTS,
+/// rule 3). [`prune_done`] is this over the whole `done` set — factored apart
 /// because the reaper needs the same drop over a NARROWER one (the superseded
 /// `done` agent siblings of a terminal that still holds a live agent — see
 /// `superseded_done_siblings` in `reap.rs`), and a second hand-rolled retain
@@ -975,8 +997,12 @@ pub(crate) fn drop_sessions(
         .cloned()
         .map(|mut s| {
             if matches!(&s.parent_session_id, Some(p) if gone.contains(p.as_str())) {
-                s.parent_session_id = None;
-                cleared.push(s.session_id.clone());
+                if super::identity::is_protected_live_wrap(&s) {
+                    s.attested_spawner = None;
+                } else {
+                    s.set_parent_session(None);
+                    cleared.push(s.session_id.clone());
+                }
             }
             s
         })
@@ -2112,7 +2138,6 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: true,
             argv: None,
-            typed: Some("echo hi".into()),
         });
         rec.state = "done".to_string(); // the reap-path ordering hazard this field survives.
 
