@@ -180,8 +180,8 @@ pub fn build_conduct_args(
     }
     args.push("--agent".to_string());
     args.push(agent.to_string());
-    args.push("--id".to_string());
-    args.push(id.to_string());
+    // One token, so an id that starts with `-` is never re-read as a flag.
+    args.push(format!("--id={id}"));
     if let Some(parent) = parent {
         args.push("--parent".to_string());
         args.push(parent.to_string());
@@ -728,6 +728,7 @@ const SPAWN_ID_MAX: usize = 128;
 /// so the queue refuses an entry that does not pass it on approval too.
 pub(in crate::graph) fn spawn_id_is_plain(id: &str) -> bool {
     !id.is_empty()
+        && !id.starts_with('-')
         && id.len() <= SPAWN_ID_MAX
         && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
         && !is_reserved_id(id)
@@ -754,22 +755,28 @@ pub(in crate::graph) fn spawn_id_in_use(id: &str) -> bool {
             .is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id && canonical_state(&s.state) != "done"))
 }
 
+/// Does a record on the roster, live or done, already carry `id`?
+fn names_a_record(id: &str) -> bool {
+    load_stage::<SessionsFile>(&sessions_path()).is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id))
+}
+
 /// The refusal of a spawn from the MCP door whose `--id` is not a plain id, or
-/// names a session that is live. Judged before the door decides to launch or hold,
+/// names an existing record. Judged before the door decides to launch or hold,
 /// so what is queued, and what an approver is shown, is already a legal id.
+/// Any record is refused, not only a live one: the child would re-parent it.
 fn refuse_spawn_id(inv: &Invocation) -> Option<Outcome> {
     let id = inv.flags.get("id")?;
     let (what, why, reason) = if !spawn_id_is_plain(id) {
         (
-            format!("spawn not launched: `--id` is not a plain id ({SPAWN_ID_MAX} characters of A-Z a-z 0-9 . _ : -)"),
+            format!("spawn not launched: `--id` is not a plain id ({SPAWN_ID_MAX} characters of A-Z a-z 0-9 . _ : -, not leading -)"),
             "a spawn's id is shown to the human who approves it and spelled into the child's socket path, \
              so a door that cannot approve may only name a plain one",
             "bad-id",
         )
-    } else if spawn_id_in_use(id) {
+    } else if names_a_record(id) || spawn_id_in_use(id) {
         (
-            format!("spawn not launched: `--id {id}` names a session that is live"),
-            "the child would take over that session's record and control socket",
+            format!("spawn not launched: `--id {id}` names an existing session"),
+            "the child would register under that record: it would take over its parent, its spawner and its control socket",
             "id-in-use",
         )
     } else {
@@ -2682,7 +2689,7 @@ mod tests {
                 "foot".to_string(),
                 "sh".to_string(),
                 "-c".to_string(),
-                "/usr/bin/aoide conduct --spawned --agent claude --id win-1 -- claude".to_string(),
+                "/usr/bin/aoide conduct --spawned --agent claude --id=win-1 -- claude".to_string(),
             ]
         );
     }
@@ -2836,5 +2843,44 @@ mod tests {
         let out = session_spawn_with(&inv, |_| Some("parent-id".to_string()));
         assert_eq!(out.status, Status::Usage, "{out:?}");
         assert!(out.message.contains("stdin"), "{}", out.message);
+    }
+
+    /// Finding 6: over MCP a spawn may name no existing record, done or live.
+    /// Re-using a done sibling's id would re-parent it under the caller and
+    /// stamp the caller as its attested spawner, which pulls it into the
+    /// caller's read scope. The refusal leaves both edges where they were.
+    #[test]
+    fn an_mcp_spawn_refuses_the_id_of_a_done_sibling_and_keeps_its_edges() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-done-sibling");
+        let mut done = session("done-sib", &root.to_string_lossy(), "done", "2026-10-12T09:00:00Z", Some("old-parent"));
+        done.attested_spawner = Some("old-parent".into());
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![done], ..Default::default() }).unwrap();
+
+        let inv = mcp_spawn(&["true"], &[("id", "done-sib")]);
+        let out = session_spawn_with(&inv, |_| Some("me-id".to_string()));
+        assert_eq!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("id-in-use"), "{out:?}");
+
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|r| r.session_id == "done-sib").expect("the record is still there");
+        assert_eq!(rec.parent_session_id.as_deref(), Some("old-parent"), "the parent edge did not move");
+        assert_eq!(rec.attested_spawner.as_deref(), Some("old-parent"), "the spawner stamp did not move");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 15: an id that starts with `-` is read as a flag. Over MCP it is
+    /// a bad id, and the child's argv binds the id as one `--id=<id>` token so
+    /// a bare id can never be re-parsed as a flag.
+    #[test]
+    fn a_dash_led_id_is_a_bad_id_and_the_child_argv_binds_it_as_one_token() {
+        assert!(!spawn_id_is_plain("--headless"), "a leading dash is never a plain id");
+        let inv = mcp_spawn(&["true"], &[("id", "--headless")]);
+        let out = refuse_spawn_id(&inv).expect("a dash-led id is refused");
+        assert_eq!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("bad-id"), "{out:?}");
+
+        let argv = build_conduct_args(false, "claude", "--headless", None, None, None, None, None, &["true".to_string()]);
+        assert!(argv.iter().any(|a| a == "--id=--headless"), "{argv:?}");
+        assert!(!argv.iter().any(|a| a == "--headless"), "a bare id is never a token of its own: {argv:?}");
     }
 }
