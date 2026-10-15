@@ -49,9 +49,14 @@ parent but an existing one is never re-parented over MCP). Approval comes from a
 terminal (the CLI) or the conductor. A `spawn` follows the same line: from an
 attested caller it launches the child under that session and its first prompt
 delivers, and from any other caller the whole spawn parks until a human approves
-it. Restoring or resurrecting a session over MCP stays held, since it is not a
-send. The A2A door has no sealed ancestor, so it parks every send. See
-[[Conductor-Channel|the gate]] for the doors and the rule.
+it. A `resurrect` is judged the same way, since it launches processes: an
+attested caller revives the sessions it names, and from any other caller
+`resurrect --project …` parks whole until a human approves it (bare `resurrect`,
+which reads the working directory's manifest, is refused there and taught to
+name a project). What a revived terminal would be typed is a restore, not a send
+a caller makes, so it stays held over MCP either way. The A2A door has no sealed
+ancestor, so it parks every send. See [[Conductor-Channel|the gate]] for the
+doors and the rule.
 
 ## A2A: the interop door
 

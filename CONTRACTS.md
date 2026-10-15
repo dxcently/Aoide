@@ -3577,9 +3577,18 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   spawn parks, as a `pending.json` entry carrying `spawn` (§3) under the `mcp`
   source, and nothing launches until a human runs `session pending approve`,
   which launches it as that approver's door.
+- An MCP `resurrect` is judged the same way, because it launches processes. An
+  attested caller revives the sessions it names. From an unattested caller (and
+  from the A2A door, which never has a sealed ancestor) `resurrect --project …`
+  parks whole as a `pending.json` entry whose `spawn.path` is `["resurrect"]`
+  (§3), nothing launches, and `session pending approve` runs it as that
+  approver's door. Bare `resurrect`, which reads the working directory's
+  manifest and launches its own commands, is refused there with `reason:
+  "bare-resurrect-not-held"` and a taught line naming `--project`, since the
+  approver would replay it from another directory and see none of what it runs.
 - A restore is not a send a caller makes. `resurrect`'s restore typed into a
   revived session rests on the door's `--yes`, so over MCP it parks and reports
-  `held-pending`, attested or not, and a `resurrect` is never held as a spawn.
+  `held-pending`, attested or not.
 - `session permit` is refused on a door that cannot approve (`reason:
   "door-cannot-approve"`, taught line `DOOR_CANNOT_APPROVE`). It files no
   summons card, and the refusal is audited. A card is how a human is asked for
@@ -3647,18 +3656,20 @@ before anything is queued, with `reason: "reserved-from"` and a taught line, and
 audited as `refused`; the refusal sits where an entry is created, so approval
 still re-drives an entry with the source it was queued under. The audit line of
 a send names that source as `from` and an MCP caller's label as `claims`, never
-the label as the sender. The optional `spawn` field, `{ "args": […],
-"flags": {…} }`, makes the entry a held spawn instead of a held send: the argv
-and flags the launch will run with, `sessionId` being the id its child will
-register under and `text` the command line an approver is shown. `list` renders
-it as that whole command, `approve` launches it as the approver's door rather
-than typing into a target, and `deny` drops it with nothing launched. An entry
-whose `spawn` does not parse is `"state": "malformed"` and is never read as a
-send. The queued `submit:true` flag means
-only "submit the line" — the concrete keystroke (`\n`, or `\r` for kimi) is
-resolved at DELIVERY time from the target session's own agent profile, never
-memoized at queue time. `list`'s HUMAN line renders both the target and `from`
-through the canonical display grammar (petnames plan P3 —
+the label as the sender. The optional `spawn` field, `{ "path": ["spawn"],
+"args": […], "flags": {…} }`, makes the entry a held launch instead of a held
+send: the command (`spawn`, or `resurrect` from a caller that could not be
+attested; an absent `path` is `spawn`), argv and flags the launch will run with,
+`sessionId` being the id its child will register under (`resurrect:<project>`
+for a resurrect) and `text` the command line an approver is shown. `list`
+renders it as that whole command, `approve` launches it as the approver's door
+rather than typing into a target, and `deny` drops it with nothing launched. An
+entry whose `spawn` does not parse, or names a `path` other than `spawn` or
+`resurrect`, is `"state": "malformed"` and is never read as a send. The queued
+`submit:true` flag means only "submit the line" — the concrete keystroke (`\n`,
+or `\r` for kimi) is resolved at DELIVERY time from the target session's own
+agent profile, never memoized at queue time. `list`'s HUMAN line renders both
+the target and `from` through the canonical display grammar (petnames plan P3 —
 `<host>/<role>/<petname> (…<tail4>)`, terse petname+tail for `from`); the JSON
 fields `data.pending[].sessionId`/`.from` stay the entry's raw canonical ids,
 verbatim, always; `.claimed` is the stored label, cleaned once more. What a

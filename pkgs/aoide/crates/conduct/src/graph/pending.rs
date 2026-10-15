@@ -7,9 +7,10 @@
 //! it parks every inject it admits and its spawn's opening turn
 //! (`crates/server/src/a2a.rs`). An MCP send parks unless its server runs
 //! under a sealed session that has a rule for the target, and a whole MCP spawn
-//! parks when the server has no sealed session (`PendingSend::spawn`: approving
-//! one launches it, as the approver's door, with the argv and flags it was held
-//! with). Until this module,
+//! parks when the server has no sealed session, and so does a whole MCP
+//! `resurrect` (`PendingSend::spawn`: approving one launches it, as the
+//! approver's door, with the command, argv and flags it was held with). Until
+//! this module,
 //! nothing in the tree ever read that file back: it was a write-only dead
 //! drop, holding entries forever, invisibly. This is the read/approve/deny
 //! surface every other surface (TUI, QML, web) can render later — CLI-only,
@@ -66,9 +67,12 @@ fn is_malformed(v: &Value) -> bool {
         .and_then(Value::as_str)
         .map(|s| !s.is_empty())
         .unwrap_or(false);
-    // A `spawn` that does not parse must not fall back to being read as a send:
-    // approving it would type its command line into a session.
-    let spawn_unreadable = v.get("spawn").is_some_and(|s| serde_json::from_value::<PendingSpawn>(s.clone()).is_err());
+    // A `spawn` that does not parse, or names a command no approval launches,
+    // must not fall back to being read as a send: approving it would type its
+    // command line into a session.
+    let spawn_unreadable = v
+        .get("spawn")
+        .is_some_and(|s| serde_json::from_value::<PendingSpawn>(s.clone()).map_or(true, |p| !p.is_known()));
     !named || spawn_unreadable
 }
 
@@ -365,7 +369,8 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
     // would lose it. The entry stays put for a later approve, or a deny. A held
     // spawn has no target yet: approving it is what creates one.
     let entry = load_pending_array().ok().and_then(|a| a.get(index).cloned()).filter(|v| !is_malformed(v));
-    if let Some(id) = entry.as_ref().and_then(spawn_of).and_then(|s| s.flags.get("id").cloned()) {
+    let spawn_id = entry.as_ref().and_then(spawn_of).filter(|s| !s.is_resurrect()).and_then(|s| s.flags.get("id").cloned());
+    if let Some(id) = spawn_id {
         // The id was free when the spawn was held. Launching binds its socket,
         // which unlinks what is there, so a session that has taken the id since
         // keeps it and the entry stays queued for the approver to deny.
@@ -488,12 +493,14 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
 fn approve_spawn(inv: &Invocation, index: usize, session_id: &str, spawn: PendingSpawn) -> Outcome {
     let cmd = "session.pending.approve";
     let line = spawn.command_line();
-    let inner = super::spawn::session_spawn(&Invocation {
-        path: vec!["spawn".to_string()],
-        args: spawn.args,
-        flags: spawn.flags,
-        door: inv.door,
-    });
+    let resurrect = spawn.is_resurrect();
+    let launch = Invocation { path: spawn.path, args: spawn.args, flags: spawn.flags, door: inv.door };
+    let inner = if resurrect {
+        super::resurrect::session_resurrect(&launch)
+    } else {
+        super::spawn::session_spawn(&launch)
+    };
+    let verb = if resurrect { "resurrect" } else { "spawn" };
     let launched = inner.status == Status::Ok;
     let status = if launched { "launched" } else { "error" };
     audit_pending(inv, cmd, status, &format!("approve [{index}] {session_id}: {}", inner.message), &line);
@@ -501,7 +508,7 @@ fn approve_spawn(inv: &Invocation, index: usize, session_id: &str, spawn: Pendin
         return Outcome::error(
             cmd,
             format!(
-                "pending spawn {index} left the queue but the launch of `{}` failed: {}",
+                "pending {verb} {index} left the queue but the launch of `{}` failed: {}",
                 visible(session_id),
                 inner.message
             ),
@@ -514,7 +521,8 @@ fn approve_spawn(inv: &Invocation, index: usize, session_id: &str, spawn: Pendin
             "spawnOutcome": inner.data,
         }));
     }
-    Outcome::ok(cmd, format!("pending entry {index} approved → spawned `{}`", visible(session_id)))
+    let done = if resurrect { "resurrected" } else { "spawned" };
+    Outcome::ok(cmd, format!("pending entry {index} approved → {done} `{}`", visible(session_id)))
         .changed(vec![format!("pending[{index}] for {session_id}: approved and launched")])
         .with_data(json!({
             "id": index.to_string(),
@@ -1318,6 +1326,7 @@ mod tests {
         let spawn = PendingSpawn {
             args: vec!["sh".into(), "-c".into(), format!("touch {}; echo \u{1b}[2J{tail}", marker.display())],
             flags: BTreeMap::from([("agent".into(), "claude".into()), ("windowed".into(), "true".into())]),
+            ..PendingSpawn::default()
         };
         crate::graph::send::hold_spawn("held-1", &spawn.command_line(), spawn.clone()).unwrap();
 

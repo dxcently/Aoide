@@ -170,12 +170,12 @@
 
 use super::common::{require_flag, stage_error};
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
-use super::send::deliver_local_with;
+use super::send::{deliver_local_with, real_attested_sender, PendingSpawn};
 use super::session_store::{stamp_origin, stamp_resumed_from};
-use super::spawn::launch_session;
+use super::spawn::{hold_whole, launch_session};
 use aoide_protocol::agents::agent_profile;
-use aoide_protocol::output::{Outcome, Status};
-use aoide_protocol::Invocation;
+use aoide_protocol::output::{Fix, Kind, Outcome, Status};
+use aoide_protocol::{Door, Invocation};
 use aoide_storage::attest::is_node_origin;
 use aoide_storage::records::RestoreSnapshot;
 use serde_json::json;
@@ -675,6 +675,16 @@ fn audit_resurrect(inv: &Invocation, status: &str, message: &str) {
     );
 }
 
+/// Is the caller of a door that cannot approve a session? Only the MCP door
+/// can be: its server walks its own ancestry to a sealed session. The A2A door
+/// runs inside aoided with no sealed ancestor, so nothing is asked of it.
+fn caller_is_attested(
+    inv: &Invocation,
+    resolve_caller: impl Fn(&[super::model::SessionRecord]) -> Option<String>,
+) -> bool {
+    inv.door == Door::Mcp && resolve_caller(&load_stage::<SessionsFile>(&sessions_path()).unwrap_or_default().sessions).is_some()
+}
+
 /// `aoide resurrect [--project <name> [--all | --id <ledgerSessionId>]]`.
 ///
 /// Bare (none of the three flags): try the manifest first
@@ -683,9 +693,53 @@ fn audit_resurrect(inv: &Invocation, status: &str, message: &str) {
 /// below, whose `require_flag` miss now teaches both misses at once. Any of
 /// `--project`/`--all`/`--id` present routes straight past the manifest
 /// check to the pre-existing flag-mode selection, unchanged.
+///
+/// A door that cannot approve launches only as an attested caller, the way
+/// `spawn` does ([`session_resurrect_with`]): an MCP server under a sealed
+/// session revives (its restore bytes are still held, see [`send_restore`]), and
+/// every other caller has the whole command held in `pending.json` for a human
+/// to approve, with nothing launched.
 pub fn session_resurrect(inv: &Invocation) -> Outcome {
+    session_resurrect_with(inv, real_attested_sender)
+}
+
+/// [`session_resurrect`] with the sender-identity resolver injected, so the
+/// door's decision is testable without a live daemon.
+///
+/// An unattested caller on a door that cannot approve gets `--project …` held
+/// whole. Bare mode is refused there instead of held: it reads the working
+/// directory's manifest and launches the manifest's own commands, which an
+/// approver replaying from another directory would neither see in the held
+/// line nor find in the same place.
+fn session_resurrect_with(
+    inv: &Invocation,
+    resolve_caller: impl Fn(&[super::model::SessionRecord]) -> Option<String>,
+) -> Outcome {
     let cmd = "resurrect";
     let flag_mode = inv.flags.contains_key("project") || inv.flags.contains_key("id") || inv.flag_present("all");
+    if !inv.door.can_approve() && !caller_is_attested(inv, resolve_caller) {
+        if !flag_mode {
+            let out = Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                "resurrect not held: bare mode reads this process's working directory",
+                "a held command is replayed by the human who approves it, from their directory, and a \
+                 manifest's own commands would launch without being shown to them",
+                Fix::Run("aoide resurrect --project <name>".to_string()),
+            )
+            .with_fields(json!({ "reason": "bare-resurrect-not-held" }));
+            audit_resurrect(inv, "refused", &out.message);
+            return out;
+        }
+        if let Some(project) = inv.flags.get("project") {
+            let held = PendingSpawn {
+                path: vec![cmd.to_string()],
+                args: inv.args.clone(),
+                flags: inv.flags.clone(),
+            };
+            return hold_whole(inv, &format!("{cmd}:{project}"), held, "");
+        }
+    }
     if !flag_mode {
         let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
         if let Some((root, manifest)) = aoide_storage::manifest::walk_up(&cwd) {
@@ -2730,41 +2784,222 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Resurrect is not a spawn the MCP door judges: its argv is the harness's
-    /// own resume line, not a caller's command. Over MCP with no attested
-    /// session it reaches the launch exactly as before, and fails there on the
-    /// headless host's missing terminal; it is not held in `pending.json`.
+    /// A terminal that records it was opened: `AOIDE_TERMINAL` for a windowed
+    /// launch, a script that touches `marker`, so a test proves by the file
+    /// whether anything was launched.
+    #[cfg(unix)]
+    fn marker_terminal(root: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let marker = root.join("terminal-ran");
+        let script = root.join("fake-terminal.sh");
+        std::fs::write(&script, format!("#!/bin/sh\ntouch {}\n", marker.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_TERMINAL", &script);
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+        marker
+    }
+
+    #[cfg(unix)]
+    fn wait_for(path: &std::path::Path) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(5000);
+        while std::time::Instant::now() < deadline && !path.exists() {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        path.exists()
+    }
+
+    #[cfg(unix)]
+    const RESURRECT_ENV: &[&str] = &[
+        "AOIDE_STAGE_DIR",
+        "AOIDE_STATE_DIR",
+        "XDG_RUNTIME_DIR",
+        "AOIDE_AUDIT_LOG",
+        "AOIDE_TERMINAL",
+        "WAYLAND_DISPLAY",
+        "DISPLAY",
+        "AOIDE_DAEMON_SOCKET",
+        "AOIDE_SESSION_ID",
+    ];
+
+    #[cfg(unix)]
+    fn held_entries() -> Vec<crate::graph::send::PendingSend> {
+        load_stage::<crate::graph::send::PendingFile>(&crate::graph::send::pending_path())
+            .map(|f| f.pending)
+            .unwrap_or_default()
+    }
+
+    /// Resurrect launches harness processes, so a door that cannot approve gets
+    /// it the way it gets a spawn: with no attested caller the whole command is
+    /// held in `pending.json` and nothing launches, whether the caller is an
+    /// MCP server with no sealed ancestor (the production resolver, no daemon)
+    /// or the A2A door, which is never asked who it is even when a resolver
+    /// would name a session. The entry replays `resurrect`, shows as that
+    /// command, and approving it from the CLI is what revives the session.
+    #[cfg(unix)]
     #[test]
-    fn a_resurrect_over_mcp_reaches_the_launch_and_is_not_held_as_a_spawn() {
+    fn an_unattested_resurrect_is_held_whole_and_launches_nothing_until_a_human_approves() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&[
-            "AOIDE_STAGE_DIR",
-            "AOIDE_STATE_DIR",
-            "XDG_RUNTIME_DIR",
-            "AOIDE_AUDIT_LOG",
-            "AOIDE_TERMINAL",
-            "AOIDE_DAEMON_SOCKET",
-            "WAYLAND_DISPLAY",
-            "DISPLAY",
-        ]);
-        let (root, proj_path) = setup("resurrect-mcp-launch");
-        std::env::remove_var("AOIDE_TERMINAL");
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-mcp-held");
         std::env::remove_var("AOIDE_DAEMON_SOCKET");
-        std::env::remove_var("WAYLAND_DISPLAY");
-        std::env::remove_var("DISPLAY");
-        set_ledger(&[ledger_entry("ledger-old-mcp", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        set_ledger(&[ledger_entry("ledger-old-held", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
         let mut undying = Vec::new();
-        aoide_storage::undying::set_undying(&mut undying, "ledger-old-mcp", true);
+        aoide_storage::undying::set_undying(&mut undying, "ledger-old-held", true);
         aoide_storage::undying::save_undying(&undying).unwrap();
 
-        let mut inv = flag_invocation(&["resurrect"], &[("project", "proj")]);
-        inv.door = aoide_protocol::Door::Mcp;
-        let out = session_resurrect(&inv);
+        let mut mcp = flag_invocation(&["resurrect"], &[("project", "proj")]);
+        mcp.door = aoide_protocol::Door::Mcp;
+        let out = session_resurrect(&mcp);
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
-        let failed = out.data.as_ref().unwrap()["failed"].as_array().unwrap().clone();
-        assert_eq!(failed.len(), 1, "{failed:?}");
-        assert!(failed[0]["reason"].as_str().unwrap().contains("AOIDE_TERMINAL"), "{failed:?}");
-        assert!(!crate::graph::send::pending_path().exists(), "no spawn was held");
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "pending", "{data}");
+        assert_eq!(data["launched"], false);
+
+        let mut a2a = flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]);
+        a2a.door = aoide_protocol::Door::A2a;
+        let out = session_resurrect_with(&a2a, |_| Some("orch".to_string()));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "A2A is held though a resolver would attest: {}", out.message);
+
+        let held = held_entries();
+        assert_eq!(held.len(), 2, "{held:?}");
+        let spawn = held[0].spawn.as_ref().expect("a held command, not a held send");
+        assert_eq!(spawn.path, ["resurrect"]);
+        assert_eq!(spawn.flags.get("project").map(String::as_str), Some("proj"));
+        assert_eq!(held[0].from.as_deref(), Some("mcp"));
+        assert_eq!(held[0].text, "aoide resurrect --project proj", "the approver is shown the command");
+        assert_eq!(held[1].text, "aoide resurrect --all --project proj");
+
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        assert!(!marker.exists(), "the held resurrect opened a terminal");
+        let roster: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+        assert!(roster.sessions.is_empty(), "no session was registered: {:?}", roster.sessions);
+
+        let listed = crate::graph::pending::pending_list(&flag_invocation(&["session", "pending", "list"], &[]));
+        assert!(listed.message.contains("aoide resurrect --project proj"), "{}", listed.message);
+
+        let approve = crate::graph::pending::pending_approve(&Invocation {
+            path: vec!["session".into(), "pending".into(), "approve".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::new(),
+            door: aoide_protocol::Door::Cli,
+        });
+        assert_eq!(approve.status, aoide_protocol::output::Status::Ok, "{}", approve.message);
+        assert!(approve.message.contains("resurrected"), "{}", approve.message);
+        assert_eq!(approve.data.as_ref().unwrap()["launched"], true);
+        assert!(wait_for(&marker), "approving the held resurrect revived the session");
+        assert_eq!(held_entries().len(), 1, "only the approved entry left the queue");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An attested MCP caller keeps today's behaviour: the resurrect launches,
+    /// nothing is held, and the restore bytes it would type are still held (the
+    /// restore tests above pin that half through the same door).
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_resurrect_launches_and_holds_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-mcp-attested-launch");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        set_ledger(&[ledger_entry("ledger-old-att", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "ledger-old-att", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let mut mcp = flag_invocation(&["resurrect"], &[("project", "proj")]);
+        mcp.door = aoide_protocol::Door::Mcp;
+        let out = session_resurrect_with(&mcp, |_| Some("orch".to_string()));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["resurrected"].as_array().unwrap().len(), 1, "{}", out.message);
+        assert!(wait_for(&marker), "an attested caller's resurrect launched");
+        assert!(held_entries().is_empty(), "and nothing was held");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Bare mode reads the manifest of this process's working directory and runs
+    /// its commands, so a held bare resurrect would be replayed from another
+    /// directory and show the approver nothing of what it launches. An
+    /// unattested caller on a door that cannot approve is refused with a taught
+    /// line, nothing is held, nothing launches; the same bare call from the CLI
+    /// door, and from an attested MCP server, still clean-spawns.
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_resurrect_from_an_unattested_door_is_refused_with_a_teaching_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let this_host = aoide_storage::display::local_host_name();
+        let (root, cwd) = setup_manifest(
+            "resurrect-mcp-bare",
+            vec![manifest_spec(&this_host, ".", "claude", Some("echo from-the-manifest"))],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+
+        let mut mcp = flag_invocation(&["resurrect"], &[]);
+        mcp.door = aoide_protocol::Door::Mcp;
+        let out = session_resurrect_with(&mcp, |_| None);
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "bare-resurrect-not-held");
+        assert!(data["refusal"]["why"].is_string(), "taught why: {data}");
+        assert!(
+            data["refusal"]["fix"]["run"].as_str().unwrap().contains("--project"),
+            "the fix names flag mode: {data}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        assert!(!marker.exists(), "nothing launched");
+        assert!(held_entries().is_empty(), "nothing was held");
+        assert_eq!(count_resurrect_audit_lines(&root.join("log")), 1, "the refusal is audited once");
+
+        let attested = session_resurrect_with(&mcp, |_| Some("orch".to_string()));
+        assert_eq!(attested.status, aoide_protocol::output::Status::Ok, "{}", attested.message);
+        assert_eq!(attested.data.as_ref().unwrap()["resurrected"].as_array().unwrap().len(), 1, "{}", attested.message);
+        assert!(wait_for(&marker), "an attested server's bare resurrect launched the manifest session");
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A queue file is not trusted to name a command: an entry whose `spawn`
+    /// path is neither `spawn` nor `resurrect` is malformed, approve refuses it,
+    /// and an entry written before `path` existed is a spawn.
+    #[test]
+    fn a_held_entry_names_only_a_command_an_approval_may_launch() {
+        let known: PendingSpawn = serde_json::from_value(json!({ "args": ["sh"], "flags": {} })).unwrap();
+        assert_eq!(known.path, ["spawn"], "an entry from before `path` is a spawn");
+        assert!(known.is_known());
+        for bad in [json!(["conduct"]), json!(["spawn", "x"]), json!([])] {
+            let entry: PendingSpawn = serde_json::from_value(json!({ "path": bad, "args": ["sh"], "flags": {} })).unwrap();
+            assert!(!entry.is_known(), "{entry:?}");
+        }
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let root = unique_stage("resurrect-held-unknown");
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        write_stage(
+            &crate::graph::send::pending_path(),
+            &json!({ "schemaVersion": "0", "pending": [{
+                "sessionId": "x", "text": "t", "from": "mcp",
+                "spawn": { "path": ["conduct"], "args": ["sh"], "flags": {} }
+            }]}),
+        )
+        .unwrap();
+        let approve = crate::graph::pending::pending_approve(&Invocation {
+            path: vec!["session".into(), "pending".into(), "approve".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::new(),
+            door: aoide_protocol::Door::Cli,
+        });
+        assert_eq!(approve.status, aoide_protocol::output::Status::Error, "{}", approve.message);
+        let raw: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(crate::graph::send::pending_path()).unwrap()).unwrap();
+        assert_eq!(raw["pending"].as_array().unwrap().len(), 1, "the entry was not taken");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

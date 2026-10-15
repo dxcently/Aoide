@@ -85,8 +85,10 @@ aoide mcp serve [--stdio] [--json]
   parent and sibling rules, so its sends to the session's children deliver and
   its spawns launch as that session's children, with the first prompt delivered.
   A server with no sealed ancestor (the network façade under systemd, a bare
-  terminal) parks every send and holds every spawn whole for a local human;
-  restoring or resurrecting a session over MCP is held too. Attestation names
+  terminal) parks every send and holds every spawn and every `resurrect
+  --project …` whole for a local human (a bare `resurrect` is refused there);
+  a restore typed into a revived terminal is held over MCP for every caller,
+  attested or not. Attestation names
   who launched the server, not who writes to its stdin, so a network bridge run
   inside a conducted terminal lends that terminal's rights to its remote
   callers. Off by default (`aoide.mcp.enable = false`); spawned per session as

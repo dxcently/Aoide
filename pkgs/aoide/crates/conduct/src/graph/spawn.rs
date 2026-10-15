@@ -26,8 +26,10 @@
 //! delivers. A server with no sealed session has its WHOLE spawn held in
 //! `pending.json` (`PendingSend::spawn`) and nothing launches until a human
 //! runs `session pending approve`, which replays it with the approver's door.
-//! `resurrect` reaches [`launch_session`] directly: its argv is the harness's
-//! own resume line, not a caller's command.
+//! `resurrect` is judged the same way (`resurrect.rs`, which holds through
+//! [`hold_whole`]): its argv is the harness's own resume line, so an attested
+//! caller reaches [`launch_session`] with it, and any other caller has the whole
+//! command held.
 //!
 //! `--windowed` (P-D7) is the sibling launch mode: instead of detaching a
 //! headless `conduct --headless` child, it execs a real terminal (its
@@ -774,18 +776,26 @@ fn spawn_id(inv: &Invocation) -> String {
 /// caller was told. A `--parent` is not kept: the caller proved no session, so
 /// it cannot place a child under one.
 fn hold_whole_spawn(inv: &Invocation) -> Outcome {
-    let cmd = "spawn";
     let id = spawn_id(inv);
     let mut flags = inv.flags.clone();
     let parent_dropped = flags.remove("parent").is_some();
     flags.insert("id".to_string(), id.clone());
-    let spawn = PendingSpawn { args: inv.args.clone(), flags };
-    let line = spawn.command_line();
-    match hold_spawn(&id, &line, spawn) {
+    let note = if parent_dropped { ", its --parent dropped" } else { "" };
+    hold_whole(inv, &id, PendingSpawn { args: inv.args.clone(), flags, ..PendingSpawn::default() }, note)
+}
+
+/// Queue `held` whole under the MCP door's bucket, and answer the caller that
+/// nothing launched. `id` is what the entry and the answer are named by, and
+/// `held` is what `session pending approve` replays as the approver's door:
+/// a `spawn` here, a `resurrect` from `resurrect.rs`. Past the count cap or the
+/// byte cap the caller gets a taught refusal and nothing is queued.
+pub(in crate::graph) fn hold_whole(inv: &Invocation, id: &str, held: PendingSpawn, note: &str) -> Outcome {
+    let cmd = if held.is_resurrect() { "resurrect" } else { "spawn" };
+    let line = held.command_line();
+    match hold_spawn(id, &line, held) {
         Ok(()) => {
-            let note = if parent_dropped { ", its --parent dropped" } else { "" };
-            let out = Outcome::ok(cmd, format!("spawn of `{id}` held pending approval{note}: nothing launched"))
-                .changed(vec![format!("pending spawn queued for {id}")])
+            let out = Outcome::ok(cmd, format!("{cmd} of `{id}` held pending approval{note}: nothing launched"))
+                .changed(vec![format!("pending {cmd} queued for {id}")])
                 .with_data(json!({ "sessionId": id, "state": "pending", "launched": false }));
             audit_pending(inv, cmd, "pending", &out.message, &line);
             out
@@ -795,7 +805,7 @@ fn hold_whole_spawn(inv: &Invocation) -> Outcome {
             let out = Outcome::refuse(
                 cmd,
                 Kind::Refused,
-                format!("spawn of `{id}` not queued: the MCP door already holds {PENDING_CAP_PER_SOURCE} pending sends"),
+                format!("{cmd} of `{id}` not queued: the MCP door already holds {PENDING_CAP_PER_SOURCE} pending sends"),
                 "the approval queue holds a bounded number of sends per sender, so one sender cannot fill it",
                 Fix::Run("aoide session pending list".to_string()),
             )
@@ -808,7 +818,7 @@ fn hold_whole_spawn(inv: &Invocation) -> Outcome {
                 cmd,
                 Kind::Refused,
                 format!(
-                    "spawn of `{id}` not queued: the entry is {bytes} bytes, over the {PENDING_ENTRY_MAX_BYTES} a held entry may be"
+                    "{cmd} of `{id}` not queued: the entry is {bytes} bytes, over the {PENDING_ENTRY_MAX_BYTES} a held entry may be"
                 ),
                 "a human reads every held entry, and the queue file is rewritten whole on each change, \
                  so one entry is bounded in size",

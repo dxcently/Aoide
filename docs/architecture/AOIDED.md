@@ -293,7 +293,8 @@ Remote reach composes what already exists:
 
 - **Ingress**: the Tier-3 Aoide MCP connector, user-enabled only, never by
   an agent (root `AGENTS.md`, Tier 3). A claude.ai session lands on some
-  mesh host's door.
+  mesh host's door. Its unit has no sealed ancestor and no `AOIDE_TERMINAL`,
+  so every send, spawn and resurrect through it parks for a local human.
 - **Enumerate**: `aoide session --hosts` / the node registry
   (`storage/src/node_store.rs:35` `Node`, `:61` `NodeRegistry`) name the
   mesh; each node's capability card is its A2A AgentCard, derived from that

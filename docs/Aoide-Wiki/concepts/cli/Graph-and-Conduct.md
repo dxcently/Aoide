@@ -539,6 +539,19 @@ per-spec revival rule; every invocation — the empty-selection no-op included
 — writes its own `resurrect` outcome record, on top of the dispatcher's
 per-command record (the two-line shape above).
 
+**Over a door that cannot approve (MCP, A2A).** `resurrect` launches
+processes, so it is judged the way `spawn` is. An MCP server launched under a
+sealed session revives as usual (a restore it would type into the revived
+terminal is still held, as for every caller of that door). With no sealed
+session, and always on the A2A door, `resurrect --project <name> …` is held
+whole in `pending.json` (a `spawn` entry whose `path` is `resurrect`, named
+`resurrect:<name>`), nothing launches, and `session pending approve` runs it as
+the approver's door; the answer is `data: {sessionId, state: "pending",
+launched: false}`. The bare form is refused there with `reason:
+"bare-resurrect-not-held"` and a line naming `--project`: it reads the process's
+working directory and launches the manifest's own commands, which a held line
+replayed from the approver's directory would neither show nor find.
+
 **Flag mode (`--project`/`--all`/`--id`) — unchanged.**
 
 - **Reads:** `state/session-ledger.jsonl` (the durable, append-only record
@@ -760,12 +773,12 @@ aoide session pending approve <id> [--json]
   --yes -- <text>` (with `--submit`/`--from` carried through) the held entry
   represents, in-process through `session_send` — the SAME door `session
   permit`'s verdict-typing already goes through — then removes the entry from
-  `pending.json` under the stage lock. An entry that is a held spawn is
-  launched instead, as the approver's door, with the argv and flags it was
-  held with, and refused (`reason: "id-in-use"`, the entry kept) when its `--id`
-  has since gone live or has a control socket, since launching binds that
-  socket. Resolution is the audit line, not a
-  persisted archive: the resolution record under `session.pending.approve`
+  `pending.json` under the stage lock. An entry that is a held spawn (or a
+  held `resurrect`) is launched instead, as the approver's door, with the argv
+  and flags it was held with, and a spawn is refused (`reason: "id-in-use"`, the
+  entry kept) when its `--id` has since gone live or has a control socket, since
+  launching binds that socket. Resolution is the audit line, not a persisted
+  archive: the resolution record under `session.pending.approve`
   (the injected text as `untrusted_data`), the re-driven `send`'s own outcome
   record, and the dispatcher's per-command record — three lines, the first
   two being the shape `send` alone already writes.

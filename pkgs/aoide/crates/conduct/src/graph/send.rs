@@ -151,27 +151,54 @@ pub struct PendingSend {
     pub spawn: Option<PendingSpawn>,
 }
 
-/// A `spawn` a door held instead of launching: the argv and flags it was
-/// asked for, replayed whole by `session pending approve`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+/// A launch a door held instead of running: the command, argv and flags it
+/// was asked for, replayed whole by `session pending approve`. The command is
+/// `spawn` or `resurrect`, the two ways an unattested caller would otherwise
+/// start a process.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PendingSpawn {
+    /// The command path to replay. Absent on an entry written before this
+    /// field existed, which was always a `spawn`.
+    #[serde(default = "spawn_path")]
+    pub path: Vec<String>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub flags: BTreeMap<String, String>,
 }
 
+fn spawn_path() -> Vec<String> {
+    vec!["spawn".to_string()]
+}
+
+impl Default for PendingSpawn {
+    fn default() -> Self {
+        Self { path: spawn_path(), args: Vec::new(), flags: BTreeMap::new() }
+    }
+}
+
 impl PendingSpawn {
     /// The line an approver is shown, and could paste: `aoide spawn --flag
-    /// value … -- <command>`, every word quoted.
+    /// value … -- <command>` (or `aoide resurrect --project <name> …`), every
+    /// word quoted.
     pub fn command_line(&self) -> String {
         Invocation {
-            path: vec!["spawn".to_string()],
+            path: self.path.clone(),
             args: self.args.clone(),
             flags: self.flags.clone(),
             door: Door::Cli,
         }
-        .command_line("aoide", &["windowed", "undying"], true)
+        .command_line("aoide", &["windowed", "undying", "all"], !self.args.is_empty())
+    }
+
+    /// Is this a command an approval may launch? Anything else in a queue file
+    /// is not replayed.
+    pub fn is_known(&self) -> bool {
+        matches!(self.path.iter().map(String::as_str).collect::<Vec<_>>()[..], ["spawn"] | ["resurrect"])
+    }
+
+    pub fn is_resurrect(&self) -> bool {
+        self.path == ["resurrect"]
     }
 }
 

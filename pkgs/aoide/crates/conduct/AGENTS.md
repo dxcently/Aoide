@@ -162,23 +162,37 @@ in the message.
   `conduct_from_a_door_that_cannot_approve_launches_nothing`,
   `pending_deny_from_a_door_that_cannot_approve_is_refused_and_every_entry_stays`
   and `a_spawn_from_mcp_cannot_take_a_live_sessions_id`.
-- **An MCP spawn launches only as an attested caller, and a restore never
-  does.** `session_spawn_with` judges the MCP door: the resolved session
-  becomes the child's `--parent` (a `--parent` naming any other session is
-  refused), and the `--prompt` is sent through `deliver_local_with` with that
-  session as the sender, so the parent rule delivers it. With no sealed
-  session the whole spawn is held with `hold_spawn` under the shared `mcp`
-  source, its id fixed so the approved launch registers under the one the
+- **An MCP spawn or resurrect launches only as an attested caller, and a
+  restore never does.** `session_spawn_with` judges the MCP door: the resolved
+  session becomes the child's `--parent` (a `--parent` naming any other
+  session is refused), and the `--prompt` is sent through `deliver_local_with`
+  with that session as the sender, so the parent rule delivers it. With no
+  sealed session the whole spawn is held with `hold_whole` under the shared
+  `mcp` source, its id fixed so the approved launch registers under the one the
   caller was told, and `pending approve` replays it with the approver's door.
-  `resurrect` reaches `launch_session` directly and types its restore through
-  `send_restore`, whose resolver names no sender: a restore rests on the
-  door's `--yes`, so an MCP door parks it even when its server is attested.
-  Pinned by `an_attested_mcp_spawn_launches_and_its_first_prompt_delivers`,
+  `session_resurrect_with` is the same judgement for `resurrect`, because it
+  too starts processes: attested, it revives; a door that cannot approve with
+  no sealed caller (always the A2A door, which is never asked) holds
+  `resurrect --project …` whole through the same `hold_whole`, as a
+  `PendingSpawn` whose `path` is `resurrect`, and `pending_approve` dispatches
+  on that path. A bare `resurrect` is refused there, not held (`reason:
+  bare-resurrect-not-held`): it reads this process's working directory and
+  launches the manifest's own commands, which a held line replayed from the
+  approver's directory would neither show nor find. A path other than `spawn`
+  or `resurrect` in a queue file is malformed and never launched
+  (`PendingSpawn::is_known`). `resurrect` types its restore through
+  `send_restore`, whose resolver names no sender: a restore rests on the door's
+  `--yes`, so an MCP door parks it even when its server is attested. Pinned by
+  `an_attested_mcp_spawn_launches_and_its_first_prompt_delivers`,
   `an_attested_mcp_spawn_cannot_name_another_sessions_child`,
   `an_unattested_mcp_spawn_parks_whole_and_nothing_launches_until_a_human_approves`,
   `a_full_mcp_bucket_refuses_one_more_spawn_and_launches_nothing`,
   `a_held_spawn_lists_as_its_whole_command_and_deny_launches_nothing`,
   `a_spawn_entry_that_does_not_parse_is_malformed_and_never_typed_as_a_send`,
+  `an_unattested_resurrect_is_held_whole_and_launches_nothing_until_a_human_approves`,
+  `an_attested_mcp_resurrect_launches_and_holds_nothing`,
+  `a_bare_resurrect_from_an_unattested_door_is_refused_with_a_teaching_line`,
+  `a_held_entry_names_only_a_command_an_approval_may_launch`,
   `an_attested_mcp_callers_restore_is_held_pending_though_its_send_would_deliver`
   and `a_restore_over_an_mcp_door_is_held_pending_and_never_typed`.
 - **`pending.json` has one writer, and it holds the per-source cap and the
