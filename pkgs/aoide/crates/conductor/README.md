@@ -131,7 +131,9 @@ Every registered node stands after this box's forest as a host card (border
 session(s)` or `last seen <age>`), with the
 sessions the roster reports for it beneath — ranked under a same-node
 spawner when the row carries `parentSessionId`, flat under the node
-otherwise. The rows are the same `session --hosts`
+otherwise, however deep or wide the node's roster runs: the pane builds, lays
+out and steps through it in time linear in its sessions. The rows are the
+same `session --hosts`
 probe Mesh paints, refreshed on the same ~15 s throttle while Graph is open;
 a cached row under an unreachable node wears the cache's word (`last-seen`)
 as its state and `was <state>` as its activity, never a live glyph, and is

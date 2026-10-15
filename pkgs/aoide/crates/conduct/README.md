@@ -1444,7 +1444,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `par1`, `nodeb/C`, then C's far descendants from that fold's own `spawned`
   edges — and `session_view_json` carries the same join as `fold` + `subtree` on
   the entry, so the view and `--json` cannot disagree; a row the fold cannot
-  back is shown `(not pulled)`, never hidden. A ledger row leaves with its
+  back is shown `(not pulled)`, never hidden. The far document is the far
+  node's to arrange, so the join is bounded by its size and not by its shape:
+  each fold is indexed once (parent to children), each far session is drawn
+  under the FIRST link that reaches it, and a link's `subtree` is a flat
+  preorder list of `{sessionId, depth}` rows walked on an explicit stack. A
+  chain a hundred thousand levels deep therefore costs its length, never the
+  stack. Indentation is drawn to 32 levels and then `…` (every row keeps its
+  line); the JSON nests to the same 32 levels, and a row below that sits in
+  preorder in the deepest nested list with `"subtree": []` and its true
+  `"depth"`. A ledger row leaves with its
   parent: `doc.rs::drop_remote_child_rows` retains `remote-children.json` against
   the removed ids, and BOTH roster-exit paths call it after their own
   `sessions.json` write has landed (`reap_inner`, for its automatic pass and for

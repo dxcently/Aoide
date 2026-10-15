@@ -184,6 +184,10 @@ pub struct Model {
     pub nodes: Vec<Node>,
     /// node id → child node ids, in draw order.
     children: HashMap<String, Vec<String>>,
+    /// node id → its place in `nodes`: every lookup by id is a probe, not a scan.
+    index: HashMap<String, usize>,
+    /// Per node, the first card — in preorder — whose children hold it.
+    parent: Vec<Option<usize>>,
     /// Indices into `nodes`, in preorder — the slice the current view draws.
     visible: Vec<usize>,
     /// Index into `visible` of the selected card.
@@ -192,6 +196,14 @@ pub struct Model {
 }
 
 impl Model {
+    /// The first DRAWN parent of `id`: a resurrected session also sits under
+    /// its `resumed` source, a ghost no longer in the roster, and map order
+    /// must not let that ghost win and strand the key.
+    fn parent_of(&self, id: &str) -> Option<&Node> {
+        let at = self.index.get(id).copied()?;
+        self.parent[at].map(|p| &self.nodes[p])
+    }
+
     /// The nodes the current view draws, in preorder.
     pub fn visible(&self) -> impl Iterator<Item = &Node> {
         self.visible.iter().map(|&i| &self.nodes[i])
@@ -230,15 +242,11 @@ pub fn select_index(app: &mut App, i: usize) {
 /// Make `id` the selection: the camera follows it again, and every fold
 /// above it opens, so the cursor can never sit on a card the view hides.
 fn pick(app: &mut App, model: &Model, id: String) {
-    let mut cur = id.clone();
+    let mut cur = id.as_str();
     let mut hops = 0;
-    while let Some((parent, _)) = model
-        .children
-        .iter()
-        .find(|(p, kids)| kids.contains(&cur) && model.nodes.iter().any(|n| &n.id == *p))
-    {
-        app.graph.folded.remove(parent);
-        cur = parent.clone();
+    while let Some(parent) = model.parent_of(cur) {
+        app.graph.folded.remove(&parent.id);
+        cur = &parent.id;
         hops += 1;
         if hops > model.nodes.len() {
             break;
@@ -270,14 +278,9 @@ pub fn select_sibling(app: &mut App, forward: bool) {
         .filter(|n| n.depth == 0)
         .map(|n| n.id.clone())
         .collect();
-    // The first DRAWN parent whose children hold this id: a resurrected
-    // session also sits under its `resumed` source, a ghost no longer in the
-    // roster, and map order must not let that ghost win and strand the key.
     let siblings = model
-        .children
-        .iter()
-        .find(|(p, kids)| kids.contains(&id) && model.nodes.iter().any(|n| &n.id == *p))
-        .map(|(_, kids)| kids)
+        .parent_of(&id)
+        .and_then(|parent| model.children.get(&parent.id))
         .unwrap_or(&roots);
     let Some(pos) = siblings.iter().position(|s| s == &id) else {
         return;
@@ -287,7 +290,7 @@ pub fn select_sibling(app: &mut App, forward: bool) {
     } else {
         pos.checked_sub(1).and_then(|p| siblings.get(p))
     };
-    if let Some(target_id) = target.filter(|t| model.nodes.iter().any(|n| &n.id == *t)) {
+    if let Some(target_id) = target.filter(|t| model.index.contains_key(*t)) {
         pick(app, &model, target_id.clone());
     }
 }
@@ -300,14 +303,8 @@ pub fn select_parent(app: &mut App) {
     let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
         return;
     };
-    // The first DRAWN parent (see `select_sibling` on the `resumed` ghost).
-    let parent = model
-        .children
-        .iter()
-        .find(|(p, kids)| kids.contains(&id) && model.nodes.iter().any(|n| &n.id == *p))
-        .map(|(p, _)| p.clone());
-    if let Some(parent) = parent {
-        pick(app, &model, parent);
+    if let Some(parent) = model.parent_of(&id) {
+        pick(app, &model, parent.id.clone());
     }
 }
 
@@ -320,7 +317,7 @@ pub fn toggle_fold(app: &mut App) {
     let has_children = model
         .children
         .get(&id)
-        .is_some_and(|kids| kids.iter().any(|k| model.nodes.iter().any(|n| &n.id == k)));
+        .is_some_and(|kids| kids.iter().any(|k| model.index.contains_key(k)));
     if !has_children {
         return;
     }
@@ -343,7 +340,7 @@ pub fn select_child(app: &mut App) {
         .get(&id)
         .into_iter()
         .flatten()
-        .find(|k| model.nodes.iter().any(|n| &n.id == *k))
+        .find(|k| model.index.contains_key(*k))
         .cloned();
     if let Some(child) = child {
         pick(app, &model, child);
@@ -671,38 +668,8 @@ pub fn build_model_from(
         // children still beneath it, so every row the node counts is a card
         // somebody can see, and a blocked agent in a loop still wears its
         // mark.
-        let on_node = |id: &str| node.sessions.iter().any(|s| s.session_id == id);
         let far = |id: &str| format!("{nid}/session:{id}");
-        let mut kids: Vec<String> = Vec::new();
-        let mut reach: HashSet<String> = HashSet::new();
-        let mut pending: Vec<(String, String)> = Vec::new();
-        for s in &node.sessions {
-            match s.parent.as_deref().filter(|p| on_node(p) && *p != s.session_id) {
-                Some(parent) => pending.push((s.session_id.clone(), parent.to_string())),
-                None => {
-                    kids.push(far(&s.session_id));
-                    reach.insert(s.session_id.clone());
-                }
-            }
-        }
-        while !pending.is_empty() {
-            let before = pending.len();
-            let mut rest = Vec::new();
-            for (sid, parent) in pending {
-                if reach.contains(&parent) {
-                    children.entry(far(&parent)).or_default().push(far(&sid));
-                    reach.insert(sid);
-                } else {
-                    rest.push((sid, parent));
-                }
-            }
-            pending = rest;
-            if pending.len() == before {
-                let (sid, _) = pending.remove(0);
-                kids.push(far(&sid));
-                reach.insert(sid);
-            }
-        }
+        let kids = rank_far(&node.sessions, &far, &mut children);
         for s in &node.sessions {
             let sid = far(&s.session_id);
             // A cached row's state is what the far node LAST said; the
@@ -747,12 +714,22 @@ pub fn build_model_from(
     let mut nodes: Vec<Node> = Vec::new();
     let mut visited: HashSet<String> = HashSet::new();
     for r in &roots {
-        walk(r, 0, &meta, &children, &mut visited, &mut nodes);
+        walk(r, &meta, &children, &mut visited, &mut nodes);
+    }
+    let index: HashMap<String, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (n.id.clone(), i)).collect();
+    let mut parent: Vec<Option<usize>> = vec![None; nodes.len()];
+    for (at, n) in nodes.iter().enumerate() {
+        for kid in children.get(&n.id).into_iter().flatten() {
+            if let Some(&k) = index.get(kid) {
+                parent[k].get_or_insert(at);
+            }
+        }
     }
 
-    place(&mut nodes, &children, &roots, &app.graph.positions);
+    place(&mut nodes, &children, &index, &roots, &app.graph.positions);
 
-    let visible = visible_order(&nodes, &children, &app.graph);
+    let visible = visible_order(&nodes, &children, &index, &app.graph);
     let selected = visible
         .iter()
         .position(|&i| nodes[i].id == app.graph.selected)
@@ -761,7 +738,7 @@ pub fn build_model_from(
         .iter()
         .enumerate()
         .filter(|(_, n)| app.graph.folded.contains(&n.id))
-        .map(|(i, n)| (i, fold_summary(&n.id, &nodes, &children)))
+        .map(|(i, n)| (i, fold_summary(&n.id, &nodes, &children, &index)))
         .filter(|(_, f)| f.hidden > 0)
         .collect();
     for (i, fold) in summaries {
@@ -793,6 +770,8 @@ pub fn build_model_from(
     Model {
         nodes,
         children,
+        index,
+        parent,
         visible,
         selected,
         camera: app.graph.camera,
@@ -809,45 +788,117 @@ fn str_field(v: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
+/// Preorder over the forest from `root`, one row per node reached. An explicit
+/// stack: a session chain is as deep as the document says, and a far
+/// document may say a hundred thousand.
 fn walk(
-    id: &str,
-    depth: usize,
+    root: &str,
     meta: &HashMap<String, Meta>,
     children: &HashMap<String, Vec<String>>,
     visited: &mut HashSet<String>,
     out: &mut Vec<Node>,
 ) {
-    if !visited.insert(id.to_string()) {
-        return; // cycle guard (a hand-edited stage file could carry one)
-    }
-    if let Some(m) = meta.get(id) {
-        out.push(Node {
-            id: id.to_string(),
-            kind: m.kind,
-            label: m.label.clone(),
-            title: m.title.clone(),
-            activity: m.activity.clone(),
-            petname: m.petname.clone(),
-            role: m.role.clone(),
-            harness: m.harness.clone(),
-            session_id: m.session_id.clone(),
-            state: m.state.clone(),
-            tags: m.tags.clone(),
-            model: m.model.clone(),
-            host: m.host.clone(),
-            remote_id: m.remote_id.clone(),
-            cached: m.cached,
-            folded: None,
-            depth,
-            row: out.len(),
-            world: WorldRect::new(0, 0, CARD_W, CARD_H),
-        });
-    }
-    if let Some(kids) = children.get(id) {
-        for k in kids {
-            walk(k, depth + 1, meta, children, visited, out);
+    let mut stack: Vec<(&str, usize)> = vec![(root, 0)];
+    while let Some((id, depth)) = stack.pop() {
+        if !visited.insert(id.to_string()) {
+            continue; // cycle guard (a hand-edited stage file could carry one)
+        }
+        if let Some(m) = meta.get(id) {
+            out.push(Node {
+                id: id.to_string(),
+                kind: m.kind,
+                label: m.label.clone(),
+                title: m.title.clone(),
+                activity: m.activity.clone(),
+                petname: m.petname.clone(),
+                role: m.role.clone(),
+                harness: m.harness.clone(),
+                session_id: m.session_id.clone(),
+                state: m.state.clone(),
+                tags: m.tags.clone(),
+                model: m.model.clone(),
+                host: m.host.clone(),
+                remote_id: m.remote_id.clone(),
+                cached: m.cached,
+                folded: None,
+                depth,
+                row: out.len(),
+                world: WorldRect::new(0, 0, CARD_W, CARD_H),
+            });
+        }
+        if let Some(kids) = children.get(id) {
+            stack.extend(kids.iter().rev().map(|k| (k.as_str(), depth + 1)));
         }
     }
+}
+
+/// Rank a far node's sessions under the same-node spawner each names, and
+/// return the ids that stand directly under the node. A session whose spawner
+/// is not on the node, or is itself, is a root; one whose chain of spawners
+/// never reaches a root (a loop) is broken out as one — the first such, in
+/// document order, then everything that hangs from it — so every session is
+/// reached exactly once whatever the document arranges.
+///
+/// The order a parent's children land in is the order a scan of the document
+/// would reach them with the parent already placed: those after the parent
+/// first, in document order, then those before it. A root's children, and a
+/// broken-out loop member's, are all "after". One pass over the sessions and
+/// one over their links: nothing here searches.
+fn rank_far(
+    sessions: &[crate::app::RosterSession],
+    far: &impl Fn(&str) -> String,
+    children: &mut HashMap<String, Vec<String>>,
+) -> Vec<String> {
+    let on_node: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
+    let mut kids: Vec<String> = Vec::new();
+    // Each session's spawners' sessions, in document order, by spawner id.
+    let mut under: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut placed: Vec<bool> = vec![false; sessions.len()];
+    let mut reached: Vec<&str> = Vec::new();
+    for (i, s) in sessions.iter().enumerate() {
+        match s.parent.as_deref().filter(|p| on_node.contains(p) && *p != s.session_id) {
+            Some(parent) => under.entry(parent).or_default().push(i),
+            None => {
+                kids.push(far(&s.session_id));
+                placed[i] = true;
+                reached.push(&s.session_id);
+            }
+        }
+    }
+    // `hang` places everything that hangs from the session ids on the work
+    // list; `from` is where the parent stood when it was placed, `None` for
+    // a parent placed before the scan began.
+    let mut work: Vec<(&str, Option<usize>)> = reached.into_iter().map(|id| (id, None)).collect();
+    let mut expanded: HashSet<&str> = HashSet::new();
+    let mut next_unplaced = 0;
+    loop {
+        while let Some((id, from)) = work.pop() {
+            if !expanded.insert(id) {
+                continue;
+            }
+            let Some(list) = under.get(id) else { continue };
+            let split = from.map_or(0, |at| list.partition_point(|&c| c < at));
+            let mut hung: Vec<String> = Vec::new();
+            for &c in list[split..].iter().chain(&list[..split]) {
+                if !placed[c] {
+                    placed[c] = true;
+                    hung.push(far(&sessions[c].session_id));
+                    work.push((&sessions[c].session_id, Some(c)));
+                }
+            }
+            if !hung.is_empty() {
+                children.entry(far(id)).or_default().extend(hung);
+            }
+        }
+        while next_unplaced < sessions.len() && placed[next_unplaced] {
+            next_unplaced += 1;
+        }
+        let Some(s) = sessions.get(next_unplaced) else { break };
+        placed[next_unplaced] = true;
+        kids.push(far(&s.session_id));
+        work.push((&s.session_id, None));
+    }
+    kids
 }
 
 // ── World placement: a fresh proposal, the retained store decides ───────────
@@ -857,13 +908,14 @@ fn walk(
 fn place(
     nodes: &mut [Node],
     children: &HashMap<String, Vec<String>>,
+    index: &HashMap<String, usize>,
     roots: &[String],
     retained: &crate::scene::Positions,
 ) {
     let mut slot = 0;
     let mut slots: HashMap<String, i32> = HashMap::new();
     for root in roots {
-        lay_slots(root, children, nodes, &mut slot, &mut slots);
+        lay_slots(root, children, nodes, index, &mut slot, &mut slots);
         slot += SLOT;
     }
     let fresh: Vec<(String, Placed)> = nodes
@@ -889,42 +941,68 @@ fn place(
 
 /// The fresh proposal: leaves take successive horizontal slots, a parent
 /// centres over its first and last descendant leaf. Selection order stays
-/// preorder.
+/// preorder. Each card is laid once, on an explicit stack: a card two parents
+/// hold keeps the slot its first parent gave it, and a chain a hundred
+/// thousand deep costs a hundred thousand frames of heap, not of stack.
 fn lay_slots(
-    id: &str,
+    root: &str,
     children: &HashMap<String, Vec<String>>,
     nodes: &[Node],
+    index: &HashMap<String, usize>,
     next: &mut i32,
     out: &mut HashMap<String, i32>,
-) -> i32 {
-    let Some(node) = nodes.iter().find(|n| n.id == id) else {
-        return *next;
+) {
+    /// One card being laid: its drawn children, how many are done, and the
+    /// slots of the first and last of them.
+    struct Frame {
+        at: usize,
+        kids: Vec<usize>,
+        done: usize,
+        span: Option<(i32, i32)>,
+    }
+    let enter = |at: usize| Frame {
+        at,
+        kids: children
+            .get(&nodes[at].id)
+            .into_iter()
+            .flatten()
+            .filter_map(|k| index.get(k).copied())
+            .filter(|&k| nodes[k].depth == nodes[at].depth + 1)
+            .collect(),
+        done: 0,
+        span: None,
     };
-    let depth = node.depth;
-    let kids: Vec<String> = children
-        .get(id)
-        .into_iter()
-        .flatten()
-        .filter(|child| {
-            nodes
-                .iter()
-                .any(|n| &n.id == *child && n.depth == depth + 1)
-        })
-        .cloned()
-        .collect();
-    let x = if kids.is_empty() {
-        let x = *next;
-        *next += SLOT;
-        x
-    } else {
-        let spans: Vec<i32> = kids
-            .iter()
-            .map(|child| lay_slots(child, children, nodes, next, out))
-            .collect();
-        (spans[0] + spans[spans.len() - 1]) / 2
+    let Some(&top) = index.get(root).filter(|_| !out.contains_key(root)) else {
+        return;
     };
-    out.insert(id.to_string(), x);
-    x
+    let mut stack = vec![enter(top)];
+    while let Some(frame) = stack.last_mut() {
+        if let Some(&kid) = frame.kids.get(frame.done) {
+            frame.done += 1;
+            match out.get(&nodes[kid].id).copied() {
+                Some(x) => {
+                    let (first, _) = frame.span.unwrap_or((x, x));
+                    frame.span = Some((first, x));
+                }
+                None => stack.push(enter(kid)),
+            }
+            continue;
+        }
+        let Some(frame) = stack.pop() else { break };
+        let x = match frame.span {
+            Some((first, last)) => (first + last) / 2,
+            None => {
+                let x = *next;
+                *next += SLOT;
+                x
+            }
+        };
+        out.insert(nodes[frame.at].id.clone(), x);
+        if let Some(parent) = stack.last_mut() {
+            let (first, _) = parent.span.unwrap_or((x, x));
+            parent.span = Some((first, x));
+        }
+    }
 }
 
 // ── The view choice: focused component, or the whole forest ─────────────────
@@ -940,15 +1018,16 @@ fn lay_slots(
 fn visible_order(
     nodes: &[Node],
     children: &HashMap<String, Vec<String>>,
+    index: &HashMap<String, usize>,
     scene: &crate::scene::SceneState,
 ) -> Vec<usize> {
-    let hidden = hidden_by_folds(nodes, children, &scene.folded);
+    let hidden = hidden_by_folds(nodes, children, index, &scene.folded);
     if scene.view == View::All || nodes.is_empty() {
         return (0..nodes.len())
             .filter(|i| !hidden.contains(nodes[*i].id.as_str()))
             .collect();
     }
-    let anchor = if nodes.iter().any(|n| n.id == scene.selected) {
+    let anchor = if index.contains_key(&scene.selected) {
         scene.selected.clone()
     } else {
         nodes[0].id.clone()
@@ -983,19 +1062,20 @@ fn visible_order(
 fn hidden_by_folds<'a>(
     nodes: &'a [Node],
     children: &'a HashMap<String, Vec<String>>,
+    index: &HashMap<String, usize>,
     folded: &std::collections::BTreeSet<String>,
 ) -> HashSet<&'a str> {
     let mut hidden: HashSet<&str> = HashSet::new();
     for id in folded {
-        let Some(root) = nodes.iter().find(|n| &n.id == id) else {
+        let Some(&root) = index.get(id) else {
             continue;
         };
-        let mut queue: VecDeque<&str> = VecDeque::from([root.id.as_str()]);
+        let mut queue: VecDeque<&str> = VecDeque::from([nodes[root].id.as_str()]);
         while let Some(cur) = queue.pop_front() {
             for kid in children.get(cur).into_iter().flatten() {
-                if let Some(n) = nodes.iter().find(|n| &n.id == kid) {
-                    if hidden.insert(n.id.as_str()) {
-                        queue.push_back(n.id.as_str());
+                if let Some(&n) = index.get(kid) {
+                    if hidden.insert(nodes[n].id.as_str()) {
+                        queue.push_back(nodes[n].id.as_str());
                     }
                 }
             }
@@ -1006,9 +1086,14 @@ fn hidden_by_folds<'a>(
 
 /// What one folded card hides: the descendants under it and how many are
 /// awaiting a human or working.
-fn fold_summary(id: &str, nodes: &[Node], children: &HashMap<String, Vec<String>>) -> Fold {
+fn fold_summary(
+    id: &str,
+    nodes: &[Node],
+    children: &HashMap<String, Vec<String>>,
+    index: &HashMap<String, usize>,
+) -> Fold {
     let one = std::collections::BTreeSet::from([id.to_string()]);
-    let hidden = hidden_by_folds(nodes, children, &one);
+    let hidden = hidden_by_folds(nodes, children, index, &one);
     let mut fold = Fold {
         hidden: hidden.len(),
         awaiting: 0,
@@ -1740,6 +1825,7 @@ mod tests {
     use aoide_conduct::graph::{Project, SessionRecord};
     use ratatui::style::Color;
     use serde_json::Map;
+    use std::time::Duration;
 
     fn session(id: &str, cwd: &str, state: &str, parent: Option<&str>) -> SessionRecord {
         SessionRecord {
@@ -3354,4 +3440,190 @@ mod tests {
             "harness appears exactly once on a titleless card: {text:?}"
         );
     }
+    // ── A hostile far document: depth and width are the sender's ───────────
+
+    fn far_session(id: &str, parent: Option<&str>, state: &str) -> serde_json::Value {
+        let mut s = serde_json::json!({
+            "sessionId": id, "label": format!("far/child/{id}"), "agent": "claude",
+            "state": state, "presence": "online", "cwd": "/",
+        });
+        if let Some(p) = parent {
+            s["parentSessionId"] = serde_json::json!(p);
+        }
+        s
+    }
+
+    /// An app whose only registered node is `far`, holding `sessions`, with
+    /// the whole forest in view.
+    fn far_app(sessions: Vec<serde_json::Value>) -> App {
+        let data = serde_json::json!({
+            "host": "osaka", "generatedAt": "t",
+            "nodes": [
+                { "name": "osaka", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null, "sessions": sessions },
+            ],
+        });
+        let mut app = App::for_test(vec![], vec![], Vec::new());
+        app.roster.outcome = Some(aoide_protocol::output::Outcome::ok("session", "x").with_data(data));
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        app
+    }
+
+    fn far_id(id: &str) -> String {
+        format!("node:far/session:{id}")
+    }
+
+    /// `s0` is a root and every `s<i>` is spawned by `s<i-1>`; every 1000th
+    /// one waits on a human.
+    fn far_chain(n: usize) -> Vec<serde_json::Value> {
+        (0..n)
+            .map(|i| {
+                let parent = (i > 0).then(|| format!("s{}", i - 1));
+                far_session(&format!("s{i}"), parent.as_deref(), if i % 1000 == 999 { "awaiting" } else { "idle" })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_50k_deep_far_chain_is_ranked_laid_folded_and_stepped_on_a_small_stack() {
+        // The chain is as deep as the document is long, one level per session:
+        // any pass that recurses per level overflows a 256 KiB stack within a
+        // few thousand of them, so fifty thousand leaves a wide margin.
+        const N: usize = 50_000;
+        let walk_the_chain = || {
+            let mut app = far_app(far_chain(N));
+            let m = build_model(&app);
+            assert_eq!(m.nodes.len(), N + 1, "the node card and every session");
+            let deepest = far_id(&format!("s{}", N - 1));
+            assert_eq!(node(&m, &deepest).depth, N);
+            assert_eq!(m.parent_of(&deepest).map(|p| p.id.clone()), Some(far_id(&format!("s{}", N - 2))));
+            let xs: HashSet<i32> = m.nodes.iter().map(|n| n.world.x).collect();
+            assert_eq!(xs.len(), 1, "an only child is centred under its parent, all the way down");
+
+            // The cursor climbs from the bottom of the chain, a level at a time.
+            select_index(&mut app, N);
+            assert_eq!(app.graph.selected, deepest);
+            select_parent(&mut app);
+            assert_eq!(app.graph.selected, far_id(&format!("s{}", N - 2)));
+            select_sibling(&mut app, true);
+            assert_eq!(app.graph.selected, far_id(&format!("s{}", N - 2)), "an only child has no sibling");
+
+            // Folding the node hides every session beneath it and counts the
+            // ones waiting on a human.
+            select_index(&mut app, 0);
+            toggle_fold(&mut app);
+            let m = build_model(&app);
+            assert_eq!(m.visible_len(), 1);
+            assert_eq!(
+                node(&m, "node:far").folded,
+                Some(Fold { hidden: N, awaiting: N / 1000, working: 0 })
+            );
+
+            // Stepping into it opens the fold and lands on the first session,
+            // and the frame paints and hit-tests without walking the chain.
+            select_child(&mut app);
+            assert_eq!(app.graph.selected, far_id("s0"));
+            let area = Rect::new(0, 0, 120, 40);
+            assert!(painted(&paint(&app, area)) > 0);
+            let _ = hit_node(area, &app, 3, 3);
+            assert!(graph_extent(&app).0 > 0);
+        };
+        aoide_test_support::finishes_within(Duration::from_secs(180), move || aoide_test_support::on_small_stack(walk_the_chain))
+            .expect("a chain fifty thousand deep is walked in seconds, not in the square of its depth");
+    }
+
+    #[test]
+    fn a_far_roster_is_built_in_linear_time_in_its_sessions() {
+        // A heap-shaped tree: a rank sixteen thousand wide at the bottom, so
+        // the layout, the placement and the ranking all meet a wide row, and
+        // the parent of every session is somewhere on the node.
+        fn build(n: usize) -> impl FnOnce() -> usize + Send + 'static {
+            move || {
+                let sessions: Vec<_> = (0..n)
+                    .map(|i| {
+                        let parent = (i > 0).then(|| format!("s{}", (i - 1) / 2));
+                        far_session(&format!("s{i}"), parent.as_deref(), "idle")
+                    })
+                    .collect();
+                let mut app = far_app(sessions);
+                // Folding the node hides every session and counts them: the
+                // fold passes walk the whole subtree too.
+                app.graph.folded.insert("node:far".into());
+                let m = build_model(&app);
+                assert_eq!(m.visible_len(), 1);
+                assert_eq!(node(&m, "node:far").folded.map(|f| f.hidden), Some(n));
+                m.nodes.len()
+            }
+        }
+        let (small, nodes) = aoide_test_support::finishes_within(Duration::from_secs(120), build(4_000)).expect("4k sessions");
+        assert_eq!(nodes, 4_001);
+        let limit = (small * 20).max(Duration::from_secs(10));
+        let (big, nodes) = aoide_test_support::finishes_within(limit, build(32_000))
+            .unwrap_or_else(|| panic!("32k sessions took over {limit:?}, 4k took {small:?}: the far layout is super-linear"));
+        assert_eq!(nodes, 32_001);
+        println!("far model: 4k sessions {small:?}, 32k sessions {big:?}");
+    }
+
+    #[test]
+    fn far_sessions_hang_under_their_spawner_in_the_order_the_document_reads() {
+        // Document order is the order, with one rotation: a spawner that is
+        // itself listed after some of its children shows the ones listed
+        // after it first. A loop with no root is broken out at its first row.
+        let doc = [
+            ("c1", Some("p")),
+            ("p", None),
+            ("c2", Some("p")),
+            ("d1", Some("q")),
+            ("q", Some("p")),
+            ("d2", Some("q")),
+            ("la", Some("lb")),
+            ("lb", Some("la")),
+            ("lc", Some("la")),
+        ];
+        let app = far_app(doc.iter().map(|(id, parent)| far_session(id, *parent, "idle")).collect());
+        let order: Vec<(String, usize)> = node_order(&app)
+            .into_iter()
+            .map(|n| (n.id.trim_start_matches("node:far/session:").to_string(), n.depth))
+            .collect();
+        let want = [
+            ("node:far", 0),
+            ("p", 1),
+            ("c1", 2),
+            ("c2", 2),
+            ("q", 2),
+            ("d2", 3),
+            ("d1", 3),
+            ("la", 1),
+            ("lb", 2),
+            ("lc", 2),
+        ];
+        assert_eq!(order, want.iter().map(|(id, d)| (id.to_string(), *d)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_far_roster_that_repeats_session_ids_is_laid_once_per_id() {
+        // Two sessions may carry one id, and each may name a different
+        // spawner, so a card is held by two parents. A ladder of such pairs
+        // doubles the paths to the bottom at every rung: laying a card once
+        // per path takes 2^rungs.
+        const RUNGS: usize = 40;
+        let mut sessions = vec![far_session("a0", None, "idle"), far_session("b0", None, "idle")];
+        for rung in 1..=RUNGS {
+            for id in ["a", "b"] {
+                for spawner in ["a", "b"] {
+                    sessions.push(far_session(&format!("{id}{rung}"), Some(&format!("{spawner}{}", rung - 1)), "idle"));
+                }
+            }
+        }
+        let (took, nodes) = aoide_test_support::finishes_within(Duration::from_secs(20), move || {
+            let app = far_app(sessions);
+            let n = build_model(&app).nodes.len();
+            n
+        })
+        .expect("a ladder of duplicate ids is laid in moments, not in 2^40 paths");
+        assert_eq!(nodes, 2 * (RUNGS + 1) + 1, "one card per id, and the node");
+        println!("duplicate-id ladder: {took:?}");
+    }
+
 }

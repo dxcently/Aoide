@@ -3805,6 +3805,16 @@ never expires, so it can render with nothing current behind it. The conductor
 TUI's own DAG (`conductor/src/graphview.rs`) does NOT yet walk either key: it
 reads project/session nodes only, so this chain is terminal-only for now.
 
+The far node chooses the document's shape, so the join is bounded by its size
+and not by its arrangement. A fold's session is drawn under the FIRST link, in
+roster order, that reaches it; a later link to a drawn session keeps its row
+and has no rows under it. The `subtree` of a `remoteChildren` entry is
+`[ { "sessionId", "subtree": [ … ] }, … ]`, nested to 32 levels. A row deeper
+than that stays in preorder in the deepest nested list as `{ "sessionId",
+"subtree": [], "depth": <n> }`, so a chain of any depth nests a bounded number
+of levels and loses no row; the text render likewise draws 32 levels of
+indentation, then `…`.
+
 ### `state/stage/herald.json` — **v0**
 
 The notification ledger the Quickshell herald draws from. dunst owns

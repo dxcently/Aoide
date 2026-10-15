@@ -680,7 +680,10 @@ are consumed internally and get no `graph.json` projection:
   its own — and `aoide session` renders exactly that chain: each
   `remoteChildren` row joins the probed fold by `(node name, sessionId)` and is
   drawn indented under the parent's own row, its far descendants beneath it,
-  with the same join feeding `--json`'s `fold`/`subtree` on the entry. A row
+  with the same join feeding `--json`'s `fold`/`subtree` on the entry. The
+  far node picks the document's shape, so each far session is drawn once,
+  under the first link that reaches it, and indentation stops at 32 levels
+  (`…`) however deep the chain runs. A row
   the fold does not carry is shown `(not pulled)`, never hidden; one behind an
   expired cache TTL is shown `(stale)`, because the ledger link itself never
   expires. The conductor TUI's DAG reads neither key yet — terminal-only.

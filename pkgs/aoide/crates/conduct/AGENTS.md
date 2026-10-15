@@ -2030,6 +2030,28 @@ in the message.
   not re-derive the nesting in a renderer — `subtree_lines` reads the joined
   rows, and a second walk would drift. The conductor TUI's `graphview.rs` reads
   neither key yet; teaching it means rendering THIS join, not a second one.
+- **No walk over a far graph recurses per level or costs more than linear in
+  its sessions plus links.** A pulled document is up to 20 MiB and every
+  session id, `spawned` edge, `remoteChildren` and `remoteParent` in it is the
+  far node's choice. Its depth rides id links, not JSON nesting, so the parse
+  limit does not bound it: a chain of a hundred thousand sessions parses, and
+  `aoide session`, `session find`, `graph view` and the conductor all render
+  it (the daemon door serves them, so an overflow or a hang there is the
+  daemon's). Hold four things. (1) Walk on an explicit stack, and build rows
+  flat (`SubtreeRow { session_id, depth }`) so derived `Clone`, `Drop`,
+  `Debug` and `PartialEq` do not recurse either. (2) Index once and probe:
+  `spawned_into` for the `spawned` edges, `FoldIndex` for parent to children;
+  never `iter().find`/`any`/`contains` over a far list inside a loop over a
+  far list. (3) Visit a node once: `FoldIndex::drawn` is shared across a
+  fold's links, so a fold's rows never outnumber its sessions however many
+  links point in. (4) Bound what is drawn, never what is kept: indentation
+  clips at `INDENT_LEVELS` and the JSON nests to the same depth, but no
+  session is dropped. A far string that reaches the filesystem is bounded
+  too: `project_bucket` starts `walk_up` at the deepest ancestor of a cwd that
+  fits `PATH_MAX` (`within_path_max`). The proofs are `a_200k_deep_far_chain_*`
+  on a 256 KiB stack (`aoide_test_support::on_small_stack`) and the ratio
+  tests beside each site (`aoide_test_support::finishes_within`); a new walk
+  over a far document gets both.
 - **A ledger row's doom belongs to the caller that lands the roster.** The
   retain is `doc.rs::drop_remote_child_rows`, called by BOTH roster-exit paths
   (`reap_inner`, `session prune`) AFTER their `sessions.json` write succeeds —
