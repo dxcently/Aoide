@@ -642,6 +642,8 @@ pub struct SessionRecord {
     /// - `held-pending` — queued in `pending.json` for a human; nothing is typed
     ///   until one approves it;
     /// - `skipped-empty` — there was nothing to queue;
+    /// - `queue-full` — the node already holds the queue's per-source cap
+    ///   (nothing queued);
     /// - `hold-failed` — the queue write failed (nothing queued);
     /// - `busy` — the opening-turn worker pool was full (nothing queued; ask
     ///   again);

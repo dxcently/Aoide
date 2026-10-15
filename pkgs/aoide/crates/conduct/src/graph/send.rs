@@ -58,7 +58,7 @@ use super::window::{
 };
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClass, CLAUDE_PROFILE};
 use aoide_protocol::{Door, Invocation};
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
 use aoide_storage::session::pid_may_move;
@@ -403,9 +403,35 @@ fn one_line_title(text: &str) -> String {
     }
 }
 
-fn record_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), String> {
+/// The most entries `pending.json` holds for one source. The source is the
+/// `from` an entry records: `node:<name>` for the network door, the attributed
+/// session for a local door, and every entry that names none counts as one
+/// more source. A send past it is refused and audited, and nothing already
+/// queued is touched, so one sender cannot fill a human's approval queue.
+pub const PENDING_CAP_PER_SOURCE: usize = 32;
+
+/// The `reason` a send refused at [`PENDING_CAP_PER_SOURCE`] carries, so a
+/// door that answers its own callers (`aoide-server`'s `do_inject`) can tell
+/// it from any other failure.
+pub const PENDING_FULL: &str = "pending-full";
+
+/// Why a send was not queued.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HoldRefused {
+    /// Its source already holds [`PENDING_CAP_PER_SOURCE`] entries.
+    Full,
+    /// The stage could not be read or written.
+    Stage(String),
+}
+
+/// Queue one held send. The cap is counted and the entry appended under ONE
+/// stage lock, so two callers racing for the last slot cannot both take it.
+fn record_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
     with_stage_lock(|| {
-        let mut file: PendingFile = load_stage(&pending_path())?;
+        let mut file: PendingFile = load_stage(&pending_path()).map_err(HoldRefused::Stage)?;
+        if file.pending.iter().filter(|p| p.from.as_deref() == from).count() >= PENDING_CAP_PER_SOURCE {
+            return Err(HoldRefused::Full);
+        }
         file.schema_version = STAGE_GRAPH_VERSION.to_string();
         file.pending.push(PendingSend {
             session_id: id.to_string(),
@@ -414,16 +440,16 @@ fn record_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Res
             queued_at: now_iso_utc(),
             from: from.map(str::to_string),
         });
-        write_stage(&pending_path(), &file)
+        write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)
     })
 }
 
 /// Park a send in `pending.json` without touching any socket: the one seam a
 /// door that cannot approve uses to hold text it was asked to inject, such as
 /// the A2A spawn's opening turn (`aoide-server`'s `opening_turn_worker`). Same
-/// queue, same `record_pending` shape, so `session pending approve` treats it
-/// exactly like any other held send.
-pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), String> {
+/// queue, same `record_pending` shape and cap, so `session pending approve`
+/// treats it exactly like any other held send.
+pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
     record_pending(id, text, submit, from)
 }
 
@@ -925,8 +951,34 @@ fn deliver_local_with(
     // whoever queued it, not whoever approved it.
     let attributed_sender = resolve_sender(inv);
     if !gate.delivers() {
-        if let Err(e) = record_pending(&id, &text, submit, attributed_sender.as_deref()) {
-            return stage_error(cmd, e);
+        match record_pending(&id, &text, submit, attributed_sender.as_deref()) {
+            Ok(()) => {}
+            Err(HoldRefused::Stage(e)) => return stage_error(cmd, e),
+            Err(HoldRefused::Full) => {
+                let what = match attributed_sender.as_deref() {
+                    Some(from) => format!(
+                        "send to `{id}` not queued: `{from}` already holds {PENDING_CAP_PER_SOURCE} pending sends"
+                    ),
+                    None => format!(
+                        "send to `{id}` not queued: unattributed senders already hold {PENDING_CAP_PER_SOURCE} pending sends"
+                    ),
+                };
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    what,
+                    "the approval queue holds a bounded number of sends per sender, so one sender cannot fill it",
+                    Fix::Run("aoide session pending list".to_string()),
+                )
+                .with_fields(json!({
+                    "reason": PENDING_FULL,
+                    "id": id,
+                    "from": attributed_sender,
+                    "cap": PENDING_CAP_PER_SOURCE,
+                }));
+                audit_send(inv, "refused", &out.message, &text);
+                return out;
+            }
         }
         // `yes` asked for approval this door is not allowed to give: the send
         // still parks, and the caller is told why, in the taught line.
@@ -3947,6 +3999,50 @@ mod tests {
             assert!(pf.pending.iter().any(|p| p.session_id == id && p.text == "do a thing"), "{door:?}");
             let _ = std::fs::remove_dir_all(&root);
         }
+    }
+
+    /// The pending queue holds at most `PENDING_CAP_PER_SOURCE` sends per
+    /// `from`. The next one from a full source is refused and audited, the
+    /// first N stay exactly as queued, and another source still queues.
+    #[test]
+    fn a_full_source_is_refused_and_audited_and_another_source_still_queues() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("pending-cap", None);
+        let send_from = |from: &str, text: &str| {
+            session_send(&send_on(Door::Mcp, &[text], &[("id", &id), ("from", from)]))
+        };
+        let queued_from = |from: &str| -> Vec<String> {
+            let pf: PendingFile = load_stage(&pending_path()).unwrap();
+            pf.pending.into_iter().filter(|p| p.from.as_deref() == Some(from)).map(|p| p.text).collect()
+        };
+        let first: Vec<String> = (0..PENDING_CAP_PER_SOURCE).map(|n| format!("send {n}")).collect();
+        for text in &first {
+            let out = send_from("flooder", text);
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        }
+
+        let out = send_from("flooder", "one too many");
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], PENDING_FULL);
+        assert_eq!(data["from"], "flooder");
+        assert_eq!(data["cap"], PENDING_CAP_PER_SOURCE);
+        assert_eq!(queued_from("flooder"), first, "the first N are intact, in order");
+        let log = std::fs::read_to_string(root.join("log")).unwrap();
+        let refused = log
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|r| r["status"] == "refused")
+            .expect("the refusal is audited");
+        assert_eq!(refused["untrusted_data"], "one too many", "{refused}");
+        assert!(refused["message"].as_str().unwrap().contains("flooder"), "{refused}");
+
+        let out = send_from("someone-else", "still welcome");
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("someone-else"), ["still welcome"]);
+        assert!(nothing_connected(&listener), "a door that cannot approve delivers nothing");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Path 2 of the audit: the box-wide autogate environment. It is read from

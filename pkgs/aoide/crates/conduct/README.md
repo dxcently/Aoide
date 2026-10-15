@@ -53,6 +53,11 @@ asked to inject (A2A's spawn opening turn). The same predicate refuses
 `session permit` (no summons card) and `mail ring` (no ring) on those doors.
 CONTRACTS.md's approval-doors section has the table.
 
+The queue holds at most `PENDING_CAP_PER_SOURCE` entries per `from`. A held
+send past it is refused with `reason` `PENDING_FULL` and audited, and
+`hold_pending` answers `HoldRefused::Full`, so the network door can answer its
+own caller (`aoide-server`'s `do_inject` and opening turn).
+
 ## Named seams (what it exposes)
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements

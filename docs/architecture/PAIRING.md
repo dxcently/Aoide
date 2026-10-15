@@ -380,8 +380,9 @@ nodes:
   loopback, so the observed origin classifies as loopback exactly like a
   genuinely local caller. The door therefore parks every Inject in
   `state/stage/pending.json` whatever the origin, and whether or not the
-  request is signed (CONTRACTS.md §6). A verified signature admits a request
-  to the queue and names its sender; it never delivers.
+  request is signed (CONTRACTS.md §6). A verified signature holding `message`
+  in its mesh admits a request to the queue and names its sender; it never
+  delivers.
 - **A remote parent's steer waits for a human, and the tunnel is its
   production shape.** An Inject from a remote parent parks in `pending.json`
   for the approver, tunneled or not, and no `aoide/from` claim changes that.

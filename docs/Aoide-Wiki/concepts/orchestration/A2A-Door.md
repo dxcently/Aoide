@@ -177,10 +177,15 @@ the conductor) approves it there. Enabling the door is admitted at
   neither that token nor a node identity gets the uniform answer: the
   synthetic `submitted` Task (#50), which names no session and touches neither
   `sessions.json` nor `pending.json`. An unauthenticated caller therefore
-  cannot tell a real `contextId` from a bogus one. A node identity is ONLY the
-  node's own bearer (the Token rung, matched against its `tokenFile`) or a
-  verified per-request signature (the Signature rung). An address match alone
-  admits nothing.
+  cannot tell a real `contextId` from a bogus one. A node identity is ONLY a
+  `verified` node's own bearer (the Token rung, matched against its
+  `tokenFile`) or a verified per-request signature whose grant in the signed
+  mesh holds `message` (the Signature rung). An address match alone admits
+  nothing.
+- **The queue is capped per source.** `pending.json` holds at most 32 entries
+  per `from`. Past that, a caller that proved a node identity is refused
+  `-32000`, any other caller gets the uniform answer, and nothing queued is
+  touched. A spawn's opening turn at the cap records `queue-full`.
 - **Pairing gates Spawn; the door-wide bearer gates only unsigned reads.**
   A spawn runs only for an identified, paired node: `spawn_admitted`
   requires a request resolved on the Signature rung (a verified per-request

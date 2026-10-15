@@ -325,8 +325,11 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     typed; an empty prompt queues nothing. Every inject parks in `pending.json`,
     loopback included, and no network send is delivered. Once a door token is
     configured, a `contextId` send from a caller that proved neither that token
-    nor a node identity gets the uniform synthetic `submitted` Task and queues
-    nothing. Spawn answers to
+    nor a node identity (a `verified` node's own bearer, or a signature
+    holding `message` in its mesh) gets the uniform synthetic `submitted` Task
+    and queues nothing. The queue holds at most 32 entries per source: past
+    that a proven node is refused `-32000` and any other caller gets the
+    uniform answer. Spawn answers to
     pairing alone: the caller must resolve on the Signature rung — a verified
     per-request signature against some `verified` node's stored pubkey — with
     `spawn` among the caller's grants IN THE MESH ITS REQUEST NAMES; every

@@ -184,9 +184,12 @@ Rules:
   with no door token configured every Inject reaches the queue; once one is
   configured, a `contextId` send from a caller that proved neither that token
   nor a node identity gets the uniform synthetic `submitted` Task and queues
-  nothing. A node identity is the node's own bearer, matched against its
-  `tokenFile`, or a verified per-request signature. An address match proves no
-  identity and admits nothing once a door token is configured.
+  nothing. A node identity is a `verified` node's own bearer, matched against
+  its `tokenFile`, or a verified per-request signature whose grant in the
+  signed mesh holds `message`. An address match proves no identity and admits
+  nothing once a door token is configured. The queue holds at most 32 entries
+  per source; past that a proven node is refused `-32000` and any other
+  caller gets the uniform answer.
 - **An unreadable config grants nothing and refuses with the reason.** The same
   resolution decides every unnamed request, so it fails closed at the grant too:
   `aoide-server::a2a::effective_mesh` is failable, an unnamed request's grant is

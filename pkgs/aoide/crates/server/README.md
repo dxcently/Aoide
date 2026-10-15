@@ -9,9 +9,12 @@ The A2A door (`a2a.rs`) never approves a gated send, and it never delivers
 one. Every inbound inject the door admits is held in `pending.json` for a
 human, whoever the caller is. Admission is decided by identity, never by
 address: with a door-wide token configured, a caller that presents neither that
-token nor a node identity (its own bearer, or a verified signature) gets the
-uniform answer and nothing queues. A spawn's opening turn is held the same way,
-verdict `held-pending`. The gate that decides this is `aoide_conduct::graph::
+token nor a node identity (a verified node's own bearer, or a verified
+signature holding `message` in its mesh) gets the uniform answer and nothing
+queues. The queue holds a bounded number of entries per source: past it, a
+proven node is refused `-32000` and any other caller gets the uniform answer. A
+spawn's opening turn is held the same way, verdict `held-pending`, or
+`queue-full` at the cap. The gate that decides this is `aoide_conduct::graph::
 Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
 
 ## Named seams (what it exposes)
@@ -205,7 +208,8 @@ Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
   so no receipt is filed. `do_spawn` (Spawn, a BRAND-NEW session) queues its
   opening turn the same way: `opening_turn_worker` stamps `pending`, then
   `hold_pending` queues the prompt attributed `node:<name>` and the verdict is
-  `held-pending`; an EMPTY opening turn records `skipped-empty` and queues
+  `held-pending` (`queue-full` when that node already holds the queue's
+  per-source cap); an EMPTY opening turn records `skipped-empty` and queues
   nothing. The verdict lands on the record (`stamp_opening_turn`: one verdict
   from the list in `CONTRACTS.md`, or `unknown` when a boot pass reconciles a
   verdict lost with the process that owed it), and `tasks/get` reports it as the

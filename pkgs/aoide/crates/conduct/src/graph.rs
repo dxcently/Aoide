@@ -174,9 +174,12 @@ pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::DAEMON_PEER_PID_FLAG;
 // `session_hook`/`session_send`/`pending_path`: the hook door and the injection
 // door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
-// registry, `aoide-server`'s dispatch).
+// registry, `aoide-server`'s dispatch). `PENDING_FULL` is the reason a send
+// refused at the queue's per-source cap carries, which the network door turns
+// into its own answer.
 pub use self::send::{
-    hold_pending, pending_path, session_hook, session_send, DOOR_CANNOT_APPROVE,
+    hold_pending, pending_path, session_hook, session_send, HoldRefused, DOOR_CANNOT_APPROVE,
+    PENDING_CAP_PER_SOURCE, PENDING_FULL,
 };
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile

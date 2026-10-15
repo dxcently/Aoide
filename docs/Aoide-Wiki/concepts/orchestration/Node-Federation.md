@@ -274,9 +274,9 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
   `spawn_admitted` requires a request resolved by signature, whose grant in
   the mesh the request names holds `"spawn"`.
 - **Token** — a node's own `tokenFile` presented as a bearer. A legacy
-  escape for an unpaired caller: it resolves the node, and that node's Inject
-  is never answered with the uniform response. It authenticates no read and
-  never reaches Spawn.
+  escape for an unpaired caller: it resolves the node, and a `verified`
+  node's Inject is never answered with the uniform response. It authenticates
+  no read and never reaches Spawn.
 - **Addr** (`NodeRung::Addr`) — a bare TCP-source-IP-vs-registered-`url`
   match. Resolves a node identity for ATTRIBUTION only (Inject's `from`
   field): it carries no possession proof, admits nothing once a door-wide
@@ -289,15 +289,17 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
 Inject classifies the caller's address first (`a2a::classify_origin` →
 `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`), and no address proves
 an identity. Every admitted inject from the network door parks in the same
-pending-approval queue `send` uses. Nothing is delivered from this door.
-Which callers reach that queue is the admission rule of [[A2A-Door]]: with no
-door-wide token configured, every inject does. Once one
-is configured, a `contextId` send from a caller holding neither that token nor
-a node identity (the Token or Signature rung above) gets the uniform answer and
-queues nothing. `aoide.a2a.bearerSecret` (a secret NAME resolved fresh on every
-request through the local [[Secrets-Broker]], consumer `a2a-door`, failing
-closed on a resolve failure) takes precedence over `aoide.a2a.tokenFile` (a
-path read once at `a2a serve` launch).
+pending-approval queue `send` uses. Nothing is delivered from this door. Which
+callers reach that queue is the admission rule of [[A2A-Door]]: with no
+door-wide token configured, every inject does. Once one is configured, a
+`contextId` send from a caller holding neither that token nor a node identity (a
+`verified` node on the Token rung, or a signature holding `message` in its mesh)
+gets the uniform answer and queues nothing. The queue holds at most 32 entries
+per source; past that a proven node is refused `-32000` and any other caller
+gets the uniform answer. `aoide.a2a.bearerSecret` (a secret NAME resolved fresh
+on every request through the local [[Secrets-Broker]], consumer `a2a-door`,
+failing closed on a resolve failure) takes precedence over `aoide.a2a.tokenFile`
+(a path read once at `a2a serve` launch).
 
 A verified signature identifies its node by key, whatever address the request
 arrived from. An ssh `-L` forward makes a tunneled node's packets arrive from

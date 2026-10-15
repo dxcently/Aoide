@@ -32,7 +32,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `aoide_protocol::Door::A2a.can_approve()`, which is false. Every
   Inject the door admits parks in `pending.json` for a human, whoever the caller
   is, so no network send is delivered. A spawn's opening turn is held with
-  `hold_pending`, not typed, verdict `held-pending`. The MCP side of the same
+  `hold_pending`, not typed, verdict `held-pending` (or `queue-full` at the
+  queue's per-source cap). The MCP side of the same
   rule is conduct's. Admission decides who gets a queue entry (see the Inject
   admission bullet below); approval is what this rule withholds.
 
@@ -518,18 +519,31 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   every Inject reaches `pending.json`. Once one is configured, a `contextId`
   send from a caller that presented neither that token nor a node identity gets
   the uniform synthetic `submitted` Task (`submitted_task`), and nothing queues.
-  A node identity is ONLY the node's own bearer (`NodeRung::Token`, matched
-  against its `tokenFile`) or a verified per-request signature
-  (`NodeRung::Signature`). An address match (`NodeRung::Addr`) proves no
-  identity and admits nothing once a door-wide token is configured: the address
-  is used for attribution only. No `aoide/from` claim changes whether an Inject
-  parks. Tests:
+  A node identity is ONLY a `verified` node's own bearer (`NodeRung::Token`,
+  matched against its `tokenFile`) or a verified per-request signature whose
+  grant in the signed mesh holds `message` (`NodeRung::Signature`). An
+  unverified node's bearer, a signature without `message` in its mesh and an
+  address match (`NodeRung::Addr`) prove no identity and admit nothing once a
+  door-wide token is configured: they are used for attribution only. No
+  `aoide/from` claim changes whether an Inject parks. Tests:
   `an_address_match_alone_gets_the_uniform_answer_behind_a_door_token` is the
   address case,
-  `a_verified_signed_node_clears_the_uniform_guard_behind_a_door_token` the
-  signature case, and
+  `an_unverified_node_bearer_gets_the_uniform_answer_behind_a_door_token` and
+  `uniform_response_guard_never_fires_for_a_per_node_token` the bearer cases,
+  `a_verified_signed_node_clears_the_uniform_guard_behind_a_door_token` and
+  `a_signed_node_without_message_in_the_signed_mesh_gets_the_uniform_answer`
+  the signature cases, and
   `uniform_response_hides_existence_and_never_queues_when_unauthenticated` the
   nothing-queues case.
+- **A full source answers by proof (`message_send`'s Inject arm).** Conduct's
+  `record_pending` refuses a send past `PENDING_CAP_PER_SOURCE` for its `from`
+  (`reason` `PENDING_FULL`), audits it, and touches nothing queued. `do_inject`
+  maps that refusal to `QUEUE_FULL_CODE` (`-32000`), which only a caller that
+  proved a node identity sees; any other caller gets the uniform answer, so the
+  queue's state is no oracle. Tests:
+  `a_full_source_refuses_a_proven_node_and_leaves_another_source_alone`,
+  `a_full_source_answers_a_caller_that_is_not_proven_uniformly` and
+  `an_opening_turn_from_a_full_source_is_queue_full_and_queues_nothing`.
 - **A shell target takes no steer from a network door, and every A2A send to
   one parks (N1, house rule 4).** Nothing at this door types into a session, so
   it carries no shell check of its own. Conduct's ping-back and doorbell refuse

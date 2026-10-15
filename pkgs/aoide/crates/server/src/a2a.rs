@@ -50,7 +50,8 @@
 
 use aoide_conduct::graph::{
     canonical_state, hold_pending, load_stage, now_iso_utc, resolve_graph_document,
-    session_send, sessions_path, Project, ProjectsFile, SessionRecord, SessionsFile,
+    session_send, sessions_path, HoldRefused, Project, ProjectsFile, SessionRecord, SessionsFile,
+    PENDING_FULL,
 };
 use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
@@ -809,11 +810,14 @@ fn opening_turn_worker(
 /// The opening turn of a spawn this network door started, held rather than
 /// typed. The door cannot approve (`Door::can_approve`), so the prompt is queued
 /// for a human exactly like a send that did not clear the gate. Nothing is
-/// typed into the new session, and the verdict says so.
+/// typed into the new session, and the verdict says so: `queue-full` when the
+/// node already holds the queue's per-source cap, `hold-failed` when the write
+/// itself failed.
 fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>) -> &'static str {
     match hold_pending(id, prompt, true, from) {
         Ok(()) => "held-pending",
-        Err(_) => "hold-failed",
+        Err(HoldRefused::Full) => "queue-full",
+        Err(HoldRefused::Stage(_)) => "hold-failed",
     }
 }
 
@@ -1843,10 +1847,19 @@ fn do_inject(
     };
     let outcome = session_send(&inv);
     if outcome.status != Status::Ok {
-        return Err((-32603, outcome.message));
+        let full = outcome.data.as_ref().and_then(|d| d.get("reason")).and_then(Value::as_str) == Some(PENDING_FULL);
+        let code = if full { QUEUE_FULL_CODE } else { -32603 };
+        return Err((code, outcome.message));
     }
     Ok(submitted_task(session_id))
 }
+
+/// The refusal a held inject gets when its source already holds the pending
+/// queue's per-source cap (`aoide_conduct::graph::PENDING_CAP_PER_SOURCE`).
+/// The same `-32000` the pairing park answers when its own queue is full. Only
+/// a caller that proved a node identity sees it; [`message_send`] answers
+/// anyone else uniformly.
+const QUEUE_FULL_CODE: i64 = -32000;
 
 /// Stamp `origin=node:<name>` directly on the just-spawned session's own
 /// record — LANE IDENTITY P-ID0 (G16/G5): this DOOR is the record-layer
@@ -2444,24 +2457,31 @@ fn do_spawn(
 /// decides is only whether the caller is admitted to the queue at all.
 ///
 /// - **Inject admission.** With no door-wide token configured, every Inject
-///   reaches the queue. Once one is configured, a `contextId` send from a caller
-///   that proved neither that token nor a node identity gets the uniform answer:
-///   the synthetic `submitted` Task of [`submitted_task`], which names no
-///   session and touches neither `sessions.json` nor `pending.json`. An
-///   unauthenticated caller therefore cannot tell a real `contextId` from a
-///   bogus one. A node identity is either the node's own bearer (the
-///   [`aoide_storage::node_store::resolve_node`] Token rung, matched against its
-///   `token_file`) or a verified per-request signature (the Signature rung). An
+///   reaches the queue. Once one is configured, a `contextId` send from a
+///   caller that proved neither that token nor a node identity gets the
+///   uniform answer: the synthetic `submitted` Task of [`submitted_task`],
+///   which names no session and touches neither `sessions.json` nor
+///   `pending.json`. An unauthenticated caller therefore cannot tell a real
+///   `contextId` from a bogus one. A node identity is a `verified` node's own
+///   bearer (the [`aoide_storage::node_store::resolve_node`] Token rung,
+///   matched against its `token_file`), or a verified per-request signature
+///   whose grant in the signed mesh holds `message` (the Signature rung). An
 ///   address match alone admits nothing.
+/// - **The per-source cap.** The queue holds at most
+///   `aoide_conduct::graph::PENDING_CAP_PER_SOURCE` entries per `from`. A
+///   proven node past it is refused `-32000` ([`QUEUE_FULL_CODE`]); any other
+///   caller gets the uniform answer. Either way nothing is queued, nothing
+///   queued is touched, and `session_send` audits the refusal.
 /// - **Attribution.** A queued Inject carries the resolved node's name in its
 ///   `from` field, whichever rung resolved it. Attribution is not a gate.
 /// - **Spawn.** [`spawn_admitted`]: the caller must resolve by a verified
 ///   signature and hold `spawn` in the mesh its request names. The door-wide
-///   bearer alone, a bare address or a token match never launches a process. A
-///   refusal is `-32006`, naming the missing prerequisite ([`spawn_refusal`]).
+///   bearer is not consulted, and a bare address or a token match never
+///   launches a process. A refusal is `-32006`, naming the missing
+///   prerequisite ([`spawn_refusal`]).
 /// - **The `aoide/from` claim** is honoured only on the signature rung
-///   ([`claimable_caller`], [`claimed_remote_parent`]). A spawn stamps it on the
-///   child as `remoteParent`, which the ping-back history gate reads
+///   ([`claimable_caller`], [`claimed_remote_parent`]). A spawn stamps it on
+///   the child as `remoteParent`, which the ping-back history gate reads
 ///   ([`history_admitted`]). No claim changes whether an Inject parks.
 /// - **Reads** are gated by [`token_authorized`] or a granted signature, and
 ///   the door-wide bearer never identifies a node.
@@ -2531,17 +2551,18 @@ fn message_send(
     let claim_build = claimed_remote_parent(claimed_identity, claimed_from.as_deref());
 
     // Admission to the queue, not delivery. Once a door-wide token is
-    // configured, a caller must prove a node identity (its own bearer, or a
-    // verified signature) or the uniform guard below answers. An address match
-    // proves nothing: a tunnel or a shared NAT address looks the same for
-    // everyone behind it.
-    let node_proved = matches!(
-        resolved_node,
-        Some((
-            _,
-            aoide_storage::node_store::NodeRung::Token | aoide_storage::node_store::NodeRung::Signature
-        ))
-    );
+    // configured, a caller must prove a node identity this box trusts with a
+    // message, or the uniform guard below answers: a VERIFIED node's own bearer
+    // (the Token rung), or a verified signature whose grant in the signed mesh
+    // holds `message` (the Signature rung). An address match proves nothing: a
+    // tunnel or a shared NAT address looks the same for everyone behind it.
+    let node_proved = match resolved_node {
+        Some((node, aoide_storage::node_store::NodeRung::Token)) => node.verified,
+        Some((_, aoide_storage::node_store::NodeRung::Signature)) => {
+            caller_grant(signed_caller).holds("message")
+        }
+        Some((_, aoide_storage::node_store::NodeRung::Addr)) | None => false,
+    };
 
     // Uniform-response guard. It mirrors `decide_send_action`'s own
     // `spawn_asked`/`context_id` split (`context_id.is_some() && !spawn_asked`
@@ -2588,7 +2609,13 @@ fn message_send(
             // Every inject queues, so the resolved node's identity always rides
             // the pending entry (P-P3 decision 7).
             let from = resolved_node.map(|(p, _rung)| format!("node:{}", p.name));
-            do_inject(&session_id, &prompt, audit_log, from.as_deref())
+            match do_inject(&session_id, &prompt, audit_log, from.as_deref()) {
+                // A full source: a proven node is told so. Anyone else gets the
+                // uniform answer, as a caller the guard above did not admit
+                // would. `session_send` has already audited the refusal.
+                Err((QUEUE_FULL_CODE, _)) if !node_proved => Ok(submitted_task(&session_id)),
+                other => other,
+            }
         }
         SendAction::Spawn { agent_cmd } => {
             if spawn_admitted(resolved_node, &caller_grant(signed_caller)) {
@@ -10804,6 +10831,52 @@ mod tests {
         }
     }
 
+    /// A node that already holds the queue's per-source cap gets `queue-full`
+    /// for its spawn's opening turn: the worker stamps it on the record, and
+    /// nothing is queued or moved.
+    #[test]
+    fn an_opening_turn_from_a_full_source_is_queue_full_and_queues_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-queue-full-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let id = "queue-full";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+        fill_source(id, "node:busy-node");
+        let before = std::fs::read_to_string(root.join("stage").join("pending.json")).unwrap();
+
+        opening_turn_worker(
+            id.to_string(),
+            "hi".to_string(),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            Some("node:busy-node".to_string()),
+        );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("queue-full"), "the verdict names the cap");
+        let after = std::fs::read_to_string(root.join("stage").join("pending.json")).unwrap();
+        assert_eq!(after, before, "nothing queued, nothing moved");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
     /// N2: the opening-turn worker pool is a REAL bound — the eighth waiter
     /// fits, the ninth is refused (`busy`), and a released slot is reusable.
     /// Without it the wait the M4 fix moved off the handler is bounded by
@@ -11745,12 +11818,14 @@ mod tests {
     #[test]
     fn uniform_response_guard_never_fires_for_a_per_node_token() {
         // A server-wide token IS configured (and the presented bearer does
-        // NOT match it), but the presented token DOES match an enrolled
-        // node's own `token_file`. Enrolled nodes authenticate per-node, never
-        // against the server-wide token, so the uniform guard must not swallow
-        // this send. The send parks: the proof it cleared the guard is that it
-        // reaches `session_ref_lookup`/`do_inject` and queues into
-        // `pending.json`, which the guard's own synthetic path never does.
+        // NOT match it), but the presented token DOES match a VERIFIED
+        // node's own `token_file`. A verified node's own bearer is its
+        // identity, never checked against the server-wide token, so the
+        // uniform guard must not swallow this send. The send parks: the
+        // proof it cleared the guard is that it reaches
+        // `session_ref_lookup`/`do_inject` and queues into `pending.json`,
+        // which the guard's own synthetic path never does. The unverified
+        // case is `an_unverified_node_bearer_gets_the_uniform_answer_behind_a_door_token`.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -11777,7 +11852,7 @@ mod tests {
             bearer_secret: None,
             hub: false,
             pubkey: None,
-            verified: false,
+            verified: true,
             grants: aoide_storage::node_store::Grants::new(),
             narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
@@ -11875,9 +11950,8 @@ mod tests {
 
     #[test]
     fn a_verified_signed_node_clears_the_uniform_guard_behind_a_door_token() {
-        // A paired node's verified signature is a node identity. Without one
-        // more flag, such a send got the uniform answer and vanished; now it
-        // reaches the queue like any other node's send.
+        // A paired node's verified signature, with `message` granted in the
+        // mesh it signed for, is a node identity: its send reaches the queue.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -11887,12 +11961,13 @@ mod tests {
         let mut paired = fixture_node("paired-node", "http://192.0.2.88:8710/");
         paired.verified = true;
         paired.pubkey = Some("ab12".to_string());
+        paired.grants = aoide_storage::node_store::grants_in("home", &["message"]);
         aoide_storage::node_store::save_nodes(&[paired]).unwrap();
 
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "signed hello" }], "contextId": id }
         });
-        let signed = SignedCaller { name: "paired-node", key: "ab12", mesh: None };
+        let signed = SignedCaller { name: "paired-node", key: "ab12", mesh: Some("home") };
         let result = message_send(
             &params,
             &root.join("log"),
@@ -11906,6 +11981,217 @@ mod tests {
         let task = result.expect("a verified node is never answered by the guard's error path");
         assert_eq!(task["id"], id);
         assert_held_at_the_door(&listener, &stage, 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_signed_node_without_message_in_the_signed_mesh_gets_the_uniform_answer() {
+        // A valid signature proves who is calling, not that this box takes its
+        // messages. Without `message` in the mesh it signed for (here it holds
+        // `read` there, and `message` only in another mesh), the send is
+        // answered like an unauthenticated one and nothing queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "sig-nogrant-target";
+        let (root, stage, listener) = uniform_guard_box("sig-nogrant", id);
+
+        let mut paired = fixture_node("paired-node", "http://192.0.2.88:8710/");
+        paired.verified = true;
+        paired.pubkey = Some("ab12".to_string());
+        paired.grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        paired.grants.insert("work".to_string(), vec!["message".to_string()]);
+        aoide_storage::node_store::save_nodes(&[paired]).unwrap();
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "signed, ungranted" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let result = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.88".parse().unwrap()),
+            "server-secret",
+            None,
+            Some(SignedCaller { name: "paired-node", key: "ab12", mesh: Some("home") }),
+        );
+        let task = result.expect("the uniform arm answers Ok, never a JSON-RPC error");
+        assert_eq!(task["status"]["state"], "submitted");
+        assert!(!stage.join("pending.json").exists(), "the uniform path never queues");
+        assert!(listener.accept().is_err(), "and never touches the socket");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("no node identity"), "the guard's own audit: {log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn an_unverified_node_bearer_gets_the_uniform_answer_behind_a_door_token() {
+        // A node's own `tokenFile` bearer names it, but a record that was never
+        // verified by pairing is no identity this box trusts: the send is
+        // answered like an unauthenticated one and nothing queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "unverified-tok-target";
+        let (root, stage, listener) = uniform_guard_box("unverified-tok", id);
+
+        let token_path = root.join("node.token");
+        std::fs::write(&token_path, "node-secret\n").unwrap();
+        let mut enrolled = fixture_node("enrolled-node", "http://192.0.2.99:8710/");
+        enrolled.token_file = Some(token_path.to_string_lossy().into_owned());
+        aoide_storage::node_store::save_nodes(&[enrolled]).unwrap();
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "unverified bearer" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let result = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("10.0.0.9".parse().unwrap()),
+            "server-secret",
+            Some("node-secret"),
+            None,
+        );
+        let task = result.expect("the uniform arm answers Ok, never a JSON-RPC error");
+        assert_eq!(task["status"]["state"], "submitted");
+        assert!(!stage.join("pending.json").exists(), "the uniform path never queues");
+        assert!(listener.accept().is_err(), "and never touches the socket");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("no node identity"), "the guard's own audit: {log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// Fill `from`'s share of the pending queue to the cap, the way the door
+    /// itself queues: through `hold_pending`.
+    fn fill_source(id: &str, from: &str) {
+        for n in 0..aoide_conduct::graph::PENDING_CAP_PER_SOURCE {
+            aoide_conduct::graph::hold_pending(id, &format!("{from} #{n}"), true, Some(from)).unwrap();
+        }
+    }
+
+    fn queued_from(stage: &std::path::Path, from: &str) -> Vec<String> {
+        let queue: Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
+        queue["pending"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["from"] == from)
+            .map(|e| e["text"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_full_source_refuses_a_proven_node_and_leaves_another_source_alone() {
+        // A proven node (a verified node's own bearer) whose source already
+        // holds the cap is refused `-32000`, audited, and nothing queued moves.
+        // Another node's send still queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "cap-target";
+        let (root, stage, listener) = uniform_guard_box("cap-proven", id);
+
+        let mut nodes = Vec::new();
+        for (name, secret) in [("full-node", "full-secret"), ("other-node", "other-secret")] {
+            let path = root.join(format!("{name}.token"));
+            std::fs::write(&path, format!("{secret}\n")).unwrap();
+            let mut node = fixture_node(name, "http://192.0.2.99:8710/");
+            node.token_file = Some(path.to_string_lossy().into_owned());
+            node.verified = true;
+            nodes.push(node);
+        }
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        fill_source(id, "node:full-node");
+        let before = queued_from(&stage, "node:full-node");
+        assert_eq!(before.len(), aoide_conduct::graph::PENDING_CAP_PER_SOURCE);
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "one too many" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let send = |bearer: &str| {
+            message_send(
+                &params,
+                &audit_log,
+                "",
+                "",
+                ConnOrigin::Remote("10.0.0.9".parse().unwrap()),
+                "server-secret",
+                Some(bearer),
+                None,
+            )
+        };
+
+        let (code, msg) = send("full-secret").expect_err("a proven node past the cap is told");
+        assert_eq!(code, QUEUE_FULL_CODE, "{msg}");
+        assert!(msg.contains("node:full-node") && msg.contains("pending sends"), "{msg}");
+        assert_eq!(queued_from(&stage, "node:full-node"), before, "the first N are intact, in order");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            log.lines().any(|l| l.contains("\"status\":\"refused\"") && l.contains("one too many")),
+            "the refusal is audited: {log}"
+        );
+
+        send("other-secret").expect("another source still queues");
+        assert_eq!(queued_from(&stage, "node:other-node"), ["one too many"]);
+        assert!(listener.accept().is_err(), "nothing is delivered either way");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_full_source_answers_a_caller_that_is_not_proven_uniformly() {
+        // With no door token every caller reaches the queue, so the cap is the
+        // only bound. A caller named by address alone proves nothing, so a full
+        // source answers it with the same synthetic `submitted` Task the guard
+        // gives an unauthenticated send, and nothing is queued.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "cap-unproven-target";
+        let (root, stage, listener) = uniform_guard_box("cap-unproven", id);
+
+        aoide_storage::node_store::save_nodes(&[fixture_node("addr-node", "http://192.0.2.89:8710/")]).unwrap();
+        fill_source(id, "node:addr-node");
+        let before = queued_from(&stage, "node:addr-node");
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "address only, one too many" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let task = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+            "",
+            None,
+            None,
+        )
+        .expect("an unproven caller is never told the queue is full");
+        assert_eq!(task, {
+            let mut uniform = submitted_task(id);
+            uniform["status"]["timestamp"] = task["status"]["timestamp"].clone();
+            uniform
+        });
+        assert_eq!(queued_from(&stage, "node:addr-node"), before, "nothing queued, nothing moved");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("\"status\":\"refused\""), "the refusal is still audited: {log}");
+        assert!(listener.accept().is_err());
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);

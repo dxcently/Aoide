@@ -117,6 +117,15 @@ in the message.
   `None` for every other door, which runs its own local path. A routed
   command must never be the approving path.
   `pkgs/aoide/crates/conduct/src/graph/send.rs`'s door tests pin each path.
+- **`pending.json` has one writer, and it holds the per-source cap.**
+  `record_pending` (`graph/send.rs`) counts the entries carrying the new
+  entry's `from` and appends under ONE stage lock, refusing at
+  `PENDING_CAP_PER_SOURCE` without touching what is queued. Every held send
+  and `hold_pending` go through it, on every door. A new writer of the queue
+  goes through it too, never around it, or one sender can fill a human's
+  approval queue. A refused send carries `reason: PENDING_FULL` and is
+  audited. Pinned by
+  `a_full_source_is_refused_and_audited_and_another_source_still_queues`.
 
 ## Invariants
 
