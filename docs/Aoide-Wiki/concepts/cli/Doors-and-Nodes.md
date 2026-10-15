@@ -692,11 +692,12 @@ aoide node spawn <name> [--yes] [--parent <session>] [--via ssh://[user@]host[:p
   projection, so today the file is the record of what this node asked for,
   not something any command displays.
   What actually runs is the NODE's configured `aoide.a2a.spawnAgent`,
-  never a remote-chosen executable. Every other refusal — `allows`
+  never a remote-chosen executable. Every other refusal — a grant
   lacking `spawn`, an unsigned-but-paired caller, clock skew — is the
   remote door's own call, surfaced verbatim.
 - **Notes:** `--yes` skips only the local `y`/`N`; the remote gate
-  (paired node, signature rung, `allows` contains `"spawn"`) is the sole
+  (paired node, signature rung, its grant in the signed mesh contains
+  `"spawn"`) is the sole
   security authority. See [[Node-Federation]].
 
 ### aoide node discover

@@ -127,17 +127,16 @@ own caller (`aoide-server`'s `do_inject` and opening turn).
   executor-specific mail readers. Resurrection does not implicitly bind it.
 
 - **Graph residency (P-D6, `docs/architecture/AOIDED.md`'s "L4")**: the
-  session-write family — `session start/phase/end`, `session
-  hook`, and `session reap` (below) — each try `aoide_client::daemon::
-  daemon_dispatch(inv)` FIRST and fall back to their pre-existing direct
-  stage-write path byte-identically on `None`. Only the CLI door makes the
-  hop; any other door runs the direct path under its own door. The daemon executes the
-  SAME registered handler code (its `dispatch` fn IS `cli::dispatch::
-  dispatch`) — no logic forks, no daemon-specific policy anywhere in this
-  crate. `session_hook` smuggles its already-read stdin payload through
-  the routed `Invocation`'s `flags` map under an internal-only key
-  (`STDIN_PAYLOAD_FLAG`) rather than growing the daemon wire a stdin
-  channel — the daemon-side handler reads that flag first and never
+  session-write family — `session start/phase/end`, `session hook`, and `session
+  reap` (below) — each try `aoide_client::daemon::daemon_dispatch(inv)` FIRST
+  and fall back to their pre-existing direct stage-write path byte-identically
+  on `None`. Only the CLI door makes the hop; any other door runs the direct
+  path under its own door. The daemon executes the SAME registered handler code
+  (its `dispatch` fn IS `cli::dispatch::dispatch`) — no logic forks, no
+  daemon-specific policy anywhere in this crate. `session_hook` smuggles its
+  already-read stdin payload through the routed `Invocation`'s `flags` map under
+  an internal-only key (`STDIN_PAYLOAD_FLAG`) rather than growing the daemon
+  wire a stdin channel — the daemon-side handler reads that flag first and never
   touches its own stdin.
 - `graph/spawn.rs` — `spawn [--windowed] [--undying]` (P-D7,
   `docs/architecture/AOIDED.md`'s "L5"): the child is always `aoide conduct

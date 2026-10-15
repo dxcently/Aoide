@@ -121,9 +121,12 @@ pub struct Node {
     /// shape `hub` set the precedent for: an old `nodes.json` deserializes
     /// `verified: false` on every entry, and an unverified entry omits the
     /// key entirely rather than writing `"verified":false` everywhere.
-    /// `verified` alone grants nothing. The A2A door's spawn arm admits on a
+    /// `verified` alone grants nothing. Behind a door token, the A2A door
+    /// admits an inject on the Token rung only for a verified node
+    /// (`a2a.rs::message_send`'s `node_proved`). Its spawn arm admits on a
     /// verified signature (the Signature rung of [`resolve_node`]) and a
-    /// `"spawn"` grant in the mesh the request names (`a2a.rs::spawn_admitted`).
+    /// `"spawn"` grant in the mesh the request names
+    /// (`a2a.rs::spawn_admitted`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub verified: bool,
     /// This node's capability grants, KEYED BY THE MESH each holds in
@@ -910,8 +913,8 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh:
 /// TCP-source-IP-vs-`url` match — spoofable by anyone who can reach the
 /// door from that address, or who merely sits behind the same NAT/proxy as
 /// the real node. `Token` is possession of that node's own `token_file`
-/// secret — it survives any reverse proxy/NAT, which is why it is tried
-/// before the address, but it is still a bare shared secret: not bound to any one
+/// secret — it survives any reverse proxy/NAT, which is why it is tried before
+/// the address, but it is still a bare shared secret: not bound to any one
 /// request, replayable, and identical across every request the true node
 /// or an impersonator ever sends. `Signature` (P-P4,
 /// `docs/architecture/PAIRING.md`'s "Wire authentication" section) is an
@@ -1569,6 +1572,27 @@ mod tests {
         assert_eq!(m.registry.nodes[0].grant("home"), ["read".to_string()], "its grant survives");
         let saved = serde_json::to_value(&m.registry.nodes[0]).unwrap();
         assert!(saved.get("autogate").is_none(), "the retired key is not written back: {saved}");
+
+        // The same through the file itself: load the old file, save the
+        // registry, and the key is gone from what lands on disk.
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_dir = std::env::var("AOIDE_STATE_DIR").ok();
+        let dir = std::env::temp_dir().join(format!("aoide-node-autogate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("AOIDE_STATE_DIR", &dir);
+        std::fs::create_dir_all(nodes_path().parent().unwrap()).unwrap();
+        std::fs::write(nodes_path(), raw).unwrap();
+        let loaded = load_nodes();
+        assert_eq!(loaded.len(), 1, "the record loads from the file");
+        save_nodes(&loaded).unwrap();
+        let on_disk = std::fs::read_to_string(nodes_path()).unwrap();
+        assert!(!on_disk.contains("autogate"), "the retired key is not written back: {on_disk}");
+        assert!(on_disk.contains("sakaki"), "the record itself is: {on_disk}");
+        let _ = std::fs::remove_dir_all(&dir);
+        match saved_dir {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
 
     #[test]

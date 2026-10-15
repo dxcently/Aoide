@@ -7091,12 +7091,12 @@ construction, since `token_configured` is checked first.
 
 ### Spawn and attribution
 
-A spawn passes two gates. First, when a token is configured, `token_authorized`
-must pass, so an absent or wrong bearer is a `-32005` error and never a silent
-fallback to the open behaviour. Second, `spawn_admitted` accepts only a
-`NodeRung::Signature` resolution, to a node that is both `verified` and holds
-`spawn` in its grants for the mesh the request signed. The door-wide bearer is
-necessary and never sufficient. The `Addr` and `Token` rungs never reach
+The door-wide bearer is not consulted for spawn. The gate is the Signature rung:
+`spawn_admitted` accepts only a `NodeRung::Signature` resolution, to a node that
+is both `verified` and holds `spawn` in its grants for the mesh the request
+signed. A spawn asked through `message/stream` is bearer-gated as a whole before
+`message_send` runs ("Read and card gating", above), and that `-32005` is the
+stream's, not the spawn gate's. The `Addr` and `Token` rungs never reach
 `do_spawn`: a bare source-address match carries no possession proof, and a bare
 token is a replayable shared secret rather than a signature. `resolve_node`
 never produces `Signature`, since it has no access to the raw request a
@@ -7104,14 +7104,13 @@ signature needs. Only `verify_signed_request` yields it. When a request is
 signed, resolution uses that name alone, with no fallback to the address or
 token ladder, even on a registry miss.
 
-Every refusal is `-32006`, distinct from `-32005`'s no-token or bad-token
-refusal, and the message depends on the shape. A paired node resolved through
-the token rung is told that its aoide is too old to sign requests, or is failing
-to sign them, and to upgrade the caller. It is not told to re-pair, because
-pairing already succeeded and the only gap is the signature. A
-signature-resolved node whose grants lack `spawn` is told the exact `node allow
-<name> spawn on` fix. Every other shape, the address rung, no resolution, or an
-unverified token match, is told to pair first, then allow, and that spawn
+Every spawn refusal is `-32006`, and the message depends on the shape. A paired
+node resolved through the token rung is told that its aoide is too old to sign
+requests, or is failing to sign them, and to upgrade the caller. It is not told
+to re-pair, because pairing already succeeded and the only gap is the signature.
+A signature-resolved node whose grants lack `spawn` is told the exact `node
+allow <name> spawn on` fix. Every other shape, the address rung, no resolution,
+or an unverified token match, is told to pair first, then allow, and that spawn
 requires a signature. The code stays `-32006` in every shape, because existing
 callers match on it.
 

@@ -748,8 +748,9 @@ in the message.
   `daemon_dispatch` answers `None` for any other door, so an MCP or A2A
   write runs the direct path under its own door and never reaches the
   daemon as `Door::Daemon` (whose Stop hook rings). Never add a door check
-  at the call site; the hop owns it. A new session-write handler joins the family the same
-  way — see `client`'s own `AGENTS.md` extension-point note. **`graph/
+  at the call site; the hop owns it. A new session-write handler joins the
+  family the same way — see `client`'s own `AGENTS.md` extension-point
+  note. **`graph/
   undying.rs`'s `undying_grant`, `graph/spawn.rs`'s `--undying` mark, and
   `graph/resurrect.rs`'s undying transfer are a deliberate exception, not an
   oversight:** `state/undying.json` is not a `state/stage/` file, so none of

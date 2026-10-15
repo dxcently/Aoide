@@ -1,10 +1,10 @@
 //! `session pending list|approve|deny` — the pending queue's OTHER half.
 //!
 //! `state/stage/pending.json` is where [`super::send::session_send`] parks a
-//! held injection when the gate doesn't authorise immediate delivery (no
-//! `--yes`, no autogate match) — and where the A2A door parks the same kind
-//! of held inject when its own admission check doesn't clear it
-//! (`crates/server/src/a2a.rs`, the token-gated path). Until this module,
+//! held injection when none of the gate's delivering rules clears it, which
+//! is every send from a door that cannot approve (`Door::can_approve`). The
+//! A2A door parks every inject it admits, and its spawn's opening turn, the
+//! same way (`crates/server/src/a2a.rs`). Until this module,
 //! nothing in the tree ever read that file back: it was a write-only dead
 //! drop, holding entries forever, invisibly. This is the read/approve/deny
 //! surface every other surface (TUI, QML, web) can render later — CLI-only,

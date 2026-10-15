@@ -462,9 +462,11 @@ impl Listener {
 //
 // [`resolve_token_file`]/[`read_expected_token`] resolve the SERVER's own
 // expected token ONCE at `a2a serve` launch, exactly like `spawn_agent`. It
-// gates two things: the SPAWN arm and the READ arms ([`token_authorized`]),
-// and, once configured, the uniform-response guard in [`message_send`] that
-// hides whether an unauthenticated caller's `contextId` exists.
+// gates the READ arms, `message/stream` as a whole and the full AgentCard
+// ([`token_authorized`]), and, once configured, it lets a caller past the
+// uniform-response guard in [`message_send`] that hides whether an
+// unauthenticated caller's `contextId` exists. Spawn never consults it: the
+// spawn gate is [`spawn_admitted`]'s signature.
 //
 // Per-node bearers (a node's own `token_file`) are not this token. They are
 // matched by [`aoide_storage::node_store::resolve_node`]'s Token rung.
@@ -505,13 +507,12 @@ fn classify_token(expected: &str, presented: Option<&str>) -> TokenState {
 /// `-32005` error, not a silent fallback to the old open behavior. Pure —
 /// directly testable without a socket or a spawned process.
 ///
-/// One predicate guards two things (CONTRACTS.md §6 amendment, Phase G,
-/// 2026-08-20): the SPAWN arm of `message/send`, and the READ commands
-/// (`tasks/get`, `aoide/graphSummary`, `tasks/resubscribe`, `message/stream`).
-/// Before Phase G the reads were ungated even with a token set — harmless on
-/// loopback, but a whole-session-graph leak the moment the door faced a
-/// network. The gate is identical for both because the question is identical:
-/// does the caller hold a valid token when one is required?
+/// It guards the READ commands (`tasks/get`, `aoide/graphSummary`,
+/// `tasks/resubscribe`), `message/stream` as a whole, and the full AgentCard
+/// (CONTRACTS.md §6, "Read and card gating"). An ungated read is a
+/// whole-session-graph leak the moment the door faces a network. The SPAWN arm
+/// of `message/send` never consults it: [`spawn_admitted`] is the spawn
+/// gate.
 fn token_authorized(token_configured: bool, token_state: TokenState) -> bool {
     !token_configured || token_state == TokenState::Valid
 }
@@ -528,7 +529,7 @@ fn read_admitted(bearer_ok: bool, caller: Option<SignedCaller<'_>>) -> bool {
 }
 
 /// The `-32005` unauthorized error every token-gated arm returns, so the code
-/// and message never drift between the spawn gate and the read gates.
+/// and message never drift between the read gates.
 fn unauthorized() -> (i64, String) {
     (-32005, "unauthorized: a valid A2A token is required".to_string())
 }
@@ -2501,11 +2502,12 @@ fn message_send(
 
     let nodes = aoide_storage::node_store::load_nodes();
 
-    // The caller's resolved node IDENTITY, and which rung resolved it. Used two
-    // ways: the Inject arm stamps EITHER rung onto `pending.json`'s `from` field
-    // for attribution only; the Spawn arm's `spawn_admitted` requires the
-    // SIGNATURE rung, because neither a bare address nor a bare token may
-    // authorize launching a process attributed to a node.
+    // The caller's resolved node IDENTITY, and which rung resolved it. The
+    // Inject arm stamps whichever rung resolved it onto `pending.json`'s `from`
+    // field, for attribution only (admission is `node_proved`, below). The
+    // Spawn arm's `spawn_admitted` requires the SIGNATURE rung, because neither
+    // a bare address nor a bare token may authorize launching a process
+    // attributed to a node.
     let addr = match origin {
         ConnOrigin::Remote(ip) => Some(ip),
         ConnOrigin::Loopback | ConnOrigin::Unknown => None,
@@ -2684,15 +2686,15 @@ fn spawn_admitted(
 
 /// The `-32006` refusal every Spawn attempt that fails [`spawn_admitted`]
 /// returns (P-P3, message content narrowed P-P4) — a distinct code from
-/// `unauthorized()`'s `-32005` (the door-wide bearer gate every OTHER arm
-/// still uses), since this is a DIFFERENT question: not "do you hold a
+/// `unauthorized()`'s `-32005` (the door-wide bearer gate of the read arms and
+/// `message/stream`), since this is a DIFFERENT question: not "do you hold a
 /// valid door-wide token" but "do you resolve, via a verified per-request
-/// SIGNATURE, to a specific node this operator has paired with and allowed
-/// to spawn." The CODE stays `-32006` across every refusal shape (no new
-/// code per shape — `message_send`'s callers already match on this one
-/// value), but the MESSAGE is now shape-specific (P-P4 requirement: "a
-/// taught error telling an unsigned paired caller that its aoide is too old
-/// / must sign," distinguishable from "you were never paired at all"):
+/// SIGNATURE, to a specific node this operator has paired with and allowed to
+/// spawn." The CODE stays `-32006` across every refusal shape (no new code per
+/// shape — `message_send`'s callers already match on this one value), but the
+/// MESSAGE is now shape-specific (P-P4 requirement: "a taught error telling an
+/// unsigned paired caller that its aoide is too old / must sign,"
+/// distinguishable from "you were never paired at all"):
 /// - **Resolved via the (now-superseded) Token rung, and genuinely
 ///   `verified`**: this caller IS a real, paired node — it just didn't sign
 ///   this request. Told to sign, not to re-pair; re-pairing would be

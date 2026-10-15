@@ -1280,11 +1280,11 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// The RECEIVING node's own `message_send` Inject arm
 /// (`aoide-server::a2a::message_send` → `do_inject`) is where the real gate
 /// lives: every inject it receives parks for a human, whatever this caller's
-/// `--submit` flag says (CONTRACTS.md §6). So `--submit`/`--yes` are ACCEPTED but UNUSED
-/// here — there is nothing on this side left for them to gate — and NOT
-/// silently: [`ignored_remote_flags`] collects whichever of them was
-/// actually passed and both delivery-attempt arms below fold a note into
-/// the returned `Outcome` (`message` + `data.ignoredFlags`) so a caller who
+/// `--submit` flag says (CONTRACTS.md §6). So `--submit`/`--yes` are ACCEPTED
+/// but UNUSED here — there is nothing on this side left for them to gate — and
+/// NOT silently: [`ignored_remote_flags`] collects whichever of them was
+/// actually passed and both delivery-attempt arms below fold a note into the
+/// returned `Outcome` (`message` + `data.ignoredFlags`) so a caller who
 /// habitually passes them sees they did nothing, rather than guessing.
 ///
 /// No title auto-rename, no local provenance prefix: both are operations on
@@ -1308,14 +1308,15 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
 ///
 /// `Err` is the resolver's own "this node would sign a claim the far door
 /// refuses" case, and the two callers answer it differently because they were
-/// asked for different things. `node spawn` REFUSES the call (a caller who named
-/// a parentage gets one or hears why). A `send` DROPS the claim and sends
+/// asked for different things. `node spawn` REFUSES the call (a caller who
+/// named a parentage gets one or hears why). A `send` DROPS the claim and sends
 /// anyway, naming the reason on one warning line: it was never asked for a
 /// parentage — the claim is a label the far door may audit, not the request —
-/// and the door applies a malformed claim only to a spawn, so an inject carrying
-/// one proceeds as one with none (`a2a.rs`'s `claimed_remote_parent`). An
-/// unruly id costs this send its audit label and nothing else. Neither path lets
-/// one reach the wire: the one that refuses never signs, the other signs nothing.
+/// and the door applies a malformed claim only to a spawn, so an inject
+/// carrying one proceeds as one with none (`a2a.rs`'s `claimed_remote_parent`).
+/// An unruly id costs this send its audit label and nothing else. Neither path
+/// lets one reach the wire: the one that refuses never signs, the other signs
+/// nothing.
 fn remote_parent_claim() -> Result<Option<String>, String> {
     aoide_client::commands::resolve_remote_parent(None)
 }

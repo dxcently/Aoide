@@ -720,9 +720,9 @@ aoide session pending list [--json]
   entry's `id` (its array POSITION — the schema carries no id of its own, so
   positions shift the moment any entry resolves; re-list between multiple
   resolutions in one breath).
-- **Notes:** read-only. The queue `send` parks a held injection in (no
-  `--yes`, no autogate match) and where the A2A door parks its own held
-  injects.
+- **Notes:** read-only. The queue `send` parks a held injection in when no
+  delivering rule clears it, and where every send from a door that cannot
+  approve (MCP, A2A) parks.
 
 ### aoide session pending approve
 

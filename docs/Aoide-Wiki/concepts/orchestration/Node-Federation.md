@@ -57,16 +57,14 @@ an error.
   "schemaVersion": "0",
   "nodes": [
     { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "addedAt": "2026-08-14T00:00:00Z",
-      "pubkey": "<hex>", "verified": true, "allows": ["read", "spawn"] }
+      "pubkey": "<hex>", "verified": true, "grants": { "home": ["read", "spawn"] } }
   ]
 }
 ```
 
-`pubkey`/`verified`/`allows` land when the [[Pairing-Ceremony]] commits the
+`pubkey`/`verified`/`grants` land when the [[Pairing-Ceremony]] commits the
 record; a never-paired (legacy-registered) node carries none of them and
-never enters the signature rung's trial set. A `nodes.json` that still
-carries an `autogate` key loads, and the key is ignored and not written
-back.
+never enters the signature rung's trial set.
 
 `tokenFile` (`node add --token-file <path>`, optional) names a file on THIS
 instance holding the shared secret that node presents as `Authorization:

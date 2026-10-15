@@ -47,14 +47,15 @@ there is no "this node may spawn, that one may not."
    its own side. Two humans, two out-of-band comparisons, one ceremony.
    CLI-first: every step must be drivable from a plain terminal on both
    ends; the popup is sugar.
-5. **Per-node permissions: a closed `allows` set.** Capabilities
+5. **Per-node permissions: a closed capability set per mesh (`grants`).**
+   Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
    `"read"` (graph/who summaries over A2A; `read` also admits output reads
    (the watch frame) of any session on this node), and `"message"` (deposit a
    mail envelope via `aoide/mailDeposit` — data a reader pulls, never
    an instruction; it grants nothing on the spawn or conduct arms).
    Commands:
-   `aoide node allow <name> <cap> on|off` — idempotent, reports
+   `aoide node allow <name> <cap> on|off [--mesh <m>]` — idempotent, reports
    exactly what changed. Unknown capability strings are refused.
    Default for a PAIRED (verified) node: `config.toml`'s `[pairing]
    defaultGrant`, itself `["read"]` — `spawn` is an explicit widening,
@@ -70,7 +71,8 @@ there is no "this node may spawn, that one may not."
    are a named, unbuilt remainder — CONTRACTS.md's identity-lane
    accounting.
 6. **The spawn gate flips hard.** Spawning requires an identified
-   (paired) node whose `allows` contains `"spawn"`. The door-wide
+   (paired) node whose grant in the mesh its request signed contains
+   `"spawn"`. The door-wide
    bearer alone no longer reaches the spawn arm; the refusal is a
    taught error naming the pairing ceremony. (Inject parks in
    the pending queue for a human; one gate per question.)
@@ -83,7 +85,7 @@ there is no "this node may spawn, that one may not."
    on any future bridge/relay design: every hop carries the true
    origin end-to-end — traced, auditable, never laundered through
    the bridge's own credential.
-9. **Everything gates off the one identity.** `allows`, the spawn
+9. **Everything gates off the one identity.** `grants`, the spawn
    arm, audit provenance now; secrets remote-exposure (the `remote`
    flag) and V5 broker-to-broker replication ride the same pairing
    later — pairing is V5's substrate, not a parallel mechanism.
@@ -140,7 +142,8 @@ B's operator TYPES the code as read off A's screen (out-of-band — a
   counts a persisted try; the 3rd cumulative mismatch AUTO-DENIES (same
   clean removal as reject, nothing committed).
   On a match, B's own node record commits HERE — pubkey, verified=true,
-  allows=the resolved grant (defaultGrant, or this commit's --allow),
+  grants[<the ceremony's mesh>]=the resolved grant (defaultGrant, or
+  this commit's --allow),
   A's name bound, and (task #131) url/via set
   from A's parked selfVia claim if one rode the request — see below;
   B's own parked entry is marked approved and left PARKED — no
@@ -431,8 +434,8 @@ the full count-site checklist (git show 9c2d05c).
   legacy fields untouched. Tests: full ceremony against a test door,
   SAS stability vectors, expiry, re-pair confirmation, unapproved =
   no record change.
-- **P-P3 — allows + the spawn gate flip + audit identity (M).**
-  `allows` set + `node allow` commands (golden +1), spawn arm requires
+- **P-P3 — grants + the spawn gate flip + audit identity (M).**
+  capability set + `node allow` commands (golden +1), spawn arm requires
   paired+spawn (taught error otherwise), audit/pending/session-record
   stamping (`origin: node:<name>`, projected into the ledger).
   Tests: gate table (paired+allowed / paired+denied / unpaired /
@@ -885,7 +888,7 @@ owners.
 
 `mesh.<name>.grant` IS live: it is the capability set a converge stamps at a
 first verification, riding the ceremony exactly as a typed `--allow` does,
-so an already-verified node's `allows` survives a re-pair untouched and
+so an already-verified node's `grants` survive a re-pair untouched and
 `node allow` remains the only way to change a live grant.
 
 Each node's result is one of four words — `completed`, `parked` (resumable
@@ -903,11 +906,11 @@ already calls a legitimate simultaneous mutual pairing and leaves alone.
 - No hand-rolled cryptography — primitives come from the vetted dep,
   full stop (User ruling).
 - No daemon-door or A2A allowlist tables — the per-command door policy
-  and the `allows` set are the only gates (AOIDED L2 discipline).
+  and the per-mesh `grants` are the only gates (AOIDED L2 discipline).
 - No transitive relay of trust, codes, or pairing state, no mesh-level
   object — the mesh stays the closure of pairwise records. Mail
   TRANSIT through declared hubs is `MAIL.md`'s one named carve-out: a
   hub relays letters, never trust.
-- No per-capability serde bool scatter — `allows` is one field.
+- No per-capability serde bool scatter — `grants` is one field.
 - The identity private key never crosses any socket, any Outcome,
   any log — including the broker's.
