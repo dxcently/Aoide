@@ -1078,7 +1078,7 @@ pub fn set(key: &str, raw: &str) -> Result<SetOutcome, SetRefusal> {
         .map_err(|e| SetRefusal::BadValue { key: key.to_string(), detail: e.to_string() })?;
 
     if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
+        if let Err(e) = crate::fs::ensure_write_dir(parent) {
             return Err(SetRefusal::Unwritable { path, detail: e.to_string() });
         }
     }

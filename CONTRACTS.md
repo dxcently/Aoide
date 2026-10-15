@@ -825,10 +825,8 @@ count.
   snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
   running re-execs with `--yes --submit` (never for a recorded `sudo …`,
-  which only restores the cwd); an idle session's clean unsubmitted
-  `typed` line preloads with `--yes` and permanently no `--submit`,
-  so it sits in the new prompt until a human presses Enter; idle with no
-  `typed` delivers nothing. Also the command core the daemon's own boot-time
+  which only restores the cwd); an idle session delivers nothing, its cwd
+  alone is restored. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -1113,9 +1111,12 @@ interleave on the wire.
 
 `aoided`'s own control socket (`$AOIDE_DAEMON_SOCKET`, else
 `$XDG_RUNTIME_DIR/aoide/aoided.sock`, `0600` user-private — no cross-uid
-audience) speaks the secrets wire's framing verbatim: one newline-delimited
-JSON request line → zero or more interim lines (`"interim":true`) → exactly
-one final reply line. Three ops, a closed set:
+audience) is owned by the holder of two exclusive `flock`s, `<socket>.lock`
+and `aoided.lock` in the state dir, for that process's life. A second
+`aoided` refuses to start rather than replace either (`docs/architecture/
+AOIDED.md` "Socket"). It speaks the secrets wire's framing verbatim: one
+newline-delimited JSON request line → zero or more interim lines
+(`"interim":true`) → exactly one final reply line. Three ops, a closed set:
 
 ```json
 {"v":0,"op":"ping"}
@@ -1177,6 +1178,30 @@ applied to the stage tree itself):
   tree — the `aoide`/`aoided` binaries alone read and write it, never
   `lyra`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
   never writes it.
+
+`state/` is owner-only and is the privacy boundary for everything under it;
+file and subdirectory modes inside it are not relied on. Every storage write
+under it locks `state/` first, and `aoided` does the same before it binds,
+refusing to start when it cannot. Under is judged by where the write lands,
+so a path through a symlinked alias or with a `..` in it counts when the
+kernel puts it inside `state/`. The lock refuses, before any chmod, a
+`state/` that is relative, whose path has a `..` in it, or that is a symlink
+(the open never follows the last component). It also refuses a filesystem
+root, and a home directory or one of its parents. Those are judged on
+canonical paths, and again on the directory the open returns, so a symlinked
+home is protected by its real path. Every home a run could mean is guarded
+together: a non-empty `$HOME`, the passwd home of the effective uid, and
+`/home/$AOIDE_USER` when `$AOIDE_USER` is set. A `state/` the OS will not make
+`0700` fails the write and names the path and the fix: a chmod when this user
+owns it, a chown when another user does. Start-up locks a `state/` that
+exists, and a tree the start-up migration moves into `state/` is locked there
+too; when it cannot be, `aoide`, `aoided` and `lyra` exit on every run rather
+than read it, the run that moved the tree and each run after. On Windows the
+boundary holds only for a `state/` aoide created: an existing one is never
+re-tightened.
+
+The boundary is against other users. A process running as the same user reads
+and writes all of `state/` whatever its mode, and nothing here stops it.
 
 **The runtime root (L-C2, lyra-carrier lane, task #107).** Every runtime
 tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,
@@ -2183,13 +2208,15 @@ outside this proof, each under its own rule. `aoide send` and `aoide spawn
 --prompt` passes `--yes`, so no human approves it); the caller is whatever process
 ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
-boot resurrect retypes a shell's own recorded line, never for `sudo`
-(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
-that execs a shell, passes it. It rejects the launchers the walk does not model
-and a label that does not match the wrap. It does not stop a same-uid process
-that names a shell after a harness; for that class the defence is inert content,
-since every line takes one pass as it is written (`wire_line`), and every shell
-metacharacter in it is made inert, with `!` and `"` among them.
+boot resurrect re-executes a session's recorded foreground command with Enter,
+never for `sudo`; an idle session gets its cwd only, with nothing typed
+(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated
+as one: a symlink named `claude` that points at `bash`, or a script named
+`claude` that execs a shell, passes it. It rejects the launchers the walk does
+not model and a label that does not match the wrap. It does not stop a same-uid
+process that names a shell after a harness; for that class the defence is inert
+content, since every line takes one pass as it is written (`wire_line`), and
+every shell metacharacter in it is made inert, with `!` and `"` among them.
 
 The refusals, in order, are `conduct.rs::auto_type_refusal`'s: a shell first
 (`agent` `""` or `shell`, a `restore` snapshot, or a `wrappedProgram` that is a
@@ -2990,15 +3017,12 @@ beside it in the same module, shared by the send gate and the secrets
 broker's origin gate — the credential's consumers, see the "Secrets home"
 section's origin-gate paragraph for the second one). **This channel is
 only as trustworthy as the daemon socket's same-uid exclusivity, and under
-OQ1-A that is NOT attacker-proof**: `bind_socket` unlink-then-binds with
-no `flock`/pidfile guard, so a same-uid attacker can already race or evict
-the real listener and bind its own in its place, serving a forged
+OQ1-A that is NOT attacker-proof**: the open hole (`docs/architecture/
+AOIDED.md` "Socket") lets a same-uid process serve a forged
 `sealPubkeyHex` from an impostor `ping` reply. **P-ID3's dispatch-socket
-peercred floor does NOT close this** — it is a CROSS-uid floor (see
-below); a same-uid attacker racing or evicting the real listener is by
-definition the SAME uid the floor admits, so this residual is
-OQ1-A-inherent and stays open (a `flock`/pidfile guard on `bind_socket`
-would be the actual fix, not attempted here). This buys the attacker
+peercred floor does NOT close this** — it is a CROSS-uid floor (see below);
+a same-uid attacker is by definition the SAME uid the floor admits, so this
+residual is OQ1-A-inherent and stays open. This buys the attacker
 nothing beyond the door already open (the raw per-session socket a
 same-uid process can already connect to directly, OQ1-A-inherent): the
 seal's value is against a caller that follows its OWN tooling honestly
@@ -3163,7 +3187,7 @@ captured restore snapshot, written change-only by `aoide-conduct`'s PTY
 tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 
 ```json
-"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null, "typed": "cargo test -p aoide-conduct" }
+"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null }
 ```
 
 - `cwd` — the shell's live working directory at the last tick (`None` when
@@ -3179,15 +3203,15 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.
-- `typed` — the reconstructed unsubmitted prompt line, REFUSAL-based: `Some`
-  only for a clean, unedited keystroke run since the last submit (bytes from
-  BOTH real stdin and an injection connection count, since both land in the
-  same shell readline buffer); any readline-editing byte (an escape
-  sequence, `^R`, Tab, `^U`/`^W`) or invalid UTF-8 poisons it to `None`
-  instead of guessing. Only ever populated when `idle` is true — a shell
-  mid-command has no prompt line. A silently WRONG `typed` would put text
-  the operator never composed one keystroke from running; `None` is a fully
-  acceptable product of this capture, a guess is not.
+
+A record that still carries a `typed` key inside `restore` loads with that
+key dropped; no writer emits it.
+
+`argv` and the session log (`state/sessions/<id>.log`) are a terminal record,
+like shell history: a secret written on a command line is stored with `argv`,
+here and in the ledger line, and whatever the pty echoed is in the log. The log
+holds the pty's output only, so input a program reads with echo off never
+reaches it. Both are private to the user under `state/`.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like
@@ -4647,7 +4671,7 @@ this field existed, tolerated on read the same as any other field here).
 
 `restore` (P-C5, durable-sessions plan) is `null` for every non-shell
 session and every line predating this field, and otherwise the SAME
-`{cwd, idle, argv, typed}` object `sessions.json`'s own `restore` field
+`{cwd, idle, argv}` object `sessions.json`'s own `restore` field
 carries (see above) — projected verbatim off `SessionRecord.restore` at the
 exact instant `ledger_session_exit` appends this line, never re-derived and
 never a `/proc` read here: the reap sweep's own ordering

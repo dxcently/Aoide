@@ -180,13 +180,11 @@ fn parse_dispatch_reply(inv: &Invocation, reply: &str) -> Option<Outcome> {
 /// FILE would let whoever can forge a seal also forge the "trusted" key
 /// that vouches for it, so a live round trip is the only channel worth
 /// asking. **This is NOT a channel a same-uid attacker is locked out of**:
-/// the daemon socket is bound unlink-then-bind with no flock/pidfile
-/// (aoide_server::daemon::bind_socket), so a same-uid attacker can already
-/// race or evict the real listener and answer with a forged key of its
-/// own — closing that is P-ID3's same-uid dispatch-socket floor, not this
-/// function's job; it buys no more than the raw per-session socket a
-/// same-uid process can already connect to directly (CONTRACTS.md's own
-/// honesty note on this exact boundary).
+/// the open hole (`docs/architecture/AOIDED.md` "Socket") lets a same-uid
+/// process answer with a forged key of its own, and this fetch does not
+/// close it. It buys no more than the raw per-session socket a same-uid
+/// process can already connect to directly (CONTRACTS.md's own honesty note
+/// on this exact boundary).
 pub fn daemon_seal_pubkey_hex() -> Option<String> {
     // The fetch's BODY lives in `aoide_storage::attest::daemon_seal_pubkey_hex`
     // as of LANE IDENTITY P-ID4 — the secrets broker's origin gate needs the

@@ -163,16 +163,6 @@ pub struct RestoreSnapshot {
     /// capture) or when `/proc` is unreadable.
     #[serde(default)]
     pub argv: Option<Vec<String>>,
-    /// The reconstructed unsubmitted prompt line — REFUSAL-based, never a
-    /// guess: `Some` only for a clean, unedited keystroke run since the last
-    /// submit; any readline-editing byte (an escape sequence, `^R`, Tab,
-    /// `^U`/`^W`) or invalid UTF-8 poisons it to `None` instead. Only ever
-    /// populated when `idle` is true — a shell mid-command has no prompt
-    /// line to reconstruct. A silently WRONG `typed` would put text the
-    /// operator never composed one keystroke from running; `None` is a
-    /// fully acceptable product of this capture, a guess is not.
-    #[serde(default)]
-    pub typed: Option<String>,
 }
 
 /// A REMOTE parent: the session that spawned this one ACROSS machines — the
@@ -760,7 +750,7 @@ pub struct SessionRecord {
     pub ever_sealed: Option<bool>,
     /// Additive/v0-safe (P-C5, durable-sessions plan): a conducted SHELL's
     /// continuously-captured restore snapshot (`RestoreSnapshot`, above) —
-    /// cwd/idle/argv/typed off the PTY tick. Absent for every non-shell
+    /// cwd/idle/argv off the PTY tick. Absent for every non-shell
     /// session and every legacy record predating this field; readers must
     /// tolerate both forms and round-trip fields they do not know.
     /// Consumed internally (`doc.rs::ledger_session_exit`'s projection into
@@ -1638,11 +1628,10 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: true,
             argv: None,
-            typed: Some("cargo test -p aoide-conduct".into()),
         });
         let json = serde_json::to_string(&rec).unwrap();
         assert!(json.contains("\"restore\":{"), "serialised: {json}");
-        assert!(json.contains("\"typed\":\"cargo test -p aoide-conduct\""), "serialised: {json}");
+        assert!(json.contains("\"cwd\":\"/home/khoa/Aoide\""), "serialised: {json}");
         let back: SessionRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(back.restore, rec.restore);
 

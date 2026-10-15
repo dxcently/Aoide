@@ -365,8 +365,9 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> Option<UnixStre
 /// `None` as "cannot verify, so treat the caller as UNIDENTIFIED"; there
 /// is no safe fallback for an unverifiable signature. Deliberately NOT
 /// cached process-wide, and never a file read — module doc's "live round
-/// trip" rule; the same-uid unlink-then-bind honesty note on this channel
-/// lives in `CONTRACTS.md`'s identity section, unchanged by the move.
+/// trip" rule; the same-uid honesty note on this channel (the open hole,
+/// `docs/architecture/AOIDED.md` "Socket") lives in `CONTRACTS.md`'s identity
+/// section, unchanged by the move.
 ///
 /// **Both hosts, one body**: the channel is an `AF_UNIX` socket on either
 /// one (`std`'s on Unix, `aoide_protocol::win_unix`'s native binding on

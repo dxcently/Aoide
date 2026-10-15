@@ -116,8 +116,12 @@ fn main() {
     // One-shot, idempotent `~/Aoide` → `$AOIDE_ROOT` migration (L-C2, task
     // #107) — see `aoide_storage::fs::root`'s own doc for why this runs
     // here, explicitly, rather than hanging off a path getter. It runs only
-    // once the argv has proven this is a launch: a probe touches nothing.
-    aoide_storage::fs::migrate_root_once();
+    // once the argv has proven this is a launch: a probe touches nothing. A
+    // moved `state/` that cannot be locked owner-only stops the start here.
+    if let Err(e) = aoide_storage::fs::migrate_root_once() {
+        eprintln!("aoided: {e}");
+        std::process::exit(1);
+    }
 
     let log = audit_log.unwrap_or_else(daemon::default_audit_log);
     let socket = daemon::socket_path();
