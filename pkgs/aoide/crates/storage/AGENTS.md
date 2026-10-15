@@ -242,9 +242,13 @@
   aoided}.rs`, `crates/lyra/src/bin/lyra.rs`) — a test may call it directly
   too (it is a plain idempotent function, no `Once`/env-isolation dance
   needed, unlike `migrate_conducting_stage`'s own test suite). A move that
-  fails is narrated and leaves the old tree in place; a tree that moved into
-  a `state/` the lock then refuses is its one `Err`, and all three binaries
-  exit on it rather than read a tree they could not make private.
+  fails is narrated and leaves the old tree in place. Its one `Err` is a
+  `state/` that exists and cannot be locked owner-only, on EVERY run: it
+  locks `state_dir()` first, before any move, and the tree a move lands in
+  is locked again. All three binaries exit on it rather than read a tree
+  they could not make private. A `state/` that is absent is not created
+  there, and one whose parent is not a directory counts as absent, so the
+  narrated failure stays the failure.
 - **A checkout-relative source path is named ONCE, here — `fs::LYRA_SHELL_SRC`
   (`"pkgs/lyra-shell"`) is the pattern, not an exception.** The lyra shell's
   QML/icons/preview tree is read by `aoide-lyra`'s `commands::preview` (which
@@ -513,7 +517,9 @@
   The directory is created through `ensure_write_dir`, so one under
   `state/` locks `state/` first. On Unix the chmod acts on a descriptor
   opened `O_NOFOLLOW`, never on the name: a directory that is a symlink is
-  refused and its target keeps its mode. A future sensitive file in its OWN
+  refused and its target keeps its mode, and a `dir` with a `..` in it is
+  refused before anything is created, since the directory it climbs to is
+  not one this call was asked to own. A future sensitive file in its OWN
   new subdirectory calls this on that subdirectory the same way, before the
   first `atomic_write_private` into it.
 - **`state/` is the privacy boundary for the state tree** (CONTRACTS.md §4
@@ -521,7 +527,8 @@
   creator whose directory lies under `state/` goes through
   `fs::ensure_write_dir`, which locks `state/` before it creates anything.
   Accepted gap: a raw creator outside this crate can make a fresh `state/`
-  wide until the next storage write or daemon start. Two are known.
+  wide until the next storage write or the next `aoide`, `aoided` or `lyra`
+  start. Two are known.
   `aoide-conduct`'s `graph/spawn.rs` makes `state/sessions/` with
   `create_dir_all`, and in that spawn path the very next call,
   `create_new_private`, locks it. `aoide-lyra`'s preview fixture

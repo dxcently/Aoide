@@ -197,10 +197,14 @@ fn default_root() -> std::path::PathBuf {
 /// (or test) that relocated only one tree never has ITS sibling moved out
 /// from under it.
 ///
-/// `Err` when a tree moved but the `state/` it landed in could not then be
-/// locked owner-only ([`migrate_dir`]). `aoide` and `aoided` exit on it rather
-/// than read a tree they could not make private.
+/// `Err` on EVERY run while a `state/` that exists cannot be locked owner-only,
+/// whether this run moved it ([`migrate_dir`]) or an earlier one did. It is
+/// locked first, before any move, so the run that moves a tree and the runs
+/// after it refuse the same way. `aoide`, `aoided` and `lyra` exit on it rather
+/// than read a tree they could not make private. A move that fails stays
+/// narrated, with the old tree in place.
 pub fn migrate_root_once() -> std::io::Result<()> {
+    lock_state_if_present()?;
     let old_root = aoide_protocol::aoide_home().join("Aoide");
     let new_root = root();
     if old_root == new_root {
@@ -218,6 +222,19 @@ pub fn migrate_root_once() -> std::io::Result<()> {
     }
 
     migrate_node_state_names()
+}
+
+/// Locks [`state_dir`] owner-only when something is there, a dangling link
+/// included, and does nothing when nothing is: a start-up that finds no
+/// `state/` creates none. A `state/` whose parent is not a directory is not
+/// there either; the move that would have put a tree there narrates its own
+/// failure.
+fn lock_state_if_present() -> std::io::Result<()> {
+    let state = state_dir();
+    match std::fs::symlink_metadata(&state) {
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => Ok(()),
+        _ => lock_state_dir(&state),
+    }
 }
 
 /// The peer -> node vocabulary rename (User ruling, 2026-09-07): the four
@@ -1340,8 +1357,19 @@ pub fn open_private_append(path: &std::path::Path) -> std::io::Result<std::fs::F
 /// costs nothing and never regresses a directory some earlier run already
 /// locked down. On Unix the chmod acts on a descriptor opened without
 /// following a link at `dir` itself, so a `dir` that is a symlink is refused
-/// and its target keeps its mode.
+/// and its target keeps its mode. A `dir` with a `..` in it is refused before
+/// anything is created or changed, since the directory it climbs to is not one
+/// this function was asked to own.
 pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    if dir.components().any(|part| part == std::path::Component::ParentDir) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "{}: refusing to make it owner-only, its path has a `..` in it; name the directory itself",
+                dir.display()
+            ),
+        ));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -3226,6 +3254,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// A `..` in the directory is refused before anything is created or
+    /// changed, even when it climbs out of `state/` onto a directory that
+    /// exists: that directory keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn secure_private_dir_refuses_a_dot_dot_in_its_path_and_never_chmods_what_it_climbs_to() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-private-dotdot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let state = base.join("state");
+        std::fs::create_dir_all(state.join("operator")).unwrap();
+        let outside = base.join("home");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("HOME", base.join("elsewhere"));
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let climbing = state.join("operator").join("..").join("..").join("home");
+        let err = secure_private_dir(&climbing).expect_err("a path with a .. in it must be refused");
+        assert!(err.to_string().contains("`..`"), "the refusal must say why: {err}");
+        assert_eq!(unix_mode(&outside), 0o755, "the directory the path climbs to was chmodded");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// A write under `state/` spelled through an alias of one of its parents
     /// locks `state/`: under is judged by where the directory lands, not by how
     /// its path is spelled.
@@ -4142,6 +4196,115 @@ mod tests {
         assert!(err.to_string().contains(&*state.to_string_lossy()), "the error must name the path: {err}");
         assert!(err.to_string().contains("symlink"), "the error must say why: {err}");
         assert_eq!(unix_mode(&target), 0o755, "the link's target was chmodded");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The run that moves an unlockable `state/` fails, and so does every run
+    /// after it: the second run finds the moved tree already in place and has
+    /// nothing to move, so only the lock at the start can refuse it.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_root_once_refuses_an_unlockable_state_on_every_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-root-every-run-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let target = home.join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::create_dir_all(home.join("Aoide")).unwrap();
+        std::os::unix::fs::symlink(&target, home.join("Aoide").join("state")).unwrap();
+        let state = home.join(".aoide").join("state");
+
+        migrate_root_once().expect_err("the run that moves an unlockable state/ must fail");
+        assert!(std::fs::symlink_metadata(&state).unwrap().file_type().is_symlink(), "the link moved");
+        assert!(std::fs::symlink_metadata(home.join("Aoide").join("state")).is_err(), "nothing is left to move");
+
+        for run in 2..=3 {
+            let err = migrate_root_once().expect_err("a later run must refuse the same state/");
+            let named = err.to_string().contains(&*state.to_string_lossy());
+            assert!(named, "run {run}: the error must name the path: {err}");
+            assert!(err.to_string().contains("symlink"), "run {run}: the error must say why: {err}");
+        }
+        assert_eq!(unix_mode(&target), 0o755, "the link's target was chmodded");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A `state/` in place that cannot be locked fails the migration with no
+    /// legacy tree at all: a link, and a link to nothing.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_root_once_refuses_a_state_already_in_place_that_is_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-root-linked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let target = home.join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let root = home.join(".aoide");
+        std::fs::create_dir_all(&root).unwrap();
+        let state = root.join("state");
+        std::os::unix::fs::symlink(&target, &state).unwrap();
+
+        let err = migrate_root_once().expect_err("a linked state/ must fail the migration");
+        assert!(err.to_string().contains("symlink"), "the error must say why: {err}");
+        assert_eq!(unix_mode(&target), 0o755, "the link's target was chmodded");
+
+        std::fs::remove_file(&state).unwrap();
+        std::os::unix::fs::symlink(home.join("nowhere"), &state).unwrap();
+        let err = migrate_root_once().expect_err("a dangling state/ link must fail the migration");
+        assert!(err.to_string().contains("symlink"), "the error must say why: {err}");
+        assert!(!home.join("nowhere").exists(), "the refusal created the link's target");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A `state/` already in place and wider than owner-only is locked by the
+    /// start-up, not only one the migration moved; and a start-up that finds no
+    /// `state/` makes none.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_root_once_locks_a_state_in_place_and_makes_none() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-root-inplace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let state = home.join(".aoide").join("state");
+
+        migrate_root_once().unwrap();
+        assert!(!state.exists(), "a start-up with no state/ created one");
+
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+        migrate_root_once().unwrap();
+        assert_eq!(unix_mode(&state), 0o700, "a state/ already in place was left wide");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A move that fails is narrated, never an `Err`: here `<home>/.aoide` is a
+    /// file, so the tree cannot land and stays where it was, and there is no
+    /// `state/` to lock.
+    #[test]
+    fn migrate_root_once_narrates_a_failed_move_and_leaves_the_old_tree() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-root-failed-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let old_state = home.join("Aoide").join("state");
+        std::fs::create_dir_all(&old_state).unwrap();
+        std::fs::write(old_state.join("nodes.json"), "kept").unwrap();
+        std::fs::write(home.join(".aoide"), "not a directory").unwrap();
+
+        migrate_root_once().expect("a failed move is narrated, not an error");
+        migrate_root_once().expect("and so is the next run's");
+        assert_eq!(std::fs::read_to_string(old_state.join("nodes.json")).unwrap(), "kept");
         let _ = std::fs::remove_dir_all(&home);
     }
 

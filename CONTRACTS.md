@@ -1192,10 +1192,12 @@ home is protected by its real path. Every home a run could mean is guarded
 together: a non-empty `$HOME`, the passwd home of the effective uid, and
 `/home/$AOIDE_USER` when `$AOIDE_USER` is set. A `state/` the OS will not make
 `0700` fails the write and names the path and the fix: a chmod when this user
-owns it, a chown when another user does. A tree the start-up migration moves
-into `state/` is locked there too; when it cannot be, `aoide` and `aoided`
-exit rather than read it. On Windows the boundary holds only for a `state/`
-aoide created: an existing one is never re-tightened.
+owns it, a chown when another user does. Start-up locks a `state/` that
+exists, and a tree the start-up migration moves into `state/` is locked there
+too; when it cannot be, `aoide`, `aoided` and `lyra` exit on every run rather
+than read it, the run that moved the tree and each run after. On Windows the
+boundary holds only for a `state/` aoide created: an existing one is never
+re-tightened.
 
 The boundary is against other users. A process running as the same user reads
 and writes all of `state/` whatever its mode, and nothing here stops it.
