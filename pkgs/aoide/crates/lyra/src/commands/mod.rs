@@ -45,10 +45,13 @@
 //! `icon` (`icon collections`/`icon list`/`icon resolve`, the pinned Iconify
 //! glyphs) and `apps` (`apps list`/`apps show`/`apps publish`, over
 //! `crate::xdg`: the installed desktop apps with their resolved icons, and
-//! `song/stage/apps.json`) close the list. `registry.rs`'s golden test is the
-//! sole authority for the command set (`pkgs/aoide/crates/AGENTS.md`, "Golden
-//! discipline").
+//! `song/stage/apps.json`) follow, and `clipboard` (`clipboard delete`/
+//! `clipboard clear`, over the `cliphist` on `PATH`: one history entry or all
+//! of them, with the launcher's cached thumbnails) closes the list.
+//! `registry.rs`'s golden test is the sole authority for the command set
+//! (`pkgs/aoide/crates/AGENTS.md`, "Golden discipline").
 pub mod apps;
+pub mod clipboard;
 pub mod dialog_qml;
 pub mod icon;
 pub mod infra;
@@ -85,6 +88,7 @@ const LAYOUT: Layout = Layout {
             ],
         ),
         ("Desktop apps", &[("apps", "Installed apps and their icons, as the shell lists them")]),
+        ("Clipboard", &[("clipboard", "Delete one clipboard-history entry, or wipe them all")]),
         ("Screen control", &[("screen", "See and drive the desktop: info, shots, pointer, OCR, diff")]),
         (
             "Dialogs & notices",
@@ -125,6 +129,7 @@ pub fn all() -> Registry {
     preview_tools::register(&mut r); // preview.shot + preview.tree + preview.notes — shell-first agent tools over that same canvas (P6): screenshots, the live/static-joined item tree, and scaffolding notes
     icon::register(&mut r); // icon.collections + icon.list + icon.resolve — the pinned icon collections (Iconify data) resolved into the lane's own SVG tree, no network at render (I1)
     apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, song/stage/apps.json
+    clipboard::register(&mut r); // clipboard delete/clear — remove cliphist history entries and their cached thumbnails
 
     r.arrange(LAYOUT);
     r

@@ -9,8 +9,9 @@
 # the clipboard backend (pkgs/lyra-shell/qml/AoideClipboard.qml) and renders
 # entries as a dedicated chapter — no separate picker surface. That backend
 # copies and previews by calling the system's `cliphist` and `wl-copy` from
-# PATH itself, so it works the same on a host that runs its own watcher and
-# never selects this lane.
+# PATH itself, and deletes or clears history through `lyra clipboard`, which
+# runs the same `cliphist` — so it works the same on a host that runs its own
+# watcher and never selects this lane.
 
 {
   config,

@@ -1,10 +1,12 @@
 // AoideClipboard.qml — the cliphist clipboard-backend for the Grimoire.
 //
 // Entries are display-only metadata. Copying and image thumbnails call the
-// system's own `cliphist` and `wl-copy` from PATH, and accept only a validated
-// numeric cliphist identifier. Each `sh -c` script is a constant and the id
-// reaches it as a positional argument: clipboard contents never become a
-// command or shell source.
+// system's own `cliphist` and `wl-copy` from PATH; removing history runs
+// `lyra clipboard delete <id>` / `lyra clipboard clear`, the bridge that also
+// drops the cached thumbnails. Every one accepts only a validated numeric
+// cliphist identifier. Each `sh -c` script is a constant and the id reaches
+// it as a positional argument: clipboard contents never become a command or
+// shell source.
 
 import QtQuick
 import Quickshell
@@ -16,6 +18,8 @@ QtObject {
     property bool loading: false
     property bool loadError: false
     property string error: ""
+    // The last deleteById/clear refusal, as lyra's message; "" when it worked.
+    property string actionError: ""
     property var entries: []
     readonly property var parsedEntries: root.entries
 
@@ -108,6 +112,48 @@ QtObject {
         // script; never preview text, never a command built from contents.
         Quickshell.execDetached(["sh", "-c", "cliphist decode \"$1\" | wl-copy", "sh", id])
         return true
+    }
+
+    // Remove one entry and its thumbnail, then reload the list. False when
+    // the id is not a numeric cliphist id (nothing runs).
+    function deleteById(value) {
+        var id = "" + value
+        if (!/^[0-9]+$/.test(id)) return false
+        root.runLyra(["delete", id])
+        return true
+    }
+
+    // Wipe the whole history and every thumbnail, then reload the list.
+    // Confirming first is the caller's job.
+    function clear() {
+        root.runLyra(["clear"])
+    }
+
+    function runLyra(args) {
+        root.actionError = ""
+        var proc = lyraFactory.createObject(root, { clipArgs: args })
+        proc.running = true
+    }
+
+    // One `lyra clipboard <args> --json` run. A failure leaves lyra's own
+    // message in actionError; either way the list reloads to what cliphist
+    // holds now.
+    property Component lyraFactory: Component {
+        Process {
+            id: lyraRun
+            property var clipArgs: []
+            command: ["lyra", "clipboard"].concat(clipArgs).concat(["--json"])
+            stdout: StdioCollector { id: lyraOut }
+            onExited: function (exitCode, exitStatus) {
+                if (exitCode !== 0) {
+                    var message = "lyra clipboard " + lyraRun.clipArgs[0] + " failed"
+                    try { message = JSON.parse(lyraOut.text).message || message } catch (e) {}
+                    root.actionError = message
+                }
+                root.refresh()
+                destroy()
+            }
+        }
     }
 
     // Factory for one-shot preview decoders — each instance decodes exactly

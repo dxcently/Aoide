@@ -671,8 +671,8 @@ Contract guarantees:
   `section` (it lists itself last, under "Not yet implemented"). `aoide`'s
   sections, in order: Start here · Sessions & conducting · Mesh & mail ·
   Secrets · Agent interfaces · System. `lyra`'s: Start here · Songs &
-  liveries · Widgets & icons · Desktop apps · Screen control · Dialogs & notices · Agent
-  interfaces · System.
+  liveries · Widgets & icons · Desktop apps · Clipboard · Screen control · Dialogs &
+  notices · Agent interfaces · System.
 - **Help screens, streams and color.** Bare `aoide`/`lyra`, `--help` and `help`
   print the overview — a tagline, one line per head under its section (a
   multi-command head shows `(N commands)`), a footer — on stdout at exit `0`.

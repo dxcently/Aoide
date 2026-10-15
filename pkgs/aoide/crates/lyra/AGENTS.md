@@ -349,6 +349,14 @@
   themes (560 of 560) but every real theme ships `icon-theme.cache`, which Qt
   follows, and later-wins mispicks 3 of the 89 real apps.
   Reordering the key or folding the kinds together reopens that regression.
+- **`lyra clipboard` hands cliphist an id and nothing else.** `delete`
+  writes `<id>\t` to `cliphist delete`'s stdin after checking `cliphist list`
+  holds it; the history's text is read for its ids only and never reaches a
+  message or `data`. Its tests run a builtins-only `cliphist` stand-in on a
+  `PATH` holding nothing else, under a scratch `HOME`/`XDG_CACHE_HOME`, so the
+  real binary and the real history are unreachable from them; keep it so.
+  The thumbnail path is `AoideClipboard.qml`'s `previewDir`, mirrored, not
+  shared: change both together.
 - **`apps publish --run` re-resolves every path on every tick and holds no
   watch.** A nix profile swap re-points a chain of symlinks, so an inotify
   watch on a store path never fires again; `fingerprint` re-resolves each
@@ -377,6 +385,9 @@
 - The golden snapshot in `registry.rs` when the command-path set changes.
 - `docs/architecture/PACKAGE-LAYOUT.md`/`CONTRACTS.md §3` when the
   core/lyra split itself shifts.
+- `docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md` and
+  `AoideClipboard.qml`'s header when a `lyra clipboard` output shape,
+  `data.reason` code or the thumbnail path changes.
 - `CONTRACTS.md` §4 (`song/stage/apps.json`) and
   `docs/Aoide-Wiki/concepts/cli/Apps-Commands.md` when the `apps.json`
   document, the listing filter or the icon rules change.

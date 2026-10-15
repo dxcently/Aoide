@@ -313,8 +313,8 @@ pub const AOIDE_ONLY_HEADS: &[&str] = &[
     "soundcheck", "spawn", "update", "usage", "workspace",
 ];
 pub const LYRA_ONLY_HEADS: &[&str] = &[
-    "apps", "cover", "element", "herald", "icon", "livery", "preview", "quickshell", "reload", "rice", "screen",
-    "shellbridge",
+    "apps", "clipboard", "cover", "element", "herald", "icon", "livery", "preview", "quickshell", "reload", "rice",
+    "screen", "shellbridge",
 ];
 pub const SHARED_HEADS: &[&str] = &["guide", "mcp", "onboard", "pair", "schema", "secrets"];
 
