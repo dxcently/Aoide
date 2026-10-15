@@ -176,10 +176,12 @@ pub use self::send::DAEMON_PEER_PID_FLAG;
 // door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
 // registry, `aoide-server`'s dispatch). `PENDING_FULL` is the reason a send
 // refused at the queue's per-source cap carries, which the network door turns
-// into its own answer.
+// into its own answer; `PENDING_FILE_FULL` and `PENDING_TOO_LARGE` are the
+// file-bound and per-entry refusals the same door answers by their own codes.
 pub use self::send::{
     hold_pending, pending_path, session_hook, session_send, HoldRefused, DOOR_CANNOT_APPROVE,
-    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_FULL,
+    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_FILE_FULL, PENDING_FULL,
+    PENDING_TOO_LARGE,
 };
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile

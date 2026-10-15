@@ -51,7 +51,7 @@
 use aoide_conduct::graph::{
     canonical_state, hold_pending, load_stage, now_iso_utc, resolve_graph_document,
     session_send, sessions_path, HoldRefused, Project, ProjectsFile, SessionRecord, SessionsFile,
-    PENDING_FULL,
+    PENDING_FILE_FULL, PENDING_FULL, PENDING_TOO_LARGE,
 };
 use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
@@ -815,12 +815,13 @@ fn opening_turn_worker(
 /// typed. The door cannot approve (`Door::can_approve`), so the prompt is queued
 /// for a human exactly like a send that did not clear the gate. Nothing is
 /// typed into the new session, and the verdict says so: `queue-full` when the
-/// node already holds the queue's per-source cap, `hold-failed` when the write
-/// itself failed or the prompt is over the queue's per-entry byte cap.
+/// node already holds the queue's per-source cap or the file's whole bound,
+/// `hold-failed` when the write itself failed or the prompt is over the queue's
+/// per-entry byte cap.
 fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>) -> &'static str {
     match hold_pending(id, prompt, true, from) {
         Ok(()) => "held-pending",
-        Err(HoldRefused::Full) => "queue-full",
+        Err(HoldRefused::Full | HoldRefused::FileFull) => "queue-full",
         Err(HoldRefused::Stage(_) | HoldRefused::TooLarge(_)) => "hold-failed",
     }
 }
@@ -1830,8 +1831,15 @@ fn do_inject(session_id: &str, prompt: &str, audit_log: &Path, from: &str) -> Re
     };
     let outcome = session_send(&inv);
     if outcome.status != Status::Ok {
-        let full = outcome.data.as_ref().and_then(|d| d.get("reason")).and_then(Value::as_str) == Some(PENDING_FULL);
-        let code = if full { QUEUE_FULL_CODE } else { -32603 };
+        // Queue state answers uniformly (see `inject_answer`); an oversize
+        // prompt is a property of the caller's own text, so it gets its own
+        // code and reveals nothing about the queue.
+        let reason = outcome.data.as_ref().and_then(|d| d.get("reason")).and_then(Value::as_str);
+        let code = match reason {
+            Some(PENDING_FULL | PENDING_FILE_FULL) => QUEUE_FULL_CODE,
+            Some(PENDING_TOO_LARGE) => INVALID_PARAMS_CODE,
+            _ => -32603,
+        };
         return Err((code, outcome.message));
     }
     Ok(submitted_task(session_id))
@@ -1867,6 +1875,8 @@ fn inject_source(
 /// a caller that proved a node identity sees it; [`message_send`] answers
 /// anyone else uniformly.
 const QUEUE_FULL_CODE: i64 = -32000;
+/// JSON-RPC "invalid params": an inject whose text is over the held-entry cap.
+const INVALID_PARAMS_CODE: i64 = -32602;
 
 /// Stamp `origin=node:<name>` directly on the just-spawned session's own
 /// record — LANE IDENTITY P-ID0 (G16/G5): this DOOR is the record-layer
@@ -12256,6 +12266,48 @@ mod tests {
             .filter(|e| e["from"] == from)
             .map(|e| e["text"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    #[test]
+    fn an_oversize_inject_answers_its_own_code_and_queues_nothing() {
+        // A prompt over the held-entry cap is refused `-32602` (invalid params),
+        // not the uniform `-32603` of a failed write, and the queue is untouched.
+        // Before the change the same refusal answered `-32603`.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "oversize-target";
+        let (root, stage, listener) = uniform_guard_box("oversize", id);
+
+        let path = root.join("node.token");
+        std::fs::write(&path, "node-secret\n").unwrap();
+        let mut node = fixture_node("big-node", "http://192.0.2.99:8710/");
+        node.token_file = Some(path.to_string_lossy().into_owned());
+        node.verified = true;
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let big = "x".repeat(aoide_conduct::graph::PENDING_ENTRY_MAX_BYTES + 1);
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": big }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let (code, msg) = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("10.0.0.9".parse().unwrap()),
+            "server-secret",
+            Some("node-secret"),
+            None,
+        )
+        .expect_err("an oversize prompt is refused");
+        assert_eq!(code, INVALID_PARAMS_CODE, "{msg}");
+        assert!(!stage.join("pending.json").exists(), "nothing queued");
+        assert!(listener.accept().is_err(), "nothing is delivered");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
     }
 
     #[test]

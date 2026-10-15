@@ -200,14 +200,17 @@ in the message.
   carrying the new entry's `from` and appends under ONE stage lock, refusing
   at `PENDING_CAP_PER_SOURCE` without touching what is queued, and refusing an
   entry that serializes past `PENDING_ENTRY_MAX_BYTES` (a send's text and a
-  spawn's argv alike) with `HoldRefused::TooLarge`. Every held send and
+  spawn's argv alike) with `HoldRefused::TooLarge`, and refusing a write that
+  would take the file past `PENDING_FILE_MAX_BYTES` (8 MiB, measured on the
+  stored pretty form) with `HoldRefused::FileFull`. Every held send and
   `hold_pending` go through it, on every door. A new writer of the queue goes
   through it too, never around it, or one sender can fill a human's approval
   queue. A refused send carries `reason: PENDING_FULL` or `PENDING_TOO_LARGE`
   and is audited (an oversize one by the head of its text only). Pinned by
   `a_full_source_is_refused_and_audited_and_another_source_still_queues`,
-  `an_entry_over_the_byte_cap_is_refused_audited_and_leaves_the_queue_alone`
-  and `an_oversize_held_spawn_is_refused_audited_and_never_queued`.
+  `an_entry_over_the_byte_cap_is_refused_audited_and_leaves_the_queue_alone`,
+  `the_file_bound_refuses_a_hold_and_the_stored_file_stays_under_it` and
+  `an_oversize_held_spawn_is_refused_audited_and_never_queued`.
 - **An approver is shown what replays, in escapes, never stripped.** Every
   human view of a queued entry (`pending list`'s line, the answers of `approve`
   and `deny`, and across the crate boundary the conductor's PENDING rows) spells
@@ -225,6 +228,27 @@ in the message.
   nothing live) and again in `pending_approve` before the entry leaves the
   queue, since launching binds that id's socket; pinned by
   `approving_a_held_spawn_whose_id_has_gone_live_is_refused_and_it_stays_queued`.
+- **Approval takes the entry it was shown, and re-checks what a hold checked.**
+  `pending_approve` and `pending_deny` read the entry first, then `take_pending_entry`
+  removes it under the stage lock only when its fingerprint is the `--expect`
+  the caller named (the conductor sends the one its row drew) and it still
+  passes `PendingSpawn::is_known`. A held resurrect's `shown` plan is checked
+  by `resurrect::approved_selection` before the take, so a ledger that moved
+  since the hold refuses without consuming the entry. Hold-time pins: a held
+  spawn's `cwd` and a relative argv[0] are absolute, an `@file` is inlined, and
+  `--instructions -` is refused (`reason: unpinnable-input`). The one unpinned
+  input is a bare argv[0], resolved through the approver's `PATH`. Pinned by
+  `deny_with_a_stale_fingerprint_takes_nothing_and_the_listed_one_takes_its_entry`,
+  `approve_refuses_a_held_spawn_that_no_hold_would_queue_and_keeps_it`,
+  `a_held_resurrect_refuses_to_launch_a_plan_its_approver_was_not_shown`,
+  `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`
+  and `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin`.
+- **Spawn ids are distinct per call and never a socket that answers.**
+  A minted id carries a process-wide counter, since the clock is seconds
+  (`spawn_id`). `spawn_id_in_use` is a `connect` probe, so a socket file nothing
+  listens on does not hold an explicit `--id`. Pinned by
+  `two_holds_in_one_second_get_distinct_ids_and_both_queue` and
+  `a_stale_socket_file_does_not_hold_an_explicit_id`.
 - **A parked send's source is derived by its door, never read off the caller.**
   `pending_origin` (`graph/send.rs`) is the one place an entry's `from` is
   chosen: the A2A door's own `--from` (`node:<name>` or `addr:<address>`, set

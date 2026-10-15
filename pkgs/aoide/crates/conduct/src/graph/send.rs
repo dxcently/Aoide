@@ -166,6 +166,11 @@ pub struct PendingSpawn {
     pub args: Vec<String>,
     #[serde(default)]
     pub flags: BTreeMap<String, String>,
+    /// What a held resurrect showed its approver: one line per candidate, and
+    /// what each would type. Empty for a spawn. Approval launches only a
+    /// selection that still reads this way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shown: Vec<String>,
 }
 
 fn spawn_path() -> Vec<String> {
@@ -174,7 +179,7 @@ fn spawn_path() -> Vec<String> {
 
 impl Default for PendingSpawn {
     fn default() -> Self {
-        Self { path: spawn_path(), args: Vec::new(), flags: BTreeMap::new() }
+        Self { path: spawn_path(), args: Vec::new(), flags: BTreeMap::new(), shown: Vec::new() }
     }
 }
 
@@ -193,9 +198,19 @@ impl PendingSpawn {
     }
 
     /// Is this a command an approval may launch? Anything else in a queue file
-    /// is not replayed.
+    /// is not replayed. The rules a hold applies (a plain id, no `--parent`, a
+    /// resurrect that names its project) are judged here too, so an entry held by
+    /// an older build, or edited by hand, is listed as malformed and never
+    /// launched on a word the hold would have refused.
     pub fn is_known(&self) -> bool {
-        matches!(self.path.iter().map(String::as_str).collect::<Vec<_>>()[..], ["spawn"] | ["resurrect"])
+        match self.path.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+            ["spawn"] => {
+                !self.flags.contains_key("parent")
+                    && self.flags.get("id").is_none_or(|id| super::spawn::spawn_id_is_plain(id))
+            }
+            ["resurrect"] => self.flags.contains_key("project"),
+            _ => false,
+        }
     }
 
     pub fn is_resurrect(&self) -> bool {
@@ -527,6 +542,15 @@ pub const PENDING_ENTRY_MAX_BYTES: usize = 64 * 1024;
 /// The `reason` an entry refused at [`PENDING_ENTRY_MAX_BYTES`] carries.
 pub const PENDING_TOO_LARGE: &str = "pending-too-large";
 
+/// The most bytes `pending.json` may hold in all, measured as `write_stage`
+/// writes it. The count and entry caps bound one source and one entry; this
+/// bounds the file, which holds every source at once and is rewritten whole on
+/// each change.
+pub const PENDING_FILE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// The `reason` a send refused at [`PENDING_FILE_MAX_BYTES`] carries.
+pub const PENDING_FILE_FULL: &str = "pending-file-full";
+
 /// How much of a refused entry's text the audit line keeps: the head, enough
 /// to tell what was tried, never the whole oversize body.
 pub(super) const AUDIT_REFUSED_TEXT_MAX: usize = 256;
@@ -542,6 +566,8 @@ pub enum HoldRefused {
     Full,
     /// The entry serializes to this many bytes, over [`PENDING_ENTRY_MAX_BYTES`].
     TooLarge(usize),
+    /// Queued, the file would hold more than [`PENDING_FILE_MAX_BYTES`].
+    FileFull,
     /// The stage could not be read or written.
     Stage(String),
 }
@@ -618,8 +644,18 @@ fn pending_origin(inv: &Invocation, attested: impl FnOnce() -> Option<String>) -
     Ok(PendingOrigin { from: Some(from), claimed })
 }
 
-/// Queue one held send. The cap is counted and the entry appended under ONE
-/// stage lock, so two callers racing for the last slot cannot both take it.
+/// The bytes `value` takes on disk, as `write_stage` writes it. A value that
+/// does not serialize is a refusal, never a zero-byte entry that passes a cap.
+fn stored_len<T: Serialize>(value: &T) -> Result<usize, HoldRefused> {
+    serde_json::to_string_pretty(value)
+        .map(|body| body.len())
+        .map_err(|e| HoldRefused::Stage(format!("pending.json: serialize: {e}")))
+}
+
+/// Queue one held send. The entry's size is judged first, so an oversize entry
+/// is refused whatever the queue holds, and the source cap, the file cap and
+/// the append happen under ONE stage lock, so two callers racing for the last
+/// slot cannot both take it.
 fn record_pending(
     id: &str,
     text: &str,
@@ -629,9 +665,6 @@ fn record_pending(
 ) -> Result<(), HoldRefused> {
     with_stage_lock(|| {
         let mut file: PendingFile = load_stage(&pending_path()).map_err(HoldRefused::Stage)?;
-        if file.pending.iter().filter(|p| p.from == origin.from).count() >= PENDING_CAP_PER_SOURCE {
-            return Err(HoldRefused::Full);
-        }
         let entry = PendingSend {
             session_id: id.to_string(),
             text: text.to_string(),
@@ -641,12 +674,18 @@ fn record_pending(
             claimed: origin.claimed.clone(),
             spawn,
         };
-        let bytes = serde_json::to_vec(&entry).map_or(0, |v| v.len());
+        let bytes = stored_len(&entry)?;
         if bytes > PENDING_ENTRY_MAX_BYTES {
             return Err(HoldRefused::TooLarge(bytes));
         }
+        if file.pending.iter().filter(|p| p.from == origin.from).count() >= PENDING_CAP_PER_SOURCE {
+            return Err(HoldRefused::Full);
+        }
         file.schema_version = STAGE_GRAPH_VERSION.to_string();
         file.pending.push(entry);
+        if stored_len(&file)? > PENDING_FILE_MAX_BYTES {
+            return Err(HoldRefused::FileFull);
+        }
         write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)
     })
 }
@@ -768,9 +807,20 @@ fn audit_send_noted(inv: &Invocation, status: &str, message: &str, text: &str, n
             command: "send".to_string(),
             status: status.to_string(),
             message,
-            untrusted_data: Some(text.to_string()),
+            untrusted_data: Some(audited_text(status, text)),
         },
     );
+}
+
+/// The text an audit line keeps for `status`. A refused send or hold was never
+/// queued and no one reads it back whole, so a refusal keeps only its head: enough
+/// to tell what was tried, never a body as large as the transport admits.
+pub(super) fn audited_text(status: &str, text: &str) -> String {
+    if status == "refused" {
+        text.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()
+    } else {
+        text.to_string()
+    }
 }
 
 /// `aoide send (--id <id> | --to <target>) [--submit] [--yes] -- <text
@@ -1235,13 +1285,20 @@ pub(in crate::graph) fn deliver_local_with(
                 return out;
             }
             Err(HoldRefused::TooLarge(bytes)) => {
+                // A door that can approve may deliver the text itself, so its
+                // refusal names that way out; no other door has one.
+                let way_out: &'static str = if may_approve {
+                    "send less text at a time, or pass --yes to deliver this one now"
+                } else {
+                    "send less text at a time"
+                };
                 let out = Outcome::refuse(
                     cmd,
                     Kind::Refused,
                     format!("send to `{id}` not queued: the entry is {bytes} bytes, over the {PENDING_ENTRY_MAX_BYTES} a held entry may be"),
                     "a human reads every held entry, and the queue file is rewritten whole on each change, \
                      so one entry is bounded in size",
-                    Fix::None("send less text at a time"),
+                    Fix::None(way_out),
                 )
                 .with_fields(json!({
                     "reason": PENDING_TOO_LARGE,
@@ -1250,8 +1307,19 @@ pub(in crate::graph) fn deliver_local_with(
                     "bytes": bytes,
                     "maxBytes": PENDING_ENTRY_MAX_BYTES,
                 }));
-                let head: String = text.chars().take(AUDIT_REFUSED_TEXT_MAX).collect();
-                audit_send_noted(inv, "refused", &out.message, &head, origin.note());
+                audit_send_noted(inv, "refused", &out.message, &text, origin.note());
+                return out;
+            }
+            Err(HoldRefused::FileFull) => {
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    format!("send to `{id}` not queued: the approval queue file is full at {PENDING_FILE_MAX_BYTES} bytes"),
+                    "pending.json is rewritten whole on each change, so every source shares one bound",
+                    Fix::Run("aoide session pending list".to_string()),
+                )
+                .with_fields(json!({ "reason": PENDING_FILE_FULL, "id": id, "from": origin.from }));
+                audit_send_noted(inv, "refused", &out.message, &text, origin.note());
                 return out;
             }
         }
@@ -4478,6 +4546,10 @@ mod tests {
             assert_eq!(data["maxBytes"], PENDING_ENTRY_MAX_BYTES);
             assert!(data["bytes"].as_u64().unwrap() as usize > PENDING_ENTRY_MAX_BYTES);
             assert!(data["refusal"]["why"].is_string() && data["refusal"]["fix"]["none"].is_string(), "taught: {data}");
+            // A door that can approve has a way out, and the line names it: the
+            // refusal would otherwise leave a human with no path to deliver.
+            let fix = data["refusal"]["fix"]["none"].as_str().unwrap();
+            assert_eq!(fix.contains("--yes"), matches!(door, Door::Cli), "{door:?}: {fix}");
         }
         assert_eq!(queued().len(), 1, "nothing of an oversize send was queued");
         let refused: Vec<Value> = audit_lines(&root).into_iter().filter(|r| r["status"] == "refused").collect();

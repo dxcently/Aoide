@@ -48,10 +48,10 @@ use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::common::stage_error;
 use super::pending::audit_pending;
 use super::send::{
-    deliver_local_with, hold_spawn, real_attested_sender, HoldRefused, PendingSpawn, AUDIT_REFUSED_TEXT_MAX,
-    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_TOO_LARGE,
+    deliver_local_with, hold_spawn, real_attested_sender, HoldRefused, PendingSpawn, PENDING_CAP_PER_SOURCE,
+    PENDING_ENTRY_MAX_BYTES, PENDING_FILE_FULL, PENDING_FILE_MAX_BYTES, PENDING_TOO_LARGE,
 };
-use super::session_store::{now_iso_utc, reserved_id_refusal};
+use super::session_store::{is_reserved_id, now_iso_utc, reserved_id_refusal};
 use super::undying::nothing_to_restore_warning;
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::{Door, Invocation};
@@ -719,22 +719,35 @@ fn session_spawn_with(
 const SPAWN_ID_MAX: usize = 128;
 
 /// May a caller on a door that cannot approve name `id` for the child of its
-/// spawn? Plain ASCII, bounded: the id is printed to the human who approves a
-/// held spawn, written to the audit log and spelled into the child's control
-/// socket path, so a byte that moves a terminal or a path is refused rather
-/// than escaped.
-fn spawn_id_is_plain(id: &str) -> bool {
+/// spawn? Plain ASCII, bounded, and outside the reserved `sub:` namespace: the
+/// id is printed to the human who approves a held spawn, written to the audit
+/// log and spelled into the child's control socket path, so a byte that moves
+/// a terminal or a path is refused rather than escaped. `pub(in crate::graph)`
+/// so the queue refuses an entry that does not pass it on approval too.
+pub(in crate::graph) fn spawn_id_is_plain(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= SPAWN_ID_MAX
         && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+        && !is_reserved_id(id)
 }
 
-/// Does `id` already name a session that is not done, or a control socket? A
-/// spawn registers its child under `id` and binds that session's socket path,
+/// Does something answer on the control socket at `path`? A socket file a
+/// crashed child left behind answers nothing and names no live session, the
+/// same probe `reap`'s orphan sweep uses to decide what to unlink.
+fn socket_answers(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    use std::os::unix::net::UnixStream;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixStream;
+    UnixStream::connect(path).is_ok()
+}
+
+/// Does `id` already name a session that is not done, or a live control socket?
+/// A spawn registers its child under `id` and binds that session's socket path,
 /// which unlinks whatever is there: a child given a live session's id would take
 /// over its record and cut its socket.
 pub(in crate::graph) fn spawn_id_in_use(id: &str) -> bool {
-    conduct_socket_path(id).exists()
+    socket_answers(&conduct_socket_path(id))
         || load_stage::<SessionsFile>(&sessions_path())
             .is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id && canonical_state(&s.state) != "done"))
 }
@@ -766,13 +779,18 @@ fn refuse_spawn_id(inv: &Invocation) -> Option<Outcome> {
     Some(out)
 }
 
+/// Ids minted for spawns held or launched by this process. The clock is only
+/// seconds, so the counter is what keeps two spawns in one second apart.
+static MINTED_SPAWN_IDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// The id a spawn's child registers under: the caller's `--id`, else one minted
-/// from this process and the clock.
+/// from this process, the clock and a counter no other mint in this process
+/// shares.
 fn spawn_id(inv: &Invocation) -> String {
-    inv.flags
-        .get("id")
-        .cloned()
-        .unwrap_or_else(|| format!("spawn-{}-{}", std::process::id(), unix_ts()))
+    inv.flags.get("id").cloned().unwrap_or_else(|| {
+        let n = MINTED_SPAWN_IDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("spawn-{}-{}-{n}", std::process::id(), unix_ts())
+    })
 }
 
 /// Hold a spawn whole, for a human to approve with `session pending approve`.
@@ -785,7 +803,61 @@ fn hold_whole_spawn(inv: &Invocation) -> Outcome {
     let parent_dropped = flags.remove("parent").is_some();
     flags.insert("id".to_string(), id.clone());
     let note = if parent_dropped { ", its --parent dropped" } else { "" };
-    hold_whole(inv, &id, PendingSpawn { args: inv.args.clone(), flags, ..PendingSpawn::default() }, note)
+    let (args, flags) = match pin_held_inputs(&inv.args, flags) {
+        Ok(pinned) => pinned,
+        Err(why) => return refuse_held_input(inv, &id, &why),
+    };
+    hold_whole(inv, &id, PendingSpawn { args, flags, ..PendingSpawn::default() }, note)
+}
+
+/// What a held spawn reads from its caller's directory or stdin, copied into
+/// the entry as it is held, so the approver sees the same command, argv and
+/// instructions the caller meant. Approval runs in the approver's own process
+/// and directory, so a relative path, a bare `@file` or `-` would resolve to
+/// something else there. Returns the argv and flags to hold, or the reason a
+/// door that cannot approve may not hold them.
+fn pin_held_inputs(args: &[String], mut flags: BTreeMap<String, String>) -> Result<(Vec<String>, BTreeMap<String, String>), String> {
+    let base = std::env::current_dir().map_err(|e| format!("the working directory is unreadable: {e}"))?;
+    let absolute = |p: &str| {
+        let path = std::path::Path::new(p);
+        if path.is_absolute() { path.to_path_buf() } else { base.join(path) }.display().to_string()
+    };
+    let cwd = flags.get("cwd").map(|c| absolute(c)).unwrap_or_else(|| base.display().to_string());
+    flags.insert("cwd".to_string(), cwd);
+    let mut args = args.to_vec();
+    if let Some(program) = args.first_mut() {
+        if program.contains('/') {
+            *program = absolute(program);
+        }
+    }
+    if let Some(spec) = flags.get("instructions").cloned() {
+        if spec == "-" {
+            return Err("`--instructions -` reads the approver's stdin, which a held spawn cannot pin".to_string());
+        }
+        if let Some(path) = spec.strip_prefix('@') {
+            let text = std::fs::read_to_string(absolute(path))
+                .map_err(|e| format!("reading --instructions @{path} at hold time: {e}"))?;
+            if text.starts_with('@') || text == "-" {
+                return Err("the instructions file's text would be read back as a file or stdin at approval".to_string());
+            }
+            flags.insert("instructions".to_string(), text);
+        }
+    }
+    Ok((args, flags))
+}
+
+/// The refusal of a held spawn whose inputs could not be pinned.
+fn refuse_held_input(inv: &Invocation, id: &str, why: &str) -> Outcome {
+    let out = Outcome::refuse(
+        "spawn",
+        Kind::Refused,
+        format!("spawn of `{id}` not held: {why}"),
+        "a held spawn runs later, from the approver's directory, so what it reads must be copied in now",
+        Fix::None("give the command a path and instructions the approver can see"),
+    )
+    .with_fields(json!({ "reason": "unpinnable-input", "sessionId": id }));
+    audit_pending(inv, "spawn", "refused", &out.message, "");
+    out
 }
 
 /// Queue `held` whole under the MCP door's bucket, and answer the caller that
@@ -805,6 +877,18 @@ pub(in crate::graph) fn hold_whole(inv: &Invocation, id: &str, held: PendingSpaw
             out
         }
         Err(HoldRefused::Stage(e)) => stage_error(cmd, e),
+        Err(HoldRefused::FileFull) => {
+            let out = Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                format!("{cmd} of `{id}` not queued: the approval queue file is full at {PENDING_FILE_MAX_BYTES} bytes"),
+                "pending.json is rewritten whole on each change, so every source shares one bound",
+                Fix::Run("aoide session pending list".to_string()),
+            )
+            .with_fields(json!({ "reason": PENDING_FILE_FULL, "sessionId": id }));
+            audit_pending(inv, cmd, "refused", &out.message, &line);
+            out
+        }
         Err(HoldRefused::Full) => {
             let out = Outcome::refuse(
                 cmd,
@@ -834,8 +918,7 @@ pub(in crate::graph) fn hold_whole(inv: &Invocation, id: &str, held: PendingSpaw
                 "bytes": bytes,
                 "maxBytes": PENDING_ENTRY_MAX_BYTES,
             }));
-            let head: String = line.chars().take(AUDIT_REFUSED_TEXT_MAX).collect();
-            audit_pending(inv, cmd, "refused", &out.message, &head);
+            audit_pending(inv, cmd, "refused", &out.message, &line);
             out
         }
     }
@@ -1257,6 +1340,7 @@ mod tests {
     use super::*;
     use crate::graph::model::{write_stage, SessionsFile};
     use crate::graph::testutil::*;
+    use crate::graph::send::AUDIT_REFUSED_TEXT_MAX;
 
     // `built_aoide_bin` moved to `testutil.rs` (P-D8) — `resurrect.rs`'s own
     // end-to-end tests need the identical fixture; glob-imported above via
@@ -1961,6 +2045,66 @@ mod tests {
         assert!(held_spawns().is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
+    /// Two spawns held by one process in the same second get two ids, and both
+    /// are queued and approvable. The clock is seconds, so the counter is what
+    /// keeps them apart; before it, the second held spawn's id collided.
+    #[cfg(unix)]
+    #[test]
+    fn two_holds_in_one_second_get_distinct_ids_and_both_queue() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let _root = spawn_stage("spawn-mcp-distinct-ids");
+        let first = session_spawn_with(&mcp_spawn(&["sh", "-c", "true"], &[]), |_| None);
+        let second = session_spawn_with(&mcp_spawn(&["sh", "-c", "true"], &[]), |_| None);
+        let a = first.data.as_ref().unwrap()["sessionId"].as_str().unwrap().to_string();
+        let b = second.data.as_ref().unwrap()["sessionId"].as_str().unwrap().to_string();
+        assert_ne!(a, b, "two holds, two ids");
+        let held: Vec<String> = held_spawns().iter().map(|p| p.session_id.clone()).collect();
+        assert_eq!(held, [a, b], "both are queued under their own ids");
+    }
+
+    /// Inputs a held spawn reads from the caller's directory are copied in at
+    /// hold time: a relative `--cwd` and a relative argv0 are stored absolute,
+    /// so the approver's directory cannot change what runs. `--instructions -`
+    /// reads the approver's stdin and is refused, nothing queued.
+    #[cfg(unix)]
+    #[test]
+    fn a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let _root = spawn_stage("spawn-mcp-pinned");
+        let out = session_spawn_with(&mcp_spawn(&["./tool"], &[("cwd", "rel-dir")]), |_| None);
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        let held = held_spawns();
+        assert_eq!(held.len(), 1);
+        let spawn = held[0].spawn.as_ref().unwrap();
+        assert!(std::path::Path::new(&spawn.flags["cwd"]).is_absolute(), "{:?}", spawn.flags);
+        assert!(spawn.flags["cwd"].ends_with("/rel-dir"), "{:?}", spawn.flags);
+        assert!(std::path::Path::new(&spawn.args[0]).is_absolute(), "{:?}", spawn.args);
+
+        let out = session_spawn_with(&mcp_spawn(&["true"], &[("instructions", "-")]), |_| None);
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "unpinnable-input");
+        assert_eq!(held_spawns().len(), 1, "a refused hold queues nothing");
+    }
+
+    /// A socket file a crashed child left behind, with nothing listening on
+    /// it, does not make its id live: the id is free, and an MCP spawn may name
+    /// it. Before the change the bare file's existence refused the id.
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_socket_file_does_not_hold_an_explicit_id() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let _root = spawn_stage("spawn-stale-socket");
+        let path = crate::graph::conduct::conduct_socket_path("stale-sock");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"").unwrap();
+        assert!(!spawn_id_in_use("stale-sock"), "a file nothing answers on is not a live session");
+        let inv = mcp_spawn(&["true"], &[("id", "stale-sock")]);
+        assert!(refuse_spawn_id(&inv).is_none(), "the id is free to name");
+    }
+
 
     /// A held spawn is one queue entry like a held send, and as bounded: a command
     /// whose entry serializes past the byte cap is refused with its taught

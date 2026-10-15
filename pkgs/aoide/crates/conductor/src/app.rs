@@ -591,6 +591,9 @@ pub struct PendingRow {
     /// The entry is a held launch (`spawn`/`resurrect`), not a held send: its
     /// `text` is the whole command line approving it would run.
     pub spawn: bool,
+    /// The entry's fingerprint as `session pending list` prints it. Approve and
+    /// deny send it as `--expect`, so the entry taken is the one drawn here.
+    pub fingerprint: String,
 }
 
 /// The approval of one held spawn, waiting on its second key. `a` on a spawn
@@ -604,6 +607,7 @@ pub struct SpawnConfirm {
     pub session_id: String,
     pub text: String,
     pub from: Option<String>,
+    pub fingerprint: String,
     pub scroll: usize,
     /// The furthest `scroll` that still shows the last line, written by the
     /// draw that wrapped the command to the popup's width.
@@ -1851,6 +1855,7 @@ impl App {
                 from: v["from"].as_str().map(String::from),
                 state: v["state"].as_str().unwrap_or("pending").to_string(),
                 spawn: v.get("spawn").is_some_and(|s| !s.is_null()),
+                fingerprint: v["fingerprint"].as_str().unwrap_or("").to_string(),
             })
             .collect()
     }
@@ -2385,10 +2390,15 @@ impl App {
                 };
                 self.refresh_pending();
                 let unchanged = self.pending_rows().iter().any(|r| {
-                    r.id == confirm.id && r.spawn && r.session_id == confirm.session_id && r.text == confirm.text
+                    r.id == confirm.id
+                        && r.spawn
+                        && r.session_id == confirm.session_id
+                        && r.text == confirm.text
+                        && r.fingerprint == confirm.fingerprint
                 });
                 if unchanged {
-                    self.dispatch(&["session", "pending", "approve"], &[confirm.id]);
+                    let flags = BTreeMap::from([("expect".to_string(), confirm.fingerprint)]);
+                    self.dispatch_with_flags(&["session", "pending", "approve"], &[confirm.id], flags);
                     self.clamp_review();
                 } else {
                     self.last_outcome = Some(Outcome::error(
@@ -2416,13 +2426,15 @@ impl App {
                     session_id: r.session_id,
                     text: r.text,
                     from: r.from,
+                    fingerprint: r.fingerprint,
                     scroll: 0,
                     max_scroll: std::cell::Cell::new(0),
                 });
             }
             ReviewRow::Pending(r) => {
                 let command = if accept { "approve" } else { "deny" };
-                self.dispatch(&["session", "pending", command], &[r.id]);
+                let flags = BTreeMap::from([("expect".to_string(), r.fingerprint)]);
+                self.dispatch_with_flags(&["session", "pending", command], &[r.id], flags);
                 self.clamp_review();
             }
             ReviewRow::Pairing(r) => {

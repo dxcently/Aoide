@@ -4020,8 +4020,32 @@ the CLI's included. One entry is bounded too: `record_pending` refuses an entry
 that serializes past `PENDING_ENTRY_MAX_BYTES` (64 KiB), a spawn's argv and
 flags counting with a send's text, with `reason: "pending-too-large"`, `bytes`
 and `maxBytes` in its data, audited as `refused` by the head of its text alone.
+The file as a whole is bounded too: `PENDING_FILE_MAX_BYTES` (8 MiB) measured on
+the stored, pretty-printed form `write_stage` writes, refused with `reason:
+"pending-file-full"` and the same audit. A full file answers the A2A door as a
+full queue (§6).
 The A2A door's own answer to a full source is in §6 ("This door parks every
 send").
+
+Approval does not re-decide what the hold decided. `approve` takes the entry it
+read, under the stage lock, only when the entry's content still matches the
+`fingerprint` `list` prints, passed as `--expect` (the conductor's rows and its
+held-spawn confirm pass it on every approve and deny; a wrong fingerprint takes
+nothing). The entry must also still pass the shape check a hold applies
+(`PendingSpawn::is_known`: a plain `--id` outside `sub:`, no `--parent`, a
+`resurrect` with a `--project`); one that does not is malformed and stays where
+it is. A held resurrect stores the plan it showed in `spawn.shown`, one line per
+candidate with the restore it would type. Approval launches that selection and
+refuses, before the entry leaves the queue, when the ledger now yields a
+different one. A held spawn's `cwd` and a relative argv[0] are recorded absolute
+at hold time, and an `@file` instructions body is copied into the entry, so the
+approver's own directory cannot change what runs. `--instructions -` is refused
+at hold time, since it would read the approver's stdin. A bare argv[0] (no `/`)
+still resolves through the approver's `PATH` at launch; that is the one input a
+hold does not pin. A held resurrect that revives nothing is not a success:
+approval answers `launched: false`, `reason: "nothing-revived"`, with each
+candidate's `failed[].reason`, and the entry is gone, because approval consumes
+it.
 
 ```json
 {
@@ -7007,7 +7031,10 @@ caller that proved a node identity is refused `-32000` (`QUEUE_FULL_CODE`, the
 same code a full pairing park answers), and any other caller gets the uniform
 answer, so a caller that proved nothing learns nothing from the queue's state.
 Either way nothing is queued, nothing already queued is touched, and the refusal
-is audited.
+is audited. A full file (§3, `pending-file-full`) is the same refusal. A prompt
+over the per-entry byte cap (`pending-too-large`) is refused `-32602` (invalid
+params) for every caller. Its size is the caller's own text, not queue state, so
+the answer reveals nothing about the queue and needs no uniform form.
 
 The synchronous answer is the submitted Task (`submitted_task`). `do_inject`
 takes no delivery flag. `tasks/get` and the SSE stream report the session's real

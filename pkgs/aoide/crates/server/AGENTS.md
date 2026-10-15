@@ -571,7 +571,11 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   touches nothing queued. `do_inject`
   maps that refusal to `QUEUE_FULL_CODE` (`-32000`), which only a caller that
   proved a node identity sees; any other caller gets the uniform answer, so the
-  queue's state is no oracle. Tests:
+  queue's state is no oracle. A file-full refusal (`PENDING_FILE_FULL`) takes
+  the same path as a full source. An oversize prompt (`PENDING_TOO_LARGE`) is
+  `-32602` (`INVALID_PARAMS_CODE`) for every caller: its size is the caller's
+  own text, so it reveals nothing about the queue. Tests:
+  `an_oversize_inject_answers_its_own_code_and_queues_nothing`,
   `a_full_source_refuses_a_proven_node_and_leaves_another_source_alone`,
   `a_full_source_answers_a_caller_that_is_not_proven_uniformly` and
   `an_opening_turn_from_a_full_source_is_queue_full_and_queues_nothing`.

@@ -782,6 +782,7 @@ fn session_resurrect_with(
                 path: vec![cmd.to_string()],
                 args: inv.args.clone(),
                 flags: inv.flags.clone(),
+                shown: held_plan(inv, project),
             };
             return hold_whole(inv, &format!("{cmd}:{project}"), held, "");
         }
@@ -820,20 +821,38 @@ fn session_resurrect_with(
         }
     };
 
+    let selection = match select_candidates(inv, &name) {
+        Ok(selection) => selection,
+        Err(o) => return o,
+    };
+    launch_selection(inv, &selection)
+}
+
+/// The candidates a flag-mode resurrect names, resolved against the project,
+/// the ledger and the undying set as they stand: the sessions it revives.
+pub(in crate::graph) struct Selection {
+    name: String,
+    selected: Vec<aoide_storage::ledger::LedgerEntry>,
+}
+
+/// Resolve `--project <name>` with `--id` or `--all` (or the undying set) to its
+/// candidates. A refusal is the outcome the command gives, audited here.
+fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome> {
+    let cmd = "resurrect";
     let projects: ProjectsFile = match load_stage(&projects_path()) {
         Ok(f) => f,
-        Err(e) => return stage_error(cmd, e),
+        Err(e) => return Err(stage_error(cmd, e)),
     };
     let Some(target_idx) = projects.projects.iter().position(|p| p.name == name) else {
         let out = Outcome::error(cmd, format!("no project named `{name}` — register it first with `project add`"))
             .with_data(json!({ "reason": "unknown-project", "project": name }));
         audit_resurrect(inv, "error", &out.message);
-        return out;
+        return Err(out);
     };
 
     let ledger = match aoide_storage::ledger::read_ledger() {
         Ok(v) => v,
-        Err(e) => return stage_error(cmd, e.to_string()),
+        Err(e) => return Err(stage_error(cmd, e.to_string())),
     };
     let anchored: Vec<aoide_storage::ledger::LedgerEntry> = ledger
         .into_iter()
@@ -850,7 +869,7 @@ fn session_resurrect_with(
                 )
                 .with_data(json!({ "reason": "unknown-ledger-id", "project": name, "id": id }));
                 audit_resurrect(inv, "error", &out.message);
-                return out;
+                return Err(out);
             }
         }
     } else if inv.flag_present("all") {
@@ -864,8 +883,85 @@ fn session_resurrect_with(
     } else {
         undying_selection(anchored)
     };
+    Ok(Selection { name: name.to_string(), selected })
+}
 
-    if selected.is_empty() {
+/// What a held resurrect would do, one line per candidate, in the words the
+/// approver reads: the session it revives and exactly what its restore would
+/// type into the new terminal. Approval replays only a selection whose plan
+/// equals the one shown ([`approved_selection`]), so nothing is typed that the
+/// approver was not shown.
+pub(in crate::graph) fn plan_lines(selection: &Selection) -> Vec<String> {
+    if selection.selected.is_empty() {
+        return vec![format!("nothing to revive for project `{}`", selection.name)];
+    }
+    selection
+        .selected
+        .iter()
+        .map(|e| format!("{} ({}): {}", e.session_id, e.agent, restore_text(e.restore.as_ref())))
+        .collect()
+}
+
+/// The plan line's account of one restore: the text [`restore_delivery`] would
+/// type, or why nothing is typed. Must agree with `restore_delivery`.
+fn restore_text(restore: Option<&RestoreSnapshot>) -> String {
+    let Some(restore) = restore else {
+        return "no restore recorded, nothing typed".to_string();
+    };
+    if restore.idle {
+        return "idle, so only the cwd restores".to_string();
+    }
+    if let Some(why) = restore_refused_because(restore) {
+        return format!("refused ({why}), nothing typed");
+    }
+    match restore.argv.as_deref() {
+        Some(argv) => format!("types `{}`, never submitted", shell_join(argv)),
+        None => "no command recorded, nothing typed".to_string(),
+    }
+}
+
+/// The plan a held resurrect carries: what [`select_candidates`] resolves now.
+/// A selection that cannot be made is held as that refusal's message, so the
+/// approver reads the same thing a launch would answer.
+pub(in crate::graph) fn held_plan(inv: &Invocation, name: &str) -> Vec<String> {
+    match select_candidates(inv, name) {
+        Ok(selection) => plan_lines(&selection),
+        Err(o) => vec![format!("no candidates: {}", o.message)],
+    }
+}
+
+/// The selection an approval of a held resurrect may launch: the one `launch`
+/// names, provided its plan still equals `shown`, the plan the entry was held
+/// with. A plan that moved is refused, so the launch can never revive, or type,
+/// anything the approver was not shown.
+pub(in crate::graph) fn approved_selection(launch: &Invocation, shown: &[String]) -> Result<Selection, Outcome> {
+    let name = launch.flags.get("project").map(String::as_str).unwrap_or_default();
+    let now = select_candidates(launch, name);
+    let lines = match &now {
+        Ok(selection) => plan_lines(selection),
+        Err(o) => vec![format!("no candidates: {}", o.message)],
+    };
+    if lines != shown {
+        let out = Outcome::refuse(
+            "resurrect",
+            Kind::Refused,
+            format!("held resurrect of `{name}` not launched: its candidates changed since it was shown"),
+            "what it would revive, and what each restore would type, is decided at approval, and it differs from the plan the entry was held with",
+            Fix::None("deny this entry and hold the resurrect again to see the current plan"),
+        )
+        .with_fields(json!({ "reason": "plan-changed", "shown": shown, "now": lines }));
+        audit_resurrect(launch, "refused", &out.message);
+        return Err(out);
+    }
+    now
+}
+
+/// Revive every candidate of `selection`, as `inv`'s door. The shared launch
+/// of a direct resurrect and an approved held one.
+pub(in crate::graph) fn launch_selection(inv: &Invocation, selection: &Selection) -> Outcome {
+    let cmd = "resurrect";
+    let name = selection.name.as_str();
+    if selection.selected.is_empty() {
         let bare = inv.flags.get("id").is_none() && !inv.flag_present("all");
         let msg = if bare {
             format!("undying set is empty for project `{name}` — nothing to resurrect")
@@ -881,7 +977,7 @@ fn session_resurrect_with(
     let mut skipped: Vec<serde_json::Value> = Vec::new();
     let mut failed: Vec<serde_json::Value> = Vec::new();
     let mut changed: Vec<String> = Vec::new();
-    for e in selected {
+    for e in selection.selected.iter().cloned() {
         resurrect_one(inv.door, resolve_candidate(e), &mut resurrected, &mut skipped, &mut failed, &mut changed);
     }
 
@@ -3182,6 +3278,82 @@ mod tests {
         assert_eq!(held_entries().len(), 1, "only the approved entry left the queue");
         let _ = std::fs::remove_dir_all(&root);
     }
+    /// A held resurrect replays the plan its approver was shown. If the ledger
+    /// gained a candidate since the hold, approve refuses it before the entry
+    /// leaves the queue, and nothing is revived. Before the binding, approve
+    /// re-selected at approve time and revived whatever the ledger held then.
+    #[cfg(unix)]
+    #[test]
+    fn a_held_resurrect_refuses_to_launch_a_plan_its_approver_was_not_shown() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-plan-moved");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        set_ledger(&[ledger_entry("ledger-old-plan", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "ledger-old-plan", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let mut mcp = flag_invocation(&["resurrect"], &[("project", "proj")]);
+        mcp.door = aoide_protocol::Door::Mcp;
+        let out = session_resurrect(&mcp);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(held_entries()[0].text, "aoide resurrect --project proj");
+
+        set_ledger(&[
+            ledger_entry("ledger-old-plan", "claude", &proj_path, "2026-08-20T01:00:00Z"),
+            ledger_entry("ledger-new-plan", "claude", &proj_path, "2026-08-21T01:00:00Z"),
+        ]);
+        aoide_storage::undying::set_undying(&mut undying, "ledger-new-plan", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let approve = crate::graph::pending::pending_approve(&Invocation {
+            path: vec!["session".into(), "pending".into(), "approve".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::new(),
+            door: aoide_protocol::Door::Cli,
+        });
+        assert_eq!(approve.status, aoide_protocol::output::Status::Error, "{}", approve.message);
+        assert_eq!(held_entries().len(), 1, "the refused entry stays held");
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        assert!(!marker.exists(), "the candidate nobody was shown did not revive");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A held resurrect that revives nothing when approved says so: the entry
+    /// has left the queue (approval consumes it), and the answer is not success.
+    /// Before the change the answer was `launched: true` for an empty revival.
+    #[cfg(unix)]
+    #[test]
+    fn approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, _proj_path) = setup("resurrect-nothing-revived");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        set_ledger(&[]);
+
+        let mut mcp = flag_invocation(&["resurrect"], &[("project", "proj")]);
+        mcp.door = aoide_protocol::Door::Mcp;
+        let out = session_resurrect(&mcp);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+
+        let approve = crate::graph::pending::pending_approve(&Invocation {
+            path: vec!["session".into(), "pending".into(), "approve".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::new(),
+            door: aoide_protocol::Door::Cli,
+        });
+        assert_eq!(approve.status, aoide_protocol::output::Status::Error, "{}", approve.message);
+        let data = approve.data.as_ref().unwrap();
+        assert_eq!(data["launched"], false, "{data}");
+        assert_eq!(data["reason"], "nothing-revived", "{data}");
+        assert!(held_entries().is_empty(), "the answered entry left the queue");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
 
     /// An attested MCP caller keeps today's behaviour: the resurrect launches,
     /// nothing is held, and the restore bytes it would type are still held (the

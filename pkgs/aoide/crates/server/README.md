@@ -13,7 +13,8 @@ token nor a node identity (a verified node's own bearer, or a verified
 signature holding `message` in its mesh) gets the uniform answer and nothing
 queues. The queue holds a bounded number of entries per source: past it, a
 proven node is refused `-32000` and any other caller gets the uniform answer. A
-spawn's opening turn is held the same way, verdict `held-pending`, or
+prompt over the per-entry byte cap is refused `-32602` for every caller, since
+its size is the caller's own text. A spawn's opening turn is held the same way, verdict `held-pending`, or
 `queue-full` at the cap. The gate that decides this is `aoide_conduct::graph::
 Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
 
