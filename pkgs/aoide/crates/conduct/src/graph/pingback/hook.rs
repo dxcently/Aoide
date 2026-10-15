@@ -2212,17 +2212,25 @@ mod tests {
 
     /// The review's probe: `aoide session end --id <child>` from a process that
     /// is not the child's harness, nor under it, while the harness is alive
-    /// with its turn open. A spawner is told only what the session itself did,
-    /// so this closes the phase and records no fact, and the spawner hears
-    /// nothing, now or when the harness later dies.
+    /// with its turn open. The end is refused and writes nothing, so the turn
+    /// stays open: the spawner hears nothing while the harness lives, and when
+    /// the harness later dies mid-turn the death is said to it, once. A
+    /// stranger's end suppresses no line.
     #[cfg(unix)]
     #[test]
-    fn a_session_end_by_an_unrelated_process_says_nothing_to_the_spawner() {
+    fn a_session_end_by_an_unrelated_process_is_refused_and_hides_no_death() {
         let (root, _env, _guard) = e2e_stage("dmt-forged-end");
         let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
         let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, "kill -9 $$"));
         let mut cursor = CursorFile::new();
         assert!(tick(&mut cursor).is_empty(), "the first examination is a baseline");
+        // The live harness anchors the record once its chain is stored, so the
+        // end waits for that: an end before the chain would find nothing to anchor.
+        poll_until(|| {
+            let f: SessionsFile = load_stage(&sessions_path()).ok()?;
+            f.sessions.iter().find(|s| s.session_id == HOOK)?.hook_ancestry.first().map(|_| ())
+        })
+        .expect("the harness's chain is stored");
 
         let ended = std::process::Command::new(built_aoide_bin())
             .args(["session", "end", "--id", HOOK])
@@ -2230,13 +2238,16 @@ mod tests {
             .output()
             .expect("aoide session end runs");
         assert!(ended.status.success(), "{}", String::from_utf8_lossy(&ended.stderr));
-        assert_eq!(hook_record().phase, "done");
+        assert_eq!(hook_record().phase, "working", "the refused end writes no phase");
         assert_eq!(hook_record().death, None, "no fact: the caller is not the session");
-        assert!(tick(&mut cursor).is_empty(), "the spawner hears nothing");
+        assert!(tick(&mut cursor).is_empty(), "the spawner hears nothing while the harness lives");
 
         std::fs::write(root.join("go"), "").unwrap();
         wait_exit(&mut wrap);
-        assert!(tick(&mut cursor).is_empty(), "nor when the harness later dies");
+        let heard = tick(&mut cursor);
+        assert_eq!(heard.len(), 1, "the death is said once, not hidden: {heard:?}");
+        assert_eq!(heard[0].parent, SPAWNER);
+        assert!(heard[0].line.contains("mid-turn"), "{heard:?}");
     }
 
     /// A wrap whose child exits after a closed phase writes nothing, and nothing is
