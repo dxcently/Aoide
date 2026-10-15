@@ -105,14 +105,16 @@ in the message.
   only past that check, so a send from a remote door parks whatever it asks
   for unless an attested rule delivers it (next bullet), and
   `pending_approve` refuses before it takes an entry off the queue, both when
-  the door cannot approve and when the entry's target is not live yet. The
-  same predicate gates the other two things a human's approval answers:
-  `session_permit` files no summons card for a door that cannot approve (or
-  for a session that is not `awaiting`), and `mail_ring` refuses before any
-  forward, so such a caller never types into a reader. The predicate is exhaustive over
-  `Door`, so a new door must be decided there. The door is the invocation's
-  own `Door`, set where the request arrived: a caller's claim about itself is
-  never read. A routed command (`daemon_dispatch`) reaches aoided as
+  the door cannot approve and when the entry's target is not live yet.
+  `pending_deny` refuses on the same predicate, so a door that cannot approve
+  cannot empty the queue under the human either. The same predicate gates
+  the other two things a human's approval answers: `session_permit` files no
+  summons card for a door that cannot approve (or for a session that is not
+  `awaiting`), and `mail_ring` refuses before any forward, so such a caller
+  never types into a reader. The predicate is exhaustive over `Door`, so a
+  new door must be decided there. The door is the invocation's own `Door`,
+  set where the request arrived: a caller's claim about itself is never
+  read. A routed command (`daemon_dispatch`) reaches aoided as
   `Door::Daemon`, so only the CLI door routes: `daemon_dispatch` answers
   `None` for every other door, which runs its own local path. A routed
   command must never be the approving path.
@@ -140,6 +142,26 @@ in the message.
   `the_a2a_door_parks_for_the_parent_a_resolver_would_name_and_the_cli_delivers`
   and, through the real resolver,
   `the_real_resolver_attests_an_mcp_send_by_the_callers_sealed_ancestor`.
+- **A door that cannot approve never moves a parent edge and never launches
+  a command of its own choosing.** The attested rules read the unsealed
+  `parentSessionId`, so rewriting it IS approving. Every path that sets it is
+  closed to `Mcp` and `A2a` at its head with `refuse_unapproving_door`
+  (`graph/common.rs`: taught, `reason: door-cannot-approve`, audited):
+  `reparent_refusal` (`graph/session_store.rs`) guards `session start
+  --parent` and `graph link` when the id already has a record with another
+  parent (a new id may register under a parent from any door, and the same
+  parent again is a no-op). `session hook` (parent claim, rekey, stale-parent
+  clearing) and `session conduct` (it runs a command and upserts its record
+  by id) refuse outright for those doors. `session_spawn_with` also refuses a
+  `--id` naming a live record or an existing socket, so an attested caller
+  cannot bind over another session's record. A new command that writes
+  `parentSessionId`, or that launches a command, takes the same first line.
+  Pinned by `an_attested_mcp_caller_cannot_adopt_a_session_by_reparenting_it`,
+  `a_new_session_registers_under_a_parent_over_mcp`,
+  `a_hook_from_a_door_that_cannot_approve_moves_no_parent`,
+  `conduct_from_a_door_that_cannot_approve_launches_nothing`,
+  `pending_deny_from_a_door_that_cannot_approve_is_refused_and_every_entry_stays`
+  and `a_spawn_from_mcp_cannot_take_a_live_sessions_id`.
 - **An MCP spawn launches only as an attested caller, and a restore never
   does.** `session_spawn_with` judges the MCP door: the resolved session
   becomes the child's `--parent` (a `--parent` naming any other session is

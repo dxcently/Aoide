@@ -44,7 +44,7 @@
 //! fail cleanly (a structured error, never a panic) without touching it —
 //! the entry stays exactly where it was for a human to inspect by hand.
 
-use super::common::{clean_line, require_args, stage_error, strip_unsafe};
+use super::common::{clean_line, refuse_unapproving_door, require_args, stage_error, strip_unsafe};
 use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
@@ -356,15 +356,14 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
     };
     // Refused before the entry leaves the queue: a caller on a door that
     // cannot approve gets a taught refusal and the held send stays held.
-    if !inv.door.can_approve() {
-        return Outcome::refuse(
-            cmd,
-            Kind::Refused,
-            "this door cannot approve a gated send",
-            DOOR_CANNOT_APPROVE,
-            Fix::Run(format!("aoide session pending approve {index}")),
-        )
-        .with_fields(json!({ "reason": "door-cannot-approve", "id": index.to_string() }));
+    if let Some(refusal) = refuse_unapproving_door(
+        inv,
+        cmd,
+        "this door cannot approve a gated send".to_string(),
+        DOOR_CANNOT_APPROVE,
+        Fix::Run(format!("aoide session pending approve {index}")),
+    ) {
+        return refusal.with_fields(json!({ "id": index.to_string() }));
     }
     // Refused before the entry leaves the queue while its target is not live.
     // An A2A spawn's opening turn can be held before its child has registered,
@@ -523,6 +522,19 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
         Ok(i) => i,
         Err(o) => return o,
     };
+    // Denying is the other half of resolving the queue, and a position is only
+    // good until something resolves: a caller that could deny earlier entries
+    // would shift a held spawn of its own onto the index a human just read.
+    if let Some(refusal) = refuse_unapproving_door(
+        inv,
+        cmd,
+        "this door cannot deny a held entry".to_string(),
+        "entries are addressed by position and positions shift as entries resolve, so only a door that \
+         can approve resolves them; approval comes from a terminal or the conductor",
+        Fix::Run(format!("aoide session pending deny {index}")),
+    ) {
+        return refusal.with_fields(json!({ "id": index.to_string() }));
+    }
     let removed = match take_pending_entry(index) {
         Ok(v) => v,
         Err(e) => {
@@ -1329,6 +1341,66 @@ mod tests {
             matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
             "nothing was typed into the session"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `pending deny` is the other half of resolving the queue, and entries are
+    /// addressed by position: a caller that could deny the entries ahead of its
+    /// own would slide it onto the index a human just read. Over a door that
+    /// cannot approve, attested or not, it is refused and audited, and every
+    /// entry stays at its index. The CLI is the control.
+    #[cfg(unix)]
+    #[test]
+    fn pending_deny_from_a_door_that_cannot_approve_is_refused_and_every_entry_stays() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("pnd-deny-door");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(std::process::id()));
+        seal_record("orch", &kp);
+        for n in 0..3 {
+            crate::graph::send::hold_pending("target", &format!("entry {n}"), false, Some("someone")).unwrap();
+        }
+        let texts = || -> Vec<String> {
+            load_pending_array().unwrap().iter().map(|e| e["text"].as_str().unwrap().to_string()).collect()
+        };
+
+        // This process is the sealed `orch`, so an MCP call from it is attested;
+        // with `AOIDE_DAEMON_SOCKET` pointing nowhere the same call is not.
+        let attested_socket = std::env::var("AOIDE_DAEMON_SOCKET").unwrap();
+        for (door, attested) in [
+            (aoide_protocol::Door::Mcp, true),
+            (aoide_protocol::Door::Mcp, false),
+            (aoide_protocol::Door::A2a, false),
+        ] {
+            std::env::set_var(
+                "AOIDE_DAEMON_SOCKET",
+                if attested { attested_socket.clone() } else { root.join("dead.sock").to_string_lossy().into_owned() },
+            );
+            let mut inv = pending_invocation(&["session", "pending", "deny"], &["0"]);
+            inv.door = door;
+            let out = pending_deny(&inv);
+            assert_eq!(out.status, Status::Error, "{door:?}/{attested}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}/{attested}");
+            assert_eq!(texts(), ["entry 0", "entry 1", "entry 2"], "{door:?}/{attested}: nothing moved");
+        }
+        let refused = std::fs::read_to_string(root.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("session.pending.deny") && l.contains("\"refused\""))
+            .count();
+        assert_eq!(refused, 3, "each refusal is audited");
+
+        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(out.status, Status::Ok, "the CLI still denies: {}", out.message);
+        assert_eq!(texts(), ["entry 1", "entry 2"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

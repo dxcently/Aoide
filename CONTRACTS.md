@@ -3555,8 +3555,13 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   caller typed beside it as a claim. Nothing else on this door delivers:
   `--yes` and `AOIDE_CONDUCT_AUTOGATE` are never read, and a send with no
   sealed ancestor, or to a session the sealed one has no rule for, parks. The
-  door still approves nothing. `session pending approve`, `session permit` and
-  `mail ring` stay refused for an attested caller, whatever it asks for.
+  door still approves nothing. `session pending approve` and `deny`,
+  `session permit` and `mail ring` stay refused for an attested caller,
+  whatever it asks for, and so does every command that would rewrite an
+  existing session's parent (`session start --parent`, `graph link`,
+  `session hook`, `session conduct`): the parent rule reads that field, so
+  each answers `reason: door-cannot-approve`. A new session id still
+  registers under a parent.
 - The A2A door has no sealed ancestor, because it runs inside aoided, and the
   tier-3 network façade (`modules/nucleus/aoided.nix`) has none either. Every
   send through them parks. There is no separate network door.

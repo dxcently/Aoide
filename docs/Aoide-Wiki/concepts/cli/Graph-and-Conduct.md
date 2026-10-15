@@ -251,7 +251,10 @@ aoide graph link <child> <parent> [--json]
   anyway"`.
 - **Notes:** errors (exit 1): `reason: "self-link"`, `"child-not-found"`, or
   `"cycle"` (the walk in `doc.rs::would_cycle`). Ignores `node:*`/`a2a:*` ids
-  like any unknown local id.
+  like any unknown local id. Moving the parent of a child that already has
+  another one is refused for a door that cannot approve (MCP, A2A): the send
+  gate's parent rule reads this field, so the edge is a human's to rewrite
+  (`reason: "door-cannot-approve"`, taught and audited).
 
 ### aoide session start
 
@@ -267,7 +270,11 @@ aoide session start --id <id> [--agent <name>] [--cwd <dir>] [--window <addr>] [
   then re-stage `graph.json`. A fresh record starts `idle` with `agent`
   defaulting to `claude`; a re-start updates only the provided fields and
   preserves `startedAt` and the live state (`upsert_session`). A `--parent`
-  that would cycle is refused (exit 1, `reason: "cycle"`).
+  that would cycle is refused (exit 1, `reason: "cycle"`). A `--parent` that
+  would change an existing record's parent, to another session or by clearing
+  it, is refused for a door that cannot approve (MCP, A2A;
+  `reason: "door-cannot-approve"`, audited); a NEW record may register under a
+  parent from any door.
 - **Output:** `data: {sessionId, agent, startedAt, inserted, file}`.
 - **Notes:** registration-time same-window agent eviction: if the NEW record is
   an agent with a `windowAddress` shared by another live agent record, an
@@ -457,7 +464,10 @@ aoide session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON o
   [--what <notification message>]` DETACHED (opt-out:
   `AOIDE_HERALD_PERMIT` in {0,false,no,off}); the harness's message rides as
   untrusted display data. A session whose record was ended/pruned mid-process
-  self-heals by re-registering on its next event (`hook_ensure_session`).
+  self-heals by re-registering on its next event (`hook_ensure_session`). A
+  door that cannot approve (MCP, A2A) is refused before stdin is read: the
+  hook claims and clears parents and re-keys records, which only a harness
+  running its own hook command, through the CLI, may do.
 
 ### aoide spawn
 
@@ -491,7 +501,10 @@ aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>
   to it, and naming another session is refused) and its `--prompt` is that
   parent's send, which delivers. Any other MCP spawn is held whole in
   `pending.json` and returns `data: {sessionId, state: "pending", launched:
-  false}`; nothing launches until a human approves it.
+  false}`; nothing launches until a human approves it. An MCP spawn's `--id`
+  must be plain (`A-Za-z0-9._:-`, at most 128 characters) and must not name a
+  live session or an existing control socket, or the call is refused before
+  anything launches or is held: an approved launch binds that id's socket.
 - **Notes:** the detached counterpart to `conduct` — this call returns
   immediately while the spawned agent keeps running headless. `--windowed`
   opens a real terminal from `$AOIDE_TERMINAL` (a whitespace-split argv with
@@ -767,6 +780,9 @@ aoide session pending deny <id> [--json]
   shape above).
 - **Output:** `data: {id, sessionId}`. A malformed or out-of-range id fails
   cleanly, leaving the entry untouched.
+- **Notes:** the door must be able to approve, as for `approve`: over MCP or
+  A2A it is refused and audited (`reason: "door-cannot-approve"`) with every
+  entry still queued, so a caller cannot clear what a human has yet to see.
 
 ### aoide session trace
 
@@ -1006,7 +1022,10 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   uncatchable death (SUPER+Q SIGKILL) strands the record — that is the reaper's
   case. `AOIDE_NO_CONDUCT=1` is the terminal-integration escape hatch (honored
   by the kitty launch wrapper in `modules/dendrites/kitty.nix`, not by this
-  command): the terminal starts a plain shell instead of `aoide conduct`.
+  command): the terminal starts a plain shell instead of `aoide conduct`. A
+  door that cannot approve (MCP, A2A) is refused: it runs an arbitrary
+  command and upserts a record by `--id`, so such a caller launches through
+  `spawn`, whose own gate holds or attests it.
 
 ## Related
 

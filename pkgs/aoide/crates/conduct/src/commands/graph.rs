@@ -93,7 +93,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["graph", "link"],
-        summary: "Record a spawned-by edge: set parentSessionId on the child session (cycle-checked).",
+        summary: "Record a spawned-by edge: set parentSessionId on the child session (cycle-checked). Moving the parent of a session that exists needs a door that can approve (the CLI); the MCP and A2A doors are refused.",
         args: [
             arg!("child", "string", true, "Session id of the spawned (child) session."),
             arg!("parent", "string", true, "Session id of the spawning (parent) session."),
@@ -113,7 +113,7 @@ pub fn register(r: &mut Registry) {
                 flag!("agent", "string", "Agent name driving the session (default claude)."),
                 flag!("cwd", "string", "Working directory; the session anchors under the longest-prefix project."),
                 flag!("window", "string", "Hyprland window address for the focus jump (`focus_session`) to use."),
-                flag!("parent", "string", "Spawning session id — records the spawned-by edge (cycle-checked)."),
+                flag!("parent", "string", "Spawning session id — records the spawned-by edge (cycle-checked). On a session that already exists it re-parents it, which a door that cannot approve (MCP, A2A) is refused; any door may register a new session under a parent."),
             ],
             gated: false,
             implemented: true,
@@ -157,7 +157,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "hook"],
-            summary: "Hook door for agent harnesses: read one hook JSON from stdin and map it to a session command through the agent's profile (never exits non-zero for a payload problem).",
+            summary: "Hook door for agent harnesses: read one hook JSON from stdin and map it to a session command through the agent's profile (never exits non-zero for a payload problem). A door that cannot approve (MCP, the network door) is refused before stdin is read.",
             args: [],
             flags: [
                 flag!("agent", "string", "Agent harness the payload comes from: claude (default), kimi, or pi."),
@@ -176,7 +176,7 @@ pub fn register(r: &mut Registry) {
         flags: [
             flag!("agent", "string", "Agent name for the roster (default: the command's basename)."),
             flag!("parent", "string", "Spawning session id — records the spawned-by edge (passed through to `conduct`)."),
-            flag!("id", "string", "Session id override (default spawn-<pid>-<unixts>)."),
+            flag!("id", "string", "Session id override (default spawn-<pid>-<unixts>). Over MCP it must be plain (A-Z a-z 0-9 . _ : -, at most 128 characters) and must not name a live session or an existing control socket."),
             flag!("prompt", "string", "A first turn to inject once the session registers (skipped, honestly reported, if it never does)."),
             flag!("windowed", "bool", "Open a real terminal (from $AOIDE_TERMINAL, a whitespace-split argv with a `{cmd}` placeholder) instead of a detached headless child. A bare `{cmd}` splices the conducted argv as separate arguments (`kitty -e {cmd}`); a quote-wrapped `'{cmd}'` joins it shell-quoted into one word for `sh -c` templates (`foot sh -c '{cmd}'`). Taught errors when unset, or when no display is present."),
             flag!("cwd", "string", "Working directory for the spawned child (default: this process's own cwd) — for --windowed, the terminal emulator's own cwd, which its own shell inherits."),
@@ -298,7 +298,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "pending", "deny"],
-        summary: "Reject one held pending entry: remove it from the queue and inject nothing. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
+        summary: "Reject one held pending entry: remove it from the queue and inject nothing. A door that cannot approve (MCP, the network door) is refused, as for approve. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
         args: [arg!("id", "string", true, "Pending entry id — its position from `session pending list`.")],
         flags: [],
         gated: false,
@@ -348,7 +348,7 @@ pub fn register(r: &mut Registry) {
     // ── conduct: the PTY-backed conductable wrap (concepts/Conductor-Channel) ─
     r.insert(cmd!(
         path: ["conduct"],
-        summary: "Run an agent command on its own PTY as a CONDUCTABLE session: spawn, register running, wait, end (exit mirrored, AOIDE_SESSION_ID exported), with a controlling tty + a per-session control socket, so `send` can type into the running agent while its TUI runs undisturbed. WITH --task it is also the FOREGROUND managed-task wrapper: it blocks, streams the child's own output, prints the task's instruction/unread context, and returns one deterministic outcome (exit | signal | timeout | stopped) — the same wrapper `spawn --task` runs detached.",
+        summary: "Run an agent command on its own PTY as a CONDUCTABLE session (a door that cannot approve, MCP and A2A, is refused: it launches through `spawn`): spawn, register running, wait, end (exit mirrored, AOIDE_SESSION_ID exported), with a controlling tty + a per-session control socket, so `send` can type into the running agent while its TUI runs undisturbed. WITH --task it is also the FOREGROUND managed-task wrapper: it blocks, streams the child's own output, prints the task's instruction/unread context, and returns one deterministic outcome (exit | signal | timeout | stopped) — the same wrapper `spawn --task` runs detached.",
         args: [arg!("command", "string", true, "The wrapped command and its args — put them after `--` so the child's own flags pass through verbatim.")],
         flags: [
             flag!("agent", "string", "Agent name for the roster (default: the command's basename)."),

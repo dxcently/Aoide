@@ -64,7 +64,11 @@ follows the send: an attested MCP caller's child is parented by its session and
 its `--prompt` is a parent-to-child send that delivers, and an unattested
 caller's whole spawn is held in `pending.json` (`PendingSend::spawn`) until a
 human approves it. A restore or a resurrect is not a send a caller makes, and
-stays held over MCP.
+stays held over MCP. Neither door can adopt a session: re-parenting an existing
+session (`session start --parent`, `graph link`), `session hook` and `session
+conduct` refuse (`reason` `door-cannot-approve`, audited), because the parent
+rule reads the very field they write, and `pending deny` refuses like
+`pending approve`. A new session id may still register under a parent.
 
 The queue holds at most `PENDING_CAP_PER_SOURCE` entries per `from`, and the
 door a send arrived through derives that source: the A2A door's own

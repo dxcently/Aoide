@@ -685,6 +685,9 @@ fn session_spawn_with(
     if inv.door != Door::Mcp || inv.args.is_empty() {
         return launch_session(inv, None);
     }
+    if let Some(refusal) = refuse_spawn_id(inv) {
+        return refusal;
+    }
     let sessions: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
     let Some(spawner) = resolve_spawner(&sessions.sessions) else {
         return hold_whole_spawn(inv);
@@ -701,6 +704,57 @@ fn session_spawn_with(
         .with_fields(json!({ "reason": "parent-not-attested", "parent": parent })),
         None => launch_session(inv, Some(&spawner)),
     }
+}
+
+/// The longest `--id` a spawn from a door that cannot approve may name.
+const SPAWN_ID_MAX: usize = 128;
+
+/// May a caller on a door that cannot approve name `id` for the child of its
+/// spawn? Plain ASCII, bounded: the id is printed to the human who approves a
+/// held spawn, written to the audit log and spelled into the child's control
+/// socket path, so a byte that moves a terminal or a path is refused rather
+/// than escaped.
+fn spawn_id_is_plain(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= SPAWN_ID_MAX
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+}
+
+/// Does `id` already name a session that is not done, or a control socket? A
+/// spawn registers its child under `id` and binds that session's socket path,
+/// which unlinks whatever is there: a child given a live session's id would take
+/// over its record and cut its socket.
+pub(in crate::graph) fn spawn_id_in_use(id: &str) -> bool {
+    conduct_socket_path(id).exists()
+        || load_stage::<SessionsFile>(&sessions_path())
+            .is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id && canonical_state(&s.state) != "done"))
+}
+
+/// The refusal of a spawn from the MCP door whose `--id` is not a plain id, or
+/// names a session that is live. Judged before the door decides to launch or hold,
+/// so what is queued, and what an approver is shown, is already a legal id.
+fn refuse_spawn_id(inv: &Invocation) -> Option<Outcome> {
+    let id = inv.flags.get("id")?;
+    let (what, why, reason) = if !spawn_id_is_plain(id) {
+        (
+            format!("spawn not launched: `--id` is not a plain id ({SPAWN_ID_MAX} characters of A-Z a-z 0-9 . _ : -)"),
+            "a spawn's id is shown to the human who approves it and spelled into the child's socket path, \
+             so a door that cannot approve may only name a plain one",
+            "bad-id",
+        )
+    } else if spawn_id_in_use(id) {
+        (
+            format!("spawn not launched: `--id {id}` names a session that is live"),
+            "the child would take over that session's record and control socket",
+            "id-in-use",
+        )
+    } else {
+        return None;
+    };
+    let out = Outcome::refuse("spawn", Kind::Refused, what, why, Fix::None("leave --id off, or give an id nothing uses"))
+        .with_fields(json!({ "reason": reason }));
+    audit_pending(inv, "spawn", "refused", &out.message, "");
+    Some(out)
 }
 
 /// The id a spawn's child registers under: the caller's `--id`, else one minted
@@ -1708,6 +1762,90 @@ mod tests {
         assert_eq!(held_spawns().len(), PENDING_CAP_PER_SOURCE);
         std::thread::sleep(Duration::from_millis(300));
         assert!(!marker.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A spawn registers its child under `--id` and binds that id's control
+    /// socket, which unlinks what is there; the child of a spawn from a door that
+    /// cannot approve is not allowed that. A live session's id, and a bare socket
+    /// with no record, are refused whether the caller is attested (it would
+    /// launch) or not (it would be held), and nothing launches, queues or
+    /// changes. A done session's id is free.
+    #[cfg(unix)]
+    #[test]
+    fn a_spawn_from_mcp_cannot_take_a_live_sessions_id() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-mcp-live-id");
+        let marker = root.join("launched");
+        let touch = format!("touch {}; sleep 1", marker.display());
+        let done = session("finished", "/w", "done", "2026-09-26T00:00:00Z", None);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: String::new(),
+                sessions: vec![session("victim", "/w", "idle", "2026-09-26T00:00:00Z", None), done],
+            },
+        )
+        .unwrap();
+        let ghost = conduct_socket_path("ghost");
+        std::fs::create_dir_all(ghost.parent().unwrap()).unwrap();
+        let _bound = std::os::unix::net::UnixListener::bind(&ghost).unwrap();
+
+        for attested in [true, false] {
+            for id in ["victim", "ghost"] {
+                let out = session_spawn_with(
+                    &mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", id)]),
+                    |_| attested.then(|| "orch".to_string()),
+                );
+                assert_eq!(out.status, Status::Error, "{id}/{attested}: {}", out.message);
+                assert_eq!(out.data.as_ref().unwrap()["reason"], "id-in-use", "{id}/{attested}");
+            }
+        }
+        assert!(held_spawns().is_empty(), "nothing was queued");
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!marker.exists(), "nothing launched");
+        assert!(ghost.exists(), "the live socket was not unlinked");
+
+        let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "finished")]), |_| None);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "an id that is done is free: {}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The id of a spawn from a door that cannot approve reaches the approver's
+    /// screen, the audit log and a socket path, so it is plain ASCII of bounded
+    /// length or the spawn is refused, before anything is held or launched. A
+    /// terminal escape, a newline, a separator and an over-long id are the
+    /// shapes; the longest legal id is still held.
+    #[cfg(unix)]
+    #[test]
+    fn a_spawn_id_outside_the_plain_set_is_refused_before_anything_is_held() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-mcp-bad-id");
+        let marker = root.join("launched");
+        let touch = format!("touch {}", marker.display());
+        let too_long = "a".repeat(SPAWN_ID_MAX + 1);
+        for bad in ["x\u{1b}[8m\nrm -rf ~", "a/b", "../escape", "has space", "tab\there", "caf\u{e9}", "", too_long.as_str()] {
+            for attested in [true, false] {
+                let out = session_spawn_with(
+                    &mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", bad)]),
+                    |_| attested.then(|| "orch".to_string()),
+                );
+                assert_eq!(out.status, Status::Error, "{bad:?}/{attested}: {}", out.message);
+                assert_eq!(out.data.as_ref().unwrap()["reason"], "bad-id", "{bad:?}/{attested}");
+                assert!(!out.message.contains(bad) || bad.is_empty(), "the refusal does not echo the id");
+            }
+        }
+        assert!(held_spawns().is_empty(), "nothing was queued");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!marker.exists(), "nothing launched");
+
+        let longest = "Az09._:-".repeat(SPAWN_ID_MAX / 8);
+        assert_eq!(longest.len(), SPAWN_ID_MAX);
+        let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", longest.as_str())]), |_| None);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(held_spawns().len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 

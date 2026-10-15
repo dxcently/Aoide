@@ -12,7 +12,7 @@
 //! seam on both hosts, so the `allow(dead_code)` this module carried while the
 //! PTY was refused on native Windows is gone with the refusal.
 
-use super::common::{require_flag, stage_error};
+use super::common::{refuse_unapproving_door, require_flag, stage_error};
 use super::doc::{
     doomed_subagent_descendants, ledger_session_exit, prune_done, restage_graph, would_cycle,
 };
@@ -24,7 +24,7 @@ use super::model::{
 use super::model::HookRecord;
 use aoide_protocol::agents::AgentProfile;
 use aoide_protocol::Invocation;
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Outcome};
 use aoide_storage::fs::{pid_is_alive, with_stage_lock};
 use serde_json::json;
 #[cfg(test)]
@@ -182,6 +182,37 @@ pub(in crate::graph) fn chain_is_stale(
         && chain
             .iter()
             .any(|&p| !rec.hook_ancestry.contains(&p) && u32::try_from(p).is_ok_and(&alive))
+}
+
+/// The refusal of a door that cannot approve changing the parent of a session
+/// that already exists to `parent`, or `None` when nothing would change or the
+/// door may. The parent is what the send gate's parent and sibling rules read
+/// to let one session command another without a human, so moving it is moving
+/// that authority, and a caller that could do it would be approving. Any door
+/// may still REGISTER a session under a parent: a new record has no earlier
+/// parent to take it from. `sessions` is the roster the write will be made
+/// from, so the check and the write judge the same record.
+pub(in crate::graph) fn reparent_refusal(
+    inv: &Invocation,
+    cmd: &str,
+    sessions: &[SessionRecord],
+    id: &str,
+    parent: &str,
+) -> Option<Outcome> {
+    let held = sessions.iter().find(|s| s.session_id == id)?.parent_session_id.as_deref();
+    if held == Some(parent) {
+        return None;
+    }
+    let was = held.map_or("no parent".to_string(), |p| format!("parent `{p}`"));
+    refuse_unapproving_door(
+        inv,
+        cmd,
+        format!("`{id}` is not re-parented to `{parent}`: it already exists with {was}"),
+        "the parent decides which session may command this one without a human, so only a door \
+         that can approve moves it; any door may register a NEW session under a parent",
+        Fix::None("re-parent from a terminal with the CLI, or register a new session id under the parent"),
+    )
+    .map(|out| out.with_fields(json!({ "sessionId": id, "parent": parent })))
 }
 
 /// Core of `session start`: cycle-check a parent, UPSERT, re-stage.
@@ -1811,17 +1842,28 @@ pub fn session_start(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
-    do_session_start(
-        &id,
-        inv.flags.get("agent").map(String::as_str),
-        inv.flags.get("cwd").map(String::as_str),
-        inv.flags.get("window").map(String::as_str),
-        inv.flags.get("parent").map(String::as_str),
-        None,
-        None,
-        None,
-        None,
-    )
+    let parent = inv.flags.get("parent").map(String::as_str);
+    // The judgement and the write share one stage lock, so a record registered
+    // between them cannot be re-parented by an upsert that judged it new.
+    with_stage_lock(|| {
+        if let Some(parent) = parent {
+            let sessions = load_stage::<SessionsFile>(&sessions_path()).map(|f| f.sessions).unwrap_or_default();
+            if let Some(refusal) = reparent_refusal(inv, "session.start", &sessions, &id, parent) {
+                return refusal;
+            }
+        }
+        do_session_start(
+            &id,
+            inv.flags.get("agent").map(String::as_str),
+            inv.flags.get("cwd").map(String::as_str),
+            inv.flags.get("window").map(String::as_str),
+            parent,
+            None,
+            None,
+            None,
+            None,
+        )
+    })
 }
 
 /// `session phase --id <id> --phase <phase>` — UPSERT the live hook phase.

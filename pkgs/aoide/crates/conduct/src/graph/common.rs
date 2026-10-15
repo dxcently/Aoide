@@ -8,8 +8,29 @@ use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, HooksFile, ProjectsFile, SessionsFile,
 };
 use aoide_protocol::Invocation;
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use serde_json::json;
+
+/// The taught refusal of a command only a door that can approve
+/// ([`aoide_protocol::Door::can_approve`]) may run, audited under that
+/// command's own name, or `None` when the invocation's door may. One place, so
+/// the commands that carry a human's approval (resolving a held entry, moving a
+/// session's parent, launching with no spawn gate) refuse in one shape.
+pub(in crate::graph) fn refuse_unapproving_door(
+    inv: &Invocation,
+    cmd: &str,
+    what: String,
+    why: &str,
+    fix: Fix,
+) -> Option<Outcome> {
+    if inv.door.can_approve() {
+        return None;
+    }
+    let out = Outcome::refuse(cmd, Kind::Refused, what, why, fix)
+        .with_fields(json!({ "reason": "door-cannot-approve" }));
+    super::pending::audit_pending(inv, cmd, "refused", &out.message, "");
+    Some(out)
+}
 
 /// Positional-arg check → structured usage error (exit 2) on a miss.
 /// Names the missing positionals (not just "you're short") — this crate has

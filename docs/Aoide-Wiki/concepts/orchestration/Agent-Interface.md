@@ -35,20 +35,22 @@ The MCP layer is deliberately optional and agent-added:
 | Per-session | agents spawn `aoide mcp serve --stdio` |
 | Network MCP | user-only; never agent-enabled |
 
-An MCP caller is attested the way a CLI caller is, and never approves. The
-stdio server dispatches in its own process, so the gate walks that process's
-ancestry to the sealed session it runs under. A send from a server launched
-under a conducted session earns that session's parent and sibling rules and
-delivers: an orchestrator's MCP server can talk to the children it spawned. A
-send from any other server, or to a session the sealed one has no rule for,
-parks as pending. `--yes` and the autogate switch are never read over MCP, and
-`session pending approve`, `session permit` and `mail ring` are refused there
-for every caller, attested or not. Approval comes from a terminal (the CLI) or
-the conductor. A `spawn` follows the same line: from an attested caller it
-launches the child under that session and its first prompt delivers, and from
-any other caller the whole spawn parks until a human approves it. Restoring or
-resurrecting a session over MCP stays held, since it is not a send. The A2A
-door has no sealed ancestor, so it parks every send. See
+An MCP caller is attested the way a CLI caller is, and never approves. The stdio
+server dispatches in its own process, so the gate walks that process's ancestry
+to the sealed session it runs under. A send from a server launched under a
+conducted session earns that session's parent and sibling rules and delivers: an
+orchestrator's MCP server can talk to the children it spawned. A send from any
+other server, or to a session the sealed one has no rule for, parks as pending.
+`--yes` and the autogate switch are never read over MCP, and `session pending
+approve` and `deny`, `session permit` and `mail ring` are refused there for
+every caller, attested or not, as is anything that would rewrite a session's
+parent (the parent rule reads that field, so a new session may register under a
+parent but an existing one is never re-parented over MCP). Approval comes from a
+terminal (the CLI) or the conductor. A `spawn` follows the same line: from an
+attested caller it launches the child under that session and its first prompt
+delivers, and from any other caller the whole spawn parks until a human approves
+it. Restoring or resurrecting a session over MCP stays held, since it is not a
+send. The A2A door has no sealed ancestor, so it parks every send. See
 [[Conductor-Channel|the gate]] for the doors and the rule.
 
 ## A2A: the interop door

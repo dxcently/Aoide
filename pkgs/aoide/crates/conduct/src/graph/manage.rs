@@ -973,6 +973,9 @@ pub fn link(inv: &Invocation) -> Outcome {
         return Outcome::error("graph.link", format!("child session `{child}` not found"))
             .with_data(json!({ "reason": "child-not-found", "child": child }));
     }
+    if let Some(refusal) = super::session_store::reparent_refusal(inv, "graph.link", &file.sessions, &child, &parent) {
+        return refusal;
+    }
     if would_cycle(&file.sessions, &child, &parent) {
         return Outcome::error(
             "graph.link",

@@ -2775,6 +2775,22 @@ const HOOK_PARENT_FLAG: &str = "__daemon-hook-parent";
 /// launcher.
 pub fn session_hook(inv: &Invocation) -> Outcome {
     use std::io::Read;
+    // Refused before stdin is read. A hook registers sessions and re-stamps their
+    // parents from a payload its own process reads: that is a harness's hook
+    // subprocess, which is the CLI, and a door that cannot approve must not move
+    // a session's parent (`reparent_refusal`). Over stdio MCP the stdin is the
+    // JSON-RPC stream itself, so reading it would also swallow the caller's
+    // next requests.
+    if let Some(refusal) = common::refuse_unapproving_door(
+        inv,
+        "session.hook",
+        "the hook door is not open to this door".to_string(),
+        "a hook registers sessions and moves their parents from a payload on its own stdin, \
+         and moving a parent is approving",
+        Fix::None("a harness runs `aoide session hook` itself, from its hook command"),
+    ) {
+        return refusal;
+    }
     let profile = match hook_profile_for(inv) {
         Ok(p) => p,
         Err(o) => return o,
@@ -4609,6 +4625,176 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
         assert!(nothing_connected(&listener));
         assert_eq!(queued_from("mcp:a-stranger"), ["hi", "hi again"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn start_on(door: Door, id: &str, parent: &str) -> Invocation {
+        Invocation {
+            path: vec!["session".to_string(), "start".to_string()],
+            args: Vec::new(),
+            flags: [("id", id), ("parent", parent)].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            door,
+        }
+    }
+
+    fn link_on(door: Door, child: &str, parent: &str) -> Invocation {
+        Invocation {
+            path: vec!["graph".to_string(), "link".to_string()],
+            args: vec![child.to_string(), parent.to_string()],
+            flags: BTreeMap::new(),
+            door,
+        }
+    }
+
+    fn parent_of(id: &str) -> Option<String> {
+        load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == id)
+            .and_then(|s| s.parent_session_id)
+    }
+
+    /// An attested MCP caller cannot adopt a session by writing itself in as its
+    /// parent: `session start --id T --parent me` is an upsert and `graph link`
+    /// a plain write, and the parent rule reads the field they set, so either
+    /// would turn "the parent may command its child" into "anyone may". Neither
+    /// door that cannot approve changes a record that exists, both refusals are
+    /// audited, and the send that follows parks. The CLI is the control: it
+    /// re-parents, and then the rule delivers.
+    #[test]
+    fn an_attested_mcp_caller_cannot_adopt_a_session_by_reparenting_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, id, listener) = door_fixture("reparent-mcp", Some("the-parent"));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("dead.sock"));
+
+        for door in [Door::Mcp, Door::A2a] {
+            for out in [
+                crate::graph::session_start(&start_on(door, &id, "me")),
+                crate::graph::link(&link_on(door, &id, "me")),
+            ] {
+                assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+                assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+                assert_eq!(parent_of(&id).as_deref(), Some("the-parent"), "{door:?}: the parent moved");
+            }
+        }
+        let refused: Vec<(String, String)> = audit_lines(&root)
+            .into_iter()
+            .filter(|r| r["status"] == "refused")
+            .map(|r| (r["command"].as_str().unwrap().to_string(), r["door"].as_str().unwrap().to_string()))
+            .collect();
+        for expected in [
+            ("session.start", "mcp"), ("graph.link", "mcp"), ("session.start", "a2a"), ("graph.link", "a2a"),
+        ] {
+            assert!(refused.contains(&(expected.0.to_string(), expected.1.to_string())), "{expected:?} in {refused:?}");
+        }
+
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hi"], &[("id", &id)]), &id, attested("me"));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert!(nothing_connected(&listener), "the adoption did not take, so nothing was typed");
+
+        // The same value again is not a change, so no door is refused for it.
+        let out = crate::graph::session_start(&start_on(Door::Mcp, &id, "the-parent"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+
+        // A door that can approve moves it, and the rule it feeds then delivers.
+        let out = crate::graph::session_start(&start_on(Door::Cli, &id, "me"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(parent_of(&id).as_deref(), Some("me"));
+        let out = crate::graph::link(&link_on(Door::Cli, &id, "the-parent"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(parent_of(&id).as_deref(), Some("the-parent"));
+        let out = crate::graph::session_start(&start_on(Door::Daemon, &id, "me"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let acc = expect_delivery(listener, "the parent rule delivers once a door that can approve made it so");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["now"], &[("id", &id)]), &id, attested("me"));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Registering is not re-parenting: a session that does not exist yet takes
+    /// its parent from any door that registers today, so an orchestrator's MCP
+    /// server still builds its tree.
+    #[test]
+    fn a_new_session_registers_under_a_parent_over_mcp() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, _id, _listener) = door_fixture("register-mcp", None);
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("dead.sock"));
+        for (door, fresh) in [(Door::Mcp, "fresh-mcp"), (Door::A2a, "fresh-a2a")] {
+            let out = crate::graph::session_start(&start_on(door, fresh, "me"));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{door:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["inserted"], true);
+            assert_eq!(parent_of(fresh).as_deref(), Some("me"), "{door:?}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The hook door registers sessions and re-stamps their parents from a
+    /// payload on its own stdin, so it is a re-parenting path of its own. A door
+    /// that cannot approve is refused before the payload is read, and nothing it
+    /// carried is applied: a SessionStart for an existing session, with the
+    /// parent claim the process's own environment would supply, leaves it where
+    /// it was. The daemon door, which a harness's hook reaches, still applies it.
+    #[test]
+    fn a_hook_from_a_door_that_cannot_approve_moves_no_parent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, id, _listener) = door_fixture("hook-mcp", Some("the-parent"));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("dead.sock"));
+        let payload = format!(r#"{{"session_id":"{id}","hook_event_name":"SessionStart","cwd":"/w","source":"resume"}}"#);
+        let hook_on = |door| Invocation {
+            path: vec!["session".to_string(), "hook".to_string()],
+            args: Vec::new(),
+            flags: [(STDIN_PAYLOAD_FLAG, payload.as_str()), (HOOK_PARENT_FLAG, "me")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            door,
+        };
+        for door in [Door::Mcp, Door::A2a] {
+            let out = session_hook(&hook_on(door));
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+            assert_eq!(parent_of(&id).as_deref(), Some("the-parent"), "{door:?}: the hook moved the parent");
+        }
+        // The control: the door a real hook reaches runs it. With no peer pid to
+        // check the claim against, the resumed session registers parentless and
+        // its stale parent is cleared, which is what the refused doors must not do.
+        let out = session_hook(&hook_on(Door::Daemon));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(parent_of(&id), None, "the daemon door applied the hook");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `conduct` registers its child under any `--parent` and over any
+    /// non-conductable `--id`, and runs its command at once; it is not a door
+    /// that cannot approve may reach. Nothing launches and nothing registers.
+    #[cfg(unix)]
+    #[test]
+    fn conduct_from_a_door_that_cannot_approve_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("conduct-mcp", Some("the-parent"));
+        let marker = root.join("ran");
+        let touch = format!("touch {}", marker.display());
+        for door in [Door::Mcp, Door::A2a] {
+            let out = crate::graph::conduct::session_conduct(&Invocation {
+                path: vec!["conduct".to_string()],
+                args: vec!["sh".to_string(), "-c".to_string(), touch.clone()],
+                flags: [("id", id.as_str()), ("parent", "me")]
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                door,
+            });
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+        }
+        assert!(!marker.exists(), "the command ran");
+        assert_eq!(parent_of(&id).as_deref(), Some("the-parent"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
