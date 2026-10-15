@@ -175,9 +175,10 @@ hand edit.
 ### The loop and the unit
 
 `aoide_server::daemon` grows `serve(config) -> io::Result<!>`-shaped
-`run_loop`: bind the socket (next section), spawn the accept thread, then
-tick (~1s): poll the secrets Follower, run the hand-edit sweep, run the
-periodic jobs L4 adds. Thread model mirrors the secrets broker
+`run_loop`: lock `state/` owner-only, refusing to start when it cannot; bind
+the socket (next section); spawn the accept thread; then tick (~1s): poll the
+secrets Follower, run the hand-edit sweep, run the periodic jobs L4 adds.
+Thread model mirrors the secrets broker
 (`broker.rs:315`): thread-per-connection via fallible
 `thread::Builder::spawn` (drop one connection, never unwind the accept
 loop), 250ms backoff on accept error. The `aoided` binary
@@ -489,15 +490,9 @@ windowed path with its resolved argv. Rules:
   --submit`) — the session was demonstrably running it when it left — EXCEPT
   when `argv[0]`'s basename is `sudo`, which is never re-exec'd unattended
   (only the cwd restores; a privileged command popping a password prompt in
-  a terminal nobody is watching is not a restore). Idle, with a clean
-  `typed` line: preload it (`--yes`, and permanently no `--submit`) so it
-  sits in the new prompt until a human presses Enter — nothing runs without
-  a keystroke. Idle with no `typed`: nothing is delivered, a terminal
-  reopened at its own cwd already being the complete answer. The two
-  delivery branches are never unified behind a shared boolean parameter —
-  each hardcodes its own flag map, so a later refactor cannot flip the
-  no-submit path into a submitting one by threading a stray `true` through
-  a shared helper.
+  a terminal nobody is watching is not a restore). Idle: nothing is
+  delivered; a terminal reopened at its own cwd already being the complete
+  answer.
 - The conductor gains a keybind invoking resurrect for the focused
   project (`conductor/src/commands.rs` — the TUI already maps keys onto
   typed commands).

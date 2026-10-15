@@ -480,7 +480,7 @@ fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 
 fn ensure_mail_dir() -> Result<(), String> {
     let dir = mail_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
+    crate::fs::ensure_write_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
 /// One-shot, idempotent `inbox.json` → typed `receipt` entries, run under
@@ -547,6 +547,9 @@ fn migrate_if_needed() -> Result<(), String> {
         None => return Err(format!("{}: no parent directory", old_path.display())),
     };
     if !migrated_path.exists() {
+        if let Some(dir) = old_path.parent() {
+            crate::fs::ensure_write_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
         std::fs::rename(&old_path, &migrated_path).map_err(|e| {
             format!("{}: rename to {}: {e}", old_path.display(), migrated_path.display())
         })?;
@@ -768,6 +771,7 @@ fn truncate_torn_tail(path: &std::path::Path) -> Result<(), String> {
         return Ok(());
     }
     let cut = bytes.iter().rposition(|&b| b == b'\n').map(|i| i + 1).unwrap_or(0);
+    ensure_mail_dir()?;
     let f = std::fs::OpenOptions::new()
         .write(true)
         .open(path)
@@ -783,6 +787,7 @@ fn append_base_line<T: Serialize>(entry: &T) -> Result<(), String> {
     let path = base_path();
     truncate_torn_tail(&path)?;
     let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+    ensure_mail_dir()?;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -801,6 +806,7 @@ fn append_seen_line(msgid: &str, received_at: &str) -> Result<(), String> {
     let path = seen_path();
     let seen = SeenEntry { msgid: msgid.to_string(), received_at: received_at.to_string() };
     let line = serde_json::to_string(&seen).map_err(|e| e.to_string())?;
+    ensure_mail_dir()?;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -1613,6 +1619,59 @@ mod tests {
 
     fn root(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
         aoide_test_support::isolated_mail_root(tag)
+    }
+
+    /// Each raw mail writer locks a wide `state/` before it creates or appends
+    /// under it, even with the mail dir already present. Each is widened and
+    /// checked on its own, so a writer that skips the gate fails by name.
+    #[cfg(unix)]
+    #[test]
+    fn mail_writes_lock_a_wide_state_they_write_into() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("mail-wide-state");
+        let state = crate::fs::state_dir();
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        let mode = || std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+        let widen = || std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        widen();
+        append_base_line(&serde_json::json!({ "v": 0 })).unwrap();
+        assert_eq!(mode(), 0o700, "append_base_line left state/ wide");
+
+        widen();
+        std::fs::write(base_path(), "{\"v\":0}\n{\"v\":").unwrap();
+        truncate_torn_tail(&base_path()).unwrap();
+        assert_eq!(mode(), 0o700, "truncate_torn_tail left state/ wide");
+
+        widen();
+        append_seen_line("m1", "2026-10-12T00:00:00Z").unwrap();
+        assert_eq!(mode(), 0o700, "append_seen_line left state/ wide");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_legacy_inbox_with_no_rows_locks_state_before_it_renames_itself() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-wide-state");
+        let state = crate::fs::state_dir();
+        // Mint first: a fresh key locks state/ on its own, which would hide the
+        // rename. With the key in place, only the rename can lock it.
+        identity::load_or_mint().unwrap();
+        std::fs::write(legacy_inbox_path(), r#"{"entries":[]}"#).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        migrate_if_needed().unwrap();
+
+        assert!(state.join("inbox.json.migrated").exists(), "the legacy inbox was not renamed");
+        assert_eq!(
+            std::fs::metadata(&state).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "migrate_if_needed renamed inside a wide state/"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn header(from: &str, to: &str, text_kind: &str, minted_at: &str) -> Header {

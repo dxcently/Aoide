@@ -836,12 +836,10 @@ count.
   Never submitted, because an argv is attacker-choosable: a same-uid process
   can rewrite its own `/proc` cmdline, and reading argv cannot prove that
   nothing in it waits on a password prompt, so the human who reads the line
-  presses Enter. An idle session's clean unsubmitted `typed` line is typed the
-  same way (`--yes`, no `--submit`) and sits in the new prompt until a human
-  presses Enter; idle with no `typed` delivers nothing. Also the command core
-  the daemon's own boot-time auto-resume trigger calls in-process — see
-  `state/stage/projects.json`'s `autoResume` paragraph below for that trigger's
-  own contract. `identity`,
+  presses Enter. An idle session delivers nothing, its cwd alone is restored.
+  Also the command core the daemon's own boot-time auto-resume trigger calls
+  in-process — see `state/stage/projects.json`'s `autoResume` paragraph below
+  for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
   lazily-minted ed25519 keypair (`aoide-storage`'s new `identity` module,
   `state/identity/`): prints the public key (hex), a short display
@@ -1188,6 +1186,30 @@ applied to the stage tree itself):
   tree — the `aoide`/`aoided` binaries alone read and write it, never
   `lyra`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
   never writes it.
+
+`state/` is owner-only and is the privacy boundary for everything under it;
+file and subdirectory modes inside it are not relied on. Every storage write
+under it locks `state/` first, and `aoided` does the same before it binds,
+refusing to start when it cannot. Under is judged by where the write lands,
+so a path through a symlinked alias or with a `..` in it counts when the
+kernel puts it inside `state/`. The lock refuses, before any chmod, a
+`state/` that is relative, whose path has a `..` in it, or that is a symlink
+(the open never follows the last component). It also refuses a filesystem
+root, and a home directory or one of its parents. Those are judged on
+canonical paths, and again on the directory the open returns, so a symlinked
+home is protected by its real path. Every home a run could mean is guarded
+together: a non-empty `$HOME`, the passwd home of the effective uid, and
+`/home/$AOIDE_USER` when `$AOIDE_USER` is set. A `state/` the OS will not make
+`0700` fails the write and names the path and the fix: a chmod when this user
+owns it, a chown when another user does. Start-up locks a `state/` that
+exists, and a tree the start-up migration moves into `state/` is locked there
+too; when it cannot be, `aoide`, `aoided` and `lyra` exit on every run rather
+than read it, the run that moved the tree and each run after. On Windows the
+boundary holds only for a `state/` aoide created: an existing one is never
+re-tightened.
+
+The boundary is against other users. A process running as the same user reads
+and writes all of `state/` whatever its mode, and nothing here stops it.
 
 **The runtime root (L-C2, lyra-carrier lane, task #107).** Every runtime
 tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,
@@ -2196,8 +2218,9 @@ ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
 boot resurrect retypes a recorded command's shell-quoted words, never for `sudo`
 or a privilege program or a shell-form argv
-(`resurrect.rs::restore_argv_refusal`). The proof is that basename, and it is
-stated as one: a symlink named `claude` that points at `bash`, or a script named
+(`resurrect.rs::restore_argv_refusal`); an idle session gets its cwd only, with
+nothing typed. The proof is that basename, and it is stated as one: a symlink
+named `claude` that points at `bash`, or a script named
 `claude` that execs a shell, passes it. It rejects the launchers the walk does
 not model and a label that does not match the wrap. It does not stop a same-uid
 process that names a shell after a harness; for that class the defence is inert
@@ -2418,12 +2441,11 @@ never idle, for its whole life: `shell_at_prompt` answers working before any
 process is read. Its first prompt asks for a password, and nothing read off the
 process table tells that prompt from the root shell's after it: a privilege
 program that is not setuid keeps its own executable there, with no child and
-flat CPU. So `restore.idle` stays false and no `typed` line is ever recorded
-for it, and a resurrect never retypes what was typed at its password prompt.
-Its `activity` and `restore.argv` come from its own conducted line, never the
-root foreground it hands the terminal to (`doas` execs into the root shell, `su`
-hands the foreground to its child), so no root command's argv reaches the stage
-file. It is never an interactive shell either, so its password prompt is heard
+flat CPU. So `restore.idle` stays false for it. Its `activity` and
+`restore.argv` come from its own conducted line, never the root foreground it
+hands the terminal to (`doas` execs into the root shell, `su` hands the
+foreground to its child), so no root command's argv reaches the stage file. It
+is never an interactive shell either, so its password prompt is heard
 and reads `awaiting`: by sudo's own witness for `sudo`, and by the screen's
 password row for `doas` and `su`. The accepted losses, for every privilege
 program: a quiet root prompt reads `working · <line>` (`working · sudo bash`);
@@ -3058,7 +3080,7 @@ captured restore snapshot, written change-only by `aoide-conduct`'s PTY
 tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 
 ```json
-"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null, "typed": "cargo test -p aoide-conduct" }
+"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null }
 ```
 
 - `cwd` — the shell's live working directory at the last tick (`None` when
@@ -3066,8 +3088,8 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 - `idle` — the shell's `shell_at_prompt` verdict: the pty's foreground process
   group is the bare shell (or none), and for a command shell nothing runs
   under it (no live child, and its pid still a shell). Never true for a
-  session whose argv runs a privilege program, so its `typed` is never
-  recorded. The SAME predicate `state` is derived from. Kept as its own field
+  session whose argv runs a privilege program. The SAME predicate `state` is
+  derived from. Kept as its own field
   rather than read back off `state` later: the reap sweep overwrites `state`
   to `"done"` BEFORE its ledger write (`reap.rs`'s own ordering, `session
   reap`), so idleness would otherwise be unrecoverable by the time the
@@ -3081,16 +3103,15 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.
-- `typed` — the reconstructed unsubmitted prompt line, REFUSAL-based: `Some`
-  only for a clean, unedited run of keystrokes from real stdin since the last
-  submit. Bytes from an injection connection land in the same shell readline
-  buffer but were not typed, so they poison the line to `None` until its
-  Enter, as does any readline-editing byte (an escape sequence, `^R`, Tab,
-  `^U`/`^W`) or invalid UTF-8, instead of guessing. Only ever populated when
-  `idle` is true — a shell mid-command has no prompt line. A silently WRONG
-  `typed` would put text the operator never composed one keystroke from
-  running; `None` is a fully acceptable product of this capture, a guess is
-  not.
+
+A record that still carries a `typed` key inside `restore` loads with that
+key dropped; no writer emits it.
+
+`argv` and the session log (`state/sessions/<id>.log`) are a terminal record,
+like shell history: a secret written on a command line is stored with `argv`,
+here and in the ledger line, and whatever the pty echoed is in the log. The log
+holds the pty's output only, so input a program reads with echo off never
+reaches it. Both are private to the user under `state/`.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like
@@ -4550,7 +4571,7 @@ this field existed, tolerated on read the same as any other field here).
 
 `restore` (P-C5, durable-sessions plan) is `null` for every non-shell
 session and every line predating this field, and otherwise the SAME
-`{cwd, idle, argv, typed}` object `sessions.json`'s own `restore` field
+`{cwd, idle, argv}` object `sessions.json`'s own `restore` field
 carries (see above) — projected verbatim off `SessionRecord.restore` at the
 exact instant `ledger_session_exit` appends this line, never re-derived and
 never a `/proc` read here: the reap sweep's own ordering

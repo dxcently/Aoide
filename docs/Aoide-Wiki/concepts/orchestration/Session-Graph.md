@@ -448,8 +448,7 @@ it runs itself goes unseen. A shell given a command or a script (`bash -c "apt
 install x"`, `sh ./run.sh`) is a program like any other, and its questions are
 heard. A privilege program (`sudo bash`, `su`) is never silenced and never idle:
 it asks for a password first, and nothing tells that prompt from the root
-shell's after it, so the password prompt is heard and nothing typed at either is
-recorded. `script` is a shell at its prompt unless `-c` or `--command` appears
+shell's after it, so the password prompt is heard. `script` is a shell at its prompt unless `-c` or `--command` appears
 after it (any dashed token with a `c` counts, so the screen only ever hears
 more). A form the launcher walk refuses (`env -S`, `sudo -i`, an option its
 table does not list) is answered as a command runner, so its questions are heard

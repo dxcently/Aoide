@@ -65,16 +65,9 @@
 //!   boot on its own. EXCEPT when [`restore_argv_refusal`] refuses the argv: the
 //!   refusals, and why each one exists, are listed once in CONTRACTS.md's
 //!   restore paragraph. The cwd still restores; nothing is delivered.
-//! - **idle, with a clean `typed` line** — preload it with `--yes` and,
-//!   deliberately, NEVER `--submit`. The text sits in the new prompt until a
-//!   human presses Enter. **This is the safety invariant this phase exists to
-//!   hold: no restore delivery carries `--submit`, for either source of the
-//!   line.** [`restore_delivery`]'s one flag map has no `submit` key, so a
-//!   later change that adds one is visible at a single site. A stale `rm -rf`
-//!   sitting in `typed` and firing itself at boot is the failure this shape
-//!   prevents.
-//! - **idle, with no `typed`** — nothing is delivered. A terminal reopened
-//!   at its own cwd is already the correct, complete answer.
+//! - **idle** — nothing is delivered. A terminal reopened at its own cwd is
+//!   already the correct, complete answer. Nothing typed in the old session
+//!   is carried into the new prompt, so nothing can fire itself at boot.
 //!
 //! **Bare-manifest mode (U2, command-defrag lane U).** `resurrect` with
 //! NONE of `--project`/`--all`/`--id` given walks UP from cwd
@@ -336,28 +329,27 @@ pub(in crate::graph) fn restore_refused_because(restore: &RestoreSnapshot) -> Op
 /// What, if anything, to deliver into a freshly-resurrected terminal once it
 /// registers — pure, no process, no socket, so this decision and its exact
 /// `Invocation` flag map are directly unit-testable apart from
-/// `resurrect_one`'s real spawn. The one line is TYPED and never submitted:
-/// no flag map here carries `submit`, for either source of the line.
+/// `resurrect_one`'s real spawn. Only a session that was running a command
+/// when it left gets anything: that command is TYPED and never submitted, so
+/// no flag map here carries `submit`. An idle one is restored by cwd alone.
 ///
 /// A busy session's recorded argv is typed (`shell_join`-quoted) unless
-/// [`restore_argv_refusal`] refuses it; an idle session's clean `typed` line
-/// is typed as the operator left it. Why never submitted: an argv is
+/// [`restore_argv_refusal`] refuses it. Why never submitted: an argv is
 /// attacker-choosable (a same-uid process can rewrite its own `/proc`
 /// cmdline), and reading it cannot prove what it will do, so the human who
 /// reads the line presses Enter. A control byte in it, `\r` included, would
 /// act as that Enter, which is why the refusals stay.
 fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreSnapshot) -> Option<Invocation> {
-    let line = if restore.idle {
-        restore.typed.clone()?
-    } else {
-        let argv = restore.argv.as_ref()?;
-        if restore_argv_refusal(argv).is_some() {
-            return None;
-        }
-        // `grep "a b" f` is typed as `grep 'a b' f`: the words re-parse to the
-        // recorded argv, for an argv that passed `restore_argv_refusal`.
-        shell_join(argv)
-    };
+    if restore.idle {
+        return None;
+    }
+    let argv = restore.argv.as_ref()?;
+    if restore_argv_refusal(argv).is_some() {
+        return None;
+    }
+    // `grep "a b" f` is typed as `grep 'a b' f`: the words re-parse to the
+    // recorded argv, for an argv that passed `restore_argv_refusal`.
+    let line = shell_join(argv);
     let mut flags = BTreeMap::new();
     flags.insert("id".to_string(), new_id.to_string());
     // Attributed to the target ITSELF: the line must reach its prompt verbatim,
@@ -518,7 +510,7 @@ fn resurrect_one(
     // deliver into, and a registered-but-unstarted one has a pty whose harness
     // is still coming up, where the same early-typing defect `spawn --prompt`
     // just fixed would lose the line. `restore_delivery` is pure and decides
-    // the whole shape; whether the session was idle picks the label below.
+    // the whole shape: it is `Some` only for a busy session's command.
     let restore_result = if !registered {
         "skipped-unregistered".to_string()
     } else if let Some(why) = c.entry.restore.as_ref().and_then(restore_refused_because) {
@@ -527,7 +519,7 @@ fn resurrect_one(
     } else {
         match c.entry.restore.as_ref().and_then(|r| restore_delivery(door, &new_id, r)) {
             None => "none".to_string(),
-            Some(_) => {
+            Some(inv) => {
                 let ready = super::spawn::wait_ready(
                     &c.entry.agent,
                     &new_id,
@@ -537,26 +529,18 @@ fn resurrect_one(
                 if ready == super::spawn::Ready::NotReady {
                     "not-ready".to_string()
                 } else {
-                    let inv = c
-                        .entry
-                        .restore
-                        .as_ref()
-                        .and_then(|r| restore_delivery(door, &new_id, r))
-                        .expect("checked just above");
                     let inner = session_send(&inv);
                     if inner.status != Status::Ok {
                         format!("failed: {}", inner.message)
                     } else {
-                        // What was typed, and whether the readiness was a fact
-                        // or a settled guess: a terminal candidate whose agent
-                        // has no profile is typed at on the guess, and says so.
-                        // Either way the line is typed and never submitted.
-                        let idle = c.entry.restore.as_ref().is_some_and(|r| r.idle);
-                        let word = if idle { "preload" } else { "command" };
+                        // Whether the readiness was a fact or a settled guess:
+                        // a terminal candidate whose agent has no profile is
+                        // typed at on the guess, and says so. Either way the
+                        // line is typed and never submitted.
                         if ready == super::spawn::Ready::Verified {
-                            word.to_string()
+                            "command".to_string()
                         } else {
-                            format!("{word}-unverified")
+                            "command-unverified".to_string()
                         }
                     }
                 }
@@ -570,10 +554,7 @@ fn resurrect_one(
         c.entry.agent,
         if registered { "" } else { " (not yet registered)" }
     ));
-    if matches!(
-        restore_result.as_str(),
-        "command" | "preload" | "command-unverified" | "preload-unverified"
-    ) {
+    if matches!(restore_result.as_str(), "command" | "command-unverified") {
         changed.push(format!("session {new_id}: restore {restore_result}"));
     }
     if restore_result == "not-ready" {
@@ -1323,7 +1304,7 @@ mod tests {
             "shell",
             "/home/khoa/Aoide",
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None }),
         );
         let candidate = resolve_candidate(entry);
         let argv = candidate.resume_argv.expect("the terminal arm must resolve a restore-bearing shell entry");
@@ -1341,29 +1322,6 @@ mod tests {
         let entry = ledger_entry_with_restore("ledger-no-restore", "shell", "/home/khoa/Aoide", "2026-08-20T01:00:00Z", None);
         let candidate = resolve_candidate(entry);
         assert!(candidate.resume_argv.is_none(), "a restore-less shell entry must still be skipped");
-    }
-
-    /// The preload path's flag map, pinned directly — no process, no socket.
-    /// `--yes` is present; `--submit` must NEVER be, on pain of violating
-    /// the whole "preload, never auto-run" invariant this phase exists for.
-    #[test]
-    fn preload_delivery_carries_yes_and_never_submit() {
-        let restore = RestoreSnapshot {
-            cwd: Some("/home/khoa/Aoide".into()),
-            idle: true,
-            argv: None,
-            typed: Some("echo hello".to_string()),
-        };
-        let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
-            .expect("an idle restore with a typed line must construct a send");
-        assert_eq!(inv.flags.get("yes").map(String::as_str), Some("true"));
-        assert!(!inv.flags.contains_key("submit"), "the no-submit path must never carry `submit`: {:?}", inv.flags);
-        // Self-attributed (`--from <new-id>`): send's self-attribution rule
-        // then delivers the bytes verbatim — without this, the preload came
-        // back as `from <sender>: echo hello`, a line no human typed
-        // (live P-C7 finding).
-        assert_eq!(inv.flags.get("from").map(String::as_str), Some("new-id"));
-        assert_eq!(inv.args, vec!["echo hello".to_string()]);
     }
 
     /// R1: a busy session's recorded argv is TYPED and never submitted. The
@@ -1439,12 +1397,11 @@ mod tests {
         String::from_utf8_lossy(&out).into_owned()
     }
 
-    /// Idle with a null `typed` (a poisoned or never-populated line) must
-    /// construct no send at all — a bare cwd restore is already the correct,
-    /// complete answer, never a guess.
+    /// An idle restore constructs no send at all — a bare cwd restore is the
+    /// whole answer. Nothing typed by the old session is ever replayed.
     #[test]
-    fn idle_with_null_typed_constructs_no_send_at_all() {
-        let restore = RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None, typed: None };
+    fn an_idle_restore_delivers_nothing_it_restores_the_cwd_alone() {
+        let restore = RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None };
         assert!(restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none());
     }
 
@@ -1463,7 +1420,6 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: false,
             argv: Some(vec!["sudo".to_string(), "systemctl".to_string(), "restart".to_string(), "aoided".to_string()]),
-            typed: None,
         };
         assert!(
             restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
@@ -1486,7 +1442,6 @@ mod tests {
                 cwd: Some("/home/khoa/Aoide".into()),
                 idle: false,
                 argv: Some(argv.iter().map(|s| s.to_string()).collect()),
-                typed: None,
             };
             assert!(
                 restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
@@ -1500,7 +1455,6 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: false,
             argv: Some(argv.iter().map(|s| s.to_string()).collect()),
-            typed: None,
         }
     }
 
@@ -1639,7 +1593,6 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: false,
             argv: Some(argv.clone()),
-            typed: None,
         };
         let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
             .expect("a working restore with argv must construct a send");
@@ -2717,7 +2670,7 @@ mod tests {
             "shell",
             &root_str,
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None }),
         )]);
         std::env::remove_var("AOIDE_TERMINAL");
         std::env::remove_var("WAYLAND_DISPLAY");
@@ -2769,7 +2722,7 @@ mod tests {
             "shell",
             &root_str,
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None }),
         )]);
         std::env::set_var("AOIDE_TERMINAL", "true");
         std::env::set_var("WAYLAND_DISPLAY", "wayland-0");

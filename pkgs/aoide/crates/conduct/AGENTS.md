@@ -1274,31 +1274,6 @@ in the message.
 - **A pid-less hosted session binds only through a live chain.**
   `window::window_for_hook_chain` walks a record's stored `hookAncestry`: the
   nearest chain pid that owns a client is the owner, and the record binds while any process of its own chain, a tab shell included, stands beneath that owner (`window_for_hook_chain` tests `pid_ancestry(p).contains(owner)` for each chain pid below the owner). A dead chain binds nothing (a dead pid's ancestry is itself), and a reused pid outside the owner's tree binds nothing. The sweep never writes a pid for such a record. A chain with no live process beneath the owner is replaced by the next per-turn hook from its live harness (`hookAncestry` above), and then binds, given a compositor to discover the window.
-- **`typed` is REFUSAL-based, never best-effort reconstruction (P-C5,
-  durable-sessions plan) — the single most important invariant in this
-  crate's restore capture.** Readline editing (arrow keys, `^R` history
-  search, Tab completion, `^U`/`^W` kills) means the raw keystroke stream
-  written into the pty master is NOT the shell's prompt buffer the moment
-  any of it happens — a byte-for-byte replay would be WRONG, not merely
-  lossy, and a silently wrong `typed` puts text the operator never composed
-  one keystroke from running (a LATER phase preloads it into a resurrected
-  terminal's own prompt). `conduct.rs::TypedLineBuffer::feed` POISONS the
-  current line to `None` on any byte below `0x20` other than `\r`/`\n`
-  (which submit-clear it instead), or `0x7f` — never attempts to interpret
-  what the edit did. A line running past `TYPED_LINE_CAP` poisons for the
-  same reason: a clipped line is wrong text, not a short one. **Bytes
-  arriving over an INJECTION connection poison too (`feed_injected`), and
-  that is a live finding, not caution:** `send` prefixes a delivered
-  payload with its provenance, so the P-C7 soak captured a `typed` of
-  `from quiet-birch (…1892): echo hello` — a line no human composed, which
-  would not even run if preloaded. Don't restore the old "injection
-  accumulates like stdin" reading; injected text reaching the same readline
-  buffer is precisely why the line stops being reconstructable. `typed()`
-  additionally refuses non-UTF-8 and an empty line. Don't widen the clear
-  set past `\r`/`\n`, don't let overflow truncate instead of refusing, and
-  don't try to make a poisoned line recoverable by inspecting WHICH control
-  byte fired — the whole point is that `None` is a fully acceptable product
-  of this capture and a guess is not.
 - **`RestoreSnapshot.idle` is captured as its OWN field, never inferred
   from `state` (P-C5).** `reap.rs`'s sweep assigns `s.state = "done"`
   BEFORE calling `ledger_session_exit` — by the time the ledger line is
@@ -1319,9 +1294,9 @@ in the message.
   `runs_a_privilege_program(&inv.args)`, and `shell_at_prompt` answers working
   on it before its first read. Keep that check first: a stand-in that is not
   setuid passes every later read as idle at its password prompt, and an idle
-  verdict is what lets `restore.typed` record what was typed there. Its
-  `activity` (`command_label`) and `restore.argv` come from that line, never
-  from `running_pid`: `doas` execs into the root shell and `su` hands the
+  verdict would read the root prompt as a shell at rest. Its `activity`
+  (`command_label`) and `restore.argv` come from that line, never from
+  `running_pid`: `doas` execs into the root shell and `su` hands the
   foreground to its child, so the pid would name a root command, which
   resurrect would then type.
 - **The executable baseline is the file the spawn started, read from its path
@@ -1344,9 +1319,9 @@ in the message.
 - **Shell-likeness is derived from the WRAPPED ARGV, never the display
   name (task #100, the P-C7 soak's live finding).** `session_conduct`'s
   `is_shell` — which gates the ENTIRE P-C5 refresh/capture path (cwd
-  tracking, working/idle state, foreground argv, the restore snapshot, and
-  `typed_capture_active`'s buffer below) — comes from the SAME
-  `conduct.rs::program_is_a_shell(&inv.args)` the refusal lanes read
+  tracking, working/idle state, foreground argv, the restore snapshot) —
+  comes from the SAME `conduct.rs::program_is_a_shell(&inv.args)` the refusal
+  lanes read
   (`program`'s own basename against the shell list, with the launchers a
   shell arrives through resolved first). It is NOT `agent ==
   "shell"` — `agent` is a caller-chosen label (`--agent <name>`, or the
@@ -1364,35 +1339,30 @@ in the message.
   basename satisfies the predicate the same way any other shell invocation
   does. `undying.rs::nothing_to_restore_warning` is the mark-time corollary
   — see its own bullet below.
-- **`typed_capture_active` gates the `TypedLineBuffer`'s existence, not just
-  its output (P-C5).** A headless conduct never reads stdin at all
-  (`read_stdin == false`, unconditionally — no controlling tty), so it has
-  no typed line, ever; don't "helpfully" instantiate the buffer anyway and
-  rely on `restore_snapshot`'s idle-gate to hide it — the buffer must not
-  exist for a session that structurally cannot have a prompt to reconstruct.
-- **A restored line is NEVER submitted (P-C6, durable-sessions plan) — the
-  consumption-side twin of `typed`'s own capture-side refusal above, and this
-  crate's single most important resurrect invariant.**
-  `resurrect.rs::restore_delivery` builds ONE flag map, with `--yes` and no
-  `submit`, for both sources of the line: a busy session's recorded argv and
-  an idle session's clean `typed` line. Don't add `submit` to it. An argv is
-  attacker-choosable, and reading one cannot prove what it will do (a password
-  prompt, a destructive command); the human who reads the typed line presses
-  Enter. A stale `rm -rf` sitting in `typed`, or a rewritten argv, firing
-  itself at boot unattended is the failure this prevents.
+- **A restored line is NEVER submitted, and only a busy session gets one
+  (P-C6, durable-sessions plan) — this crate's single most important
+  resurrect invariant.** `resurrect.rs::restore_delivery` returns a
+  `session_send` flag map only for a session that was demonstrably RUNNING a
+  foreground command (`idle: false`) whose argv `restore_argv_refusal`
+  passes, with `--yes` and no `submit`. Don't add `submit` to it. An argv is
+  attacker-choosable, and reading one cannot prove what it will do (a
+  password prompt, a destructive command); the human who reads the typed line
+  presses Enter. An idle snapshot returns `None` and only its cwd restores.
+  Don't add a branch that delivers idle text: nothing typed in an old session
+  is carried forward, so there is no stale line that could fire at boot.
 - **Restore delivery is SELF-ATTRIBUTED (`--from <new-id>`), and
   `send.rs`'s self-attribution rule delivers such bytes verbatim — both
   halves stay, together (P-C7 live finding #2).** `send` prefixes a
   delivered payload with `from <sender>: ` for attribution; restore rides
   `send`, so the live soak's resurrected re-exec arrived as `from
-  quiet-birch (…1892): /run/…/sleep 900` — a bash syntax error — and the
-  preload as a line no human typed. The fix keys off the ATTRIBUTED sender
-  (`resolve_sender`, i.e. `--from`), never the gate's own sender identity
+  quiet-birch (…1892): /run/…/sleep 900` — a bash syntax error. The fix keys
+  off the ATTRIBUTED sender (`resolve_sender`, i.e. `--from`), never the
+  gate's own sender identity
   (LANE IDENTITY P-ID2: a kernel-attested session, `graph/identity.rs::
   attested_sender` — the two are separate axes on purpose, module doc):
   restore is delivered from ANOTHER session's env, which is exactly how it
-  got mis-prefixed. Removing the `from` flag from either
-  `restore_delivery` branch, or the `attributed_to_target` suppression in
+  got mis-prefixed. Removing the `from` flag from
+  `restore_delivery`, or the `attributed_to_target` suppression in
   `deliver_local`, silently reintroduces the corruption. Not a gate
   widening: `--from ""` (explicit anonymous) already skipped the prefix,
   and the audit line records the attributed sender either way.

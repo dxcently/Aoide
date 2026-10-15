@@ -52,8 +52,8 @@ fn command_basename(program: &str) -> String {
 
 /// The shell basenames [`program_is_a_shell`] resolves to — the ONE list, in
 /// the one place shell-likeness is decided: the P-C5 capture path
-/// (`is_shell`, the refresh tick, the `typed` buffer, the restore snapshot),
-/// the auto-typing refusals (ping-back, the doorbell's PTY arm, the A2A
+/// (`is_shell`, the refresh tick, the restore snapshot), the auto-typing
+/// refusals (ping-back, the doorbell's PTY arm, the A2A
 /// door) and `spawn`'s own gates all read THIS verdict, never a private copy
 /// of the names.
 const SHELL_BASENAMES: &[&str] = &[
@@ -1338,10 +1338,9 @@ struct ExeId {
 #[derive(Debug)]
 struct ShellWatch {
     /// The conducted argv, when it runs a privilege program
-    /// ([`runs_a_privilege_program`]). Such a session is never idle, so nothing
-    /// typed at its password prompt is ever recorded, and this line is its
-    /// `activity` and `restore.argv`, never the root foreground it hands the
-    /// terminal to.
+    /// ([`runs_a_privilege_program`]). Such a session is never idle, and this
+    /// line is its `activity` and `restore.argv`, never the root foreground it
+    /// hands the terminal to.
     privileged: Option<Vec<String>>,
     /// The identity of the file the spawn started (see [`shell_baseline`]). A
     /// later identity that differs, or none at all, means the shell exec'd into
@@ -1562,24 +1561,19 @@ fn shell_snapshot(
 /// the reap sweep overwrites `state` to `"done"` before its ledger write.
 /// `argv` is `None` while idle (no process to capture) and RAW (uncollapsed,
 /// unclipped) `/proc/<pid>/cmdline` of [`running_pid`] otherwise — never
-/// `proc_command`'s DISPLAY label, which would re-exec the wrong or a truncated
-/// binary. `typed` is gated to `idle` HERE, structurally, rather than trusted
-/// to
-/// the caller: a shell mid-command has no prompt line to reconstruct, so any
-/// `typed` the caller passes while working is dropped.
+/// `proc_command`'s DISPLAY label, which would re-exec the wrong or a
+/// truncated binary.
 fn restore_snapshot(
     fg: i32,
     shell_pid: i32,
     idle: bool,
     cwd: Option<String>,
-    typed: Option<String>,
     argv_of: impl Fn(i32) -> Option<Vec<String>>,
 ) -> RestoreSnapshot {
     RestoreSnapshot {
         cwd,
         idle,
         argv: if idle { None } else { argv_of(running_pid(fg, shell_pid)) },
-        typed: if idle { typed } else { None },
     }
 }
 
@@ -1587,12 +1581,10 @@ fn restore_snapshot(
 /// foreground process group and the live cwd, and push cwd + the current
 /// command + the idle/working/awaiting state via [`shell_snapshot`], plus the
 /// P-C5 restore snapshot via [`restore_snapshot`]. `prompt` is the screen's
-/// standing question, if any. `typed` comes from `conduct_multiplex`'s own
-/// typed-line buffer (`None` for a headless session, which never reads stdin) —
-/// this function has no access to the keystroke stream itself. A privileged
-/// session ([`ShellWatch::privileged`]) is labelled and recorded by its own
-/// conducted line, never by the root foreground it hands the terminal to, so
-/// no root command's argv reaches the stage file and resurrect refuses it.
+/// standing question, if any. A privileged session ([`ShellWatch::privileged`])
+/// is labelled and recorded by its own conducted line, never by the root
+/// foreground it hands the terminal to, so no root command's argv reaches the
+/// stage file and resurrect refuses it.
 ///
 /// The foreground process group comes from the seam
 /// ([`Pty::foreground_pgid`]), which is `tcgetpgrp(2)` on Unix and `0` — "no
@@ -1608,7 +1600,6 @@ fn conduct_refresh_shell(
     interactive: bool,
     watch: &mut ShellWatch,
     prompt: Option<&Prompt>,
-    typed: Option<String>,
 ) {
     let fg = pty.foreground_pgid();
     let idle = shell_at_prompt(
@@ -1633,105 +1624,11 @@ fn conduct_refresh_shell(
         |pid| own.map_or_else(|| proc_command(pid), command_label),
         proc_has_children,
     );
-    let restore = restore_snapshot(fg, shell_pid, idle, cwd.clone(), typed, |pid| {
+    let restore = restore_snapshot(fg, shell_pid, idle, cwd.clone(), |pid| {
         own.map_or_else(|| proc_argv(pid), |argv| Some(argv.to_vec()))
     });
     let facts = ShellFacts { cwd: cwd.as_deref(), activity: activity.as_deref(), state, restore };
     do_session_refresh(id, Some(facts), needs_sudo, question.as_deref());
-}
-
-/// Cap on the P-C5 typed-line buffer, bytes.
-const TYPED_LINE_CAP: usize = 4096;
-
-/// The P-C5 typed-but-unsubmitted prompt-line buffer, reconstructed from the
-/// operator's own keystrokes on real stdin ([`TypedLineBuffer::feed`]). Bytes
-/// from an injection connection land in the SAME shell readline buffer but
-/// were not typed, so they poison the line until its Enter
-/// ([`TypedLineBuffer::feed_injected`]). REFUSAL-based, not
-/// reconstruction-based: readline editing (arrow keys, `^R` history search,
-/// Tab completion, `^U`/`^W` kills) means the
-/// keystroke stream is no longer the prompt buffer, so replaying it verbatim
-/// would be WRONG, not merely lossy — a silently wrong `typed` puts text the
-/// operator never composed one keystroke from running. Any control byte
-/// below `0x20` other than the two that SUBMIT the line (`\r`/`\n`), or
-/// `0x7f` (DEL), POISONS the buffer for the current line; `\r`/`\n`
-/// themselves CLEAR it (submitted) and lift any earlier poison, since the
-/// NEXT line starts clean. `typed()` additionally refuses non-UTF-8 and an
-/// empty line. Scoped to one CONDUCT process's lifetime — never persisted,
-/// never read back after the fact (see the module's own P-C5 note on why a
-/// `/proc` snapshot can't recover this).
-struct TypedLineBuffer {
-    buf: Vec<u8>,
-    poisoned: bool,
-}
-impl TypedLineBuffer {
-    fn new() -> Self {
-        TypedLineBuffer { buf: Vec::new(), poisoned: false }
-    }
-    /// Feed bytes written to the master. A line that runs past
-    /// `TYPED_LINE_CAP` POISONS rather than truncating: a clipped line is
-    /// wrong text, not merely short, and this buffer's whole contract is to
-    /// refuse the cases it cannot reconstruct exactly. The buffer stops
-    /// growing at the cap either way, so it never grows unbounded, and a
-    /// later `\r`/`\n` still clears normally.
-    fn feed(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            match b {
-                b'\r' | b'\n' => {
-                    self.buf.clear();
-                    self.poisoned = false;
-                }
-                0x7f => self.poisoned = true,
-                b if b < 0x20 => self.poisoned = true,
-                _ => {
-                    if self.buf.len() < TYPED_LINE_CAP {
-                        self.buf.push(b);
-                    } else {
-                        self.poisoned = true;
-                    }
-                }
-            }
-        }
-    }
-    /// Feed bytes that arrived over an INJECTION connection rather than the
-    /// operator's own stdin. They reach the same readline buffer, so the
-    /// line stops being reconstructable — but they are not what anyone
-    /// TYPED, and `graph send` prefixes a delivered payload with its
-    /// provenance (`from <petname> (…tail): `), so replaying them would
-    /// preload a line no human composed and that would not even run. The
-    /// line is poisoned instead. A `\r`/`\n` still ends it, so an injection
-    /// that submits leaves the NEXT line clean rather than poisoning
-    /// everything after it.
-    fn feed_injected(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            match b {
-                b'\r' | b'\n' => {
-                    self.buf.clear();
-                    self.poisoned = false;
-                }
-                _ => self.poisoned = true,
-            }
-        }
-    }
-    /// The current line, or `None` when poisoned, empty (nothing typed since
-    /// the last submit), or not valid UTF-8.
-    fn typed(&self) -> Option<String> {
-        if self.poisoned || self.buf.is_empty() {
-            return None;
-        }
-        std::str::from_utf8(&self.buf).ok().map(str::to_string)
-    }
-}
-
-/// Whether a P-C5 typed-line buffer should even be instantiated: only an
-/// INTERACTIVE shell (`is_shell && read_stdin`) has a real readline prompt to
-/// reconstruct. A headless conduct never reads stdin at all
-/// (`read_stdin == false`, unconditionally — there is no controlling tty to
-/// read from), so it has no typed line, ever; a non-shell (an agent harness)
-/// has no shell prompt to begin with. Pure so the gating itself is
-/// unit-testable without spawning anything.
-fn typed_capture_active(is_shell: bool, read_stdin: bool) -> bool {
-    is_shell && read_stdin
 }
 
 /// The wrapper's own END vocabulary — a CLOSED set, derived ONLY from the
@@ -1821,17 +1718,8 @@ fn conduct_multiplex(
     // into its own refresh, any other wrap publishes it when it changes.
     let mut watch = watch_prompts.then(|| PromptWatch::new(std::time::Instant::now()));
     let mut published: Option<Prompt> = None;
-    // P-C5: the typed-line buffer only exists for an interactive shell — a
-    // headless conduct never reads stdin (no prompt line to reconstruct) and
-    // an agent harness has no shell prompt at all.
-    let mut typed_buf = if typed_capture_active(is_shell, read_stdin) {
-        Some(TypedLineBuffer::new())
-    } else {
-        None
-    };
     if is_shell {
-        let typed = typed_buf.as_ref().and_then(|b| b.typed());
-        conduct_refresh_shell(id, pty, shell_pid, interactive, &mut shell_watch, None, typed); // stamp initial cwd/state now.
+        conduct_refresh_shell(id, pty, shell_pid, interactive, &mut shell_watch, None); // stamp initial cwd/state now.
     }
 
     let mut timed_out = false;
@@ -1908,8 +1796,7 @@ fn conduct_multiplex(
                 .filter(|_| !child_exited)
                 .and_then(|w| w.standing(std::time::Instant::now()));
             if is_shell {
-                let typed = typed_buf.as_ref().and_then(|b| b.typed());
-                conduct_refresh_shell(id, pty, shell_pid, interactive, &mut shell_watch, standing.as_ref(), typed);
+                conduct_refresh_shell(id, pty, shell_pid, interactive, &mut shell_watch, standing.as_ref());
             } else if standing != published {
                 let question = standing.as_ref().map(|p| p.question.as_str());
                 do_session_refresh(id, None, standing.as_ref().is_some_and(Prompt::sudo), question);
@@ -1945,9 +1832,6 @@ fn conduct_multiplex(
             match console.read(&mut buf) {
                 Ok(0) => stdin_eof = true, // our own stdin closed; keep bridging the rest.
                 Ok(n) => {
-                    if let Some(tb) = typed_buf.as_mut() {
-                        tb.feed(&buf[..n]);
-                    }
                     if let Some(w) = watch.as_mut() {
                         w.input(&buf[..n]);
                     }
@@ -1962,13 +1846,6 @@ fn conduct_multiplex(
         if ready.inbox {
             if let Some(inbox) = inbox.as_mut() {
                 for chunk in inbox.drain() {
-                    // Injected bytes reach the same readline buffer, but
-                    // they are not what anyone TYPED — and a delivered
-                    // payload carries its provenance prefix, so replaying
-                    // them would preload a line no human composed.
-                    if let Some(tb) = typed_buf.as_mut() {
-                        tb.feed_injected(&chunk);
-                    }
                     if let Some(w) = watch.as_mut() {
                         w.input(&chunk);
                     }
@@ -3103,7 +2980,7 @@ mod tests {
     fn restore_snapshot_a_command_shell_with_no_foreground_group_records_its_own_argv() {
         const SHELL_PID: i32 = 100;
         let argv = vec!["sh".to_string(), "-c".to_string(), "sleep 30; true".to_string()];
-        let snap = restore_snapshot(0, SHELL_PID, false, None, None, |pid| {
+        let snap = restore_snapshot(0, SHELL_PID, false, None, |pid| {
             assert_eq!(pid, SHELL_PID);
             Some(argv.clone())
         });
@@ -3172,17 +3049,14 @@ mod tests {
             SHELL_PID,
             true,
             Some("/home/khoa/Aoide".to_string()),
-            Some("cargo test".to_string()),
             |_| panic!("argv_of should not be consulted at the bare prompt"),
         );
         assert!(snap.idle);
         assert_eq!(snap.argv, None);
         assert_eq!(snap.cwd.as_deref(), Some("/home/khoa/Aoide"));
-        // `typed` passes through unchanged while idle.
-        assert_eq!(snap.typed.as_deref(), Some("cargo test"));
     }
     #[test]
-    fn restore_snapshot_working_yields_full_uncollapsed_argv_and_drops_typed() {
+    fn restore_snapshot_working_yields_full_uncollapsed_argv() {
         const SHELL_PID: i32 = 100;
         const FG_PID: i32 = 200;
         let snap = restore_snapshot(
@@ -3190,9 +3064,6 @@ mod tests {
             SHELL_PID,
             false,
             Some("/home/khoa/Aoide".to_string()),
-            // A stale typed buffer from before the foreground command started
-            // — must be dropped, never leak through while a command runs.
-            Some("leftover".to_string()),
             |pid| {
                 assert_eq!(pid, FG_PID);
                 Some(vec!["nvim".to_string(), "--cmd".to_string(), "lua x=1".to_string()])
@@ -3203,19 +3074,6 @@ mod tests {
             snap.argv,
             Some(vec!["nvim".to_string(), "--cmd".to_string(), "lua x=1".to_string()])
         );
-        assert_eq!(snap.typed, None, "a shell mid-command has no prompt line to reconstruct");
-    }
-    #[test]
-    fn typed_capture_active_gates_on_shell_and_stdin() {
-        // Only an interactive shell has a real readline prompt to capture.
-        assert!(typed_capture_active(true, true));
-        // A headless conduct never reads stdin — no typed line, ever, even
-        // for a conducted shell.
-        assert!(!typed_capture_active(true, false));
-        // A non-shell (agent harness) has no shell prompt at all, headless
-        // or not.
-        assert!(!typed_capture_active(false, true));
-        assert!(!typed_capture_active(false, false));
     }
     #[test]
     fn invocation_plumbing_is_a_shell_or_a_launcher_by_basename() {
@@ -3679,107 +3537,6 @@ mod tests {
                 "program_is_a_shell({argv:?}) should be {expected}"
             );
         }
-    }
-    #[test]
-    fn typed_line_buffer_accumulates_plain_text() {
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(b"cargo");
-        tb.feed(b" test");
-        assert_eq!(tb.typed().as_deref(), Some("cargo test"));
-    }
-    #[test]
-    fn typed_line_buffer_injected_bytes_poison_rather_than_accumulate() {
-        // Found in the P-C7 live soak: `graph send` prefixes a delivered
-        // payload with its provenance, so an injected line captured as
-        // "typed" read `from quiet-birch (…1892): echo hello` — a line no
-        // human composed, which would not even run if preloaded. Injection
-        // reaches the same readline buffer as stdin, so the line is no
-        // longer reconstructable either way. Refuse it.
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(b"echo ");
-        tb.feed_injected(b"from quiet-birch (...1892): hello");
-        assert_eq!(tb.typed(), None, "an injected line is never reported as typed");
-
-        // A submitting injection still ends the line, so the NEXT one starts
-        // clean rather than inheriting the poison forever.
-        tb.feed_injected(b"\n");
-        tb.feed(b"mine");
-        assert_eq!(tb.typed().as_deref(), Some("mine"));
-    }
-    #[test]
-    fn typed_line_buffer_carriage_return_and_newline_both_clear() {
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(b"echo hi\r");
-        assert_eq!(tb.typed(), None, "a submitted line is empty, not the old text");
-        tb.feed(b"next line\n");
-        assert_eq!(tb.typed(), None);
-        tb.feed(b"third");
-        assert_eq!(tb.typed().as_deref(), Some("third"));
-    }
-    #[test]
-    fn typed_line_buffer_escape_byte_poisons_the_line() {
-        // An ESC (0x1b) — the lead byte of every arrow-key/cursor escape
-        // sequence — means the keystroke stream is no longer the prompt
-        // buffer. Refuse, don't guess.
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(b"echo hi");
-        tb.feed(&[0x1b, b'[', b'A']); // an up-arrow sequence.
-        assert_eq!(tb.typed(), None);
-        // The poison holds even if more plain text follows on the SAME line.
-        tb.feed(b"more");
-        assert_eq!(tb.typed(), None);
-        // Submitting clears the poison — the NEXT line starts clean.
-        tb.feed(b"\n");
-        tb.feed(b"clean");
-        assert_eq!(tb.typed().as_deref(), Some("clean"));
-    }
-    #[test]
-    fn typed_line_buffer_ctrl_u_poisons_the_line() {
-        // ^U (0x15) — a readline line-kill — is exactly the "keystroke stream
-        // isn't the prompt buffer anymore" case this mechanism exists for.
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(b"garbage");
-        tb.feed(&[0x15]);
-        assert_eq!(tb.typed(), None);
-    }
-    #[test]
-    fn typed_line_buffer_del_byte_poisons_the_line() {
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(b"oops");
-        tb.feed(&[0x7f]); // backspace/DEL.
-        assert_eq!(tb.typed(), None);
-    }
-    #[test]
-    fn typed_line_buffer_tab_completion_poisons_the_line() {
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(b"carg");
-        tb.feed(&[0x09]); // Tab — completion may rewrite the whole line.
-        assert_eq!(tb.typed(), None);
-    }
-    #[test]
-    fn typed_line_buffer_overflow_poisons_rather_than_truncating() {
-        let mut tb = TypedLineBuffer::new();
-        // Well past TYPED_LINE_CAP — must not panic or grow unbounded, and
-        // must refuse: a clipped line is WRONG text, not merely short, and
-        // handing back a prefix would be exactly the silent guess this
-        // buffer exists to avoid.
-        tb.feed(&[b'x'; 5000]);
-        assert_eq!(tb.typed(), None, "an overflowed line must never yield a truncated prefix");
-        // Submitting clears the poison — the NEXT line starts clean.
-        tb.feed(b"\n");
-        tb.feed(b"ok");
-        assert_eq!(tb.typed().as_deref(), Some("ok"));
-    }
-    #[test]
-    fn typed_line_buffer_invalid_utf8_yields_none() {
-        let mut tb = TypedLineBuffer::new();
-        tb.feed(&[0xff, 0xfe]); // not valid UTF-8, and not a poisoning byte.
-        assert_eq!(tb.typed(), None);
-    }
-    #[test]
-    fn typed_line_buffer_empty_line_yields_none() {
-        let tb = TypedLineBuffer::new();
-        assert_eq!(tb.typed(), None);
     }
     /// GATED on Unix with its reason: the fixture writes to the injection
     /// socket from a DOUBLE-FORKED process (`spawn_unrelated_writer`), whose
@@ -5137,12 +4894,11 @@ mod tests {
         )
         .unwrap();
 
-        let idle_restore = RestoreSnapshot { cwd: Some("/proj".into()), idle: true, argv: None, typed: None };
+        let idle_restore = RestoreSnapshot { cwd: Some("/proj".into()), idle: true, argv: None };
         let working_restore = RestoreSnapshot {
             cwd: Some("/proj".into()),
             idle: false,
             argv: Some(vec!["cargo".into(), "test".into()]),
-            typed: None,
         };
 
         let refresh = |activity, state, needs_sudo, question, restore: &RestoreSnapshot| {
@@ -5556,13 +5312,11 @@ mod tests {
     #[cfg(unix)]
     impl LiveSession {
         fn start(tag: &str, argv: &[&str]) -> Self {
-            Self::start_with(tag, argv, true, None)
+            Self::start_with(tag, argv, None)
         }
 
-        /// `headless` false conducts with a stdin, a pipe this test writes
-        /// through [`LiveSession::type_stdin`]. `bin` goes first on the
-        /// session's `PATH`.
-        fn start_with(tag: &str, argv: &[&str], headless: bool, bin: Option<&std::path::Path>) -> Self {
+        /// `bin` goes first on the session's `PATH`.
+        fn start_with(tag: &str, argv: &[&str], bin: Option<&std::path::Path>) -> Self {
             let lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
             let env = EnvVars::save(&[
                 "AOIDE_STAGE_DIR",
@@ -5581,10 +5335,7 @@ mod tests {
             std::env::set_var("XDG_RUNTIME_DIR", &root);
             std::env::remove_var("AOIDE_SESSION_ID");
             let mut conduct = std::process::Command::new(built_aoide_bin());
-            conduct.arg("conduct");
-            if headless {
-                conduct.arg("--headless");
-            }
+            conduct.args(["conduct", "--headless"]);
             if let Some(bin) = bin {
                 let path = std::env::var_os("PATH").unwrap_or_default();
                 let dirs = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&path));
@@ -5598,7 +5349,7 @@ mod tests {
                 .env("AOIDE_AUDIT_LOG", root.join("log"))
                 .env("XDG_RUNTIME_DIR", &root)
                 .env_remove("AOIDE_SESSION_ID")
-                .stdin(if headless { std::process::Stdio::null() } else { std::process::Stdio::piped() })
+                .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -5616,14 +5367,6 @@ mod tests {
             let mut door = std::os::unix::net::UnixStream::connect(conduct_socket_path(&self.tag))
                 .expect("the session's inbox is bound while it runs");
             door.write_all(bytes).unwrap();
-        }
-
-        /// Writes `bytes` to the session's own stdin, as the operator's keys.
-        fn type_stdin(&mut self, bytes: &[u8]) {
-            use std::io::Write as _;
-            let stdin = self.child.stdin.as_mut().expect("a session started with a stdin");
-            stdin.write_all(bytes).unwrap();
-            stdin.flush().unwrap();
         }
 
         /// The pid of the program the session conducts: the one child `aoide
@@ -5735,7 +5478,6 @@ mod tests {
         let session = LiveSession::start_with(
             "sb-undump",
             &["sh", "-c", "import ctypes,time; c=ctypes.CDLL(None); c.prctl(15, b'bash', 0, 0, 0); c.prctl(4, 0, 0, 0, 0); time.sleep(30)"],
-            true,
             Some(&bin),
         );
         let shell = session.conducted_pid(std::time::Duration::from_secs(10)).expect("the conducted shell starts");
@@ -5817,28 +5559,24 @@ mod tests {
 
     /// Never idle, end to end: a dumpable `sudo` stand-in (a `#!` script on a
     /// private `PATH`) sits at its password prompt with the same executable, no
-    /// child and flat CPU, which reads idle for any other program. Keys typed at
-    /// that prompt reach the session's stdin, yet no tick records them: the
-    /// screen still asks for the password, and `restore` stays not idle with no
-    /// `typed`.
+    /// child and flat CPU, which reads idle for any other program. No tick
+    /// reads it idle: the screen still asks for the password, and `restore`
+    /// stays not idle.
     #[cfg(unix)]
     #[test]
-    fn a_privileged_session_records_nothing_typed_at_its_password_prompt() {
+    fn a_privileged_session_never_reads_idle_at_its_password_prompt() {
         let bin = unique_stage("sb-sudo-bin");
         let sudo = bin.join("sudo");
         std::fs::write(&sudo, "#!/bin/sh\nprintf '[sudo] password for khoa: '\nread -r pw\n").expect("the stand-in");
         std::fs::set_permissions(&sudo, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("its mode");
-        let mut session = LiveSession::start_with("sb-sudo", &["sudo", "bash"], false, Some(&bin));
+        let session = LiveSession::start_with("sb-sudo", &["sudo", "bash"], Some(&bin));
         let Some(asking) = session.wait_for(std::time::Duration::from_secs(30), |r| r.state == "awaiting" && r.question.is_some()) else {
             panic!("the stand-in's password prompt was never heard");
         };
         assert_eq!(asking.question.as_deref(), Some("[sudo] password for khoa:"));
         assert_eq!(asking.needs_sudo, Some(true));
-        session.type_stdin(b"hunter2");
-        let recorded = session.wait_for(std::time::Duration::from_secs(4), |r| {
-            r.restore.as_ref().is_none_or(|x| x.idle || x.typed.is_some())
-        });
-        assert!(recorded.is_none(), "a privileged session recorded what was typed at its prompt: {recorded:?}");
+        let idle = session.wait_for(std::time::Duration::from_secs(4), |r| r.restore.as_ref().is_none_or(|x| x.idle));
+        assert!(idle.is_none(), "a privileged session read idle at its prompt: {idle:?}");
         let rec = session.wait_for(std::time::Duration::from_secs(1), |_| true).expect("the record");
         assert_eq!(rec.state, "awaiting");
         assert_eq!(rec.question.as_deref(), Some("[sudo] password for khoa:"));
@@ -5869,7 +5607,7 @@ mod tests {
         let stand_in = bin.join(argv[0]);
         std::fs::write(&stand_in, script).expect("the stand-in");
         std::fs::set_permissions(&stand_in, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("its mode");
-        let session = LiveSession::start_with(tag, argv, true, Some(&bin));
+        let session = LiveSession::start_with(tag, argv, Some(&bin));
         let ticked = session.wait_for(std::time::Duration::from_secs(10), |r| {
             r.restore.as_ref().is_some_and(|x| x.argv.is_some())
         });
