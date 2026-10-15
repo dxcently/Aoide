@@ -44,7 +44,7 @@ modifier.
 | Keybind | Action |
 |---|---|
 | `SUPER + SPACE` | Toggle the launcher — a Hyprland global shortcut (`global, aoide:launcher`) reaching the QML surface directly; no CLI command. |
-| `SUPER + W` | Toggle the wallpaper picker (`global, aoide:wallpaper`); picking a cover shells `lyra cover set <path>`. |
+| `SUPER + W` | Open the wallpaper picker (`global, aoide:wallpaper`): the launcher's own Desktop Pictures when the song's launcher has one (`openPictures()`), else the plain cover picker; picking a cover shells `lyra cover set <path>`. |
 | `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
 | `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
 | `SUPER + ESCAPE` | Lock the screen — `exec, aoide shell lock`; no `shell` command group exists in either binary's registry, so this binding is dead (report only, not repointed). |
@@ -59,6 +59,7 @@ modifier.
 | `SUPER + 1–0` | Switch to workspace 1–10. |
 | `SUPER SHIFT + 1–0` | Move window to workspace 1–10. |
 | `ALT + Tab` | Previous workspace. |
+| — | `aoide:switcher`, the window switcher (a song's `widgets/switcher.qml`, else the plain one), is registered but not bound here: the venue binds it. |
 | `SUPER + X` / `SUPER + Z` | Toggle special workspace `magic` / `scratch` (`SHIFT` = move window there). |
 | `SUPER + leftdrag` / `rightdrag` | Move / resize window with the mouse. |
 

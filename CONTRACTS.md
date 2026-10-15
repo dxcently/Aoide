@@ -6670,7 +6670,13 @@ window:** `WidgetSlot` is an `Item` — it can't host a widget whose root IS a
 same `resolveSong` → `Qt.createComponent` → `Component.createObject(null,
 props)` mechanism `WidgetSlot` uses, exposing the live instance as `.item`
 for the host to call directly (e.g. the bar's clef calling
-`.item.toggle()`). A slot's catalog entry in `slots.md` documents which
+`.item.toggle()`). Its floor is the same chain's: sonata's body, else an
+optional lane-side `fallback` Component. Only `switcher` gives one, the plain
+`AoideSwitcher.qml`, so the lane's one `aoide:switcher` shortcut toggles a
+song's `widgets/switcher.qml` when the song ships it and the plain switcher in
+every other song. A shortcut that toggles a slot is registered once, by the
+lane, never also by the body it toggles: two registrations of one name
+collide. A slot's catalog entry in `slots.md` documents which
 anchor kind hosts it — a slot that roots a `PanelWindow` also documents its
 WlrLayershell namespace there, since the compositor lane's glass
 layerrules match on it; that contract travels with the slot.
