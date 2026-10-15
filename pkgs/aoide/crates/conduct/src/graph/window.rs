@@ -20,7 +20,7 @@ use super::model::{
     canonical_state, load_stage, observe_workspace, projects_path, sessions_path, write_stage,
     Project, ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
-use super::session_store::{ancestry_may_move, chain_is_stale};
+use super::session_store::{ancestry_may_move, chain_is_stale, live_harness_outside};
 use aoide_storage::fs::{pid_is_alive, with_stage_lock};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -727,7 +727,8 @@ pub(in crate::graph) fn discover_window_from(pid: i32) -> Option<(String, Option
 /// answers `None` without `HYPRLAND_INSTANCE_SIGNATURE` (through `hyprctl_clients`),
 /// while the heal reads only `/proc`. A bind fills `windowAddress`, the workspace
 /// observation, and the record's `hookAncestry` (the harness's chain, through
-/// `ancestry_may_move`) in one locked write. A stale stored chain ([`chain_is_stale`])
+/// `ancestry_may_move`) in one locked write. A bind is refused onto a record that
+/// a live harness outside the chain anchors ([`live_harness_outside`]). A stale stored chain ([`chain_is_stale`])
 /// takes the same chain in one locked write, with or without a bind, so a live
 /// harness the record never recorded is recorded on its next turn, compositor or not.
 /// A live stored chain is never written here. It never writes `pid` (discovery is
@@ -756,8 +757,8 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
     if windowless_by_lineage(id, &file.sessions) {
         return;
     }
-    let needs_window = rec.window_address.is_empty();
-    if !needs_window && rec.hook_ancestry.is_empty() {
+    let windowless = rec.window_address.is_empty();
+    if !windowless && rec.hook_ancestry.is_empty() {
         return;
     }
     // The walk runs twice on one snapshot. Without the compositor first, which is all a
@@ -768,6 +769,8 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
     let Some(walked) = chain_of(&ancestry, None) else {
         return;
     };
+    // A bind onto a record its live harness anchors is a stranger's, so it is refused.
+    let needs_window = windowless && live_harness_outside(rec, &walked, pid_is_alive).is_none();
     let needs_heal = chain_is_stale(rec, &walked, pid_is_alive);
     if !needs_window && !needs_heal {
         return;
@@ -796,8 +799,11 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
         let Some(s) = file.sessions.iter_mut().find(|s| s.session_id == id) else {
             return;
         };
-        // A window filled by a concurrent writer while we were discovering is kept.
-        let bind = found.filter(|_| s.window_address.is_empty());
+        // A window filled by a concurrent writer while we were discovering is kept, and
+        // so is a record a live harness outside `chain` has come to anchor.
+        let bind = found.filter(|_| {
+            s.window_address.is_empty() && live_harness_outside(s, &chain, pid_is_alive).is_none()
+        });
         let moves = bind.is_some() || chain_is_stale(s, &chain, pid_is_alive);
         let mut changed = false;
         if let Some((addr, workspace)) = bind {
@@ -2474,8 +2480,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         const DEAD: i32 = 2_000_000_000;
-        do_hook_session_start("hand", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD + 2]);
-        do_hook_session_start("bare", Some("claude"), Some("/w"), None, None, None, &[]);
+        do_hook_session_start(aoide_protocol::Door::Cli, "hand", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD + 2]);
+        do_hook_session_start(aoide_protocol::Door::Cli, "bare", Some("claude"), Some("/w"), None, None, None, &[]);
 
         let (child, hook) = stand_in_hook(&dir, "pid", |s, o| {
             sh_c(&format!("sh {} {}; true", s.display(), o.display()))
@@ -2531,7 +2537,7 @@ mod tests {
         });
         let stored: Vec<i32> = pid_ancestry(hook).into_iter().skip(2).take(8).collect();
         assert_eq!(stored.first(), Some(&(std::process::id() as i32)), "the stored chain starts at the harness");
-        do_hook_session_start("bound", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
+        do_hook_session_start(aoide_protocol::Door::Cli, "bound", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
 
         let before = client_reads();
         ensure_session_window("bound", Some(hook));
@@ -2688,7 +2694,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start("h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
+        do_hook_session_start(aoide_protocol::Door::Cli, "h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
         let sibling_chain: Vec<i32> = [sibling.id() as i32]
             .into_iter()
             .chain(a[2..].iter().copied())
@@ -2713,7 +2719,7 @@ mod tests {
         // The hook exits. The live harness now stands in the record's own chain.
         let _ = hook.kill();
         let _ = hook.wait();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "sib", Some("claude"), Some("/w"), Some("0xW"), None, None, &sibling_chain,
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2755,7 +2761,7 @@ mod tests {
         let me = std::process::id() as i32;
         let a = pid_ancestry(me);
         assert!(a.len() >= 3, "the test process has a harness and an owner above it");
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "old", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD, DEAD + 1, DEAD + 2],
         );
@@ -2778,7 +2784,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "sib", Some("claude"), Some("/w"), Some("0xW"), None, None, &sibling_chain,
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2822,7 +2828,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start("h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
+        do_hook_session_start(aoide_protocol::Door::Cli, "h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
         let sibling_chain: Vec<i32> = [sibling.id() as i32]
             .into_iter()
             .chain(a[2..].iter().copied())
@@ -2853,7 +2859,7 @@ mod tests {
 
         let _ = hook.kill();
         let _ = hook.wait();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "sib", Some("claude"), Some("/w"), Some("0xW"), None, None, &sibling_chain,
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2903,7 +2909,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "anchored", Some("claude"), Some("/w"), Some("0xW"), None, Some(anchor.id()),
             &stored,
         );

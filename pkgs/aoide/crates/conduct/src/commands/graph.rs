@@ -128,11 +128,11 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "phase"],
-            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins).",
+            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins). A `done` phase (and `exit`, `finished`, `complete`, which fold to it) is `session end`.",
             args: [],
             flags: [
                 flag!("id", "string", "Session id (required)."),
-                flag!("phase", "string", "Live phase to record; folded to one canonical state: working | awaiting | stopped | idle | done."),
+                flag!("phase", "string", "Live phase to record, folded to one canonical state: working | awaiting | stopped | idle | done. `died` is not recordable here: a wrap records its child's death."),
             ],
             gated: false,
             implemented: true,
@@ -144,7 +144,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "end"],
-            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown.",
+            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown. From outside a live harness it is refused and writes nothing (reason `harness-anchored`).",
             args: [],
             flags: [flag!("id", "string", "Session id to end (required).")],
             gated: false,
@@ -197,7 +197,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["resurrect"],
-        summary: "Revive sessions. BARE (no --project/--all/--id): walk up from cwd for the nearest .aoide/project.json and revive THAT manifest's specs directly — no projects.json registration needed. Each local-host spec (a spec whose host doesn't match this host's own name is skipped, remote summoning lands in a later phase) enriches off the newest matching state/session-ledger.jsonl entry (same cwd/agent) through the exact --id path below when one exists, else clean-spawns windowed from the spec's own command or the agent's default launch. WITH --project (resolved against projects.json by exact name; --all/--id ignore the manifest entirely): anchors ledger entries to it (longest-prefix, same rule the bare `graph` render uses), then selects — bare (no --all/--id) resumes the project's WHOLE undying set (state/undying.json, `session grant undying on|off`) minus any id already alive; --all widens to every anchored entry; --id narrows to one. Each candidate resolves through two arms: a harness with a verified resume argv spawns windowed running `<harness> --resume <id>`; a conducted TERMINAL (no harness profile, but a captured `restore` snapshot) spawns windowed running its login shell, then — once registered — either re-execs its last foreground command (`--yes --submit`, only when it was demonstrably running one, and never for a recorded `sudo …`) or preloads its last typed-but-unsubmitted line into the new prompt (`--yes`, deliberately never `--submit` — nothing runs without a human keystroke) or delivers nothing if it was idle with no typed line. Neither arm resolving is skipped with a taught message. The revived session always mints a NEW sessionId (ids are never recycled) and is stamped resumedFrom, rendered as a `resumed` graph edge; an undying old id transfers its mark onto the new one. A windowed-spawn failure (no $AOIDE_TERMINAL / no display) is folded into `failed` rather than erroring the command, so a headless host degrades gracefully.",
+        summary: "Revive sessions. BARE (no --project/--all/--id): walk up from cwd for the nearest .aoide/project.json and revive THAT manifest's specs directly — no projects.json registration needed. Each local-host spec (a spec whose host doesn't match this host's own name is skipped, remote summoning lands in a later phase) enriches off the newest matching state/session-ledger.jsonl entry (same cwd/agent) through the exact --id path below when one exists, else clean-spawns windowed from the spec's own command or the agent's default launch. WITH --project (resolved against projects.json by exact name; --all/--id ignore the manifest entirely): anchors ledger entries to it (longest-prefix, same rule the bare `graph` render uses), then selects — bare (no --all/--id) resumes the project's WHOLE undying set (state/undying.json, `session grant undying on|off`) minus any id already alive; --all widens to every anchored entry; --id narrows to one. Each candidate resolves through two arms: a harness with a verified resume argv spawns windowed running `<harness> --resume <id>`; a conducted TERMINAL (no harness profile, but a captured `restore` snapshot) spawns windowed running its login shell, then — once registered — types its last foreground command at the prompt (`--yes`, never `--submit`: a human presses Enter; only when it was demonstrably running one, and not when the restore refuses it, as for a recorded `sudo …`); an idle one restores its cwd alone and delivers nothing. Neither arm resolving is skipped with a taught message. The revived session always mints a NEW sessionId (ids are never recycled) and is stamped resumedFrom, rendered as a `resumed` graph edge; an undying old id transfers its mark onto the new one. A windowed-spawn failure (no $AOIDE_TERMINAL / no display) is folded into `failed` rather than erroring the command, so a headless host degrades gracefully.",
         args: [],
         flags: [
             flag!("project", "string", "Project name to resurrect a session for; resolved against projects.json by exact name. Omit entirely, along with --all/--id, to use bare-manifest mode instead (walk up from cwd for .aoide/project.json)."),

@@ -263,6 +263,19 @@ pub struct AgentProfile {
     /// value for a harness whose marker set has not been established from its
     /// own material — never a guessed name.
     pub session_env_markers: &'static [&'static str],
+
+    /// The `reason` values of a `SessionEnd` payload after which the harness
+    /// PROCESS lives on under another session id: the old id ended, the
+    /// conversation did not. Claude documents `clear` (`/clear` starts a new
+    /// session in the same process) and `resume` (a switch to another
+    /// session); every other value it documents (`logout`,
+    /// `prompt_input_exit`, `other`) is the process going away.
+    ///
+    /// Matched against the raw field, byte for byte, never normalised: an
+    /// absent field and an unknown value both read as "the process ends",
+    /// which is the side that tells a spawner. An empty slice is the honest
+    /// value for a harness that documents no such field.
+    pub session_end_continues: &'static [&'static str],
 }
 
 // ── claude ──────────────────────────────────────────────────────────────────
@@ -830,6 +843,9 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
         "CLAUDE_PID",
         "CLAUDE_CODE_ENTRYPOINT",
     ],
+    // The `reason` of claude's SessionEnd payload, from its hooks reference:
+    // `clear` and `resume` both leave the process running under a new id.
+    session_end_continues: &["clear", "resume"],
 };
 
 /// `claude --resume <harness_session_id>` — resume a prior claude session by
@@ -1249,6 +1265,8 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
     // material — an empty list, never a guessed name (a wrong name here would
     // strip a user's variable from every spawned child).
     session_env_markers: &[],
+    // No `reason` field is documented for this harness's SessionEnd.
+    session_end_continues: &[],
 };
 
 /// `kimi --session <harness_session_id>` — resume a prior kimi session by
@@ -1594,6 +1612,8 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
     // material — an empty list, never a guessed name (a wrong name here would
     // strip a user's variable from every spawned child).
     session_env_markers: &[],
+    // No `reason` field is documented for this harness's SessionEnd.
+    session_end_continues: &[],
 };
 
 /// `pi --session-id <harness_session_id>` — resume a prior pi session by its
@@ -2993,6 +3013,8 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     // exists to catch, and `AOIDE_SESSION_ID` is deliberately never scrubbed:
     // it is the aoide parent edge, not a harness marker).
     session_env_markers: &[],
+    // No `reason` field is documented for this harness's SessionEnd.
+    session_end_continues: &[],
 };
 
 /// The profile table. New harnesses land here as another entry.
@@ -3298,6 +3320,19 @@ mod tests {
         assert!(KIMI_PROFILE.session_env_markers.is_empty());
         assert!(PI_PROFILE.session_env_markers.is_empty());
         assert!(EIDOLON_PROFILE.session_env_markers.is_empty());
+    }
+
+    /// The reasons after which the harness process lives on are claude's two
+    /// documented ones, spelled exactly; no other harness documents the field.
+    #[test]
+    fn claude_profile_names_the_session_end_reasons_that_keep_the_process() {
+        assert_eq!(CLAUDE_PROFILE.session_end_continues, ["clear", "resume"]);
+        for gone in ["logout", "prompt_input_exit", "other", ""] {
+            assert!(!CLAUDE_PROFILE.session_end_continues.contains(&gone));
+        }
+        assert!(KIMI_PROFILE.session_end_continues.is_empty());
+        assert!(PI_PROFILE.session_end_continues.is_empty());
+        assert!(EIDOLON_PROFILE.session_end_continues.is_empty());
     }
 
     // ── the kimi profile ───────────────────────────────────────────────────

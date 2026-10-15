@@ -159,9 +159,12 @@ by decision — no embedded database yet
   becomes `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, and the
   link-preserving copy picks `symlink_dir`/`symlink_file` by asking the
   source what its target is. The private-file and private-directory policy is
-  NOT answered here: `atomic_write_private`'s temp and `secure_private_dir`
-  call `aoide_protocol::owner_only`, one implementation exposed from the leaf
-  crate rather than a second copy in this one.
+  NOT answered here: `atomic_write_private`'s temp (a leftover of its name is
+  removed, then created exclusively at `0600`) and `secure_private_dir` call
+  `aoide_protocol::owner_only`, one implementation exposed from the leaf crate
+  rather than a second copy in this one. The state tree's privacy
+  boundary is `state/`, which `fs::ensure_write_dir` locks; the rule is
+  CONTRACTS.md §4.
   `conducting_stage_dir`'s first no-override resolution in a process also
   drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
   six core files off their pre-split `song/stage/` location, never
@@ -583,7 +586,7 @@ by decision — no embedded database yet
   didn't mint itself at the door — env AND the unsealed ledger both.
   `records::RestoreSnapshot`/`SessionRecord.restore`/`LedgerEntry.restore`
   (P-C5, durable-sessions plan) are a conducted TERMINAL's continuously-
-  captured `{cwd, idle, argv, typed}` snapshot — the SAME `RestoreSnapshot`
+  captured `{cwd, idle, argv}` snapshot — the SAME `RestoreSnapshot`
   type embedded on both, `origin`'s "additive live field, always-serialized
   ledger field" shape again, except `RestoreSnapshot`'s OWN fields never use
   `skip_serializing_if` in EITHER home, so a populated snapshot reads the
@@ -591,9 +594,8 @@ by decision — no embedded database yet
   field rather than inferred from `state`, deliberately: the reap sweep
   overwrites `state` to `"done"` before its ledger write, so idleness would
   otherwise be unrecoverable by the time `ledger_session_exit` runs.
-  `aoide-conduct` is the sole writer (its PTY tick, ~1 Hz) and the sole
-  reader of `typed`'s raw keystroke stream — this crate only holds the
-  shape, never the capture logic.
+  `aoide-conduct` is the sole writer (its PTY tick, ~1 Hz); this crate only
+  holds the shape, never the capture logic.
 - `undying` — the undying mark (durable-sessions plan, P-C1; renamed from
   "carry" at command-defrag lane U1, 2026-08-27): `state/undying.json`, the
   set of session ids marked durable so a project's whole undying set can be
@@ -912,6 +914,9 @@ by decision — no embedded database yet
   so does `wire_auth` below (P-P4) — `Keypair::sign`/`Keypair::verify` are
   its ONLY two entry points into `ed25519_dalek`, so neither
   `aoide-client` nor `aoide-server` needs that dependency directly.
+  `load_existing` is the read half of `load_or_mint`: `None` when no key is on
+  disk, never a mint, never a write. The door's answer path uses it, so
+  answering a request cannot create this box's identity.
 - `sealed_id` — the daemon-sealed session credential (LANE IDENTITY P-ID1,
   `docs/architecture/CONTRACTS.md` §4's `seal` field, plan file "LANE
   IDENTITY (#63)"): `SealedIdentity{sessionId, pid, pidStarttime,
@@ -975,8 +980,9 @@ by decision — no embedded database yet
   (P-P4, `docs/architecture/PAIRING.md`'s "Wire authentication (paired
   nodes)" section, CONTRACTS.md §6's own amendment for the full wire
   shape and pinned vectors). `canonical_string(method, path, timestamp,
-  nonce, body)` is the ONE function both ends build independently (never
-  a wire-carried canonical string) — five fields, each trimmed+lowercased,
+  nonce, body, mesh)` is the ONE function both ends build independently
+  (never a wire-carried canonical string) — five fields, plus the mesh as a
+  sixth when the request names one. Each is trimmed+lowercased and
   NUL-separated after every field including the last (P-P2's
   `derive_sas`/`derive_commit` style, reused verbatim), with only the body
   digested (`sha2`) rather than riding the string whole. `sign_hex`/
@@ -992,6 +998,12 @@ by decision — no embedded database yet
   doc comment states the reasoning). `HEADER_NODE`/`HEADER_TIMESTAMP`/
   `HEADER_NONCE`/`HEADER_SIGNATURE` are the four wire header names — always
   present together or not at all, never independently optional.
+  The answer half: `answer_string(request_signature, request_nonce, status,
+  body)` is the canonical string a door's answer signature covers (method
+  field `ANSWER`, status in the timestamp field); `sign_answer` and
+  `verify_answer` sign and check it, and `HEADER_ANSWER_SIGNATURE` names the
+  response header that carries it. The answer string's layout is pinned by
+  `answer_string_stability_vector_never_drifts` and quoted in CONTRACTS.md §6.
 - `advertise` — the discovery advertisement's wire format and the
   advertise switch (P-P6 + task #120, `docs/architecture/PAIRING.md`'s
   "Discovery (advertise-but-locked)" section, CONTRACTS.md §6's

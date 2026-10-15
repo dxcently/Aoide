@@ -290,16 +290,35 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   forever; a timed-out write is an ordinary `write-failed` skip, latch
   untouched, same as any other write failure.
 - **`graph::pingback::hook`** is the ping-back's second source, for every
-  other registered harness whose hooks write `hooks.json` (claude, kimi, pi):
-  a local-parented child's canonical hook phase and `updatedAt` become
-  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …` and `…
-  settled`, claimed in the SAME stage-lock section as the trace source into
-  the entry's `hook` field of `pingback.json`, and delivered by the same
-  `deliver` — it adds a cursor half and three lines, never a second transport.
-  The recipient is the child's SPAWNER, resolved through the wrap that hosts
-  it and only over an edge the kernel attested (`hook::recipient`; the climb
-  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell and a
-  sub-agent node are not its children.
+  other registered harness whose hooks write `hooks.json` (claude, kimi, pi): a
+  local-parented child's canonical hook phase and `updatedAt` become
+  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …`, `… settled`,
+  `… died mid-turn · last: …` and `… ended mid-turn · last: …`, claimed in the
+  SAME stage-lock section as the trace source into the entry's `hook` field of
+  `pingback.json`, and delivered by the same `deliver`: it adds a cursor half
+  and five lines, never a second transport. A death the wrap records (`done`
+  with a `death` fact on the child's hook record, written by
+  `session_store::record_hook_deaths`) is said once, with its status; one the
+  tick infers carries none. A session that ends itself with its turn open
+  (`session end` run by its own harness or under it, or its `SessionEnd`
+  hook) records the fact `end`, said once as `ended mid-turn`. Anyone else's
+  `session end` of a session whose harness lives is refused and writes
+  nothing, so nothing is said. A `SessionEnd` whose `reason` is `clear` or
+  `resume` ends the session and says nothing either, since the harness process
+  lives on under another session id. A live harness anchors its record: no
+  hook from outside it re-homes its chain or parent, no `session start` or
+  `graph link` from outside moves its window or parent, and no end from outside
+  makes it prunable before the end. The fact names its spawner
+  (`hook::recipient_of`), so a child no tick saw before its wrap ended is still
+  told. At most three death lines per wrap and spawner go out in a pass, then
+  one `and N more ended or died mid-turn`. The recipient is the child's SPAWNER,
+  resolved through the wrap that hosts it and only over an edge the kernel
+  attested (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can
+  no longer route is judged from the route its entry kept (`hook::gone`). Its
+  rules, orphan included, are stated once in `CONTRACTS.md` under
+  `state/stage/pingback.json`. An eidolon, a remote-parented child, a shell, a
+  sub-agent node and a conducted wrap are not its children, so a chain stamped
+  on a wrap routes nothing.
 - **`graph::prompt`** is the screen source of `awaiting`, for a conducted
   program that reports through neither hooks nor a trace (a `codex`, an
   `aider`, a REPL, an installer in a plain conducted shell). The wrap's
@@ -314,6 +333,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   shell's screen is silenced at its bare prompt; a shell given a command or a
   script is heard. A non-shell session with a hook phase or a trace is never
   touched.
+- **`shell_at_prompt`** is the one idle verdict a conducted shell's `state` and
+  `restore.idle` are both read off. An interactive shell is idle at its bare
+  prompt (the pgid check); a command shell (`bash -c …`) is working while a
+  child runs, once its executable is no longer the one it started as (or
+  cannot be read), or while its CPU time rises. A session whose argv runs
+  `sudo`, `doas` or `su` is never idle, and is labelled and recorded by its own
+  conducted line; the privilege programs it does not detect are listed in
+  CONTRACTS.md. The wrap keeps that line, the executable and the CPU memory
+  for it (`ShellWatch`; see AGENTS.md and CONTRACTS.md, the shell-state
+  paragraph).
 - **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape
   stripper: the screen source reads its window through it, and
   `aoide-conductor`'s log tail renders through it.
@@ -581,7 +610,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   re-stamp is change-only on difference, and
   `do_session_start`'s upsert writes the resolved parent as it does every
   other field on a re-start. Either way, no daemon reachable or no
-  conducted ancestor found leaves the parent untouched, fail-closed.
+  conducted ancestor found leaves the parent untouched, fail-closed. A conducted
+  wrap's edge is never moved this way: the walk skips it, and
+  `do_hook_session_start` drops a parent it would write onto one.
   `session_store::lineage_of`
   (ancestors + descendants) is the matching widened carve-out for the
   same-window registration-time eviction, reused by `reap.rs`'s dedup pass
@@ -1084,16 +1115,11 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   **Post-spawn restore delivery (P-C6):** once a terminal candidate's spawn
   actually registers, `restore_delivery` decides what — if anything — lands
   in the new pty, through `send::session_send` in-process, never a
-  direct socket write. Working (`idle: false`) with a foreground `argv`
-  re-execs it (`--yes --submit`) — EXCEPT when `argv[0]`'s basename is
-  `sudo` (`is_sudo_argv`, the orchestrator's ruling on durable-sessions
-  plan open knob 5): a privileged command is never re-exec'd unattended, so
-  only the cwd restores. Idle (`idle: true`) with a clean `typed` line
-  preloads it (`--yes`, and — permanently — no `--submit`): the text sits
-  in the new prompt until a human presses Enter, never running itself. Idle
-  with no `typed` delivers nothing; a terminal reopened at its own cwd is
-  already the complete answer. See AGENTS.md for why the two branches are
-  never unified behind a shared boolean parameter.
+  direct socket write. Working (`idle: false`) with a foreground `argv` is
+  typed at its prompt (`--yes`, never `--submit`) unless `restore_argv_refusal`
+  refuses it, and then only the cwd restores (the refusals are in CONTRACTS.md's
+  restore paragraph). Idle (`idle: true`) delivers nothing; a terminal
+  reopened at its own cwd is already the complete answer.
   **Bare-manifest mode (U2, command-defrag lane U):** `resurrect` with NONE
   of `--project`/`--all`/`--id` walks up from cwd
   (`aoide_storage::manifest::walk_up`) for the nearest `.aoide/
@@ -1157,8 +1183,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
   WRAPPED ARGV, never the agent label (task #100).**
   `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz
-  refresh tick, `typed_capture_active`'s buffer, the restore snapshot) comes
-  from the SAME `program_is_a_shell(&inv.args)` every refusal lane reads —
+  refresh tick and the restore snapshot) comes from the SAME
+  `program_is_a_shell(&inv.args)` every refusal lane reads —
   the program's own basename against the shell list, with the launchers a
   shell arrives through (`env`, `nix develop -c`, `setsid`, `timeout`,
   `nice`, …) resolved to what they forward to — never `agent == "shell"`.
@@ -1183,26 +1209,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   process group. `idle` is captured as its OWN field rather than read back
   off `state` later: `reap.rs`'s sweep overwrites `state` to `"done"`
   BEFORE its ledger write, so idleness is unrecoverable from `state` by
-  then. This is a CONTINUOUS capture, not a reap-time snapshot — by the
-  time a sweep condemns a session its process is already gone (the exact
-  signal it reaped on), so a `/proc` read there returns nothing, every
-  time; `doc.rs::ledger_session_exit` projects the record's last-captured
-  `restore` verbatim into the ledger line, no new call site. `typed` (the
-  reconstructed unsubmitted prompt line) is REFUSAL-based: `conduct_
-  multiplex` feeds every byte written to the master — from BOTH real stdin
-  and an injection connection, since both land in the same shell readline
-  buffer — into a capped `TypedLineBuffer`; `\r`/`\n` submit-clears it, and
-  ANY other control byte (an escape sequence, `^R`, Tab, `^U`/`^W`) or
-  invalid UTF-8 POISONS the current line to `None` rather than guessing.
-  `typed_capture_active` gates the buffer's very existence to an
-  interactive shell (`is_shell && read_stdin`) — a headless conduct never
-  reads stdin, so it never populates `typed`. See AGENTS.md for why this
-  is refusal-based, not best-effort. The same verdict is readable OFF a
-  record as `wrapped_program_is_a_shell(&rec)` (`restore.is_some()`), which
-  is how a lane that was not there at spawn time — ping-back, doorbell,
-  the A2A door — can refuse to type into a shell without knowing the
-  wrapped argv: stamped on the multiplexer's opening tick, so it is present
-  from the start of a live shell session.
+  then. This is a CONTINUOUS capture, not a reap-time snapshot — by the time a
+  sweep condemns a session its process is already gone (the exact signal it
+  reaped on), so a `/proc` read there returns nothing, every time;
+  `doc.rs::ledger_session_exit` projects the record's last-captured `restore`
+  verbatim into the ledger line, no new call site. The same verdict is
+  readable OFF a record as `wrapped_program_is_a_shell(&rec)`
+  (`restore.is_some()`), which is how a lane that was not there at spawn time
+  — ping-back, doorbell, the A2A door — can refuse to type into a shell
+  without knowing the wrapped argv: stamped on the multiplexer's opening tick,
+  so it is present from the start of a live shell session.
 - **Session origin (P-P3, `docs/architecture/PAIRING.md` decision 7;
   write-authority tightened at LANE IDENTITY P-ID0, G16/G5):**
   `session_store.rs::stamp_origin` (now `pub`, crossing the crate boundary)
@@ -1287,11 +1303,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   find a session whose seal `verify_seal_over` confirms against the
   daemon's LIVE public key (`aoide_client::daemon::daemon_seal_pubkey_hex`
   — a fresh `ping` round trip, never cached, never a file; that channel is
-  only as trustworthy as the daemon socket's same-uid exclusivity, which
-  `bind_socket`'s unlink-then-bind with no flock/pidfile does NOT actually
-  provide against a same-uid attacker — P-ID3's job to floor, stated
-  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred`
-  reads `SO_PEERCRED` off an accepted `UnixStream` (a local
+  only as trustworthy as the daemon socket's same-uid exclusivity, which has
+  the open hole (`AOIDED.md` "Socket") — P-ID3's job to floor, stated
+  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred` reads
+  `SO_PEERCRED` off an accepted `UnixStream` (a local
   reimplementation of `aoide_secrets::peercred`'s own shape — no new
   cross-crate edge for one struct+fn). **That mechanism is Linux/Android
   only, and deliberately NOT ported**: any other host gets the same
@@ -1333,6 +1348,35 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   to that one MCP subprocess, never `aoided`'s. This crate computes where
   it lives and is its first client: `doorbell.rs::ring_locked` connects to
   it (never binds or accepts — that lifecycle stays `aoide-server`'s).
+- **A protected live wrap is ended only by its own exit, and the autogate
+  reads only the spawn-time edge.** `identity::is_protected_live_wrap` is the
+  one predicate, stated once in `CONTRACTS.md`'s identity section. It reads no
+  daemon key. `identity::live_sealed_wrap_ids` is the set it yields.
+  `session_store::protected_wrap` is the one reader of it for a single id, and
+  `live_wrap_refusal_for` is the refusal every finishing door (`session end`,
+  a terminal `session phase`) asks from it first, and so does `graph link` as
+  the child. The start door (`session_start`) and the hook's SessionStart
+  (`do_hook_session_start`) take one verdict (`live_wrap_verdict`) before any
+  write, and the hook's refusal is audited on the door it arrived on. A start
+  judged on a protected wrap writes nothing, and the hook arm lands nothing
+  after it. Every other hook arm is refused by one guard in
+  `send.rs::hook_for_profile_gated`, right after `map_hook`: a payload whose
+  `session_id` names a protected wrap is ignored whole (`no-op
+  (live-sealed-wrap)`, audited on the door), since a harness reports under its
+  child's id and never its wrap's. `doc.rs::prune_done_keeping` keeps such a
+  record out of every prune, and `reap_inner` spares it. `doc.rs::drop_sessions`
+  keeps a protected survivor's edge and drops its spawn stamp when the record
+  the edge names leaves the roster, and `do_subagent_rekey` keeps the edge too.
+  A sub-agent record leaving the roster needs no such rule: the `sub:` prefix
+  is reserved (`session_store::reserved_id_refusal`, asked by `conduct`,
+  `spawn`, the start door and the hook's SessionStart, and `is_reserved_id`,
+  which the eidolon and Codex-app reconcilers skip), so a `sub:` record is
+  never a spawner. The sub-agent writers that act on an id a hook payload
+  names skip a protected live wrap holding it. The autogate reads a parent edge
+  only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner`
+  to name the same id. Only `conduct` registration writes that stamp, and
+  `SessionRecord::set_parent_session` drops it whenever the edge moves. The
+  residuals are listed in `CONTRACTS.md`.
 - **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
   `identity::peer_cred`/`PeerCred` widened `pub(crate)` (was `pub(in
   crate::graph)`) so `shellbridge.rs` — a sibling module of `graph`, not a

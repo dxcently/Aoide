@@ -79,12 +79,14 @@
 mod hook;
 mod prompt;
 
+pub(in crate::graph) use hook::recipient_of;
+
 use super::common::{clean_line, clip_flat, strip_unsafe};
 use super::conduct::{auto_type_refusal, channel_socket_path, AutoTypeRefusal};
 use super::doorbell::{connect_for_ring, write_channel};
 use super::eidolon::{eidolon_state_from_trace, DroppedEidolon};
 use super::model::{
-    canonical_state, hooks_path, load_stage, sessions_path, HooksFile, SessionRecord, SessionsFile,
+    canonical_state, hooks_path, load_stage, sessions_path, write_stage, HooksFile, SessionRecord, SessionsFile,
 };
 use super::permit::profile_for_agent;
 use super::send::{audit_send, write_delivery, SUBMIT_KEYSTROKE_DELAY};
@@ -416,12 +418,15 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
     // bounded socket round trip has no business inside it), and only when some
     // hook child, or a wrap asking off its screen, could need it. `None` — no
     // daemon answering — fails every seal check closed: those sources then
-    // speak for nobody.
-    let seal_key = roster
-        .iter()
-        .any(|r| hook::tracked(r) || prompt::pending(r))
-        .then(aoide_storage::attest::daemon_seal_pubkey_hex)
-        .flatten();
+    // speak for nobody. A hook candidate is a tracked record OR a hook entry the
+    // cursor still holds: a child whose record and wrap were pruned in the same
+    // reap pass has left this roster, but its open turn still needs the key to be
+    // told. The cursor read here only decides whether to fetch the key; the claim
+    // reads it again inside the lock, and a key missed this tick keeps the entry
+    // for the next.
+    let candidate = roster.iter().any(|r| hook::tracked(r) || prompt::pending(r))
+        || read_cursor().values().any(|e| e.hook.is_some());
+    let seal_key = candidate.then(aoide_storage::attest::daemon_seal_pubkey_hex).flatten();
     let sealed = |rec: &SessionRecord| {
         seal_key.as_deref().is_some_and(|key| super::identity::verify_seal_over(rec, key))
     };
@@ -438,8 +443,7 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         let roster_now: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path())
             .map(|f| f.sessions)
             .unwrap_or_default();
-        let hooks_now: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
-        let hook_children = hook::gather(&roster_now, &hooks_now.hooks, &sealed);
+        let mut hooks_now: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
         let mut tracked_now = tracked_ids.clone();
         tracked_now.extend(
             roster_now
@@ -449,16 +453,34 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
         );
 
         let (mut claims, old_cursor, mut new_cursor) = claim_locked(&children, &tracked_now, now_ms);
-        claims.lines.extend(hook::claim(&hook_children, &mut new_cursor, now_ms));
+        let (hook_lines, said) =
+            hook::claim(&roster_now, &hooks_now.hooks, &sealed, &old_cursor, &mut new_cursor, now_ms);
+        claims.lines.extend(hook_lines);
         claims.lines.extend(prompt::claim(&roster_now, &sealed, &mut new_cursor));
+        // The cursor is written before anything is delivered, and a line is
+        // delivered only once its claim is durable: a failed write delivers
+        // nothing, so no later tick can repeat what this one said.
         if new_cursor != old_cursor {
-            match serde_json::to_string(&new_cursor) {
-                Ok(body) => {
-                    if let Err(e) = aoide_storage::fs::atomic_write(&pingback_path(), &format!("{body}\n")) {
-                        eprintln!("[aoide/reap] ping-back cursor write failed: {e}");
-                    }
-                }
-                Err(e) => eprintln!("[aoide/reap] ping-back cursor encode failed: {e}"),
+            let body = serde_json::to_string(&new_cursor)
+                .map_err(|e| eprintln!("[aoide/reap] ping-back cursor encode failed: {e}"))
+                .ok();
+            let written = body.and_then(|body| {
+                aoide_storage::fs::atomic_write(&pingback_path(), &format!("{body}\n"))
+                    .map_err(|e| eprintln!("[aoide/reap] ping-back cursor write failed: {e}"))
+                    .ok()
+            });
+            if written.is_none() {
+                return Claimed::default();
+            }
+        }
+        // A said death's fact leaves its record only after the cursor has
+        // recorded it. A record that keeps its fact is said again next tick,
+        // so a failed clear costs a repeat, never a silent loss.
+        if !said.is_empty() {
+            hook::clear_said(&mut hooks_now.hooks, &said);
+            if let Err(e) = write_stage(&hooks_path(), &hooks_now) {
+                eprintln!("[aoide/reap] ping-back death clear failed: {e}");
+                return Claimed::default();
             }
         }
         claims
@@ -585,6 +607,16 @@ fn claim_locked(
         }
     }
     (claimed, old, next)
+}
+
+/// The wrap-written deaths the tick has not claimed yet, as of now (see
+/// `hook::unclaimed_deaths`). The reaper and every prune spare these records, so
+/// the fact survives until the tick has said it once.
+pub(crate) fn held_deaths(hooks: &[crate::graph::model::HookRecord]) -> std::collections::HashSet<String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    hook::unclaimed_deaths(hooks, now)
 }
 
 /// Read the cursor file; any unreadable/unparseable content reads as an EMPTY
@@ -770,6 +802,13 @@ fn choose_event(
 
 // ── the line ────────────────────────────────────────────────────────────
 
+/// The `died mid-turn` line, for both sources. The wording lives here and
+/// nowhere else; its tag and tail arrive already cleaned, and `deliver` strips
+/// the wire.
+fn died_mid_turn(tag: &str, tail: &str) -> String {
+    format!("{tag} died mid-turn{tail}")
+}
+
 /// The event as ONE line. `tag` is the renderer's own — `[eidolon <petname>]`
 /// here, the parent's ledger tag on the node that pulled the event — so an
 /// event never names a box and this function needs nothing but the event.
@@ -791,9 +830,7 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
             line
         }
         PingEvent::DiedMidTurn { calls, say, errors } => {
-            let mut line = format!("{tag} died mid-turn");
-            line.push_str(&turn_tail(*calls, None, say, *errors));
-            line
+            died_mid_turn(tag, &turn_tail(*calls, None, say, *errors))
         }
         PingEvent::Asking { prompt, errors } => {
             format!("{tag} asking: \"{}\"{}", quote(prompt), errors_note(*errors))
@@ -801,10 +838,10 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
         PingEvent::WrappingUp { calls_left, secs_left, errors } => {
             let mut line = format!("{tag} wrapping up");
             if let Some(left) = calls_left {
-                line.push_str(&format!(" · {left} calls left"));
+                line.push_str(&format!(" · {} calls left", clean(left)));
             }
             if let Some(left) = secs_left {
-                line.push_str(&format!(" · {left} s left"));
+                line.push_str(&format!(" · {} s left", clean(left)));
             }
             line.push_str(&errors_note(*errors));
             line
@@ -812,7 +849,7 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
         PingEvent::Failing { run, tool } => {
             let mut line = format!("{tag} failing · {run} tool errors in a row");
             if let Some(label) = tool {
-                line.push_str(&format!(" · last: {label}"));
+                line.push_str(&format!(" · last: {}", strip_unsafe(label)));
             }
             line
         }
@@ -820,7 +857,7 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
             let mut line = format!("{tag} silent {mins} min");
             match last {
                 Some(Last::Said(say)) => line.push_str(&format!(" · last: \"{}\"", quote(say))),
-                Some(Last::Did(label)) => line.push_str(&format!(" · last: {label}")),
+                Some(Last::Did(label)) => line.push_str(&format!(" · last: {}", strip_unsafe(label))),
                 None => {}
             }
             line
@@ -830,7 +867,7 @@ fn render_line(tag: &str, event: &PingEvent) -> String {
             if let Some(code) = code {
                 line.push_str(&format!(" · exit {code}"));
             } else if let Some(outcome) = outcome.as_ref().filter(|o| !o.is_empty()) {
-                line.push_str(&format!(" · {outcome}"));
+                line.push_str(&format!(" · {}", clean(outcome)));
             }
             line
         }
@@ -895,8 +932,8 @@ fn read_trace(agent: &str, path: &Path) -> Option<Vec<String>> {
 /// never the ordinary path.
 fn child_tag(petname: Option<&str>, id: &str) -> String {
     match petname.filter(|p| !p.trim().is_empty()) {
-        Some(name) => format!("[eidolon {name}]"),
-        None => format!("[eidolon {id}]"),
+        Some(name) => format!("[eidolon {}]", clean(name)),
+        None => format!("[eidolon {}]", clean(id)),
     }
 }
 
@@ -1143,6 +1180,11 @@ fn deliver(
         return Err(reason.to_string());
     }
 
+    // The one place a line reaches a socket. Whatever a renderer or a cursor
+    // handed over, no control character, Cf mark or live shell metacharacter
+    // leaves this function (house rule 4, [`wire_line`]): a renderer cleans its
+    // own fields for shape, and this is the wire's guarantee, so no future arm
+    // can skip it.
     let line = wire_line(line);
     let payload = format!("{line}\n");
     let channel = connect_for_ring(channel_socket_path(parent))
@@ -1678,7 +1720,7 @@ fn audit_pull(inv: &Invocation, status: &str, message: &str) {
 mod tests {
     use super::*;
     use crate::graph::conduct::conduct_socket_path;
-    use crate::graph::model::{load_stage, sessions_path, write_stage, SessionsFile};
+    use crate::graph::model::{load_stage, sessions_path, write_stage, HookDeath, HooksFile, SessionsFile};
     use crate::graph::session_store::{do_session_start, stamp_headless};
     use crate::graph::testutil::*;
     use aoide_test_support::{accept_one, read_delivery};
@@ -2297,7 +2339,8 @@ mod tests {
             let mut rec = session(id, "/w", phase, "2026-09-12T00:00:00Z", Some(host));
             rec.petname = Some("fond-aspen".to_string());
             rec.kind = Some("agent".to_string());
-            rec.hook_ancestry = vec![9001, host_pid as i32];
+            // The harness is this process: alive for the whole test.
+            rec.hook_ancestry = vec![std::process::id() as i32, host_pid as i32];
             file.sessions.push(rec);
             file.schema_version = "0".to_string();
             write_stage(&sessions_path(), &file).unwrap();
@@ -2411,7 +2454,7 @@ mod tests {
                     rec.pid = Some(moved);
                 }
                 if rec.session_id == "kid" {
-                    rec.hook_ancestry = vec![9001, moved as i32];
+                                        rec.hook_ancestry = vec![std::process::id() as i32, moved as i32];
                 }
             }
             write_stage(&sessions_path(), &file).unwrap();
@@ -2427,6 +2470,379 @@ mod tests {
         assert!(log.contains("delivered to `wrap-p`"), "{log}");
         assert!(!log.contains("wrap-w") && !log.contains("wrap-victim"), "{log}");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The fixtures both death tests share: a spawner `wrap-p` and the host
+    /// `wrap-w` that runs the hook child `kid` (`fond-aspen`), every wrap
+    /// sealed, the child's harness this process, and the first pass spent on
+    /// the baseline.
+    fn died_fixture(tag: &str) -> (PathBuf, UnixListener, UnixListener) {
+        let root = setup(tag);
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        let spawner = headless_parent("wrap-p", "claude");
+        let host = headless_parent("wrap-w", "claude");
+        let stamp = aoide_storage::time::now_iso_utc();
+        hook_child_fixture("kid", "wrap-w", "wrap-p", std::process::id(), "working", &stamp);
+        seal_record("wrap-w", &kp);
+        seal_record("wrap-p", &kp);
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the baseline says nothing");
+        (root, spawner, host)
+    }
+
+    /// One pass, and what the spawner read off its socket during it.
+    fn heard_by(spawner: &UnixListener) -> (String, PingbackReport) {
+        let listen = spawner.try_clone().unwrap();
+        let acc = std::thread::spawn(move || read_all(listen));
+        let report = pingback(&daemon_inv(), &[]);
+        (String::from_utf8_lossy(&acc.join().unwrap()).into_owned(), report)
+    }
+
+    /// The wrap records what it saw of its child's death, as `record_hook_deaths`
+    /// does on exit: `done`, with the fact the tick will say once.
+    fn host_records_death(fact: HookDeath) {
+        let mut file: HooksFile = load_stage(&hooks_path()).unwrap();
+        for h in file.hooks.iter_mut().filter(|h| h.session_id == "kid") {
+            h.phase = "done".into();
+            h.death = Some(fact.clone());
+        }
+        write_stage(&hooks_path(), &file).unwrap();
+    }
+
+    fn recorded_death_of_kid() -> Option<HookDeath> {
+        let file: HooksFile = load_stage(&hooks_path()).unwrap();
+        file.hooks.into_iter().find(|h| h.session_id == "kid").and_then(|h| h.death)
+    }
+
+    /// A harness that is already reaped: its pid names nothing.
+    fn reaped_pid() -> u32 {
+        let mut harness = std::process::Command::new("true").spawn().unwrap();
+        let pid = harness.id();
+        harness.wait().unwrap();
+        pid
+    }
+
+    #[test]
+    fn a_harness_that_dies_under_a_live_host_is_said_once_when_the_host_records_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-died");
+        set_harness("kid", reaped_pid());
+
+        // The harness is gone under a live, sealed host: the host has not recorded
+        // it, so the tick says nothing.
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the live host tells, not the tick");
+
+        host_records_death(HookDeath::default());
+        let (text, report) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r", "one line to the spawner");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+        assert!(report.skipped.is_empty(), "{report:?}");
+        assert_eq!(recorded_death_of_kid(), None, "the claim cleared the fact it said");
+
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "once");
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "the spawner heard nothing more");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_death_whose_cursor_cannot_be_written_is_delivered_by_no_pass_and_said_once_it_can() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-cursor");
+        set_harness("kid", reaped_pid());
+        host_records_death(HookDeath::default());
+
+        // The claim cannot make its cursor durable: nothing is delivered, and the
+        // fact stays on the record for a later pass.
+        std::fs::remove_file(pingback_path()).unwrap();
+        std::fs::create_dir(pingback_path()).unwrap();
+        let report = pingback(&daemon_inv(), &[]);
+        assert!(report.delivered.is_empty(), "{report:?}");
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "nothing reached the spawner");
+        assert!(recorded_death_of_kid().is_some(), "the fact is not cleared by a claim that did not land");
+
+        std::fs::remove_dir(pingback_path()).unwrap();
+        let (text, report) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_said_death_is_not_repeated_when_pingback_json_is_deleted() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-deleted");
+        set_harness("kid", reaped_pid());
+        host_records_death(HookDeath::default());
+        let (text, _) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r");
+
+        std::fs::remove_file(pingback_path()).unwrap();
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the claim left no fact to say again");
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "the spawner heard nothing more");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hook_child_gone_mid_turn_is_reported_once_its_host_is_gone_through_the_route_it_was_last_seen_on() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-reaped");
+
+        // The harness the sighting saw is a real process, and it dies before its
+        // record leaves the roster; its hooks.json entry still reads working.
+        let mut harness = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        set_harness("kid", harness.id());
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the sighting says nothing");
+        harness.kill().unwrap();
+        harness.wait().unwrap();
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.retain(|r| r.session_id != "kid");
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        // The host wrap still runs: it records the death itself, so nothing is
+        // inferred while it does.
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "a live host tells, not the tick");
+
+        // The host exits without having recorded it.
+        {
+            let gone = reaped_pid();
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            for rec in file.sessions.iter_mut().filter(|r| r.session_id == "wrap-w") {
+                rec.state = "done".into();
+                rec.pid = Some(gone);
+            }
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        let (text, report) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "exactly once");
+        let raw = std::fs::read_to_string(pingback_path()).unwrap_or_default();
+        assert!(!raw.contains("kid"), "the entry leaves with its child: {raw}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Name `harness` as the process the hook child `id` runs under: the pid a
+    /// sighting reads as alive or dead.
+    fn set_harness(id: &str, harness: u32) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        for rec in file.sessions.iter_mut().filter(|r| r.session_id == id) {
+            rec.hook_ancestry = vec![harness as i32, std::process::id() as i32];
+        }
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    #[test]
+    fn an_orphan_whose_harness_still_runs_is_kept_and_silent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-reaped-alive");
+
+        // The reaper takes the record; its harness, this process, is still running.
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.retain(|r| r.session_id != "kid");
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "a live harness is not a death");
+        spawner.set_nonblocking(true).unwrap();
+        assert!(spawner.accept().is_err(), "the spawner heard nothing");
+        let raw = std::fs::read_to_string(pingback_path()).unwrap_or_default();
+        assert!(raw.contains("kid"), "an orphan's entry is kept while its harness runs: {raw}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_pruned_child_and_its_wrap_are_still_told_to_a_root_spawner() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-pruned");
+
+        // The harness dies, and one reap pass prunes the child and its host wrap.
+        // The spawner is a root wrap no hook source tracks, so no tracked record
+        // is left to fetch the seal key for: the cursor's own entry must ask.
+        let mut harness = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        set_harness("kid", harness.id());
+        assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default(), "the sighting says nothing");
+        harness.kill().unwrap();
+        harness.wait().unwrap();
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.retain(|r| r.session_id != "kid" && r.session_id != "wrap-w");
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        let (text, report) = heard_by(&spawner);
+        assert_eq!(text, "[claude fond-aspen] died mid-turn · last: working\n\r", "told to the root spawner");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_forged_hook_entry_delivers_no_control_character() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, spawner, _host) = died_fixture("pingback-hook-forged");
+
+        // A same-uid writer fabricates the cursor entry: no record behind it, a
+        // host that names nothing, and controls in its tag and its tool.
+        {
+            let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.retain(|r| r.session_id != "kid");
+            write_stage(&sessions_path(), &file).unwrap();
+        }
+        let forged = serde_json::json!({
+            "kid": { "hook": {
+                "phase": "working",
+                "at": aoide_storage::time::now_iso_utc(),
+                "route": {
+                    "host": "nowhere",
+                    "to": "wrap-p",
+                    "tag": "[claude fond-aspen]\r\nEVIL",
+                    "last": "Bash\n\u{1b}[2J"
+                }
+            } }
+        });
+        std::fs::write(pingback_path(), format!("{forged}\n")).unwrap();
+        let (text, report) = heard_by(&spawner);
+        let body = text.strip_suffix("\n\r").unwrap_or_else(|| panic!("the submit key ends it: {text:?}"));
+        assert!(body.starts_with("[claude fond-aspen]"), "{text:?}");
+        assert!(!body.chars().any(char::is_control), "no CR, LF or control character: {text:?}");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn every_rendered_line_is_free_of_control_characters_whatever_the_record_says() {
+        let hostile = "x\r\nrm -rf ~\u{1b}[2J\u{202e}";
+        let tag = child_tag(Some(hostile), hostile);
+        assert!(!tag.chars().any(char::is_control), "{tag:?}");
+        let events = [
+            PingEvent::Settled {
+                stop: Some(hostile.into()),
+                calls: Some(3),
+                mins: Some(2),
+                say: Some(hostile.into()),
+                errors: 1,
+            },
+            PingEvent::Cancelled { calls: None, mins: None, say: Some(hostile.into()), errors: 0 },
+            PingEvent::DiedMidTurn { calls: Some(1), say: Some(hostile.into()), errors: 0 },
+            PingEvent::Asking { prompt: hostile.into(), errors: 0 },
+            PingEvent::WrappingUp {
+                calls_left: Some(hostile.into()),
+                secs_left: Some(hostile.into()),
+                errors: 0,
+            },
+            PingEvent::Failing { run: 3, tool: Some(hostile.into()) },
+            PingEvent::Silent { mins: 12, last: Some(Last::Did(hostile.into())) },
+            PingEvent::Silent { mins: 12, last: Some(Last::Said(hostile.into())) },
+            PingEvent::Exited { code: None, outcome: Some(hostile.into()) },
+        ];
+        for event in &events {
+            let line = render_line(&tag, event);
+            assert!(!line.chars().any(char::is_control), "{event:?} rendered {line:?}");
+        }
+    }
+
+    #[test]
+    fn the_wire_carries_no_control_character_whatever_line_it_is_handed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("pingback-wire");
+        let spawner = headless_parent("wrap-p", "claude");
+        let roster = load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions;
+        let listen = spawner.try_clone().unwrap();
+        let acc = std::thread::spawn(move || read_all(listen));
+        deliver(
+            "[eidolon brave-otter]\r\nrm -rf ~\u{1b}[2J\u{202e}",
+            "wrap-p",
+            &roster,
+            &daemon_inv(),
+            "autogate-child",
+        )
+        .unwrap();
+        let text = String::from_utf8_lossy(&acc.join().unwrap()).into_owned();
+        let body = text.strip_suffix("\n\r").unwrap_or_else(|| panic!("the submit key ends it: {text:?}"));
+        assert_eq!(body, "[eidolon brave-otter]rm -rf ~[2J", "CR, LF and the bidi mark are gone");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -409,6 +409,8 @@
               nil
               deadnix
               statix
+              # The two-mesh harness makes its test CA with openssl
+              openssl
             ];
           };
 
