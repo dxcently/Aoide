@@ -1193,6 +1193,10 @@ pub(super) fn collect_roster(
     if scoped.is_some() {
         s.sessions.retain(|r| super::send::in_read_scope(&scoped, &r.session_id));
         h.hooks.retain(|k| super::send::in_read_scope(&scoped, &k.session_id));
+        // A remote parent is an ancestor on another node: not the reader's to name.
+        for r in &mut s.sessions {
+            r.remote_parent = None;
+        }
     }
     let nodes = match scoped {
         Some(_) => Vec::new(),

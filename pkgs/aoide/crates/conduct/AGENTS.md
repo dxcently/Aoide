@@ -145,16 +145,31 @@ in the message.
 - **An MCP read is clipped to the caller's own subtree.** `read_scope`
   (`graph/send.rs`) gives the set the caller may see: its attested session
   (`real_attested_sender`, never a claimed id) and every session under it by
-  `attested_parent_of` edges. `in_read_scope` tests membership. `session find`
-  (`load_index`), the roster (`collect_roster`) and the graph (`view_as`) take
-  the set; an unattested caller gets the empty set and sees nothing. Off MCP
-  the scope is `None` and nothing is clipped. A forged `parent` without the
-  spawn stamp adds nothing. Mail read stays closed to MCP: mailbox ownership
-  rests on cursors and wrap (`mail_facts`), which is not yet a per-session
-  rule. Pinned by `an_mcp_caller_sees_its_own_attested_subtree_and_no_sibling_or_forged_child`,
+  `attested_parent_of` edges. `in_read_scope` tests membership. An unattested
+  caller gets the empty set and sees nothing. Off MCP the scope is `None` and
+  nothing is clipped. A forged `parent` without the spawn stamp adds nothing.
+  Each MCP reader cuts to the scope in its own way:
+  - The roster (`collect_roster`) and `session find` (`load_index`) keep the
+    scoped rows, name no remote parent (an ancestor on another node), and
+    carry no mail facts: a mailbox can be shared with a sibling outside the
+    scope, and mail read stays closed until it is scoped by the mailbox
+    registry.
+  - The graph (`view_as`) keeps the scoped sessions and hooks, and draws only
+    the projects a scoped session resolves to, with no path, root or host. It
+    folds no mesh node (no url, no far-node cache) and names no remote parent.
+    `build_graph_as` and `render_as` take the `reveal` switch that does this.
+  - `session watch` (`session_watch_as`) cuts its candidates to the scope
+    before it resolves, so an out-of-scope id, tail or petname refuses with
+    the text an unknown id gets, and never appears in an ambiguity list. A
+    `node/<query>` target is refused the same way, with no fetch.
+  Pinned by `an_mcp_caller_sees_its_own_attested_subtree_and_no_sibling_or_forged_child`,
   `an_unattested_mcp_caller_sees_no_session_at_all`,
-  `an_mcp_roster_shows_the_callers_subtree_and_probes_no_node` and
-  `an_mcp_graph_draws_the_callers_subtree_and_blanks_an_outside_lead`.
+  `an_mcp_find_row_carries_no_mail_from_a_mailbox_shared_with_a_sibling`,
+  `an_mcp_find_row_names_no_remote_parent`,
+  `an_mcp_roster_shows_the_callers_subtree_and_probes_no_node`,
+  `an_mcp_graph_names_no_project_path_node_url_or_far_cache_outside_the_scope`,
+  `an_mcp_watch_refuses_a_sibling_run_by_id_tail_or_petname_as_unknown` and
+  `an_mcp_watch_refuses_a_remote_target_as_unknown_and_never_fetches`.
 - **A door that cannot approve never moves a parent edge and never launches
   a command of its own choosing.** The attested rules read the unsealed
   `parentSessionId`, so rewriting it IS approving. Every path that sets it is

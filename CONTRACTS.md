@@ -655,7 +655,11 @@ Contract guarantees:
   `mcp` and `a2a`, and hide the flags a door does not open.
   Over MCP, the session read commands (`session` roster, `session find`,
   `graph`) answer only for the caller's own attested subtree; they are
-  clipped to it, not closed. `mail` read stays closed to MCP.
+  clipped to it, not closed. The graph draws no project's path, roots or
+  hosts, folds no mesh node, and names no remote parent. `session find`
+  carries no mail facts. `session watch` refuses a run outside the subtree,
+  and a `node/<query>` target, as an unknown id. `mail` read stays closed to
+  MCP.
 - Declared validation (all **additive**, same discipline: each key is omitted
   from `schema --json` at its default, so a command that declares none
   serializes byte-identical to before). On a flag: `value` (the `<placeholder>`

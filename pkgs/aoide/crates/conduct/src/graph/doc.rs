@@ -48,6 +48,19 @@ pub fn build_graph(
     sessions: &[SessionRecord],
     hooks: &[HookRecord],
 ) -> Value {
+    build_graph_as(projects, sessions, hooks, true)
+}
+
+/// [`build_graph`] for one reader. `reveal` false is an MCP read of a scope:
+/// the document names no project's location or host, folds no mesh node (its
+/// url or far-node cache), and names no remote parent. The caller has already
+/// cut `sessions` and `projects` to what that reader may see.
+pub(crate) fn build_graph_as(
+    projects: &[Project],
+    sessions: &[SessionRecord],
+    hooks: &[HookRecord],
+    reveal: bool,
+) -> Value {
     let projects = sorted_projects(projects);
     let sessions = merged_sessions(sessions, hooks);
     let ids: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
@@ -67,21 +80,23 @@ pub fn build_graph(
     // `nodes.json` once for the whole document: every link's `key` resolves
     // against it (`model::current_node_name`), and the node fold at the bottom
     // folds the same registry — one read, one parse, both uses.
-    let mesh_nodes = aoide_storage::node_store::load_nodes();
+    let mesh_nodes = if reveal { aoide_storage::node_store::load_nodes() } else { Vec::new() };
 
     for p in &projects {
         let mut node = json!({
             "id": format!("project:{}", p.name),
             "kind": "project",
             "name": p.name,
-            "path": p.path,
-            "roots": p.roots(),
         });
+        if reveal {
+            node["path"] = json!(p.path);
+            node["roots"] = json!(p.roots());
+        }
         // Host membership (P-14 M1) rides only when non-empty, same
         // ride-only-when-present rule the session node's `title`/`petname`
         // fields already hold below — a project no `--host` invocation ever
         // touched stays byte-for-byte as before this field existed.
-        if !p.hosts.is_empty() {
+        if reveal && !p.hosts.is_empty() {
             node["hosts"] = json!(p.hosts);
         }
         if let Some(lead) = &p.lead {
@@ -216,7 +231,7 @@ pub fn build_graph(
         // locally-registered record stays byte-for-byte as before. No edge
         // accompanies it: the parent is not on this node, and a local
         // `spawned` edge would have to name a foreign id as a local session.
-        if let Some(rp) = &s.remote_parent {
+        if let Some(rp) = s.remote_parent.as_ref().filter(|_| reveal) {
             node["remoteParent"] = json!({
                 "node": super::model::current_node_name(&mesh_nodes, &rp.key, &rp.node),
                 "sessionId": rp.session_id,
@@ -595,6 +610,17 @@ pub fn render(
     hooks: &[HookRecord],
     focus: Option<&str>,
 ) -> String {
+    render_as(projects, sessions, hooks, focus, true)
+}
+
+/// [`render`] for one reader: `reveal` false prints no project's path or roots.
+pub(crate) fn render_as(
+    projects: &[Project],
+    sessions: &[SessionRecord],
+    hooks: &[HookRecord],
+    focus: Option<&str>,
+    reveal: bool,
+) -> String {
     let projects = sorted_projects(projects);
     let sessions = merged_sessions(sessions, hooks);
     let ids: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
@@ -747,8 +773,12 @@ pub fn render(
 
     for (i, p) in projects.iter().enumerate() {
         let id = format!("project:{}", p.name);
-        let mut head = format!("{}◆ {}  {}", marker(focus, &id, &p.name), p.name, p.path);
-        for r in p.roots().into_iter().skip(1) {
+        let mut head = if reveal {
+            format!("{}◆ {}  {}", marker(focus, &id, &p.name), p.name, p.path)
+        } else {
+            format!("{}◆ {}", marker(focus, &id, &p.name), p.name)
+        };
+        for r in p.roots().into_iter().skip(1).filter(|_| reveal) {
             head.push_str(&format!("\n   {r}"));
         }
         render_group(&mut out, head, &per_project[i]);

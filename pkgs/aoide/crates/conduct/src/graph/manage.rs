@@ -4,10 +4,11 @@
 
 use super::common::{load_inputs, require_args, stage_error};
 use super::session_store::{anchored_refusal, live_harness_anchoring};
-use super::doc::{build_graph, drop_remote_child_rows, prune_done_sparing, render, restage_graph, would_cycle};
+use super::doc::{build_graph_as, drop_remote_child_rows, prune_done_sparing, render_as, restage_graph, would_cycle};
 use super::model::{
-    hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
-    write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, SessionRecord, STAGE_GRAPH_VERSION,
+    effective_project_for, hooks_path, leads_project, load_stage, merged_sessions, project_for, projects_path,
+    sessions_path, sorted_projects, write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile,
+    SessionRecord, STAGE_GRAPH_VERSION,
 };
 use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::Outcome;
@@ -43,8 +44,9 @@ pub fn view(inv: &Invocation) -> Outcome {
 }
 
 /// [`view`] with the caller's attested session injected, so a test names the
-/// caller. An MCP read draws only its scope's sessions and hooks, and a
-/// project's lead is blanked when that lead lies outside the scope.
+/// caller. An MCP read draws only its scope's sessions and hooks. A project's
+/// lead is blanked when that lead lies outside the scope, and only the projects
+/// a scoped session resolves to are drawn, with no location or mesh node.
 pub(crate) fn view_as(inv: &Invocation, caller: impl Fn(&[SessionRecord]) -> Option<String>) -> Outcome {
     let (mut p, mut s, mut h) = match load_inputs("graph") {
         Ok(v) => v,
@@ -60,10 +62,19 @@ pub(crate) fn view_as(inv: &Invocation, caller: impl Fn(&[SessionRecord]) -> Opt
                 project.lead = None;
             }
         }
+        let all = p.projects.clone();
+        let merged = merged_sessions(&s.sessions, &h.hooks);
+        let held: std::collections::BTreeSet<usize> = merged
+            .iter()
+            .flat_map(|r| [project_for(r, &all), leads_project(r, &all), effective_project_for(r, &merged, &all)])
+            .flatten()
+            .collect();
+        p.projects = all.into_iter().enumerate().filter(|(i, _)| held.contains(i)).map(|(_, p)| p).collect();
     }
     let focus = inv.flags.get("focus").map(String::as_str);
-    let doc = build_graph(&p.projects, &s.sessions, &h.hooks);
-    let tree = render(&p.projects, &s.sessions, &h.hooks, focus);
+    let reveal = scope.is_none();
+    let doc = build_graph_as(&p.projects, &s.sessions, &h.hooks, reveal);
+    let tree = render_as(&p.projects, &s.sessions, &h.hooks, focus, reveal);
     let (n, e) = (
         doc["nodes"].as_array().map_or(0, Vec::len),
         doc["edges"].as_array().map_or(0, Vec::len),
@@ -1156,6 +1167,7 @@ fn prune_inner() -> Outcome {
 mod tests {
     use super::*;
     use crate::graph::anchor_for;
+    use crate::graph::doc::build_graph;
     use crate::graph::testutil::*;
 
     #[test]
@@ -2132,6 +2144,80 @@ mod tests {
         assert!(!text.contains("sib-id"), "a sibling and its lead are not the caller's: {text}");
         let unattested = view_as(&mcp, |_| None);
         assert!(!unattested.data.as_ref().expect("data").to_string().contains("kid-id"), "unattested sees nothing");
+    }
+
+    /// Finding 4: over MCP the graph names only the projects that hold an
+    /// in-scope session, with no path, root or host, and folds no mesh node
+    /// (its url, or its far-node cache). The CLI document keeps all of it.
+    #[test]
+    fn an_mcp_graph_names_no_project_path_node_url_or_far_cache_outside_the_scope() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = unique_stage("graph-mcp-scope");
+        let state = unique_stage("graph-mcp-scope-state");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        let alpha = stage.join("zz-alpha-root");
+        let beta = stage.join("zz-beta-root");
+        let gamma = stage.join("zz-gamma-root");
+        let alpha_two = stage.join("zz-alpha-two-root");
+        for dir in [&alpha, &beta, &gamma, &alpha_two] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let me = session("me-id", &alpha.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
+        let mut kid = session("kid-id", &alpha.to_string_lossy(), "idle", "2026-10-12T09:01:00Z", Some("me-id"));
+        kid.attested_spawner = Some("me-id".into());
+        kid.remote_parent = Some(aoide_storage::records::RemoteParent {
+            node: "far-node".into(),
+            key: String::new(),
+            session_id: "far-parent-id".into(),
+            extra: Default::default(),
+        });
+        let sibling = session("sib-id", &beta.to_string_lossy(), "idle", "2026-10-12T09:02:00Z", None);
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![me, kid, sibling], ..Default::default() }).unwrap();
+        let projects = vec![
+            Project {
+                name: "alpha".into(),
+                path: alpha.to_string_lossy().into(),
+                roots: vec![alpha_two.to_string_lossy().into()],
+                ..Default::default()
+            },
+            Project { name: "beta".into(), path: beta.to_string_lossy().into(), ..Default::default() },
+            Project { name: "gamma".into(), path: gamma.to_string_lossy().into(), ..Default::default() },
+        ];
+        write_stage(&projects_path(), &ProjectsFile { projects, ..Default::default() }).unwrap();
+        let far = aoide_storage::node_store::Node { url: "https://yomi.example:7443/".into(), ..synthetic_node("yomi") };
+        aoide_storage::node_store::save_nodes(&[far]).unwrap();
+        aoide_storage::node_store::save_node_cache(&aoide_storage::node_store::NodeCacheEntry {
+            schema_version: "0".into(),
+            name: "yomi".into(),
+            graph: Some(json!({ "nodes": [{ "id": "session:far-secret-id" }], "edges": [] })),
+            fetched_at: Some(aoide_storage::time::now_iso_utc()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mcp = Invocation { path: vec!["graph".into()], args: vec![], flags: Default::default(), door: Door::Mcp };
+        let doc = view_as(&mcp, |_| Some("me-id".to_string())).data.expect("data");
+        let text = doc.to_string();
+        assert!(text.contains("me-id") && text.contains("kid-id"), "{text}");
+        let nodes = doc["nodes"].as_array().expect("nodes");
+        let projects: Vec<&Value> = nodes.iter().filter(|n| n["kind"] == "project").collect();
+        assert_eq!(projects.len(), 1, "only alpha holds an in-scope session: {text}");
+        assert_eq!(projects[0]["name"], "alpha");
+        for bare in ["path", "roots", "hosts"] {
+            assert!(projects[0].get(bare).is_none(), "an MCP project keeps no `{bare}`: {text}");
+        }
+        assert!(!text.contains("\"kind\":\"node\""), "an MCP graph folds no mesh node: {text}");
+        for leaked in ["zz-beta-root", "zz-gamma-root", "zz-alpha-two-root", "sib-id", "yomi", "far-secret-id", "far-parent-id"] {
+            assert!(!text.contains(leaked), "an MCP graph names `{leaked}`: {text}");
+        }
+
+        let cli = Invocation { door: Door::Cli, ..mcp };
+        let full = view_as(&cli, |_| None).data.expect("data").to_string();
+        for shown in ["zz-beta-root", "zz-gamma-root", "yomi.example", "far-secret-id", "far-parent-id"] {
+            assert!(full.contains(shown), "the CLI graph keeps `{shown}`: {full}");
+        }
     }
 
     // ── P-14 M1: host membership (`--host <node>` on add/edit/remove) ──
