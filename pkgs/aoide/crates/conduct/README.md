@@ -1340,17 +1340,25 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   reads only the spawn-time edge.** `identity::is_protected_live_wrap` is the
   one predicate, stated once in `CONTRACTS.md`'s identity section. It reads no
   daemon key. `identity::live_sealed_wrap_ids` is the set it yields.
-  `session_store::live_wrap_refusal_for` is the refusal every finishing door
-  (`session end`, a terminal `session phase`, the hook's `SessionEnd` arm) asks
-  first, and so does `graph link` as the child. The start door
-  (`session_start`) and the hook's SessionStart (`do_hook_session_start`)
-  take one verdict (`live_wrap_verdict`) before any write, and the hook's
-  refusal is audited on the door it arrived on. A start judged on a
-  protected wrap writes nothing, and the hook arm lands nothing after it.
-  `doc.rs::prune_done_keeping` keeps such a record out of every prune, and
-  `reap_inner` spares it. `doc.rs::drop_sessions` and `do_subagent_rekey`
-  keep a protected survivor's edge and drop its spawn stamp when the record
-  the edge names leaves the roster. The autogate reads a parent edge
+  `session_store::protected_wrap` is the one reader of it for a single id, and
+  `live_wrap_refusal_for` is the refusal every finishing door (`session end`,
+  a terminal `session phase`) asks from it first, and so does `graph link` as
+  the child. The start door (`session_start`) and the hook's SessionStart
+  (`do_hook_session_start`) take one verdict (`live_wrap_verdict`) before any
+  write, and the hook's refusal is audited on the door it arrived on. A start
+  judged on a protected wrap writes nothing, and the hook arm lands nothing
+  after it. Every other hook arm is refused by one guard in
+  `send.rs::hook_for_profile_gated`, right after `map_hook`: a payload whose
+  `session_id` names a protected wrap is ignored whole (`no-op
+  (live-sealed-wrap)`, audited on the door), since a harness reports under its
+  child's id and never its wrap's. `doc.rs::prune_done_keeping` keeps such a
+  record out of every prune, and `reap_inner` spares it. `doc.rs::drop_sessions`
+  keeps a protected survivor's edge and drops its spawn stamp when the record
+  the edge names leaves the roster, and `do_subagent_rekey` keeps the edge too.
+  A sub-agent record leaving the roster needs no such rule: the `sub:` prefix
+  is reserved (`session_store::reserved_id_refusal`, asked by `conduct`, the
+  start door and the hook's SessionStart), so a `sub:` record is never a
+  spawner. The autogate reads a parent edge
   only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner`
   to name the same id. Only `conduct` registration writes that stamp, and
   `SessionRecord::set_parent_session` drops it whenever the edge moves. The

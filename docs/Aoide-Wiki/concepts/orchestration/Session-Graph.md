@@ -539,6 +539,13 @@ subagent-of-subagent nesting) backs both paths, so a session that dies
 rather than exiting through `session end` — loses its sub-agent
 children exactly as cleanly as an orderly exit does.
 
+The `sub:` id prefix belongs to these nodes. Only the hook door's sub-agent
+arms create, re-key or close one, each on a harness's word, so `conduct`,
+`session start` and a hook's SessionStart refuse an id under the prefix: a
+wrap registered there would answer to a forged sub-agent hook. For the same
+reason a `sub:` node is never a spawner, and its ending or re-keying leaves no
+spawn stamp orphaned (CONTRACTS, rule 3).
+
 The same pass also retires **same-window agent duplicates**. A window hosts
 any number of agents: one desktop app window runs several headless claudes,
 and one kitty window can run several tabs. So a shared `windowAddress` never
@@ -718,8 +725,9 @@ secrets broker's `allowRemoteOrigin` gate is the credential's first policy
 consumer (P-ID4); the node wire resolves identity by verifying key, never
 claimed name (P-ID5, [[Node-Federation]]). The live-wrap rules in CONTRACTS.md
 refuse a same-uid end, prune, phase, or changed-field start of a protected live
-wrap (judged by the plaintext starttime and no key), and the autogate reads a
-parent edge only where `attestedSpawner` names it. Open, each
+wrap (judged by the plaintext starttime and no key), ignore every hook that
+reports under such a wrap's own id, and the autogate reads a parent edge only
+where `attestedSpawner` names it. Open, each
 named: (1) **consumer-name authentication** — the seal
 authenticates the session and its class, never a self-asserted consumer
 string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker

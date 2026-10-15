@@ -310,7 +310,7 @@ pub(in crate::graph) fn is_self_originated(
 /// `conductable`, a seal, a nonzero plaintext `sealedPidStarttime` equal to the
 /// live pid's starttime, and a `sealedBootId` equal to this boot's. Every
 /// refusal asks this and nothing else: `session end`/`phase`/`prune`/`start`,
-/// the hook's `SessionEnd` arm, and the reaper's spare.
+/// every hook that names the wrap's id, and the reaper's spare.
 ///
 /// No key, no socket, no signature. A daemon restart or an unreachable
 /// `AOIDE_DAEMON_SOCKET` cannot lift it. A reused pid cannot inherit it (its

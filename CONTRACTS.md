@@ -2468,7 +2468,11 @@ infers it from the `agent` string: `agent` (a Claude/agent session), `shell`
 (a conducted terminal), `subagent` (a Task the agent spawned — a leaf of the
 conductor tree, its own child record with its own harness-native-subagent
 classifier, parented to the harness session from the hook payload, closed on
-its own stop event and swept if its parent ends), `a2a` (§6 — an external
+its own stop event and swept if its parent ends; its id is `sub:<tool_use_id>`
+or `sub:<agent_id>`, and the `sub:` prefix is reserved to the hook door's
+sub-agent arms: `conduct`, `session start` and a hook's SessionStart, the doors
+that take an id from the caller, refuse one under it with reason
+`reserved-id`), `a2a` (§6 — an external
 A2A agent folded into the session DAG), or `app` (a task inside an app aoide
 does not conduct — e.g. a desktop Codex/ChatGPT thread, keyed by the app's
 own native thread id, `agent:"codex"`, `state:"idle"` at enrolment and
@@ -2631,7 +2635,9 @@ harness's OWN session id, straight off the raw hook payload's own
 `session_id` field. Stamped by `aoide session hook` on EVERY event
 that carries one — not only at registration, and not gated on whether the
 event maps to a graph action at all (an event the door has no other use for
-still stamps it, as long as a record with that id already exists) — and
+still stamps it, as long as a record with that id already exists, and bar an
+event that names a protected live wrap, which the door ignores whole, rule 2 of
+"Same-uid processes and the live sealed wrap" below) — and
 regardless of whether it equals this record's own `sessionId` (for a
 hook-registered record the two values are the same today, since the record's
 own id is minted FROM this field; the field is still stamped unconditionally
@@ -2817,12 +2823,14 @@ Three rules hold, each on the doors named:
    `session phase` carrying a terminal token (`exit`, `finished`, `complete`,
    `done`), and `session prune` refuse it with a taught error that names the
    wrap and `aoide session kill --id`; prune keeps the record and reports it as
-   held. The hook's `SessionEnd` arm answers `ok` and leaves the record to its
-   own exit. The reaper spares it whichever liveness signal named it. The wrap's
+   held. A hook's `SessionEnd` naming it is ignored like every hook that names
+   it (rule 2), and leaves the record to its own exit. The reaper spares it
+   whichever liveness signal named it. The wrap's
    own exit path, and the reaper once the pid is gone, end it. A record that is
    dead, unsealed, not conducted, or whose starttime or boot does not match ends
    as it always has.
-2. *A protected live wrap is re-registered only as it is.* The start door
+2. *A protected live wrap is re-registered only as it is, and no hook reports
+   under its id.* The start door
    (`session start --id`) and the harness hook's SessionStart (`session hook`,
    `do_hook_session_start`) are one act, judged once before any write
    (`live_wrap_verdict`). It compares four fields of the wrap: `agent`, `cwd`,
@@ -2846,6 +2854,22 @@ Three rules hold, each on the doors named:
    `window` counts as a change even from empty, so a protected wrap stored with
    no window refuses a hook that discovers one.
 
+   Every other hook arm refuses the same record outright. A harness never
+   reports under its wrap's own id: what a wrap hosts is a hook child, which
+   reports under an id of its own. So a hook whose payload `session_id` names a
+   protected live wrap is ignored whole, whatever its event, before any arm
+   runs, and answers `no-op (live-sealed-wrap)`. That covers a phase, a
+   permission prompt (which would otherwise raise the herald's approve/deny
+   card, carrying the payload's text, for the wrap), a tool start or end, a
+   sub-agent event, a session end and an event the profile does not map. None
+   of them writes a phase, `contextCeiling`, `harnessSessionId`, a window, a
+   chain, a sub-agent node or an end, and none raises a summons. Each is
+   audited on the door the hook arrived on, naming the wrap and never the
+   payload. SessionStart is the one event left to its arm, which judges it
+   field by field against the same record (`session_store::protected_wrap`) and
+   writes nothing either way, as above. A harness child's hooks name the child,
+   so they are unaffected, and so is the readiness that reads the child.
+
    The hook chain (`hookAncestry`) is not one of the four fields, and on a
    conducted wrap it routes nothing: the ping-back's hook source never tracks a
    conducted record (`pingback/hook.rs`, `tracked`), whatever chain it carries.
@@ -2856,12 +2880,20 @@ Three rules hold, each on the doors named:
    link`, or a moved edge earns no autogate: the send is held pending. `graph
    link` refuses a protected wrap as its child, with reason `live-sealed-wrap`.
    The hook door attests nothing, and it never moves a conducted wrap's edge.
-   When the record a protected wrap's edge names leaves the roster (a prune or
-   a reap drops it, or a sub-agent re-key renames it), the wrap keeps
-   `parentSessionId`, since it is alive, and loses `attestedSpawner`, as a
-   moved edge does. A later registration under that id is not the spawner, and
-   a send from it is held pending. Graph placement treats the missing parent as
-   none and falls back to project anchoring.
+   When a prune or a reap drops the record a protected wrap's edge names, the
+   wrap keeps `parentSessionId`, since it is alive, and loses `attestedSpawner`,
+   as a moved edge does. A later registration under that id is not the spawner,
+   and a send from it is held pending. Graph placement treats the missing parent
+   as none and falls back to project anchoring.
+
+   A sub-agent record leaving the roster (a sub-agent end, a re-key, or the
+   cascade of its owner's end) leaves no stamp to drop. A `sub:` record is never
+   a spawner: the doors that take an id refuse the prefix (the `kind` field
+   above), so a sub-agent node is made only by the sub-agent hooks, and
+   `spawner_is_attested` stamps a parent only when its pid stands in the
+   registering process's ancestry or its hook chain covers it, which a
+   sub-agent node, with neither, does not have. A re-key still never
+   re-parents a protected wrap.
 
 **Who can set the marker.** `sealedPidStarttime` and `sealedBootId` are written
 in one place, `stamp_seal`. Two callers reach it: the daemon's tick, and the

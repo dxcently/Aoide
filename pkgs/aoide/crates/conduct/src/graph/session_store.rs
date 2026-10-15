@@ -24,7 +24,7 @@ use super::model::{
 use super::model::HookRecord;
 use aoide_protocol::agents::AgentProfile;
 use aoide_protocol::Invocation;
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_storage::fs::{pid_is_alive, with_stage_lock};
 use serde_json::json;
 #[cfg(test)]
@@ -214,8 +214,9 @@ pub(in crate::graph) fn do_session_start(
 /// and writes nothing whatever the verdict: a start that changes none of agent,
 /// cwd, window or parent answers ok, and one that would change one is refused
 /// and audited on `door`, since the hook discards its outcome at one call site.
-/// The `bool` is true for those two answers, so the caller lands nothing after
-/// them either.
+/// An id in the reserved `sub:` namespace is refused before either
+/// ([`reserved_id_refusal`]). The `bool` is true for those three answers, so the
+/// caller lands nothing after them either.
 pub(in crate::graph) fn do_hook_session_start(
     door: aoide_protocol::Door,
     id: &str,
@@ -226,6 +227,9 @@ pub(in crate::graph) fn do_hook_session_start(
     pid: Option<u32>,
     ancestry: &[i32],
 ) -> (Outcome, bool) {
+    if let Some(refusal) = reserved_id_refusal("session.start", id) {
+        return (refusal, true);
+    }
     with_stage_lock(|| {
         // The hook door never moves a conducted wrap's edge (`conducted_wrap`).
         let conducted = load_stage::<SessionsFile>(&sessions_path())
@@ -257,13 +261,39 @@ fn live_wrap_verdict(
     window: Option<&str>,
     parent: Option<&str>,
 ) -> Option<(SessionRecord, Vec<&'static str>)> {
-    let file: SessionsFile = load_stage(&sessions_path()).ok()?;
-    let rec = file.sessions.into_iter().find(|s| s.session_id == id)?;
-    if !super::identity::is_protected_live_wrap(&rec) {
-        return None;
-    }
+    let rec = protected_wrap(id)?;
     let changed = start_changes(&rec, agent, cwd, window, parent);
     Some((rec, changed))
+}
+
+/// The stored record of `id` when it is a protected live wrap
+/// (`identity::is_protected_live_wrap`), else `None`. The one reader of the
+/// predicate for a single id: the start door's verdict, the refusal the end and
+/// phase doors give, and the hook door's guard on every payload all ask here.
+pub(in crate::graph) fn protected_wrap(id: &str) -> Option<SessionRecord> {
+    let file: SessionsFile = load_stage(&sessions_path()).ok()?;
+    file.sessions
+        .into_iter()
+        .find(|s| s.session_id == id && super::identity::is_protected_live_wrap(s))
+}
+
+/// The refusal of an id in the reserved `sub:` namespace, `None` for any other.
+/// A `sub:` record is a Task sub-agent's leaf and `do_subagent_spawn` is its
+/// only creator. A record any other door registered under that prefix would
+/// answer to the sub-agent hooks, which end, re-key and re-kind a `sub:` record
+/// on a harness's word alone, so `conduct`, the start door and the hook's
+/// SessionStart refuse the id.
+pub(in crate::graph) fn reserved_id_refusal(cmd: &str, id: &str) -> Option<Outcome> {
+    id.starts_with("sub:").then(|| {
+        Outcome::refuse(
+            cmd,
+            Kind::Usage,
+            format!("session id `{id}` uses the reserved `sub:` prefix"),
+            "the `sub:` prefix names a Task sub-agent node, and only a harness's own sub-agent hook creates one",
+            Fix::Set("`--id` to a name without the `sub:` prefix, or leave it off".to_string()),
+        )
+        .with_fields(json!({ "reason": "reserved-id", "id": id }))
+    })
 }
 
 /// The identity fields a start would change on a protected wrap, by name: each
@@ -315,6 +345,20 @@ fn live_wrap_unchanged(id: &str, rec: &SessionRecord) -> Outcome {
 fn live_wrap_refused(id: &str, fields: &[&str]) -> Outcome {
     Outcome::error("session.start", super::identity::live_wrap_refusal(id))
         .with_data(json!({ "reason": "live-sealed-wrap", "id": id, "fields": fields }))
+}
+
+/// Append the audit line for a hook that names a protected wrap's own id and was
+/// ignored whole, on the door the hook arrived on. A harness never reports under
+/// its wrap's id, so each one is a forgery or a fault worth finding later.
+pub(in crate::graph) fn audit_ignored_wrap_hook(door: aoide_protocol::Door, id: &str) {
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        door,
+        aoide_protocol::audit::EventClass::Audit,
+        "session.hook",
+        "error",
+        &format!("live-sealed-wrap: a hook naming `{id}` was ignored; nothing was written"),
+    );
 }
 
 /// Append the audit line for a refused hook start on a protected wrap, on the
@@ -1620,8 +1664,10 @@ pub(in crate::graph) fn do_subagent_rekey(from_sub_id: &str, to_sub_id: &str) {
         }
         // Reparent any child that pointed at the old id (none at launch time, but
         // keeps the tree consistent if a nested node ever raced in first). A
-        // protected live wrap keeps its edge and loses its spawn stamp, as when
-        // a prune drops its parent (CONTRACTS, rule 3).
+        // protected live wrap keeps its edge (CONTRACTS, rule 3). It loses a
+        // spawn stamp too, as when a prune drops its parent, though no
+        // registration stamps a `sub:` parent, so only a hand-written roster
+        // carries one.
         for s in file.sessions.iter_mut() {
             if s.parent_session_id.as_deref() != Some(from_sub_id) {
                 continue;
@@ -1938,6 +1984,7 @@ fn do_session_end_inner(id: &str) -> Outcome {
 /// daemon, daemon key or `AOIDE_DAEMON_SOCKET` involved: a start that changes no
 /// identity field (agent, cwd, window, parent) is an ok no-op that writes
 /// nothing, and one that would change one is refused (see [`live_wrap_verdict`]).
+/// An id in the reserved `sub:` namespace is refused ([`reserved_id_refusal`]).
 pub fn session_start(inv: &Invocation) -> Outcome {
     if let Some(outcome) = aoide_client::daemon::daemon_dispatch(inv) {
         return outcome;
@@ -1950,6 +1997,9 @@ pub fn session_start(inv: &Invocation) -> Outcome {
     let cwd = inv.flags.get("cwd").map(String::as_str);
     let window = inv.flags.get("window").map(String::as_str);
     let parent = inv.flags.get("parent").map(String::as_str);
+    if let Some(refusal) = reserved_id_refusal("session.start", &id) {
+        return refusal;
+    }
     with_stage_lock(|| {
         if let Some((rec, changed)) = live_wrap_verdict(&id, agent, cwd, window, parent) {
             return if changed.is_empty() {
@@ -2008,10 +2058,7 @@ pub fn session_end(inv: &Invocation) -> Outcome {
 /// (`identity::is_protected_live_wrap`). `None` for every other record. It reads
 /// no daemon key, so it answers the same with a daemon or without one.
 pub(in crate::graph) fn live_wrap_refusal_for(id: &str) -> Option<String> {
-    let file: SessionsFile = load_stage(&sessions_path()).ok()?;
-    super::identity::live_sealed_wrap_ids(&file.sessions)
-        .contains(id)
-        .then(|| super::identity::live_wrap_refusal(id))
+    protected_wrap(id).map(|_| super::identity::live_wrap_refusal(id))
 }
 
 #[cfg(test)]
@@ -4671,7 +4718,7 @@ mod live_sealed_wrap_guards {
     fn a_subagent_rekey_never_re_parents_a_protected_wrap() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, kp, stage) = seal_world("rekey-protected");
-        do_session_start("sub:tu1", Some("Explore"), Some("/w"), None, None, None, None, None, None);
+        do_subagent_spawn("sub:tu1", "owner", "Explore", "Explore", true);
         sealed_live_wrap("wrap", &kp);
         set_spawn_edge("wrap", "sub:tu1");
         do_session_start("plain", Some("claude"), Some("/p"), None, None, None, None, None, None);
@@ -4687,3 +4734,81 @@ mod live_sealed_wrap_guards {
         let _ = std::fs::remove_dir_all(&stage);
     }
 }
+
+#[cfg(test)]
+mod reserved_sub_ids {
+    use super::*;
+    use crate::graph::testutil::*;
+    use aoide_protocol::output::Status;
+
+    fn record(id: &str) -> Option<SessionRecord> {
+        load_stage::<SessionsFile>(&sessions_path())
+            .ok()?
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == id)
+    }
+
+    /// The start door (`session start --id`) refuses a `sub:` id with the taught
+    /// refusal and registers nothing; any other id registers as it always has.
+    #[test]
+    fn the_start_door_refuses_a_sub_prefixed_id_and_registers_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = unique_stage("reserved-start-door");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let door = |id: &str| {
+            // `Door::Daemon` skips the dispatch hop, so the handler runs in this process.
+            let mut inv = flag_invocation(&["session", "start"], &[("id", id)]);
+            inv.door = aoide_protocol::Door::Daemon;
+            inv
+        };
+
+        let out = session_start(&door("sub:x"));
+
+        assert_eq!(out.status, Status::Usage, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "reserved-id");
+        assert!(data["refusal"]["why"].as_str().unwrap().contains("sub-agent"), "{data}");
+        assert!(record("sub:x").is_none(), "nothing is registered");
+        assert_eq!(session_start(&door("x")).status, Status::Ok, "control: an ordinary id registers");
+        assert!(record("x").is_some());
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The hook's SessionStart is the same act as the start door: the refusal
+    /// reaches its caller as "wrote nothing", so no stamp follows it.
+    #[test]
+    fn a_hook_start_under_a_sub_prefixed_id_is_refused_and_wrote_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = unique_stage("reserved-hook-start");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let (out, wrote_nothing) = do_hook_session_start(
+            aoide_protocol::Door::Cli, "sub:x", Some("claude"), Some("/w"), None, None, None, &[],
+        );
+
+        assert_eq!(out.status, Status::Usage, "{}", out.message);
+        assert!(wrote_nothing);
+        assert!(record("sub:x").is_none());
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The one creator of a `sub:` record keeps working.
+    #[test]
+    fn a_subagent_spawn_still_creates_its_sub_record() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = unique_stage("reserved-spawn");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        do_subagent_spawn("sub:t1", "owner", "Task name", "explore", true);
+
+        let node = record("sub:t1").expect("the node is created");
+        assert_eq!(node.kind.as_deref(), Some("subagent"));
+        assert_eq!(node.parent_session_id.as_deref(), Some("owner"));
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+}
+

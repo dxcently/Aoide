@@ -107,7 +107,8 @@ in the message.
   refresh go through `aoide_storage::session::pid_may_move`. Anything that
   signals or injects by pid (`session kill`) re-verifies the seal against the
   live starttime (`terminate_with_key`); `conduct --id` refuses an id whose
-  record is conductable or sealed (a conducted id is born once); lineage-only readers (`eidolon::
+  record is conductable or sealed (a conducted id is born once) and any id
+  under the reserved `sub:` prefix; lineage-only readers (`eidolon::
   resolve_parent`, `resolve_parent_claim`) lean on the pid being immutable
   while the process lives, not on a seal.
 - **The workspace default is stamped ONCE, through ONE seam, at THREE
@@ -1185,25 +1186,51 @@ in the message.
 - **A protected live wrap is ended only by its own exit, and nothing reads the
   daemon key on that path.** The predicate is
   `identity::is_protected_live_wrap`, stated once in `CONTRACTS.md`'s identity
-  section. Every refusal asks it: `session end`, a terminal `session phase`, the
-  hook's `SessionEnd` arm, `session prune`, the reaper's spare, and `graph
-  link` (as the child). The start door (`session_store`'s `session_start`,
-  after the daemon hop) and the hook door's SessionStart
+  section. Every refusal asks it: `session end`, a terminal `session phase`,
+  every hook arm (below), `session prune`, the reaper's spare, and `graph link`
+  (as the child). A single id is read through `session_store::protected_wrap`,
+  never a second copy of the predicate. The start door (`session_store`'s
+  `session_start`, after the daemon hop) and the hook door's SessionStart
   (`do_hook_session_start`) both ask it before any write, through one
   verdict (`live_wrap_verdict`), and a refused hook start is audited on the
   door the hook arrived on. A start judged on a protected wrap writes
   nothing, refused or not, and the hook door returns that judgement beside
-  its outcome so `send.rs` lands no stamp after it. `drop_sessions` and
-  `do_subagent_rekey` keep a protected survivor's `parentSessionId` and drop
-  its `attestedSpawner` when the record its edge names leaves the roster.
-  `graph link` and `session prune` load and write under the stage lock.
-  `identity::live_sealed_wrap_ids` is the
-  set the doors and the reaper test. The wrap's own exit path (`do_session_end`
-  from `session_conduct`) is the one legitimate end and stays unrefused. A new
-  door that can finish or re-register a record asks the same predicate first,
-  and the wrap's own exit path never does. The grant side (`send.rs`'s
+  its outcome so `send.rs` lands no stamp after it. `drop_sessions` keeps a
+  protected survivor's `parentSessionId` and drops its `attestedSpawner` when
+  the record its edge names leaves the roster, and `do_subagent_rekey` keeps
+  the edge too. `graph link` and `session prune` load and write under the
+  stage lock. `identity::live_sealed_wrap_ids` is the set the doors and the
+  reaper test. The wrap's own exit path (`do_session_end` from
+  `session_conduct`) is the one legitimate end and stays unrefused. A new door
+  that can finish or re-register a record asks the same predicate first, and
+  the wrap's own exit path never does. The grant side (`send.rs`'s
   `real_attested_*`, `actions.rs`'s `terminate_verified`, `pingback.rs`) still
   verifies the seal, and must.
+- **No hook arm acts on a protected wrap's own id, and the guard is one
+  place.** A harness reports under its hook child's id, never its wrap's, so
+  `hook_for_profile_gated` asks `protected_wrap` for the payload's `session_id`
+  right after `map_hook` (before the unmapped-event stamp as well) and returns
+  `noop("live-sealed-wrap")` for every event but SessionStart, after one audit
+  line on the door it was given (`audit_ignored_wrap_hook`; the line names the
+  wrap and never the payload). SessionStart stays distinct on purpose: its arm
+  judges the four identity fields against the same record, answers `ok` for a
+  start that changes none and refuses one that does, and a same-fields start is
+  not audited. Never add a per-arm protected check (the `SessionEnd` arm lost
+  its own when the guard landed), and never move a stamp, a window or chain
+  write, a phase write or a `spawn_summons` call ahead of the guard. A new arm
+  is covered by being below it. Tests that forge a hook at a protected wrap
+  set `AOIDE_AUDIT_LOG`, since the guard appends to it.
+- **The `sub:` id prefix belongs to the sub-agent hooks.** `do_subagent_spawn`
+  creates a `sub:<id>` node, `do_subagent_rekey` renames it and
+  `do_subagent_end` removes it, each on a harness's word alone, so a wrap or
+  session registered under that prefix would answer to a forged hook.
+  `session_store::reserved_id_refusal` (a taught `Kind::Usage` refusal, reason
+  `reserved-id`) is asked by `session_conduct` before the child is spawned, by
+  `session_start` and by `do_hook_session_start`: the doors that take an id from
+  the caller. A new door that registers a caller's id asks it too. It is why a
+  `sub:` record is never a spawner (`window::spawner_is_attested` needs the
+  parent's pid in the ancestry, or its hook chain), so no stamp is ever left
+  naming a sub-agent node that ends, is re-keyed or is cascaded away.
 - **A session's exit — a clean `session end` OR a `reap` sweep — MUST
   append exactly one line to the durable session ledger, through the SAME
   shared call (P-D8, `docs/architecture/AOIDED.md`'s "L5").**

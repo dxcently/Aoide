@@ -46,8 +46,8 @@ use super::model::{
 };
 use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
-    clear_stale_parent, do_hook_session_start, do_session_end, do_session_phase,
-    live_wrap_refusal_for,
+    audit_ignored_wrap_hook, clear_stale_parent, do_hook_session_start, do_session_end,
+    do_session_phase, protected_wrap,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
     do_subagent_spawn, ensure_session_ceiling, now_iso_utc, refresh_subagent_says,
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
@@ -1994,7 +1994,21 @@ fn hook_for_profile_gated(
     // mapping (identity for claude; kimi's prompt array, tool_call_id, and
     // agent_name land on user_prompt / tool_use_id / agent_type).
     (profile.normalize_payload)(&mut payload);
-    let Some(action) = map_hook(profile, &payload) else {
+    let action = map_hook(profile, &payload);
+    // A harness never reports under its wrap's own id: a hook child, which is
+    // what a wrap hosts, has an id of its own. So a payload naming a protected
+    // live wrap is ignored whole, whatever its event, before any arm or stamp
+    // below can act on it. Only a SessionStart is left to its arm, which judges
+    // it field by field against the same record ([`protected_wrap`]) and writes
+    // nothing either way (CONTRACTS, rule 2).
+    if !matches!(action, Some(HookAction::Start { .. })) {
+        let named = payload.get("session_id").and_then(Value::as_str).filter(|s| !s.is_empty());
+        if let Some(id) = named.filter(|id| protected_wrap(id).is_some()) {
+            audit_ignored_wrap_hook(door, id);
+            return noop("live-sealed-wrap");
+        }
+    }
+    let Some(action) = action else {
         // Even an event this door has no graph ACTION for (kimi's
         // PreCompact/StopFailure, a Notification whose detail classifies as
         // neither awaiting tier, …) still carries the harness's own raw
@@ -2107,7 +2121,7 @@ fn hook_for_profile_gated(
             // boundary.
             let mid_turn = stored_phase(&id) == "working";
             let pid = vouched_payload_pid(&payload, hook_pid);
-            let (out, protected) = do_hook_session_start(
+            let (out, wrote_nothing) = do_hook_session_start(
                 door,
                 &id,
                 Some(profile.name),
@@ -2117,10 +2131,11 @@ fn hook_for_profile_gated(
                 pid,
                 &chain,
             );
-            // A start judged on a protected live wrap wrote nothing, so nothing
-            // lands after it: no `sessionStartAt`, no lane run, no phase fold,
-            // and none of the stamps after this match (CONTRACTS, rule 2).
-            if protected {
+            // A start refused or judged on a protected live wrap wrote nothing,
+            // so nothing lands after it: no `sessionStartAt`, no lane run, no
+            // phase fold, and none of the stamps after this match (CONTRACTS,
+            // rule 2).
+            if wrote_nothing {
                 return fold_hook_outcome(cmd, out, None, claim_note);
             }
             // The harness's own hello, timestamped: the one writer of
@@ -2343,13 +2358,7 @@ fn hook_for_profile_gated(
             do_subagent_end(&sub_id);
             Outcome::ok("session.hook", format!("subagent end {sub_id}"))
         }
-        HookAction::End { id } => match live_wrap_refusal_for(&id) {
-            Some(_) => Outcome::ok(
-                "session.hook",
-                format!("session `{id}` is a live sealed wrap; its own exit records the end"),
-            ),
-            None => do_session_end(&id),
-        },
+        HookAction::End { id } => do_session_end(&id),
     };
     // Publish a harness-reported context-window ceiling onto the record
     // IMMEDIATELY (every hook carries it — pi's extension reads the active
@@ -7846,6 +7855,277 @@ mod tests {
     #[test]
     fn a_same_fields_hook_start_on_a_protected_wrap_lands_nothing() {
         assert_a_protected_hook_start_lands_nothing("hook-start-no-op-lands", "/w", "Ok");
+    }
+
+    /// The world a hook naming a protected wrap runs in: the wrap, an audit log
+    /// of its own, and no compositor. The caller holds `env_lock`.
+    fn forged_hook_world(tag: &str) -> (EnvVars, aoide_test_support::EnvSaver, PathBuf) {
+        let env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (root_env, root) = aoide_test_support::isolated_mail_root(tag);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        protected_wrap_for_hook_start(&kp);
+        (env, root_env, root)
+    }
+
+    fn audit_lines(root: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(root.join("audit.log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("live-sealed-wrap"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn stage_bytes() -> (Vec<u8>, Vec<u8>) {
+        (std::fs::read(sessions_path()).unwrap(), std::fs::read(hooks_path()).unwrap())
+    }
+
+    fn hook_phase(id: &str) -> Option<String> {
+        load_stage::<HooksFile>(&hooks_path())
+            .unwrap_or_default()
+            .hooks
+            .into_iter()
+            .find(|h| h.session_id == id)
+            .map(|h| h.phase)
+    }
+
+    fn stored(id: &str) -> Option<SessionRecord> {
+        load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == id)
+    }
+
+    /// A permission prompt reported under a protected wrap's own id is ignored
+    /// whole: the phase is not written, which also keeps the herald summons from
+    /// being raised (it is spawned from that arm, after the phase). The refusal
+    /// is audited on the door the hook arrived on.
+    #[test]
+    fn a_forged_awaiting_naming_a_protected_wrap_writes_nothing_and_is_audited() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-awaiting");
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = |id: &str| {
+            format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "cwd": "/w" }}"#
+            )
+        };
+
+        hook_for_profile_gated(Door::Cli, claude, &payload("plain"), false, Some(me), None);
+        assert_eq!(hook_phase("plain").as_deref(), Some("awaiting"), "control: this payload reaches the awaiting arm");
+        let (sessions, phases) = stage_bytes();
+
+        let out = hook_for_profile_gated(Door::Daemon, claude, &payload("wrap"), false, Some(me), None);
+
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "live-sealed-wrap", "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["action"], "none");
+        assert_ne!(hook_phase("wrap").as_deref(), Some("awaiting"), "the wrap's phase is not forged");
+        assert_eq!(stage_bytes(), (sessions, phases), "both roster files are byte-identical");
+        let audit = audit_lines(&root);
+        assert_eq!(audit.len(), 1, "one audit line: {audit:?}");
+        assert!(audit[0].contains("\"door\":\"daemon\""), "the line names the door the hook arrived on: {audit:?}");
+        assert!(audit[0].contains("`wrap`"), "and the wrap: {audit:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every other event class, and one the profile does not map at all, is
+    /// ignored the same way: no phase, no `contextCeiling`, no
+    /// `harnessSessionId`, no window and no chain filled, no sub-agent node
+    /// spawned or ended, and no end. The hook process stands under a window
+    /// owner, so an unguarded hook would bind the wrap's empty window.
+    #[cfg(unix)]
+    #[test]
+    fn a_forged_hook_naming_a_protected_wrap_stamps_binds_and_spawns_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-turns");
+        let (_hypr, _hypr_root) = crate::graph::testutil::fake_hypr_socket("forged-turns-hypr");
+        let me = std::process::id() as i32;
+        let ancestry = crate::graph::window::pid_ancestry(me);
+        assert!(ancestry.len() >= 3, "the test process has a window owner above it");
+        std::env::set_var("AOIDE_TEST_CLIENT_PID", ancestry[1].to_string());
+        let mut hook = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let hook_pid = hook.id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = |id: &str, event: &str, extra: &str| {
+            format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "{event}", "cwd": "/w", "context_ceiling": 200000{extra} }}"#
+            )
+        };
+
+        let control = hook_for_profile_gated(
+            Door::Cli, claude, &payload("plain", "UserPromptSubmit", r#", "user_prompt": "go""#), false, Some(hook_pid), None,
+        );
+        let plain = stored("plain").unwrap_or_else(|| panic!("control: the hook registers a session: {}", control.message));
+        assert_eq!(plain.window_address, "0xAA", "control: this rig lets a hook bind a window");
+        assert_eq!(plain.context_ceiling, Some(200000), "control: and stamp a ceiling");
+        assert_eq!(plain.harness_session_id.as_deref(), Some("plain"));
+        let (sessions, phases) = stage_bytes();
+        assert!(stored("wrap").unwrap().window_address.is_empty(), "the wrap holds no window");
+
+        let events = [
+            ("UserPromptSubmit", r#", "user_prompt": "go""#),
+            ("Stop", ""),
+            ("PreToolUse", r#", "tool_name": "Bash", "tool_use_id": "tu1""#),
+            ("PreToolUse", r#", "tool_name": "Task", "tool_use_id": "tuT", "tool_input": { "description": "look" }"#),
+            ("PostToolUse", r#", "tool_name": "Bash", "tool_use_id": "tu1""#),
+            ("SubagentStart", r#", "parent_tool_use_id": "tuT", "agent_type": "Explore""#),
+            ("SubagentStop", r#", "parent_tool_use_id": "tuT""#),
+            ("Notification", r#", "notification_type": "idle_prompt""#),
+            ("SessionEnd", ""),
+            ("PreCompact", ""),
+        ];
+        for (n, (event, extra)) in events.iter().enumerate() {
+            let out = hook_for_profile_gated(
+                Door::Cli, claude, &payload("wrap", event, extra), false, Some(hook_pid), None,
+            );
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "live-sealed-wrap", "{event}: {}", out.message);
+            assert_eq!(stage_bytes(), (sessions.clone(), phases.clone()), "{event} left both roster files byte-identical");
+            assert_eq!(audit_lines(&root).len(), n + 1, "{event} is audited");
+        }
+        let wrap = stored("wrap").unwrap();
+        assert_eq!(wrap.context_ceiling, None);
+        assert_eq!(wrap.harness_session_id, None);
+        assert!(wrap.window_address.is_empty() && wrap.hook_ancestry.is_empty(), "no window and no chain");
+        assert_ne!(wrap.state, "done", "the wrap is not ended");
+        let _ = hook.kill();
+        let _ = hook.wait();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The herald's approve/deny card is raised by a detached `aoide session
+    /// permit` that the phase arm spawns, which no in-process test can see (under
+    /// libtest `spawn_summons` re-enters nothing). So this runs the REAL hook
+    /// binary against a fake shellbridge: a conductable record that is not
+    /// protected gets its card (the control), and a protected wrap gets none.
+    #[cfg(unix)]
+    #[test]
+    fn a_forged_awaiting_raises_no_summons_card_for_a_protected_wrap() {
+        use std::io::Write as _;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-summons");
+        let _runtime_env = EnvVars::save(&["XDG_RUNTIME_DIR", "AOIDE_HERALD_PERMIT"]);
+        let runtime = unique_stage("forged-summons-run");
+        std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+        std::env::remove_var("AOIDE_HERALD_PERMIT");
+        std::fs::create_dir_all(runtime.join("aoide")).unwrap();
+        let bridge = UnixListener::bind(runtime.join("aoide").join("shellbridge.sock")).unwrap();
+        bridge.set_nonblocking(true).unwrap();
+        let me = std::process::id();
+        do_session_start(
+            "unsealed", Some("claude"), Some("/w"), None, None, Some(true), Some("/nonexistent/unsealed.sock"), None, Some(me),
+        );
+        let run_hook = |id: &str| {
+            let payload = format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "cwd": "/w" }}"#
+            );
+            let mut child = std::process::Command::new(built_aoide_bin())
+                .args(["session", "hook", "--agent", "claude"])
+                .env_remove("AOIDE_SESSION_ID")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("the built aoide binary runs");
+            child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+            assert!(child.wait().unwrap().success(), "a hook never fails its harness");
+        };
+
+        run_hook("unsealed");
+        let mut card = accept_one(&bridge, "the unsealed conductable record gets its summons card");
+        let line = String::from_utf8(read_delivery(&mut card, "the card is one line")).unwrap();
+        assert!(line.contains("heraldpush") && line.contains("permit-unsealed"), "control: {line}");
+
+        run_hook("wrap");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            assert!(bridge.accept().is_err(), "a protected wrap raised a summons card");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_ne!(hook_phase("wrap").as_deref(), Some("awaiting"), "and its phase is not forged");
+        let audit = audit_lines(&root);
+        assert!(
+            audit.iter().any(|l| l.contains("\"door\":\"cli\"") && l.contains("a hook naming `wrap`")),
+            "the refusal is audited on the door the hook arrived on: {audit:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&runtime);
+    }
+
+    /// What a wrap hosts is unaffected: its harness child reports under an id of
+    /// its own, and every one of that child's hooks lands on the child. The
+    /// phase arm runs for it, `awaiting` included, and the wrap's record is
+    /// not touched.
+    #[test]
+    fn a_protected_wraps_harness_child_hooks_still_land_on_the_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-child");
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = |event: &str, extra: &str| {
+            format!(
+                r#"{{ "session_id": "harness-uuid", "hook_event_name": "{event}", "cwd": "/w", "context_ceiling": 200000{extra} }}"#
+            )
+        };
+        let wrap_before = serde_json::to_value(stored("wrap").unwrap()).unwrap();
+        let since = now_iso_utc();
+
+        for (event, extra) in [
+            ("SessionStart", ""),
+            ("UserPromptSubmit", r#", "user_prompt": "go""#),
+            ("Notification", r#", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash""#),
+        ] {
+            let out = hook_for_profile_gated(Door::Cli, claude, &payload(event, extra), false, Some(me), Some("wrap"));
+            assert_eq!(out.data.as_ref().unwrap()["action"], "applied", "{event}: {}", out.message);
+        }
+
+        assert_eq!(hook_phase("harness-uuid").as_deref(), Some("awaiting"), "the child's phase arm ran");
+        let child = stored("harness-uuid").expect("the child is registered");
+        assert_eq!(child.parent_session_id.as_deref(), Some("wrap"));
+        assert_eq!(child.context_ceiling, Some(200000));
+        assert_eq!(child.harness_session_id.as_deref(), Some("harness-uuid"));
+        assert_eq!(
+            crate::graph::wait_ready("claude", "wrap", &since, std::time::Duration::from_millis(500)),
+            crate::graph::Ready::Verified,
+            "readiness opens on the child's SessionStart"
+        );
+        let wrap_after = serde_json::to_value(stored("wrap").unwrap()).unwrap();
+        assert_eq!(wrap_after, wrap_before, "the wrap's own record is untouched");
+        assert!(audit_lines(&root).is_empty(), "nothing the child sent is refused or audited");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The `sub:` namespace belongs to the sub-agent hooks: a harness's
+    /// SessionStart under such an id registers nothing, while a Task tool call
+    /// still spawns its `sub:` node.
+    #[test]
+    fn a_hook_start_under_a_sub_prefixed_id_registers_nothing_while_a_task_still_spawns_its_node() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root("hook-start-sub-id");
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let hook = |payload: &str| hook_for_profile_gated(Door::Cli, claude, payload, false, Some(me), None);
+
+        let start = hook(r#"{ "session_id": "sub:x", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+
+        assert_eq!(start.data.as_ref().unwrap()["innerStatus"], "Usage", "{}", start.message);
+        assert!(stored("sub:x").is_none(), "no record is registered under a reserved id");
+
+        hook(r#"{ "session_id": "owner", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+        hook(
+            r#"{ "session_id": "owner", "hook_event_name": "PreToolUse", "cwd": "/w", "tool_name": "Task",
+                 "tool_use_id": "tuT", "tool_input": { "description": "look", "subagent_type": "Explore" } }"#,
+        );
+        let node = stored("sub:tuT").expect("a Task call still creates its sub-agent node");
+        assert_eq!(node.kind.as_deref(), Some("subagent"));
+        assert_eq!(node.parent_session_id.as_deref(), Some("owner"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Spawn readiness reads the harness child's own record, never the wrap's,
