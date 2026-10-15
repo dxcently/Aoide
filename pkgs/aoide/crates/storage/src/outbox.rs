@@ -293,11 +293,12 @@ impl OutboxEntry {
     }
 
     /// Did the last attempt get an ANSWER from the far end at all — a delivery
-    /// (`accepted`/`duplicate`) or a refusal (`refused: <word>`)? A transport
-    /// failure is the one thing that is not an answer: nothing came back. The
-    /// words are the DRAIN's vocabulary, so it is read HERE and nowhere else,
-    /// and it is read POSITIVELY — the answer words decide, not the absence of a
-    /// prefix.
+    /// (`accepted`/`duplicate`) or a refusal (`refused: <word>`)? Neither a
+    /// transport failure (nothing came back) nor an `unauthenticated: <reason>`
+    /// attempt (an answer whose signature did not verify under the key on file,
+    /// so nothing in it was used) is an answer. The words are the DRAIN's
+    /// vocabulary, so it is read HERE and nowhere else, and it is read
+    /// POSITIVELY — the answer words decide, not the absence of a prefix.
     pub fn last_attempt_was_answered(&self) -> bool {
         ["accepted", "duplicate", "refused:"].iter().any(|word| self.last_outcome.starts_with(word))
     }
@@ -511,8 +512,6 @@ pub fn nodes_with_outbox() -> Result<Vec<String>, String> {
 /// lock. The one place [`write_entry`] and [`write_ack_if_absent`] both
 /// funnel their actual disk write through, so the two never drift on shape.
 fn write_entry_unlocked(node: &str, entry: &OutboxEntry) -> Result<(), String> {
-    let dir = node_dir(node);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = entry_path(node, &entry.envelope.msgid);
     let json = serde_json::to_string_pretty(entry).map_err(|e| e.to_string())?;
     atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
@@ -606,7 +605,7 @@ pub fn write_ack_if_absent(node: &str, acked_msgid: &str, entry: &OutboxEntry) -
         // is still actually there rather than trusting existence alone.
         let marker = ack_marker_path(&node, &acked_msgid);
         if let Some(parent) = marker.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+            crate::fs::ensure_write_dir(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         std::fs::write(&marker, entry.envelope.msgid.as_bytes())
             .map_err(|e| format!("{}: {e}", marker.display()))?;
@@ -924,8 +923,6 @@ fn read_filed_unlocked(node: &str) -> Result<Vec<String>, String> {
 }
 
 fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
-    let dir = node_dir(node);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = filed_path(node);
     if pending.is_empty() {
         let _ = std::fs::remove_file(&path);
@@ -1048,8 +1045,6 @@ fn write_link_state(node: &str, state: &LinkState) -> Result<(), String> {
     let node = node.to_string();
     let state = state.clone();
     with_lock(move || {
-        let dir = node_dir(&node);
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = link_path(&node);
         let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
         atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
@@ -1147,7 +1142,7 @@ pub fn try_take_poll_lock(node: &str) -> Result<Option<LinkLockGuard>, String> {
 
 fn try_take(node: &str, path: PathBuf) -> Result<Option<LinkLockGuard>, String> {
     let dir = node_dir(node);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    crate::fs::ensure_write_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -1497,6 +1492,26 @@ mod tests {
             sig: "ef".repeat(32),
             msgid: format!("ack-{acked_msgid}-{}", minted_at.replace(':', "-")),
         }
+    }
+
+    /// The ack marker is written under a `state/` that may be wide, and the
+    /// write locks it before the first byte lands.
+    #[cfg(unix)]
+    #[test]
+    fn write_ack_if_absent_locks_a_wide_state_it_writes_into() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("write-ack-locks");
+        let state = crate::fs::state_dir();
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let ack = OutboxEntry::fresh(ack_for("there", "acked-msgid", "2026-09-13T00:00:00Z"));
+        assert!(write_ack_if_absent("there", "acked-msgid", &ack).unwrap());
+
+        let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "write_ack_if_absent left state/ at {mode:o}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1971,5 +1986,28 @@ mod sealed_spool_tests {
         assert!(remove_entry("elsewhere", &second_msgid).unwrap());
         let left: Vec<String> = list_entries("elsewhere").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
         assert_eq!(left, vec![msgid.clone()], "only the first entry is left, by its msgid");
+    }
+
+    /// **An attempt whose answer could not be checked is neither a delivery nor
+    /// an answer.** `unauthenticated:` is what the client writes when a far
+    /// end's answer does not verify under the key on file. Liveness must not
+    /// count it as reached or answered, or a forged or dead peer would read as
+    /// reachable.
+    #[test]
+    fn an_unauthenticated_attempt_is_neither_reached_nor_answered() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&aoide_test_support::unique_tmp("outbox-unauthenticated"));
+
+        let envelope = crate::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
+        let mut entry = OutboxEntry::fresh(envelope);
+        entry.last_outcome = "unauthenticated: `elsewhere` answered `aoide/mailDeposit` with no answer signature".to_string();
+        assert!(!entry.last_attempt_reached_the_peer());
+        assert!(!entry.last_attempt_was_answered());
+
+        entry.last_outcome = "refused: bad-msgid".to_string();
+        assert!(entry.last_attempt_was_answered(), "a refusal is an answer, so the contrast holds");
+        entry.last_outcome = "accepted".to_string();
+        assert!(entry.last_attempt_reached_the_peer() && entry.last_attempt_was_answered());
     }
 }

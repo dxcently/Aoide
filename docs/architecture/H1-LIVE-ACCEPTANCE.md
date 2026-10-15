@@ -126,23 +126,35 @@ and state, and `aoide.config.settings` is whole-file-or-nothing
    operator = "ed25519:<64 lowercase hex>"
    ```
 
-4. yomi: repoint the relay's VERIFIED record at its HTTPS address. A poll node
-   dials a record (`mail_wire::poll_node`), a request is signed only for a
-   verified record (`commands::sign_headers_for_node`), and the pairing that
-   verifies is LAN-only. yomi was paired with sakaki on the LAN, so the
-   existing record is moved, once, keeping its key and grants:
+4. yomi: no pair record is needed for sakaki. A poll reaches its relay through
+   the charter in force (HTTPS-MESH-API.md, "A poll reaches its relay by the
+   charter alone"): sakaki's line gives its identity key and its `https://`
+   address, and sakaki must prove that key before a letter moves. So the relay
+   is asked by its charter, and the LAN is not needed:
 
    ```sh
-   aoide node address sakaki https://aoide.necoconeco.net
-   jq '.nodes[] | select(.name=="sakaki") | {name,url,verified,grants}' $AOIDE_ROOT/state/nodes.json
+   aoide mail poll sakaki
    ```
 
-   Expected: `url` is the HTTPS address, `verified` is `true`, `grants.home`
-   contains `message`. The command clears `via`: an `https://` url together
-   with a `via` is refused at the dial seam (`node_store::transport_conflict`).
-   If `node address` answers `unknown-node`, or `verified` is `false`, there is
-   no paired record to repoint: stop and report; pairing cannot be done across
-   this network.
+   Expected: `polled`, with no `refused` and no `unreachable`. Two refusals are
+   the ones to stop on, and each names its own fix:
+
+   - `no pair record of it here, and no charter in force declares it`: the
+     charter on yomi (step 3) does not name sakaki. Stop and report.
+   - `answered its identity check with a key the charter of mesh home does
+     not give it, or with no proof at all`: the machine answering at sakaki's
+     address is not the one the charter names, or it runs an aoide that does
+     not sign its answers. The reason in brackets says which: `does not verify
+     as signed by the key on file` for the first, `no answer signature` and
+     `upgrade aoide on sakaki` for the second. Stop and report; nothing was
+     polled, and yomi's log holds `mail.poll.relay-key-mismatch` beside
+     `mail.answer.key-mismatch` or `mail.answer.unsigned`.
+
+   A verified record of sakaki from an earlier LAN pairing, if yomi holds one,
+   answers first, with its own key and grants. Its `url` must then be the HTTPS
+   address (`aoide node address sakaki https://aoide.necoconeco.net` clears
+   `via`; an `https://` url with a `via` is refused at the dial seam,
+   `node_store::transport_conflict`).
 5. yomi: the ask is a timer, because a node with nothing to send never dials
    (MAIL.md Wire). A transient user timer, removed in section 9:
 

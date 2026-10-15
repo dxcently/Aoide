@@ -32,7 +32,12 @@ terminal's rights to its remote callers.
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`
-  execs: bind the control socket
+  execs: lock `state/` owner-only first (`tighten_state_tree`, refusing to
+  start when it cannot; CONTRACTS.md §4), then take the socket lock
+  `<socket>.lock` (`daemon::acquire_daemon_lock`) and the state lock
+  `aoided.lock` in the state dir (`daemon::acquire_state_lock`), both
+  non-blocking `flock`s held for the process's life, so a held lock
+  refuses the start before anything is bound. Then bind the control socket
   (`$AOIDE_DAEMON_SOCKET`, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`,
   `daemon::socket_path`), spawn a thread-per-connection accept loop
   (fallible `Builder::spawn`, accept-error backoff — the secrets broker's
@@ -151,16 +156,18 @@ terminal's rights to its remote callers.
   `daemon::mint_seal(session_id, pid, origin_class)` builds a
   `SealedIdentity` (reading `pid_starttime` via `aoide_conduct::
   graph::pid_starttime`, no second `/proc` parse) and signs it under that
-  key (`aoide_storage::sealed_id::mint_seal`). `handle_conn`'s `dispatch`
-  op calls `daemon::seal_freshly_registered_session` right after a
-  successful `session start` dispatch: if the just-written record already
-  carries a `pid` (today, only `session_conduct`'s own direct
-  registration does — the bare wire path does not), it mints a seal and
-  stamps it via `aoide_conduct::graph::stamp_seal`. **This is honest
-  scaffolding, not a security boundary**: the pid sealed over is
+  key (`aoide_storage::sealed_id::mint_seal`), and returns the starttime it
+  signed over as well. `handle_conn`'s `dispatch` op calls
+  `daemon::seal_freshly_registered_session` right after a successful
+  `session start` dispatch: if the just-written record already carries a
+  `pid` (today, only `session_conduct`'s own direct registration does — the
+  bare wire path does not), it mints a seal and stamps it, with that
+  starttime as `sealedPidStarttime`, via `aoide_conduct::graph::stamp_seal`.
+  The start door (`aoide_conduct::graph::session_start`) decides a start on a
+  protected wrap, and it never reads the signature. **This
+  is honest scaffolding, not a security boundary**: the pid sealed over is
   whatever the record already carries, not yet a peercred-verified
-  CONNECTING pid, and nothing anywhere reads `seal` back to gate a
-  decision. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
+  CONNECTING pid. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
   own README for the full mechanism.
 - **The dispatch socket's own accept gets a cross-uid floor, and two
   attribution leaks close (LANE IDENTITY P-ID3).** `daemon::accept_loop`
@@ -561,12 +568,33 @@ terminal's rights to its remote callers.
   §Status). An UNLOADABLE set refuses both methods with `config-invalid` and
   keeps serving everything else: no zone checks means no mail, never mail with
   the walls down. **An unloadable set is answered BEFORE caller resolution, to
-  every caller**: where the request's signature verifies against the key its own
-  `X-Aoide-Node` holds on the charter in force, the door answers the refused
-  `config-invalid` result — fixed text, with the load error audited only, never
-  sent — and CONSUMES the nonce, so those bytes cannot be replayed into the
-  method once the config returns. A request whose signature does not verify, or
-  naming a node that charter does not carry, still reads `-32007`.
+  every caller**: where the request's signature verifies
+  against the key its own `X-Aoide-Node` holds on the charter in force, the door
+  answers the refused `config-invalid` result — fixed text, with the load error
+  audited only, never sent — and CONSUMES the nonce, so those bytes cannot be
+  replayed into the method once the config returns. A request whose signature
+  does not verify, or naming a node that charter does not carry, still reads
+  `-32007`.
+- **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
+  verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
+  `wire_auth::answer_string` over the request's own signature and nonce, the
+  status and the exact body bytes (`answer_headers`). A signed request is a
+  POST and nothing else: any other method is refused `-32007` before its
+  signature is checked. Everything else is unsigned, and each write site says
+  why in a comment there: an unparsed or unsigned request, every GET (the card
+  included), every refusal (`-32007`, `-32008`, and the replay `-32009`), the
+  `config-invalid` answer above, the busy 503s, and the SSE stream. That
+  answer is checked only against the raw charter in force: the charter a node
+  governs is read through the same config that failed to load
+  (`charter::governing`), so there is none to sign under. The door's key
+  signs nothing an unverified sender chose. A key that is not on disk, or will
+  not load, leaves the answer unsigned and audited (`a2a.answer-unsigned`),
+  and the answer path never mints one (`identity::load_existing`). The client
+  refuses an unsigned answer.
+- **Nonces are single-use in any letter case.** `nonce_is_replay` keys both the
+  pubkey and the nonce trimmed and lowercased, the form `canonical_string`
+  signs. A captured request whose nonce header is upper-cased is therefore a
+  replay, not a fresh nonce.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

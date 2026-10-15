@@ -996,11 +996,8 @@ fn drain_spooled(mesh: &str, spooled: &[charter::Spooled]) -> Vec<serde_json::Va
                 Some(entry) => json!({
                     "node": node,
                     "drained": false,
-                    "error": if entry.last_outcome.is_empty() {
-                        "the drain did not complete".to_string()
-                    } else {
-                        entry.last_outcome
-                    },
+                    "error": crate::mail_wire::outcome_line(&entry.last_outcome)
+                        .unwrap_or_else(|| "the drain did not complete".to_string()),
                 }),
                 None if relayed => json!({
                     "node": node,
@@ -1255,6 +1252,50 @@ mod tests {
             );
             let text = render_spooled(&rows);
             assert!(text.contains("NOT DIALLED") && text.contains("down"), "{text}");
+        });
+    }
+
+    /// **A charter letter that did not drain says why in clean words.** The row
+    /// carries the entry's own `last_outcome`, which a build before the far end's
+    /// words were cleaned stored as they came.
+    #[test]
+    fn an_undrained_charter_letter_reports_its_stored_outcome_clean() {
+        with_root("drain-stored-outcome", |_dir| {
+            charter::init("home").unwrap();
+            let line = charter::node_line().unwrap();
+            let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+            std::fs::write(charter::source_path("home"), &src).unwrap();
+            charter::sign("home", None).unwrap();
+            let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+            let mut nodes = aoide_storage::node_store::load_nodes();
+            aoide_storage::node_store::upsert_paired_node(
+                &mut nodes,
+                "peerbox",
+                "http://127.0.0.1:1/",
+                &kp.info().pubkey_hex,
+                &aoide_storage::time::now_iso_utc(),
+                &["message".to_string()],
+                "home",
+            );
+            aoide_storage::node_store::save_nodes(&nodes).unwrap();
+            let envelope = aoide_storage::mail::mint_outbound_letter("here", "peerbox", "bob", "hi").unwrap();
+            let msgid = envelope.msgid.clone();
+            let mut entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
+            entry.tries = 1;
+            entry.last_outcome = "refused: over\rwritten \u{1b}[2J\u{202e}desrever \u{2800}".to_string();
+            aoide_storage::outbox::write_entry("peerbox", &entry).unwrap();
+            // The link is backing off, so the drain returns without a dial and the
+            // entry is still there to be reported.
+            aoide_storage::outbox::back_off("peerbox", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64, "transport: HTTP 0").unwrap();
+
+            let rows = drain_spooled(
+                "home",
+                &[charter::Spooled { node: "peerbox".to_string(), next: "peerbox".to_string(), msgid }],
+            );
+
+            assert_eq!(rows[0]["drained"], false, "{rows:?}");
+            assert_eq!(rows[0]["error"], "refused: overwritten [2Jdesrever", "{rows:?}");
+            assert!(render_spooled(&rows).contains("refused: overwritten [2Jdesrever"));
         });
     }
 

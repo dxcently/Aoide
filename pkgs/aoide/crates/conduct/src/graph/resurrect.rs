@@ -63,26 +63,14 @@
 //! the revived session's spawn is the harness's own resume line, launched
 //! without the MCP spawn gate:
 //! - **not idle, with a foreground `argv`** — the session was demonstrably
-//!   RUNNING something when it left. Re-exec it, `--yes --submit` and all:
-//!   the never-auto-run rule below covers the typed-but-unsubmitted case,
-//!   not a command already in flight. EXCEPT when `argv[0]`'s basename is
-//!   `sudo` (orchestrator ruling, open knob 5 — asked twice, unanswered,
-//!   default taken and flagged): a privileged foreground command is never
-//!   re-exec'd unattended — at best it hangs on a password prompt nobody is
-//!   watching, at worst it silently re-runs something destructive. The cwd
-//!   still restores; nothing is delivered.
-//! - **idle, with a clean `typed` line** — preload it with `--yes` and,
-//!   deliberately, NEVER `--submit`. The text sits in the new prompt until a
-//!   human presses Enter. **This is the whole safety invariant this phase
-//!   exists to hold: the no-submit path must never grow a `--submit`, and
-//!   the two branches above must never be unified behind a shared boolean
-//!   parameter** — [`restore_delivery`] hardcodes each branch's flag map
-//!   inline rather than threading a `submit: bool` through one "deliver"
-//!   helper, precisely so a later refactor can't flip one into the other by
-//!   accident. A stale `rm -rf` sitting in `typed` and firing itself at boot
-//!   is the failure this shape prevents.
-//! - **idle, with no `typed`** — nothing is delivered. A terminal reopened
-//!   at its own cwd is already the correct, complete answer.
+//!   RUNNING something when it left. Its command is TYPED at the prompt, never
+//!   submitted: the human who reads the line presses Enter. Nothing runs at
+//!   boot on its own. EXCEPT when [`restore_argv_refusal`] refuses the argv: the
+//!   refusals, and why each one exists, are listed once in CONTRACTS.md's
+//!   restore paragraph. The cwd still restores; nothing is delivered.
+//! - **idle** — nothing is delivered. A terminal reopened at its own cwd is
+//!   already the correct, complete answer. Nothing typed in the old session
+//!   is carried into the new prompt, so nothing can fire itself at boot.
 //!
 //! **Bare-manifest mode (U2, command-defrag lane U).** `resurrect` with
 //! NONE of `--project`/`--all`/`--id` given walks UP from cwd
@@ -168,11 +156,12 @@
 //! ordinary-revive case to protect here, every manifest-mode spawn already
 //! came from an explicit, operator-authored declaration.
 
-use super::common::{require_flag, stage_error};
+use super::common::{is_unsafe, require_flag, stage_error};
+use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
 use super::send::{deliver_local_with, real_attested_sender, PendingSpawn};
 use super::session_store::{stamp_origin, stamp_resumed_from};
-use super::spawn::{hold_whole, launch_session};
+use super::spawn::{hold_whole, launch_session, shell_join, Ready};
 use aoide_protocol::agents::agent_profile;
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::{Door, Invocation};
@@ -300,99 +289,177 @@ fn stored_login_shell() -> Option<String> {
     None
 }
 
-/// The narrow, named check behind the sudo refusal (orchestrator ruling,
-/// durable-sessions plan open knob 5): match ONLY `argv[0]`'s basename being
-/// exactly `sudo`, nothing cleverer — no `doas`/`pkexec` guessing, no
-/// argument inspection.
-fn is_sudo_argv(argv: &[String]) -> bool {
-    argv.first()
-        .and_then(|a| std::path::Path::new(a).file_name())
-        .and_then(|n| n.to_str())
-        == Some("sudo")
+/// The longest line a restore re-types, in bytes. A longer recorded argv is
+/// refused, never clipped: a clipped line is wrong text, not a short one.
+const RESTORE_LINE_MAX: usize = 4096;
+
+/// Why a recorded foreground argv is never re-typed, or `None` when it may be.
+/// Pure. The refusals are listed once, in CONTRACTS.md's restore paragraph. The
+/// reason returned names the one that fired, and the `restore refused` line
+/// carries it.
+///
+/// Reading argv is not proof of what will run: a same-uid process can rewrite
+/// its own `/proc` cmdline, so these refusals judge the typed text, not the
+/// process.
+fn restore_argv_refusal(argv: &[String]) -> Option<&'static str> {
+    if argv.first().is_some_and(|a| a.contains('=')) {
+        return Some("an assignment prefix");
+    }
+    if argv.iter().any(|w| w.contains('\u{fffd}') || w.chars().any(is_unsafe)) {
+        return Some("a control or invisible character");
+    }
+    if shell_join(argv).len() > RESTORE_LINE_MAX {
+        return Some("a line over 4096 bytes");
+    }
+    if runs_a_privilege_program(argv) {
+        return Some("a privilege program");
+    }
+    if program_is_a_shell(argv) && !program_is_an_interactive_shell(argv) {
+        return Some("a shell-form argv");
+    }
+    None
 }
 
-/// What, if anything, to deliver into a freshly-resurrected terminal once it
-/// registers — pure, no process, no socket, so this decision and its exact
-/// `Invocation` flag map are directly unit-testable apart from
-/// `resurrect_one`'s real spawn. See the module doc's safety-invariant
-/// paragraph: the two branches below are never unified behind a shared
-/// boolean parameter — each hardcodes its own flag map inline.
-/// The outcome word for one restore, from the answer [`send_restore`] gave it.
-/// Pure, so the held-pending mapping is testable without a spawn: a send the
-/// door parked is `held-pending`, never reported as typed.
-fn restore_word(inner: &Outcome, submit: bool, ready: super::spawn::Ready) -> String {
-    if inner.status != Status::Ok {
-        return format!("failed: {}", inner.message);
+/// The refusal a restore's recorded foreground gets, or `None`. An idle session
+/// has no foreground argv to refuse, so `None` for it.
+pub(in crate::graph) fn restore_refused_because(restore: &RestoreSnapshot) -> Option<&'static str> {
+    if restore.idle {
+        return None;
     }
-    if inner.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str) == Some("pending") {
-        // The door could not approve the restore, so it is queued for a human,
-        // not typed: say so, never "restored".
-        return "held-pending".to_string();
-    }
-    // The branch that fired, and whether the readiness was a fact or a settled
-    // guess: a terminal candidate whose agent has no profile is typed at on the
-    // guess, and says so.
-    let word = if submit { "reexec" } else { "preload" };
-    if ready == super::spawn::Ready::Verified {
-        word.to_string()
-    } else {
-        format!("{word}-unverified")
-    }
+    restore.argv.as_deref().and_then(restore_argv_refusal)
 }
 
 /// Type a restore into the revived session through the one gated injection
 /// door. A restore is the session's own earlier bytes going back to its own
 /// prompt, so what authorises it is the door's `--yes` and nothing else: it
 /// names no sender, even to a caller the kernel can attest. A door that cannot
-/// approve parks it, whoever is calling.
-fn send_restore(inv: &Invocation, new_id: &str) -> Outcome {
-    deliver_local_with(inv, new_id, |_| None)
+/// approve parks it, whoever is calling, and a parked restore is reported as
+/// [`Landed::Held`], never as typed.
+fn send_restore(inv: &Invocation, new_id: &str) -> Result<Landed, String> {
+    let out = deliver_local_with(inv, new_id, |_| None);
+    if out.status != Status::Ok {
+        return Err(out.message);
+    }
+    if out.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str) == Some("pending") {
+        return Ok(Landed::Held);
+    }
+    Ok(Landed::Typed)
 }
 
+/// Where a restore's line went once its send returned: typed into the pty, or
+/// parked in the pending queue for a human to approve.
+#[derive(Debug, PartialEq, Eq)]
+enum Landed {
+    Typed,
+    Held,
+}
+
+/// What, if anything, to deliver into a freshly-resurrected terminal once it
+/// registers — pure, no process, no socket, so this decision and its exact
+/// `Invocation` flag map are directly unit-testable apart from
+/// `resurrect_one`'s real spawn. Only a session that was running a command
+/// when it left gets anything: that command is TYPED and never submitted, so
+/// no flag map here carries `submit`. An idle one is restored by cwd alone.
+///
+/// A busy session's recorded argv is typed (`shell_join`-quoted) unless
+/// [`restore_argv_refusal`] refuses it. Why never submitted: an argv is
+/// attacker-choosable (a same-uid process can rewrite its own `/proc`
+/// cmdline), and reading it cannot prove what it will do, so the human who
+/// reads the line presses Enter. A control byte in it, `\r` included, would
+/// act as that Enter, which is why the refusals stay.
 fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreSnapshot) -> Option<Invocation> {
-    if !restore.idle {
-        // Branch one — demonstrably RUNNING something when the session
-        // left. Re-exec it, Enter and all: never for `sudo` (`is_sudo_argv`)
-        // — an unattended password prompt in a terminal nobody is watching
-        // is not a restore.
-        let argv = restore.argv.as_ref()?;
-        if is_sudo_argv(argv) {
-            return None;
-        }
-        let mut flags = BTreeMap::new();
-        flags.insert("id".to_string(), new_id.to_string());
-        // Attributed to the target ITSELF: these are the session's own prior
-        // bytes going back to its own prompt, and send's self-attribution
-        // rule delivers them verbatim — a provenance prefix would turn the
-        // re-exec into a shell syntax error (live P-C7 finding).
-        flags.insert("from".to_string(), new_id.to_string());
-        flags.insert("yes".to_string(), "true".to_string());
-        flags.insert("submit".to_string(), "true".to_string());
-        return Some(Invocation {
-            path: vec!["send".to_string()],
-            args: vec![argv.join(" ")],
-            flags,
-            door,
-        });
+    if restore.idle {
+        return None;
     }
-    // Branch two — idle, with a clean, unpoisoned typed line. Preload it and
-    // NOTHING else: `--yes`, and — permanently — no `--submit`. This flag
-    // map must never gain a `submit` key; that omission is the entire
-    // mechanism behind "preload, never auto-run".
-    let typed = restore.typed.as_ref()?;
+    let argv = restore.argv.as_ref()?;
+    if restore_argv_refusal(argv).is_some() {
+        return None;
+    }
+    // `grep "a b" f` is typed as `grep 'a b' f`: the words re-parse to the
+    // recorded argv, for an argv that passed `restore_argv_refusal`.
+    let line = shell_join(argv);
     let mut flags = BTreeMap::new();
     flags.insert("id".to_string(), new_id.to_string());
-    // Self-attributed for the same verbatim-bytes reason as the re-exec
-    // branch above: the preloaded line must be exactly what the operator
-    // typed, or Enter runs something else.
+    // Attributed to the target ITSELF: the line must reach its prompt verbatim,
+    // and send's self-attribution rule delivers it that way. A provenance
+    // prefix would turn it into a shell syntax error (live P-C7 finding).
     flags.insert("from".to_string(), new_id.to_string());
     flags.insert("yes".to_string(), "true".to_string());
     Some(Invocation {
         path: vec!["send".to_string()],
-        args: vec![typed.clone()],
+        args: vec![line],
         flags,
         door,
     })
+}
+
+/// How one resurrected terminal's restore ended, which is the `restoreDelivery`
+/// of its row in `resurrected[]` ([`Restore::label`] is the whole vocabulary).
+#[derive(Debug, PartialEq, Eq)]
+enum Restore {
+    /// The spawn never registered, so there was no live pty to deliver into.
+    Unregistered,
+    /// [`restore_refused_because`] refused the recorded foreground argv.
+    Refused(&'static str),
+    /// Nothing to deliver: an idle session, or an entry with no `restore`.
+    Nothing,
+    /// The target never became ready, so nothing was typed.
+    NotReady,
+    /// The send into the new pty failed.
+    Failed(String),
+    /// The command was typed, never submitted. `verified` is whether the
+    /// readiness was a fact or a settled guess.
+    Typed { verified: bool },
+    /// The door could not approve the restore, so it waits in the pending queue
+    /// for a human. Nothing was typed.
+    Held,
+}
+
+impl Restore {
+    fn label(&self) -> String {
+        match self {
+            Restore::Unregistered => "skipped-unregistered".to_string(),
+            Restore::Refused(why) => format!("refused: {why}"),
+            Restore::Nothing => "none".to_string(),
+            Restore::NotReady => "not-ready".to_string(),
+            Restore::Failed(why) => format!("failed: {why}"),
+            Restore::Typed { verified: true } => "command".to_string(),
+            Restore::Typed { verified: false } => "command-unverified".to_string(),
+            Restore::Held => "held-pending".to_string(),
+        }
+    }
+}
+
+/// The restore step of one resurrected terminal, in the order its effects may
+/// run: nothing is waited on or sent for an unregistered, refused or empty
+/// restore, and nothing is sent to a target that is not ready. The wait and the
+/// send are injected, so the whole decision is a table test.
+fn restore_step(
+    registered: bool,
+    restore: Option<&RestoreSnapshot>,
+    door: aoide_protocol::Door,
+    new_id: &str,
+    wait_ready: impl FnOnce() -> Ready,
+    send: impl FnOnce(&Invocation) -> Result<Landed, String>,
+) -> Restore {
+    if !registered {
+        return Restore::Unregistered;
+    }
+    if let Some(why) = restore.and_then(restore_refused_because) {
+        return Restore::Refused(why);
+    }
+    let Some(inv) = restore.and_then(|r| restore_delivery(door, new_id, r)) else {
+        return Restore::Nothing;
+    };
+    let ready = wait_ready();
+    if ready == Ready::NotReady {
+        return Restore::NotReady;
+    }
+    match send(&inv) {
+        Ok(Landed::Typed) => Restore::Typed { verified: ready == Ready::Verified },
+        Ok(Landed::Held) => Restore::Held,
+        Err(why) => Restore::Failed(why),
+    }
 }
 
 /// What `resurrect_one` does with a ledger entry's `origin` field when
@@ -539,38 +606,20 @@ fn resurrect_one(
     // registered AND became READY: an unregistered session has no live pty to
     // deliver into, and a registered-but-unstarted one has a pty whose harness
     // is still coming up, where the same early-typing defect `spawn --prompt`
-    // just fixed would lose the line (or, for the re-exec branch's Enter, run
-    // it somewhere it was never aimed at). `restore_delivery` is pure and
-    // decides the whole shape; the `submit` key on its returned flags (never
-    // present on the preload shape) is what this reads back to report which
-    // branch fired.
-    let restore_result = if !registered {
-        "skipped-unregistered".to_string()
-    } else {
-        match c.entry.restore.as_ref().and_then(|r| restore_delivery(door, &new_id, r)) {
-            None => "none".to_string(),
-            Some(_) => {
-                let ready = super::spawn::wait_ready(
-                    &c.entry.agent,
-                    &new_id,
-                    &launch_at,
-                    super::spawn::READY_BUDGET,
-                );
-                if ready == super::spawn::Ready::NotReady {
-                    "not-ready".to_string()
-                } else {
-                    let inv = c
-                        .entry
-                        .restore
-                        .as_ref()
-                        .and_then(|r| restore_delivery(door, &new_id, r))
-                        .expect("checked just above");
-                    let submit = inv.flags.contains_key("submit");
-                    restore_word(&send_restore(&inv, &new_id), submit, ready)
-                }
-            }
-        }
-    };
+    // just fixed would lose the line. `restore_step` runs the wait and the send
+    // in order and names the outcome; `restore_delivery` is pure and decides the
+    // whole shape: it is `Some` only for a busy session's command.
+    let restore = restore_step(
+        registered,
+        c.entry.restore.as_ref(),
+        door,
+        &new_id,
+        || super::spawn::wait_ready(&c.entry.agent, &new_id, &launch_at, super::spawn::READY_BUDGET),
+        |inv| send_restore(inv, &new_id),
+    );
+    if let Restore::Refused(why) = &restore {
+        changed.push(format!("session {new_id}: restore refused — {why}"));
+    }
 
     changed.push(format!(
         "session {new_id}: resurrected from {} ({}){}",
@@ -578,19 +627,16 @@ fn resurrect_one(
         c.entry.agent,
         if registered { "" } else { " (not yet registered)" }
     ));
-    if matches!(
-        restore_result.as_str(),
-        "reexec" | "preload" | "reexec-unverified" | "preload-unverified"
-    ) {
-        changed.push(format!("session {new_id}: restore {restore_result}"));
+    if let Restore::Typed { .. } = restore {
+        changed.push(format!("session {new_id}: restore {}", restore.label()));
     }
-    if restore_result == "not-ready" {
+    if restore == Restore::NotReady {
         changed.push(format!(
             "session {new_id}: restore not injected — `{}` was not ready",
             c.entry.agent
         ));
     }
-    if restore_result == "held-pending" {
+    if restore == Restore::Held {
         changed.push(format!("session {new_id}: restore held pending approval"));
     }
     resurrected.push(json!({
@@ -598,7 +644,7 @@ fn resurrect_one(
         "resumedFrom": c.entry.session_id,
         "agent": c.entry.agent,
         "registered": registered,
-        "restoreDelivery": restore_result,
+        "restoreDelivery": restore.label(),
     }));
 }
 
@@ -1387,7 +1433,7 @@ mod tests {
             "shell",
             "/home/khoa/Aoide",
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None }),
         );
         let candidate = resolve_candidate(entry);
         let argv = candidate.resume_argv.expect("the terminal arm must resolve a restore-bearing shell entry");
@@ -1407,81 +1453,335 @@ mod tests {
         assert!(candidate.resume_argv.is_none(), "a restore-less shell entry must still be skipped");
     }
 
-    /// The preload path's flag map, pinned directly — no process, no socket.
-    /// `--yes` is present; `--submit` must NEVER be, on pain of violating
-    /// the whole "preload, never auto-run" invariant this phase exists for.
+    /// R1: a busy session's recorded argv is TYPED and never submitted. The
+    /// flag map carries `--yes` and no `submit`, and the bytes the real send
+    /// writer puts on the pty are the line itself, with no submit key after it.
+    #[cfg(unix)]
     #[test]
-    fn preload_delivery_carries_yes_and_never_submit() {
-        let restore = RestoreSnapshot {
-            cwd: Some("/home/khoa/Aoide".into()),
-            idle: true,
-            argv: None,
-            typed: Some("echo hello".to_string()),
-        };
+    fn a_busy_argv_is_typed_and_never_submitted() {
+        let restore = busy_restore(&["nvim", "notes.md"]);
         let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
-            .expect("an idle restore with a typed line must construct a send");
+            .expect("a busy argv that passes the refusals is typed");
         assert_eq!(inv.flags.get("yes").map(String::as_str), Some("true"));
-        assert!(!inv.flags.contains_key("submit"), "the no-submit path must never carry `submit`: {:?}", inv.flags);
-        // Self-attributed (`--from <new-id>`): send's self-attribution rule
-        // then delivers the bytes verbatim — without this, the preload came
-        // back as `from <sender>: echo hello`, a line no human typed
-        // (live P-C7 finding).
-        assert_eq!(inv.flags.get("from").map(String::as_str), Some("new-id"));
-        assert_eq!(inv.args, vec!["echo hello".to_string()]);
-    }
-
-    /// The re-exec path's flag map, pinned directly — no process, no socket.
-    /// It carries BOTH `--yes` and `--submit`: the session was demonstrably
-    /// running this when it left, which is a different case from a typed
-    /// -but-unsubmitted line.
-    #[test]
-    fn reexec_delivery_carries_yes_and_submit() {
-        let restore = RestoreSnapshot {
-            cwd: Some("/home/khoa/Aoide".into()),
-            idle: false,
-            argv: Some(vec!["nvim".to_string(), "notes.md".to_string()]),
-            typed: None,
-        };
-        let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
-            .expect("a working restore with argv must construct a send");
-        assert_eq!(inv.flags.get("yes").map(String::as_str), Some("true"));
-        assert_eq!(inv.flags.get("submit").map(String::as_str), Some("true"));
-        // Self-attributed for the same verbatim-bytes reason as the preload
-        // pin above — a prefixed re-exec is a shell syntax error.
+        assert!(!inv.flag_present("submit"), "a restore never submits: {:?}", inv.flags);
         assert_eq!(inv.flags.get("from").map(String::as_str), Some("new-id"));
         assert_eq!(inv.args, vec!["nvim notes.md".to_string()]);
+
+        let (mut tx, mut rx) = std::os::unix::net::UnixStream::pair().expect("a socket pair");
+        crate::graph::send::write_delivery(
+            &mut tx,
+            inv.args[0].as_bytes(),
+            inv.flag_present("submit"),
+            "\r",
+            std::time::Duration::ZERO,
+        )
+        .expect("the line is written");
+        drop(tx);
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut rx, &mut bytes).expect("the socket reads to its end");
+        assert_eq!(bytes, b"nvim notes.md", "the line is typed, and no submit key follows it");
     }
 
-    /// Idle with a null `typed` (a poisoned or never-populated line) must
-    /// construct no send at all — a bare cwd restore is already the correct,
-    /// complete answer, never a guess.
+    /// R1 at the prompt: a busy argv typed into `bash -i` on a pty sits there
+    /// unrun until a human presses Enter. The sentinel is the result of
+    /// `expr 6 '*' 7`, which the typed text does not contain.
+    #[cfg(unix)]
     #[test]
-    fn idle_with_null_typed_constructs_no_send_at_all() {
-        let restore = RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None, typed: None };
+    fn a_busy_argv_waits_at_the_prompt_until_a_human_presses_enter() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let restore = busy_restore(&["expr", "6", "*", "7"]);
+        let line = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
+            .expect("a busy argv that passes the refusals is typed")
+            .args[0]
+            .clone();
+        let args: Vec<String> = ["--norc", "--noprofile", "-i"].iter().map(|s| s.to_string()).collect();
+        let (mut child, mut pty) = crate::graph::pty::spawn_on_pty("bash", &args, "resurrect-r1", None, None)
+            .expect("bash starts on a pty");
+        pty.write(line.as_bytes());
+        let before = read_pty_until(&mut pty, std::time::Duration::from_millis(1500), "42");
+        pty.write(b"\r");
+        let after = read_pty_until(&mut pty, std::time::Duration::from_secs(10), "42");
+        child.kill();
+        let _ = child.wait_for(std::time::Duration::from_secs(3));
+        pty.close();
+        assert!(!before.contains("42"), "the typed line ran before Enter: {before:?}");
+        assert!(after.contains("42"), "Enter did not run the typed line: {after:?}");
+    }
+
+    /// Reads what a pty prints for up to `budget`, stopping early at `stop`.
+    #[cfg(unix)]
+    fn read_pty_until(pty: &mut crate::graph::pty::Pty, budget: std::time::Duration, stop: &str) -> String {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 8192];
+        let deadline = std::time::Instant::now() + budget;
+        while std::time::Instant::now() < deadline && !String::from_utf8_lossy(&out).contains(stop) {
+            while pty.has_output() {
+                match pty.read(&mut buf) {
+                    Ok(n) if n > 0 => out.extend_from_slice(&buf[..n]),
+                    _ => break,
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    /// An idle restore constructs no send at all — a bare cwd restore is the
+    /// whole answer. Nothing typed by the old session is ever replayed.
+    #[test]
+    fn an_idle_restore_delivers_nothing_it_restores_the_cwd_alone() {
+        let restore = RestoreSnapshot { cwd: Some("/home/khoa/Aoide".into()), idle: true, argv: None };
         assert!(restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none());
+    }
+
+    /// The `restoreDelivery` vocabulary and the order of its effects, one row
+    /// per label: nothing is waited on or sent for an unregistered, refused or
+    /// empty restore, and nothing is sent to a target that is not ready.
+    #[test]
+    fn a_restore_step_is_labelled_and_runs_its_effects_only_when_due() {
+        use std::cell::Cell;
+        let idle = RestoreSnapshot { cwd: Some("/p".into()), idle: true, argv: None };
+        let busy = busy_restore(&["nvim", "notes.md"]);
+        let sudo = busy_restore(&["sudo", "reboot"]);
+        let ok = || Ok(Landed::Typed);
+        // (registered, restore, readiness, send result, label, waited, sent)
+        let rows: Vec<(bool, Option<&RestoreSnapshot>, Ready, Result<Landed, String>, &str, bool, bool)> = vec![
+            (false, Some(&busy), Ready::Verified, ok(), "skipped-unregistered", false, false),
+            (true, Some(&sudo), Ready::Verified, ok(), "refused: a privilege program", false, false),
+            (true, Some(&idle), Ready::Verified, ok(), "none", false, false),
+            (true, None, Ready::Verified, ok(), "none", false, false),
+            (true, Some(&busy), Ready::NotReady, ok(), "not-ready", true, false),
+            (true, Some(&busy), Ready::Verified, Err("no socket".into()), "failed: no socket", true, true),
+            (true, Some(&busy), Ready::Verified, ok(), "command", true, true),
+            (true, Some(&busy), Ready::Unverified, ok(), "command-unverified", true, true),
+            (true, Some(&busy), Ready::Verified, Ok(Landed::Held), "held-pending", true, true),
+        ];
+        for (registered, restore, ready, sent, label, waited, did_send) in rows {
+            let (waits, sends) = (Cell::new(false), Cell::new(false));
+            let step = restore_step(
+                registered,
+                restore,
+                aoide_protocol::Door::Daemon,
+                "new-id",
+                || {
+                    waits.set(true);
+                    ready
+                },
+                |inv| {
+                    assert_eq!(inv.args, vec!["nvim notes.md".to_string()]);
+                    sends.set(true);
+                    sent
+                },
+            );
+            assert_eq!(step.label(), label);
+            assert_eq!((waits.get(), sends.get()), (waited, did_send), "effects for {label}");
+        }
     }
 
     /// The orchestrator ruling (open knob 5): a recorded foreground of
     /// `sudo …` re-execs nothing and delivers nothing — only the cwd
-    /// restores. Covers both the narrow named check directly and the
-    /// delivery decision that consults it.
+    /// restores. Covers both the privilege check directly and the delivery
+    /// decision that consults it.
     #[test]
-    fn sudo_foreground_is_never_reexeced() {
-        assert!(is_sudo_argv(&["sudo".to_string(), "reboot".to_string()]));
-        assert!(is_sudo_argv(&["/usr/bin/sudo".to_string(), "-i".to_string()]), "basename match must see through a full path");
-        assert!(!is_sudo_argv(&["sudo-ish".to_string()]), "must match the exact basename, nothing cleverer");
-        assert!(!is_sudo_argv(&[]));
+    fn sudo_foreground_is_never_re_typed() {
+        assert!(runs_a_privilege_program(&["sudo".to_string(), "reboot".to_string()]));
+        assert!(runs_a_privilege_program(&["/usr/bin/sudo".to_string(), "-i".to_string()]), "basename match must see through a full path");
+        assert!(!runs_a_privilege_program(&["sudo-ish".to_string()]), "must match the exact basename, nothing cleverer");
+        assert!(!runs_a_privilege_program(&[]));
 
         let restore = RestoreSnapshot {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: false,
             argv: Some(vec!["sudo".to_string(), "systemctl".to_string(), "restart".to_string(), "aoided".to_string()]),
-            typed: None,
         };
         assert!(
             restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
             "a recorded sudo foreground must never be re-exec'd"
         );
+    }
+
+    /// A recorded shell-form argv (`sh -c …`, `bash -lc …`) is never re-typed.
+    /// Its command sits inside the quotes, where no program check can see a
+    /// `sudo`, and the join that flattens it would mangle it. Its session gets
+    /// its cwd only, as an idle one does.
+    #[test]
+    fn a_recorded_shell_command_string_is_never_re_typed() {
+        for argv in [
+            vec!["sh", "-c", "sudo apt install x"],
+            vec!["sh", "-c", "sleep 30; true"],
+            vec!["bash", "-lc", "make"],
+        ] {
+            let restore = RestoreSnapshot {
+                cwd: Some("/home/khoa/Aoide".into()),
+                idle: false,
+                argv: Some(argv.iter().map(|s| s.to_string()).collect()),
+            };
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{argv:?} must not be re-typed"
+            );
+        }
+    }
+
+    fn busy_restore(argv: &[&str]) -> RestoreSnapshot {
+        RestoreSnapshot {
+            cwd: Some("/home/khoa/Aoide".into()),
+            idle: false,
+            argv: Some(argv.iter().map(|s| s.to_string()).collect()),
+        }
+    }
+
+    /// F1: a control byte, an invisible format mark, U+FFFD (a lossy decode of
+    /// non-UTF-8 bytes) or a newline in any word is never re-typed. Quoting
+    /// does not contain them: readline reads `^A` as an edit key, and a newline
+    /// submits the line early.
+    #[test]
+    fn a_control_or_invisible_byte_in_a_recorded_argv_is_never_re_typed() {
+        for word in ["\u{1}echo OUT", "a\u{1b}b", "a\u{7f}b", "a\u{202e}b", "a\u{fffd}b", "a\nb", "a\rb", "a\tb"] {
+            let restore = busy_restore(&["echo", word]);
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{word:?} must not be re-typed"
+            );
+        }
+    }
+
+    /// F1: the re-typed line is capped at 4096 bytes, and refused above it.
+    #[test]
+    fn a_re_typed_line_is_capped_at_4096_bytes() {
+        let fits = "x".repeat(4091);
+        let over = "x".repeat(4092);
+        let line = |word: &str| {
+            restore_delivery(aoide_protocol::Door::Daemon, "new-id", &busy_restore(&["echo", word]))
+                .map(|inv| inv.args[0].len())
+        };
+        assert_eq!(line(&fits), Some(4096), "a line of exactly 4096 bytes is typed");
+        assert_eq!(line(&over), None, "a line of 4097 bytes is refused");
+    }
+
+    /// F1 at the keystroke level: `bash --norc --noprofile -i` on a real pty,
+    /// fed what `restore_delivery` would type for the hostile argv. The
+    /// refusal means nothing is typed, so the payload never runs; the canary
+    /// line proves the shell read input after the (absent) argv line.
+    #[cfg(unix)]
+    #[test]
+    fn a_hostile_argv_never_reaches_an_interactive_shell_as_keystrokes() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let restore = busy_restore(&["echo", "\u{1}echo OUT$((6*7))ZZ #"]);
+        let typed = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).map(|inv| inv.args[0].clone());
+        assert!(typed.is_none(), "the hostile argv must be refused, not typed");
+
+        let args: Vec<String> = ["--norc", "--noprofile", "-i"].iter().map(|s| s.to_string()).collect();
+        let (mut child, mut pty) = crate::graph::pty::spawn_on_pty("bash", &args, "resurrect-f1", None, None)
+            .expect("bash starts on a pty");
+        if let Some(line) = typed {
+            pty.write(format!("{line}\r").as_bytes());
+        }
+        pty.write(b"echo CANARY$((1+1))\r");
+        let mut out = Vec::new();
+        let mut buf = [0u8; 8192];
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline && !String::from_utf8_lossy(&out).contains("CANARY2") {
+            while pty.has_output() {
+                match pty.read(&mut buf) {
+                    Ok(n) if n > 0 => out.extend_from_slice(&buf[..n]),
+                    _ => break,
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        child.kill();
+        let _ = child.wait_for(std::time::Duration::from_secs(3));
+        pty.close();
+        let text = String::from_utf8_lossy(&out).into_owned();
+        assert!(text.contains("CANARY2"), "the shell never read the canary line: {text:?}");
+        assert!(!text.contains("OUT42ZZ"), "the recorded argv ran as keystrokes: {text:?}");
+    }
+
+    /// F2: a leading `NAME=value` word is a shell assignment, and it must not
+    /// hide the `sudo` or the shell behind it from the refusals.
+    #[test]
+    fn an_assignment_prefix_never_hides_a_privilege_or_a_shell_form() {
+        for argv in [
+            vec!["A=1", "sudo", "-n", "true"],
+            vec!["A=1", "B=2", "bash", "-c", "x"],
+            vec!["env", "A=1", "sudo", "x"],
+        ] {
+            let restore = busy_restore(&argv);
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{argv:?} must not be re-typed"
+            );
+        }
+    }
+
+    /// F6: a privilege program is never re-typed, bare or wrapped: `doas`,
+    /// `su`,
+    /// `pkexec` and `run0` ask for a password on the pty, and an interactive
+    /// `doas bash` or `su` would hand a root shell to an unattended line.
+    /// `doas apt x` is refused by the shell-form test already; it is pinned
+    /// here so the refusal cannot quietly go.
+    #[test]
+    fn a_privilege_program_is_never_re_typed() {
+        for argv in [
+            vec!["doas", "bash"],
+            vec!["doas", "-u", "root", "zsh"],
+            vec!["su"],
+            vec!["su", "bash"],
+            vec!["su", "-l", "khoa"],
+            vec!["pkexec", "x"],
+            vec!["run0", "x"],
+            vec!["doas", "apt", "x"],
+            vec!["env", "pkexec", "x"],
+            vec!["nice", "su", "-l"],
+            vec!["sudoedit", "x"],
+            vec!["runuser", "-u", "root", "bash"],
+            vec!["setpriv", "--reuid=0", "bash"],
+            vec!["chroot", "/x", "sh"],
+            vec!["sg", "wheel", "x"],
+            vec!["newgrp", "wheel"],
+            vec!["dzdo", "x"],
+            vec!["ksu", "x"],
+            vec!["busybox", "su", "-l", "khoa"],
+        ] {
+            let restore = busy_restore(&argv);
+            assert!(
+                restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore).is_none(),
+                "{argv:?} must not be re-typed"
+            );
+        }
+    }
+
+    /// The re-exec line re-parses to the recorded argv: a word with a space, a
+    /// quote, a glob or a `$` stays one word, and a plain word stays bare. It
+    /// is checked through `sh -c`, which is the POSIX re-parse only. An
+    /// interactive shell's readline reads control bytes as edit keys, which
+    /// this test does not cover; `a_hostile_argv_never_reaches_an_interactive_
+    /// shell_as_keystrokes` covers that, and the refusal keeps such an argv out.
+    #[cfg(unix)]
+    #[test]
+    fn a_re_exec_line_re_parses_to_the_recorded_argv() {
+        let argv: Vec<String> = ["grep", "a b", "f", "it's", "x*y", "$HOME", ""].iter().map(|s| s.to_string()).collect();
+        let restore = RestoreSnapshot {
+            cwd: Some("/home/khoa/Aoide".into()),
+            idle: false,
+            argv: Some(argv.clone()),
+        };
+        let inv = restore_delivery(aoide_protocol::Door::Daemon, "new-id", &restore)
+            .expect("a working restore with argv must construct a send");
+        let line = &inv.args[0];
+        assert_eq!(line, "grep 'a b' f 'it'\\''s' 'x*y' '$HOME' ''");
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("set -- {line}; for a in \"$@\"; do printf '[%s]\\n' \"$a\"; done"))
+            .output()
+            .expect("sh runs");
+        let words: Vec<String> = String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(|l| l[1..l.len() - 1].to_string())
+            .collect();
+        assert_eq!(words, argv, "the typed line must re-parse to the recorded argv");
     }
 
     #[test]
@@ -2543,7 +2843,7 @@ mod tests {
             "shell",
             &root_str,
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None }),
         )]);
         std::env::remove_var("AOIDE_TERMINAL");
         std::env::remove_var("WAYLAND_DISPLAY");
@@ -2595,7 +2895,7 @@ mod tests {
             "shell",
             &root_str,
             "2026-08-20T01:00:00Z",
-            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None, typed: None }),
+            Some(RestoreSnapshot { cwd: Some(root_str.clone()), idle: true, argv: None }),
         )]);
         std::env::set_var("AOIDE_TERMINAL", "true");
         std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
@@ -2700,20 +3000,10 @@ mod tests {
             None,
         );
 
-        let restore = RestoreSnapshot {
-            idle: true,
-            typed: Some("echo hello".to_string()),
-            ..Default::default()
-        };
+        let restore = busy_restore(&["echo", "hello"]);
         let inv = restore_delivery(aoide_protocol::Door::Mcp, id, &restore)
-            .expect("an idle restore with a typed line constructs a send");
-        let inner = send_restore(&inv, id);
-        assert_eq!(
-            restore_word(&inner, false, crate::graph::spawn::Ready::Verified),
-            "held-pending",
-            "inner: {}",
-            inner.message
-        );
+            .expect("a busy restore constructs a send");
+        assert_eq!(send_restore(&inv, id), Ok(Landed::Held), "a restore over MCP is parked");
 
         listener.set_nonblocking(true).unwrap();
         assert!(
@@ -2766,11 +3056,11 @@ mod tests {
         crate::graph::session_store::do_session_start(
             id, Some("claude"), Some("/w"), None, Some("orch"), Some(true), Some(socket.to_str().unwrap()), None, None,
         );
-        let restore = RestoreSnapshot { idle: true, typed: Some("echo hello".to_string()), ..Default::default() };
+        crate::graph::session_store::stamp_attested_spawner(id, Some("orch"));
+        let restore = busy_restore(&["echo", "hello"]);
         let inv = restore_delivery(aoide_protocol::Door::Mcp, id, &restore).unwrap();
 
-        let inner = send_restore(&inv, id);
-        assert_eq!(restore_word(&inner, false, crate::graph::spawn::Ready::Verified), "held-pending", "{}", inner.message);
+        assert_eq!(send_restore(&inv, id), Ok(Landed::Held), "a restore over MCP is parked");
         assert!(
             matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
             "an attested MCP caller's restore typed into the session"

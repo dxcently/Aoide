@@ -266,7 +266,11 @@ never the inbound/serve half (that's `aoide-server`).
   in the read loop itself, killing the child the moment the running total
   crosses the limit rather than waiting for it to finish. An over-cap
   response refuses with a taught error naming the cap; every existing
-  caller's own node/url context still wraps it, unchanged. `run_curl_capped`
+  caller's own node/url context still wraps it, unchanged. curl's exit status
+  is read too: a transfer it did not finish (a status came back, then the far
+  side closed early or the clock ran out mid-body) is a transport failure,
+  never a fragment handed on as a body, and a dial that never connected keeps
+  its `could not reach the agent` wording. `run_curl_capped`
   / `post_json_capped` are the same transport with the cap STATED by the
   caller, and the watch frame is their one caller today
   (`FRAME_MAX_RESPONSE_BYTES`, 512 KiB): the far door bounds a frame to
@@ -275,6 +279,11 @@ never the inbound/serve half (that's `aoide-server`).
   out near 321 KB and 512 KiB is ~1.6× that, not 2×. (Stated as arithmetic
   rather than derived: those two bounds live in `aoide-conduct` and
   `aoide-server`.)
+  `post_json_answered` and `post_json_to_node_answered` are the same POST
+  with curl's `--include`, returning the status line, headers and bounded
+  body as an `HttpResponse`. Every mail call goes through the node form
+  (`post_signed`), so the answer's signature header is in reach of the check
+  that reads it.
 - **Dial resolution (P-S4, ssh-transport lane)** — the tunnel seam every
   outbound POST resolves through BEFORE it ever reaches `commands::
   post_json` (`aoide-client`'s one HTTP transport, unchanged by this
@@ -450,7 +459,7 @@ never the inbound/serve half (that's `aoide-server`).
   `attempt_deposit` builds and sends one `aoide/mailDeposit` POST,
   mirroring `spawn_on_node_via`'s exact shape (resolve bearer, sign, POST,
   parse, check `error`) with no `--via` override — a drain only ever dials
-  `node.via` as recorded. Its `DepositAttempt` has three arms:
+  `node.via` as recorded. Its `DepositAttempt` has five arms:
   `Delivered{status}` (a result whose `status` is `"accepted"` or
   `"duplicate"`), `Refused(reason)` (the far end's own policy call, e.g.
   `-32010` lacks-message as a JSON-RPC `error` for an ADMISSION refusal,
@@ -459,8 +468,30 @@ never the inbound/serve half (that's `aoide-server`).
   split means the two travel differently on the wire but collapse into
   this one arm here, since a drain only ever needs "not currently
   deliverable," never which shape carried that news; the link is fine
-  either way, this ONE entry isn't), and `TransportFailed(reason)` (no
-  response at all — the LINK is the suspect). `drain_node`'s loop walks up
+  either way, this ONE entry isn't), `TransportFailed(reason)` (no
+  response at all — the LINK is the suspect), `LinkRefused(reason)` (the far
+  end answered with a word about its own state, `down` or `config-invalid`: the
+  entry stays live and the link backs off), and `Unauthenticated(reason)` (an
+  answer that did not verify under the key on file: nothing in it is read, so
+  the entry is recorded `unauthenticated:`, neither settled nor parked, and the
+  link backs off). The one thing an unsigned answer contributes is what it
+  said, for the operator: its `error.message`, else its result's `reason`
+  (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
+  and clipped to 120 characters before it reaches the entry, the link record
+  or the refusal, and labelled `(it said: …; not acted on)`. For the word
+  `config-invalid` the lead says the far end's own config is invalid rather
+  than that it needs an upgrade, since a door in that state never signs its
+  answer. A signed answer's words get the same cleaning where they are read
+  (`foreign_words`), clipped to 200 characters: a refusal's `reason` and
+  `detail`, a JSON-RPC `error`, a poll's own refusal, a `withheld` entry, and
+  a refused container's `msgid`. So the entry's `last_outcome`, the link
+  record, a poll's `Err`, a `PollOutcome` and the `mail.answer.*` and
+  `mail.poll.*` audit lines hold none of a stranger's control characters, and a
+  signature does not make a stranger's text safe for a terminal. A record an
+  older build stored uncleaned is cleaned on the way out by `outcome_line`
+  (`mail outbox`, a send's `delivery`, the charter drain row). The
+  `down`/`config-invalid` classification is judged on the raw word first.
+  `drain_node`'s loop walks up
   to `DRAIN_BATCH_CAP` (50) non-refused entries oldest first — a per-call
   bound so one tick's cost never scales with an unbounded backlog (mail
   register §26 outbox fix; a stuck link that had piled up 16k+ undelivered
@@ -475,7 +506,9 @@ never the inbound/serve half (that's `aoide-server`).
   frozen at `tries: 0` forever. A receipt's own successful deposit —
   accepted OR duplicate, either way the far end has it now — IS its
   confirmation (ruling 4: no separate ack-of-an-ack), so `drain_node`
-  removes it outright; an ordinary letter waits for a REAL ack instead,
+  removes it outright (`settle_delivered` retires a `charter` letter and a
+  `transit` container on the same verified acceptance); an ordinary letter
+  waits for a REAL ack instead,
   only having its `tries`/`last_try_at`/`last_outcome` bookkeeping
   updated. **P-M3 adds hold, the poll, and poll-on-contact to this same
   function.** `drain_node` skips a `hold` entry exactly the way it skips a
@@ -496,9 +529,13 @@ never the inbound/serve half (that's `aoide-server`).
   for), and `pollable_nodes()` leaves such a node out, so a bare
   `aoide mail poll` never dials a node that has no inbound transport to answer
   on.
-  `post_signed(node, method, params)` is the dial/bearer/sign/POST/parse
-  half both methods share — `attempt_deposit` and `poll_node` are two
-  readings of its `SignedCall`, never two copies of the wire machinery.
+  `post_signed(node, method, params, mesh)` is the dial/bearer/sign/POST/
+  verify/parse half every mail method shares — `attempt_deposit`, `poll_node`
+  and the binding exchange are readings of its `SignedCall`, never copies of
+  the wire machinery. It is the one place an answer is verified: the
+  `X-Aoide-Answer-Signature` must verify under the key on file for the node,
+  over the exact body bytes, before anything in it is read. A node with no key
+  on file is refused before it is dialled (`keyed_record`).
   `poll_node` posts `{"node": <this box's own name>}`, and receives each
   handed-over envelope through the SAME `aoide_storage::mail::deposit`
   chain a pushed deposit gets (hop = the node polled, origin = the
@@ -509,12 +546,31 @@ never the inbound/serve half (that's `aoide-server`).
   the second caller of `poll_node`, and the reason it exists: an empty
   outbox never dials, so `drain_node`'s poll-on-contact can never reach a
   node with nothing to send — the one receive path the relay model needs
-  most.** With no argument the command walks `pollable_nodes()`
-  (registered, `verified`, `message` in this box's own `allows` — the same
-  gate `mail send` applies, so the sendable set and the pollable set stay
-  one), reporting per node and never letting one node's failure stop the
-  sweep; with a name it dials that one, refusing `unknown-node` /
-  `unpaired-node` BEFORE any dial. Hand-over is bounded by
+  most.** The relay a poll reaches is resolved by `poll_target` first: a
+  stored record answers with its own key and grants, verified or not, exactly
+  as it always has; only a name with NO record is read from the charter in
+  force (`charter_relay`) — the mesh a send to that name would use, the
+  charter's key, and an https address dialled through `dial_node`. The named
+  `mail poll` refuses an unverified record `unpaired-node` before any dial, as
+  it always has. A charter relay is polled with no pair record, and only after
+  `relay_proves_charter_key` has checked its signed `aoide/binding` answer
+  against the charter's key: a relay answering as any other key is audited
+  (`mail.poll.relay-key-mismatch`) and refused before a letter moves. An answer
+  not signed by the key on file (unsigned, forged, or bound to another request)
+  is audited `mail.answer.unsigned` or `mail.answer.key-mismatch`, and the poll
+  fails with nothing filed or cleared. Every
+  refusal is a taught `Refusal` (what, why, fix) raised before any dial — no
+  record and no charter line, a `pair` mesh, a `down` line, a `poll` or
+  `ssh://` address, a charter with no identity key — never an empty
+  `Ok(filed = 0)`. The one silent answer is a VERIFIED record the charter
+  declares `down`: `poll_through` returns `Ok(default)` without dialling.
+  With no argument the command walks `pollable_nodes()`
+  (every verified record whose mesh grants `message`, plus every charter
+  relay of a charter mesh this box is on that has NO record here and that
+  `poll_target` accepts), reporting per node and never letting one node's
+  failure stop the sweep; with a name it refuses an unverified record
+  `unpaired-node`, and any other name takes its `poll_target` and refuses with
+  the taught text, all BEFORE any dial. Hand-over is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP` (50, the drain's own batch), which
   is safe because the acks retire what was filed and the next poll
   advances. The `PollOutcome` it returns carries all three answers the command
@@ -534,11 +590,16 @@ never the inbound/serve half (that's `aoide-server`).
   lock across the POST itself (spec item 9: network I/O never happens
   under the stage lock). `Ok(())` covers every ordinary non-error path —
   nothing registered under `node_name`, `.bsy` already held by a
-  concurrent drain (ruling 3: skipped, never queued), a held-off link, an
-  empty spool, or a completed pass regardless of outcome mix; `Err` is
+  concurrent drain (ruling 3: skipped, never queued), a held-off link, a
+  spool with nothing to attempt (empty, or only parked and held entries), or
+  a completed pass regardless of outcome mix; `Err` is
   reserved for a genuine local I/O failure, never for "the remote node was
   unreachable," which is an ordinary outcome recorded in entry/link state
-  instead of surfaced as an error to the caller. **A drain tears its own
+  instead of surfaced as an error to the caller. A held-off link is read
+  before the binding exchange, so a drain of it sends nothing at all and
+  writes no audit line, however often the daemon ticks; so is a spool with
+  nothing to attempt (`dialable_entries` empty), because a node's directory is
+  never removed and the daemon visits every one. **A drain tears its own
   tunnel down before returning, unconditionally, on every path (ruling
   10)** — `TunnelTeardownGuard` is a Drop guard mirroring
   `commands::ScratchBodyFile`'s pattern; see the `tunnel` bullet above for
@@ -625,9 +686,9 @@ never the inbound/serve half (that's `aoide-server`).
   count), `oldestMintedAtAgeSecs` (age of the oldest entry's
   `envelope.header.mintedAt`, `null` if the node has no entries or an
   unparseable timestamp), `tries` (a histogram keyed by `tries` value as a
-  string), `lastOutcomeCounts` (keyed by `lastOutcome`, or the literal
-  `"(none)"` for an entry that hasn't failed yet), and `refused` (count of
-  entries parked `refused: true`). This is a summary added onto the
+  string), `lastOutcomeCounts` (keyed by the printed `lastOutcome`, or the
+  literal `"(none)"` for an entry that hasn't failed yet), and `refused`
+  (count of entries parked `refused: true`). This is a summary added onto the
   existing `mail outbox --json` payload, not a new subcommand — the
   per-entry `rows` it sits beside are unchanged. This command never
   dials — it is the read side of the projection, not a drain. `handle_mail_outbox_rm` (`mail outbox rm

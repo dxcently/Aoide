@@ -1370,6 +1370,8 @@ mod tests {
             origin: None,
             seal: None,
             sealed_issued_at: None,
+            sealed_pid_starttime: None,
+            sealed_boot_id: None,
             ever_sealed: None,
             attested_spawner: None,
             restore: None,

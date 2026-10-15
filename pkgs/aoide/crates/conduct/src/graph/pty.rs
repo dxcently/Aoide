@@ -143,10 +143,18 @@ pub(in crate::graph) fn signal_name(signo: i32) -> String {
 pub(in crate::graph) struct PtyChild {
     inner: std::process::Child,
     ended: Option<Ended>,
+    /// The file the spawn started, the one [`resolve_program`] picked.
+    image: Option<std::path::PathBuf>,
 }
 
 #[cfg(unix)]
 impl PtyChild {
+    /// The file this child was started from: the path [`resolve_program`] chose,
+    /// or `None` when the spawn kept the bare name.
+    pub(in crate::graph) fn image(&self) -> Option<&std::path::Path> {
+        self.image.as_deref()
+    }
+
     /// This child's pid — the process-group leader `spawn_on_pty` made it.
     pub(in crate::graph) fn id(&self) -> i32 {
         self.inner.id() as i32
@@ -252,6 +260,11 @@ impl Drop for PtyChild {
 
 #[cfg(windows)]
 impl PtyChild {
+    /// Windows has no exec baseline: the executable test is a Linux `/proc` read.
+    pub(in crate::graph) fn image(&self) -> Option<&std::path::Path> {
+        None
+    }
+
     pub(in crate::graph) fn id(&self) -> i32 {
         self.pid
     }
@@ -612,6 +625,51 @@ impl From<libc::winsize> for WinSize {
     }
 }
 
+/// The file a spawned `program` starts, resolved the way `execvp` searches: a
+/// name with a `/` is itself, and a bare name is the first `PATH` entry holding
+/// an executable regular file of that name. `PATH` unset searches glibc's
+/// default, `/bin:/usr/bin`; an empty entry is the working directory. `None`
+/// when nothing matches, and when the match is a file the kernel will not start
+/// itself (no `#!`, no ELF magic): `execvp` runs that through `/bin/sh`, so the
+/// spawn keeps the bare name for it.
+#[cfg(unix)]
+fn resolve_program(program: &str) -> Option<std::path::PathBuf> {
+    resolve_in(program, std::env::var_os("PATH").as_deref())
+}
+
+#[cfg(unix)]
+fn resolve_in(program: &str, path: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+    let found = if program.contains('/') {
+        std::path::PathBuf::from(program)
+    } else {
+        let default = std::ffi::OsStr::new("/bin:/usr/bin");
+        std::env::split_paths(path.unwrap_or(default))
+            .map(|dir| dir.join(program))
+            .find(|candidate| is_executable_file(candidate))?
+    };
+    (is_executable_file(&found) && kernel_starts(&found)).then_some(found)
+}
+
+/// A regular file the calling user may execute (`access(X_OK)`).
+#[cfg(unix)]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    std::fs::metadata(path).is_ok_and(|m| m.is_file())
+        && unsafe { libc::access(c_path.as_ptr(), libc::X_OK) } == 0
+}
+
+/// Whether the kernel starts `file` itself: a `#!` line or an ELF header.
+#[cfg(unix)]
+fn kernel_starts(file: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 4];
+    std::fs::File::open(file).and_then(|mut f| f.read_exact(&mut head)).is_ok()
+        && (head.starts_with(b"#!") || head == *b"\x7fELF")
+}
+
 /// Open a terminal and spawn `program args` on it, returning the (reapable)
 /// child plus the master side.
 ///
@@ -620,6 +678,9 @@ impl From<libc::winsize> for WinSize {
 /// ([`super::conduct::scrub_session_markers`]'s list — the child must never
 /// believe it is running inside its parent's harness session), and a managed
 /// task's own two variables are exported.
+///
+/// On Unix the program's file is resolved once ([`resolve_program`]) and the
+/// child's [`PtyChild::image`] names it; argv[0] stays the name given.
 ///
 /// The child is a session leader (Unix) / a pseudo-console client (Windows),
 /// and the caller owns the order: spawn FIRST, so a failed exec registers no
@@ -659,7 +720,17 @@ pub(in crate::graph) fn spawn_on_pty(
 
     let slave_fd = slave;
     let master_fd = master;
-    let mut cmd = std::process::Command::new(program);
+    // One resolution: the file the spawn starts is the file the baseline reads
+    // (`PtyChild::image`), and argv[0] stays the name the operator gave.
+    let image = resolve_program(program);
+    let mut cmd = match &image {
+        Some(path) => {
+            let mut cmd = std::process::Command::new(path);
+            cmd.arg0(program);
+            cmd
+        }
+        None => std::process::Command::new(program),
+    };
     cmd.args(args)
         .env(super::conduct::CHILD_SESSION_ENV, session_id);
     super::conduct::scrub_session_markers(&mut cmd);
@@ -703,7 +774,7 @@ pub(in crate::graph) fn spawn_on_pty(
     }
     let child = spawned?;
     Ok((
-        PtyChild { inner: child, ended: None },
+        PtyChild { inner: child, ended: None, image },
         Pty { master: master_owned },
     ))
 }
@@ -2303,5 +2374,97 @@ mod tests {
         );
         assert_eq!(*block.last().unwrap(), 0, "the block ends with its own NUL");
         std::env::remove_var(marker);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod resolve_tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+
+    /// A fresh scratch directory, named for the test that asks for it.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("aoide-resolve-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch dir");
+        dir
+    }
+
+    fn write(path: &Path, body: &[u8], mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, body).expect("a file");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("its mode");
+    }
+
+    /// `execvp` skips a `PATH` file without the execute bit and takes the next
+    /// one. A resolver that stopped at the first name match would pick the
+    /// plain file, and the spawn would then fail where the name ran.
+    #[test]
+    fn resolve_skips_a_file_without_the_execute_bit() {
+        let early = scratch("early");
+        let late = scratch("late");
+        write(&early.join("fakeprog"), b"#!/bin/sh\n", 0o644);
+        write(&late.join("fakeprog"), b"#!/bin/sh\n", 0o755);
+        let path = std::env::join_paths([&early, &late]).expect("a PATH");
+        assert_eq!(resolve_in("fakeprog", Some(&path)), Some(late.join("fakeprog")));
+    }
+
+    /// With `PATH` unset, `execvp` searches glibc's default, so a bare name
+    /// still resolves.
+    #[test]
+    fn resolve_uses_the_default_path_when_path_is_unset() {
+        if !Path::new("/bin/sh").is_file() {
+            eprintln!("skipping: no /bin/sh to search for");
+            return;
+        }
+        assert_eq!(resolve_in("sh", None), Some(PathBuf::from("/bin/sh")));
+    }
+
+    /// A `PATH` entry that is not UTF-8 is still a directory to search. The old
+    /// resolver read `PATH` as a `String`, so such a `PATH` resolved nothing.
+    #[test]
+    fn resolve_reads_a_non_utf8_path_entry() {
+        if !Path::new("/bin/sh").is_file() {
+            eprintln!("skipping: no /bin/sh to search for");
+            return;
+        }
+        let mut bytes = b"/no/such/dir\xff".to_vec();
+        bytes.extend_from_slice(b":/bin");
+        assert_eq!(resolve_in("sh", Some(OsStr::from_bytes(&bytes))), Some(PathBuf::from("/bin/sh")));
+    }
+
+    /// A file with the execute bit and no `#!` or ELF magic is left to the
+    /// name, which `execvp` runs through `/bin/sh`; a `#!` file is its own image.
+    #[test]
+    fn resolve_refuses_a_file_the_kernel_will_not_start() {
+        let dir = scratch("plain");
+        let plain = dir.join("plainscript");
+        write(&plain, b"echo hi\n", 0o755);
+        assert_eq!(resolve_in(plain.to_str().expect("utf-8 scratch path"), None), None);
+        let shebang = dir.join("shebanged");
+        write(&shebang, b"#!/bin/sh\necho hi\n", 0o755);
+        assert_eq!(resolve_in(shebang.to_str().expect("utf-8 scratch path"), None), Some(shebang));
+    }
+
+    /// The child's argv[0] is the name the spawn was given, not the resolved
+    /// path it ran from: `/proc/<pid>/cmdline` reads `sh`, where an absolute
+    /// spawn without `arg0` would read `/…/sh`.
+    #[test]
+    fn spawn_starts_the_resolved_file_under_the_name_it_was_given() {
+        let args = vec!["-c".to_string(), "sleep 5; true".to_string()];
+        let (child, _master) =
+            spawn_on_pty("sh", &args, "argv0-probe", None, None).expect("a pty child starts");
+        let mut cmdline = Vec::new();
+        for _ in 0..20 {
+            if let Ok(bytes) = std::fs::read(format!("/proc/{}/cmdline", child.id())) {
+                cmdline = bytes;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let argv0 = cmdline.split(|b| *b == 0).next().unwrap_or_default();
+        assert_eq!(argv0, b"sh", "argv[0] is the name the spawn was given");
     }
 }
