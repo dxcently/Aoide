@@ -34,7 +34,7 @@
 use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, unix_ts};
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::send::session_send;
-use super::session_store::now_iso_utc;
+use super::session_store::{now_iso_utc, reserved_id_refusal};
 use super::undying::nothing_to_restore_warning;
 use aoide_protocol::output::{Outcome, Status};
 use aoide_protocol::Invocation;
@@ -648,6 +648,9 @@ pub fn wait_ready(agent: &str, id: &str, since: &str, budget: Duration) -> Ready
 /// never leaves a ghost session — the control socket simply never appears
 /// here and `registered` comes back `false`.
 ///
+/// An `--id` under the reserved `sub:` prefix is refused first of all, before
+/// any enrolment, sidecar or launch (`reserved_id_refusal`).
+///
 /// `--windowed` pre-flights against two taught errors before ever touching a
 /// process: no `$AOIDE_TERMINAL` set, and no live display
 /// (`$WAYLAND_DISPLAY`/`$DISPLAY` both absent — a headless host, told to use
@@ -671,6 +674,12 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         .get("id")
         .cloned()
         .unwrap_or_else(|| format!("spawn-{}-{}", std::process::id(), unix_ts()));
+    // The child would refuse this id itself, but only after launch, once
+    // `spawn` had enrolled a mailbox reader and written the write-once sidecar
+    // under it. So the refusal is here, before either.
+    if let Some(refusal) = reserved_id_refusal(cmd, &id) {
+        return refusal;
+    }
 
     let windowed = inv.flag_present("windowed");
     let cwd = inv.flags.get("cwd").map(String::as_str);
@@ -1739,6 +1748,48 @@ mod tests {
             "nothing was written and nothing was spawned"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `spawn --id sub:x` is refused before anything exists: the detached child
+    /// would refuse it too, but only after `spawn` had enrolled the task's mailbox
+    /// reader and written the write-once instruction sidecar under that id.
+    #[test]
+    fn a_spawn_under_a_sub_prefixed_id_is_refused_before_anything_is_enrolled_or_written() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_SPAWN_EXE",
+        ]);
+        let root = unique_stage("spawn-reserved-id");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+
+        let out = session_spawn(&spawn_invocation(
+            &["sh", "-c", "true"],
+            &[("id", "sub:x"), ("task", "fix-it"), ("instructions", "do the thing")],
+        ));
+
+        let left: Vec<PathBuf> = [state.join("mail").join("cursors.json"), state.join("sessions")]
+            .into_iter()
+            .filter(|p| p.exists())
+            .collect();
+        assert!(left.is_empty(), "a reader enrolment or a sidecar was left behind: {left:?}");
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "reserved-id");
+        assert!(
+            load_stage::<SessionsFile>(&sessions_path()).map_or(true, |f| f.sessions.is_empty()),
+            "nothing is registered"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

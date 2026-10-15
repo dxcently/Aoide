@@ -515,13 +515,44 @@ door's audit name whitelist gains both names so they never log as bare
   the operator can read.
 - **The ask has two triggers, and they are the same call.**
   `aoide mail poll [<node>]` dials the node named — or, with no argument,
-  every paired node this box holds `message` for — polls, files what comes
-  back through the receiving chain below, and acks it. A drain pass that
-  reached a node also ends by polling it (poll-on-contact), which is the
-  free case: a node with something to send gets its reply without asking.
-  The command is what a node with NOTHING to send needs — an empty outbox
-  never dials, so it would otherwise never receive at all — and it is the
-  trigger an OS timer (H1) drives for a `poll`-addressed box.
+  every paired node this box holds `message` for, and every relay a charter in
+  force names for this box — polls, files what comes back through the receiving
+  chain below, and acks it. A drain pass that reached a node also ends by
+  polling it (poll-on-contact), which is the free case: a node with something
+  to send gets its reply without asking. The command is what a node with
+  NOTHING to send needs — an empty outbox never dials, so it would otherwise
+  never receive at all — and it is the trigger an OS timer (H1) drives for a
+  `poll`-addressed box.
+- **Which relay a poll reaches, and what a poll without one says.** A stored
+  record answers first, and a named `mail poll` refuses an unverified one
+  `unpaired-node` before any dial. With no record at all, the charter in force
+  gives the relay its identity key and its `https://` address, and the poll goes there
+  (HTTPS-MESH-API.md, "A poll reaches its relay by the charter alone"). Before
+  any letter moves, the relay must prove that key with its own signed binding.
+  A poll that cannot reach its relay this way is refused, naming what is
+  missing and the one fix (`aoide pair <node>`, or a charter that declares the
+  relay); it is never an empty answer. A relay the charter declares `down` is
+  not asked, and a relay whose answer contradicts its charter line is refused,
+  and every such refusal is audited `mail.poll.relay-key-mismatch`. When the
+  answer itself does not verify under the charter's key, the answer check
+  writes its own line as well, so both words appear:
+  `mail.answer.key-mismatch` for another key's signature,
+  `mail.answer.unsigned` for none.
+- **An answer is believed only when it is signed.** Every mail call's answer
+  (`aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) is read only once its
+  signature verifies under the key on file for that node, over the exact body
+  bytes and bound to the request it answers (CONTRACTS §6). An answer that does
+  not verify (unsigned, signed by another key, made for another request, or
+  carrying two signatures) is `unauthenticated`: nothing in it is used, the
+  attempt is recorded, and the link backs off. Its `accepted` retires nothing,
+  and its JSON-RPC `error` parks nothing. What it said (that error's message,
+  or a refused result's `reason`) is shown to the operator, stripped of
+  control and invisible characters and clipped, and never acted on. A
+  verified answer's words get the same stripping and a longer clip: a
+  signature proves who spoke, not that a stranger's text is safe for a
+  terminal. A node with no key on file is never dialled. A verified
+  `accepted` or `duplicate` retires a receipt, a `charter` letter or a
+  `transit` container; a letter waits for its receipt.
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
   destination. Routed like any letter, never themselves acked. **An
@@ -1370,7 +1401,7 @@ aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, 
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
-aoide mail poll [<node>]                                 ask without depositing; no <node> polls every paired node holding message (a poll node: its relay, from the OS scheduler)
+aoide mail poll [<node>]                                 ask without depositing; no <node> polls every paired node holding message and every charter relay (a poll node: its relay, from the OS scheduler)
 aoide mail serve [--port N]                              the relay's loopback mail adapter: deposit, poll, binding and the stripped card, nothing else (H1)
 aoide mail ring --for <name> [--from <session-id>]       the doorbell, by hand; --from excludes that reader
 aoide mesh                          nodelist view: + mesh, status, role, key source, liveness, charter version

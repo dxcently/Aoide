@@ -148,12 +148,39 @@ poll node --HTTPS 443--> TLS front (cloudflared) --> reverse proxy (:8080) --> a
 - **The relay needs no inbound port of its own.** The front dials out to the
   box, and every node dials out to the front.
 - **A node's side is runtime state, not a unit.** A `poll` node runs no
-  listener. It holds the operator key it trusts, the charter in force, and a
-  verified record of its relay whose URL is the relay's `https://` address;
-  its ask is poll-on-contact after a send, or `aoide mail poll` driven by an OS timer. None of
-  that is a Nix option, because core is configured by `config.toml` and state
-  and not by a rebuild. `docs/architecture/H1-LIVE-ACCEPTANCE.md` is the
-  procedure.
+  listener. It holds the operator key it trusts and the charter in force, and
+  that charter is all it needs to reach its relay: the relay's line gives its
+  identity key and its `https://` address (see "A poll reaches its relay by the
+  charter alone" under Transports and relays). Its ask is poll-on-contact after
+  a send, or `aoide mail poll` driven by an OS timer. None of that is a Nix
+  option, because core is configured by `config.toml` and state and not by a
+  rebuild. `docs/architecture/H1-LIVE-ACCEPTANCE.md` is the procedure.
+
+### A poll reaches its relay by the charter alone
+
+A box polls the relay its mesh's signed charter declares, without a pair record
+for it. `aoide mail poll <relay>` and the poll-on-contact that follows a send
+both resolve the relay the same way:
+
+| Step | Where the answer comes from | Refused with (no dial) |
+|---|---|---|
+| 1. A stored record of the node | this box's `nodes.json`; its own key and grants answer, as before | `unpaired-node` for a named `mail poll` of a record that is not verified |
+| 2. The charter in force names it | the mesh a send to it would name (`--mesh`, or the one charter that declares it and carries this box) | no pair record and no charter declares it: `aoide pair <node>` |
+| 3. The mesh is a charter mesh | a pair mesh's keys are paired records | pair with the node |
+| 4. Not declared `down` there | the charter's `[status]` | the charter declares it down |
+| 5. Its address is `https://` | `dial_of` on the line's address; `poll` has no address to ask and `ssh://` needs a pair record for its tunnel | the address says which |
+
+Before any letter moves, the relay must prove its identity: its own signed age
+binding, returned by `aoide/binding`, must verify under the identity key the
+charter gives its line. This box sends no binding of its own on that request,
+so the relay never has to learn a record for a box it has none of. A relay that
+answers as any other key is refused and audited (`mail.poll.relay-key-mismatch`),
+and no unsigned or unverified poll is sent in its place. The poll itself is then
+signed like any other, and the relay hands over the containers it holds, sealed
+to this box by the age binding its own charter line declares.
+
+The sweep (`aoide mail poll` with no node) asks each charter relay this box is on,
+with a record or without one. A relay never asks itself.
 
 ## Trust per mesh
 
@@ -535,6 +562,14 @@ plaintext HTTPS. The design follows from that:
   observed source address is never an input: behind a tunnel, every request looks
   like loopback. TLS is additional and never replaces payload protection.
   Revocation and scope changes affect active streams as well as new requests.
+- **Answers carry the responder's signature.** Cloudflare can read and rewrite
+  any response it terminates, so an answer's authenticity cannot rest on the
+  transport. A door signs its answer to each verified request with its own
+  identity key (`X-Aoide-Answer-Signature`, CONTRACTS.md §6 "Signed answers"),
+  and the signed answer is the identity proof a client checks against the key
+  on file for the node it dialled. A front that strips the header makes the
+  answer unverifiable, and the client refuses it rather than trusting the
+  front.
 - **Certificate pinning is optional and per node.** It applies only where TLS is
   end to end (a VPS, a tailnet) and is declared in `[mesh.<name>.pins]`. The design
   never assumes a pin through Cloudflare, where the edge certificate belongs to the

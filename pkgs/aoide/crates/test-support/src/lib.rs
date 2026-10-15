@@ -259,6 +259,18 @@ pub fn unique_tmp(tag: &str) -> PathBuf {
     dir
 }
 
+/// The value of header `name` in a raw HTTP message's head (a request or a
+/// response): the first blank line ends the head, the first line is the
+/// request or status line and is skipped, and the name matches
+/// case-insensitively. The value is trimmed; `None` when there is no such line.
+pub fn raw_header(raw: &str, name: &str) -> Option<String> {
+    let head = raw.split_once("\r\n\r\n").map_or(raw, |(head, _)| head);
+    head.lines().skip(1).find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim().eq_ignore_ascii_case(name).then(|| value.trim().to_string())
+    })
+}
+
 pub fn inv(path: &[&str], args: &[&str]) -> Invocation {
     Invocation {
         path: path.iter().map(|s| s.to_string()).collect(),

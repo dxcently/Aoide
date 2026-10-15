@@ -86,6 +86,7 @@ use super::model::{
     canonical_state, load_stage, sessions_path, write_stage, SessionRecord, SessionsFile,
     STAGE_GRAPH_VERSION,
 };
+use super::session_store::is_reserved_id;
 use aoide_protocol::agents::agent_profile;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -294,9 +295,11 @@ pub(crate) fn reconcile_eidolon_sessions(
         .map(|s| s.session_id.clone())
         .collect();
 
+    // A `sub:` id is a Task sub-agent's, made by the sub-agent hooks alone
+    // (`reserved_id_refusal`), so a presence that names one enrols nothing.
     let mut desired: HashMap<&str, &EidolonSession> = HashMap::new();
     for t in live {
-        if claimed.contains(t.id.as_str()) {
+        if claimed.contains(t.id.as_str()) || is_reserved_id(&t.id) {
             continue;
         }
         desired.insert(t.id.as_str(), t);
@@ -341,7 +344,7 @@ pub(crate) fn reconcile_eidolon_sessions(
                 changed = true;
             }
             if rec.parent_session_id != parent {
-                rec.parent_session_id = parent.clone();
+                rec.set_parent_session(parent.clone());
                 changed = true;
             }
             // The fixed identity, re-applied every upsert.
@@ -923,6 +926,26 @@ mod tests {
             r.petname.is_some(),
             "a freshly enrolled record mints a petname"
         );
+    }
+
+    /// The `sub:` prefix is a Task sub-agent's, made by the sub-agent hooks
+    /// alone: a presence whose `meta.json` names one enrols nothing and retires
+    /// an enrolment made under it, while an ordinary presence beside it enrols.
+    #[test]
+    fn a_presence_under_a_sub_prefixed_id_enrols_nothing() {
+        let mut old = session("sub:foo", "/w", "idle", "", None);
+        old.agent = "eidolon".to_string();
+        let (out, changed) = reconcile_eidolon_sessions(
+            vec![old],
+            &PresenceScan::Observed(vec![
+                presence("sub:foo", 4242, "/home/khoa", false, true),
+                presence("user-0001", 4243, "/home/khoa", false, true),
+            ]),
+            no_ancestry,
+        );
+        assert!(changed);
+        let ids: Vec<&str> = out.iter().map(|r| r.session_id.as_str()).collect();
+        assert_eq!(ids, ["user-0001"]);
     }
 
     /// The live-target shape (`P-EIDOLON` rev 3 §1's acceptance table): a

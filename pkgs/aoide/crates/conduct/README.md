@@ -298,8 +298,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `deliver` — it adds a cursor half and three lines, never a second transport.
   The recipient is the child's SPAWNER, resolved through the wrap that hosts
   it and only over an edge the kernel attested (`hook::recipient`; the climb
-  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell and a
-  sub-agent node are not its children.
+  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell, a
+  sub-agent node and a conducted wrap are not its children, so a chain
+  stamped on a wrap routes nothing.
 - **`graph::prompt`** is the screen source of `awaiting`, for a conducted
   program that reports through neither hooks nor a trace (a `codex`, an
   `aider`, a REPL, an installer in a plain conducted shell). The wrap's
@@ -591,7 +592,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   re-stamp is change-only on difference, and
   `do_session_start`'s upsert writes the resolved parent as it does every
   other field on a re-start. Either way, no daemon reachable or no
-  conducted ancestor found leaves the parent untouched, fail-closed.
+  conducted ancestor found leaves the parent untouched, fail-closed. A conducted
+  wrap's edge is never moved this way: the walk skips it, and
+  `do_hook_session_start` drops a parent it would write onto one.
   `session_store::lineage_of`
   (ancestors + descendants) is the matching widened carve-out for the
   same-window registration-time eviction, reused by `reap.rs`'s dedup pass
@@ -1282,11 +1285,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   find a session whose seal `verify_seal_over` confirms against the
   daemon's LIVE public key (`aoide_client::daemon::daemon_seal_pubkey_hex`
   — a fresh `ping` round trip, never cached, never a file; that channel is
-  only as trustworthy as the daemon socket's same-uid exclusivity, which
-  `bind_socket`'s unlink-then-bind with no flock/pidfile does NOT actually
-  provide against a same-uid attacker — P-ID3's job to floor, stated
-  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred`
-  reads `SO_PEERCRED` off an accepted `UnixStream` (a local
+  only as trustworthy as the daemon socket's same-uid exclusivity, which has
+  the open hole (`AOIDED.md` "Socket") — P-ID3's job to floor, stated
+  honestly in `CONTRACTS.md` rather than oversold here); `peer_cred` reads
+  `SO_PEERCRED` off an accepted `UnixStream` (a local
   reimplementation of `aoide_secrets::peercred`'s own shape — no new
   cross-crate edge for one struct+fn). **That mechanism is Linux/Android
   only, and deliberately NOT ported**: any other host gets the same
@@ -1328,6 +1330,35 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   to that one MCP subprocess, never `aoided`'s. This crate computes where
   it lives and is its first client: `doorbell.rs::ring_locked` connects to
   it (never binds or accepts — that lifecycle stays `aoide-server`'s).
+- **A protected live wrap is ended only by its own exit, and the autogate
+  reads only the spawn-time edge.** `identity::is_protected_live_wrap` is the
+  one predicate, stated once in `CONTRACTS.md`'s identity section. It reads no
+  daemon key. `identity::live_sealed_wrap_ids` is the set it yields.
+  `session_store::protected_wrap` is the one reader of it for a single id, and
+  `live_wrap_refusal_for` is the refusal every finishing door (`session end`,
+  a terminal `session phase`) asks from it first, and so does `graph link` as
+  the child. The start door (`session_start`) and the hook's SessionStart
+  (`do_hook_session_start`) take one verdict (`live_wrap_verdict`) before any
+  write, and the hook's refusal is audited on the door it arrived on. A start
+  judged on a protected wrap writes nothing, and the hook arm lands nothing
+  after it. Every other hook arm is refused by one guard in
+  `send.rs::hook_for_profile_gated`, right after `map_hook`: a payload whose
+  `session_id` names a protected wrap is ignored whole (`no-op
+  (live-sealed-wrap)`, audited on the door), since a harness reports under its
+  child's id and never its wrap's. `doc.rs::prune_done_keeping` keeps such a
+  record out of every prune, and `reap_inner` spares it. `doc.rs::drop_sessions`
+  keeps a protected survivor's edge and drops its spawn stamp when the record
+  the edge names leaves the roster, and `do_subagent_rekey` keeps the edge too.
+  A sub-agent record leaving the roster needs no such rule: the `sub:` prefix
+  is reserved (`session_store::reserved_id_refusal`, asked by `conduct`,
+  `spawn`, the start door and the hook's SessionStart, and `is_reserved_id`,
+  which the eidolon and Codex-app reconcilers skip), so a `sub:` record is
+  never a spawner. The sub-agent writers that act on an id a hook payload
+  names skip a protected live wrap holding it. The autogate reads a parent edge
+  only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner`
+  to name the same id. Only `conduct` registration writes that stamp, and
+  `SessionRecord::set_parent_session` drops it whenever the edge moves. The
+  residuals are listed in `CONTRACTS.md`.
 - **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
   `identity::peer_cred`/`PeerCred` widened `pub(crate)` (was `pub(in
   crate::graph)`) so `shellbridge.rs` — a sibling module of `graph`, not a

@@ -433,9 +433,9 @@
   `aoide-conduct`), and the secrets broker's per-secret `allowRemoteOrigin`
   origin gate (P-ID4, in `aoide-secrets`) — that policy logic never moves
   here.
-- **`wire_auth::canonical_string`'s five-field order, NUL-separator, and
-  lowercased/trimmed style are the wire contract, not an implementation
-  detail (P-P4) — pinned by
+- **`wire_auth::canonical_string`'s field order (five, plus the mesh as a
+  sixth when named), NUL-separator, and lowercased/trimmed style are the wire
+  contract, not an implementation detail (P-P4) — pinned by
   `tests::canonical_string_stability_vectors_never_drift`, mirroring
   `pairing::derive_sas`'s own pinning discipline.** A change to the field
   order, the separator, the case-folding, or the digest algorithm breaks
@@ -450,6 +450,16 @@
   adding a nonce store here — that would duplicate state across a
   crate boundary for no benefit, the same anti-pattern the "no cross-crate
   copying" cross-crate rule already forbids.
+- **`wire_auth::answer_string` is a second wire contract, and its method
+  tag (`ANSWER`) must stay distinct from every request method.** The door
+  signs answers with its identity key, so the answer form is the one place a
+  door's key produces bytes a client reads. Its method tag and its
+  status-in-the-timestamp position are what keep an answer from verifying as
+  a request (and back),
+  pinned by `answer_string_stability_vector_never_drifts` and
+  `a_request_signature_never_verifies_as_an_answer_and_back`. Any new
+  signed answer form needs its own tag and vector, never a reuse of
+  `answer_string`'s.
 - **`fs::pid_is_alive` is the shared liveness probe in core** — a POSIX
   `kill(pid, 0)` where `ESRCH` alone is absent and every other errno (including
   `EPERM`) reads live, so an unanswerable probe never reaps or unlinks. `0` and

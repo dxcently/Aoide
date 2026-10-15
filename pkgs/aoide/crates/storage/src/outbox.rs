@@ -293,11 +293,12 @@ impl OutboxEntry {
     }
 
     /// Did the last attempt get an ANSWER from the far end at all — a delivery
-    /// (`accepted`/`duplicate`) or a refusal (`refused: <word>`)? A transport
-    /// failure is the one thing that is not an answer: nothing came back. The
-    /// words are the DRAIN's vocabulary, so it is read HERE and nowhere else,
-    /// and it is read POSITIVELY — the answer words decide, not the absence of a
-    /// prefix.
+    /// (`accepted`/`duplicate`) or a refusal (`refused: <word>`)? Neither a
+    /// transport failure (nothing came back) nor an `unauthenticated: <reason>`
+    /// attempt (an answer whose signature did not verify under the key on file,
+    /// so nothing in it was used) is an answer. The words are the DRAIN's
+    /// vocabulary, so it is read HERE and nowhere else, and it is read
+    /// POSITIVELY — the answer words decide, not the absence of a prefix.
     pub fn last_attempt_was_answered(&self) -> bool {
         ["accepted", "duplicate", "refused:"].iter().any(|word| self.last_outcome.starts_with(word))
     }
@@ -1985,5 +1986,28 @@ mod sealed_spool_tests {
         assert!(remove_entry("elsewhere", &second_msgid).unwrap());
         let left: Vec<String> = list_entries("elsewhere").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
         assert_eq!(left, vec![msgid.clone()], "only the first entry is left, by its msgid");
+    }
+
+    /// **An attempt whose answer could not be checked is neither a delivery nor
+    /// an answer.** `unauthenticated:` is what the client writes when a far
+    /// end's answer does not verify under the key on file. Liveness must not
+    /// count it as reached or answered, or a forged or dead peer would read as
+    /// reachable.
+    #[test]
+    fn an_unauthenticated_attempt_is_neither_reached_nor_answered() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&aoide_test_support::unique_tmp("outbox-unauthenticated"));
+
+        let envelope = crate::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
+        let mut entry = OutboxEntry::fresh(envelope);
+        entry.last_outcome = "unauthenticated: `elsewhere` answered `aoide/mailDeposit` with no answer signature".to_string();
+        assert!(!entry.last_attempt_reached_the_peer());
+        assert!(!entry.last_attempt_was_answered());
+
+        entry.last_outcome = "refused: bad-msgid".to_string();
+        assert!(entry.last_attempt_was_answered(), "a refusal is an answer, so the contrast holds");
+        entry.last_outcome = "accepted".to_string();
+        assert!(entry.last_attempt_reached_the_peer() && entry.last_attempt_was_answered());
     }
 }

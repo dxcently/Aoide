@@ -107,7 +107,8 @@ in the message.
   refresh go through `aoide_storage::session::pid_may_move`. Anything that
   signals or injects by pid (`session kill`) re-verifies the seal against the
   live starttime (`terminate_with_key`); `conduct --id` refuses an id whose
-  record is conductable or sealed (a conducted id is born once); lineage-only readers (`eidolon::
+  record is conductable or sealed (a conducted id is born once) and any id
+  under the reserved `sub:` prefix; lineage-only readers (`eidolon::
   resolve_parent`, `resolve_parent_claim`) lean on the pid being immutable
   while the process lives, not on a seal.
 - **The workspace default is stamped ONCE, through ONE seam, at THREE
@@ -908,6 +909,16 @@ in the message.
   accepted under the manifest's host-local, operator-authored trust model
   (the operator who writes a spec already controls their own disk), not a
   gap to close with a `canonicalize` call here.
+- **The autogate reads a parent edge only through `send.rs`'s
+  `attested_parent_of`.** A target's `parentSessionId` earns the parent-of-target
+  and sibling rules only where its `attestedSpawner` names the same id. Only
+  `session_conduct` writes that stamp, where the kernel backs the edge
+  (`window::spawner_is_attested`). `session start --parent`, `graph link`, the hook
+  door, and any moved edge leave no matching stamp, so that child is gated like
+  any unrelated send. Every write of `parentSessionId` goes through
+  `SessionRecord::set_parent_session`, which drops the stamp when the edge moves. A
+  new producer of parent edges must do the same, and stamp the spawn-time field
+  where the kernel backs the edge, or accept that its children are gated.
 - **A parent automatically hears the children it spawned, and that line is
   the DAEMON's own, never a `send` (P-EIDOLON E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice"; the User's ruling, 2026-09-17).**
@@ -949,10 +960,11 @@ in the message.
   **The hook source is the same lane, as a child module
   (`graph/pingback/hook.rs`).** A local-parented child of any registered
   harness that is not an `eidolon` (`hook::tracked`: no `remoteParent`, not a
-  shell, sub-agent node or app thread) is read off its `hooks.json` phase and
-  stamp, never a trace, and its lines (`awaiting`, `silent 12 min · last: …`,
-  `settled`) join the SAME `claims.lines` the eidolon source fills, so
-  `deliver` and its skips are one implementation. Its claim runs inside the
+  shell, sub-agent node, app thread or conducted wrap) is read off its
+  `hooks.json` phase and stamp, never a trace, and its lines (`awaiting`,
+  `silent 12 min · last: …`, `settled`) join the SAME `claims.lines` the
+  eidolon source fills, so `deliver` and its skips are one implementation.
+  Its claim runs inside the
   SAME `with_stage_lock` section over the cursor `claim_locked` just built
   (`hook::claim`), reading the roster and `hooks.json` inside that lock and
   writing the entry's `hook` half — `{phase, at, silent?}` — so the two
@@ -1126,10 +1138,11 @@ in the message.
   invisible non-`Cf` fillers (`is_invisible`: variation selectors, Hangul and
   braille blanks) — and a new sanitizer anywhere in this crate must too, never
   a copied table (S9's own review found the local lane filtering `is_control`
-  only, and the fillers missing). `common::clean_line` is `pub` and re-exported
-  at `graph::clean_line` for the SAME reason (P-RSA S10 review, L6): the A2A
-  door echoes a caller's illegal slug in its refusal and must clean it with
-  this one, not with a second rule of its own.
+  only, and the fillers missing). The table and its filters are
+  `aoide_protocol::untrusted`'s, re-exported through `common` so these paths
+  stand, and `graph::clean_line` re-exports `clean_line` for the SAME reason
+  (P-RSA S10 review, L6): the A2A door echoes a caller's illegal slug in its
+  refusal and must clean it with this one, not with a second rule of its own.
   **Both ends of a child's exit are one input.** `pingback`'s `dropped` slice
   carries the eidolon sync's own drop set AND (H1 of the S8/S9 review) the
   end facts of every remote child `reap_inner` took off the roster this same
@@ -1171,6 +1184,71 @@ in the message.
   routing, not sweep logic) reaches `reap_and_announce` for real and has to
   neutralize `notify-send` itself (e.g. blanking `$PATH` for that one call)
   rather than letting a test fire a real toast on the machine running it.
+- **A protected live wrap is ended only by its own exit, and nothing reads the
+  daemon key on that path.** The predicate is
+  `identity::is_protected_live_wrap`, stated once in `CONTRACTS.md`'s identity
+  section. Every refusal asks it: `session end`, a terminal `session phase`,
+  every hook arm (below), `session prune`, the reaper's spare, and `graph link`
+  (as the child). A single id is read through `session_store::protected_wrap`,
+  never a second copy of the predicate. The start door (`session_store`'s
+  `session_start`, after the daemon hop) and the hook door's SessionStart
+  (`do_hook_session_start`) both ask it before any write, through one
+  verdict (`live_wrap_verdict`), and a refused hook start is audited on the
+  door the hook arrived on. A start judged on a protected wrap writes
+  nothing, refused or not, and the hook door returns that judgement beside
+  its outcome so `send.rs` lands no stamp after it. `drop_sessions` keeps a
+  protected survivor's `parentSessionId` and drops its `attestedSpawner` when
+  the record its edge names leaves the roster, and `do_subagent_rekey` keeps
+  the edge too. `graph link` and `session prune` load and write under the
+  stage lock. `identity::live_sealed_wrap_ids` is the set the doors and the
+  reaper test. The wrap's own exit path (`do_session_end` from
+  `session_conduct`) is the one legitimate end and stays unrefused. A new door
+  that can finish or re-register a record asks the same predicate first, and
+  the wrap's own exit path never does. The grant side (`send.rs`'s
+  `real_attested_*`, `actions.rs`'s `terminate_verified`, `pingback.rs`) still
+  verifies the seal, and must.
+- **No hook arm acts on a protected wrap's own id, and the guard is one
+  place.** A harness reports under its hook child's id, never its wrap's, so
+  `hook_for_profile_gated` asks `protected_wrap` for the payload's `session_id`
+  right after `map_hook` (before the unmapped-event stamp as well) and returns
+  `noop("live-sealed-wrap")` for every event but SessionStart, after one audit
+  line on the door it was given (`audit_ignored_wrap_hook`; the line names the
+  wrap and never the payload). SessionStart stays distinct on purpose: its arm
+  judges the four identity fields against the same record, answers `ok` for a
+  start that changes none and refuses one that does, and a same-fields start is
+  not audited. Never add a per-arm protected check (the guard covers the
+  `SessionEnd` arm too), and never move a stamp, a window or chain write, a
+  phase write or a `spawn_summons` call ahead of the guard. A new arm is
+  covered by being below it. Tests that forge a hook at a protected wrap set
+  `AOIDE_AUDIT_LOG`, since the guard appends to it.
+- **A payload field that names a `sub:` node is guarded where it is written.**
+  The guard above reads `session_id` and nothing else, while `tool_use_id`,
+  `parent_tool_use_id` and `agent_id` build the `sub:` ids that
+  `do_subagent_spawn`, `do_subagent_end`, `do_subagent_rekey` (its source id)
+  and `set_owner_activity` write under. Each of the four asks `protected_wrap`
+  for that id inside the stage lock and returns when it names a protected live
+  wrap, so a wrap registered under the prefix before it was reserved is not
+  re-kinded, renamed, dropped or given a phase or an activity by a forged
+  payload. A new writer keyed by an id a payload names asks the same reader.
+- **The `sub:` id prefix belongs to the sub-agent hooks.** `do_subagent_spawn`
+  creates a `sub:<id>` node, `do_subagent_rekey` renames it and
+  `do_subagent_end` removes it, each on a harness's word alone, so a wrap or
+  session registered under that prefix would answer to a forged hook.
+  `session_store::reserved_id_refusal` (a taught `Kind::Usage` refusal, reason
+  `reserved-id`) is asked by the four doors that take an id from their caller:
+  `session_conduct`, before the child is spawned; `session_spawn`, before any
+  mailbox enrolment, sidecar or launch (its child would refuse the id only
+  after all three); `session_start`; and a hook's SessionStart, as the Start
+  arm's first act, ahead of `clear_stale_parent` and every other write, and
+  again in `do_hook_session_start` for the first hook of an unknown id. The
+  A2A door mints its own id (`spawn_session_id`) and takes none from its
+  caller. A new door that registers a caller's id asks it too. The eidolon and
+  Codex-app reconcilers read the id off disk instead, so they skip an id for
+  which `is_reserved_id` holds: they enrol none and retire one enrolled under
+  it. Together these make the sub-agent hooks the only makers of a `sub:` node.
+  It is why a `sub:` record is never a spawner (`window::spawner_is_attested`
+  needs the parent's pid in the ancestry, or its hook chain), so no stamp is
+  ever left naming a sub-agent node that ends, is re-keyed or is cascaded away.
 - **A session's exit — a clean `session end` OR a `reap` sweep — MUST
   append exactly one line to the durable session ledger, through the SAME
   shared call (P-D8, `docs/architecture/AOIDED.md`'s "L5").**
@@ -1538,7 +1616,8 @@ in the message.
   execs a real terminal running the same `aoide conduct`, and a windowed
   worker terminal is abandoned exactly as readily as a headless one.
   `parentSessionId` is worse than wrong — `graph/doc.rs` clears a child's
-  parent edge when the parent leaves the roster, so it is empty at
+  parent edge when the parent leaves the roster (a protected live wrap keeps
+  it, CONTRACTS rule 3), so it is empty at
   precisely the moment a shell becomes leftover, and a predicate keyed on
   it would match only shells whose agent is still alive. `spawned` is
   stamped once by `stamp_spawned` inside the child `spawn` re-execs and
@@ -1611,7 +1690,8 @@ in the message.
   so does the end of the chain: the door then moves no chain and binds no window. An
   unreadable pid counts as plumbing. It lands
   in the same locked write as three events: the registration
-  (`do_hook_session_start`), a first window bind (`ensure_session_window`), and
+  (`do_hook_session_start`, except on a protected live wrap, whose start
+  writes nothing), a first window bind (`ensure_session_window`), and
   a per-turn heal (`ensure_session_window` again, through
   `session_store::chain_is_stale`). Registration is a SessionStart, or the first
   hook event of an unknown id, so a resumed harness that runs in a new process
@@ -1677,7 +1757,8 @@ in the message.
   split, so an EXISTING record gets this too, not only a freshly-registered
   one — and re-stamps `parentSessionId` via
   `session_store::stamp_attested_parent` whenever the resolved wrap differs
-  from what's currently stored (change-only, cycle-guarded by
+  from what's currently stored, unless it is a conducted wrap (change-only,
+  cycle-guarded by
   `would_cycle`). `ToolStart`/`ToolEnd`/`SubRekey`/`SubEnsure` —
   PreToolUse/PostToolUse and their subagent siblings, fired on every tool
   call — skip the walk outright (`attest: None`): a terminal's wrap only
@@ -1693,7 +1774,8 @@ in the message.
   same session id, hosted by a DIFFERENT terminal after the resume) follow
   its CURRENT wrap from the very first hook after the resume. Never a
   guess from cwd/title/workspace; no daemon reachable, or no conducted
-  ancestor found, leaves the field untouched — fail-closed. The ordinary
+  ancestor found, leaves the field untouched — fail-closed. A conducted wrap's
+  parent is never written this way (`conducted_wrap`). The ordinary
   `AOIDE_SESSION_ID` env fallback still exists on both paths, but only
   behind the attested wrap. `hook_ensure_session_with` is the injection
   seam (the `deliver_local_with` precedent) for the per-turn path:

@@ -21,8 +21,9 @@ use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild,
 #[cfg(unix)]
 use super::pty::signal_name;
 use super::session_store::{
-    do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
-    stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task, stamp_wrap,
+    do_session_end, do_session_start, reserved_id_refusal, set_session_log_path, stamp_headless,
+    stamp_origin, stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task,
+    stamp_wrap,
 };
 use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
 use aoide_protocol::agents::agent_profile;
@@ -1919,6 +1920,11 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         .get("id")
         .cloned()
         .unwrap_or_else(|| format!("conduct-{}-{}", std::process::id(), unix_ts()));
+    // The `sub:` namespace is the sub-agent hooks' own: a wrap under it would
+    // answer to them (`reserved_id_refusal`).
+    if let Some(refusal) = reserved_id_refusal(cmd, &id) {
+        return refusal;
+    }
     // A conducted id is born once: an existing record that is conductable or
     // sealed (now or ever) holds a pid no one may hand to another process, so
     // reusing its id would leave it stranded on the old pid (or invite a
@@ -4677,6 +4683,39 @@ mod tests {
             );
         }
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    /// The `sub:` namespace belongs to the sub-agent hooks. A wrap registered under
+    /// it would answer to them, so `conduct --id sub:x` is refused with the taught
+    /// refusal before the child exists: nothing runs and nothing is registered.
+    /// GATED on Unix with its reason: the control child is an `sh` script.
+    #[cfg(unix)]
+    #[test]
+    fn conduct_refuses_a_sub_prefixed_id_before_spawning_and_registers_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("conduct-reserved-id");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        let ran = root.join("ran");
+        let script = format!("touch {}", ran.display());
+
+        let out = session_conduct(&conduct_invocation(&["sh", "-c", &script], &[("id", "sub:x")]));
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "reserved-id");
+        assert!(!ran.exists(), "the child was never spawned");
+        let roster: Vec<String> = load_stage::<SessionsFile>(&sessions_path())
+            .map(|f| f.sessions.into_iter().map(|s| s.session_id).collect())
+            .unwrap_or_default();
+        assert!(roster.is_empty(), "nothing is registered: {roster:?}");
+
+        let ok = session_conduct(&conduct_invocation(&["sh", "-c", &script], &[("id", "x")]));
+        assert_eq!(ok.status, aoide_protocol::output::Status::Ok, "control: msg: {}", ok.message);
+        assert!(ran.exists(), "control: an ordinary id runs its child");
         let _ = std::fs::remove_dir_all(&root);
     }
     /// The field is NOT once-only like `headless`/`spawned`: an id re-registers
