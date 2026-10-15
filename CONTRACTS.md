@@ -6636,8 +6636,9 @@ set of "flavor" surfaces — committed files, not nix options:
   author its own body to put the control in its own grammar; every body keeps
   the same bridge calls (`riceMenu`, `riceMode`, `riceDraft`) and the same
   gesture: any click opens the one menu — the runtime songbook's songs, one
-  back-to-declarative row, then the draft rows — and nothing switches until a
-  row is chosen. A borrowed bar brings its lender's body with
+  back-to-declarative row, then the draft rows (a body may leave the drafts
+  out when its song offers them on another surface of its own, as barcarolle's
+  Start menu does) — and nothing switches until a row is chosen. A borrowed bar brings its lender's body with
   it (quodlibet takes fugue's `ricemode` with fugue's `bar`).
 - **Playbook:** `song/songbook/update-playbook.md`.
 
