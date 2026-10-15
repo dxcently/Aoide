@@ -322,13 +322,16 @@ while its turn is still open records the same fact with no status, and its
 spawner hears `[claude <petname>] ended mid-turn · last: <tool>` once; its wrap
 then finds the phase closed and adds nothing. Anyone else's `aoide session end`
 only closes the phase, since a spawner is told only what the session itself
-did. A `done` phase with no fact (a session that ended by its own hook once its
-turn closed) says nothing. A spawner hears at most three such lines from one
-wrap's end, then one `and N more ended or died mid-turn`. A silence before a
-death does not hide it. The first look at a child is a baseline and says
-nothing, except a recorded death under a day old; a child found already stopped
-says nothing, and a turn that begins and ends between two ticks is not heard. A
-child the tick can no longer route is judged from the route its entry kept, by
+did. So does a `SessionEnd` whose `reason` is `clear` or `resume`: claude's
+process lives on under another session id, so nothing ended mid-turn. Any other
+reason, or none, records the fact. A `done` phase with no fact (a session that
+ended by its own hook once its turn closed) says nothing. A spawner hears at
+most three such lines from one wrap's end, then one `and N more ended or died
+mid-turn`. A silence before a death does not hide it. The first look at a child
+is a baseline and says nothing, except a recorded death under a day old; a child
+found already stopped says nothing, and a turn that begins and ends between two
+ticks is not heard.
+A child the tick can no longer route is judged from the route its entry kept, by
 the rules in `CONTRACTS.md` (`state/stage/pingback.json`), where the orphan rule
 is stated once. A hook child's own `parentSessionId` is the wrap that hosts it,
 never the session that spawned it, so this source does not write to that edge:

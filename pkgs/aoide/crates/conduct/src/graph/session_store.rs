@@ -4185,6 +4185,12 @@ mod hosted_death_tests {
     fn hook_end() {
         super::super::send::hook_from_str(r#"{ "session_id": "kid", "hook_event_name": "SessionEnd" }"#);
     }
+    fn hook_end_for(reason: serde_json::Value) -> impl FnOnce() {
+        move || {
+            let payload = serde_json::json!({ "session_id": "kid", "hook_event_name": "SessionEnd", "reason": reason });
+            super::super::send::hook_from_str(&payload.to_string());
+        }
+    }
     fn daemon_end(peer: Option<i32>) {
         let mut inv = crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]);
         inv.door = aoide_protocol::Door::Daemon;
@@ -4276,6 +4282,52 @@ mod hosted_death_tests {
             let rec = ended_child("end-other", "working", true, h, end);
             assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{case}");
         }
+    }
+
+    /// `/clear` and a resume end the old session id and leave the claude process
+    /// running under another one, so the end is no death and no "ended mid-turn"
+    /// is true: the record closes as `done` with no fact for the spawner to hear.
+    #[test]
+    fn a_session_end_after_which_the_harness_lives_on_records_no_fact() {
+        let me = std::process::id() as i32;
+        for reason in ["clear", "resume"] {
+            for phase in ["working", "awaiting"] {
+                let rec = ended_child("end-lives-on", phase, true, me, hook_end_for(serde_json::json!(reason)));
+                assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{reason}, {phase}");
+            }
+        }
+    }
+
+    /// Every other reason, an absent one and a value the profile does not name
+    /// is the process going away, and tells the spawner: the raw field is matched
+    /// exactly, so a disguised `clear` (a zero-width character, another case,
+    /// padding) does not borrow the skip.
+    #[test]
+    fn a_session_end_for_any_other_reason_records_the_fact() {
+        use serde_json::json;
+        let me = std::process::id() as i32;
+        let reasons = [
+            json!("logout"),
+            json!("prompt_input_exit"),
+            json!("other"),
+            json!("bypass_permissions_disabled"),
+            json!("a-reason-from-a-newer-claude"),
+            json!(""),
+            json!("clear\u{200b}"),
+            json!("\u{200b}resume"),
+            json!("Clear"),
+            json!(" clear"),
+            json!("resume\n"),
+            json!(null),
+            json!(7),
+            json!(["clear"]),
+        ];
+        for reason in reasons {
+            let rec = ended_child("end-other-reason", "working", true, me, hook_end_for(reason.clone()));
+            assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()), "reason {reason}");
+        }
+        let absent = ended_child("end-no-reason", "working", true, me, hook_end);
+        assert_eq!((absent.phase.as_str(), &absent.death), ("done", &ended_fact()), "no reason field");
     }
 
     /// The fact is the unclaimed state, and a second end must not erase it: a

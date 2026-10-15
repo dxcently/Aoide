@@ -1414,7 +1414,10 @@ enum HookAction {
     /// unanswered AskUserQuestion); a settled `idle`/`done` session must not be
     /// flipped by the ~60s idle heartbeat.
     PhaseIfRunning { id: String, phase: String },
-    End { id: String },
+    /// The session ended. `continues`: the payload's `reason` is one the
+    /// profile names as leaving the harness process alive under another
+    /// session id, so the end is no death and says nothing to a spawner.
+    End { id: String, continues: bool },
 }
 
 /// Map ONE hook payload (`session_id`, `hook_event_name`, optional `cwd`) to a
@@ -1645,7 +1648,13 @@ fn map_hook(profile: &AgentProfile, payload: &Value) -> Option<HookAction> {
                 sub_id: format!("sub:{k}"),
             })
         }
-        HookClass::SessionEnd => Some(HookAction::End { id: id.to_string() }),
+        HookClass::SessionEnd => Some(HookAction::End {
+            id: id.to_string(),
+            continues: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| profile.session_end_continues.contains(&reason)),
+        }),
         // A DEDICATED needs-input event (kimi: `PermissionRequest`) — the same
         // unconditional `awaiting` a permission Notification yields. Claude's
         // map can never produce this class at the top level (its Awaiting only
@@ -2293,7 +2302,10 @@ fn hook_for_profile_gated(
             do_subagent_end(&sub_id);
             Outcome::ok("session.hook", format!("subagent end {sub_id}"))
         }
-        HookAction::End { id } => do_session_end(&id, hook_pid),
+        // A process that lives on has no death to attest: no caller, no fact.
+        HookAction::End { id, continues } => {
+            do_session_end(&id, if continues { None } else { hook_pid })
+        }
     };
     // Publish a harness-reported context-window ceiling onto the record
     // IMMEDIATELY (every hook carries it — pi's extension reads the active
@@ -5287,6 +5299,42 @@ mod tests {
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "session_id": "s" })).is_none());
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "hook_event_name": "SessionStart" })).is_none());
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "session_id": "", "hook_event_name": "SessionStart" })).is_none());
+    }
+    /// Whether a SessionEnd leaves the harness process alive is the profile's
+    /// word on the payload's raw `reason`: claude names `clear` and `resume`,
+    /// compared exactly; a harness that names none never skips on the field.
+    #[test]
+    fn a_session_end_continues_only_for_a_reason_the_profile_names() {
+        let continues = |profile: &AgentProfile, reason: Option<Value>| {
+            let mut payload = json!({ "session_id": "s", "hook_event_name": "SessionEnd" });
+            if let Some(reason) = reason {
+                payload["reason"] = reason;
+            }
+            match map_hook(profile, &payload) {
+                Some(HookAction::End { id, continues }) if id == "s" => continues,
+                other => panic!("a SessionEnd maps to End, got {other:?}"),
+            }
+        };
+        for reason in ["clear", "resume"] {
+            assert!(continues(&CLAUDE_PROFILE, Some(json!(reason))), "{reason}");
+        }
+        let gone = [
+            Some(json!("logout")),
+            Some(json!("prompt_input_exit")),
+            Some(json!("other")),
+            Some(json!("clear\u{200b}")),
+            Some(json!("CLEAR")),
+            Some(json!(["clear"])),
+            Some(json!(null)),
+            None,
+        ];
+        for reason in gone {
+            assert!(!continues(&CLAUDE_PROFILE, reason.clone()), "{reason:?}");
+        }
+        for name in ["kimi", "pi"] {
+            let profile = agent_profile(name).unwrap();
+            assert!(!continues(profile, Some(json!("clear"))), "{name} documents no reason");
+        }
     }
     #[test]
     fn hook_garbage_stdin_is_an_ok_noop_never_nonzero() {

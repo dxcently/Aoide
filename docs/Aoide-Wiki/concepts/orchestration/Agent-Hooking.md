@@ -201,6 +201,14 @@ Everything the bridge knows about a specific agent harness lives on an
   inherited `CLAUDE_CODE_CHILD_SESSION` is what makes a child claude turn
   transcript saving off and silently disable the project `.mcp.json` doorbell
   channel (`TASK-REGISTER.md` §3).
+- `session_end_continues` — the `reason` values of a `SessionEnd` payload after
+  which the harness PROCESS lives on under another session id (claude: `clear`,
+  `resume`; its `logout`, `prompt_input_exit` and `other` are the process going
+  away). The reason is matched against the raw field, never normalised, so an
+  absent field, an unlisted value and a disguised `clear` all read as the
+  process ending; a harness that documents no such field lists none. A session
+  that ends this way closes `done` and records no "ended mid-turn" fact for its
+  spawner (`CONTRACTS.md`, `state/stage/sessions.json`).
 
 Every agent-aware consumer dispatches through the profile rather than
 hardcoding a harness: the hook door (`--agent` → `map_hook` and the

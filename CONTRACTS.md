@@ -2163,8 +2163,14 @@ itself when the caller the door attests is its harness or runs under it, the
 harness pid being in that caller's `/proc` ancestry. The attested caller is the
 hook process, the daemon's `SO_PEERCRED` pid for a forwarded call, or else the
 calling process itself; a door that attests none ends nobody. A `session end`
-from any other caller only closes the phase. The wrap, finding that phase
-closed when its harness then exits, writes nothing more.
+from any other caller only closes the phase. So does a `SessionEnd` hook whose
+`reason` is `clear` or `resume`, the two reasons after which the harness process
+lives on under another session id: that session did not end mid-turn, the
+conversation moved to a new id. The reason is read from the raw payload field
+and matched byte for byte against the profile's `session_end_continues`, never
+normalised; `logout`, `prompt_input_exit`, `other`, any value not listed and an
+absent field all write the fact. The wrap, finding that phase closed when its
+harness then exits, writes nothing more.
 `lastTool` is the tool in flight, when there was one. `spawner` is the session
 the death is said to, resolved while the wrap still runs by the same climb a
 route takes (§ `pingback.json`) over the roster as it stands, with no seal

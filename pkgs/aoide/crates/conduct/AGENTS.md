@@ -1048,9 +1048,16 @@ in the message.
   daemon's `__daemon-peer-pid` stamp read by `send::door_pid` on `Door::Daemon`
   only, else this process; the wrap's own end passes none), and
   `runs_under_harness` writes the fact only when the child's harness pid is in
-  that pid's `/proc` ancestry. Any other caller closes the phase plain. A
-  second `done` on a record that carries a fact is a no-op in
-  `aoide_storage::session::upsert_hook`, so a repeated end or a duplicate
+  that pid's `/proc` ancestry. Any other caller closes the phase plain. So does
+  a `SessionEnd` whose `reason` the profile lists in `session_end_continues`
+  (claude: `clear` and `resume`), since the harness process lives on under
+  another session id and nothing ended mid-turn: `map_hook` sets
+  `HookAction::End { continues }` and the door passes no caller. The reason is
+  the raw payload field, matched exactly and never normalised, so `logout`,
+  `prompt_input_exit`, `other`, a disguised `clear`, an unknown value and an
+  absent field all write the fact; a harness whose profile lists none never
+  skips on the field. A second `done` on a record that carries a fact is a no-op
+  in `aoide_storage::session::upsert_hook`, so a repeated end or a duplicate
   `SessionEnd` cannot erase it; a live phase still supersedes the fact.
 
   **The wrap's own signals.** `WrapSignals::install` (`graph/pty.rs`) runs first

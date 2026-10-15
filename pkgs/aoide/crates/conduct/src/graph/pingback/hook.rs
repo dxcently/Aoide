@@ -2162,6 +2162,48 @@ mod tests {
         assert!(tick(&mut cursor).is_empty(), "at most once");
     }
 
+    /// A real wrap over a harness that reports a turn, then sends its own
+    /// SessionEnd hook with `reason` and dies: the fact the record is left with
+    /// and what the spawner hears.
+    #[cfg(unix)]
+    fn session_end_hook_then_death(tag: &str, reason: &str) -> (Option<HookDeath>, Vec<ChildClaim>) {
+        let (root, _env, _guard) = e2e_stage(tag);
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let payload = format!(r#"{{"session_id":"{HOOK}","hook_event_name":"SessionEnd","reason":"{reason}"}}"#);
+        let after = format!("printf '%s' '{payload}' | \"$AOIDE\" session hook\nkill -9 $$");
+        let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, &after));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty(), "the first examination is a baseline");
+
+        std::fs::write(root.join("go"), "").unwrap();
+        wait_exit(&mut wrap);
+        assert_eq!(hook_record().phase, "done");
+        let death = hook_record().death;
+        let heard = tick(&mut cursor);
+        assert!(tick(&mut cursor).is_empty(), "at most once");
+        (death, heard)
+    }
+
+    /// `/clear` and a resume end the old session id inside a claude process that
+    /// goes on under another: its SessionEnd carries the reason, the end is no
+    /// death, and the spawner hears nothing of it, not even when the process
+    /// later dies. A `logout` is the process going away, and is heard.
+    #[cfg(unix)]
+    #[test]
+    fn a_session_end_by_clear_or_resume_says_nothing_to_the_spawner_and_a_logout_does() {
+        for reason in ["clear", "resume"] {
+            let (death, heard) = session_end_hook_then_death(&format!("dmt-{reason}"), reason);
+            assert_eq!(death, None, "{reason}: no fact");
+            assert!(heard.is_empty(), "{reason}: the spawner hears nothing, got {heard:?}");
+        }
+        let (death, heard) = session_end_hook_then_death("dmt-logout", "logout");
+        assert_eq!(death.and_then(|d| d.outcome).as_deref(), Some("end"));
+        assert_eq!(
+            heard,
+            vec![ChildClaim { parent: SPAWNER.into(), line: "[claude fond-aspen] ended mid-turn · last: Bash".into() }]
+        );
+    }
+
     /// The review's probe: `aoide session end --id <child>` from a process that
     /// is not the child's harness, nor under it, while the harness is alive
     /// with its turn open. A spawner is told only what the session itself did,

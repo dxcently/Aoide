@@ -191,8 +191,11 @@ other crate in this workspace sits above.
   `session_env_markers`, the variables this harness injects into the
   processes it launches that mean "you are inside a `<harness>` session";
   the union of every profile's list is `session_env_markers()`, the one list
-  a launch path drops from a child's environment before exec) keyed by
-  harness name. `on_path` (P-I2,
+  a launch path drops from a child's environment before exec) keyed by harness
+  name. `session_end_continues` lists the `reason` values of a `SessionEnd`
+  payload after which the harness process lives on under another session id
+  (claude: `clear`, `resume`), matched against the raw field and never
+  normalised; a harness that documents none lists none. `on_path` (P-I2,
   ONBOARD.md decision 7) is the `AgentProfile`-shaped wrapper over
   `bin::on_path`, over the profile's own `launch` program name — onboard's
   harness-picker preselection. The table gains a fourth row for `eidolon`,
