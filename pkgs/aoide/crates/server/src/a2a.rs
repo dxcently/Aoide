@@ -3599,7 +3599,7 @@ fn deposit_sealed(
             // entry the hub could not write is not a hop, and an audit that said
             // "next `chiyo`" about it would be the one record of a letter that is
             // nowhere.
-            match aoide_storage::seal::file_transit_hop(&hop, &hop_name) {
+            match aoide_storage::seal::file_transit_hop(&hop) {
                 Ok(()) => {
                     let _ = audit(
                         ctx.audit_log,
@@ -15807,11 +15807,6 @@ mod tests {
             aoide_storage::outbox::list_entries("far").unwrap().is_empty(),
             "and no receipt is minted back to the depositing hop"
         );
-        let transit = aoide_storage::mail::read_transit_unlocked().unwrap();
-        assert_eq!(transit.len(), 1, "the hop is recorded");
-        assert_eq!(transit[0].next, "dave");
-        let recorded = serde_json::to_string(&transit[0]).unwrap();
-        assert!(!recorded.contains("\"ct\""), "the line holds no ciphertext: {recorded}");
         assert!(
             !serde_json::to_string(&aoide_storage::outbox::list_entries("dave").unwrap()).unwrap()
                 .contains("\"ct\"")
@@ -15852,7 +15847,6 @@ mod tests {
         assert_eq!(first["status"], "accepted", "{first}");
         let again = mail_deposit(&json!({ "container": container }), &ctx).unwrap();
         assert_eq!(again["status"], "duplicate", "{again}");
-        assert_eq!(aoide_storage::mail::read_transit_unlocked().unwrap().len(), 1, "one hop, not two");
         assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "one spooled copy");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
@@ -15888,7 +15882,6 @@ mod tests {
         let answer = mail_deposit(&json!({ "container": looped }), &ctx).unwrap();
         assert_eq!(answer["status"], "refused", "{answer}");
         assert_eq!(answer["reason"], aoide_storage::seal::CHAIN_LOOP, "{answer}");
-        assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "nothing recorded");
         assert!(aoide_storage::outbox::list_entries("dave").unwrap().is_empty(), "nothing spooled onward");
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
         assert!(log.contains(aoide_storage::seal::CHAIN_LOOP), "the drop is audited: {log}");
@@ -15926,7 +15919,6 @@ mod tests {
         let answer = mail_deposit(&json!({ "container": container }), &ctx).unwrap();
         assert_eq!(answer["status"], "refused", "{answer}");
         assert_eq!(answer["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
-        assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty());
         assert!(aoide_storage::outbox::list_entries("dave").unwrap().is_empty());
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
         assert!(log.contains(aoide_storage::seal::ZONE_VIOLATION), "audited: {log}");

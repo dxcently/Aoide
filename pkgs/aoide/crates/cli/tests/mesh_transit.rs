@@ -330,21 +330,13 @@ fn osaka_to_chiyo_routes_via_sakaki_and_the_chain_of_two_verifies_at_chiyo() {
     assert_eq!(hop.mesh, HOME, "no gate is crossed — `chiyo` is in the letter's own mesh");
     assert!(hop.held, "`chiyo` polls, so its relay holds the letter for its own ask");
     assert_eq!(hop.container.transit.len(), 2, "the hub's own chained hop signature");
-    aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
+    aoide_storage::seal::file_transit_hop(&hop).unwrap();
     assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held toward `chiyo`");
 
-    // What the hub's own store holds: the routing metadata and the container's
-    // digest — no mailbox name, no byte of the letter, and no second copy of the
-    // ciphertext (the spool toward `chiyo` is where the container lives).
-    let transit = aoide_storage::mail::read_transit_unlocked().unwrap();
-    assert_eq!(transit.len(), 1, "one transit line at the hub");
-    assert_eq!(transit[0].next, "chiyo");
-    assert!(transit[0].held);
-    assert_eq!(transit[0].digest.len(), 64, "the container's own digest, hex");
-    let logged = serde_json::to_string(&transit[0]).unwrap();
-    assert!(!logged.contains("conductor"), "no mailbox name at the hub: {logged}");
-    assert!(!logged.contains("a letter for chiyo"), "and no letter bytes: {logged}");
-    assert!(!logged.contains("\"ct\""), "and no ciphertext: the spool is where that is: {logged}");
+    // The hub's store holds the container once, in the spool toward `chiyo`;
+    // no hop line duplicates it.
+    let spool = serde_json::to_string(&aoide_storage::outbox::list_entries("chiyo").unwrap()).unwrap();
+    assert!(!spool.contains("a letter for chiyo"), "no letter bytes at the hub: {spool}");
 
     // `chiyo` opens it: two hops, the origin's and the relay's, ending here.
     fx.enter("chiyo");
@@ -384,7 +376,7 @@ fn chiyos_poll_files_the_letter_and_the_origins_entry_retires_on_the_receipt() {
         aoide_storage::seal::ContainerOutcome::Hopped(hop) => hop,
         other => panic!("a hub carries it on: {other:?}"),
     };
-    aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
+    aoide_storage::seal::file_transit_hop(&hop).unwrap();
     assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held for `chiyo` — the relay's own spool");
 
     // `chiyo` asks: the RELAY's own offer and hand-over read (a poll is computed
@@ -476,7 +468,7 @@ fn a_host_whose_name_is_not_its_charter_name_still_hops_and_still_receives() {
         other => panic!("a hub carries it on: {other:?}"),
     };
     assert_eq!(hop.next, "chiyo");
-    aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
+    aoide_storage::seal::file_transit_hop(&hop).unwrap();
 
     // And the destination answers to its own charter line too.
     fx.enter("chiyo");
@@ -777,7 +769,6 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
     aoide_storage::node_store::save_nodes(&nodes).unwrap();
     let pulled = aoide_client::mail_wire::poll_node("osaka", None).unwrap();
     assert!(pulled.refused.is_empty(), "nothing refused: {:?}", pulled.refused);
-    assert_eq!(aoide_storage::mail::read_transit_unlocked().unwrap().len(), 1, "the hop is recorded");
     assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held toward `chiyo`");
     let hub_spool = serde_json::to_string(&aoide_storage::outbox::list_entries("chiyo").unwrap()).unwrap();
     assert!(!hub_spool.contains("conductor"), "no mailbox name at the hub: {hub_spool}");
@@ -923,7 +914,6 @@ fn a_dual_member_that_is_not_the_gate_refuses_the_bridge_at_the_door() {
     assert_eq!(result["status"], "refused", "{answer}");
     assert_eq!(result["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
     fx_enter(&root, EVO);
-    assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "nothing is filed as a hop");
     assert!(aoide_storage::outbox::list_entries("other").unwrap().is_empty(), "nothing is spooled onward");
     let log = std::fs::read_to_string(root.join("log")).unwrap_or_default();
     assert!(log.contains(aoide_storage::seal::ZONE_VIOLATION), "and the refusal is audited: {log}");
@@ -965,7 +955,6 @@ fn a_rewritten_mesh_without_the_gates_signature_is_refused_at_the_door() {
     assert_eq!(result["status"], "refused", "{answer}");
     assert_eq!(result["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
     fx_enter(&root, EVO);
-    assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty());
     assert!(aoide_storage::outbox::list_entries("other").unwrap().is_empty());
     let log = std::fs::read_to_string(root.join("log")).unwrap_or_default();
     assert!(log.contains(aoide_storage::seal::ZONE_VIOLATION), "audited: {log}");
@@ -1131,7 +1120,6 @@ fn a_stranger_in_a_charter_mesh_is_told_not_a_member_at_the_door() {
     let log = std::fs::read_to_string(fx.boxes["evo"].join("log")).unwrap_or_default();
     assert!(log.contains(aoide_storage::routing::NOT_A_MEMBER), "and it is audited: {log}");
     fx.enter("evo");
-    assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "a stranger files no hop");
     assert!(aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(), "and spools nothing onward");
 }
 
@@ -2104,7 +2092,7 @@ fn a_charter_signed_with_a_poll_node_lands_in_the_relays_hold_for_that_node() {
     };
     assert_eq!(hop.next, "chiyo");
     assert!(hop.held, "held for chiyo's own ask");
-    aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
+    aoide_storage::seal::file_transit_hop(&hop).unwrap();
     let held = aoide_storage::outbox::list_entries("chiyo").unwrap();
     assert_eq!(held.len(), 1, "in the relay's hold for chiyo");
     assert!(held[0].is_held());

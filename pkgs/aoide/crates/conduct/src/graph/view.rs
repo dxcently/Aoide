@@ -1083,8 +1083,8 @@ fn live_letters(
 ) -> Vec<Entry> {
     let mut fresh: Vec<Entry> = Vec::new();
     if follower.is_none() {
-        *follower = aoide_protocol::feed::Follower::open_at_end(&aoide_storage::mail::base_path()).ok();
-        fresh = aoide_storage::mail::read_base().unwrap_or_default();
+        *follower = aoide_protocol::feed::Follower::open_at_end(&aoide_storage::mail::box_path(slug)).ok();
+        fresh = aoide_storage::mail::read_box(slug).unwrap_or_default();
     } else if let Some(f) = follower.as_mut() {
         if let Ok(lines) = f.poll() {
             fresh.extend(lines.into_iter().filter_map(|l| serde_json::from_str::<Entry>(&l).ok()));
@@ -1727,7 +1727,7 @@ mod tests {
         let watched = [
             sessions_path(),
             crate::graph::model::hooks_path(),
-            mail::base_path(),
+            mail::box_path("fix-flaky"),
             mail::cursors_path(),
         ]
         .map(|p| std::fs::read(&p).unwrap_or_default());
@@ -1745,7 +1745,7 @@ mod tests {
         for (path, before) in [
             sessions_path(),
             crate::graph::model::hooks_path(),
-            mail::base_path(),
+            mail::box_path("fix-flaky"),
             mail::cursors_path(),
         ]
         .into_iter()
@@ -2335,5 +2335,33 @@ mod tests {
         assert_eq!(data["code"], OUTPUT_READ_REFUSED_CODE);
         assert_eq!(data["sessionId"], "sess-remote-1");
         assert_eq!(data["followed"], true, "a failed poll is still a followed watch: {data}");
+    }
+
+    /// The live rail keeps its place when the box file is replaced under it:
+    /// a rewrite (new inode, the same letters) re-reads from the top, and the
+    /// `rendered_seq` filter means each letter is shown exactly once.
+    #[test]
+    fn session_watch_follows_the_slug_box_across_a_rewrite() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root, _env) = isolated("watch-slug-rewrite");
+        let texts = |letters: &[aoide_storage::mail::Entry]| -> Vec<String> {
+            letters.iter().map(|e| e.envelope.text.clone()).collect()
+        };
+
+        mail::file_letter("outside", "fix-flaky", "one").unwrap();
+        let mut follower = None;
+        let mut rendered = 0;
+        assert_eq!(texts(&live_letters(&mut follower, &mut rendered, "fix-flaky")), ["one"]);
+
+        mail::file_letter("outside", "fix-flaky", "two").unwrap();
+        assert_eq!(texts(&live_letters(&mut follower, &mut rendered, "fix-flaky")), ["two"]);
+
+        let path = mail::box_path("fix-flaky");
+        let replacement = path.with_extension("rewrite");
+        std::fs::copy(&path, &replacement).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        mail::file_letter("outside", "fix-flaky", "three").unwrap();
+        assert_eq!(texts(&live_letters(&mut follower, &mut rendered, "fix-flaky")), ["three"]);
+        assert!(live_letters(&mut follower, &mut rendered, "fix-flaky").is_empty());
     }
 }

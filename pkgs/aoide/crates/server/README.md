@@ -221,7 +221,7 @@ terminal's rights to its remote callers.
 - `a2a` — the serve half of A2A (JSON-RPC/HTTP/SSE); the client half stays in
   `aoide-client`. Both `message/send` arms park what they are given and deliver
   nothing, so neither files into the mailbase (messaging plan P-M1,
-  `state/mail/base.jsonl`). `do_inject` (Inject, an EXISTING session) reuses
+  `state/mail/boxes/`). `do_inject` (Inject, an EXISTING session) reuses
   `aoide_conduct::graph::session_send` with `Door::A2a`, which parks the send in
   `pending.json` under the source the door derived (`inject_source`:
   `node:<name>` for a caller that proved the node, `addr:<address>` for every
@@ -504,8 +504,8 @@ terminal's rights to its remote callers.
   `aoide_conduct::mail_bridge:: drain_node` the daemon's own periodic tick uses
   — one drain implementation; `aoide-server` never dials out on its own account.
   **A container addressed to another node is not this receiver's to open**
-  (`deposit_sealed`'s `Hopped` arm): the door files it as a `transit` entry,
-  spools it toward the node the four steps pick, best-effort drains that hop
+  (`deposit_sealed`'s `Hopped` arm): the door writes no mail line, records the
+  hop in the audit log, spools it toward the node the four steps pick, best-effort drains that hop
   (never one the route said is HELD), and answers `accepted` with the hop named
   — nothing filed as correspondence, no reader armed and NO ack, because the
   letter is not here. The audit stamp and the chain agree on the caller's name

@@ -110,9 +110,10 @@ FidoNet node could.
     through a node declared as the zonegate between two named meshes. The
     routing table IS the mesh declaration — the charter, for a charter
     mesh.
-12. **Transit files at the hub** (FidoNet-faithful): a typed `transit`
-    entry in the hub's mailbase, holding the sealed container and its
-    routing metadata only, browsable as metadata, re-exported from there.
+12. **Transit at the hub** (FidoNet-faithful): the hub keeps no transit
+    record. The sealed container lives in the spool toward its `next` node,
+    which is what a retry resends and that node's poll reads; the hop itself
+    is recorded in the audit log.
 13. **Wire: extension methods, policy keyed on the method name.**
     `aoide/mailDeposit` and `aoide/mailPoll` beside the pairing methods.
     One door, one inspection, separate windows; gate/no-gate never
@@ -260,16 +261,19 @@ ride outside it on the container.
 file):
 
 ```
-base.jsonl      append-only, one entry per line, immutable once written
-cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
-seen.jsonl      one `{"msgid","receivedAt"}` per line, append-only; dedup
-                memory that outlives pruning, loaded once per process
-seq             the last sequence number issued, ASCII decimal, written
-                before the line it numbers
-receipts.seen   one `[signer, originMesh, ackedMsgid]` per line, append-only:
-                one line per receipt filed, so its read grows with the
-                letters this box has sent, never with the base
+boxes/<name>.log   one entry per line, append-only: a letter's box
+boxes/_legacy.log  letters whose name the grammar refuses (grandfathered)
+receipts.log       receipts, rotated to receipts.log.1 at 4 MiB
+cursors.json       { "<name>": { "<reader>": { "seq", "rung" } } }
+seq                the last sequence number issued, ASCII decimal, written
+                   before the line it numbers
 ```
+
+Every entry that exists is one line in exactly one file. The box line is the
+filing and its `msgid` is the dedup key, so there is no second index to keep
+in step. A receipt's key is `(signer, origin_mesh, acked msgid)` (see
+§Receipts).
+
 
 An entry is an envelope plus local facts:
 
@@ -295,14 +299,11 @@ An entry is an envelope plus local facts:
   fail-open shape for the callers that chose it. Three sessions on one
   box cannot make two append at once.
 - Write order is what makes a crash safe: under the lock, write the new
-  `seq`, append the entry to `base.jsonl` and fsync (a torn tail is cut
-  first), THEN append to `seen.jsonl`. A base line whose `msgid` is absent
-  from `seen` is a crash between those two writes, and a re-offer of that
-  `msgid` files it again: at-least-once, never lost. The reverse order
-  would lose mail. Only the write path cuts a torn tail; a reader drops a
-  final line with no newline, skips any line that does not parse, and
-  writes nothing.
-- All three files resolve through the same `state_dir()`; the timer, the
+  `seq`, then append the entry to its file and fsync (a torn tail is cut
+  first). A crash between the two leaves a gap in `seq`, never a reused
+  number. Only the write path cuts a torn tail; a reader drops a final line
+  with no newline, skips any line that does not parse, and writes nothing.
+- Every file resolves through the same `state_dir()`; the timer, the
   door unit, and the CLI must see one directory. P-M1's live gate checks
   the unit environments agree, not just the code.
 - `type=receipt` entries carry what `inbox.json` carried (from, target,
@@ -316,22 +317,11 @@ An entry is an envelope plus local facts:
   per-entry read flag has no high-water counterpart and is not carried:
   every migrated entry is unread once. Acks are receipts addressed back
   to the origin.
-- `type=transit` entries are letters the node is relaying (§Transit): the
-  ROUTING METADATA of the hop it made — the hop that deposited it, the
-  `next` node it goes to, the mesh it rides there, whether that node is
-  held for, and the container's own digest — and nothing else, never an
-  opened envelope, never a mailbox name, never a byte of the letter and
-  never the ciphertext (the container itself waits in the spool toward
-  `next`, which is what a retry resends and what that node's poll reads);
-  readers hide these lines unless asked. The line is the hub's own record
-  and stays (append-only); the hub's SPOOL entry toward `next` is what
-  retires, and it retires when that hop ACKNOWLEDGES having it — on a
-  drain, by the deposit's acceptance; on a poll, by the poller's next poll
-  naming it in `filed`.
 - `type=post` entries are opened board posts, filed once per node and
   carrying their board id (§Boards). A charter letter and a wrap are
   applied, not filed as correspondence: the charter to `state/mesh/`, the
-  epoch key to `state/boards/`; only their `msgid` enters `seen.jsonl`.
+  epoch key to `state/boards/`; their `msgid` is kept as their dedup key,
+  as every entry's is.
 - Reading never mutates an entry. Cursors are per reader: a name maps to
   a set of readers, each with its own high-water mark, and a read
   advances only the caller's. Two agents sharing a mailbox never
@@ -360,9 +350,11 @@ An entry is an envelope plus local facts:
   inherits the name's old `seq`, and a name with no recorded reader
   keeps its mark under the name itself. Nobody re-reads what they had
   already read.
-- Keep-all. `aoide mail rm --older-than <Nd|Nh>` is the only pruning; it
-  never touches `seen.jsonl`, so a pruned letter re-offered later is
-  still a duplicate (the RFC 5537 §3.3 coupling, kept by construction).
+- Dedup memory is the box itself. Pruning (`aoide mail rm --older-than`)
+  removes a letter's line and so its `msgid`: a pruned letter re-offered
+  later is filed again, unread. This is the accepted direction (forgetting
+  re-delivers, it never loses), and it needs a re-offer that outlives the
+  prune, which only a broken retire produces.
 
 The test-root guard lands with the store: `test-support` gains a helper
 that points `AOIDE_ROOT` (and so `state_dir()`) at a per-test temp root
@@ -512,7 +504,7 @@ door's audit name whitelist gains both names so they never log as bare
   `local-io`, `config-unreadable`, `no-charter-in-force`, `box-full`, and the
   rest of that class) is never named: its custody is kept and it is offered
   again. The hub retires
-  its own custody of the named msgids (a `transit` entry, and only that)
+  its own custody of the named msgids (its spool entry, and only that)
   before it offers
   (`aoide_storage::outbox::filed_pending`). A response can be lost, so the
   hand-over itself is not an acknowledgement, and anything the poller has not
@@ -594,7 +586,7 @@ door's audit name whitelist gains both names so they never log as bare
   and nothing is owed, so the sender retires its copy rather than parking it.
   A signer acknowledges a letter once per mesh: a second receipt from the same
   signer, in the same mesh, for the same acked letter files nothing, however
-  many times the destination re-acks it (`receipts.seen`). A receipt in
+  many times the destination re-acks it (`receipts.log`). A receipt in
   another mesh is a different acknowledgement and is filed.
   **What is bounded, and what is not.** The base gains at most one receipt
   per letter this box sent, per signer and mesh; a flood of receipts for
@@ -827,8 +819,7 @@ letter parks at its sender — but nothing moves either, so the declaration
 comes last and the drift report is the dry run.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
-(§Wire, "Lane and payload"), file the sealed container as `transit`,
-append the hub's chained hop signature naming the `next` node the route
+(§Wire, "Lane and payload"), keep no transit record, append the hub's chained hop signature naming the `next` node the route
 picks, re-spool by the four steps. Loops die twice over:
 `msgid` seen, and any envelope whose transit chain already names self is
 dropped. Deposit `refused` reasons — `no-route`, `unknown-mesh`,
@@ -1183,7 +1174,7 @@ resolution. The project board's owner is the project's host node, the
 one authority host: membership is decided there, and posts replicate to
 member nodes only, never implicitly across the mesh.
 
-**Existing mail.** Letters already in `base.jsonl` stay letters —
+**Existing mail.** Letters already in the old `base.jsonl` stay letters —
 immutable, opened, their threads intact. Nothing becomes a board by
 migration; boards start empty. `mail export` keeps its thread notes,
 and P-BOARD adds one note per board beside them (`type: board`) with the
@@ -1191,8 +1182,8 @@ same fences, clamps and idempotence (§Export).
 
 **Store.** `state/boards/<id>/` holds the board's membership records in
 order and the epoch keys this node holds (`0600`; shared with the
-board's member nodes by design, never a host key). Posts file in
-`base.jsonl`.
+board's member nodes by design, never a host key). Posts file in their
+box, like any letter.
 
 ## Export
 
@@ -1203,8 +1194,8 @@ one note per thread, so the correspondence is searchable from Mneme (register
 the default stays on this box until that share exists; `--dir` goes wherever
 the caller says, created if it is missing.
 
-**Read-only on the mailbase.** It is a projection of `base.jsonl` through
-`read_base`, and advances no cursor, marks nothing, removes nothing, rings
+**Read-only on the mailbase.** It is a projection of the boxes and
+`receipts.log` through `read_base`, and advances no cursor, marks nothing, removes nothing, rings
 nothing; a first touch of an unmigrated box runs the same one-shot migrations
 every mail command runs (mailbase and cursor shape), which may mint the
 identity key. Only `type=letter` entries export — a `receipt` or any other
@@ -1438,8 +1429,9 @@ paired node that merely misbehaves.
   reader pulls on purpose. The doorbell carries none of it.
 - **Floods** are visible (one audit line per deposit, with origin) and
   bounded only by disk until `down`. A hub amplifies roughly threefold
-  per letter — transit entry, outbox copy, returning ack — and
-  `seen.jsonl` and outbox directories grow unbounded by ruling. The
+  per letter — outbox copy, returning ack — and the boxes, receipts and
+  outbox directories grow unbounded by ruling (receipts rotate at 4 MiB,
+  and each box is a capped log of its own). The
   doorbell latch keeps a flood off the pty; the audit log and the disk
   are where it is felt, and `node allow … message off` is the same-
   minute answer. Quotas are addable at the door later without any
@@ -1464,7 +1456,7 @@ aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
-aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
+aoide mail rm --older-than <Nd|Nh>                       prune the boxes (dedup goes with them)
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
 aoide mail poll [<node>]                                 ask without depositing; no <node> polls every paired node holding message and every charter relay (a poll node: its relay, from the OS scheduler)
 aoide mail serve [--port N]                              the relay's loopback mail adapter: deposit, poll, binding and the stripped card, nothing else (H1)

@@ -1622,7 +1622,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
             // spooled where it was when the write fails.
             aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
                 let at = aoide_storage::time::now_iso_utc();
-                if let Err(e) = aoide_storage::seal::file_transit_hop(&hop, node_name) {
+                if let Err(e) = aoide_storage::seal::file_transit_hop(&hop) {
                     let _ = aoide_protocol::audit::audit(
                         &aoide_protocol::audit::default_audit_log(),
                         aoide_protocol::audit::Door::Cli,
@@ -5171,10 +5171,9 @@ mod tests {
 
         let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
         register_polled_relay(port);
-        // A base this box cannot write: its seen set is a directory, so the
-        // deposit fails for a reason of its own state, not of the container.
-        let seen = aoide_storage::mail::seen_path();
-        std::fs::create_dir_all(&seen).unwrap();
+        // The box this letter files into is a directory, so the append fails
+        // for a reason of its own state, not of the container.
+        std::fs::create_dir_all(aoide_storage::mail::box_path("bob")).unwrap();
 
         let first = poll_node("relay", None).unwrap();
         assert_eq!(first.filed, 0, "nothing is filed while the disk is unsound");
@@ -5189,7 +5188,7 @@ mod tests {
         );
         assert_eq!(aoide_storage::outbox::list_entries("relay").unwrap().len(), 1, "the hub still holds it");
 
-        std::fs::remove_dir_all(&seen).unwrap();
+        std::fs::remove_dir_all(aoide_storage::mail::box_path("bob")).unwrap();
         let second = poll_node("relay", None).unwrap();
         assert_eq!(second.filed, 1, "the next poll offers it again and it files: {second:?}");
         assert!(aoide_storage::mail::show(&msgid).unwrap().is_some());
@@ -5636,9 +5635,6 @@ mod tests {
 
         let outcome = poll_node("relay", None).unwrap();
         assert!(outcome.refused.is_empty(), "nothing refused: {:?}", outcome.refused);
-        let transit = aoide_storage::mail::read_transit_unlocked().unwrap();
-        assert_eq!(transit.len(), 1, "the hop is filed as a transit entry");
-        assert_eq!(transit[0].next, "dave");
         assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "and spooled onward");
         // **The hop is custody taken at THIS box**, so the hub that handed it
         // over is owed the acknowledgement: without it the hub holds the

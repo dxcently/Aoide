@@ -4,7 +4,7 @@ use aoide_storage::mail::{Address, Entry};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_LETTERS: usize = 200;
@@ -186,18 +186,42 @@ impl MailBoard {
     }
 
     pub fn refresh(&mut self) {
-        self.refresh_from(&aoide_storage::mail::base_path());
-    }
-
-    fn refresh_from(&mut self, path: &Path) {
-        match read_snapshot(path) {
-            Ok((letters, truncated)) => {
-                self.letters = letters;
-                self.truncated = truncated;
-                self.error = None;
-            }
+        match aoide_storage::mail::box_paths() {
+            Ok(paths) => self.refresh_from_paths(&paths),
             Err(error) => self.error = Some(error),
         }
+    }
+
+    /// Every named box's newest letters, merged newest-first by `seq` and kept to
+    /// [`MAX_LETTERS`]. One box that cannot be read keeps the previous snapshot.
+    fn refresh_from_paths(&mut self, paths: &[PathBuf]) {
+        let mut letters = Vec::new();
+        let mut truncated = false;
+        for path in paths {
+            match read_snapshot(path) {
+                Ok((found, cut)) => {
+                    letters.extend(found);
+                    truncated |= cut;
+                }
+                Err(error) => {
+                    self.error = Some(error);
+                    return;
+                }
+            }
+        }
+        letters.sort_by(|a, b| b.seq.cmp(&a.seq));
+        if letters.len() > MAX_LETTERS {
+            letters.truncate(MAX_LETTERS);
+            truncated = true;
+        }
+        self.letters = letters;
+        self.truncated = truncated;
+        self.error = None;
+    }
+
+    #[cfg(test)]
+    fn refresh_from(&mut self, path: &Path) {
+        self.refresh_from_paths(&[path.to_path_buf()]);
     }
 }
 
@@ -232,8 +256,8 @@ fn read_snapshot(path: &Path) -> Result<(Vec<MailLetter>, bool), String> {
         .rev()
         .filter(|l| !l.is_empty())
     {
-        let entry: Entry = serde_json::from_slice(line)
-            .map_err(|e| format!("Cannot decode mail snapshot: {e}"))?;
+        // A line that does not parse is skipped, as every mail reader skips one.
+        let Ok(entry) = serde_json::from_slice::<Entry>(line) else { continue };
         if entry.kind != "letter" {
             continue;
         }
@@ -536,10 +560,27 @@ mod tests {
         assert_eq!(board.letters.len(), 200);
         assert_eq!(board.letters[0].seq, 204);
         assert!(board.truncated);
-        std::fs::write(fixture.base(), "invalid\n").unwrap();
+        // A box that cannot be read at all (a directory where the file should be).
+        std::fs::remove_file(fixture.base()).unwrap();
+        std::fs::create_dir(fixture.base()).unwrap();
         board.refresh_from(&fixture.base());
         assert!(board.error.is_some());
         assert_eq!(board.letters.len(), 200);
+    }
+
+    /// The board reads every box, so a letter in any mailbox shows, newest first
+    /// across them, and a line that does not parse is skipped.
+    #[test]
+    fn mailview_merges_box_tails_by_seq_and_skips_bad_lines() {
+        let fixture = Fixture::new();
+        let bob = fixture.0.join("bob.log");
+        let carol = fixture.0.join("carol.log");
+        std::fs::write(&bob, entry(1, "letter") + &entry(5, "letter") + "not json\n").unwrap();
+        std::fs::write(&carol, entry(2, "letter") + &entry(4, "letter")).unwrap();
+        let mut board = MailBoard::default();
+        board.refresh_from_paths(&[bob, carol]);
+        assert_eq!(board.letters.iter().map(|l| l.seq).collect::<Vec<_>>(), [5, 4, 2, 1]);
+        assert!(board.error.is_none());
     }
 
     #[test]

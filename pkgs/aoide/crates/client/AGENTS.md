@@ -952,7 +952,7 @@
   (MAIL.md "Status and the nodelist view"); a `--mesh` that is not a mesh name
   is `invalid-mesh` rather than the `mesh-ambiguous` that a real tie gives.
 - **`mail_export` is READ-ONLY on the mailbase and clamps everything that
-  leaves a fence (register §30).** It reads `base.jsonl` once
+  leaves a fence (register §30).** It reads the boxes and `receipts.log` once
   (`mail::read_base`), groups and renders, and writes notes under
   `--dir`/`state/mail-export/` — no cursor, mark, removal or ring; a first
   touch of an unmigrated box runs the same one-shot migrations every mail

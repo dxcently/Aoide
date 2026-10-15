@@ -11240,8 +11240,8 @@ mod tests {
                 msgid: msgid.into(),
             },
         };
-        let path = aoide_storage::mail::base_path();
-        std::fs::create_dir_all(aoide_storage::mail::mail_dir()).unwrap();
+        let path = aoide_storage::mail::box_path("conductor");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut base = std::fs::read_to_string(&path).unwrap_or_default();
         base.push_str(&serde_json::to_string(&row).unwrap());
         base.push('\n');

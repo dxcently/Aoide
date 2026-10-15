@@ -283,7 +283,7 @@ stripping one, and a held spawn shows as its whole command.
   plain, hub-blind `addr::resolve`. `send::deliver_local`'s success path is the
   one seam in this crate that files a delivered message into
   `aoide_storage::mail` as a receipt (messaging plan P-M1,
-  `state/mail/base.jsonl`) — every route that lands a message into an
+  `state/mail/receipts.log`) — every route that lands a message into an
   ALREADY-REGISTERED session (direct `--id`, `--to` local, `pending approve`'s
   re-drive) is covered by that one call (`mail::file_receipt`). A network door
   never lands one: its send parks in `pending.json`, and a held send is filed

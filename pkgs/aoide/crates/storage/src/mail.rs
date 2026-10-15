@@ -10,10 +10,9 @@
 //! [`file_received_entry`] (never re-minted — the envelope arrives already
 //! signed). **Transit is not filed here**: a sealed container addressed to
 //! another node is a HOP, and [`crate::seal`] answers it as one
-//! (`ContainerOutcome::Hopped`) — the hub writes a `transit` line
-//! ([`file_transit`]) holding the container and its routing metadata, and this
-//! module never opens it, never names a mailbox for it, and never rings a
-//! reader. The zone checks a receiver runs live in [`crate::seal`]'s chain walk.
+//! (`ContainerOutcome::Hopped`) — the hub spools the container toward the next
+//! node and writes no line here, and this module never opens it, never names a
+//! mailbox for it, and never rings a reader. The zone checks a receiver runs live in [`crate::seal`]'s chain walk.
 //! The doorbell's own latch and its targeting queries ([`arms`],
 //! [`ring_targets`], [`stamp_rung`], [`armed_names_for_reader`],
 //! [`enrol_reader`]) live here (P-M5a-1); the ring itself — injecting a byte
@@ -51,25 +50,23 @@
 //! Files under `state_dir()/mail/` (MAIL.md "Store"):
 //!
 //! ```text
-//! base.jsonl      append-only, one Entry per line, immutable once written
-//! cursors.json    { "<name>": { "<reader>": { "seq": n } } }
-//! seen.jsonl      one {"msgid","receivedAt"} per line, append-only
-//! seq             the last sequence number issued, ASCII decimal
+//! boxes/<name>.log   one Entry per line, a letter's box (append-only)
+//! boxes/_legacy.log  letters whose name the grammar refuses
+//! receipts.log       receipts, rotated to receipts.log.1 at ROTATE_AT
+//! cursors.json       { "<name>": { "<reader>": { "seq": n } } }
+//! seq                the last sequence number issued, ASCII decimal
 //! ```
 //!
 //! **Write order, under the lock, no other:** the counter ([`next_seq`]) is
-//! written first → the line is appended and fsynced by
-//! [`feed::append_line`], which cuts a torn tail before it writes → the `seen`
-//! line is appended ([`file_entry`]). A crash after the base fsync and before
-//! the `seen` line leaves a base line whose `msgid` is not in `seen`, and a
-//! re-offer of that `msgid` files it again (at-least-once). The reverse order
-//! would lose mail: a crash would leave `seen` claiming a letter the base never
-//! received, and the re-offer would be refused as a duplicate. Readers
-//! ([`read_entries_unlocked`]) read bytes, drop a final segment with no
+//! written first, then the line is appended and fsynced by
+//! [`feed::append_line`], which cuts a torn tail before it writes. There is no
+//! second file to keep in step: the box line IS the filing, and its `msgid` is
+//! the dedup key (a re-offer finds it in the box and is a duplicate). A crash
+//! after the counter write leaves a gap in `seq`, never a reused number.
+//! Readers ([`read_entries_unlocked`]) read bytes, drop a final segment with no
 //! newline, and skip any line that does not parse; they write nothing.
 //! `crate::ledger`'s `append_ledger_entry`/`read_ledger` pair is this crate's
-//! existing append-only-JSONL precedent; this module adds the counter and
-//! the fsync-before-seen ordering that precedent doesn't need.
+//! existing append-only-JSONL precedent.
 //!
 //! **Every mutation AND every read funnels through [`with_lock`]**, one
 //! process-wide [`crate::fs::try_stage_lock`] acquisition — the SAME
@@ -114,14 +111,13 @@
 
 use crate::display;
 use aoide_protocol::feed;
-use crate::fs::{atomic_write, atomic_write_private, state_dir};
+use crate::fs::{atomic_write_private, state_dir};
 use crate::identity;
 use crate::stage::{load_stage, write_stage};
 use crate::time::{now_iso_utc, parse_iso_utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
-use std::io::Write as _;
 use std::path::PathBuf;
 
 /// The canonical header's `version` field for this phase. Bumps only if the
@@ -226,46 +222,6 @@ pub struct Entry {
     pub envelope: Envelope,
 }
 
-/// One `base.jsonl` line recording a hop this node made for a sealed container
-/// (MAIL.md §Transit): the routing metadata — where it went, in which zone,
-/// whether that node is held, and the container's digest — and NOT the container.
-///
-/// **Nothing here is the letter.** The ciphertext, the routing metadata and the
-/// container's own bytes live in the SPOOL toward `next`, which is what a retry
-/// resends and what `next`'s own poll reads; this line is the hub's record that
-/// the hop happened, so a second copy of `ct` would be the whole letter kept for
-/// a reason nothing reads it for. No mailbox name reaches this disk either: a hub
-/// cannot open the container, so it has no names to write, and `to.name` lives
-/// only inside `ct`.
-///
-/// Written by [`file_transit`], one line per hop, with a local `seq` like every
-/// other entry, so `next_seq` counts it and the append-only/truncate-a-torn-tail
-/// discipline is the same one.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransitEntry {
-    pub seq: u64,
-    pub received_at: String,
-    /// Always [`ENTRY_TYPE_TRANSIT`] — the discriminator the untagged read of
-    /// this file turns on, and the reason a `transit` line and a correspondence
-    /// line can share one store.
-    #[serde(rename = "type")]
-    pub kind: String,
-    /// The hop that deposited it here.
-    pub via: String,
-    /// The container's own immutable-fields digest (`seal`'s dedup digest) — what
-    /// identifies the bytes this hop is carrying WITHOUT holding them. The
-    /// container itself lives in the spool toward `next`, which is what a retry
-    /// and the poll read; a second copy here would be the whole ciphertext kept
-    /// for a reason nothing reads it for.
-    pub digest: String,
-    /// The node this hop hands it to next, and the zone it rides there.
-    pub next: String,
-    pub mesh: String,
-    /// The far end never dials it: `next` polls, or is declared `hold`.
-    pub held: bool,
-}
-
 /// One reader's high-water mark, like an NNTP `.newsrc` line (MAIL.md
 /// "Store").
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -296,16 +252,6 @@ pub type Cursor = BTreeMap<String, Mark>;
 /// one).
 pub type Cursors = BTreeMap<String, Cursor>;
 
-/// One `seen.jsonl` line — dedup memory, outlives `mail rm` pruning by
-/// design (MAIL.md "Store": "keep-all... `mail rm` never touches
-/// `seen.jsonl`").
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SeenEntry {
-    msgid: String,
-    received_at: String,
-}
-
 /// `$AOIDE_STATE_DIR/mail/` (ordinary [`state_dir`] resolution — see that
 /// function's own doc for the `AOIDE_STATE_DIR`-then-`AOIDE_ROOT/state`
 /// precedence every state file shares).
@@ -320,6 +266,34 @@ pub fn cursors_path() -> PathBuf {
 }
 pub fn seen_path() -> PathBuf {
     mail_dir().join("seen.jsonl")
+}
+/// `state/mail/boxes/`: one capped log per mailbox, plus the legacy box.
+pub fn boxes_dir() -> PathBuf {
+    mail_dir().join("boxes")
+}
+/// Every receipt filed on this box, `receipts.log`; its rotated generation is
+/// `receipts.log.1`.
+pub fn receipts_log_path() -> PathBuf {
+    mail_dir().join("receipts.log")
+}
+/// The byte cap past which `receipts.log` rotates to `.1` (MAIL.md "Store").
+pub const ROTATE_AT: u64 = 4 * 1024 * 1024;
+/// The longest box name, the DNS label limit, so a 64-hex board id is never a
+/// box name.
+pub const BOX_NAME_MAX: usize = 63;
+
+/// The counter's value, `None` while no counter has been written yet.
+fn read_counter() -> Result<Option<u64>, String> {
+    let path = seq_path();
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => raw
+            .trim()
+            .parse::<u64>()
+            .map(Some)
+            .map_err(|_| format!("{}: not a sequence number", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
 }
 
 /// The pre-mail `state/inbox.json` path, recomputed directly rather than
@@ -485,6 +459,7 @@ fn seal(header: &Header, text: &str, kp: &identity::Keypair) -> (String, String)
 fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     match crate::fs::try_stage_lock(move || {
         ensure_mail_dir()?;
+        migrate_base_if_needed()?;
         migrate_if_needed()?;
         migrate_cursors_if_needed()?;
         f()
@@ -497,6 +472,85 @@ fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 fn ensure_mail_dir() -> Result<(), String> {
     let dir = mail_dir();
     crate::fs::ensure_write_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))
+}
+
+/// One-shot split of the old single `base.jsonl` into boxes, receipts and the
+/// legacy box (MAIL.md "Store"). It runs first in every locked operation and
+/// does nothing once `base.jsonl` is gone. A first migration keeps every line's
+/// `seq` and every mark, and files each line once: a line already held is
+/// skipped, so a retry after a crash never duplicates. A `base.jsonl` that
+/// appears after the migration (an older binary wrote it) is imported with fresh
+/// numbers, since its letters were accepted and may already be acknowledged,
+/// and archived raw. The archive is never read. Transit lines are not entries,
+/// so they stay in the archive.
+fn migrate_base_if_needed() -> Result<(), String> {
+    let base = base_path();
+    if !base.exists() {
+        return Ok(());
+    }
+    let archive = mail_dir().join("base.jsonl.migrated");
+    let late = archive.exists();
+    let lines = feed::read_lines(&base).map_err(|e| format!("{}: {e}", base.display()))?;
+    let mut filed = Filed::load()?;
+    for line in &lines {
+        let Ok(mut entry) = serde_json::from_slice::<Entry>(line) else { continue };
+        if filed.holds(&entry) {
+            continue;
+        }
+        if late {
+            entry.seq = next_seq()?;
+        }
+        append_entry(&entry)?;
+        filed.add(&entry);
+    }
+    if late {
+        for line in &lines {
+            feed::append_line(&archive, line).map_err(|e| format!("{}: {e}", archive.display()))?;
+        }
+        std::fs::remove_file(&base).map_err(|e| format!("{}: {e}", base.display()))?;
+        return Ok(());
+    }
+    let floor = seq_floor()?.max(read_counter()?.unwrap_or(0));
+    atomic_write_private(&seq_path(), format!("{floor}\n").as_bytes())
+        .map_err(|e| format!("{}: {e}", seq_path().display()))?;
+    std::fs::rename(&base, &archive).map_err(|e| format!("{}: {e}", base.display()))?;
+    for old in [seen_path(), mail_dir().join("receipts.seen")] {
+        if old.exists() {
+            let mut dest = old.clone().into_os_string();
+            dest.push(".migrated");
+            std::fs::rename(&old, PathBuf::from(dest)).map_err(|e| format!("{}: {e}", old.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Every msgid and receipt key already filed, read once per migration so each
+/// line costs a lookup, not a rescan. Kept current with each line it files.
+struct Filed {
+    msgids: HashSet<String>,
+    keys: HashSet<String>,
+}
+
+impl Filed {
+    fn load() -> Result<Self, String> {
+        let mut filed = Filed { msgids: HashSet::new(), keys: HashSet::new() };
+        for entry in read_entries_unlocked()? {
+            filed.add(&entry);
+        }
+        Ok(filed)
+    }
+
+    fn holds(&self, entry: &Entry) -> bool {
+        self.msgids.contains(&entry.envelope.msgid)
+            || (entry.kind == ENTRY_TYPE_RECEIPT && self.keys.contains(&receipt_key(&entry.envelope)))
+    }
+
+    fn add(&mut self, entry: &Entry) {
+        self.msgids.insert(entry.envelope.msgid.clone());
+        if entry.kind == ENTRY_TYPE_RECEIPT {
+            self.keys.insert(receipt_key(&entry.envelope));
+        }
+    }
 }
 
 /// One-shot, idempotent `inbox.json` → typed `receipt` entries, run under
@@ -531,7 +585,7 @@ fn migrate_if_needed() -> Result<(), String> {
 
     let node = display::local_node_name();
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
-    let already_seen = read_seen_msgids_unlocked()?;
+    let already_seen: HashSet<String> = read_entries_unlocked()?.into_iter().map(|e| e.envelope.msgid).collect();
 
     for row in &legacy.entries {
         let header = Header {
@@ -554,8 +608,7 @@ fn migrate_if_needed() -> Result<(), String> {
             via: "self".to_string(),
             envelope,
         };
-        append_base_line(&entry)?;
-        append_seen_line(&msgid, &row.received_at)?;
+        append_entry(&entry)?;
     }
 
     let migrated_path = match old_path.parent() {
@@ -643,128 +696,109 @@ fn migrate_cursors_if_needed() -> Result<(), String> {
     Ok(())
 }
 
-/// Tolerant whole-file read of `base.jsonl` — skips a malformed line
-/// (including a torn tail) rather than erroring, exactly like
-/// [`crate::ledger::read_ledger`]; never truncates (ruling 9, only the
-/// write path does that). **Raw — assumes the caller already holds the
-/// lock**, same contract every other function in this "unlocked" family
-/// shares.
-///
-/// Both line shapes come back: a correspondence [`Entry`] and a [`TransitEntry`]
-/// are disjoint (one has an envelope, the other a container), so one untagged
-/// read covers the store and `next_seq` counts every line — a `transit` line the
-/// seq walk skipped would hand the next writer a number already in use.
-fn read_lines_unlocked() -> Result<Vec<BaseLine>, String> {
-    let path = base_path();
-    let lines = feed::read_lines(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(lines.iter().filter_map(|l| serde_json::from_slice::<BaseLine>(l).ok()).collect())
+/// Every line of one capped log that parses as a correspondence entry, in file
+/// order. A malformed line is skipped, never an error. Raw: assumes the caller
+/// holds the lock when the file can change under it.
+fn read_file_entries(path: &std::path::Path) -> Result<Vec<Entry>, String> {
+    let lines = feed::read_lines(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(lines.iter().filter_map(|l| serde_json::from_slice::<Entry>(l).ok()).collect())
 }
 
-/// One `base.jsonl` line, as the store holds it.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum BaseLine {
-    Entry(Box<Entry>),
-    Transit(Box<TransitEntry>),
+/// `receipts.log` and its one rotated generation, in that order.
+fn receipt_generations() -> [PathBuf; 2] {
+    let current = receipts_log_path();
+    let rotated = PathBuf::from(format!("{}.1", current.display()));
+    [current, rotated]
 }
 
-/// Every CORRESPONDENCE entry — the readers' own view. A relayed container is
-/// hidden from them (MAIL.md §Store: "readers hide them unless asked"): it is
-/// addressed to a mailbox on another machine, so no local reader has anything to
-/// read, and a hub that showed one would be showing a letter it cannot open.
-/// Raw — assumes the caller already holds the lock.
-fn read_entries_unlocked() -> Result<Vec<Entry>, String> {
-    Ok(read_lines_unlocked()?
-        .into_iter()
-        .filter_map(|line| match line {
-            BaseLine::Entry(entry) => Some(*entry),
-            BaseLine::Transit(_) => None,
-        })
-        .collect())
+/// The box name the legacy file holds: every letter whose `to.name` the grammar
+/// refuses. Its name starts with `_`, which the grammar never does.
+const LEGACY_BOX: &str = "_legacy";
+
+/// A box name the grammar accepts: a node name, at most [`BOX_NAME_MAX`] bytes.
+pub fn valid_box_name(name: &str) -> bool {
+    crate::node_store::valid_node_name(name) && name.len() <= BOX_NAME_MAX
 }
 
-/// Every TRANSIT entry this node holds — the hub's own view of what it is
-/// carrying (its routing metadata and the sealed container). Raw — assumes the
-/// caller holds the lock.
-pub fn read_transit_unlocked() -> Result<Vec<TransitEntry>, String> {
-    Ok(read_lines_unlocked()?
-        .into_iter()
-        .filter_map(|line| match line {
-            BaseLine::Transit(entry) => Some(*entry),
-            BaseLine::Entry(_) => None,
-        })
-        .collect())
+/// The legacy box file: letters whose name the grammar refuses.
+pub fn legacy_box_path() -> PathBuf {
+    box_path(LEGACY_BOX)
 }
 
-/// Append one SEALED CONTAINER to `base.jsonl` as a `transit` entry: this node
-/// is relaying it (MAIL.md §Transit). The container goes in verbatim — it is
-/// what a retry resends and what the spool toward `next` holds — beside the
-/// routing metadata a hop needs (`next`, `mesh`, `held`, and the hop that
-/// deposited it).
-///
-/// Deliberately NOT a `seen.jsonl` write: `seen` is the FILING record
-/// (`mail::deposit`'s own dedup memory for correspondence), while a container's
-/// dedup memory is `containers.jsonl`, written by the caller once this line has
-/// landed. So there is no write-order pair here — this one append is the whole
-/// step.
-pub fn file_transit(
-    digest: &str,
-    next: &str,
-    mesh: &str,
-    held: bool,
-    via: &str,
-) -> Result<TransitEntry, String> {
-    let next = next.to_string();
-    let mesh = mesh.to_string();
-    let via = via.to_string();
-    let digest = digest.to_string();
-    with_lock(move || {
-        let seq = next_seq()?;
-        let entry = TransitEntry {
-            seq,
-            received_at: now_iso_utc(),
-            kind: ENTRY_TYPE_TRANSIT.to_string(),
-            via,
-            digest,
-            next,
-            mesh,
-            held,
-        };
-        append_base_line(&entry)?;
-        Ok(entry)
-    })
+/// The file a letter to `to_name` lives in: `boxes/<to_name>.log`, or the
+/// legacy box for a name the grammar refuses.
+pub fn box_path(to_name: &str) -> PathBuf {
+    let stem = if valid_box_name(to_name) { to_name } else { LEGACY_BOX };
+    boxes_dir().join(format!("{stem}.log"))
 }
 
-/// Tolerant whole-file read of `seen.jsonl`'s `msgid` column into a set —
-/// same skip-malformed-lines contract as [`read_entries_unlocked`]. Raw —
-/// assumes the caller already holds the lock. [`migrate_if_needed`] reads
-/// this ONCE before its row loop, not per row, so retrying after a crash
-/// mid-migration stays one lookup per row rather than one file read.
-fn read_seen_msgids_unlocked() -> Result<HashSet<String>, String> {
-    let path = seen_path();
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
+/// Every box file that exists, sorted: `boxes/<name>.log` for a grammar name,
+/// plus the legacy file. Anything else in the directory (an atomic-write temp,
+/// a stray file) is not a box.
+pub fn box_paths() -> Result<Vec<PathBuf>, String> {
+    let dir = boxes_dir();
+    let read = match std::fs::read_dir(&dir) {
+        Ok(read) => read,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
     };
-    Ok(raw.lines().filter_map(|l| serde_json::from_str::<SeenEntry>(l).ok()).map(|s| s.msgid).collect())
+    let mut out = Vec::new();
+    for entry in read {
+        let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+        let name = entry.file_name();
+        let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".log")) else { continue };
+        if stem == LEGACY_BOX || valid_box_name(stem) {
+            out.push(entry.path());
+        }
+    }
+    out.sort();
+    Ok(out)
 }
 
-/// The seq a line carries, whichever shape it has.
-fn line_seq(line: &BaseLine) -> u64 {
-    match line {
-        BaseLine::Entry(entry) => entry.seq,
-        BaseLine::Transit(entry) => entry.seq,
+/// Every correspondence entry on disk, in one global `seq` order: every box,
+/// then both receipt generations. Raw: assumes the caller holds the lock, or
+/// is a lock-free peek that accepts a line being appended beside it.
+fn read_entries_unlocked() -> Result<Vec<Entry>, String> {
+    let mut out = Vec::new();
+    for path in box_paths()? {
+        out.extend(read_file_entries(&path)?);
     }
+    for path in receipt_generations() {
+        out.extend(read_file_entries(&path)?);
+    }
+    out.sort_by_key(|e| e.seq);
+    Ok(out)
+}
+
+/// The highest `seq` any line on disk names, in the boxes, the receipts, and an
+/// unmigrated `base.jsonl`. A line of any shape counts, so an older binary's
+/// line is never reissued. Raw — assumes the caller holds the lock.
+fn tail_seq_unlocked() -> Result<u64, String> {
+    #[derive(Deserialize)]
+    struct SeqOnly {
+        seq: u64,
+    }
+    let mut paths = box_paths()?;
+    paths.extend(receipt_generations());
+    paths.push(base_path());
+    let mut max = 0;
+    for path in paths {
+        for line in feed::read_lines(&path).map_err(|e| format!("{}: {e}", path.display()))? {
+            if let Ok(s) = serde_json::from_slice::<SeqOnly>(&line) {
+                max = max.max(s.seq);
+            }
+        }
+    }
+    Ok(max)
 }
 
 /// The next global sequence number, issued under the lock (P4). The counter
 /// file is the source of truth, and it is never reset by a prune: a line an
-/// older binary appended is counted too (`max` with the base's tail), so no
-/// number is ever issued twice. A missing counter starts from the highest seq
-/// any line or mark names. The new value is written durably before the caller
-/// appends the line it numbers, so a crash leaves a gap and never a reuse.
-/// Raw — assumes the caller already holds the lock.
+/// older binary appended is counted too (`max` with the tail), so no number is
+/// ever issued twice. A missing counter starts from the highest seq any line or
+/// mark names. The new value is written durably before the caller appends the
+/// line it numbers, so a crash leaves a gap and never a reuse. Raw — assumes
+/// the caller already holds the lock.
 fn next_seq() -> Result<u64, String> {
     let path = seq_path();
     let counter = match std::fs::read_to_string(&path) {
@@ -772,51 +806,49 @@ fn next_seq() -> Result<u64, String> {
             .trim()
             .parse::<u64>()
             .map_err(|_| format!("{}: not a sequence number", path.display()))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let tail = read_lines_unlocked()?.iter().map(line_seq).max().unwrap_or(0);
-            let marks = load_cursors()?.values().flat_map(|c| c.values()).map(|m| m.seq.max(m.rung)).max().unwrap_or(0);
-            tail.max(marks)
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => seq_floor()?,
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    let tail = read_lines_unlocked()?.iter().map(line_seq).max().unwrap_or(0);
-    let seq = counter.max(tail) + 1;
+    let seq = counter.max(tail_seq_unlocked()?) + 1;
     ensure_mail_dir()?;
     atomic_write_private(&path, format!("{seq}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(seq)
+}
+
+/// The floor a missing counter starts from: the highest seq of any line, or of
+/// any mark or rung. Raw — assumes the caller holds the lock.
+fn seq_floor() -> Result<u64, String> {
+    let marks = load_cursors()?.values().flat_map(|c| c.values()).map(|m| m.seq.max(m.rung)).max().unwrap_or(0);
+    Ok(tail_seq_unlocked()?.max(marks))
 }
 
 fn seq_path() -> PathBuf {
     mail_dir().join("seq")
 }
 
-/// Append one line to `base.jsonl` through the capped-log primitive, which cuts
-/// any torn tail itself, then fsyncs. Raw — assumes the caller already holds
-/// the lock. One shape for both line kinds (`mail::Entry`,
-/// `mail::TransitEntry`), so the two never drift on how a line is written.
-fn append_base_line<T: Serialize>(entry: &T) -> Result<(), String> {
-    let path = base_path();
-    let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
-    ensure_mail_dir()?;
-    feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+/// The one routing rule for a filed entry: a receipt goes to `receipts.log`,
+/// every other kind to the box its `to.name` names.
+fn route(kind: &str, to_name: &str) -> PathBuf {
+    if kind == ENTRY_TYPE_RECEIPT {
+        receipts_log_path()
+    } else {
+        box_path(to_name)
+    }
 }
 
-/// Append one line to `seen.jsonl` — no `fsync` (only the base write needs
-/// the crash-safety guarantee; the write-order rule only requires this
-/// happen AFTER the base append returns, which every caller already
-/// ensures by calling it second). Raw — assumes the caller holds the lock.
-fn append_seen_line(msgid: &str, received_at: &str) -> Result<(), String> {
-    let path = seen_path();
-    let seen = SeenEntry { msgid: msgid.to_string(), received_at: received_at.to_string() };
-    let line = serde_json::to_string(&seen).map_err(|e| e.to_string())?;
+/// Append one entry to the file its kind and name route it to, through the
+/// capped-log primitive (which cuts a torn tail and fsyncs). A receipt rotates
+/// `receipts.log` first when it has reached [`ROTATE_AT`]. Raw — assumes the
+/// caller holds the lock.
+fn append_entry(entry: &Entry) -> Result<(), String> {
+    let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+    let path = route(&entry.kind, &entry.envelope.header.to.name);
     ensure_mail_dir()?;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    f.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-    f.write_all(b"\n").map_err(|e| e.to_string())
+    crate::fs::ensure_write_dir(&boxes_dir()).map_err(|e| format!("{}: {e}", boxes_dir().display()))?;
+    if entry.kind == ENTRY_TYPE_RECEIPT {
+        feed::rotate_at(&path, ROTATE_AT).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The index a filed receipt is keyed on: the signer, the mesh the receipt is
@@ -827,32 +859,16 @@ fn receipt_key(envelope: &Envelope) -> String {
         .unwrap_or_default()
 }
 
-fn receipts_path() -> PathBuf {
-    mail_dir().join("receipts.seen")
-}
-
-/// Every receipt key already filed, read from the sidecar index: one line per
-/// filed receipt, so the read grows with the letters this box has sent and never
-/// with the base.
+/// Every receipt key already filed, across both generations of `receipts.log`.
+/// The read grows with the letters this box has sent, never with the boxes.
 fn read_receipt_keys_unlocked() -> Result<HashSet<String>, String> {
-    let path = receipts_path();
-    match std::fs::read_to_string(&path) {
-        Ok(raw) => Ok(raw.lines().map(str::to_string).collect()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashSet::new()),
-        Err(e) => Err(format!("{}: {e}", path.display())),
+    let mut keys = HashSet::new();
+    for path in receipt_generations() {
+        for entry in read_file_entries(&path)? {
+            keys.insert(receipt_key(&entry.envelope));
+        }
     }
-}
-
-fn append_receipt_key(key: &str) -> Result<(), String> {
-    let path = receipts_path();
-    ensure_mail_dir()?;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    f.write_all(key.as_bytes()).map_err(|e| e.to_string())?;
-    f.write_all(b"\n").map_err(|e| e.to_string())
+    Ok(keys)
 }
 
 fn load_cursors() -> Result<Cursors, String> {
@@ -904,8 +920,7 @@ fn file_entry(kind: &str, from: Address, to: Address, text: &str, via: &str) -> 
         via: via.to_string(),
         envelope,
     };
-    append_base_line(&entry)?;
-    append_seen_line(&msgid, &entry.received_at)?;
+    append_entry(&entry)?;
     Ok(entry)
 }
 
@@ -925,8 +940,7 @@ fn file_received_entry(envelope: Envelope, via: &str) -> Result<Entry, String> {
         via: via.to_string(),
         envelope,
     };
-    append_base_line(&entry)?;
-    append_seen_line(&entry.envelope.msgid, &entry.received_at)?;
+    append_entry(&entry)?;
     Ok(entry)
 }
 
@@ -1267,50 +1281,42 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         if envelope.header.kind == ENTRY_TYPE_RECEIPT && !is_msgid(&envelope.text) {
             return Ok(DepositOutcome::MalformedAck);
         }
-        let seen = read_seen_msgids_unlocked()?;
         // A receipt files only for a letter this box still holds, addressed to the
         // name that letter went out as. Anything else names no letter this box can
         // retire, so it files nothing, and is answered `duplicate`: nothing is
         // filed and nothing is owed, so the sender retires its copy instead of
-        // parking it. This bounds the base to the letters this box has sent: a
+        // parking it. This bounds the receipts to the letters this box has sent: a
         // flood of distinct msgids is refused before any write.
-        let receipt_key = if envelope.header.kind == ENTRY_TYPE_RECEIPT {
+        if envelope.header.kind == ENTRY_TYPE_RECEIPT {
             if crate::outbox::spooled_letter_sender(&envelope.text)?.as_deref() != Some(envelope.header.to.node.as_str()) {
                 return Ok(DepositOutcome::Duplicate { filed_letter: false });
             }
-            // The second line of defence against an ack loop. A signer acknowledges
-            // a letter once, per mesh: a second receipt from the same signer, in the
-            // same mesh, for the same acked msgid files nothing. It covers the
-            // window between a filing and the sender's own settlement, which runs
-            // after this lock is released. A receipt in another mesh is a different
-            // acknowledgement and is not conflated with this one.
-            let key = receipt_key(&envelope);
-            if read_receipt_keys_unlocked()?.contains(&key) {
+            // A signer acknowledges a letter once, per mesh: a second receipt from the
+            // same signer, in the same mesh, for the same acked msgid files nothing. A
+            // receipt in another mesh is a different acknowledgement and is not conflated.
+            if read_receipt_keys_unlocked()?.contains(&receipt_key(&envelope)) {
                 return Ok(DepositOutcome::Duplicate { filed_letter: false });
             }
-            Some(key)
         } else {
-            None
-        };
-        if seen.contains(&envelope.msgid) {
-            // Re-derive whether the already-filed entry was a letter,
-            // without a second full parse of `base.jsonl` beyond what a
-            // tolerant scan already costs — `read_entries_unlocked` skips
-            // malformed lines the same way `read_seen_msgids_unlocked`
-            // does, so this stays consistent with what's actually on disk.
-            let filed_letter = read_entries_unlocked()?
-                .iter()
-                .any(|e| e.envelope.msgid == envelope.msgid && e.kind == ENTRY_TYPE_LETTER);
-            return Ok(DepositOutcome::Duplicate { filed_letter });
+            // A letter's msgid covers its `to.name`, so the one box it routes to is the
+            // only place a re-offer can already be filed. Its box is the memory.
+            let target = route(&envelope.header.kind, &envelope.header.to.name);
+            if let Some(found) = read_file_entries(&target)?.into_iter().find(|e| e.envelope.msgid == envelope.msgid) {
+                return Ok(DepositOutcome::Duplicate { filed_letter: found.kind == ENTRY_TYPE_LETTER });
+            }
         }
         let kind = envelope.header.kind.clone();
         let msgid = envelope.msgid.clone();
         file_received_entry(envelope, via)?;
-        if let Some(key) = receipt_key {
-            append_receipt_key(&key)?;
-        }
         Ok(DepositOutcome::Filed { msgid, kind })
     })
+}
+
+/// One mailbox's correspondence entries, read under the lock: the file a letter
+/// to `name` lands in, which is the legacy box for a name the grammar refuses.
+pub fn read_box(name: &str) -> Result<Vec<Entry>, String> {
+    let name = name.to_string();
+    with_lock(move || read_file_entries(&box_path(&name)))
 }
 
 /// The whole base, tolerantly parsed, in file order. The one PUBLIC,
@@ -1355,20 +1361,7 @@ pub fn peek_cursors() -> Option<Cursors> {
 /// write would remove. Transit and malformed lines are skipped, as
 /// [`read_entries_unlocked`] skips them. A missing file is empty.
 pub fn peek_base() -> Result<Vec<Entry>, String> {
-    let path = base_path();
-    let bytes = match std::fs::read(&path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    let complete = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
-    Ok(bytes[..complete]
-        .split(|&b| b == b'\n')
-        .filter_map(|line| match serde_json::from_slice::<BaseLine>(line).ok()? {
-            BaseLine::Entry(entry) => Some(*entry),
-            BaseLine::Transit(_) => None,
-        })
-        .collect())
+    read_entries_unlocked()
 }
 
 /// The letters `name` holds that are UNREAD BY `reader_session`, plus that
@@ -1712,21 +1705,34 @@ pub fn with_ring_lock<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 /// `receivedAt` fails to parse is KEPT, not guessed at.
 pub fn rm_older_than(max_age_secs: u64) -> Result<usize, String> {
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
         let cutoff = parse_iso_utc(&now_iso_utc()).unwrap_or(0) - max_age_secs as i64;
-        let (keep, dropped): (Vec<Entry>, Vec<Entry>) = entries.into_iter().partition(|e| {
-            match parse_iso_utc(&e.received_at) {
-                Some(epoch) => epoch >= cutoff,
-                None => true,
+        let mut dropped = 0;
+        let mut paths = box_paths()?;
+        paths.extend(receipt_generations());
+        for path in paths {
+            let lines = feed::read_lines(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let mut body: Vec<u8> = Vec::new();
+            let mut changed = false;
+            for raw in lines {
+                // A line that does not parse is kept as it is: only a letter or a
+                // receipt the age test drops is ever removed.
+                let old = serde_json::from_slice::<Entry>(&raw)
+                    .ok()
+                    .and_then(|e| parse_iso_utc(&e.received_at))
+                    .is_some_and(|epoch| epoch < cutoff);
+                if old {
+                    dropped += 1;
+                    changed = true;
+                    continue;
+                }
+                body.extend_from_slice(&raw);
+                body.push(b'\n');
             }
-        });
-        let mut body = String::new();
-        for e in &keep {
-            body.push_str(&serde_json::to_string(e).map_err(|err| err.to_string())?);
-            body.push('\n');
+            if changed {
+                atomic_write_private(&path, &body).map_err(|e| format!("{}: {e}", path.display()))?;
+            }
         }
-        atomic_write(&base_path(), &body).map_err(|e| e.to_string())?;
-        Ok(dropped.len())
+        Ok(dropped)
     })
 }
 
@@ -1779,18 +1785,15 @@ mod tests {
         let mode = || std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
         let widen = || std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
 
+        std::fs::create_dir_all(boxes_dir()).unwrap();
         widen();
-        append_base_line(&serde_json::json!({ "v": 0 })).unwrap();
-        assert_eq!(mode(), 0o700, "append_base_line left state/ wide");
+        append_entry(&letter_entry("bob", 1, "first")).unwrap();
+        assert_eq!(mode(), 0o700, "append_entry left state/ wide");
 
         widen();
-        std::fs::write(base_path(), "{\"v\":0}\n{\"v\":").unwrap();
-        append_base_line(&serde_json::json!({ "v": 1 })).unwrap();
+        std::fs::write(box_path("bob"), "{\"v\":0}\n{\"v\":").unwrap();
+        append_entry(&letter_entry("bob", 2, "after the tear")).unwrap();
         assert_eq!(mode(), 0o700, "a torn-tail cut left state/ wide");
-
-        widen();
-        append_seen_line("m1", "2026-10-12T00:00:00Z").unwrap();
-        assert_eq!(mode(), 0o700, "append_seen_line left state/ wide");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1816,6 +1819,21 @@ mod tests {
             "migrate_if_needed renamed inside a wide state/"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A signed letter from `alice` to `to`, at `seq`, filed the way a deposit files
+    /// it: [`append_entry`] routes it to its box.
+    fn letter_entry(to: &str, seq: u64, text: &str) -> Entry {
+        let h = header("alice", to, ENTRY_TYPE_LETTER, &now_iso_utc());
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let (sig, msgid) = seal(&h, text, &kp);
+        Entry {
+            seq,
+            received_at: now_iso_utc(),
+            kind: ENTRY_TYPE_LETTER.to_string(),
+            via: "self".to_string(),
+            envelope: Envelope { header: h, text: text.to_string(), sig, msgid },
+        }
     }
 
     fn header(from: &str, to: &str, text_kind: &str, minted_at: &str) -> Header {
@@ -1900,7 +1918,7 @@ mod tests {
 
         // An old mtime, so any write since would move it to now.
         let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
-        let before: Vec<_> = [base_path(), cursors_path()]
+        let before: Vec<_> = [box_path("bob"), cursors_path()]
             .into_iter()
             .map(|p| {
                 std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_modified(old).unwrap();
@@ -1924,10 +1942,10 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("peek-torn");
         file_letter("alice", "bob", "one").unwrap();
-        let line = std::fs::read_to_string(base_path()).unwrap();
+        let line = std::fs::read_to_string(box_path("bob")).unwrap();
         let torn = line.trim_end_matches('\n').to_string();
-        assert!(serde_json::from_str::<BaseLine>(&torn).is_ok(), "the tail parses: only the missing newline makes it torn");
-        std::fs::write(base_path(), format!("{line}{torn}")).unwrap();
+        assert!(serde_json::from_str::<Entry>(&torn).is_ok(), "the tail parses: only the missing newline makes it torn");
+        std::fs::write(box_path("bob"), format!("{line}{torn}")).unwrap();
 
         let entries = peek_base().unwrap();
         assert_eq!(entries.len(), 1, "a tail with no newline is not part of the file yet");
@@ -2169,7 +2187,7 @@ mod tests {
             assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false }, "{i}");
         }
         assert!(read_base().unwrap().is_empty(), "no receipt for an unsent letter is filed");
-        assert!(!receipts_path().exists(), "and nothing is indexed either");
+        assert!(!receipts_log_path().exists(), "and nothing is filed either");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2277,10 +2295,10 @@ mod tests {
 
         // Simulate a crash mid-write: a partial line with NO trailing newline.
         {
-            let mut f = std::fs::OpenOptions::new().append(true).open(base_path()).unwrap();
-            f.write_all(br#"{"seq":99,"receivedAt":"broke"#).unwrap();
+            let mut f = std::fs::OpenOptions::new().append(true).open(box_path("bob")).unwrap();
+            std::io::Write::write_all(&mut f, br#"{"seq":99,"receivedAt":"broke"#).unwrap();
         }
-        let raw_before = std::fs::read_to_string(base_path()).unwrap();
+        let raw_before = std::fs::read_to_string(box_path("bob")).unwrap();
         assert!(!raw_before.ends_with('\n'), "the fixture really did leave a torn tail");
 
         let next = file_letter("alice", "bob", "after the crash").unwrap();
@@ -2295,41 +2313,14 @@ mod tests {
     }
 
     #[test]
-    fn a_seen_line_with_no_base_entry_is_re_acceptable() {
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("base-before-seen");
-
-        // Simulate the exact crash window MAIL.md describes: base written,
-        // seen not yet appended.
-        let h = header("alice", "bob", ENTRY_TYPE_LETTER, &now_iso_utc());
-        let (kp, _) = identity::load_or_mint().unwrap();
-        let (sig, msgid) = seal(&h, "orphaned", &kp);
-        let envelope = Envelope { header: h, text: "orphaned".to_string(), sig, msgid: msgid.clone() };
-        let entry = Entry { seq: 1, received_at: now_iso_utc(), kind: ENTRY_TYPE_LETTER.to_string(), via: "self".to_string(), envelope };
-        std::fs::create_dir_all(mail_dir()).unwrap();
-        append_base_line(&entry).unwrap();
-
-        let seen_raw = std::fs::read_to_string(seen_path()).unwrap_or_default();
-        assert!(!seen_raw.contains(&msgid), "seen.jsonl must not yet know this msgid");
-
-        // The base entry must still read back cleanly — a read never
-        // consults seen.jsonl to decide whether a base line is valid.
-        let all = read_base().unwrap();
-        assert_eq!(all.len(), 1);
-        assert_eq!(all[0].envelope.msgid, msgid);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn a_torn_mid_utf8_tail_wedges_neither_reads_nor_the_next_write() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("torn-utf8");
         let good = file_letter("alice", "bob", "good").unwrap();
         {
             // Half of a three-byte character after the last complete line.
-            let mut f = std::fs::OpenOptions::new().append(true).open(base_path()).unwrap();
-            f.write_all(&[0xE2, 0x82]).unwrap();
+            let mut f = std::fs::OpenOptions::new().append(true).open(box_path("bob")).unwrap();
+            std::io::Write::write_all(&mut f, &[0xE2, 0x82]).unwrap();
         }
         assert_eq!(read_base().unwrap().len(), 1, "a read skips the torn tail instead of erroring");
 
@@ -2350,7 +2341,7 @@ mod tests {
         assert_eq!(read_for("bob", false, None).unwrap().len(), 3, "bob has read all three");
 
         // A prune that drops every line, rewritten the way rm_older_than writes it.
-        atomic_write(&base_path(), "").unwrap();
+        atomic_write_private(&box_path("bob"), b"").unwrap();
 
         let fresh = file_letter("alice", "bob", "four").unwrap();
         assert!(fresh.seq > 3, "the counter survives the prune, got seq {}", fresh.seq);
@@ -2367,15 +2358,172 @@ mod tests {
         file_letter("alice", "bob", "one").unwrap();
 
         // An older binary appends a line this binary's counter never issued.
-        let h = header("alice", "bob", ENTRY_TYPE_LETTER, &now_iso_utc());
-        let (kp, _) = identity::load_or_mint().unwrap();
-        let (sig, msgid) = seal(&h, "from the old writer", &kp);
-        let envelope = Envelope { header: h, text: "from the old writer".to_string(), sig, msgid };
-        let old = Entry { seq: 9, received_at: now_iso_utc(), kind: ENTRY_TYPE_LETTER.to_string(), via: "self".to_string(), envelope };
-        append_base_line(&old).unwrap();
+        let old = letter_entry("bob", 9, "from the old writer");
+        append_entry(&old).unwrap();
 
         let next = file_letter("alice", "bob", "two").unwrap();
         assert_eq!(next.seq, 10, "a number the older writer used is never reissued");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A letter from `alice-host` to `bob`, signed by `alice` the way a far node
+    /// signs what it sends.
+    fn alice_letter(text: &str, alice: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", "bob", ENTRY_TYPE_LETTER, "2026-09-06T00:00:00Z");
+        h.from.node = "alice-host".to_string();
+        let (sig, msgid) = seal(&h, text, alice);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    fn write_base(lines: &[String]) {
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        let body: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        std::fs::write(base_path(), body).unwrap();
+    }
+
+    fn seqs(entries: &[Entry]) -> Vec<u64> {
+        entries.iter().map(|e| e.seq).collect()
+    }
+
+    /// The old single base splits into one file per mailbox, every seq and every
+    /// mark kept, so a reader's place in its own mailbox survives the move.
+    #[test]
+    fn migration_splits_base_keeping_every_seq_and_mark() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-split");
+        write_base(&[
+            serde_json::to_string(&letter_entry("bob", 1, "to bob")).unwrap(),
+            serde_json::to_string(&letter_entry("carol", 2, "to carol")).unwrap(),
+            serde_json::to_string(&letter_entry("bob", 3, "bob again")).unwrap(),
+        ]);
+        std::fs::write(cursors_path(), r#"{"bob":{"bob":{"seq":1}}}"#).unwrap();
+
+        assert_eq!(seqs(&read_base().unwrap()), vec![1, 2, 3]);
+        assert!(!base_path().exists(), "the old base is archived, not left in place");
+        assert!(mail_dir().join("base.jsonl.migrated").exists());
+        assert_eq!(seqs(&read_file_entries(&box_path("bob")).unwrap()), vec![1, 3]);
+        assert_eq!(seqs(&read_file_entries(&box_path("carol")).unwrap()), vec![2]);
+        let (_, unread) = unread_for("bob", None).unwrap();
+        assert_eq!(seqs(&unread), vec![3], "bob's mark at 1 still stands after the split");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Receipts go to `receipts.log`; transit lines are not entries, so they stay
+    /// in the archive and no mailbox ever shows them.
+    #[test]
+    fn migration_routes_receipts_and_leaves_transit_in_the_archive() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-receipts");
+        let receipt_header = header("alice", "bob", ENTRY_TYPE_RECEIPT, "2026-09-06T00:00:00Z");
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let text = format!("{:064x}", 7);
+        let (sig, msgid) = seal(&receipt_header, &text, &kp);
+        let receipt = Entry {
+            seq: 1,
+            received_at: now_iso_utc(),
+            kind: ENTRY_TYPE_RECEIPT.to_string(),
+            via: "self".to_string(),
+            envelope: Envelope { header: receipt_header, text, sig, msgid },
+        };
+        let transit = r#"{"seq":2,"receivedAt":"2026-09-06T00:00:00Z","type":"transit","via":"self","digest":"d","next":"n","mesh":"","held":false}"#;
+        write_base(&[serde_json::to_string(&receipt).unwrap(), transit.to_string()]);
+
+        assert_eq!(seqs(&read_base().unwrap()), vec![1], "the transit line is not an entry");
+        assert_eq!(seqs(&read_file_entries(&receipts_log_path()).unwrap()), vec![1]);
+        assert!(box_paths().unwrap().is_empty(), "a receipt makes no mailbox");
+        let archived = std::fs::read_to_string(mail_dir().join("base.jsonl.migrated")).unwrap();
+        assert!(archived.contains(transit), "the transit line is kept, unread, in the archive");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A migration killed after one line is filed files each line once on retry:
+    /// the line already in its box is skipped, the rest are filed.
+    #[test]
+    fn a_migration_killed_midway_files_each_line_once_on_retry() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-killed");
+        let first = letter_entry("bob", 1, "first");
+        write_base(&[
+            serde_json::to_string(&first).unwrap(),
+            serde_json::to_string(&letter_entry("bob", 2, "second")).unwrap(),
+            serde_json::to_string(&letter_entry("carol", 3, "third")).unwrap(),
+        ]);
+        // The first run filed line one, then died before it archived the base.
+        append_entry(&first).unwrap();
+
+        assert_eq!(seqs(&read_base().unwrap()), vec![1, 2, 3]);
+        assert_eq!(seqs(&read_file_entries(&box_path("bob")).unwrap()), vec![1, 2], "line one is not filed twice");
+        assert_eq!(seqs(&read_file_entries(&box_path("carol")).unwrap()), vec![3]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `base.jsonl` an older binary writes after the migration is imported with
+    /// fresh numbers: its seq 1 collides with nothing, and a line this box already
+    /// holds is skipped. The raw bytes are archived, never read again.
+    #[test]
+    fn a_late_base_from_an_older_binary_is_imported_renumbered() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-late");
+        let filed = letter_entry("bob", 1, "already here");
+        write_base(&[serde_json::to_string(&filed).unwrap()]);
+        assert_eq!(seqs(&read_base().unwrap()), vec![1]);
+
+        let late = letter_entry("bob", 1, "from the old binary");
+        write_base(&[serde_json::to_string(&filed).unwrap(), serde_json::to_string(&late).unwrap()]);
+        let got = read_base().unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1].envelope.text, "from the old binary");
+        assert!(got[1].seq > 1, "the late letter takes a fresh number, got {}", got[1].seq);
+        assert!(!base_path().exists(), "the late base is removed once imported");
+        let archived = std::fs::read_to_string(mail_dir().join("base.jsonl.migrated")).unwrap();
+        assert!(archived.contains("from the old binary"), "the raw bytes are archived");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The box is the dedup memory: a second deposit of one letter is a duplicate
+    /// that says the first filing was a letter, and no `seen.jsonl` is ever made.
+    #[test]
+    fn a_redeposit_is_duplicate_with_no_seen_file() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("redeposit");
+        let alice = alice_on_record();
+        let letter = alice_letter("hello", &alice);
+
+        assert!(matches!(deposit(letter.clone(), "alice-host").unwrap(), DepositOutcome::Filed { .. }));
+        assert_eq!(
+            deposit(letter, "alice-host").unwrap(),
+            DepositOutcome::Duplicate { filed_letter: true }
+        );
+        assert_eq!(seqs(&read_file_entries(&box_path("bob")).unwrap()), vec![1]);
+        assert!(!seen_path().exists(), "no seen file is written");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A crash after the box's fsync leaves the letter filed and no ack sent. The
+    /// re-offer finds it in its box and answers duplicate, which re-acks it.
+    #[test]
+    fn a_crash_after_the_box_fsync_answers_duplicate_and_reacks() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("crash-after-fsync");
+        let alice = alice_on_record();
+        let letter = alice_letter("hello again", &alice);
+        let entry = Entry {
+            seq: 1,
+            received_at: now_iso_utc(),
+            kind: ENTRY_TYPE_LETTER.to_string(),
+            via: "alice-host".to_string(),
+            envelope: letter.clone(),
+        };
+        append_entry(&entry).unwrap();
+
+        assert_eq!(deposit(letter, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: true });
+        assert_eq!(seqs(&read_base().unwrap()), vec![1], "the duplicate files nothing new");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2754,19 +2902,6 @@ mod tests {
             envelope: Envelope { header: row1_header, text: "first".to_string(), sig, msgid: row1_msgid.clone() },
         };
         std::fs::write(base_path(), format!("{}\n", serde_json::to_string(&row1_entry).unwrap())).unwrap();
-        std::fs::write(
-            seen_path(),
-            format!(
-                "{}\n",
-                serde_json::to_string(&SeenEntry {
-                    msgid: row1_msgid.clone(),
-                    received_at: "2026-08-21T00:00:00Z".to_string()
-                })
-                .unwrap()
-            ),
-        )
-        .unwrap();
-
         // Retry: inbox.json is still present, exactly as after a crash.
         let all = read_base().unwrap();
         assert_eq!(all.len(), 2, "row 1 must not be duplicated, row 2 must be filed");
@@ -2807,34 +2942,6 @@ mod tests {
 
         let all = read_base().unwrap();
         assert_eq!(all.len(), 1, "the lock must serialize the two opens, never migrate twice");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_seen_set_survives_rm() {
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("seen-survives-rm");
-
-        let e1 = file_letter("alice", "bob", "old").unwrap();
-        // Backdate it so `rm --older-than` actually prunes it.
-        {
-            let mut all = read_entries_unlocked().unwrap();
-            all[0].received_at = "2000-01-01T00:00:00Z".to_string();
-            let mut body = String::new();
-            for e in &all {
-                body.push_str(&serde_json::to_string(e).unwrap());
-                body.push('\n');
-            }
-            std::fs::write(base_path(), body).unwrap();
-        }
-
-        let removed = rm_older_than(60).unwrap();
-        assert_eq!(removed, 1);
-        assert!(read_base().unwrap().is_empty());
-
-        let seen_raw = std::fs::read_to_string(seen_path()).unwrap();
-        assert!(seen_raw.contains(&e1.envelope.msgid), "seen.jsonl must still remember the pruned msgid");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3172,8 +3279,7 @@ mod tests {
             );
         }
 
-        assert!(!base_path().exists(), "a refused name must never write base.jsonl");
-        assert!(!seen_path().exists(), "a refused name must never write seen.jsonl");
+        assert!(!boxes_dir().exists(), "a refused name must never create a box");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3195,8 +3301,8 @@ mod tests {
             envelope,
         };
         std::fs::create_dir_all(mail_dir()).unwrap();
-        append_base_line(&entry).unwrap();
-        append_seen_line(&msgid, &entry.received_at).unwrap();
+        append_entry(&entry).unwrap();
+        assert!(legacy_box_path().exists(), "a grammar-refused name is filed in the legacy box");
 
         let got = read_for("Old_Name", false, None).unwrap();
         assert_eq!(got.len(), 1, "a pre-existing off-grammar name stays filed and readable forever");

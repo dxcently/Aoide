@@ -128,10 +128,10 @@
   called by the caller once `mail::deposit` has returned `Filed` or
   `Duplicate`, never from inside `seal::deposit_container`. Whether a duplicate
   was originally a letter — and so whether a lost receipt is owed — is read
-  back out of `base.jsonl` through `mail::filed_kind`/`mail::show`, never
+  back out of the boxes through `mail::filed_kind`/`mail::show`, never
   remembered by the gate. Both halves of that ordering are load-bearing: record
   any earlier and a refusal past the gate answers `duplicate` forever instead
-  of re-running, and a crash between the gate and `base.jsonl` claims a filing
+  of re-running, and a crash between the gate and the box append claims a filing
   that never happened.
 - **Housekeeping never decides a refusal word.** `seal::sweep_retired_keys`
   runs only on the current key's own successful open — never before an

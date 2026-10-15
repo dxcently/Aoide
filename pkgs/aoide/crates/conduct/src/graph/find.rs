@@ -2856,7 +2856,7 @@ mod tests {
         mail::file_letter("builder", "reviewer", "one").unwrap();
         mail::file_letter("builder", "reviewer", "two").unwrap();
 
-        let watched = [sessions_path(), mail::base_path(), mail::cursors_path(), nodes_path(), node_cache_path("yomi-strix")];
+        let watched = [sessions_path(), mail::box_path("reviewer"), mail::cursors_path(), nodes_path(), node_cache_path("yomi-strix")];
         let before: Vec<(Vec<u8>, std::time::SystemTime)> = watched
             .iter()
             .map(|p| (std::fs::read(p).unwrap(), std::fs::metadata(p).unwrap().modified().unwrap()))

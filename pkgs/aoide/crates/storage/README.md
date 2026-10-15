@@ -722,22 +722,24 @@ by decision — no embedded database yet
   order this module's own tier-5 `node/<rest>` grammar went through).
 - `mail` — the addressed, signed, append-only mailbase (messaging plan P-M1,
   `docs/architecture/MAIL.md`, CONTRACTS.md §4's `state/mail/` subsection):
-  `base.jsonl`/`cursors.json`/`seen.jsonl`/`seq` under `state/mail/`, one entry
-  per envelope (header, text, ed25519 `sig`, sha256 `msgid` over the signed
-  bytes — MAIL.md's "The envelope" is the formula). Every write funnels through
-  one `with_lock` choke point — under `fs::try_stage_lock`, migrate a legacy
-  `inbox.json` if not yet done (skipping any row whose `msgid` is already in
-  `seen.jsonl`, so a retry after a crash mid-migration never re-files one),
-  issue the next `seq` from the `seq` counter (written durably first), append
-  through `aoide_protocol::feed::append_line` (which cuts a torn tail and
-  fsyncs), then append `seen.jsonl`. A crash between the last two leaves a base
-  line whose `msgid` is unseen, and a re-offer files it again: at-least-once,
-  never lost. Reads go through `feed::read_lines`, which works on bytes, so a
+  `boxes/<name>.log` (one capped log per mailbox, `boxes/_legacy.log` for
+  grammar-refused names), `receipts.log` (+ `.1`, rotated at 4 MiB),
+  `cursors.json` and `seq` under `state/mail/`, one entry per envelope (header,
+  text, ed25519 `sig`, sha256 `msgid` over the signed bytes — MAIL.md's "The
+  envelope" is the formula). Every write funnels through one `with_lock` choke
+  point — under `fs::try_stage_lock`, migrate `base.jsonl` into the boxes and a
+  legacy `inbox.json` if not yet done (`migrate_base_if_needed` first; a
+  migrated line whose `msgid` or receipt key is already filed is skipped, so a
+  retry never re-files one), issue the next `seq` from the `seq` counter
+  (written durably first), then append through
+  `aoide_protocol::feed::append_line` (which cuts a torn tail and fsyncs).
+  The box line IS the filing: its `msgid` is the dedup key, and there is no
+  second index. Reads go through `feed::read_lines`, which works on bytes, so a
   torn multi-byte tail cannot wedge them.
   `mail::file_receipt` is the shared seam `conduct`'s `deliver_local` files a
   delivered message through; `mail::file_letter` is `mail send`'s own engine.
-  Keep-all: `mail rm --older-than` is the only pruning, and it never touches
-  `seen.jsonl`.
+  Keep-all: `mail rm --older-than` is the only pruning, and it takes the dedup
+  memory with the line (a pruned letter re-offered is filed again).
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
@@ -755,28 +757,20 @@ by decision — no embedded database yet
   verified node's key (a paired node signing as another paired node's
   name must not verify); `deposit` is the receiving side's whole admitted
   policy in one function — recompute `msgid`, verify the origin
-  signature, dedup against `seen.jsonl` (a filed `letter`'s duplicate
+  signature, dedup against the box (a filed `letter`'s duplicate
   reports whether it was ever filed, so the caller knows to re-spool the
   ack), then file via the new `file_received_entry`. A receipt is filed
   only against a letter still spooled here under its own name
   (`outbox::spooled_letter_sender`), and a repeat of one already filed is
-  caught by `receipts.seen`, keyed on (signer, mesh, acked msgid). Both mint functions
-  and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
+  caught by `receipts.log`, keyed on (signer, mesh, acked msgid). Both mint
+  functions and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
   exactly P-M1's shape, addressed at a real node instead of `self`.
 
-  The store holds a second kind of line too, and a hop is what writes it:
-  `mail::TransitEntry` (`ENTRY_TYPE_TRANSIT`) is a hop this node made for a
-  sealed container — the routing metadata and the container's digest, never an
-  envelope, never a mailbox name, never a byte of the letter and never the
-  ciphertext (the container waits in the spool toward `next`, which is what a
-  retry resends) — and
-  `seal::file_transit_hop` is
-  what files it and spools the container toward the next hop. Readers hide
-  transit lines (`read_entries_unlocked`), `next_seq` counts them, and the
-  hub's own spool entry retires when that hop HAS the letter
-  (`outbox::retire_acknowledged` when a poller names the msgid in `filed`, the
-  deposit's own acceptance on a drain) — never on the destination's receipt,
-  which a hub never sees.
+  A hop writes no store line. `seal::file_transit_hop` records the hop in the
+  audit log and spools the container toward the next hop; the hub's own spool
+  entry retires when that hop HAS the letter (`outbox::retire_acknowledged`
+  when a poller names the msgid in `filed`, the deposit's own acceptance on a
+  drain) — never on the destination's receipt, which a hub never sees.
 
   P-M5a-1 adds the doorbell's own state and its safety floor: `arms(kind)`
   is the one place that decides which entry kinds ring (`letter` only,

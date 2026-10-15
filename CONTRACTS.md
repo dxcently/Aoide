@@ -4794,10 +4794,11 @@ then-`AOIDE_ROOT/state` resolution): the `aoided` timer, the `aoide a2a
 serve` door unit, and the CLI all resolve the same directory.
 
 ```
-base.jsonl      append-only, one entry per line, immutable once written
+boxes/<name>.log   append-only, one entry per line: a letter's box
+boxes/_legacy.log  letters whose name the grammar refuses
+receipts.log       receipts, rotated to receipts.log.1 at 4 MiB
 cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
-seen.jsonl      one {"msgid","receivedAt"} per line, append-only dedup
-                memory that outlives pruning
+seq             the last sequence number issued (written before its line)
 .ring.lock      the doorbell's own lock file (P-M5a-2) — `flock`ed for
                 the whole select-inject-stamp ring, never the mailbase
                 writers' `.stage.lock` (a DIFFERENT file, in `stage_dir()`,
@@ -4871,30 +4872,25 @@ third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a link;
 it is the next number of the `state/mail/seq` counter, issued under the lock
-and never reset by a prune. `type=letter` is `mail send`'s
-own filing; `type=transit` is a HOP this node made for a sealed container
-(`mail::file_transit`, MAIL.md §Transit): one line holding the routing metadata
-— the depositing hop, the `next` node, the mesh it rides there, whether that
-node is held for, and the container's own digest — and NOT the container: the
-ciphertext waits in `state/outbox/<next>/`, which is what a retry resends and
-what that node's own poll reads, so a copy here would be the whole letter kept
-for a reason nothing reads it for. Readers hide `transit` lines
-(`mail::read_entries_unlocked`); `mail::read_transit_unlocked` is the hub's own
-view. `type=receipt` carries what a delivered message lands with (from, target,
-text, receivedAt) inside the envelope shape, signed by the box identity
-(`identity::load_or_mint` — a box that has never paired mints its key on its
-first letter) — `aoide_conduct::graph::send::deliver_local`'s success path files
-receipts through `mail::file_receipt`, the ONE seam covering every route a
-delivered message takes to land in a local session — `do_inject` files no entry
+and never reset by a prune. `type=letter` is `mail send`'s own filing, into the
+box its `to.name` names. There is no `type=transit` entry: a hop this node
+made for a sealed container is recorded in the audit log, and the ciphertext
+waits in `state/outbox/<next>/`, which is what a retry resends and what that
+node's own poll reads. `type=receipt` carries what a delivered message lands
+with (from, target, text, receivedAt) inside the envelope shape, signed by the
+box identity (`identity::load_or_mint` — a box that has never paired mints its
+key on its first letter) — `aoide_conduct::graph::send::deliver_local`'s success
+path files receipts through `mail::file_receipt`, the ONE seam covering every
+route a delivered message takes to land in a local session — `do_inject` files no entry
 of its own, see its doc comment. A held A2A inject or opening turn files nothing
 until a human approves it through `session pending approve`, which re-drives it
 through `session_send`. An OUTBOUND `--to node/<x>` send (P-M2) files nothing
-into THIS box's own `base.jsonl` at send time — it mints a signed envelope and
+into THIS box's own boxes at send time — it mints a signed envelope and
 spools it into `state/outbox/` instead (below), delivered over
 `aoide/mailDeposit` by a best-effort drain right after the write, the daemon's
 own periodic sweep, or a door's post-heard drain of that node. The letter lands
-in a `base.jsonl` only on the FAR box, once ITS OWN `mail_deposit` files it;
-this box's own base gains an entry only when that far box's ack (a `receipt`) is
+in a box only on the FAR box, once ITS OWN `mail_deposit` files it;
+this box's own receipts gain an entry only when that far box's ack (a `receipt`) is
 deposited back here in turn.
 
 Every mutation of the mailbase runs under the stage lock and refuses when
@@ -4902,11 +4898,10 @@ the lock is not held: `try_stage_lock` (`storage/src/fs.rs`) blocks for
 the same `LOCK_EX` `with_stage_lock` already uses, and returns `Err` only
 when the lock file itself cannot be opened or created — a writer waits
 behind another, never runs unlocked. Write order is what makes a crash
-safe: under the lock, write the new `seq`, append the entry to `base.jsonl`
-and fsync (a torn tail is cut first), THEN append to `seen.jsonl`. A base
-line whose `msgid` is absent from `seen` is a crash between those two writes,
-and a re-offer of that `msgid` files it again — at-least-once; the reverse
-order would lose mail.
+safe: under the lock, write the new `seq`, then append the entry to its box
+or `receipts.log` and fsync (a torn tail is cut first). A crash between the
+two leaves a gap in `seq`, never a reused number, and the dedup key is the
+line itself, so a re-offer of a `msgid` that never landed files it.
 
 Read/resolved by `aoide mail`/`mail send`/`mail read`/`mail show`/`mail
 mark`/`mail rm` (the outbox's own `mail outbox`/`mail outbox rm` are a
@@ -4946,8 +4941,9 @@ live agent's mark, and two readers of the same name never consume each
 other's mail. `mail show <msgid>` prints one entry without touching any
 cursor; `mail mark --for <name>` advances the caller's mark the same way,
 without printing; `mail rm --older-than <Nd|Nh>` is the only pruning, and
-it never touches `seen.jsonl` — a pruned letter re-offered later is still
-recognised as a duplicate. Keep-all otherwise: no cap, no fold.
+dedup memory goes with the line, so a pruned letter re-offered later is filed
+again, unread (forgetting re-delivers; it never loses). Keep-all otherwise: no
+cap, no fold.
 
 On first open by any command (read or write), a legacy `inbox.json`
 migrates field-by-field into typed `receipt` entries under the same lock
@@ -5050,7 +5046,7 @@ inbound transport to fetch from) — reachability is never identity, and
 
 The envelope is stored VERBATIM — a retry resends the exact signed bytes,
 never re-mints (a re-mint would also mint a fresh, different `msgid`,
-defeating the far end's dedup in `state/mail/seen.jsonl`). `refused` is
+defeating the far end's dedup in its boxes). `refused` is
 set ONLY when a deposit attempt comes back a JSON-RPC REFUSAL (a transport
 failure backs the LINK off AND records the attempt on the entry it hit —
 `tries`/`lastTryAt`/`lastOutcome` — so an entry behind a dead link is
@@ -5833,9 +5829,10 @@ file, so a node re-added under the same name inherits nothing.
 The sealed container's own dedup gate, append-only, one JSON object per
 admitted **and filed** container: `originKey`, `toNode`, `msgid`, `digest`.
 
-Separate from `state/mail/seen.jsonl` because it answers a different
-question at a different time. `seen.jsonl` is consulted *after* an envelope
-is opened and has no way to decide anything before that; this gate runs
+Separate from the box dedup (the `msgid` already filed in a box) because it
+answers a different question at a different time. The box dedup is consulted
+*after* an envelope is opened and has no way to decide anything before that;
+this gate runs
 before the open, which is what makes "a previously admitted duplicate
 returns `duplicate`" cost no decryption and no recipient key at all.
 
@@ -8957,7 +8954,7 @@ rung, nothing filed as correspondence, and NO ack, because the letter is not
 here.
 
 A container that passes all of it is handed to the SAME
-`aoide_storage::mail::deposit` an envelope is, so filing, `seen.jsonl` and
+`aoide_storage::mail::deposit` an envelope is, so filing, the box dedup and
 the pending-receipt rule have one implementation. `aoide/mailPoll`'s answer
 becomes two lists, `containers` and `envelopes`: a sealed entry hands over
 its container and NO plaintext, and only an entry spooled before the
@@ -9237,7 +9234,7 @@ recompute `msgid` from `(header, text, sig)`; verify the ORIGIN
 signature — the two-lookup identity model, hop via the already-
 KEY-RESOLVED caller, origin via the one key on record for
 `header.from.node`; refuse an envelope whose `type` this lane cannot
-file (`charter` — P-CHARTER); dedup against `state/mail/seen.jsonl`;
+file (`charter` — P-CHARTER); dedup against the boxes;
 file. A mismatched `msgid`, an unverified origin, or a kind that is
 applied rather than filed answers a REFUSED RESULT,
 never a JSON-RPC error: MAIL.md §Wire's admission/outcome split makes
@@ -9256,7 +9253,7 @@ successful deposit answers:
 ```
 
 `"duplicate"` replaces `"accepted"` when `msgid` was already in
-`seen.jsonl` — the far end's earlier attempt evidently landed even if ITS
+the box — the far end's earlier attempt evidently landed even if ITS
 own ack never arrived, so a duplicate whose original filing was a
 **letter** re-sends the ack (never a duplicate **receipt** — that would
 ack an ack, and the `letter`/`receipt` vocabulary has no third shape to
@@ -9388,7 +9385,7 @@ next drain carries it back) or through `aoide mail outbox rm <msgid>`. The
 receiving side is the SAME receive path a pushed deposit takes —
 `aoide_client::mail_wire::poll_node` runs `mail::deposit`'s whole chain
 (recompute `msgid`, verify the ORIGIN against `header.from.node`'s own key,
-dedup against `seen.jsonl`, file) with the hop set to the node it polled, then
+dedup against the boxes, file) with the hop set to the node it polled, then
 the shared outcome dispatch (`settle_deposit`, the one implementation the door
 reaches through `aoide_conduct::mail_bridge`) — so the poller's `msgid` dedup,
 not any bookmark here, is what makes a re-poll harmless.

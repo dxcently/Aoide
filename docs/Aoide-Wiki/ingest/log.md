@@ -4866,3 +4866,24 @@ pkgs/aoide/crates/storage/src/mail.rs, pkgs/aoide/crates/client/src/mail_wire.rs
 pkgs/aoide/crates/client/src/commands.rs, docs/architecture/MAIL.md,
 CONTRACTS.md, pkgs/aoide/crates/client/AGENTS.md,
 pkgs/aoide/crates/client/README.md
+
+## [2026-10-15] change | the store is one capped log per box, with no seen file
+
+Letters file into `boxes/<name>.log`, a grammar-refused name into
+`boxes/_legacy.log`, and receipts into `receipts.log` (rotated at 4 MiB). The
+box line is the filing and its msgid is the dedup key, so `seen.jsonl` is gone
+and a pruned letter re-offered later is filed again. The old `base.jsonl`
+migrates on first open under the stage lock, and its transit lines stay in the
+archive. A hop writes no store line; it is recorded in the audit log. The
+mailview and the session watch read the boxes directly.
+
+Pages touched: pkgs/aoide/crates/storage/src/mail.rs,
+pkgs/aoide/crates/storage/src/seal.rs, pkgs/aoide/crates/storage/README.md,
+pkgs/aoide/crates/storage/AGENTS.md, pkgs/aoide/crates/client/src/mail_wire.rs,
+pkgs/aoide/crates/client/src/commands.rs, pkgs/aoide/crates/client/AGENTS.md,
+pkgs/aoide/crates/server/src/a2a.rs, pkgs/aoide/crates/server/README.md,
+pkgs/aoide/crates/conductor/src/mailview.rs,
+pkgs/aoide/crates/conduct/src/graph/view.rs,
+pkgs/aoide/crates/conduct/src/graph/find.rs,
+pkgs/aoide/crates/conduct/README.md, pkgs/aoide/crates/cli/tests/mesh_transit.rs,
+docs/architecture/MAIL.md, CONTRACTS.md, docs/Aoide-Wiki/ingest/log.md
