@@ -149,6 +149,7 @@ pub(crate) use self::pingback::pingback_path;
 // `workspaceProject` birth default are written through, called by all three
 // compositor stamp sites (`window.rs`) so a future adapter calls it too rather
 // than writing the field itself.
+pub(crate) use self::model::harness_pid;
 pub use self::model::{
     anchor_for, effective_project_for, lead_over, leads_project, observe_workspace, project_for,
     canonical_state, merged_sessions, HookDeath, HookRecord, HooksFile, Project, ProjectsFile,

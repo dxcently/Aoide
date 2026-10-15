@@ -1082,7 +1082,7 @@ in the message.
   no `sessions.json` state, no ledger exit, subagent cascade, tunnel close or
   check-lane baseline forget). The outcome begins `refused:` and carries
   `reason: harness-anchored`. `session_phase` sends a `done` phase to
-  `do_session_end`, so the phase door is no way round the caller test. The reaper's own staleness bands still apply to the record. A
+  `do_session_end`, so the phase door is no way round the caller test. The reaper spares the record while the harness lives (`reap::harness_alive`): the window signal, the orphan arm and the staleness bands skip it, and only the pid signal of the record's own pid still judges it. A
   session that has ended (`state` `done`: its own `SessionEnd`, `/clear` and
   resume included), a dead harness, or a hook that runs under the harness
   releases the anchor, which is what lets `claude --resume` in another terminal

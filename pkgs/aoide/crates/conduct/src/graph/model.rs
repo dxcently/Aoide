@@ -234,7 +234,7 @@ pub fn merged_sessions(sessions: &[SessionRecord], hooks: &[HookRecord]) -> Vec<
 /// stamps none. The hook source reads a death off it, and the wrap that hosted
 /// the harness asks the same question about its own child, so both probe one
 /// process.
-pub(in crate::graph) fn harness_pid(rec: &SessionRecord) -> Option<u32> {
+pub(crate) fn harness_pid(rec: &SessionRecord) -> Option<u32> {
     rec.hook_ancestry
         .first()
         .and_then(|pid| u32::try_from(*pid).ok())

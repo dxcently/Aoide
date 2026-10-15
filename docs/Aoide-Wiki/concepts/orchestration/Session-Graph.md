@@ -533,6 +533,8 @@ a session **dead** when *any* of three independent signals fires:
 
 - **window gone** — the record has a non-empty `windowAddress` that is no
   longer among the live addresses the compositor's client list (`j/clients`) reports.
+  Not judged while the record's live harness (the first pid of its hook chain)
+  anchors it; see the veto below.
 - **pid gone** — the record has a `pid` whose `/proc/<pid>` no longer exists.
 - **stale abandonment** — every evidence stream (`last_seen`: the max of
   transcript mtime, hook `updatedAt`, and `startedAt`) has gone silent past a
@@ -544,7 +546,11 @@ a session **dead** when *any* of three independent signals fires:
   outlives it — window and pid stay live forever, so only across-the-board
   silence catches it. A live pid that is NOT its window's owning pid (per a
   window-owner map built alongside the live-address set) is read as the
-  agent's own process and vetoes the staleness signal outright.
+  agent's own process and vetoes the staleness signal outright. A live harness
+  of the hook chain (its first pid) vetoes the window signal, the staleness
+  bands and the orphan arm; the pid signal still judges the record's own pid.
+  The chain stores no start time, so a recycled pid holds the record until it
+  exits.
 
 The never-false-reap guard: if Hyprland can't be queried at all (no
 `HYPRLAND_INSTANCE_SIGNATURE`, `hyprctl` missing/failed), the window signal is

@@ -67,7 +67,7 @@
 use aoide_protocol::Invocation;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use crate::graph::{
-    canonical_state, codex_home, drop_remote_child_rows, drop_sessions, hooks_path, hyprctl_clients,
+    canonical_state, codex_home, drop_remote_child_rows, drop_sessions, harness_pid, hooks_path, hyprctl_clients,
     ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
     prune_done_sparing, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
     stage_error, superseded_by, DroppedEidolon,
@@ -205,6 +205,13 @@ pub fn is_session_dead(
     now_epoch: i64,
     last_seen: impl Fn(&SessionRecord) -> Option<i64>,
 ) -> bool {
+    let pid_signal = matches!(rec.pid, Some(p) if !proc_exists(p));
+    // A live harness anchors its record: it is positive proof of life, so the
+    // window signal, the orphan arm and the staleness bands never judge it
+    // (see `harness_alive`). A dead pid of the record's own still counts.
+    if harness_alive(rec, window_owners, &proc_exists) {
+        return pid_signal;
+    }
     let window_signal = match live_addresses {
         Some(live) => {
             !rec.window_address.is_empty()
@@ -212,7 +219,6 @@ pub fn is_session_dead(
         }
         None => false, // compositor not queried — window liveness is unknown.
     };
-    let pid_signal = matches!(rec.pid, Some(p) if !proc_exists(p));
     let state = canonical_state(&rec.state);
     let at_rest = matches!(state, "idle" | "stopped");
     let mid_turn = matches!(state, "working" | "awaiting");
@@ -227,12 +233,7 @@ pub fn is_session_dead(
     // the window's owner is the TERMINAL's, which outlives the agent, so it
     // cannot veto. No owner map (compositor unqueried) reads a live pid
     // conservatively as the agent's own.
-    let live_agent_pid = rec.pid.is_some_and(|p| {
-        proc_exists(p)
-            && !window_owners
-                .and_then(|m| m.get(&normalize_addr(&rec.window_address)).copied())
-                .is_some_and(|owner| owner == p)
-    });
+    let live_agent_pid = rec.pid.is_some_and(|p| agent_alive(rec, window_owners, &proc_exists, p));
     // WHO staleness may judge: a headless record (no window AND no pid — the
     // classic hook-only shape) or an AGENT record (the hardened arm — see the
     // doc above for why shells are excluded).
@@ -252,6 +253,37 @@ pub fn is_session_dead(
         && ((at_rest && stale_beyond(REAP_IDLE_STALE_SECS))
             || (mid_turn && stale_beyond(working_band)));
     window_signal || pid_signal || stale_abandoned
+}
+
+/// Is `pid` alive as the agent's own process, not as the terminal that owns the
+/// record's window (a terminal outlives its agent, so its pid never vouches)?
+/// No owner map reads a live pid as the agent's own.
+fn agent_alive(
+    rec: &SessionRecord,
+    window_owners: Option<&HashMap<String, u32>>,
+    proc_exists: &impl Fn(u32) -> bool,
+    pid: u32,
+) -> bool {
+    proc_exists(pid)
+        && !window_owners
+            .and_then(|m| m.get(&normalize_addr(&rec.window_address)).copied())
+            .is_some_and(|owner| owner == pid)
+}
+
+/// Is `rec`'s harness alive as an agent process? Only a stored hook chain
+/// names one: its first pid, the harness [`harness_pid`] reads. A record with
+/// no chain falls back to its own pid there, and that pid is the agent's own
+/// process, which the window signal has always judged (a window closed under
+/// a live pid is dead, SUPER+Q), so it is not spared here. Liveness alone
+/// decides it: a chain stores no start time, so a pid recycled by an unrelated
+/// live process holds the record until that process exits, the fail-safe side.
+fn harness_alive(
+    rec: &SessionRecord,
+    window_owners: Option<&HashMap<String, u32>>,
+    proc_exists: &impl Fn(u32) -> bool,
+) -> bool {
+    !rec.hook_ancestry.is_empty()
+        && harness_pid(rec).is_some_and(|h| agent_alive(rec, window_owners, proc_exists, h))
 }
 
 /// Gather the live windows from Hyprland's request socket (`j/clients`, the JSON
@@ -631,12 +663,14 @@ fn pre_boot_ghosts(
 fn orphaned_subagents(
     sessions: &[SessionRecord],
     is_recent: impl Fn(&SessionRecord) -> bool,
+    spared: impl Fn(&SessionRecord) -> bool,
 ) -> Vec<String> {
     let known: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
     sessions
         .iter()
         .filter(|s| s.state != "done")
         .filter(|s| !is_recent(s))
+        .filter(|s| !spared(s))
         .filter(|s| {
             let parent = s
                 .parent_session_id
@@ -1544,7 +1578,9 @@ fn reap_inner(
     // host terminal's record has left the same way (see `orphaned_subagents`).
     // Same settle grace as the dedup above, so an infant awaiting its own
     // parent link is never judged.
-    for id in orphaned_subagents(&s_file.sessions, is_recent) {
+    // A record whose live harness anchors it is spared (see `harness_alive`).
+    let spared = |s: &SessionRecord| harness_alive(s, window_owners.as_ref(), &proc_exists);
+    for id in orphaned_subagents(&s_file.sessions, is_recent, spared) {
         if !reaped.contains(&id) {
             reaped.push(id);
         }
@@ -2085,6 +2121,62 @@ mod tests {
             pid: None,
             ..Default::default()
         }
+    }
+
+    /// A hook-only agent under a live harness, with every other signal against
+    /// it: its window is gone from the compositor, its last evidence of life is
+    /// a century old, and its parent left the roster. The harness is `555`.
+    fn anchored_by(harness_alive: bool) -> (SessionRecord, impl Fn(u32) -> bool) {
+        let mut rec = hook_only("anchored", "idle");
+        rec.window_address = "0xdead".into();
+        rec.hook_ancestry = vec![555, 700];
+        rec.parent_session_id = Some("ghost".into());
+        (rec, move |p| harness_alive && p == 555)
+    }
+
+    /// A live harness is positive proof of life: the window signal, the
+    /// staleness band and the orphan arm never judge its record, and the
+    /// same record with the harness gone is judged as ever.
+    #[test]
+    fn a_live_harness_spares_its_record_from_window_staleness_and_orphan_signals() {
+        let (rec, alive) = anchored_by(true);
+        let now = 4_000_000_000;
+        let ancient = |_: &SessionRecord| Some(0);
+        let no_live = HashSet::new();
+        assert!(!is_session_dead(&rec, Some(&no_live), None, &alive, now, ancient));
+        let (rec, dead) = anchored_by(false);
+        assert!(is_session_dead(&rec, Some(&no_live), None, &dead, now, ancient));
+        let spared = |s: &SessionRecord| harness_alive(s, None, &alive);
+        let mut hook_only_rec = rec.clone();
+        hook_only_rec.window_address.clear();
+        assert!(orphaned_subagents(std::slice::from_ref(&hook_only_rec), |_| false, spared).is_empty());
+        assert_eq!(
+            orphaned_subagents(std::slice::from_ref(&hook_only_rec), |_| false, |_| false),
+            vec!["anchored".to_string()],
+            "the orphan arm takes it once nothing spares it",
+        );
+    }
+
+    /// A dead pid of the record's own is still evidence: the harness veto
+    /// spares a live harness, not a record whose stored pid has gone.
+    #[test]
+    fn a_dead_pid_of_the_record_is_still_dead_under_a_live_harness() {
+        let (mut rec, alive) = anchored_by(true);
+        rec.pid = Some(42);
+        assert!(is_session_dead(&rec, None, None, &alive, 0, |_| None));
+    }
+
+    /// A terminal's pid is not the agent's harness: it owns the window and
+    /// outlives the agent, so it cannot veto the window signal (the same rule
+    /// the pid veto applies).
+    #[test]
+    fn a_terminal_that_owns_the_window_is_not_a_live_harness() {
+        let (mut rec, _) = anchored_by(true);
+        rec.hook_ancestry = vec![600];
+        let owners: HashMap<String, u32> = [(normalize_addr("0xdead"), 600)].into();
+        let alive = |p: u32| p == 600;
+        let no_live = HashSet::new();
+        assert!(is_session_dead(&rec, Some(&no_live), Some(&owners), &alive, 0, |_| None));
     }
 
     #[test]
@@ -3344,7 +3436,7 @@ mod tests {
             hook_only("not-a-subagent", "working"), // parentless, but not a sub
         ];
 
-        let mut got = orphaned_subagents(&sessions, |_| false);
+        let mut got = orphaned_subagents(&sessions, |_| false, |_| false);
         got.sort();
         assert_eq!(
             got,
@@ -3357,14 +3449,14 @@ mod tests {
 
         // The settle grace: an infant whose parent link is a moment away is
         // never judged.
-        assert!(orphaned_subagents(&sessions, |_| true).is_empty());
+        assert!(orphaned_subagents(&sessions, |_| true, |_| false).is_empty());
 
         // The `sub:` id prefix classifies too, for a record that published no
         // kind at all.
         let mut bare = hook_only("sub:t1", "working");
         bare.kind = None;
         assert_eq!(
-            orphaned_subagents(&[bare], |_| false),
+            orphaned_subagents(&[bare], |_| false, |_| false),
             vec!["sub:t1".to_string()],
         );
     }
@@ -3398,11 +3490,11 @@ mod tests {
             with_pid,
         ];
 
-        let got = orphaned_subagents(&sessions, |_| false);
+        let got = orphaned_subagents(&sessions, |_| false, |_| false);
         assert_eq!(got, vec!["orphan-host-gone".to_string()]);
 
         // The settle grace spares an infant here too.
-        assert!(orphaned_subagents(&sessions, |_| true).is_empty());
+        assert!(orphaned_subagents(&sessions, |_| true, |_| false).is_empty());
     }
 
     /// A SPAWNED conducted SHELL that HAS been ticked by `conduct`'s P-C5

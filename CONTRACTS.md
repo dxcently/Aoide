@@ -2193,9 +2193,12 @@ to adopt. The reason is read from the raw payload field and matched byte for
 byte against the profile's `session_end_continues`, never normalised; `logout`,
 `prompt_input_exit`, `other`, any value not listed and an absent field all write
 the fact. The chain stores no start time, so a pid reused by an unrelated live
-process holds the anchor until that process exits. The reaper's staleness bands,
-72 hours at rest and a week mid-turn counted from the record's last sign of
-life, still judge the record as they judge any other. The caller's ancestry is
+process holds the anchor until that process exits. The reaper spares the
+record while the harness lives: its window signal, its orphan arm and its
+staleness bands (72 hours at rest, a week mid-turn, from the record's last sign
+of life) never judge it, and the pid signal still judges the record's own pid.
+The reaper's staleness bands judge the record again once the harness has
+exited. The caller's ancestry is
 read when the end is served, so a harness that has exited first leaves the hook
 re-parented and outside it: that end is plain, and the line is missing rather
 than false. `lastTool` is the tool in flight, when there
