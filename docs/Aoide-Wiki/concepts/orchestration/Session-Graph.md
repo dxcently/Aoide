@@ -324,7 +324,8 @@ then finds the phase closed and adds nothing. Anyone else's `aoide session end`
 of a session whose harness lives is refused and writes nothing, since a spawner
 is told only what the session itself did.
 A live harness anchors its session: a hook from outside it re-homes neither its
-chain nor its parent, so a stranger can neither claim a session nor end it
+chain nor its parent, and a `session start` or `graph link` from outside cannot
+move its window or parent, so a stranger can neither claim a session nor end it
 first. A harness that exited before its `SessionEnd` hook was served leaves the
 hook re-parented, and that end closes plain: the line is missing, never false. A
 `SessionEnd` whose `reason` is `clear` or `resume` ends the session with no

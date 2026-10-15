@@ -2050,17 +2050,42 @@ pub fn session_start(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
-    do_session_start(
-        &id,
-        inv.flags.get("agent").map(String::as_str),
-        inv.flags.get("cwd").map(String::as_str),
-        inv.flags.get("window").map(String::as_str),
-        inv.flags.get("parent").map(String::as_str),
-        None,
-        None,
-        None,
-        None,
-    )
+    let window = inv.flags.get("window").map(String::as_str);
+    let parent = inv.flags.get("parent").map(String::as_str);
+    // The refusal and the write share one lock, so no other writer lands between them.
+    with_stage_lock(|| match anchored_start_refusal(&id, asking_pid(inv), window, parent) {
+        Some(refusal) => refusal,
+        None => do_session_start(
+            &id,
+            inv.flags.get("agent").map(String::as_str),
+            inv.flags.get("cwd").map(String::as_str),
+            window,
+            parent,
+            None,
+            None,
+            None,
+            None,
+        ),
+    })
+}
+
+/// The refusal for a `session start` that would move the window or the parent of
+/// a record its live harness anchors and whose harness the caller is not. Only a
+/// value that differs from the stored one is a move; the same value is a no-op.
+fn anchored_start_refusal(
+    id: &str,
+    caller: Option<i32>,
+    window: Option<&str>,
+    parent: Option<&str>,
+) -> Option<Outcome> {
+    let file = load_stage::<SessionsFile>(&sessions_path()).ok()?;
+    let rec = file.sessions.iter().find(|s| s.session_id == id)?;
+    let moves = window.is_some_and(|w| w != rec.window_address)
+        || parent.is_some_and(|p| rec.parent_session_id.as_deref() != Some(p));
+    if !moves {
+        return None;
+    }
+    live_harness_anchoring(id, caller).map(|harness| anchored_refusal("session.start", id, harness))
 }
 
 /// `session phase --id <id> --phase <phase>` — UPSERT the live hook phase. A
@@ -2082,7 +2107,7 @@ pub fn session_phase(inv: &Invocation) -> Outcome {
     // A phase that folds to `done` is an end: it marks the roster record `done`,
     // so it answers to the same caller check as `session end`.
     if canonical_state(&phase) == "done" {
-        return do_session_end(&id, session_end_caller(inv), true);
+        return do_session_end(&id, asking_pid(inv), true);
     }
     do_session_phase(&id, &phase)
 }
@@ -2098,14 +2123,14 @@ pub fn session_end(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
-    do_session_end(&id, session_end_caller(inv), true)
+    do_session_end(&id, asking_pid(inv), true)
 }
 
-/// Who is asking for a `session end`, by the kernel's word and nobody's
+/// Who is asking for a session command, by the kernel's word and nobody's
 /// argument: the daemon's `SO_PEERCRED` stamp when the daemon runs it for a
 /// forwarded call (none when it stamped none), else this process, which IS the
 /// caller on every other door.
-fn session_end_caller(inv: &Invocation) -> Option<i32> {
+fn asking_pid(inv: &Invocation) -> Option<i32> {
     match inv.door {
         aoide_protocol::Door::Daemon => super::send::door_pid(inv),
         _ => Some(std::process::id() as i32),
@@ -4634,6 +4659,41 @@ mod hosted_death_tests {
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
         });
         assert_ne!(kid.state, "done");
+    }
+
+    /// A stranger's `session start` that would move the window or the parent of
+    /// a record its live harness anchors is refused, and writes neither. The
+    /// same values are a no-op, and the harness itself, whose pid is in the
+    /// caller's chain, may move both (asked directly, since this process is a
+    /// stranger to the harness it spawned).
+    #[test]
+    fn a_stranger_cannot_move_the_window_or_parent_of_an_anchored_record() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let (kid, _) = rehomed_child("start-anchored", h, std::process::id(), || {
+            let win = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("window", "0xbbb")]));
+            assert_eq!(win.data.as_ref().unwrap()["reason"], "harness-anchored", "{}", win.message);
+            let par = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("parent", "other")]));
+            assert_eq!(par.data.as_ref().unwrap()["reason"], "harness-anchored", "{}", par.message);
+            let same = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("parent", "wrap")]));
+            assert!(same.data.as_ref().map_or(true, |d| d["reason"] != "harness-anchored"), "{}", same.message);
+            assert!(anchored_start_refusal("kid", Some(h as i32), Some("0xbbb"), Some("other")).is_none(), "the harness may move its own record");
+        });
+        assert_eq!(kid.window_address, "0xkid", "the window is unchanged");
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"), "the parent is unchanged");
+        assert_eq!(kid.hook_ancestry, vec![h as i32, 4242], "and so is the chain");
+    }
+
+    /// `graph link` re-parents a record only where its live harness does not
+    /// anchor it: a stranger's link is refused, and the parent stays.
+    #[test]
+    fn graph_link_cannot_re_parent_an_anchored_record() {
+        let harness = Bystander::start();
+        let (kid, _) = rehomed_child("link-anchored", harness.pid(), std::process::id(), || {
+            let out = crate::graph::manage::link(&crate::graph::testutil::invocation(&["graph", "link"], &["kid", "other"]));
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "harness-anchored", "{}", out.message);
+        });
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"));
     }
 
     /// `/clear` ends the old session id and leaves its claude running, so the id

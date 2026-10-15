@@ -2170,9 +2170,13 @@ caller that does not run under the harness moves nothing of the record:
 - a `SessionStart` for the id is a no-op that exits ok. Its audited outcome
   names the session and the harness pid, and its data carries the reason
   `harness-anchored`;
-- a per-turn hook is not refused. It sets the phase like any hook, and may bind
-  a window the record lacks, but it moves neither the chain nor the parent. A
-  forged one can bind a window onto a windowless record; that moves no fact;
+- a per-turn hook is not refused. It sets the phase like any hook. It may bind
+  a window the record lacks, unless a live harness outside its chain anchors the
+  record, in which case the bind is refused. A bind moves neither the chain nor
+  the parent, and no fact;
+- `aoide session start` with `--window` or `--parent` that would change the
+  stored value, and `aoide graph link` that would re-parent the record, are
+  refused with the same reason, and write nothing;
 - `aoide session end`, a `SessionEnd` hook and `aoide session phase --phase
   done`, which is the same call, are refused and write nothing: no `hooks.json`
   phase, no `sessions.json` state, no exit ledger line, no subagent cascade, no
@@ -2320,7 +2324,7 @@ registration (a parent counts when its pid is really above the registering
 process, or it is the agent whose `hookAncestry` matched; a registration made
 after the spawner returned, such as a detached spawn that was reparented to
 init first, has no ancestry left and gets no stamp), and holds the id itself
-rather than a flag: `parentSessionId` can be rewritten by a bare `session start --parent` with no evidence at all, and a
+rather than a flag: `parentSessionId` can be rewritten by a `session start --parent` on a record no live harness anchors, with no evidence at all, and a
 reader trusts the edge only while `attestedSpawner == parentSessionId`. It
 exists because a detached `aoide spawn` leaves its child reparented to init, so
 the ancestry cannot be re-derived later. Absent for every parent the kernel did
@@ -3830,14 +3834,15 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
   edge is read through: no hook from outside it re-homes the record's chain or
   parent first, and no `session end` or `session phase` from outside makes the
   record `done`, so it cannot be pruned and registered anew (§ `sessions.json`).
-  `session start --parent` and `graph link` can still set a parent, but they
-  move no chain, and a route needs the host wrap's pid in it. So besides a file
-  edit, only a process the child's harness itself runs can produce one while
-  that harness lives, and that process can equally end the child's turn. After
-  the harness has exited, or the session has ended, a new chain may adopt the
-  id, and the line it can then cause says that a session already over ended with
-  its turn open. A forged per-turn hook can still bind a window onto a
-  windowless record, which moves no fact. This is the same class as editing the
+  `session start --window`, `--parent` and `graph link` cannot move a live
+  record's window or parent from outside its harness, and a route needs the
+  host wrap's pid in the chain. So besides a file edit, only a process the
+  child's harness itself runs can produce one while that harness lives, and
+  that process can equally end the child's turn. After the harness has exited,
+  or the session has ended, a new chain may adopt the id, and the line it can
+  then cause says that a session already over ended with its turn open. A
+  forged per-turn hook can still bind a window onto a windowless record that no
+  live harness anchors, which moves no fact. This is the same class as editing the
   `hooks.json` phase itself;
 - **redirect** a live child's lines. On the live path the recipient is read
   through the host's `parentSessionId` and `attestedSpawner`, which live in

@@ -3,6 +3,7 @@
 //! [`super::doc::restage_graph`] so the read path never drifts.
 
 use super::common::{load_inputs, require_args, stage_error};
+use super::session_store::{anchored_refusal, live_harness_anchoring};
 use super::doc::{build_graph, drop_remote_child_rows, prune_done_sparing, render, restage_graph, would_cycle};
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
@@ -981,6 +982,14 @@ pub fn link(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "cycle", "child": child, "parent": parent }));
     }
     let parent_known = file.sessions.iter().any(|s| s.session_id == parent);
+    // A re-parent of a record its live harness anchors is refused unless this
+    // process runs under that harness (see `live_harness_anchoring`).
+    let stored = file.sessions.iter().find(|s| s.session_id == child).and_then(|s| s.parent_session_id.as_deref());
+    if stored != Some(parent.as_str()) {
+        if let Some(harness) = live_harness_anchoring(&child, Some(std::process::id() as i32)) {
+            return anchored_refusal("graph.link", &child, harness);
+        }
+    }
 
     let rec = file
         .sessions

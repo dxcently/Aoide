@@ -7093,8 +7093,10 @@ mod tests {
     /// record's hook binds the window its caller owns and then moves the chain
     /// to the caller's. A live harness outside the caller's chain keeps the
     /// chain; a dead one lets it move. A record that stores no chain but a pid
-    /// holds it the same, since that pid is its harness. The window still
-    /// binds either way: it moves no chain, parent or fact.
+    /// holds it the same, since that pid is its harness. A live harness outside
+    /// the caller's chain also anchors the record against the bind itself: the
+    /// window stays unbound. Where no live harness anchors it, the window binds
+    /// and moves no chain, parent or fact.
     #[cfg(unix)]
     #[test]
     fn a_per_turn_hook_that_binds_a_window_cannot_take_the_chain_of_a_live_harness() {
@@ -7132,7 +7134,9 @@ mod tests {
             file.sessions.into_iter().find(|r| r.session_id == id).unwrap().window_address
         };
         assert!(chain_of("pid-held").is_empty(), "a live pid is the harness of a chainless record, and holds it");
-        assert_eq!(window_of("pid-held"), "0xAA", "the window binds all the same");
+        assert_eq!(window_of("pid-held"), "", "a stranger's bind onto an anchored record is refused");
+        assert_eq!(window_of("held"), "", "and so is one onto a record anchored by its stored chain");
+        assert_eq!(window_of("pid-free"), "0xAA", "the window binds where no live harness anchors the record");
         assert_eq!(chain_of("pid-free").first(), Some(&me), "a dead pid lets the caller's chain land");
         for c in [&mut owner, &mut harness] {
             let _ = c.kill();

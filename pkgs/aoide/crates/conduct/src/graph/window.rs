@@ -20,7 +20,7 @@ use super::model::{
     canonical_state, load_stage, observe_workspace, projects_path, sessions_path, write_stage,
     Project, ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
-use super::session_store::{ancestry_may_move, chain_is_stale};
+use super::session_store::{ancestry_may_move, chain_is_stale, live_harness_outside};
 use aoide_storage::fs::{pid_is_alive, with_stage_lock};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -727,7 +727,8 @@ pub(in crate::graph) fn discover_window_from(pid: i32) -> Option<(String, Option
 /// answers `None` without `HYPRLAND_INSTANCE_SIGNATURE` (through `hyprctl_clients`),
 /// while the heal reads only `/proc`. A bind fills `windowAddress`, the workspace
 /// observation, and the record's `hookAncestry` (the harness's chain, through
-/// `ancestry_may_move`) in one locked write. A stale stored chain ([`chain_is_stale`])
+/// `ancestry_may_move`) in one locked write. A bind is refused onto a record that
+/// a live harness outside the chain anchors ([`live_harness_outside`]). A stale stored chain ([`chain_is_stale`])
 /// takes the same chain in one locked write, with or without a bind, so a live
 /// harness the record never recorded is recorded on its next turn, compositor or not.
 /// A live stored chain is never written here. It never writes `pid` (discovery is
@@ -756,8 +757,8 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
     if windowless_by_lineage(id, &file.sessions) {
         return;
     }
-    let needs_window = rec.window_address.is_empty();
-    if !needs_window && rec.hook_ancestry.is_empty() {
+    let windowless = rec.window_address.is_empty();
+    if !windowless && rec.hook_ancestry.is_empty() {
         return;
     }
     // The walk runs twice on one snapshot. Without the compositor first, which is all a
@@ -768,6 +769,8 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
     let Some(walked) = chain_of(&ancestry, None) else {
         return;
     };
+    // A bind onto a record its live harness anchors is a stranger's, so it is refused.
+    let needs_window = windowless && live_harness_outside(rec, &walked, pid_is_alive).is_none();
     let needs_heal = chain_is_stale(rec, &walked, pid_is_alive);
     if !needs_window && !needs_heal {
         return;
@@ -796,8 +799,11 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
         let Some(s) = file.sessions.iter_mut().find(|s| s.session_id == id) else {
             return;
         };
-        // A window filled by a concurrent writer while we were discovering is kept.
-        let bind = found.filter(|_| s.window_address.is_empty());
+        // A window filled by a concurrent writer while we were discovering is kept, and
+        // so is a record a live harness outside `chain` has come to anchor.
+        let bind = found.filter(|_| {
+            s.window_address.is_empty() && live_harness_outside(s, &chain, pid_is_alive).is_none()
+        });
         let moves = bind.is_some() || chain_is_stale(s, &chain, pid_is_alive);
         let mut changed = false;
         if let Some((addr, workspace)) = bind {

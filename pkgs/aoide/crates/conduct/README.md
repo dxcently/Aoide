@@ -306,8 +306,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   nothing is said. A `SessionEnd` whose `reason` is `clear` or `resume`, after which the
   harness process lives on under another session id, ends the session and says
   nothing either. A live harness anchors its record, so no hook from outside it
-  re-homes its chain or parent, and no end from outside makes it prunable,
-  before the end. The fact names its spawner (`hook::recipient_of`), so a child
+  re-homes its chain or parent, no `session start` or `graph link` from
+  outside moves its window or parent, and no end from outside makes it
+  prunable, before the end. The fact names its spawner (`hook::recipient_of`), so a child
   no tick saw before its wrap ended is still told. At most three death lines per
   wrap and spawner go out in a pass, then one `and N more ended or died
   mid-turn`. The recipient is the child's SPAWNER, resolved through the wrap

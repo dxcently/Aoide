@@ -1072,11 +1072,14 @@ in the message.
   the harness away whole, with `harness-anchored` as its reason and the session
   and harness pid in its message, and skips a per-turn hook's attested-parent
   re-stamp. A per-turn hook from outside is not refused: it still sets the
-  phase, and still binds a window the record lacks, so a forged one can put a
-  window on a windowless record; the bind moves no chain, parent or fact.
-  `session start --parent` and `graph link` still set a parent on a live record
-  and the test does not guard them; they move no chain, and a route needs the
-  host wrap's pid in the child's own chain (`host_wrap`), so no line follows.
+  phase. It binds a window the record lacks only where no live harness outside
+  its chain anchors the record (`ensure_session_window`, under
+  `live_harness_outside`); the bind moves no chain, parent or fact.
+  `session start` with a `--window` or `--parent` that would change the stored
+  value, and `graph link` that would re-parent the record, are refused by
+  `anchored_start_refusal` and `manage::link` with `harness-anchored`, unless
+  the caller runs under the harness. A route needs the host wrap's pid in the
+  child's own chain (`host_wrap`), so a re-parent alone draws no line.
   `do_session_end` asks the same question of the caller. When it holds, the end
   is refused by `anchored_refusal`: nothing is written (no `hooks.json` phase,
   no `sessions.json` state, no ledger exit, subagent cascade, tunnel close or
