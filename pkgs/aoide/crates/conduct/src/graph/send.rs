@@ -1665,7 +1665,7 @@ fn map_hook(profile: &AgentProfile, payload: &Value) -> Option<HookAction> {
 /// profile — the test-facing wrapper (production resolves the profile from
 /// `--agent` via [`hook_profile_for`] and calls [`hook_for_profile`]).
 #[cfg(test)]
-fn hook_from_str(buf: &str) -> Outcome {
+pub(super) fn hook_from_str(buf: &str) -> Outcome {
     let profile = agent_profile(CLAUDE_PROFILE.name).expect("the claude profile is registered");
     hook_for_profile(profile, buf)
 }

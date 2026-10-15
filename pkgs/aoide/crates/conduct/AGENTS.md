@@ -953,7 +953,8 @@ in the message.
   harness that is not an `eidolon` (`hook::tracked`: no `remoteParent`, not a
   shell, sub-agent node or app thread) is read off its `hooks.json` phase and
   stamp, never a trace, and its lines (`awaiting`, `silent 12 min · last: …`,
-  `settled`, `died mid-turn · last: …`) join the SAME `claims.lines` the
+  `settled`, `died mid-turn · last: …`, `ended mid-turn · last: …`) join the
+  SAME `claims.lines` the
   eidolon source fills, so
   `deliver` and its skips are one implementation. Its claim runs inside the
   SAME `with_stage_lock` section over the cursor `claim_locked` just built
@@ -1028,9 +1029,19 @@ in the message.
   before its wrap ended is still told. Each child's session is set to `done`
   (presence reads the process as over, and the held rules spare the record
   until the death is claimed). `aoide session phase` folds the phase it
-  is given and never writes `death`, so only the wrap writes one. A closed phase
-  is never written. The tick says the fact when the wrap wrote it, and infers a
-  death only when none was written (SIGKILL), so each death is said once.
+  is given and never writes `death`. A closed phase is never written. The tick
+  says the fact when the wrap wrote it, and infers a death only when none was
+  written (SIGKILL), so each death is said once.
+  **A session that ends itself mid-turn writes its own fact.**
+  `do_session_end_inner`, the one core of `aoide session end` and the hook
+  door's `SessionEnd`, finds the child's hook phase still `working` or
+  `awaiting` and `hook::recipient_of` naming a spawner, and writes the fact
+  with `outcome: "end"` (no status), the tool in flight and that spawner in
+  place of the plain `done`. The tick says it as `ended mid-turn · last: …`,
+  latched and cleared like any recorded death. The wrap's later
+  `record_hook_deaths` finds the phase closed and writes nothing, so one end
+  is one line. `recipient_of` answers only for a child `hook::tracked` names,
+  so an eidolon's death, which its trace says, is never told twice.
 
   **The wrap's own signals.** `WrapSignals::install` (`graph/pty.rs`) runs first
   in `session_conduct` and catches SIGTERM, SIGHUP and SIGINT with `SA_SIGINFO`

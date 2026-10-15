@@ -292,13 +292,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
 - **`graph::pingback::hook`** is the ping-back's second source, for every
   other registered harness whose hooks write `hooks.json` (claude, kimi, pi): a
   local-parented child's canonical hook phase and `updatedAt` become
-  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …`, `… settled` and
-  `… died mid-turn · last: …`, claimed in the SAME stage-lock section as the
-  trace source into the entry's `hook` field of `pingback.json`, and delivered
-  by the same `deliver` — it adds a cursor half and four lines, never a second
-  transport. A death the wrap records (`done` with a `death` fact on the
-  child's hook record, written by `session_store::record_hook_deaths`) is said
-  once, with its status; one the tick infers carries none. The fact names its
+  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …`, `… settled`,
+  `… died mid-turn · last: …` and `… ended mid-turn · last: …`, claimed in the
+  SAME stage-lock section as the trace source into the entry's `hook` field of
+  `pingback.json`, and delivered by the same `deliver` — it adds a cursor half
+  and five lines, never a second transport. A death the wrap records (`done`
+  with a `death` fact on the child's hook record, written by
+  `session_store::record_hook_deaths`) is said once, with its status; one the
+  tick infers carries none. A session that ends itself with its turn open
+  (`session end`, or its `SessionEnd` hook) records the fact `end`, said once
+  as `ended mid-turn`. The fact names its
   spawner (`hook::recipient_of`), so a child no tick saw before its wrap ended
   is still told. The recipient is the child's SPAWNER, resolved
   through the wrap that hosts it and only over an edge the kernel attested

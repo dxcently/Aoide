@@ -12,13 +12,14 @@
 //! eidolon source's — in the entry's `hook` field, so the two sources never
 //! read each other's cursor.
 //!
-//! Four lines, one per event:
+//! Five lines, one per event:
 //!
 //! ```text
 //! [claude <petname>] awaiting
 //! [claude <petname>] silent 12 min · last: <the tool in flight, else "working">
 //! [claude <petname>] settled
 //! [claude <petname>] died mid-turn · last: <the tool in flight, else "working">
+//! [claude <petname>] ended mid-turn · last: <the tool in flight, else "working">
 //! ```
 //!
 //! **Who hears it: the SPAWNER, and only over an attested edge.** A hook
@@ -68,8 +69,15 @@
 //! dead harness under it is not a death yet, and the tick infers one only once
 //! the host is gone. It is the hook source's twin of the trace
 //! source's `died mid-turn` (an eidolon record dropped with its turn open), and
-//! says that the turn did not end, not why. A `done` phase with no fact is a
-//! session ending by its own hook and says nothing.
+//! says that the turn did not end, not why.
+//!
+//! **Ended mid-turn** is a session that ended itself with the turn open: its
+//! `SessionEnd` hook, or `aoide session end`, found the phase `working` or
+//! `awaiting` and wrote the same fact with `outcome: "end"` and no status
+//! (`session_store::do_session_end`). It is said once, as a recorded death is,
+//! and its wrap then finds the phase closed and writes nothing more. A `done`
+//! phase with no fact is a session ending by its own hook after its turn closed,
+//! and says nothing.
 //!
 //! A child the tick can no longer route cannot be asked for its recipient, so
 //! the cursor carries the route: the host wrap and the spawner resolved while
@@ -174,6 +182,7 @@ enum HookEvent {
     Silent { mins: i64, last: String },
     Settled,
     Died { last: String, status: Option<String> },
+    Ended { last: String },
 }
 
 /// What a child whose record has left the roster comes to.
@@ -226,12 +235,14 @@ fn route_of(
 }
 
 /// The spawner a recorded death names, written onto the fact by whoever records
-/// it while the child's wrap still runs: the [`route_of`] climb over the roster
-/// as it stands, with no seal check, since the recorder holds no daemon key. The
-/// claim verifies this recipient's seal before it says anything, as it does a
-/// cached route's.
+/// it while the child's wrap still runs (the wrap, or the child's own `session
+/// end`): the [`route_of`] climb over the roster as it stands, with no seal
+/// check, since the recorder holds no daemon key. Only for a child this source
+/// [`tracked`]s, so a death another source says is never told twice. The claim
+/// verifies this recipient's seal before it says anything, as it does a cached
+/// route's.
 pub(in crate::graph) fn recipient_of(kid: &SessionRecord, roster: &[SessionRecord]) -> Option<String> {
-    route_of(kid, roster, &|_: &SessionRecord| true).map(|(_, to)| to)
+    tracked(kid).then(|| route_of(kid, roster, &|_: &SessionRecord| true)).flatten().map(|(_, to)| to)
 }
 
 /// Steps 2 and 3 of [`route_of`]: the spawner of a conducted `host` wrap,
@@ -318,15 +329,20 @@ fn status_of(death: &HookDeath) -> Option<String> {
     }
 }
 
-/// The death a turn is said to have ended in: the tool the wrap recorded in
-/// flight (else the cached `last`), and the status the fact names, if any. With
-/// no fact the line is the inferred one, which carries no status.
+/// The death a turn is said to have ended in: the tool the fact recorded in
+/// flight (else the cached `last`), and the status the fact names, if any. A fact
+/// whose outcome is `end` is a session that ended itself with the turn open, and
+/// is said as ended, not died. With no fact the line is the inferred one, which
+/// carries no status.
 fn died_of(last: &str, death: Option<&HookDeath>) -> HookEvent {
-    let tool = death
+    let last = death
         .and_then(|d| d.last_tool.clone())
         .filter(|t| !t.trim().is_empty())
         .unwrap_or_else(|| last.to_string());
-    HookEvent::Died { last: tool, status: death.and_then(status_of) }
+    match death {
+        Some(d) if d.outcome.as_deref() == Some("end") => HookEvent::Ended { last },
+        _ => HookEvent::Died { last, status: death.and_then(status_of) },
+    }
 }
 
 /// The tracked children that have a hook record and a live route. A child
@@ -389,7 +405,7 @@ pub(super) fn claim(
         let (event, cursor) = decide(child, entry.hook.as_ref(), now_ms);
         entry.hook = Some(cursor);
         if let Some(event) = event {
-            if matches!(event, HookEvent::Died { .. }) {
+            if matches!(event, HookEvent::Died { .. } | HookEvent::Ended { .. }) {
                 said.push(child.id.clone());
             }
             lines.push(ChildClaim { parent: child.to.clone(), line: render(&child.tag, &event) });
@@ -599,6 +615,7 @@ fn render(tag: &str, event: &HookEvent) -> String {
             let status = status.as_deref().map_or(String::new(), |s| format!(" ({s})"));
             died_mid_turn(&tag, &format!("{status} · last: {}", clean(last)))
         }
+        HookEvent::Ended { last } => format!("{tag} ended mid-turn · last: {}", clean(last)),
     }
 }
 
@@ -934,6 +951,17 @@ mod tests {
         k.petname = Some("fond-aspen".into());
         k.hook_ancestry = vec![me as i32, me as i32, 1];
         vec![p, w, k]
+    }
+
+    /// The spawner a fact is written with is the hook source's alone: a child it
+    /// does not track (an eidolon, whose trace speaks for it) names none, so its
+    /// death is never said twice.
+    #[test]
+    fn a_child_the_hook_source_does_not_track_names_no_recipient() {
+        let mut roster = spawned_shape();
+        assert_eq!(recipient_of(&roster[2], &roster).as_deref(), Some("P"));
+        roster[2].agent = "eidolon".into();
+        assert_eq!(recipient_of(&roster[2], &roster), None);
     }
 
     /// The child's harness is gone: its hook ancestry's first pid names nothing.
@@ -1574,6 +1602,37 @@ mod tests {
         assert_eq!(decide(&kid, Some(&next), at_ms() + 120_000).0, None, "once: the claim cleared the fact");
     }
 
+    /// A session that ended itself with its turn open is said as ended, not died:
+    /// once, with the tool the fact names and no status.
+    #[test]
+    fn an_end_fact_is_said_ended_mid_turn_once_with_its_tool_and_no_status() {
+        let (_, base) = decide(&child("working", AT), None, at_ms());
+        let mut kid = died("2026-10-07T10:01:00Z", HookDeath { exit_code: Some(0), ..died_fact("end") });
+        let (event, next) = decide(&kid, Some(&base), at_ms() + 60_000);
+        assert_eq!(line(event).as_deref(), Some("[claude fond-aspen] ended mid-turn · last: Bash"));
+        assert!(next.died);
+        kid.death = None;
+        assert_eq!(decide(&kid, Some(&next), at_ms() + 120_000).0, None, "once: the claim cleared the fact");
+    }
+
+    /// An end fact on a child still gathered (its wrap still up) is named said,
+    /// so the caller clears it and it is not said again.
+    #[test]
+    fn an_end_fact_on_a_gathered_child_is_named_said() {
+        let roster = spawned_shape();
+        let sealed = |_: &SessionRecord| true;
+        let mut base = CursorFile::new();
+        claim(&roster, &[hook_rec("K", "working", AT)], &sealed, &CursorFile::new(), &mut base, at_ms());
+        let ended = [HookRecord { death: Some(died_fact("end")), ..hook_rec("K", "done", "2026-10-07T10:01:00Z") }];
+        let mut next = CursorFile::new();
+        let (lines, said) = super::claim(&roster, &ended, &sealed, &base, &mut next, at_ms() + 60_000);
+        assert_eq!(
+            lines,
+            vec![ChildClaim { parent: "P".into(), line: "[claude fond-aspen] ended mid-turn · last: Bash".into() }]
+        );
+        assert_eq!(said, vec!["K".to_string()]);
+    }
+
     /// The status a fact names is printed only where a real process could have
     /// ended with it, and the tool is cleaned like every other value read back.
     #[test]
@@ -1888,6 +1947,39 @@ mod tests {
                 parent: SPAWNER.into(),
                 line: "[claude fond-aspen] died mid-turn (signal 9) · last: Bash".into(),
             }]
+        );
+        assert!(tick(&mut cursor).is_empty(), "at most once");
+    }
+
+    /// A harness that ends its own session with the turn open (its SessionEnd hook
+    /// after an interrupt) and then dies: the session end records the fact, the
+    /// wrap finds the phase closed and adds nothing, and the spawner hears one
+    /// "ended mid-turn".
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_that_ends_its_session_mid_turn_and_dies_is_said_ended_mid_turn_once() {
+        let (root, _env, _guard) = e2e_stage("dmt-ended");
+        let before = format!("\"$AOIDE\" session phase --id {HOOK} --phase working");
+        let after = format!("\"$AOIDE\" session end --id {HOOK}\nkill -9 $$");
+        let (mut wrap, _) = start_wrap(&root, &fake_harness(&before, &after));
+        let mut cursor = CursorFile::new();
+        assert!(tick(&mut cursor).is_empty(), "the first examination is a baseline");
+
+        std::fs::write(root.join("go"), "").unwrap();
+        wait_exit(&mut wrap);
+        assert_eq!(
+            hook_record().death,
+            Some(HookDeath {
+                last_tool: Some("Bash".into()),
+                outcome: Some("end".into()),
+                spawner: Some(SPAWNER.into()),
+                ..Default::default()
+            }),
+            "the session end names the tool in flight and the spawner, and no status"
+        );
+        assert_eq!(
+            tick(&mut cursor),
+            vec![ChildClaim { parent: SPAWNER.into(), line: "[claude fond-aspen] ended mid-turn · last: Bash".into() }]
         );
         assert!(tick(&mut cursor).is_empty(), "at most once");
     }

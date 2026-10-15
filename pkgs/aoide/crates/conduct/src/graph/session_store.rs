@@ -1750,7 +1750,7 @@ fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: 
 
 /// The wrap's own exit, recorded before the wrap ends its own record
 /// (`session_conduct`). Each hosted child [`hosted_open_children`] names gets the
-/// death fact `end`, carrying the tool it was in and its spawner, and is marked
+/// wrap's own death fact, carrying the tool it was in and its spawner, and is marked
 /// `done` in `sessions.json`: it is dead, and presence must read it so. Written
 /// under the stage lock. One harness is one death: a `/clear` gives the same
 /// process a new hook id, so the newest id carries the fact and the older ids are
@@ -1803,6 +1803,11 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 
 /// Core of `session end`: mark the session `done` (and its hook phase
 /// `done`), re-stage. An unknown id is an ok no-op (matching `project remove`).
+/// A hook child that ends itself with its turn open (`working`/`awaiting`) and a
+/// spawner to tell ([`recipient_of`](super::pingback::recipient_of)) gets the
+/// death fact `end` instead, carrying the tool it was in and that spawner, so
+/// the ping-back says it ended mid-turn; its wrap then finds the phase closed
+/// and records nothing more.
 ///
 /// Also closes every ssh tunnel this session opened
 /// (`aoide_client::tunnel::close_all_for_session`, ssh-transport lane P-S5) —
@@ -1845,6 +1850,15 @@ fn do_session_end_inner(id: &str) -> Outcome {
         return out;
     }
     let now = now_iso_utc();
+    let ended_mid_turn = s_file.sessions.iter().find(|s| s.session_id == id).and_then(|s| {
+        let spawner = super::pingback::recipient_of(s, &s_file.sessions)?;
+        Some(HookDeath {
+            last_tool: s.activity.clone().filter(|a| !a.is_empty()),
+            outcome: Some("end".to_string()),
+            spawner: Some(spawner),
+            ..HookDeath::default()
+        })
+    });
     for s in s_file.sessions.iter_mut() {
         if s.session_id == id {
             // The ledger write (P-D8), gated on an ACTUAL transition: unlike
@@ -1901,7 +1915,11 @@ fn do_session_end_inner(id: &str) -> Outcome {
         Ok(f) => f,
         Err(e) => return stage_error(cmd, e),
     };
-    upsert_hook(&mut h_file.hooks, id, "done", &now);
+    let open = h_file.hooks.iter().any(|h| h.session_id == id && turn_open(&h.phase));
+    match ended_mid_turn.filter(|_| open) {
+        Some(fact) => record_death(&mut h_file.hooks, id, fact, &now),
+        None => upsert_hook(&mut h_file.hooks, id, "done", &now),
+    }
     if h_file.schema_version.is_empty() {
         h_file.schema_version = STAGE_GRAPH_VERSION.to_string();
     }
@@ -4088,6 +4106,64 @@ mod hosted_death_tests {
         let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
         assert_eq!(hooks.hooks.iter().find(|h| h.session_id == "kid").unwrap().phase, "idle");
         let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A hook child ended by `end` with its turn in `phase`, under a wrap whose
+    /// spawner edge is attested or not: the hook record it is left with.
+    fn ended_child(tag: &str, phase: &str, attested: bool, end: impl FnOnce()) -> HookRecord {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage(tag);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let at = "2026-10-07T10:00:00Z";
+        let mut spawner = crate::graph::testutil::session("P", "/p", "working", at, None);
+        spawner.conductable = Some(true);
+        let mut wrap = crate::graph::testutil::session("wrap", "/w", "working", at, Some("P"));
+        wrap.conductable = Some(true);
+        wrap.pid = Some(4242);
+        wrap.attested_spawner = attested.then(|| "P".to_string());
+        let mut kid = crate::graph::testutil::session("kid", "/w", "working", at, Some("wrap"));
+        kid.hook_ancestry = vec![999_999, 4242];
+        kid.activity = Some("Bash".into());
+        let sessions = SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: vec![spawner, wrap, kid] };
+        write_stage(&sessions_path(), &sessions).unwrap();
+        let hook = HookRecord { session_id: "kid".into(), phase: phase.into(), updated_at: at.into(), ..Default::default() };
+        write_stage(&hooks_path(), &HooksFile { schema_version: STAGE_GRAPH_VERSION.into(), hooks: vec![hook] }).unwrap();
+        end();
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let _ = std::fs::remove_dir_all(&stage);
+        hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap()
+    }
+
+    /// A session end that finds the turn open records the fact `end`, with the
+    /// tool in flight and the spawner, by the CLI door and the hook door alike. A
+    /// closed turn, or one with no spawner to tell, is only marked `done`.
+    #[test]
+    fn a_session_end_with_the_turn_open_records_that_it_ended_mid_turn() {
+        let ended = Some(HookDeath {
+            last_tool: Some("Bash".into()),
+            outcome: Some("end".into()),
+            spawner: Some("P".into()),
+            ..Default::default()
+        });
+        let cli = || {
+            session_end(&crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]));
+        };
+        let hook = || {
+            super::super::send::hook_from_str(r#"{ "session_id": "kid", "hook_event_name": "SessionEnd" }"#);
+        };
+        for phase in ["working", "awaiting"] {
+            for (door, rec) in [("cli", ended_child("end-cli", phase, true, cli)), ("hook", ended_child("end-hook", phase, true, hook))] {
+                assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended), "{door} door, {phase}");
+            }
+        }
+        for (case, rec) in [
+            ("closed", ended_child("end-closed", "stopped", true, cli)),
+            ("closed by hook", ended_child("end-closed-hook", "idle", true, hook)),
+            ("no spawner", ended_child("end-unattested", "working", false, cli)),
+        ] {
+            assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{case}");
+        }
     }
 
     /// One harness is one death: a `/clear` gives the same process a second hook

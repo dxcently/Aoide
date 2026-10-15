@@ -2148,13 +2148,18 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
-**`death` — a turn its harness ended, recorded by the wrap.** A hook record of a
-child that a conducted wrap hosts MAY carry `phase: "done"` and `death`:
-`{ lastTool?, outcome?, exitCode?, signal?, spawner? }`. The wrap writes both in
-one upsert under the stage lock when its harness is seen to end while the
-child's phase reads `working` or `awaiting`; a closed phase is left alone. The
-end is named as an exit code (`exit`), a signal number (`signal`), or the wrap's
-own deadline (`timeout`); `outcome` is absent when the wrap cannot name it.
+**`death` — a turn that never closed, recorded by the wrap or the session's own
+end.** A hook record of a child that a conducted wrap hosts MAY carry
+`phase: "done"` and `death`: `{ lastTool?, outcome?, exitCode?, signal?,
+spawner? }`. Two writers put both on the record in one upsert under the stage
+lock, each only while the child's phase reads `working` or `awaiting`; a closed
+phase is left alone. The wrap writes it when its harness is seen to end, naming
+the end as an exit code (`exit`), a signal number (`signal`), or the wrap's own
+deadline (`timeout`); `outcome` is absent when the wrap cannot name it. A
+`session end` of the child itself, by `aoide session end` or its harness's
+`SessionEnd` hook, writes it with `outcome: "end"` and no status, when the edge
+names a spawner; with none it only closes the phase. The wrap, finding that
+phase closed when its harness then exits, writes nothing more.
 `lastTool` is the tool in flight, when there was one. `spawner` is the session
 the death is said to, resolved while the wrap still runs by the same climb a
 route takes (§ `pingback.json`) over the roster as it stands, with no seal
@@ -2183,10 +2188,11 @@ leaves the child reading `working` until that wrap ends.
 
 The child's session record in `sessions.json` is set to `done`: the process is
 dead, and presence reads it so. `done`, not `idle`: `done` says the process is
-over, and the claim, not the state, decides when the record may go. Nothing
-else writes `death`. `aoide session phase` folds the phase it is given to its
+over, and the claim, not the state, decides when the record may go. No other
+path writes `death`. `aoide session phase` folds the phase it is given to its
 canonical rest and writes no fact, so no caller can make a spawner hear a
-death. A later hook event replaces the phase and drops `death`, so the fact is
+death; `aoide session end` writes only the `end` it performs, to the spawner the
+child's own edge names. A later hook event replaces the phase and drops `death`, so the fact is
 heard only while it is still the phase.
 
 **`shell` and `wrappedProgram` — what a conducted wrap runs.** A session
@@ -3665,7 +3671,8 @@ is absent when the harness was not alive.
   ago — is said whatever phase the cursor last saw, and no latch gates it. The
   line carries the fact's status (`(exit N)`, `(signal N)` or `(timeout)`) when
   it names one, and the fact's tool (else the session's last `activity`,
-  `working` when none);
+  `working` when none). A fact whose `outcome` is `end` is said as
+  `ended mid-turn · last: <tool>` instead, with no status;
 - the first examination of a child (no `hook` yet) is a BASELINE: it claims
   nothing, except a recorded death under 24 hours old, which is said;
 - `awaiting` is claimed on ENTERING that phase (a restamp of it is not another
@@ -3723,7 +3730,8 @@ roster, `hooks.json`, the seals), in this order:
   sessions), its spawner must verify at the claim (inside the stage lock), and
   its host wrap must be gone (absent, or its pid dead) or still verify. Then the
   child is said of as `died mid-turn` over `route`, with the fact's status and
-  tool when a fact is recorded, and with no status when it is inferred. A host
+  tool when a fact is recorded (`ended mid-turn`, with no status, for an `end`
+  fact), and with no status when it is inferred. A host
   that is still up but no longer verifies keeps a recorded death's entry
   instead.
 
@@ -3760,9 +3768,11 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
 - **fabricate a death** by writing a child's `hooks.json` record as `phase:
   "done"` with a `death` fact: it is said as a death on the child's route, or
   to the `spawner` the fact names once that session verifies, the same reach as
-  a fabricated cursor entry. `aoide session phase` cannot write a fact
-  (§ `sessions.json`), so only a file edit can. This is the same class as
-  editing the `hooks.json` phase itself;
+  a fabricated cursor entry. `aoide session phase` cannot write a fact, and
+  `aoide session end` writes only an `end` fact, for a session it really ends,
+  to the spawner the child's own edge names (§ `sessions.json`), so only a file
+  edit can fabricate one. This is the same class as editing the `hooks.json`
+  phase itself;
 - **redirect** a live child's lines. On the live path the recipient is read
   through the host's `parentSessionId` and `attestedSpawner`, which live in
   `sessions.json` and are not under the seal (the seal covers the wrap's own
