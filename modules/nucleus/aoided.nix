@@ -70,7 +70,7 @@ lib.mkIf config.aoide.enable {
   # When aoide.mcp.enable is true, also start the per-session MCP server stub.
   # Agents spawn `aoide mcp serve --stdio` themselves; this service is the
   # network-addressable façade for tooling that cannot do stdio transport.
-  # No sealed ancestor, no AOIDE_TERMINAL: every send, spawn, resurrect parks.
+  # No sealed ancestor: every send, spawn and `resurrect --project` parks.
   systemd.user.services.aoide-mcp = lib.mkIf config.aoide.mcp.enable {
     description = "Aoide MCP façade (network, user-only)";
 

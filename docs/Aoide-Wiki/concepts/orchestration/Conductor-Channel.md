@@ -225,8 +225,8 @@ through.
   removes it without injecting. Approval is a local act: see the approval
   doors below. The list spells every control, bidi and invisible character of
   an entry as a visible escape (`\n`, `\x1b`, `\u{202e}`), so a human reads
-  what replays. This is CLI-only today — the conductor
-  TUI's own one-key approve/deny (below) is still Phase ③.
+  what replays. The conductor's Review pane approves and denies as well: a
+  held entry takes `a` then `y`, from the entry's whole text.
 - **Approval doors.** Only a door that can approve may approve a gated
   send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
   the herald, and any same-uid client of the aoided socket) can. The MCP

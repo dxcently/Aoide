@@ -635,7 +635,8 @@ pub struct SessionRecord {
     /// - `skipped-empty` — there was nothing to queue;
     /// - `queue-full` — the node already holds the queue's per-source cap
     ///   (nothing queued);
-    /// - `hold-failed` — the queue write failed (nothing queued);
+    /// - `hold-failed` — the queue write failed, or the prompt was over the
+    ///   per-entry byte cap (nothing queued);
     /// - `busy` — the opening-turn worker pool was full (nothing queued; ask
     ///   again);
     /// - `no-worker` — no worker thread could start (nothing queued);

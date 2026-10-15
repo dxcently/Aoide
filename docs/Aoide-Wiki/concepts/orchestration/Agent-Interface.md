@@ -53,8 +53,8 @@ it. A `resurrect` is judged the same way, since it launches processes: an
 attested caller revives the sessions it names, and from any other caller
 `resurrect --project …` parks whole until a human approves it (bare `resurrect`,
 which reads the working directory's manifest, is refused there and taught to
-name a project). What a revived terminal would be typed is a restore, not a send
-a caller makes, so it stays held over MCP either way. The A2A door has no sealed
+name a project). The restore that resurrect would type into a revived terminal is not a send a
+caller makes, so it stays held over MCP either way. The A2A door has no sealed
 ancestor, so it parks every send. See [[Conductor-Channel|the gate]] for the
 doors and the rule.
 

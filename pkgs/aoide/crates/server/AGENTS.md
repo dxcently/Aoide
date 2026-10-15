@@ -45,7 +45,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   approve` and `deny`, `session permit` and `mail ring` stay refused over it
   however well attested, and so does every command that would make a session's
   parent (`session start --parent` on an existing id, `graph link`,
-  `session hook`, `session conduct`): the parent rule reads that field, so
+  `session hook`, `conduct`): the parent rule reads that field, so
   rewriting it would be approving. The tier-3 network façade has no sealed
   ancestor, so every send from it parks. A network bridge run INSIDE a
   conducted terminal lends that terminal's rights to its remote callers; that

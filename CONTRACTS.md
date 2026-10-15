@@ -3886,7 +3886,7 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   `session permit` and `mail ring` stay refused for an attested caller,
   whatever it asks for, and so does every command that would rewrite an
   existing session's parent (`session start --parent`, `graph link`,
-  `session hook`, `session conduct`): the parent rule reads that field, so
+  `session hook`, `conduct`): the parent rule reads that field, so
   each answers `reason: door-cannot-approve`. A new session id still
   registers under a parent.
 - The A2A door has no sealed ancestor, because it runs inside aoided, and the
@@ -3902,7 +3902,12 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   child, which the parent rule delivers. From an unattested caller the whole
   spawn parks, as a `pending.json` entry carrying `spawn` (§3) under the `mcp`
   source, and nothing launches until a human runs `session pending approve`,
-  which launches it as that approver's door.
+  which launches it as that approver's door. The `--id` of such a spawn must be
+  plain (at most 128 characters of A-Z a-z 0-9 . _ : -, outside the reserved
+  `sub:` namespace) and name no live session, or the spawn is refused
+  `reason: "bad-id"` or `"id-in-use"`, for an attested caller too. `approve`
+  judges the same id again and refuses `id-in-use` if a live session now holds
+  it.
 - An MCP `resurrect` is judged the same way, because it launches processes. An
   attested caller revives the sessions it names. From an unattested caller (and
   from the A2A door, which never has a sealed ancestor) `resurrect --project …`
@@ -3958,7 +3963,8 @@ by `aoide session pending list/approve/deny`: `list` enumerates every entry (a
 malformed one — a stale hand-edited line — surfaces as `"state": "malformed"`
 rather than failing the read); `approve` re-drives the entry through the SAME
 gated injection door with `--yes`, in-process, and only on a door that can
-approve (the table below); `deny` drops it from any door. Either resolution
+approve (the table below); `deny` only on a door that can approve (the same
+table). Either resolution
 REMOVES the entry from this file — the record of what happened is the audit log
 (`session.pending.approve` / `.deny`), not a persisted "resolved" archive. An
 entry carries no id of its own; `list`'s `id` is its array position, which
@@ -3986,8 +3992,9 @@ the label as the sender. The optional `spawn` field, `{ "path": ["spawn"],
 "args": […], "flags": {…} }`, makes the entry a held launch instead of a held
 send: the command (`spawn`, or `resurrect` from a caller that could not be
 attested; an absent `path` is `spawn`), argv and flags the launch will run with,
-`sessionId` being the id its child will register under (`resurrect:<project>`
-for a resurrect) and `text` the command line an approver is shown. `list`
+`sessionId` being the id its child will register under, and for a resurrect
+the label `resurrect:<project>` (the revived sessions mint their own ids), and
+`text` the command line an approver is shown. `list`
 renders it as that whole command, `approve` launches it as the approver's door
 rather than typing into a target, and `deny` drops it with nothing launched. An
 entry whose `spawn` does not parse, or names a `path` other than `spawn` or
@@ -4053,7 +4060,7 @@ it.
   "pending": [
     { "sessionId": "conduct-6364-1786576226", "text": "/compact keep only operational records", "submit": true, "queuedAt": "2026-08-13T14:01:10Z", "from": "conduct-1122-1786570000" },
     { "sessionId": "conduct-6364-1786576226", "text": "run the tests", "submit": true, "queuedAt": "2026-08-13T14:02:31Z", "from": "mcp:conduct-1122-1786570000", "claimed": "orchestrator" },
-    { "sessionId": "spawn-held", "text": "aoide spawn --id spawn-held -- ./agent.sh", "submit": false, "queuedAt": "2026-08-13T14:03:02Z", "from": "mcp", "spawn": { "args": ["./agent.sh"], "flags": { "id": "spawn-held" } } }
+    { "sessionId": "spawn-held", "text": "aoide spawn --id spawn-held -- ./agent.sh", "submit": false, "queuedAt": "2026-08-13T14:03:02Z", "from": "mcp", "spawn": { "path": ["spawn"], "args": ["./agent.sh"], "flags": { "id": "spawn-held" } } }
   ]
 }
 ```

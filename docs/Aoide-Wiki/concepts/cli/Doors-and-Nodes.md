@@ -78,7 +78,7 @@ aoide mcp serve [--stdio] [--json]
   `--yes`, `session pending approve` and `deny`, `session permit` and `mail
   ring` are refused over it for every caller, and so is anything that would
   rewrite a session's parent (re-parenting an existing session, `session hook`,
-  `session conduct`), since the parent rule reads that field; a new session id
+  `conduct`), since the parent rule reads that field; a new session id
   may still register under a parent. It is attested like the CLI: the process
   that dispatches a `tools/call` is this server, so the send gate walks its
   ancestry to a sealed session. A server launched under one earns that session's

@@ -70,7 +70,7 @@ caller revives the sessions it names, any other has the whole command held
 unseen, is refused there with a line naming `--project`. A restore is not a send
 a caller makes, and stays held over MCP for every caller. Neither door can adopt
 a session: re-parenting an existing session (`session start --parent`, `graph
-link`), `session hook` and `session conduct` refuse (`reason`
+link`), `session hook` and `conduct` refuse (`reason`
 `door-cannot-approve`, audited), because the parent rule reads the very field
 they write, and `pending deny` refuses like `pending approve`. A new session id
 may still register under a parent.
