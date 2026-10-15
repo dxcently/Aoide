@@ -41,6 +41,14 @@ other crate in this workspace sits above.
   `BRIEF_MAX`/`list_description` live here.
 - `suggest` — the one edit-distance matcher (`closest`) behind every
   did-you-mean, and `lead` (the first clause of a description).
+- `untrusted` — text this process did not write, made safe to print:
+  `is_unsafe` (the one table — every control character, every Unicode `Cf`
+  mark, and the invisible fillers and variation selectors), `strip_unsafe`,
+  `clip_flat` (whitespace flattened, clipped by characters with `…`), and
+  `clean_line` (the two at `LINE_MAX`, 200). Every door that prints a peer's
+  bytes cleans them here: `aoide-client` the words of a far door's mail answer,
+  `aoide-conduct`'s graph views (re-exported as `graph::clean_line`), and
+  `aoide-server`'s A2A door.
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.
 - `output` — `Outcome` + exit codes, the generic envelope every command
   returns; also the taught-error shape (`Outcome::refuse`, `Kind`, `Fix`,

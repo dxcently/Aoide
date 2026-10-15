@@ -175,10 +175,11 @@ hand edit.
 ### The loop and the unit
 
 `aoide_server::daemon` grows `serve(config) -> io::Result<!>`-shaped
-`run_loop`: bind the socket (next section), spawn the accept thread, then
-tick (~1s): poll the secrets Follower, run the hand-edit sweep, run the
-periodic jobs L4 adds. Thread model mirrors the secrets broker
-(`broker.rs:315`): thread-per-connection via fallible
+`run_loop`: lock `state/` owner-only, refusing to start when it cannot;
+take both locks and bind the socket (next section); spawn the accept
+thread; then tick (~1s): poll the secrets Follower, run the hand-edit
+sweep, run the periodic jobs L4 adds. Thread model mirrors the secrets
+broker (`broker.rs:315`): thread-per-connection via fallible
 `thread::Builder::spawn` (drop one connection, never unwind the accept
 loop), 250ms backoff on accept error. The `aoided` binary
 (`cli/src/bin/aoided.rs`) calls it with the assembled registry and dispatch
@@ -208,10 +209,31 @@ needs the daemon socket.
 ### Socket
 
 `$AOIDE_DAEMON_SOCKET` override, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`.
-Bind mirrors `secrets::broker::bind_socket` (`broker.rs:275`): create
-parent, remove stale socket, bind, chmod `0600` (user-private — unlike the
+
+Ownership is two locks. Both are exclusive, non-blocking `flock`s, both are
+taken before the socket is touched, and both are held for the daemon's whole
+life:
+
+- the socket lock, `<socket>.lock` (the socket's path with `.lock` appended):
+  one daemon per socket path;
+- the state lock, `aoided.lock` in the state dir (`$AOIDE_STATE_DIR`, else
+  `$AOIDE_ROOT/state`): one daemon per root, so two never tick and seal or
+  reap the same `sessions.json`.
+
+A second `aoided` finds either lock held and refuses to start. Its message
+names the lock file and what the live holder owns, and names the holder's pid
+where readable. Nothing is bound. The kernel drops both locks on exit, crash
+included, so a dead daemon's lock never blocks a restart. Once both are held,
+bind mirrors `secrets::broker::bind_socket` (`broker.rs:275`): create parent,
+remove the leftover socket, bind, chmod `0600` (user-private — unlike the
 secrets socket there is no cross-uid audience; `$XDG_RUNTIME_DIR` is 0700
 anyway, the chmod is belt-and-braces).
+
+**The open hole.** A same-uid process can still kill the lock holder first,
+then take both locks and bind its own socket. The locks stop a second
+`aoided` from starting beside a live one; they do not stop a same-uid process
+that kills the holder. The real fix (`aoided` under its own user) is not
+planned.
 
 ### Framing
 
@@ -234,14 +256,12 @@ reply line. One `write_json_line`-shaped formatter, one
   paragraph) is this process's current seal-signing public key — never
   secret, but a same-uid-writable FILE next to the seal it vouches for
   would be cryptographically void, so it is fetched fresh from a live
-  round trip instead. That round trip is NOT attacker-proof under OQ1-A:
-  `bind_socket` unlink-then-binds with no flock/pidfile, so a same-uid
-  attacker can already race or evict the real listener and answer with a
-  forged key — LANE IDENTITY P-ID3 added a CROSS-uid peercred floor to
-  this socket's accept, which does not close this (a same-uid attacker
-  racing the bind is the same uid the floor admits); a `flock`/pidfile
-  guard on `bind_socket` would be the actual fix, not attempted there. It
-  buys no more than the raw per-session socket already leaves open.
+  round trip instead. That round trip is NOT attacker-proof under OQ1-A: a
+  same-uid attacker that kills the lock holder (the open hole, under
+  "Socket") can answer with a forged key. LANE IDENTITY P-ID3 added a
+  CROSS-uid peercred floor to this socket's accept, which does not close
+  this (a same-uid attacker is the same uid the floor admits). It buys no
+  more than the raw per-session socket already leaves open.
 - `subscribe` → the connection becomes a stream: each matching bus event is
   written as an interim line as it happens; the final reply only comes on
   shutdown. Classes are explicit — an empty/absent `classes` delivers
@@ -485,19 +505,14 @@ windowed path with its resolved argv. Rules:
 - **Post-spawn restore delivery (P-C6).** Once a terminal candidate's spawn
   actually registers, its `restore` snapshot decides what — if anything —
   lands in the new pty, through `session_send` in-process, never a direct
-  socket write. Not idle, with a foreground `argv`: re-exec it (`--yes
-  --submit`) — the session was demonstrably running it when it left — EXCEPT
-  when `argv[0]`'s basename is `sudo`, which is never re-exec'd unattended
-  (only the cwd restores; a privileged command popping a password prompt in
-  a terminal nobody is watching is not a restore). Idle, with a clean
-  `typed` line: preload it (`--yes`, and permanently no `--submit`) so it
-  sits in the new prompt until a human presses Enter — nothing runs without
-  a keystroke. Idle with no `typed`: nothing is delivered, a terminal
-  reopened at its own cwd already being the complete answer. The two
-  delivery branches are never unified behind a shared boolean parameter —
-  each hardcodes its own flag map, so a later refactor cannot flip the
-  no-submit path into a submitting one by threading a stray `true` through
-  a shared helper.
+  socket write. Not idle, with a foreground `argv`: type it at the prompt
+  (`--yes`, never `--submit`) — the session was demonstrably running it when
+  it left, and the human who reads the line presses Enter — EXCEPT when
+  `restore_argv_refusal` refuses the argv (a privilege program such as `sudo`,
+  a shell-form argv, an assignment prefix, a control character, a line over
+  4096 bytes; `CONTRACTS.md` lists them once), which restores the cwd only.
+  Idle: nothing is delivered; a terminal reopened at its own cwd already being
+  the complete answer.
 - The conductor gains a keybind invoking resurrect for the focused
   project (`conductor/src/commands.rs` — the TUI already maps keys onto
   typed commands).

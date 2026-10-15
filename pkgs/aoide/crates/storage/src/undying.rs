@@ -77,7 +77,7 @@ fn migrate_carry_to_undying() {
         return;
     }
     if let Some(parent) = new_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
+        if let Err(e) = crate::fs::ensure_write_dir(parent) {
             eprintln!(
                 "aoide: cannot create {} ({e}) — undying marks remain at {}",
                 parent.display(),
@@ -266,6 +266,25 @@ mod tests {
     }
 
     // ── carry.json → undying.json migration (command-defrag lane U1) ──────
+
+    /// The carry migration moves a file into a `state/` that may be wide, and the
+    /// move locks it: a `state/` left at a wider mode is owner-only afterward.
+    #[cfg(unix)]
+    #[test]
+    fn the_carry_migration_locks_a_wide_state_it_moves_into() {
+        use std::os::unix::fs::PermissionsExt;
+        with_temp_state_dir("migrate-locks", || {
+            std::fs::create_dir_all(state_dir()).unwrap();
+            std::fs::set_permissions(state_dir(), std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::write(state_dir().join("carry.json"), r#"{"schemaVersion":"0","carried":[]}"#).unwrap();
+
+            migrate_carry_to_undying();
+
+            assert!(undying_path().exists(), "the carry file must have moved");
+            let mode = std::fs::metadata(state_dir()).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "the carry migration left state/ at {mode:o}");
+        });
+    }
 
     #[test]
     fn migrate_carry_to_undying_renames_the_old_file_once() {

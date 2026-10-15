@@ -193,40 +193,45 @@ pub fn node_fingerprint(pubkey: &[u8]) -> String {
 /// no way to recover the true mint time and fabricating one would be
 /// worse than admitting we don't know it.
 pub fn load_or_mint() -> io::Result<(Keypair, bool)> {
-    let kp = key_path();
-    match std::fs::read(&kp) {
-        Ok(bytes) => {
-            let seed: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "{}: expected a 32-byte ed25519 seed, found {} bytes — refusing to mint over an existing identity file",
-                        kp.display(),
-                        bytes.len()
-                    ),
-                )
-            })?;
-            let signing_key = SigningKey::from_bytes(&seed);
-            let created_at = std::fs::read_to_string(created_at_path())
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(now_iso_utc);
-            Ok((
-                Keypair {
-                    signing_key,
-                    created_at,
-                },
-                false,
-            ))
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let (pair, minted) = load_or_mint_seed_file(&kp)?;
-            fs::atomic_write(&created_at_path(), &pair.created_at)?;
-            Ok((pair, minted))
-        }
-        Err(e) => Err(e),
+    if let Some(kp) = load_existing()? {
+        return Ok((kp, false));
     }
+    let kp = key_path();
+    let (pair, minted) = load_or_mint_seed_file(&kp)?;
+    fs::atomic_write(&created_at_path(), &pair.created_at)?;
+    Ok((pair, minted))
+}
+
+/// The read half of [`load_or_mint`]: this instance's keypair when its key
+/// file is already on disk, `None` when it is not. It never mints and never
+/// writes, so a caller that must not create an identity (the door's answer
+/// path) asks for the key here and leaves no key file behind.
+pub fn load_existing() -> io::Result<Option<Keypair>> {
+    let kp = key_path();
+    let bytes = match std::fs::read(&kp) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let seed: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{}: expected a 32-byte ed25519 seed, found {} bytes — refusing to mint over an existing identity file",
+                kp.display(),
+                bytes.len()
+            ),
+        )
+    })?;
+    let created_at = std::fs::read_to_string(created_at_path())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(now_iso_utc);
+    Ok(Some(Keypair {
+        signing_key: SigningKey::from_bytes(&seed),
+        created_at,
+    }))
 }
 
 /// Load or mint a raw 32-byte ed25519 seed at `path` — [`load_or_mint`]'s own
@@ -415,6 +420,24 @@ mod tests {
         let (loaded, minted_again) = load_or_mint().unwrap();
         assert!(!minted_again);
         assert_eq!(loaded.info(), minted_info);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn load_existing_reads_a_key_and_never_mints_one() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = aoide_test_support::EnvSaver::capture(&["AOIDE_STATE_DIR"]);
+        let root = aoide_test_support::unique_tmp("identity-load-existing");
+        env(&root);
+
+        assert!(load_existing().unwrap().is_none(), "no key on disk is None, not a minted key");
+        assert!(!key_path().exists(), "and nothing was written");
+        assert!(!identity_dir().exists(), "not even the identity directory");
+
+        let (minted, _) = load_or_mint().unwrap();
+        let existing = load_existing().unwrap().expect("the minted key is on disk now");
+        assert_eq!(existing.info(), minted.info());
 
         let _ = std::fs::remove_dir_all(&root);
     }

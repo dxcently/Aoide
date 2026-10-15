@@ -245,9 +245,6 @@ pub fn enabled() -> bool {
 pub fn set_enabled(on: bool) -> std::io::Result<bool> {
     let previous = enabled();
     let path = switch_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let file = SwitchFile { schema_version: SWITCH_SCHEMA_VERSION.to_string(), enabled: on };
     let line = serde_json::to_string(&file)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;

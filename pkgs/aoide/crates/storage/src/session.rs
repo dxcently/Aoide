@@ -73,7 +73,7 @@ pub fn upsert_session(
             s.window_address = w.to_string();
         }
         if let Some(p) = parent {
-            s.parent_session_id = Some(p.to_string());
+            s.set_parent_session(Some(p.to_string()));
         }
         if let Some(c) = conductable {
             s.conductable = Some(c);
@@ -185,6 +185,8 @@ pub fn upsert_session(
             // pid; a fresh registration otherwise starts without one.
             seal: None,
             sealed_issued_at: None,
+            sealed_pid_starttime: None,
+            sealed_boot_id: None,
             ever_sealed: None,
             attested_spawner: None,
             // Stamped later by the PTY tick's `conduct_refresh_shell`

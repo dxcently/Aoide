@@ -80,6 +80,9 @@ aoide session phase --id "$ID" --phase awaiting
 aoide session end   --id "$ID"
 ```
 
+Re-registering a protected live wrap is covered in CONTRACTS.md's identity
+section, which states the rule for the hook's own SessionStart too.
+
 Canonical state vocabulary and how the desktop renders it:
 
 | state | glyph | treatment |

@@ -1613,6 +1613,14 @@ fn reap_inner(
         }
     }
 
+    // The reaper ends a record only once its process is dead.
+    // A protected live wrap (`identity::is_protected_live_wrap`) is spared
+    // whichever liveness signal (window, staleness, ghost) named it.
+    if !reaped.is_empty() {
+        let live_wraps = crate::graph::identity::live_sealed_wrap_ids(&s_file.sessions);
+        reaped.retain(|id| !live_wraps.contains(id));
+    }
+
     // A hook child whose conducted wrap still runs, with its turn open, is that
     // wrap's to end: the wrap records the death when its own child exits
     // (`record_hook_deaths`), and a reap here would close the phase first and

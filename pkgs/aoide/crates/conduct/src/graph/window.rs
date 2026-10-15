@@ -2480,8 +2480,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         const DEAD: i32 = 2_000_000_000;
-        do_hook_session_start("hand", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD + 2]);
-        do_hook_session_start("bare", Some("claude"), Some("/w"), None, None, None, &[]);
+        do_hook_session_start(aoide_protocol::Door::Cli, "hand", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD + 2]);
+        do_hook_session_start(aoide_protocol::Door::Cli, "bare", Some("claude"), Some("/w"), None, None, None, &[]);
 
         let (child, hook) = stand_in_hook(&dir, "pid", |s, o| {
             sh_c(&format!("sh {} {}; true", s.display(), o.display()))
@@ -2537,7 +2537,7 @@ mod tests {
         });
         let stored: Vec<i32> = pid_ancestry(hook).into_iter().skip(2).take(8).collect();
         assert_eq!(stored.first(), Some(&(std::process::id() as i32)), "the stored chain starts at the harness");
-        do_hook_session_start("bound", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
+        do_hook_session_start(aoide_protocol::Door::Cli, "bound", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
 
         let before = client_reads();
         ensure_session_window("bound", Some(hook));
@@ -2694,7 +2694,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start("h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
+        do_hook_session_start(aoide_protocol::Door::Cli, "h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
         let sibling_chain: Vec<i32> = [sibling.id() as i32]
             .into_iter()
             .chain(a[2..].iter().copied())
@@ -2719,7 +2719,7 @@ mod tests {
         // The hook exits. The live harness now stands in the record's own chain.
         let _ = hook.kill();
         let _ = hook.wait();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "sib", Some("claude"), Some("/w"), Some("0xW"), None, None, &sibling_chain,
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2761,7 +2761,7 @@ mod tests {
         let me = std::process::id() as i32;
         let a = pid_ancestry(me);
         assert!(a.len() >= 3, "the test process has a harness and an owner above it");
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "old", Some("claude"), Some("/w"), Some("0xW"), None, None,
             &[DEAD, DEAD + 1, DEAD + 2],
         );
@@ -2784,7 +2784,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "sib", Some("claude"), Some("/w"), Some("0xW"), None, None, &sibling_chain,
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2828,7 +2828,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start("h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
+        do_hook_session_start(aoide_protocol::Door::Cli, "h", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
         let sibling_chain: Vec<i32> = [sibling.id() as i32]
             .into_iter()
             .chain(a[2..].iter().copied())
@@ -2859,7 +2859,7 @@ mod tests {
 
         let _ = hook.kill();
         let _ = hook.wait();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "sib", Some("claude"), Some("/w"), Some("0xW"), None, None, &sibling_chain,
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2909,7 +2909,7 @@ mod tests {
             .chain(a[2..].iter().copied())
             .take(8)
             .collect();
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "anchored", Some("claude"), Some("/w"), Some("0xW"), None, Some(anchor.id()),
             &stored,
         );

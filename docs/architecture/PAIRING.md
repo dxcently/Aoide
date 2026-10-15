@@ -372,6 +372,14 @@ nodes:
   direction: a `< 0.0.26` binary writes the whole registry from a model with
   no `grants`/`narrowed`, so its first write erases per-mesh grants
   (CONTRACTS.md §4's rollback-scope paragraph, §7's `grants` record).
+- **Answers are signed too.** A door signs its JSON-RPC answer to a request
+  whose signature it verified, with its own identity key, over the request's
+  signature and nonce, the HTTP status and the body digest (CONTRACTS.md §6
+  "Signed answers"). The signature rides the response header
+  `X-Aoide-Answer-Signature`. Unverified, replayed and refused requests get no
+  door signature, so the key never signs bytes a sender chose. The signed
+  answer is what a client checks against the key on file for the node it
+  dialled.
 - Unpaired callers keep today's door-wide bearer path (read arms
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where
