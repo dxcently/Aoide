@@ -198,6 +198,15 @@ in the message.
   sealed session the whole spawn is held with `hold_whole` under the shared
   `mcp` source, its id fixed so the approved launch registers under the one the
   caller was told, and `pending approve` replays it with the approver's door.
+  An attested MCP spawn whose argv `wrapped_harness` does not recognise as a
+  registered harness is held whole the same way, shown as its full escaped
+  argv (a shell, `aoide`/`lyra`, `env sh`, an interpreter, any unknown program).
+  It is never refused outright and never launched by the MCP call; only
+  `pending approve` from a human door launches it. The accepted residual: a
+  recognised harness is an agent with its own shell, so a launched MCP spawn can
+  steer its own child the way Melete's `steer_run` does. `wrapped_harness` proves
+  the walked name (`claude`, `kimi`, `pi`, `eidolon`), not the file behind it, so
+  a file named `claude` anywhere passes; pinning a path is the open decision.
   `session_resurrect_with` is the same judgement for `resurrect`, because it
   too starts processes: attested, it revives; a door that cannot approve with
   no sealed caller (always the A2A door, which is never asked) holds

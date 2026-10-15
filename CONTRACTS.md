@@ -1203,6 +1203,13 @@ survives; a request line over the 1 MiB cap is dropped mid-stream (checked
 incrementally, not only after a `\n` finally arrives) with one error reply
 first when a node is still there to receive it.
 
+An MCP spawn is judged by its argv, not only by its caller. A spawn from an
+attested caller launches only when `wrapped_harness` recognises a registered
+harness; any other argv is held whole in `pending.json` and launches only
+through `pending approve` on a human door. Nothing is refused outright, and
+nothing unrecognised launches over MCP. A launched harness is an agent with its
+own shell, so it can steer its own child; that residual is accepted.
+
 ---
 
 ## 4. Stage file formats — **v0**
