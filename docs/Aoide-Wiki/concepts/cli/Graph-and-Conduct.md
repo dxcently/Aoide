@@ -778,13 +778,17 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
   role, mailboxes, cc, edges), then the sessions that share a reason with it,
   each with its reasons. `--json`, or any door but the CLI, carries the same
   facts in `data`: `query`, `scope`, `sessions` (carries, `unknown`,
-  `matched`) and `related`. The human form builds no row JSON. MCP, A2A and
-  the daemon pass the query as one string, split like the conductor's line
-  (`agent:claude state:working` is two terms; `cc:"pr 41"` keeps its space).
-  A far row's text fields, a `matched` value and each `threads` list are
-  clipped to a line or to 20 entries beside their full count. A cached row's
-  project is the one its node published, and none when it published none: its
-  cwd is never read against this box's disk or projects.
+  `matched`) and `related`. The human form builds no row JSON. MCP and A2A
+  pass the query as one string, split like the conductor's line
+  (`agent:claude state:working` is two terms; `cc:"pr 41"` keeps its space);
+  the daemon's array elements are the words. A far row's text fields, a
+  letter's text, a mailbox's name and a `matched` value are clipped to a line.
+  Every list in a row (mailboxes, cc'd letters, threads, a letter's To
+  addresses, edges, a related row's reasons) holds at most 20 beside its full
+  count, and `sessions` and `related` list at most 200 rows beside `total` and
+  `more`. A cached row's project is the one its node published, and none when
+  it published none: its cwd is never read against this box's disk or
+  projects.
 - **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
   refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
   over 64 words, or one with more than 256 alternatives in all its terms, each

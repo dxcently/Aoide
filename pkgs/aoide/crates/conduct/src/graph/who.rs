@@ -1375,9 +1375,9 @@ mod tests {
         let sessions = sessions_from_graph(&graph, "yomi-strix");
         let row = &sessions[0];
         let rendered = render_nodes(&[build_mesh_node(&node("yomi-strix"), Ok(graph.clone()), None)]);
-        // The same cwd's basename becomes a project bucket name in the OTHER
-        // grouping — a string derived off the same pulled field, so it is
-        // cleaned at the render and in the JSON too.
+        // The OTHER grouping renders the same pulled fields under a bucket
+        // name, which is the project the node published (none here, so
+        // `(no project)`), and a document's text is cleaned there too.
         let grouped = render_groups(&group_by_project(
             vec![build_mesh_node(&node("yomi-strix"), Ok(graph.clone()), None)],
             &[],

@@ -141,9 +141,10 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
 A query is a list of words. On the command line each word is one shell argument,
 quoted the way the shell quotes (`cc:"pr 41"` is one word, value `pr 41`). The
 conductor's query line splits on spaces and honours `"…"`, and so does the one
-`query` string that MCP, A2A and the daemon carry: there,
-`agent:claude state:working` is two terms and `cc:"pr 41"` is one word. All
-three reach the parser as the same list. A word whose text before the first `:`
+`query` string that MCP and A2A carry: there, `agent:claude state:working` is
+two terms and `cc:"pr 41"` is one word. The daemon carries an array, whose
+elements are the words as they stand. All of them reach the parser as the same
+list. A word whose text before the first `:`
 is a key below is a term; every other word is a bare word. Every term and every
 bare word must match (AND); inside one term, commas are alternatives (OR):
 `state:working,awaiting`.
@@ -300,23 +301,31 @@ facts in `data`:
                  "carries": {
                    "agent", "model", "kind", "cwd", "project", "title", "petname",
                    "role":      { "task", "nativeRole", "leads": [] },
-                   "mailboxes": { "reads": [{ "name", "unread", "via" }], "inbox": [], "reportTo" },
-                   "cc":        [{ "msgid", "threadId", "subject", "from", "to": [] }],
+                   "mailboxes": { "reads": [{ "name", "unread", "via" }], "readsCount", "inbox": [], "reportTo" },
+                   "cc":        [{ "msgid", "threadId", "subject", "from", "to": [], "toCount" }], "ccCount",
                    "threads":   [], "threadsCount",
                    "edges":     { "parent", "childrenCount", "siblingsCount", "wrap",
                                   "remoteParent", "remoteChildrenCount", "repo" } },
                  "unknown": ["mailboxes", "cc", "threads"],
                  "matched": [{ "term", "field", "value", "how": "exact" | "prefix" | "substring" }] }],
-  "related":  [{ "node", "sessionId", "reasons": [{ "kind", "detail" }] }] }
+  "related":  [{ "origin", "node", "sessionId", "reasons": [{ "kind", "detail" }], "reasonsCount" }],
+  "total", "more" }
 ```
 
 `sessions` and `related` ride only for a machine reader: `--json`, or any door
 but a terminal's CLI, so an MCP caller gets them without the flag. The human
 form builds neither, nor a row's `matched` terms. `unknown` rides on remote
 rows; `related` rides with `--related`. The `children`, `siblings` and
-`remoteChildren` lists ride only on the `--related` target. Those three and
-`threads` hold at most 20 each, the first filed, and each `…Count` key is the
-full size on every row.
+`remoteChildren` lists ride only on the `--related` target.
+
+Every list in a row holds at most 20, beside its full count: `children`,
+`siblings`, `remoteChildren`, `reads` (the first by name), `cc` (the newest
+letters), `threads` (the first filed), a letter's `to`, and a related row's
+`reasons` (the strongest). Each `…Count` key is the full size on every row. The
+list itself, `sessions` or `related`, holds at most 200 rows. `total` is how
+many rows answered and `more` how many of them are not listed. The human form
+lists every row, and a target's mailboxes line or a related row's reasons that
+are cut begin with their full count.
 `cacheAge` is the cache's age in seconds, `null` for this box's rows. An absent
 key, a key named in `unknown`, and an empty list are three different answers:
 not recorded, not published to this box, recorded as none. Titles, subjects
@@ -325,11 +334,13 @@ the human rows and in `--json`, has its control, format and bidi characters
 stripped (Decision 10). In the human form each field also flattens its
 whitespace and clips to 200 characters, and a row clips to 240, so one row is
 one terminal line. In `--json` a far row's text fields are clipped the same way
-when the row is built, and a `matched` value is clipped to 200 characters
-(Decision 13). A far row's fields are that node's claims, and the header
-above the rows says so with each node's cache age. A consumer treats every such
-string as data (house rule 4). The human cc line names the newest letter and
-counts the rest; `--json` carries them all.
+when the row is built, a letter's subject, sender and recipients and a
+mailbox's name are clipped where the base is read, and a `matched` value is
+clipped to 200 characters (Decision 13). A far row's fields are that node's
+claims, and the header above the rows says so with each node's cache age. A
+consumer treats every such string as data (house rule 4). The human cc line
+names the newest letter and counts the rest; `--json` carries the newest 20
+beside `ccCount`.
 
 Find writes nothing, takes no lock, never reaches the daemon and never dials a
 node — `session trace`'s posture. A row is a fact, never a recommendation:
@@ -582,33 +593,43 @@ alternative would have given, and what the chosen call costs.
     show as related. Cost: a remote link this box never recorded is invisible
     here, and a far row sharing a task with a local row is not related to it.
 
-13. **An answer's size follows the rows, never the query times a field.** A far
-    node chooses its rows, ids, cwds and edges, one cache may hold 20 MiB, and a
-    paired node can deposit letters into this box's mail. So a far row's text
-    fields are clipped to one clean line of 200 characters when the row is
-    built, before a match reads it; a `matched` value is clipped the same way;
-    a query takes at most 64 words and 256 alternatives; the base is walked a
-    few times in all and never once per row (unread counts search each
-    mailbox's sorted marks, a letter is decoded once, and threads and reasons
-    dedupe through sets); and a row's lists hold at most 20 beside their
-    counts. The alternative, bound only the output, leaves a 5 MiB title cloned
-    once per word into every machine reader's answer: four rows at 64 words
-    made 1.4 GB of JSON. Cost: a far field is found by its first 200
-    characters only, and a far session id longer than that names itself
-    clipped, which no honest node produces.
+13. **An answer's size follows the rows, never the query or a letter times a
+    field.** A far node chooses its rows, ids, cwds and edges, one cache may
+    hold 20 MiB, and a paired node can deposit letters into this box's mail,
+    with a subject, a sender, recipients and a mailbox name of any length. So
+    every such string is clipped to one clean line of 200 characters where it
+    is read: a far row's text fields when the row is built, before a match
+    reads them, and a letter's text and a mailbox's name when the base is
+    read. A `matched` value is clipped the same way. A query takes at most 64
+    words and 256 alternatives. The base is walked a few times in all: unread
+    counts search each mailbox's sorted marks, a letter is decoded once, a row
+    visits only the letters filed to the mailboxes it reads, and threads,
+    mailboxes and reasons pair through sets. Every list in a row holds at most
+    20 beside its count, and a machine answer lists at most 200 rows beside
+    `total` and `more`, so it holds no more than rows times a constant. The
+    alternative, bound only the output, leaves a 5 MiB title cloned once per
+    word into every machine reader's answer: four rows at 64 words made 1.4 GB
+    of JSON. Cost: a far field is found by its first 200 characters only, a
+    far session id longer than that names itself clipped, which no honest node
+    produces, and `cc:` reads each letter's sender, subject, thread and first
+    20 To addresses. A letter is copied into each local row that reads its
+    mailbox, so the memory of the mail facts is the sum of those copies.
 
 14. **A far row has only the project its node published.** Its cwd is a path
     the node chose. Deriving a bucket from it would stat this box's disk up
     the whole path (`project_bucket`'s manifest walk) and match this box's
-    registered project roots, so a far node could steer reads on this box and
-    put itself under one of this box's projects in a `project:` answer. So a
+    registered project roots, so a far node could steer reads on this box. So a
     cached row's project is the stored `project` its document carries, clipped
     like the other far text, and none when the document carries none. A local
     row is unchanged, and bare `session` files a far session the same way
-    (`remote_project` is the one rule). The alternative, the bucket rule
-    applied to every row, files a far session by this box's projects whenever
-    the fleet shares paths. Cost: a far session whose node published no
-    project is under no project, in both commands.
+    (`remote_project` is the one rule). A far node can still publish
+    `project: "aoide"`, and its row is then filed under `aoide` in a
+    `project:` answer. That is accepted: the project is the node's claim, the
+    row is marked as the node's claim like every far row, and it never makes a
+    `same project` reason with a local row (Decision 12). The alternative, the
+    bucket rule applied to every row, files a far session by this box's
+    projects whenever the fleet shares paths. Cost: a far session whose node
+    published no project is under no project, in both commands.
 
 ## How it sits with other work
 

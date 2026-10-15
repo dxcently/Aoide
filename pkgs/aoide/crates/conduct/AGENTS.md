@@ -1952,34 +1952,42 @@ in the message.
   argument (`session_find_with`), so a test never reads it, and its no-dial
   and no-write proofs are the find tests
   `find_reads_the_stage_and_the_caches_and_writes_nothing_and_dials_no_node`.
-- **`graph::find` stays linear in a hostile far node's rows and a paired
-  node's letters.** A far node chooses its rows, ids, cwds and edges, one
-  cache may hold 20 MiB, and a paired node can deposit letters into local
-  mail. So no step may cost rows times rows, letters times rows, or letters
-  times mailboxes, and no allocation may grow with a field's length times the
-  query's word count. `remote_row` clips every text field the node wrote to one
-  clean line (`clip`: `LINE_MAX` characters, reading only the field's head)
-  before anything reads it; a task stays whole because `remote_task` already
-  bounds it. A `matched` value is clipped the same way, whichever row
-  or letter it came from. A query takes at most `WORDS_MAX` (64) words and
-  `ALTERNATIVES_MAX` (256) alternatives. The resolver's candidates are
+- **`graph::find` stays linear in a hostile far node's rows and a paired node's
+  letters, and an answer never grows past its rows times a constant.** A far
+  node chooses its rows, ids, cwds and edges, one cache may hold 20 MiB, and a
+  paired node can deposit letters into local mail, with a subject, a sender,
+  recipients and a mailbox name of any length. So no step may cost rows times
+  rows, mailboxes times mailboxes, letters times mailboxes or letters times
+  every row, and no allocation may grow with a field's length times the query's
+  word count. Every string such a node or letter wrote is clipped where it is
+  read (`clip`: `LINE_MAX` characters, reading only the field's head):
+  `remote_row` for a far row, `filed` for a letter's subject, sender, recipients
+  and thread, `mail_facts` for a mailbox's name; a task stays whole because
+  `remote_task` already bounds it. A `matched` value is clipped the same way,
+  whichever row or letter it came from. A query takes at most `WORDS_MAX` (64)
+  words and `ALTERNATIVES_MAX` (256) alternatives. The resolver's candidates are
   gathered once per answer (`Refs`), and each distinct `parent:` value is
   resolved once. `--related` checks each row against a `Target` built once,
-  whose remote children are a set. A row's bare fields are read only when
-  the query has a bare word, and the cwd is folded once, its components
-  slices of that fold, never a string each. `find` returns rows and never a
-  `matched`: `Found::explain` builds one, and only the machine block of
+  whose remote children and mailboxes are sets. A row's bare fields are read
+  only when the query has a bare word, and the cwd is folded once, its
+  components slices of that fold, never a string each. `find` returns rows and
+  never a `matched`: `Found::explain` builds one, and only the machine block of
   `list_view` calls it, so a human answer has no flag to get wrong. In
   `mail_facts`, unread counts search each mailbox's sorted marks, a letter is
-  decoded once however many rows read its mailbox (`filed`), and a row's
-  threads dedupe through a set; `reasons_between` pairs threads and dedupes
-  its reasons through sets as well. Edge lists, a row's `threads` and the
-  candidates a refusal names hold at most `LIST_MAX` (20), the lists beside
-  their full count and a refusal's with `and N more`. The timing tests in
-  `find.rs` (the twenty-thousand-row, cap and mail tests) fail on a quadratic
-  or per-component regression; their bounds are many times the idle run so a
-  loaded builder passes them, and a quadratic mutant still fails them. Keep
-  both properties when touching these paths.
+  decoded once however many rows read its mailbox (`filed`), a row visits only
+  the letters filed to the mailboxes it reads (an index by mailbox, merged back
+  into the base's order), and a row's threads dedupe through a set;
+  `reasons_between` pairs threads and mailboxes and dedupes its reasons through
+  sets as well. Every list in a row holds at most `LIST_MAX` (20) beside its
+  full count: edges, `reads`, `cc`, `threads`, a letter's `to`, a related row's
+  `reasons`, and the candidates a refusal names (with `and N more`). A machine
+  answer lists at most `ROWS_MAX` (200) rows beside `total` and `more`; the
+  human form lists them all. A new list in a row takes a cap and a count, and a
+  new string a node or letter wrote takes a `clip` where it is read. The timing
+  tests in `find.rs` (the twenty-thousand-row, cap and mail tests) fail on a
+  quadratic or per-component regression; their bounds are many times the idle
+  run so a loaded builder passes them, and a quadratic mutant still fails them.
+  Keep both properties when touching these paths.
 - **A remote row's project is the one its node published.**
   `who.rs::remote_project` is the one rule: the stored `project`, clipped to a
   line, and none when the node published none. Bare `session`'s
@@ -1990,14 +1998,14 @@ in the message.
   box's `projects.json` roots, so a node could steer reads here and put its
   rows under a local project. A local row still buckets through `project_of`.
   A node that published no project is under no project in both commands.
-- **Row JSON is for a machine reader only.** `sessions` and `related`, with
-  each row's `matched`, are built when `--json` is passed or the door is not
-  the CLI (`teach::quiet`'s rule in aoide-client), so an MCP caller gets them
-  without the flag and a human answer builds none. The same doors carry the
-  registry's one `query` argument as one string, so a lone argument on any door
-  but the CLI is a query line and `words` splits it with `split_line`; a CLI
-  argument is a word already and is never split again. Every human line passes
-  through `fit` (clipped to `ROW_MAX`, 240 characters) after each field's
+- **Row JSON is for a machine reader only.** `sessions` and `related`, with each
+  row's `matched`, are built when `--json` is passed or the door is not the CLI
+  (`teach::quiet`'s rule in aoide-client), so an MCP caller gets them without
+  the flag and a human answer builds none. MCP and A2A carry the registry's one
+  `query` argument as one string, so a lone argument there is a query line and
+  `words` splits it with `split_line`; a CLI argument and a daemon array
+  element are words already and are never split. Every human line
+  passes through `fit` (clipped to `ROW_MAX`, 240 characters) after each field's
   `clean_line`, and a fix that names text a far node wrote passes it through
   `plain_word`, which hands the operator a placeholder for anything but one
   plain word. A new human line or a new fix goes through them.
