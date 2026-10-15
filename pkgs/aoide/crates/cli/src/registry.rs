@@ -424,6 +424,7 @@ mod tests {
             "session.kill",
             "session.project",
             "session.end",
+            "session.find",
             "session.grant",
             "session.hook",
             "session.pending.approve",

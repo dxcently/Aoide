@@ -1371,11 +1371,13 @@ writes it. Ledger-driven views do NOT run that ladder: `resurrect --project
 will not offer for that session.
 `SessionRecord.project` and the graph node's `project` keep publishing the
 stored value only; `aoide session`'s bucket names and the conductor's
-per-project counts read the derived view. An additive `effectiveProject`
-(string) rides beside the stored `project` on two documents, present only
-when the resolver finds one — never a dangling null: the `graph.json`
-session node, and every `aoide session --json` row in both groupings
-(`--hosts` and the default project grouping, built from one
+per-project counts read the derived view, except that `aoide session` files a
+row built from a remote node's graph document under the stored `project` that
+node published, and under no project when it published none, never by its cwd.
+An additive `effectiveProject` (string) rides beside the stored `project` on
+two documents, present only when the resolver finds one — never a dangling
+null: the `graph.json` session node, and every `aoide session --json` row in
+both groupings (`--hosts` and the default project grouping, built from one
 `session_view_json`). It is LOCAL ONLY: rows a remote node's graph document
 supplies never carry it (no local session slice to walk), and `node list`
 rows do not carry it either. The same rows carry `nativeRole` under the
@@ -2192,6 +2194,106 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
+**`death` — a turn that never closed, recorded by the wrap or the session's own
+end.** A hook record of a child that a conducted wrap hosts MAY carry
+`phase: "done"` and `death`: `{ lastTool?, outcome?, exitCode?, signal?,
+spawner? }`. Two writers put both on the record in one upsert under the stage
+lock, each only while the child's phase reads `working` or `awaiting`; a closed
+phase is left alone. The wrap writes it when its harness is seen to end, naming
+the end as an exit code (`exit`), a signal number (`signal`), or the wrap's own
+deadline (`timeout`); `outcome` is absent when the wrap cannot name it. A
+`session end` of the child by the child itself, by `aoide session end` or its
+harness's `SessionEnd` hook, writes it with `outcome: "end"` and no status, when
+the edge names a spawner; with none it only closes the phase. The child ends
+itself when the caller the door attests is its harness or runs under it, the
+harness pid being in that caller's `/proc` ancestry. The attested caller is the
+hook process, the daemon's `SO_PEERCRED` pid for a forwarded call, or else the
+calling process itself; a door that attests none ends nobody. A session that has
+not ended (its roster `state` is not `done`) is anchored to its harness, the
+first pid of its `hookAncestry` else its `pid`, while that process is alive. A
+caller that does not run under the harness moves neither the record's chain nor
+its parent, and writes no fact:
+
+- a `SessionStart` for the id is a no-op that exits ok. Its audited outcome
+  names the session and the harness pid, and its data carries the reason
+  `harness-anchored`;
+- a per-turn hook is not refused. It sets the phase like any hook. It may bind
+  a window the record lacks, unless a live harness outside its chain anchors the
+  record, in which case the bind is refused. A bind moves neither the chain nor
+  the parent, and no fact;
+- `aoide session start` with `--window` or `--parent` that would change the
+  stored value, and `aoide graph link` that would re-parent the record, are
+  refused with the same reason, and write nothing;
+- `aoide session end`, a `SessionEnd` hook and `aoide session phase --phase
+  done`, which is the same call, are refused and write nothing: no `hooks.json`
+  phase, no `sessions.json` state, no exit ledger line, no subagent cascade, no
+  ssh tunnel or check-lane baseline change. The outcome is ok, its message
+  begins `refused:` and names the session and the harness pid, and its data
+  carries `reason: "harness-anchored"`. Its fix line is `aoide session kill
+  --id <id>`, which reaches a conducted session only; a bare-terminal harness
+  ends with its own process.
+
+The audit log keeps an outcome's message, so it names the session and the
+harness. So no hook, `session end` or `session phase` from a stranger re-homes
+the record, ends it, or changes its phase or presence before the end. The
+anchor lets go once the harness has exited or the session has ended. A `SessionEnd` hook whose `reason` is `clear` or `resume`, the two
+reasons after which the harness process lives on under another session id, ends
+the session with no fact: nothing ended mid-turn, the conversation moved to a
+new id, and the old id is free for a `claude --resume` of it in another terminal
+to adopt. The reason is read from the raw payload field and matched byte for
+byte against the profile's `session_end_continues`, never normalised; `logout`,
+`prompt_input_exit`, `other`, any value not listed and an absent field all write
+the fact. The chain stores no start time, so a pid reused by an unrelated live
+process holds the anchor until that process exits. The reaper spares the
+record while its stored chain names a live harness: its window signal, its orphan
+arm and its staleness bands (72 hours at rest, a week mid-turn, from the
+record's last sign of life) never judge it, and the pid signal still judges the
+record's own pid. A record with no stored chain is judged as before, and the
+bands judge a record again once its harness has exited. The caller's ancestry is
+read when the end is served, so a harness that has exited first leaves the hook
+re-parented and outside it: that end is plain, and the line is missing rather
+than false. `lastTool` is the tool in flight, when there
+was one. `spawner` is the session the death is said to, resolved while the wrap
+still runs by the same climb a route takes (§ `pingback.json`) over the roster
+as it stands, with no seal check: the recorder holds no daemon key, so the
+ping-back verifies the spawner before it says anything. It is absent when the
+edge names nobody. A wrap sent SIGTERM, SIGHUP or SIGINT (only one sent to its
+own pid, by `kill(2)`) forwards it to its harness once, SIGKILLs the harness
+after five seconds if it has not gone, records the death, and then ends by that
+same signal. A signal the terminal raised keeps its default action, and a
+disposition that was ignored on entry stays ignored, since the harness inherits
+it. A wrap killed by SIGKILL writes nothing; its death is inferred by the
+ping-back instead, with no status.
+
+`death` is the unclaimed state. The ping-back says it once and then clears it
+from the record (§ `pingback.json`), so a record that reads `phase: "done"`
+with no `death` is an ordinary finished session. Until it is said, the reaper,
+the session-start eviction, the superseded-tombstone pass, the orphan sweep and
+`session prune` spare the record (see *Held* under `pingback.json`).
+
+Before the death is written, the wrap owns it. The reaper leaves a hook child
+alone while three things hold: the conducted wrap that hosts it runs (its pid
+alive, and the wrap is not itself reaped in that pass), the child's phase reads
+`working` or `awaiting`, and the child has a spawner to be told of its death.
+It does so even when the child's harness is dead: the wrap records the death
+when its own child ends, and a reap would close the phase first and leave
+nothing to record. A child with no spawner, such as one whose wrap was started
+in an ordinary terminal, is reaped like any other, since no line would follow.
+What the wait costs is a stale reading: a harness that dies under a wrap that
+outlives it (a shell host, whose own child is the shell) leaves the child
+reading `working` until that wrap ends.
+
+The child's session record in `sessions.json` is set to `done`: the process is
+dead, and presence reads it so. `done`, not `idle`: `done` says the process is
+over, and the claim, not the state, decides when the record may go. No other
+path writes `death`. `aoide session phase` folds the phase it is given to its
+canonical rest and writes no fact, so no caller can make a spawner hear a
+death; `aoide session end` writes only the `end` a session performs on itself,
+to the spawner its own edge names. A later live phase replaces the phase and
+drops `death`, so the fact is heard only while it is still the phase. A second
+`done`, from a repeated `session end` or a duplicate `SessionEnd`, leaves the
+record and its fact exactly as they are.
+
 **`shell` and `wrappedProgram` — what a conducted wrap runs.** A session
 record MAY carry two fields, both written by the conducting process at
 REGISTRATION (`stamp_wrap`, on both `upsert_session` arms, so re-registering an
@@ -2272,13 +2374,16 @@ registration (a parent counts when its pid is really above the registering
 process, or it is the agent whose `hookAncestry` matched; a registration made
 after the spawner returned, such as a detached spawn that was reparented to
 init first, has no ancestry left and gets no stamp), and holds the id itself
-rather than a flag. Every writer of `parentSessionId` goes through one setter,
-which drops the stamp whenever the edge moves to a different id or to none, so a
-stamp names only the edge it was minted for. The send gate's parent and sibling
-autogate read the pair (`attestedSpawner == parentSessionId`). The hook door's
-sealed-ancestry walk moves a hook-registered record's edge without attesting it,
-and never moves a conducted wrap's edge.
-It exists because a detached `aoide spawn` leaves its child reparented to init, so
+rather than a flag, and a reader trusts the edge only while
+`attestedSpawner == parentSessionId`. Every writer of `parentSessionId` goes
+through one setter, which drops the stamp whenever the edge moves to a
+different id or to none, so a stamp names only the edge it was minted for. The
+send gate's parent and sibling autogate read the pair. A `session start` with
+`--parent` can rewrite the edge of a record that no live harness anchors, with
+no evidence at all; the hook door's sealed-ancestry walk moves a hook-registered
+record's edge without attesting it, and never moves a conducted wrap's edge.
+It exists because a detached `aoide spawn` leaves its child reparented to
+init, so
 the ancestry cannot be re-derived later. Absent for every parent the kernel did
 not back (an explicit `--parent` or ambient `AOIDE_SESSION_ID` naming a session
 the registering process does not run beneath, and every wrap registered by
@@ -2646,7 +2751,7 @@ and `parentSessionId` together, never off `kind` alone.
 with each of three events: the registration (a SessionStart, or the first hook
 event of an unknown id, `aoide session hook`), the first window bind to the
 session, and a per-turn heal. It is the chain of the harness's latest process, self-first from the harness up (at most 8 pids). The hook process and every shell or forwarding launcher beneath the harness are never stored. The harness is found by walking up from the hook's parent: the first process whose argv[0] basename is neither a shell nor a forwarding launcher (`conduct`'s `is_invocation_plumbing`) is the harness. The owner check runs before the plumbing verdict: a process that owns a compositor client ends the walk with no harness, a shell owner included, and so does the end of the chain. Where no harness is found the door moves no chain and binds no window. When the compositor cannot be read (off Hyprland, or no client array back on its request socket), no client check applies, so an owner in the chain is not refused.
-It is replaced only where `ancestry_may_move` allows: a pid-less record always takes the new chain, and a record anchored to a live pid of its own keeps the stored chain while that pid is alive outside the new one. That pid is the only anchor, so two live processes under one session id resolve to the latest SessionStart's process. A per-turn heal is stricter. It fires only on a dead→live transition: the stored chain is non-empty, no pid of the record, its own pid or a stored chain pid, is alive outside the hook's chain (`lives_apart`; such a pid holds the chain, so the heal is blocked), and the hook's chain holds a live harness the stored chain lacks. Both chains start at the harness, so a direct child, a compound `sh -c`, an exec-in-place `sh -c` and a capture pipeline `sh -c 'tee … | HOOK'` read the same harness (`window.rs`'s `a_direct_child_hook_finds_its_harness_at_once`, `a_hook_under_a_compound_sh_c_finds_its_harness_past_the_shell`, `a_hook_under_an_exec_in_place_sh_c_finds_its_harness` and `a_capture_pipeline_hook_finds_its_harness_past_the_pipeline_shell` pin the four). So a live stored chain is not rewritten per turn. The heal needs no compositor: only the window bind does (discovery answers nothing without `HYPRLAND_INSTANCE_SIGNATURE`). A hook whose walk meets a window owner before any harness has no harness, a shell owner included: it binds nothing and moves no chain (`a_hand_run_hook_under_a_window_owner_binds_nothing`, the hook's shell under a terminal's window owner; `a_shell_that_owns_a_window_ends_the_walk_with_no_harness`, a shell that owns the window). Two residuals. A hand-run hook under an `aoide conduct` wrap or a multiplexer server (tmux, screen) takes that process as its harness and binds the window it sits under, since the plumbing list names shells and forwarding launchers only. A hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its harness and binds the same window, and its stored chain heals once per turn, since each turn's launcher is a new pid: `program_is_a_shell` reads those names, the plumbing list does not. The `--capture` install renders its tee pipeline with no flag. A capture command written by an older build carries a flag the door no longer parses (`unrecognized flag`), until `hooks install --capture` re-renders it. 
+It is replaced only where `ancestry_may_move` allows. A record whose session has ended takes it, and so does one whose own processes, its `pid` and its harness (the first stored pid, else the `pid`), are dead or inside the new chain. A record with either alive outside the new chain keeps the stored one, and a SessionStart from there is refused whole (§ `death` above), so two live processes under one session id do not trade it: the one that holds it keeps it until it exits. Only those two processes anchor, since a shell of the old chain outlives its harness. A per-turn heal is stricter. It fires only on a dead→live transition: the stored chain is non-empty, no pid of the record, its own pid or a stored chain pid, is alive outside the hook's chain (`lives_apart`; such a pid holds the chain, so the heal is blocked), and the hook's chain holds a live harness the stored chain lacks. Both chains start at the harness, so a direct child, a compound `sh -c`, an exec-in-place `sh -c` and a capture pipeline `sh -c 'tee … | HOOK'` read the same harness (`window.rs`'s `a_direct_child_hook_finds_its_harness_at_once`, `a_hook_under_a_compound_sh_c_finds_its_harness_past_the_shell`, `a_hook_under_an_exec_in_place_sh_c_finds_its_harness` and `a_capture_pipeline_hook_finds_its_harness_past_the_pipeline_shell` pin the four). So a live stored chain is not rewritten per turn. The heal needs no compositor: only the window bind does (discovery answers nothing without `HYPRLAND_INSTANCE_SIGNATURE`). A hook whose walk meets a window owner before any harness has no harness, a shell owner included: it binds nothing and moves no chain (`a_hand_run_hook_under_a_window_owner_binds_nothing`, the hook's shell under a terminal's window owner; `a_shell_that_owns_a_window_ends_the_walk_with_no_harness`, a shell that owns the window). Three residuals. A per-turn hook from outside a record's live harness still binds a window the record lacks, since only the chain is anchored; it moves no chain, parent or fact. A hand-run hook under an `aoide conduct` wrap or a multiplexer server (tmux, screen) takes that process as its harness and binds the window it sits under, since the plumbing list names shells and forwarding launchers only. A hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its harness and binds the same window, and its stored chain heals once per turn, since each turn's launcher is a new pid: `program_is_a_shell` reads those names, the plumbing list does not. The `--capture` install renders its tee pipeline with no flag. A capture command written by an older build carries a flag the door no longer parses (`unrecognized flag`), until `hooks install --capture` re-renders it. 
 A later
 `conduct`/`spawn`
 registration with no explicit `--parent` walks ITS OWN `/proc` ancestry and
@@ -3378,10 +3483,10 @@ same-window dedup pass (`aoide session reap`'s `superseded_agent_duplicates`)
 applies the identical `superseded_by` rule and the identical lineage carve-out,
 so a window hosting six live sessions keeps all six. A conducted PTY host
 (`conductable`) is never a candidate for either pass. "No live process of its
-own" is judged against the record's stored `hookAncestry`. A pid-less record
-takes a fresh chain at every SessionStart (`ancestry_may_move`), so for a pid-less
-record a stale chain survives only a SessionStart that was missed or refused (an
-anchored record keeps its chain while its own pid lives, by design). The residual is a SessionStart that was missed or refused: such a record holds a stale chain until a per-turn hook from its live harness heals it (`hookAncestry` above), and until then a same-depth sibling registration can still retire the record. A chainless record with no pid is never a twin (`superseded_by`).
+own" is judged against the record's stored `hookAncestry`. A record takes a
+fresh chain at a SessionStart unless its pid or its harness lives outside the
+new chain (`ancestry_may_move`), so a stale chain survives only a SessionStart
+that was missed or refused. The residual is a SessionStart that was missed or refused: such a record holds a stale chain until a per-turn hook from its live harness heals it (`hookAncestry` above), and until then a same-depth sibling registration can still retire the record. A chainless record with no pid is never a twin (`superseded_by`).
 Tab-shell residual: a chain whose tab shell stands beneath the window owner binds that window (`window_for_hook_chain`), but its heal is blocked while the tab shell lives outside the hook's chain (`lives_apart`), so such a stored chain stays stale until the shell exits.
 
 **Additive in v0 (P-CX-5):** a session record MAY also carry an optional
@@ -3716,9 +3821,10 @@ lead was ever named.
 }
 ```
 
-A session node MAY carry the sessions.json `petname` and `nativeRole` fields
-above, present under the same rule; its `role` key still comes from `kind`
-alone.
+A session node MAY carry the sessions.json `petname`, `nativeRole` and `task`
+fields above, present under the same rule; its `role` key still comes from
+`kind` alone. `task` is a managed run's slug, and rides only when it is
+non-empty, so an ordinary session's node carries no `task` key.
 A project node MAY likewise carry the projects.json `hosts` array above,
 present under the same rule (non-empty only) — `{ "id": "project:aoide", …,
 "hosts": [ { "name": "chiyo", "roots": ["/srv/khoa/Aoide"] } ] }`; a
@@ -3804,6 +3910,16 @@ cannot disagree. A row the fold does not carry is still shown, marked
 never expires, so it can render with nothing current behind it. The conductor
 TUI's own DAG (`conductor/src/graphview.rs`) does NOT yet walk either key: it
 reads project/session nodes only, so this chain is terminal-only for now.
+
+The far node chooses the document's shape, so the join is bounded by its size
+and not by its arrangement. A fold's session is drawn under the FIRST link, in
+roster order, that reaches it; a later link to a drawn session keeps its row
+and has no rows under it. The `subtree` of a `remoteChildren` entry is
+`[ { "sessionId", "subtree": [ … ] }, … ]`, nested to 32 levels. A row deeper
+than that stays in preorder in the deepest nested list as `{ "sessionId",
+"subtree": [], "depth": <n> }`, so a chain of any depth nests a bounded number
+of levels and loses no row; the text render likewise draws 32 levels of
+indentation, then `…`.
 
 ### `state/stage/herald.json` — **v0**
 
@@ -3929,28 +4045,193 @@ eidolon record leaves the roster drops out of this file on the same pass.
 There is no command that reads or edits it: it is a cursor, not a queue.
 
 **`hook` — additive in v0.** A hook-source child's entry is
-`{ "phase", "at", "silent"? }`: `phase` is the canonical phase
-(`canonical_state`) of the child's `hooks.json` record last examined, `at` its
-`updatedAt` verbatim, and `silent` — absent while false — the latch that the
-12-minute silence line was sent for that `at`. A hook event is a `phase` or
-`at` that differs from the cursor's; it re-arms `silent`. The decision over it:
-the first examination of a child (no `hook` yet) is a baseline and claims
-nothing; `awaiting` is claimed on ENTERING that phase (a restamp of it is not
-another entry); `settled` when the cursor last held `working` or `awaiting`
-and the record now reads `stopped` or `idle` (the later `stopped`→`idle` decay
-says nothing); `silent` when the record reads `working` and its `at` is at
-least 12 minutes and under 24 hours old. `hooks.json` carries no reason for a
-state, so the `awaiting` line has none. The line goes to the child's SPAWNER,
-never to its `parentSessionId` (a hook child's own host wrap): the host wrap
-must be a conducted wrap whose pid is in the child's `hookAncestry` and whose
-daemon seal verifies against the live daemon key (a seal re-derives the
-pid's start time, so a pid reused by another process after its wrap died, or
-a pid hand-edited into `sessions.json`, fails it, and an unreachable daemon
-fails every check closed), and its `parentSessionId` counts only while it
-equals its `attestedSpawner` (§ `sessions.json`); a conducted spawner is
-sealed too. A child with no such recipient is not tracked and has no entry. A
-reader that does not know `hook` ignores it. A child whose session leaves the
-roster drops out on the same pass.
+`{ "phase", "at", "silent"?, "died"?, "route"? }`. `phase` is the canonical
+phase (`canonical_state`) of the child's `hooks.json` record last examined, so a
+recorded death reads `done`; `at` is its `updatedAt` verbatim. `silent`
+(absent while false) latches the 12-minute silence line for that `at`. `died`
+(absent while false) latches that a death was said for that `at`, by the
+record's fact or by the gone path. A hook event is a `phase` or `at` that
+differs from the cursor's, and clears both latches. `route` —
+`{ "host", "to", "tag", "last", "harness"? }` — is the edge last resolved while
+the child was live: the host wrap whose seal carried it, the spawner it is said
+to, the rendered `[<agent> <petname>]` tag, the tool in flight (`"working"`
+when there is none), and `harness` — `{ "pid", "start" }`, the harness process
+as the sighting found it alive, its pid and its `/proc` start time. `harness`
+is absent when the harness was not alive.
+
+**The decision, for a child the tick gathers this pass** (tracked, with a
+`hooks.json` record, and a route that verifies now):
+
+- its recorded death — a `done` record with `death`, stamped under 24 hours
+  ago and no more than a minute ahead of the clock — is said whatever phase the
+  cursor last saw, and no latch gates it. The
+  line carries the fact's status (`(exit N)`, `(signal N)` or `(timeout)`) when
+  it names one, and the fact's tool (else the session's last `activity`,
+  `working` when none). A fact whose `outcome` is `end` is said as
+  `ended mid-turn · last: <tool>` instead, with no status;
+- the first examination of a child (no `hook` yet) is a BASELINE: it claims
+  nothing, except a recorded death under 24 hours old, which is said;
+- `awaiting` is claimed on ENTERING that phase (a restamp of it is not another
+  entry). `settled` is claimed when the cursor last held `working` or `awaiting`
+  and the record now reads `stopped` or `idle` (the later `stopped`→`idle` decay
+  says nothing). `silent` is claimed when the record reads `working` and its `at`
+  is at least 12 minutes and under 24 hours old, once per `at`;
+- there is no inferred death here. A dead harness under a sealed, live host is
+  not a death yet: the host records it, or the host dies and the gone path
+  judges the child. A `done` phase with no `death` is a session ending through
+  its own hook and claims nothing. `hooks.json` carries no reason for a state,
+  so the `awaiting` line has none.
+
+**Write order.** The claim runs inside one stage-lock section. It decides, then
+writes the cursor (atomically, temp-then-rename), then clears from `hooks.json`
+the facts it said. A cursor write that fails delivers nothing; a clear that
+fails delivers nothing either, and the fact is said again on a later pass.
+Lines are delivered after the lock is released. Because a said fact is cleared
+from its record, deleting `pingback.json` after a death went out cannot repeat
+it.
+
+**Held.** A recorded death under 24 hours old (and no more than a minute dated
+ahead of the clock) is held while it has someone to be said to: its fact names a
+`spawner`, or the cursor caches a route for it. A held record is spared by the
+reaper, the superseded-tombstone pass, the orphan sweep, `session prune`, and
+the session-start eviction (which skips it, rather than rewrite its record). A
+record with neither has no line to wait for, and is not held. Neither is checked
+against a seal here, since every caller holds the stage lock and no daemon key:
+a death whose recipient never verifies is held until its stamp is 24 hours old,
+and is then pruned unsaid.
+
+**The gone path.** An entry whose child the tick did not gather this pass, and
+a recorded death no entry holds yet (its wrap ended before any tick saw the
+child), is judged from its cached route and from what the tick reads (the
+roster, `hooks.json`, the seals), in this order:
+
+- its record is on the roster with its pid alive: kept while the child is
+  tracked, dropped once it is not. A live child that only lost its edge is
+  never said of;
+- no `hooks.json` record: dropped silently. An absent record cannot show an
+  open turn, so a clean end, or a record pruned under a live harness, is not a
+  death;
+- the stamp is a day old or more, or dated more than a minute ahead of the
+  clock, or there is no fact and the entry is latched `died`, or its cursor
+  phase or its record's phase is not `working` or `awaiting`: dropped silently;
+- no cached route: a recorded death is said over the `spawner` its fact names
+  instead, with the child's own record giving the host wrap and the tag; with
+  no spawner, or no record, dropped silently;
+- no fact, and the cached route's `harness` still runs under its recorded
+  `start` (an orphan): kept, and nothing is said while that harness lives;
+- no fact, and the route's host wrap is not gone (its record is on the roster
+  with its pid alive): kept, whether its seal verifies or not. A live host
+  records the death itself when its own child ends, so nothing is inferred
+  while it runs;
+- otherwise the route must be distinct (child, spawner and host are three
+  sessions), its spawner must verify at the claim (inside the stage lock), and
+  its host wrap must be gone (absent, or its pid dead) or still verify. Then the
+  child is said of as `died mid-turn` over `route`, with the fact's status and
+  tool when a fact is recorded (`ended mid-turn`, with no status, for an `end`
+  fact), and with no status when it is inferred. A host that is still up but no
+  longer verifies keeps a recorded death's entry instead.
+
+A `done` host whose pid still runs is judged by its seal, like any live host.
+
+**A burst of deaths.** One pass puts at most three death lines (`died mid-turn`
+or `ended mid-turn`) to one spawner from the children of one host wrap. The rest
+are counted into a single line, `and <n> more ended or died mid-turn`, and every
+fact is still cleared as said. A wrap that hosted many children, ghosts minted
+through the hook door included, cannot flood its spawner with one line each.
+
+The line goes to the child's SPAWNER, never to its `parentSessionId` (a hook
+child's own host wrap). Over a live edge the host wrap must be a conducted
+wrap whose pid is in the child's `hookAncestry` and whose daemon seal verifies
+against the live daemon key; the spawner is its `parentSessionId` only while
+that equals its `attestedSpawner` (§ `sessions.json`), and a conducted spawner
+is sealed too. A seal re-derives the pid's start time, so a pid reused by
+another process after its wrap died, or a pid hand-edited into
+`sessions.json`, fails it, and an unreachable daemon fails every check closed.
+A `route` is written only while both wraps it names verify, the same test a
+live edge passes. On the gone path the spawner is checked at the claim, inside
+the stage lock;
+the host wrap need not, once it is gone, because a conducted wrap's program IS
+its harness and its seal fails when it exits. A host that is still up but no
+longer verifies keeps the entry instead of the line.
+
+**Trust model.** This file is unsealed data. The hook source reads a cursor's
+route, tag, tool and harness back as facts, so a same-uid writer can:
+
+- **fabricate** an entry about a child id that never existed, with a route to
+  any sealed, receptive session the writer chooses; the line is delivered to
+  that session. This is the same reach `aoide send --yes` already gives any
+  same-uid caller;
+- **suppress** a genuine death, two ways: by writing `route.harness` as a
+  process the writer knows is alive, under the start time it reads for that
+  process (pid 1 always runs and its start time is readable, so the entry is
+  kept as an orphan until its record is a day old, then dropped silently); or by
+  deleting a recorded `death` fact, or the record, before the tick reads it.
+  Both are the same class as editing the cursor's latches;
+- **fabricate a death** by writing a child's `hooks.json` record as `phase:
+  "done"` with a `death` fact: it is said as a death on the child's route, or
+  to the `spawner` the fact names once that session verifies, the same reach as
+  a fabricated cursor entry. A `session phase` to any phase but `done` cannot
+  write a fact. A `done` phase is `aoide session end` (§ `sessions.json`), which
+  writes an `end` fact only when its attested caller is the child's own harness
+  or runs under it, and only to the spawner the child's own edge names. The live harness anchors the chain that
+  edge is read through: no hook from outside it re-homes the record's chain or
+  parent first, and no `session end` or `session phase` from outside makes the
+  record `done`, so it cannot be pruned and registered anew (§ `sessions.json`).
+  `session start --window`, `--parent` and `graph link` cannot move a live
+  record's window or parent from outside its harness, and a route needs the
+  host wrap's pid in the chain. So besides a file edit, only a process the
+  child's harness itself runs can produce one while that harness lives, and
+  that process can equally end the child's turn. After the harness has exited,
+  or the session has ended, a new chain may adopt the id, and the line it can
+  then cause says that a session already over ended with its turn open. A
+  forged per-turn hook can still bind a window onto a windowless record that no
+  live harness anchors, which moves no fact. This is the same class as editing the
+  `hooks.json` phase itself;
+- **redirect** a live child's lines. On the live path the recipient is read
+  through the host's `parentSessionId` and `attestedSpawner`, which live in
+  `sessions.json` and are not under the seal (the seal covers the wrap's own
+  pid and start time, not its spawner edge). A same-uid edit of those two
+  fields moves the line to another session.
+
+**Session identity, same-uid residuals.** The anchor (§ `sessions.json`)
+closes a stranger's move of a live record, and nothing else. Still open, each
+a same-uid class awaiting design B, in which the daemon owns session identity:
+
+- a done id is squattable. After a `/clear`, the old id is `done` and free, so
+  one forged `SessionStart` and one forged `UserPromptSubmit` hold it against
+  the owner's `claude --resume` (the release of a `done` anchor is what lets a
+  legitimate resume adopt the id);
+- a process the victim spawned counts as its harness. A descendant of the
+  harness, such as a Bash-tool child or a sub-claude, is inside the caller's
+  chain, so it ends the session in full, with an `end` fact to its spawner while
+  the harness lives, or re-homes it after the harness has exited;
+- liveness is read in the caller's own pid namespace. A namespaced caller
+  cannot see the harness and reads it dead, so its local-path end is plain;
+- the pid fill on a chainless record. A per-turn hook fills a pid-less,
+  chainless record with an ancestor pid of its own, which then reads as the
+  harness;
+- the wrap-end ordering. A wrap whose shell exited while its orphaned harness
+  lives is refused its own end, so the record reads `working` until the
+  harness exits: a missing line, never a false one.
+
+Closed by the anchor: a stranger's `session end`, `session phase --phase done`
+and SessionEnd hook are refused and write nothing while the harness lives,
+including a daemon-routed end with no stamped peer (fail-closed); a stranger's
+`session start` moves no window or parent of a live record, `graph link`
+re-parents none, and a per-turn bind onto an anchored record is refused; and
+the reaper neither window-, orphan- nor staleness-judges a record whose stored
+chain names a live harness. The residual classes above are the ones a same-uid process
+still reaches without the daemon.
+
+Nothing in the hook source hardens the file itself; the lane accepts these as
+the same-uid boundary. The designed fix is stance B: the seal covers the
+spawner, so an edge is verified rather than read. It is designed on the
+`design/session-identity-b` branch.
+
+A child whose route does not verify when its death is owed keeps its entry
+while the death is recent (under 24 hours old), so a later tick that verifies
+it still says it; past that the entry is dropped. A child that never had a
+recipient has no entry. A reader that does not know `hook` ignores it.
 
 **`screen` — additive in v0.** A screen-source child's entry is
 `{ "screen": "<question>" }`: the `question` (§ `sessions.json`) last

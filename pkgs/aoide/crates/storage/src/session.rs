@@ -12,7 +12,7 @@
 //! Phase 3b.
 
 use crate::petname;
-use crate::records::{HookRecord, SessionRecord};
+use crate::records::{HookDeath, HookRecord, SessionRecord};
 use aoide_protocol::agents::CLAUDE_PROFILE;
 use serde_json::Map;
 
@@ -219,17 +219,40 @@ pub fn upsert_session(
 ///
 /// `merged_sessions` keys the live phase by (latest `updatedAt`), so a single
 /// rolling record per session is all it needs — no unbounded append.
+///
+/// A `done` record that still carries its death fact is the fact's whole
+/// evidence, so a second `done` (a repeated `session end`, a duplicate
+/// `SessionEnd`, a reap) leaves it exactly as it is. Any live phase supersedes
+/// the fact: a session that runs again has not died.
 pub fn upsert_hook(hooks: &mut Vec<HookRecord>, id: &str, phase: &str, now: &str) {
     if let Some(h) = hooks.iter_mut().find(|h| h.session_id == id) {
+        if phase == "done" && h.phase == "done" && h.death.is_some() {
+            return;
+        }
         h.phase = phase.to_string();
         h.updated_at = now.to_string();
+        // A death fact describes the phase it was written with; any new phase
+        // supersedes it.
+        h.death = None;
     } else {
         hooks.push(HookRecord {
             session_id: id.to_string(),
             phase: phase.to_string(),
             updated_at: now.to_string(),
+            death: None,
             extra: Map::new(),
         });
+    }
+}
+
+/// UPSERT a hook child's death: the phase becomes `done` (the process is over,
+/// and every reader folds it so) and `death` rides on the same record, so the
+/// phase and its fact are never written apart. The fact is the unclaimed state:
+/// the ping-back says it once and clears it.
+pub fn record_death(hooks: &mut Vec<HookRecord>, id: &str, death: HookDeath, now: &str) {
+    upsert_hook(hooks, id, "done", now);
+    if let Some(h) = hooks.iter_mut().find(|h| h.session_id == id) {
+        h.death = Some(death);
     }
 }
 
@@ -434,5 +457,70 @@ mod context_binding_tests {
         let legacy: SessionRecord = serde_json::from_str(r#"{"sessionId":"old"}"#).unwrap();
         assert!(legacy.enduring_agent_id.is_none());
         assert!(serde_json::to_value(legacy).unwrap().get("enduringAgentId").is_none());
+    }
+}
+
+#[cfg(test)]
+mod death_tests {
+    use super::*;
+
+    #[test]
+    fn a_death_is_its_phase_and_fact_together_and_a_new_phase_supersedes_it() {
+        let mut hooks = Vec::new();
+        upsert_hook(&mut hooks, "k", "working", "2026-10-07T10:00:00Z");
+        let fact = HookDeath {
+            last_tool: Some("Bash".into()),
+            outcome: Some("signal".into()),
+            signal: Some(9),
+            ..Default::default()
+        };
+        record_death(&mut hooks, "k", fact.clone(), "2026-10-07T10:01:00Z");
+        assert_eq!(hooks[0].phase, "done");
+        assert_eq!(hooks[0].updated_at, "2026-10-07T10:01:00Z");
+        assert_eq!(hooks[0].death.as_ref(), Some(&fact));
+
+        upsert_hook(&mut hooks, "k", "working", "2026-10-07T10:02:00Z");
+        assert_eq!(hooks[0].death, None, "a restarted turn carries no old death");
+    }
+
+    /// The fact lives on the `done` record, so a second `done` must not wipe it
+    /// or restamp the record; a plain `done` is still restamped, and a live
+    /// phase still supersedes the fact (a resumed session has not died).
+    #[test]
+    fn a_second_done_leaves_a_record_that_carries_its_fact_untouched() {
+        let mut hooks = Vec::new();
+        upsert_hook(&mut hooks, "k", "working", "2026-10-07T10:00:00Z");
+        let fact = HookDeath { last_tool: Some("Bash".into()), outcome: Some("end".into()), ..Default::default() };
+        record_death(&mut hooks, "k", fact.clone(), "2026-10-07T10:01:00Z");
+        let recorded = hooks.clone();
+
+        upsert_hook(&mut hooks, "k", "done", "2026-10-07T10:05:00Z");
+        assert_eq!(hooks, recorded, "a repeated done keeps the fact and the stamp");
+
+        upsert_hook(&mut hooks, "plain", "done", "2026-10-07T10:02:00Z");
+        upsert_hook(&mut hooks, "plain", "done", "2026-10-07T10:06:00Z");
+        assert_eq!(hooks[1].updated_at, "2026-10-07T10:06:00Z", "a done with no fact is restamped as ever");
+
+        upsert_hook(&mut hooks, "k", "idle", "2026-10-07T10:07:00Z");
+        assert_eq!((hooks[0].phase.as_str(), hooks[0].death.as_ref()), ("idle", None), "a live phase supersedes it");
+    }
+
+    #[test]
+    fn a_death_round_trips_and_stays_absent_on_an_ordinary_record() {
+        let mut hooks = Vec::new();
+        upsert_hook(&mut hooks, "k", "stopped", "2026-10-07T10:00:00Z");
+        let plain = serde_json::to_value(&hooks[0]).unwrap();
+        assert!(plain.get("death").is_none(), "{plain}");
+
+        record_death(
+            &mut hooks,
+            "k",
+            HookDeath { last_tool: Some("Edit".into()), outcome: Some("exit".into()), exit_code: Some(1), ..Default::default() },
+            "2026-10-07T10:01:00Z",
+        );
+        let wire = serde_json::to_value(&hooks[0]).unwrap();
+        assert_eq!(wire["death"], serde_json::json!({ "lastTool": "Edit", "outcome": "exit", "exitCode": 1 }));
+        let back: HookRecord = serde_json::from_value(wire).unwrap();
+        assert_eq!(back.death, hooks[0].death);
     }
 }

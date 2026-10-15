@@ -25,7 +25,25 @@
   ghost, which is not a node, and map order must not let it win.
 - A remote row's `parentSessionId` ranks it only under a parent the SAME
   node lists; a parent the node does not list (or a self-reference) leaves
-  the row flat, never guessed across nodes.
+  the row flat, never guessed across nodes. Children land in document order.
+  A hung spawner (one placed under another) that is itself listed after some
+  of its children shows the ones listed after it first, then the ones before
+  it; a root's children and a loop's breakout keep document order. A loop
+  with no root is broken out at its first listed row. A repeated session id
+  expands once, at the first occurrence the walk reaches (a root listed later
+  is walked first), so its children follow that occurrence's place; the set of
+  cards is the same, and this is the order.
+- A far roster is the far node's to shape: it may be a chain a hundred
+  thousand levels deep, a rank tens of thousands wide, or repeat a session id.
+  Nothing that ranks, walks, lays out, folds, steps or places it recurses per
+  level or scans the card list per card. `rank_far`, `walk` and `lay_slots`
+  run on explicit stacks, `Model::index` and `Model::parent` answer "which
+  card" and "whose child" by lookup, and `Positions::place` keeps each rank's
+  cards ordered and remembers the lanes a nudge has walked, so the cost is
+  linear in cards up to a logarithm. A card two parents hold is laid once,
+  under its first. A new pass over the model gets the same two proofs the
+  existing ones have: a deep chain on `on_small_stack` and an absolute
+  `finishes_within` ceiling (not a ratio: its baseline runs in milliseconds).
 - Registered nodes enter the graph from the roster outcome (`App::roster_nodes`),
   never from the document's `node:*` fold (fresh only inside the cache TTL,
   written only by `node pull`). A remote card's id is prefixed with its node's
