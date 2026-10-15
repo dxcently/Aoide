@@ -74,13 +74,16 @@
 //! **Ended mid-turn** is a session that ended itself with the turn open: its
 //! `SessionEnd` hook, or `aoide session end`, found the phase `working` or
 //! `awaiting` and wrote the same fact with `outcome: "end"` and no status
-//! (`session_store::do_session_end`). Only the session itself writes it: the
-//! caller the door attests must be the child's harness or run under it, or the
+//! (`session_store::do_session_end`). Only the session itself writes it, while
+//! its harness lives: the caller the door attests must be the child's harness
+//! or run under it, and the live harness anchors the record, so a hook from
+//! outside it re-homes neither its chain nor its parent first. Otherwise the
 //! end only closes the phase, since this line goes to an orchestrator agent and
-//! a stranger must not be able to cause it. It is said once, as a recorded
-//! death is, and its wrap then finds the phase closed and writes nothing more.
-//! A `done` phase with no fact is a session ending by its own hook after its
-//! turn closed, and says nothing.
+//! a stranger must not be able to cause it. An end served after its harness has
+//! exited finds the hook re-parented and closes plain too: the line is missing,
+//! never false. It is said once, as a recorded death is, and its wrap then
+//! finds the phase closed and writes nothing more. A `done` phase with no fact
+//! is a session ending by its own hook after its turn closed, and says nothing.
 //!
 //! A spawner hears at most [`DEATH_LINES_MAX`] death lines (died or ended) from
 //! one host wrap in a pass, then one `and <n> more ended or died mid-turn`: an
@@ -2184,10 +2187,10 @@ mod tests {
         (death, heard)
     }
 
-    /// `/clear` and a resume end the old session id inside a claude process that
-    /// goes on under another: its SessionEnd carries the reason, the end is no
-    /// death, and the spawner hears nothing of it, not even when the process
-    /// later dies. A `logout` is the process going away, and is heard.
+    /// `/clear` and a resume end the old session id inside a claude process
+    /// that goes on under another: its SessionEnd carries the reason, the end
+    /// is no death, and the spawner hears nothing of it, not even when the
+    /// process later dies. A `logout` is the process going away, and is heard.
     #[cfg(unix)]
     #[test]
     fn a_session_end_by_clear_or_resume_says_nothing_to_the_spawner_and_a_logout_does() {

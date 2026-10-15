@@ -4453,7 +4453,8 @@ mod tests {
     /// its running wrap only when someone would hear of its death. Two children
     /// with a dead harness and an open turn sit under live conducted wraps; the
     /// one whose wrap has a spawner is left as it is, and the one whose wrap
-    /// was started in an ordinary terminal (no spawner) is reaped like any other.
+    /// was started in an ordinary terminal (no spawner) is reaped like any
+    /// other.
     #[test]
     fn reap_leaves_a_live_wraps_open_child_only_when_a_spawner_would_hear_of_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

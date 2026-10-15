@@ -304,17 +304,17 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   records the fact `end`, said once as `ended mid-turn`; anyone else's `session
   end` closes the phase and says nothing, and so does a `SessionEnd` whose
   `reason` is `clear` or `resume`, after which the harness process lives on
-  under another session id. The fact names its spawner (`hook::recipient_of`),
-  so a child no tick saw before its wrap ended is still told. At most three
-  death lines per wrap and spawner go out in a pass, then one `and N more ended
-  or died mid-turn`. The recipient is the child's SPAWNER,
-  resolved through the wrap that hosts it and only over an edge the kernel
-  attested
-  (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can no
-  longer route is judged from the route its entry kept (`hook::gone`). Its
-  rules, orphan included, are stated once in `CONTRACTS.md` under
-  `state/stage/pingback.json`. An eidolon, a remote-parented child, a shell and
-  a sub-agent node are not its children.
+  under another session id. A live harness anchors its record, so no hook from
+  outside it re-homes its chain or parent before the end. The fact names its
+  spawner (`hook::recipient_of`), so a child no tick saw before its wrap ended
+  is still told. At most three death lines per wrap and spawner go out in a
+  pass, then one `and N more ended or died mid-turn`. The recipient is the
+  child's SPAWNER, resolved through the wrap that hosts it and only over an edge
+  the kernel attested (`hook::route_of`; the climb is in `AGENTS.md`). A child
+  the tick can no longer route is judged from the route its entry kept
+  (`hook::gone`). Its rules, orphan included, are stated once in `CONTRACTS.md`
+  under `state/stage/pingback.json`. An eidolon, a remote-parented child, a
+  shell and a sub-agent node are not its children.
 - **`graph::prompt`** is the screen source of `awaiting`, for a conducted
   program that reports through neither hooks nor a trace (a `codex`, an
   `aider`, a REPL, an installer in a plain conducted shell). The wrap's

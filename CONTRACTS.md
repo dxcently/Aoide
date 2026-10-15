@@ -2162,15 +2162,25 @@ the edge names a spawner; with none it only closes the phase. The child ends
 itself when the caller the door attests is its harness or runs under it, the
 harness pid being in that caller's `/proc` ancestry. The attested caller is the
 hook process, the daemon's `SO_PEERCRED` pid for a forwarded call, or else the
-calling process itself; a door that attests none ends nobody. A `session end`
-from any other caller only closes the phase. So does a `SessionEnd` hook whose
-`reason` is `clear` or `resume`, the two reasons after which the harness process
-lives on under another session id: that session did not end mid-turn, the
-conversation moved to a new id. The reason is read from the raw payload field
-and matched byte for byte against the profile's `session_end_continues`, never
-normalised; `logout`, `prompt_input_exit`, `other`, any value not listed and an
-absent field all write the fact. The wrap, finding that phase closed when its
-harness then exits, writes nothing more.
+calling process itself; a door that attests none ends nobody. A record's harness
+is the first pid of its `hookAncestry`, else its `pid`, and while that process
+is alive it anchors the record: only a hook that runs under it moves the
+record's chain or its parent, and a `SessionStart` or a per-turn hook from
+anywhere else is a no-op that exits ok and leaves `harness-anchored` in its
+audited outcome, so no stranger re-homes a record before ending it. The anchor
+lets go once the harness has exited, so a `claude --resume` in another terminal
+adopts the id. The chain stores no start time, so a pid reused by an unrelated
+live process holds the anchor until that process exits. A `session end` from any
+other caller only closes the phase. So does a `SessionEnd` hook whose `reason`
+is `clear` or `resume`, the two reasons after which the harness process lives on
+under another session id: that session did not end mid-turn, the conversation
+moved to a new id. The reason is read from the raw payload field and matched
+byte for byte against the profile's `session_end_continues`, never normalised;
+`logout`, `prompt_input_exit`, `other`, any value not listed and an absent field
+all write the fact. The caller's ancestry is read when the end is served, so a
+harness that has exited first leaves the hook re-parented and outside it: that
+end closes the phase plain, and the line is missing rather than false. The wrap,
+finding that phase closed when its harness then exits, writes nothing more.
 `lastTool` is the tool in flight, when there was one. `spawner` is the session
 the death is said to, resolved while the wrap still runs by the same climb a
 route takes (§ `pingback.json`) over the roster as it stands, with no seal
@@ -3795,10 +3805,14 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
   a fabricated cursor entry. `aoide session phase` cannot write a fact, and
   `aoide session end` writes an `end` fact only when its attested caller is
   the child's own harness or runs under it (§ `sessions.json`), and only to the
-  spawner the child's own edge names. So besides a file edit, only a process the
-  child's harness itself runs can produce one, and that process can equally end
-  the child's turn. This is the same class as editing the `hooks.json` phase
-  itself;
+  spawner the child's own edge names. The live harness anchors that edge: no
+  hook from outside it re-homes the record's chain or parent first (§
+  `sessions.json`). So besides a file edit, only a process the child's harness
+  itself runs can produce one while that harness lives, and that process can
+  equally end the child's turn. After the harness has exited a new chain may
+  adopt the id, and the line it can then cause says that a session already over
+  ended with its turn open. This is the same class as editing the `hooks.json`
+  phase itself;
 - **redirect** a live child's lines. On the live path the recipient is read
   through the host's `parentSessionId` and `attestedSpawner`, which live in
   `sessions.json` and are not under the seal (the seal covers the wrap's own

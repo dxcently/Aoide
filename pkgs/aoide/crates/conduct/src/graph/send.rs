@@ -48,7 +48,8 @@ use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
     clear_stale_parent, do_hook_session_start, do_session_end, do_session_phase,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
-    do_subagent_spawn, ensure_session_ceiling, now_iso_utc, refresh_subagent_says,
+    do_subagent_spawn, ensure_session_ceiling, live_harness_outside, now_iso_utc,
+    refresh_subagent_says,
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
     stamp_harness_session_id, stamp_session_start_at, stored_phase,
 };
@@ -60,7 +61,7 @@ use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClas
 use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::Outcome;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
-use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
+use aoide_storage::fs::{conducting_stage_dir, pid_is_alive, with_stage_lock};
 use aoide_storage::session::pid_may_move;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1751,6 +1752,21 @@ fn own_parent_claim() -> Option<String> {
     std::env::var("AOIDE_SESSION_ID").ok().filter(|p| !p.is_empty())
 }
 
+/// The pid of the live harness that anchors the registered session `id` against
+/// this hook, when it has one: the record's harness (`harness_pid`) is alive
+/// and is not in `hook_pid`'s own process ancestry, so the hook is a stranger
+/// to it. A hook from outside the harness may not re-home the record, by chain
+/// or parent: that is what lets `session end` believe whose process asks. A
+/// harness that has exited, an unregistered id and a hook that runs under the
+/// harness all answer `None`, and a hook with no walkable pid is a stranger to
+/// every live one.
+fn live_harness_anchoring(id: &str, hook_pid: Option<i32>) -> Option<u32> {
+    let file = load_stage::<SessionsFile>(&sessions_path()).ok()?;
+    let rec = file.sessions.iter().find(|s| s.session_id == id)?;
+    let ancestry = hook_pid.map(pid_ancestry).unwrap_or_default();
+    live_harness_outside(rec, &ancestry, pid_is_alive)
+}
+
 /// The profile-parametrized core of [`hook_from_str`].
 ///
 /// Split from `session_hook` so the whole path — parse, map, execute — is
@@ -1843,7 +1859,9 @@ fn hook_ensure_session_with(
     }
     let attested = attest.then(|| hook_pid.and_then(&resolve_wrap)).flatten();
     if let Some(w) = attested.as_deref() {
-        stamp_attested_parent(id, w);
+        if live_harness_anchoring(id, hook_pid).is_none() {
+            stamp_attested_parent(id, w);
+        }
     }
     let reported = vouched_payload_pid(payload, hook_pid);
     let existing = load_stage::<SessionsFile>(&sessions_path()).ok();
@@ -2004,6 +2022,18 @@ fn hook_for_profile_gated(
     let mut claim_note: Option<String> = None;
     let inner = match action {
         HookAction::Start { id, cwd } => {
+            // A SessionStart re-chains and re-parents an id that is already
+            // registered, so one from outside its live harness is refused
+            // whole: nothing moves, and the hook still exits ok and says so
+            // only in its audited outcome.
+            if let Some(harness) = live_harness_anchoring(&id, hook_pid) {
+                return Outcome::ok(cmd, "no-op (anchored to a live harness)").with_data(json!({
+                    "action": "none",
+                    "reason": "harness-anchored",
+                    "sessionId": id,
+                    "harness": harness,
+                }));
+            }
             // A claude launched INSIDE a conducted session inherits its parent's
             // `AOIDE_SESSION_ID` in the HOOK PROCESS's env — thread it as the
             // parent so a claude-conducting-claude (or a claude-in-a-shell) nests
@@ -2462,10 +2492,14 @@ const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
 /// the one of the three that is not ordinary same-uid input.
 pub const DAEMON_PEER_PID_FLAG: &str = "__daemon-peer-pid";
 
-/// The door's own peer pid on a daemon-run invocation ([`DAEMON_PEER_PID_FLAG`]),
-/// or `None` when the door stamped none. Read only where the invocation is known
-/// to be the daemon's own (`Door::Daemon`, built literally by the daemon), so a
-/// flag typed on any other door never passes for a kernel fact.
+/// The door's own peer pid on a daemon-run invocation
+/// ([`DAEMON_PEER_PID_FLAG`]), or `None` when the door stamped none.
+/// `session_end_caller` reads it only on `Door::Daemon`, which the daemon
+/// builds literally. `session_hook` reads it wherever the forwarded payload
+/// ([`STDIN_PAYLOAD_FLAG`]) rides, and no other door can carry either key: the
+/// daemon overwrites the stamp, the CLI refuses a flag its command does not
+/// declare, and the MCP and A2A doors build their flags from declared names. So
+/// a flag typed by a caller never passes for a kernel fact.
 pub(in crate::graph) fn door_pid(inv: &Invocation) -> Option<i32> {
     inv.flags.get(DAEMON_PEER_PID_FLAG).and_then(|s| s.parse::<i32>().ok()).filter(|p| *p > 0)
 }
@@ -7065,11 +7099,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&fake_dir);
     }
 
+    /// The window bind is the one route where only the chain rule stands
+    /// between a stranger's per-turn hook and a record's chain: a windowless
+    /// record's hook binds the window its caller owns and then moves the chain
+    /// to the caller's. A live harness outside the caller's chain keeps the
+    /// chain; a dead one lets it move.
+    #[cfg(unix)]
+    #[test]
+    fn a_per_turn_hook_that_binds_a_window_cannot_take_the_chain_of_a_live_harness() {
+        const DEAD: i32 = 2_000_000_000;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("anchor-bind");
+        let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let me = std::process::id() as i32;
+        let mut owner = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut harness = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let (_fake_env, fake_dir) = fake_hypr_socket("anchor-bind");
+        std::env::set_var("AOIDE_TEST_CLIENT_PID", owner.id().to_string());
+        std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "com.example.App");
+        let chain_of = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().hook_ancestry
+        };
+        let held = vec![harness.id() as i32, DEAD];
+        let free = vec![DEAD, DEAD + 1];
+        for (id, stored) in [("held", &held), ("free", &free)] {
+            do_hook_session_start(id, Some("claude"), Some("/p"), None, None, None, stored);
+            let payload = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+            hook_for_profile_gated(profile, &payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        assert_eq!(chain_of("held"), held, "a live harness outside the caller's chain holds it");
+        assert_eq!(chain_of("free").first(), Some(&me), "a dead one lets the caller's chain land");
+        for c in [&mut owner, &mut harness] {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        let _ = std::fs::remove_dir_all(&fake_dir);
+    }
+
     /// A SessionStart refreshes the stored hook chain only where trust allows. A
-    /// dead chain moves. A pid-less record's chain moves even over a live process
-    /// outside the new one, and a record anchored to a live pid of its own outside
-    /// the new chain is refused. A sealed record's chain moves but its pid does not
-    /// (pid trust).
+    /// dead chain moves. A pid-less record's chain moves even over a live shell
+    /// or terminal outside the new one, but not over its live harness, and a
+    /// record anchored to a live pid of its own outside the new chain is
+    /// refused. A sealed record's chain moves but its pid does not (pid trust).
     /// An unsealed record whose pid is dead takes the pi payload's pid (the
     /// unchanged `pid_may_move` path).
     #[test]
@@ -7118,6 +7190,18 @@ mod tests {
         let _ = live.kill();
         let _ = live.wait();
 
+        // r2b: pid-less, and the live process outside the new chain is its
+        // harness. The SessionStart is a stranger's and is refused whole: the
+        // chain stays.
+        let mut harness = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let held = vec![harness.id() as i32, DEAD];
+        do_hook_session_start("r2b", Some("claude"), Some("/p"), None, None, None, &held);
+        let out = hook_for_profile_gated(claude, &claude_start("r2b"), false, Some(me), None);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "a refusal never fails the hook");
+        assert_eq!(load("r2b").hook_ancestry, held, "a live harness outside the new chain holds it");
+        let _ = harness.kill();
+        let _ = harness.wait();
+
         // r3: sealed, dead pid, dead chain. The pi payload's pid is refused by
         // `pid_may_move`, and the chain still refreshes.
         do_hook_session_start(
@@ -7134,6 +7218,37 @@ mod tests {
         do_hook_session_start("r4", Some("pi"), Some("/p"), None, None, Some(DEAD as u32), &[DEAD]);
         hook_for_profile_gated(pi, &pi_start("r4", me), false, Some(me), None);
         assert_eq!(load("r4").pid, Some(me as u32), "an unsealed dead pid is replaced");
+    }
+
+    /// A per-turn hook follows its session to the wrap that hosts it now, as a
+    /// `--resume` under a new wrap needs, but only for a hook that runs under
+    /// the session's harness or whose harness has exited. A stranger's hook,
+    /// attested to a wrap of its own, does not re-parent a session whose
+    /// harness lives.
+    #[cfg(unix)]
+    #[test]
+    fn a_per_turn_hook_from_outside_the_live_harness_does_not_re_parent_the_session() {
+        const DEAD: i32 = 2_000_000_000;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("anchor-parent");
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let me = std::process::id() as i32;
+        let mut live = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        for wrap in ["wrapk", "wrapa"] {
+            do_session_start(wrap, Some("claude"), Some("/w"), None, None, Some(true), None, None, None);
+        }
+        let parent = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().parent_session_id
+        };
+        let prompt = |id: &str| json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+        for (id, harness, want) in [("held", live.id() as i32, "wrapk"), ("free", DEAD, "wrapa")] {
+            do_hook_session_start(id, Some("claude"), Some("/w"), None, Some("wrapk"), None, &[harness, 4242]);
+            hook_ensure_session_with(claude, &prompt(id), id, Some(me), true, |_| Some("wrapa".to_string()), None);
+            assert_eq!(parent(id).as_deref(), Some(want), "{id}");
+        }
+        let _ = live.kill();
+        let _ = live.wait();
     }
 
     /// L2, at the door's own entry point: a `session hook` served with a payload

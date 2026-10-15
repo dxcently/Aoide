@@ -482,8 +482,8 @@ mod death_tests {
     }
 
     /// The fact lives on the `done` record, so a second `done` must not wipe it
-    /// or restamp the record; a plain `done` is still restamped, and a live phase
-    /// still supersedes the fact (a resumed session has not died).
+    /// or restamp the record; a plain `done` is still restamped, and a live
+    /// phase still supersedes the fact (a resumed session has not died).
     #[test]
     fn a_second_done_leaves_a_record_that_carries_its_fact_untouched() {
         let mut hooks = Vec::new();

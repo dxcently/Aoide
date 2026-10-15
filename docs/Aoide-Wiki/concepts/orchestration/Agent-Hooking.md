@@ -27,7 +27,7 @@ Each profile's `hook_event_map` collapses its harness's event NAMES onto shared 
 
 | event | state |
 |---|---|
-| `SessionStart` | registers the session, `idle`. A resume folds a `stopped` record back to `idle` (resumed, not yet active) but never resets a live `working`/`awaiting` turn |
+| `SessionStart` | registers the session, `idle`. A resume folds a `stopped` record back to `idle` (resumed, not yet active) but never resets a live `working`/`awaiting` turn. For an id already registered it is a no-op (`harness-anchored` in the audited outcome) unless it runs under the record's live harness or that harness has exited: a live harness anchors its record, so no other hook re-homes its chain or parent |
 | `UserPromptSubmit` | `working` (and, set-once, NAMES the session from the prompt) |
 | `PreToolUse` / `PostToolUse` | `working`, setting the owner's `activity` to the tool |
 | `Stop` | `stopped` (turn over, human's move — alive at the prompt, and recently so) |

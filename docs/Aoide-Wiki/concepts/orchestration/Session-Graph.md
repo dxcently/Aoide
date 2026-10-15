@@ -322,7 +322,11 @@ while its turn is still open records the same fact with no status, and its
 spawner hears `[claude <petname>] ended mid-turn · last: <tool>` once; its wrap
 then finds the phase closed and adds nothing. Anyone else's `aoide session end`
 only closes the phase, since a spawner is told only what the session itself
-did. So does a `SessionEnd` whose `reason` is `clear` or `resume`: claude's
+did. A live harness anchors its session: a hook from outside it re-homes neither
+its chain nor its parent, so a stranger cannot claim a session and then end it.
+A harness that exited before its `SessionEnd` hook was served leaves the hook
+re-parented, and that end closes plain: the line is missing, never false. A
+`SessionEnd` whose `reason` is `clear` or `resume` also closes plain: claude's
 process lives on under another session id, so nothing ended mid-turn. Any other
 reason, or none, records the fact. A `done` phase with no fact (a session that
 ended by its own hook once its turn closed) says nothing. A spawner hears at
@@ -330,41 +334,40 @@ most three such lines from one wrap's end, then one `and N more ended or died
 mid-turn`. A silence before a death does not hide it. The first look at a child
 is a baseline and says nothing, except a recorded death under a day old; a child
 found already stopped says nothing, and a turn that begins and ends between two
-ticks is not heard.
-A child the tick can no longer route is judged from the route its entry kept, by
-the rules in `CONTRACTS.md` (`state/stage/pingback.json`), where the orphan rule
-is stated once. A hook child's own `parentSessionId` is the wrap that hosts it,
-never the session that spawned it, so this source does not write to that edge:
-it climbs to the wrap's own `parentSessionId` and speaks only when
-`attestedSpawner` — the parent the registering `aoide conduct` process saw in
-its own `/proc` ancestry — names it, and the child's `hookAncestry` (stamped by
-the hook door from the hook process's own credentials) holds the wrap's pid. On
-the live edge both wraps' pids must also carry a verifying daemon seal when the
-line is delivered, because a seal re-derives the pid's start time: a pid reused
-by another process after its wrap died fails it, and so does a daemon that
-cannot be asked (nothing is attested, nothing is said). On the gone path the
-host wrap may be gone instead (its pid dead, or no record), since a conducted
-wrap's program is its harness and its seal fails when it exits. The spawner's
-seal is checked at the claim, inside the stage lock, on both paths. The stamp
-itself is the registering process's own kernel ancestry and needs no seal. A
-spawner that is itself an agent is resolved to the wrap hosting it by the same
-test. A forged `session start --parent` carries none of this and is ignored, and
-a child is never its own recipient nor its host wrap's. Two limits are known and
-deliberate. A detached `aoide spawn` that only registers after its spawner has
-returned has lost the `/proc` ancestry the stamp is read from, so it gets no
-stamp and its child is silent — never guessed. And a claude launched through
-another claude's Bash tool, with no wrap of its own in between, shares that
-claude's host wrap: its line reaches that wrap's attested spawner, an ancestor
-of the real launcher, not the launcher itself. A wrap whose program has neither
-hook nor trace (a `codex`, an `aider`, a REPL) is read off its own screen,
-below: `[codex <petname>] asking: "Apply patch? [y/N]"`. There is no hook
-session under it, so the wrap itself plays the child and its pid must carry a
-verifying daemon seal; its attested spawner, found by the same climb, hears it.
-A question is heard once while it stands: the same one is not repeated, and a
-different one is a new episode. An answer clears that memory only on a pass that
-finds the record without the question, so a question answered and asked again
-with the same text between two passes is not heard again. There is no episode
-counter.
+ticks is not heard. A child the tick can no longer route is judged from the
+route its entry kept, by the rules in `CONTRACTS.md`
+(`state/stage/pingback.json`), where the orphan rule is stated once. A hook
+child's own `parentSessionId` is the wrap that hosts it, never the session that
+spawned it, so this source does not write to that edge: it climbs to the wrap's
+own `parentSessionId` and speaks only when `attestedSpawner` — the parent the
+registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
+and the child's `hookAncestry` (stamped by the hook door from the hook process's
+own credentials) holds the wrap's pid. On the live edge both wraps' pids must
+also carry a verifying daemon seal when the line is delivered, because a seal
+re-derives the pid's start time: a pid reused by another process after its wrap
+died fails it, and so does a daemon that cannot be asked (nothing is attested,
+nothing is said). On the gone path the host wrap may be gone instead (its pid
+dead, or no record), since a conducted wrap's program is its harness and its
+seal fails when it exits. The spawner's seal is checked at the claim, inside the
+stage lock, on both paths. The stamp itself is the registering process's own
+kernel ancestry and needs no seal. A spawner that is itself an agent is resolved
+to the wrap hosting it by the same test. A forged `session start --parent`
+carries none of this and is ignored, and a child is never its own recipient nor
+its host wrap's. Two limits are known and deliberate. A detached `aoide spawn`
+that only registers after its spawner has returned has lost the `/proc` ancestry
+the stamp is read from, so it gets no stamp and its child is silent — never
+guessed. And a claude launched through another claude's Bash tool, with no wrap
+of its own in between, shares that claude's host wrap: its line reaches that
+wrap's attested spawner, an ancestor of the real launcher, not the launcher
+itself. A wrap whose program has neither hook nor trace (a `codex`, an `aider`,
+a REPL) is read off its own screen, below: `[codex <petname>] asking: "Apply
+patch? [y/N]"`. There is no hook session under it, so the wrap itself plays the
+child and its pid must carry a verifying daemon seal; its attested spawner,
+found by the same climb, hears it. A question is heard once while it stands: the
+same one is not repeated, and a different one is a new episode. An answer clears
+that memory only on a pass that finds the record without the question, so a
+question answered and asked again with the same text between two passes is not
+heard again. There is no episode counter.
 
 It is not a send and never becomes one: the send door attests the sender from
 the running process's `/proc` ancestry, so inside the daemon the sender is the

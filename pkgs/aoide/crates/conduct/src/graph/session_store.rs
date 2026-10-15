@@ -145,24 +145,42 @@ pub(crate) fn superseded_by(
     }
 }
 
+/// Is `p` alive and outside `chain`: a process the caller does not run under.
+fn alive_outside(p: u32, chain: &[i32], alive: &impl Fn(u32) -> bool) -> bool {
+    alive(p) && !chain.iter().any(|&c| u32::try_from(c).ok() == Some(p))
+}
+
+/// `rec`'s harness ([`harness_pid`]) when it is alive and `chain`, the harness
+/// chain or process ancestry of whoever addresses the record, does not hold it:
+/// the live process that anchors the record against that caller. No start time
+/// is stored with the chain, so a pid recycled by an unrelated live process
+/// holds the anchor until it exits; the refusal is the fail-safe side.
+pub(in crate::graph) fn live_harness_outside(
+    rec: &SessionRecord,
+    chain: &[i32],
+    alive: impl Fn(u32) -> bool,
+) -> Option<u32> {
+    harness_pid(rec).filter(|&harness| alive_outside(harness, chain, &alive))
+}
+
 /// May `rec`'s stored `hookAncestry` be replaced by `chain`, the chain of a fresh
-/// SessionStart? Yes when nothing is stored, when the record has no pid, or when
-/// its pid is dead or still in the new chain. Refused only while the record's own
-/// pid is alive outside the new chain: that pid is the record's anchor. A pid-less
-/// record follows its latest SessionStart, so two live processes under one session
-/// id resolve to the latest one. Sits beside pid trust, not inside it: the chain is
-/// kernel truth and never a payload claim, and a sealed record's chain may still
-/// refresh (the seal binds `(pid, starttime)`, not the chain).
+/// SessionStart? Yes when nothing is stored, or when neither of the record's
+/// own processes is alive outside the new chain: its pid and its harness (the
+/// first `hookAncestry` pid). A live harness outside the chain anchors the
+/// record, so a stranger's hook cannot re-home it, and one that has exited, or
+/// that the new chain holds, lets the next run adopt the id (`claude --resume`
+/// in a new terminal). A shell or terminal of the old chain that outlives its
+/// harness is no anchor. Sits beside pid trust, not inside it: the chain is
+/// kernel truth and never a payload claim, and a sealed record's chain may
+/// still refresh (the seal binds `(pid, starttime)`, not the chain).
 pub(in crate::graph) fn ancestry_may_move(
     rec: &SessionRecord,
     chain: &[i32],
     alive: impl Fn(u32) -> bool,
 ) -> bool {
     rec.hook_ancestry.is_empty()
-        || match rec.pid {
-            None => true,
-            Some(p) => !alive(p) || chain.iter().any(|&c| u32::try_from(c).ok() == Some(p)),
-        }
+        || !(rec.pid.is_some_and(|p| alive_outside(p, chain, &alive))
+            || live_harness_outside(rec, chain, &alive).is_some())
 }
 
 /// Is `rec`'s stored `hookAncestry` stale against `chain`, the harness chain of a live
@@ -1703,14 +1721,14 @@ fn turn_open(phase: &str) -> bool {
 }
 
 /// Of `ids`, the hook children a running wrap still owns: a child whose host is a
-/// conducted wrap with a live pid (and not itself in `ids`), whose turn is open,
-/// and that has a spawner to be told ([`recipient_of`](super::pingback::recipient_of)).
-/// That wrap records the child's death when its own child exits
-/// ([`record_hook_deaths`]); a pass that closed the phase first would leave it
-/// nothing to record. A child nobody would hear of is not worth the wait, so the
-/// pass reaps it as it always did. The cost: a harness that dies under a wrap
-/// that outlives it (a shell host) leaves its child reading `working` until the
-/// wrap ends.
+/// conducted wrap with a live pid (and not itself in `ids`), whose turn is
+/// open, and that has a spawner to be told
+/// ([`recipient_of`](super::pingback::recipient_of)). That wrap records the
+/// child's death when its own child exits ([`record_hook_deaths`]); a pass that
+/// closed the phase first would leave it nothing to record. A child nobody
+/// would hear of is not worth the wait, so the pass reaps it as it always did.
+/// The cost: a harness that dies under a wrap that outlives it (a shell host)
+/// leaves its child reading `working` until the wrap ends.
 pub(crate) fn owned_by_live_wraps(sessions: &[SessionRecord], hooks: &[HookRecord], ids: &[String]) -> HashSet<String> {
     let owned = |s: &SessionRecord| {
         let host = s.parent_session_id.as_deref().filter(|h| !ids.iter().any(|id| id == h));
@@ -1808,15 +1826,16 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 
 /// Core of `session end`: mark the session `done` (and its hook phase
 /// `done`), re-stage. An unknown id is an ok no-op (matching `project remove`).
-/// A hook child that ends ITSELF with its turn open (`working`/`awaiting`) and a
-/// spawner to tell ([`recipient_of`](super::pingback::recipient_of)) gets the
+/// A hook child that ends ITSELF with its turn open (`working`/`awaiting`) and
+/// a spawner to tell ([`recipient_of`](super::pingback::recipient_of)) gets the
 /// death fact `end` instead, carrying the tool it was in and that spawner, so
 /// the ping-back says it ended mid-turn; its wrap then finds the phase closed
-/// and records nothing more. `caller` is the kernel's word for who is asking, the
-/// hook door's pid or the daemon's peer credentials ([`session_end_caller`]); the
-/// session ends itself only when that pid is, or runs under, the child's own
-/// harness ([`runs_under_harness`]). Any other caller, or none, ends it plain: a
-/// spawner is told only what the session itself did.
+/// and records nothing more. `caller` is the kernel's word for who is asking,
+/// the hook door's pid or the daemon's peer credentials
+/// ([`session_end_caller`]); the session ends itself only when that pid is, or
+/// runs under, the child's own harness ([`runs_under_harness`]). Any other
+/// caller, or none, ends it plain: a spawner is told only what the session
+/// itself did.
 ///
 /// Also closes every ssh tunnel this session opened
 /// (`aoide_client::tunnel::close_all_for_session`, ssh-transport lane P-S5) —
@@ -2524,8 +2543,10 @@ mod tests {
     }
 
     #[test]
-    fn ancestry_refuses_only_while_its_own_pid_lives_outside_the_new_chain() {
-        // Pid-less: follows its latest SessionStart, even over a live stored process.
+    fn ancestry_refuses_only_while_its_own_pid_or_harness_lives_outside_the_new_chain() {
+        // Pid-less, and the harness (the first stored pid) is dead: a shell or
+        // a terminal of the old chain that outlives it is no anchor, so the
+        // record follows its latest SessionStart.
         let pidless = hosted("pidless", &[DEAD, 555, 700], None);
         assert!(ancestry_may_move(&pidless, &[800, 700], live(&[555, 700, 800])));
         // Anchored to a live pid of its own outside the new chain: held.
@@ -2536,6 +2557,25 @@ mod tests {
         assert!(ancestry_may_move(&anchored, &[800, 555], live(&[555, 700, 800])));
         let fresh = hosted("fresh", &[], None);
         assert!(ancestry_may_move(&fresh, &[800, 700], live(&[700, 800])));
+    }
+
+    /// A pid-less record is anchored by its live harness: a SessionStart whose
+    /// chain does not hold it cannot take the chain, which is what stops a
+    /// stranger re-homing the record before ending it. The harness dead or in
+    /// the new chain lets the next run adopt the id, and a pid that is dead
+    /// does not hide a live harness.
+    #[test]
+    fn a_live_harness_outside_the_new_chain_holds_the_chain_of_a_pidless_record() {
+        let pidless = hosted("pidless-live", &[555, 600, 700], None);
+        assert!(!ancestry_may_move(&pidless, &[800, 700], live(&[555, 600, 700, 800])));
+        assert_eq!(live_harness_outside(&pidless, &[800, 700], live(&[555, 700, 800])), Some(555));
+        assert!(ancestry_may_move(&pidless, &[800, 700], live(&[600, 700, 800])), "the harness has exited");
+        assert!(ancestry_may_move(&pidless, &[555, 700], live(&[555, 700])), "the new chain holds the harness");
+        assert_eq!(live_harness_outside(&pidless, &[555, 700], live(&[555, 700])), None);
+        let dead_pid = hosted("dead-pid", &[555, 600, 700], Some(DEAD as u32));
+        assert!(!ancestry_may_move(&dead_pid, &[800, 700], live(&[555, 700, 800])));
+        let no_chain = hosted("no-chain", &[], Some(555));
+        assert_eq!(live_harness_outside(&no_chain, &[800], live(&[555, 800])), Some(555), "the pid is the fallback harness");
     }
 
     #[test]
@@ -2756,8 +2796,9 @@ mod tests {
     }
 
     /// The chain lands on registration. A pid-less record follows its latest
-    /// SessionStart; a record anchored to a live pid of its own keeps its chain
-    /// until that pid leaves the new chain.
+    /// SessionStart unless its live harness is outside the new chain; a record
+    /// anchored to a live pid of its own keeps its chain until that pid leaves
+    /// the new chain.
     #[test]
     fn a_hook_chain_lands_on_registration_and_only_a_live_anchor_holds_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2814,6 +2855,21 @@ mod tests {
             .hook_ancestry
             .clone();
         assert_eq!(anchored_chain, vec![DEAD, a[1], a[2]], "a live pid of its own holds the chain");
+
+        // Pid-less, and the stored chain starts at a live harness (a[1]): a
+        // registration whose chain does not hold it is a stranger's and is
+        // refused.
+        do_hook_session_start("harnessed", Some("claude"), Some("/w"), Some("0xH"), None, None, &[a[1], a[2]]);
+        do_hook_session_start("harnessed", Some("claude"), Some("/w"), Some("0xH"), None, None, &[DEAD + 8, DEAD + 9]);
+        let harnessed_chain = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|r| r.session_id == "harnessed")
+            .unwrap()
+            .hook_ancestry
+            .clone();
+        assert_eq!(harnessed_chain, vec![a[1], a[2]], "a live harness outside the new chain holds the chain");
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -4028,8 +4084,8 @@ mod hosted_death_tests {
     use super::*;
 
     /// Which reaped ids a running wrap still owns: a hosted child with its turn
-    /// open and a spawner to tell, under a conducted wrap whose pid is alive and
-    /// that is not itself being reaped. Every other id stays the reaper's.
+    /// open and a spawner to tell, under a conducted wrap whose pid is alive
+    /// and that is not itself being reaped. Every other id stays the reaper's.
     #[test]
     fn a_live_wrap_owns_only_its_hosted_children_with_an_open_turn_and_a_spawner() {
         let me = std::process::id();
@@ -4176,9 +4232,9 @@ mod hosted_death_tests {
         hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap()
     }
 
-    /// The doors a `session end` for `kid` comes through: the CLI, the hook door's
-    /// `SessionEnd`, and the daemon's forwarded call with `peer` as the pid it
-    /// stamped (none when it stamped none).
+    /// The doors a `session end` for `kid` comes through: the CLI, the hook
+    /// door's `SessionEnd`, and the daemon's forwarded call with `peer` as the
+    /// pid it stamped (none when it stamped none).
     fn cli_end() {
         session_end(&crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]));
     }
@@ -4200,7 +4256,8 @@ mod hosted_death_tests {
         session_end(&inv);
     }
 
-    /// A live process of its own that is no ancestor of this test, killed on drop.
+    /// A live process of its own that is no ancestor of this test, killed on
+    /// drop.
     struct Bystander(std::process::Child);
     impl Bystander {
         fn start() -> Self {
@@ -4228,9 +4285,9 @@ mod hosted_death_tests {
 
     /// A session end that finds the turn open records the fact `end`, with the
     /// tool in flight and the spawner, by the CLI door, the hook door and the
-    /// daemon's forwarded call alike, when the caller is the child's own harness
-    /// or runs under it. A closed turn, or one with no spawner to tell, is only
-    /// marked `done`.
+    /// daemon's forwarded call alike, when the caller is the child's own
+    /// harness or runs under it. A closed turn, or one with no spawner to tell,
+    /// is only marked `done`.
     #[test]
     fn a_session_end_with_the_turn_open_records_that_it_ended_mid_turn() {
         let me = std::process::id() as i32;
@@ -4257,10 +4314,11 @@ mod hosted_death_tests {
     /// A false "ended mid-turn" is an injection into the spawner, so only the
     /// session ending itself can write one. Someone else's `session end` for an
     /// open turn, whose harness is alive and is no ancestor of the caller, only
-    /// closes the phase, whichever door it comes through: the CLI, the hook door
-    /// with a forged SessionEnd payload, or the daemon's forwarded call whose
-    /// stamped peer is not under the harness or is absent. A peer-pid flag typed
-    /// on a door other than the daemon's is not a kernel fact and is not read.
+    /// closes the phase, whichever door it comes through: the CLI, the hook
+    /// door with a forged SessionEnd payload, or the daemon's forwarded call
+    /// whose stamped peer is not under the harness or is absent. A peer-pid
+    /// flag typed on a door other than the daemon's is not a kernel fact and is
+    /// not read.
     #[test]
     fn a_session_end_by_someone_else_records_no_fact() {
         let harness = Bystander::start();
@@ -4284,9 +4342,124 @@ mod hosted_death_tests {
         }
     }
 
-    /// `/clear` and a resume end the old session id and leave the claude process
-    /// running under another one, so the end is no death and no "ended mid-turn"
-    /// is true: the record closes as `done` with no fact for the spawner to hear.
+    /// A victim hook child `kid` with its turn open, under the conducted wrap
+    /// `wrap` that `P` spawned, anchored on the process `harness`; and this
+    /// process as a stranger under `wrapa`, a wrap of its own (pid `wrapa_pid`,
+    /// an ancestor of this process) whose orchestrator is `A`. `attack` runs
+    /// with `AOIDE_SESSION_ID=wrapa`, as the stranger's own hook process would
+    /// have it. Returns the records `kid` is left with.
+    fn rehomed_child(tag: &str, harness: i32, wrapa_pid: u32, attack: impl FnOnce()) -> (SessionRecord, HookRecord) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID", "HYPRLAND_INSTANCE_SIGNATURE"]);
+        let stage = crate::graph::testutil::unique_stage(tag);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let at = "2026-10-07T10:00:00Z";
+        let orchestrator = |id: &str| {
+            let mut s = crate::graph::testutil::session(id, "/p", "working", at, None);
+            s.conductable = Some(true);
+            s
+        };
+        let wrap = |id: &str, pid: u32, parent: &str| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", at, Some(parent));
+            s.conductable = Some(true);
+            s.pid = Some(pid);
+            s.attested_spawner = Some(parent.to_string());
+            s
+        };
+        let mut kid = crate::graph::testutil::session("kid", "/w", "working", at, Some("wrap"));
+        kid.hook_ancestry = vec![harness, 4242];
+        kid.activity = Some("Bash".into());
+        let roster = vec![orchestrator("P"), orchestrator("A"), wrap("wrap", 4242, "P"), wrap("wrapa", wrapa_pid, "A"), kid];
+        write_stage(&sessions_path(), &SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: roster }).unwrap();
+        let hook = HookRecord { session_id: "kid".into(), phase: "working".into(), updated_at: at.into(), ..Default::default() };
+        write_stage(&hooks_path(), &HooksFile { schema_version: STAGE_GRAPH_VERSION.into(), hooks: vec![hook] }).unwrap();
+        std::env::set_var("AOIDE_SESSION_ID", "wrapa");
+        attack();
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let _ = std::fs::remove_dir_all(&stage);
+        (
+            sessions.sessions.into_iter().find(|s| s.session_id == "kid").unwrap(),
+            hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap(),
+        )
+    }
+
+    fn hook_event(event: &str) {
+        let payload = serde_json::json!({ "session_id": "kid", "hook_event_name": event, "cwd": "/p", "prompt": "go" });
+        super::super::send::hook_from_str(&payload.to_string());
+    }
+
+    fn phase_now() -> String {
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap().phase
+    }
+
+    /// The live harness anchors the record. A stranger under a wrap of its own
+    /// sends a SessionStart for a victim's id with its wrap as the parent
+    /// claim, then ends the victim: while the victim's harness lives nothing
+    /// re-homes, so the end runs under no harness of the victim's and writes no
+    /// fact, and the victim keeps its chain and its parent.
+    #[test]
+    fn a_session_start_from_outside_a_live_harness_cannot_re_home_the_record() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let mine = crate::graph::window::hook_chain(std::process::id() as i32).expect("the test process has a harness above it");
+        let (kid, hook) = rehomed_child("anchor-held", h, *mine.last().unwrap() as u32, || {
+            hook_event("SessionStart");
+            cli_end();
+        });
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"), "the parent is unchanged");
+        assert_eq!(kid.hook_ancestry, vec![h, 4242], "so is the chain");
+        assert_eq!((hook.phase.as_str(), hook.death), ("done", None), "the end names nobody");
+    }
+
+    /// Once the harness has exited the id is free: a new chain adopts it, as a
+    /// `claude --resume` in another terminal does, and the record follows the
+    /// wrap that hosts the new run.
+    #[test]
+    fn a_session_start_adopts_the_id_once_its_harness_has_exited() {
+        let mine = crate::graph::window::hook_chain(std::process::id() as i32).expect("the test process has a harness above it");
+        let (kid, _) = rehomed_child("anchor-free", 2_000_000_000, std::process::id(), || hook_event("SessionStart"));
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrapa"), "the parent follows the new run");
+        assert_eq!(kid.hook_ancestry, mine, "and so does the chain");
+    }
+
+    /// The harness's own hooks are never refused: a SessionStart from under it
+    /// follows its wrap, its later hooks move the phase, and its SessionEnd
+    /// with the turn open is said, to the spawner of the wrap it now runs
+    /// under.
+    #[test]
+    fn the_anchored_harness_own_hooks_still_land() {
+        let mine = crate::graph::window::hook_chain(std::process::id() as i32).expect("the test process has a harness above it");
+        let (kid, hook) = rehomed_child("anchor-own", mine[0], *mine.last().unwrap() as u32, || {
+            hook_event("SessionStart");
+            hook_event("Stop");
+            assert_eq!(phase_now(), "stopped");
+            hook_event("UserPromptSubmit");
+            assert_eq!(phase_now(), "working");
+            hook_end();
+        });
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrapa"), "a resume under a new wrap follows it");
+        assert_eq!(kid.hook_ancestry, mine);
+        let told = hook.death.as_ref().map(|d| (d.outcome.as_deref(), d.spawner.as_deref()));
+        assert_eq!((hook.phase.as_str(), told), ("done", Some((Some("end"), Some("A")))));
+    }
+
+    /// The loss the anchor accepts: a hook served after its harness has exited
+    /// has been re-parented, so it no longer runs under the harness it would
+    /// have to name, and its end closes the phase plain. No line is wrong, one
+    /// is missing.
+    #[test]
+    fn a_session_end_served_after_its_harness_has_exited_records_no_fact() {
+        let rec = ended_child("end-exited", "working", true, 2_000_000_000, hook_end);
+        assert_eq!((rec.phase.as_str(), rec.death), ("done", None));
+    }
+
+    /// `/clear` and a resume end the old session id and leave the claude
+    /// process running under another one, so the end is no death and no "ended
+    /// mid-turn" is true: the record closes as `done` with no fact for the
+    /// spawner to hear.
     #[test]
     fn a_session_end_after_which_the_harness_lives_on_records_no_fact() {
         let me = std::process::id() as i32;
@@ -4299,9 +4472,9 @@ mod hosted_death_tests {
     }
 
     /// Every other reason, an absent one and a value the profile does not name
-    /// is the process going away, and tells the spawner: the raw field is matched
-    /// exactly, so a disguised `clear` (a zero-width character, another case,
-    /// padding) does not borrow the skip.
+    /// is the process going away, and tells the spawner: the raw field is
+    /// matched exactly, so a disguised `clear` (a zero-width character, another
+    /// case, padding) does not borrow the skip.
     #[test]
     fn a_session_end_for_any_other_reason_records_the_fact() {
         use serde_json::json;
@@ -4332,7 +4505,8 @@ mod hosted_death_tests {
 
     /// The fact is the unclaimed state, and a second end must not erase it: a
     /// repeated `session end`, and a duplicate `SessionEnd` hook, both find the
-    /// phase already closed and leave the record exactly as the first end made it.
+    /// phase already closed and leave the record exactly as the first end made
+    /// it.
     #[test]
     fn a_second_session_end_and_a_duplicate_session_end_hook_keep_the_fact() {
         let record = || {
