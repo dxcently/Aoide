@@ -2245,6 +2245,41 @@ mod tests {
         assert!(!unattested.data.as_ref().expect("data").to_string().contains("kid-id"), "unattested sees nothing");
     }
 
+    /// Finding 8 on the roster: over MCP no row names its remote parent, the
+    /// far ancestor on another node. The unscoped roster still does.
+    #[test]
+    fn an_mcp_roster_names_no_remote_parent() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        use crate::graph::model::{write_stage, SessionsFile};
+        use aoide_protocol::Door;
+        use aoide_storage::stage::sessions_path;
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("roster-mcp-remote-parent");
+        for sub in ["stage", "state", "state/mail", "state/sessions", "run"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+        let mut me = session("me-id", &root.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
+        me.remote_parent = Some(aoide_storage::records::RemoteParent {
+            node: "far-node".into(),
+            key: String::new(),
+            session_id: "far-parent-id".into(),
+            extra: Default::default(),
+        });
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![me], ..Default::default() }).unwrap();
+
+        let mcp = Invocation { path: vec!["session".into()], args: vec![], flags: Default::default(), door: Door::Mcp };
+        let out = session_roster_as(&mcp, never_called_pull(), |_| Some("me-id".to_string()));
+        let text = out.data.as_ref().expect("data").to_string();
+        assert!(text.contains("me-id"), "{text}");
+        assert!(!text.contains("far-parent-id") && !text.contains("far-node"), "an MCP roster names no far parent: {text}");
+        let cli = Invocation { door: Door::Cli, ..mcp };
+        let full = session_roster_as(&cli, never_called_pull(), |_| None);
+        assert!(full.data.as_ref().expect("data").to_string().contains("far-parent-id"), "the CLI roster keeps it");
+    }
+
     fn never_called_pull() -> PullFn {
         Arc::new(|_: &Node| panic!("no nodes registered — pull must never be called"))
     }

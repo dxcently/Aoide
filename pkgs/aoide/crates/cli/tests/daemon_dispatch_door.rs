@@ -615,7 +615,7 @@ fn a_wire_supplied_door_pid_is_discarded_not_walked() {
 /// terminal alone, so the registry refuses it over the daemon door before its
 /// handler runs (`run_cli`'s launch path is the only place it blocks).
 #[test]
-fn mcp_serve_answers_the_daemon_door_and_a2a_serve_is_refused_there() {
+fn mcp_serve_and_a2a_serve_answer_the_daemon_door_as_they_always_did() {
     let (stream, socket_path, events_path) = start_daemon("servers");
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
@@ -624,9 +624,10 @@ fn mcp_serve_answers_the_daemon_door_and_a2a_serve_is_refused_there() {
     assert_eq!(mcp_outcome["status"], "ok", "{mcp_outcome}");
     assert!(mcp_outcome["data"]["hint"].is_string(), "{mcp_outcome}");
 
+    // `a2a serve` was default-door before the door policy, so the Daemon hop
+    // still answers its Ok hint; only the terminal launches the listener.
     let a2a_outcome = send_dispatch(&mut writer, &mut reader, &["a2a", "serve"], &[], &[]);
-    assert_eq!(a2a_outcome["status"], "usage", "{a2a_outcome}");
-    assert!(a2a_outcome["message"].as_str().unwrap().contains("is not open to the daemon door"), "{a2a_outcome}");
+    assert_eq!(a2a_outcome["status"], "ok", "{a2a_outcome}");
 
     cleanup(&socket_path, &events_path);
 }

@@ -1993,8 +1993,12 @@ mod tests {
         assert!(!marker.exists(), "nothing launched");
         assert!(ghost.exists(), "the live socket was not unlinked");
 
+        // Finding 6: a done record's id is not free over MCP either. The
+        // record stays where it is, and a fresh id is still held.
         let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "finished")]), |_| None);
-        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "an id that is done is free: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "id-in-use", "a done record's id is not free: {}", out.message);
+        let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "fresh-id")]), |_| None);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "a fresh id is free: {}", out.message);
         let _ = std::fs::remove_dir_all(&root);
     }
 
