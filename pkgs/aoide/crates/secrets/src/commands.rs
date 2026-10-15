@@ -205,6 +205,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_serve,
         examples: ["secrets serve"],
         brief: "Run the secrets broker (unix socket, resolves by policy).",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "exec"],
@@ -221,6 +222,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_exec,
         examples: ["secrets exec --as m --secret db-prod -- psql"],
         brief: "Run a command with a secret injected as an env var.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "add"],
@@ -237,6 +239,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_add,
         examples: ["secrets add db-prod", "secrets add db-prod --backend pass --key prod/db --consumers m"],
         brief: "Register a secret's policy: a backend and a key, never a value.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "rm"],
@@ -248,6 +251,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_rm,
         examples: ["secrets rm db-prod"],
         brief: "Forget a secret's policy (the backend's store is untouched).",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "grant"],
@@ -262,6 +266,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_grant,
         examples: ["secrets grant db-prod m"],
         brief: "Add one consumer to a secret's policy.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "revoke"],
@@ -276,6 +281,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_revoke,
         examples: ["secrets revoke db-prod m"],
         brief: "Remove one consumer from a secret's policy.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "enroll"],
@@ -290,6 +296,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_enroll,
         examples: ["secrets enroll", "secrets enroll --force", "secrets enroll --show"],
         brief: "Enroll this host for TOTP and print the otpauth URI.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "put"],
@@ -307,6 +314,7 @@ pub fn register(r: &mut Registry) {
             "secrets put db-prod --force < ./value.txt"
         ],
         brief: "Store a value for an existing secret, read from stdin.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "set-totp"],
@@ -321,6 +329,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_set_totp,
         examples: ["secrets set-totp db-prod on", "secrets set-totp db-prod off"],
         brief: "Turn a secret's TOTP requirement on or off.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "automate"],
@@ -341,6 +350,7 @@ pub fn register(r: &mut Registry) {
             "secrets automate db-prod off"
         ],
         brief: "Let listed consumers resolve a secret without a TOTP code.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "expose"],
@@ -355,6 +365,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_expose,
         examples: ["secrets expose db-prod on", "secrets expose db-prod off"],
         brief: "Turn a secret's remote-reachability bit on or off.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "pending"],
@@ -366,6 +377,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_pending,
         examples: ["secrets pending"],
         brief: "List parked resolves waiting on a TOTP code.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "approve"],
@@ -377,6 +389,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_approve,
         examples: ["secrets approve 3 --totp 123456"],
         brief: "Release a parked resolve with a TOTP code.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "dismiss"],
@@ -388,6 +401,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_dismiss,
         examples: ["secrets dismiss 3"],
         brief: "Refuse a parked resolve outright.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "watch"],
@@ -404,6 +418,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_watch,
         examples: ["secrets watch", "secrets watch --json", "secrets watch --popup"],
         brief: "Follow the broker's events and answer parked asks inline.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "migrate"],
@@ -415,6 +430,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_migrate,
         examples: ["secrets migrate db-prod", "secrets migrate db-prod --backend age"],
         brief: "Move a secret's stored value to another backend.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "allow-remote-origin"],
@@ -429,6 +445,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_allow_remote_origin,
         examples: ["secrets allow-remote-origin db-prod on", "secrets allow-remote-origin db-prod off"],
         brief: "Admit or refuse resolves from remote-origin sessions.",
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["secrets", "status"],
@@ -440,6 +457,7 @@ pub fn register(r: &mut Registry) {
         handler: handle_secrets_status,
         examples: ["secrets status", "secrets status --json"],
         brief: "List every secret's value-free policy metadata.",
+        doors: &[Door::Cli],
     ));
 }
 

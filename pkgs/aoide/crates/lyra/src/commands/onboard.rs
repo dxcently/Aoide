@@ -45,6 +45,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_onboard,
         brief: "Generate aoide.nix from every aoide.* module option.",
+        doors: &[Door::Cli],
     ));
 }
 

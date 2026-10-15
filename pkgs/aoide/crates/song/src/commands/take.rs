@@ -74,6 +74,7 @@ use aoide_storage::takes::{self, TakeRecord};
 use aoide_storage::time::{now_iso_utc, parse_iso_utc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -84,6 +85,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "list"],
@@ -93,6 +95,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take_list,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "mark"],
@@ -102,6 +105,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take_mark,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "diff"],
@@ -114,6 +118,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take_diff,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "prune"],

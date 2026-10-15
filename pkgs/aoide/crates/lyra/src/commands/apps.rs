@@ -66,7 +66,8 @@ pub fn register(r: &mut Registry) {
         flags: [flag!(
             "run",
             "bool",
-            "Keep song/stage/apps.json current until stopped: re-check every 2 s, rewrite only on change."
+            "Keep song/stage/apps.json current until stopped: re-check every 2 s, rewrite only on change.",
+            doors: &[Door::Cli]
         )],
         gated: false,
         implemented: true,

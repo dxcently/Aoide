@@ -342,6 +342,7 @@ pub fn register_melete(r: &mut Registry) {
         implemented: true,
         handler: handle_melete_status,
         examples: ["melete status"],
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["melete", "graph"],
@@ -352,6 +353,7 @@ pub fn register_melete(r: &mut Registry) {
         implemented: true,
         handler: handle_melete_graph,
         examples: ["melete graph"],
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["melete", "call"],
@@ -362,6 +364,7 @@ pub fn register_melete(r: &mut Registry) {
         implemented: true,
         handler: handle_melete_call,
         examples: ["melete call job_status --args '{\"run_id\":\"r-123\"}'"],
+        doors: &[Door::Cli],
     ));
 }
 

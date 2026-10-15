@@ -19,6 +19,7 @@ use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use aoide_storage::fs as shellbridge;
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -44,6 +45,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_livery_resolve,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["livery", "lint"],
@@ -53,6 +55,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_livery_lint,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 

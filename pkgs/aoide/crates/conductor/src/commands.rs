@@ -44,5 +44,6 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_conductor,
         brief: "The interactive terminal UI to conduct agent sessions.",
+        doors: &[Door::Cli],
     ));
 }

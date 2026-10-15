@@ -60,6 +60,7 @@ use aoide_protocol::registry::{arg, cmd, Registry};
 use aoide_storage::fs as shellbridge;
 use aoide_storage::mode::{load_mode_marker, RiceMode};
 use serde_json::{json, Value};
+use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -80,6 +81,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_draft_list,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "draft", "drop"],

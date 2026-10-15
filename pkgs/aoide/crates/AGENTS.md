@@ -30,6 +30,11 @@ else. An external subcommand (task #138 — `aoide foo` falling through to
 (`aoide-protocol::registry::Command` is entirely `&'static`), so it never
 reaches `Registry::insert` and the golden never sees it.
 
+The MCP-open set has a second golden per app crate,
+`mcp_open_paths_match_the_golden_snapshot`. Every `doors:` line that opens a
+command to MCP updates that list in the same commit; a command is closed to
+MCP until its own `doors` says otherwise.
+
 ## No cross-crate copying
 
 Every crate born from the Phase 2–9 restructure carries a shim-discipline

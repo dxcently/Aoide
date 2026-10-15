@@ -104,6 +104,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_pair_ask,
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["pair", "show"],
@@ -118,6 +119,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_pair_show,
+        doors: &[Door::Cli],
     ));
 }
 

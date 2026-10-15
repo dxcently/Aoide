@@ -30,6 +30,7 @@
 //! same registration slots — it does not reorder `all()`).
 
 use aoide_protocol::registry::{arg, cmd, flag, Registry};
+use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -180,7 +181,7 @@ pub fn register(r: &mut Registry) {
             flag!("prompt", "string", "A first turn to inject once the session registers (skipped, honestly reported, if it never does)."),
             flag!("windowed", "bool", "Open a real terminal (from $AOIDE_TERMINAL, a whitespace-split argv with a `{cmd}` placeholder) instead of a detached headless child. A bare `{cmd}` splices the conducted argv as separate arguments (`kitty -e {cmd}`); a quote-wrapped `'{cmd}'` joins it shell-quoted into one word for `sh -c` templates (`foot sh -c '{cmd}'`). Taught errors when unset, or when no display is present."),
             flag!("cwd", "string", "Working directory for the spawned child (default: this process's own cwd) — for --windowed, the terminal emulator's own cwd, which its own shell inherits."),
-            flag!("undying", "bool", "Mark the spawned session durable in state/undying.json once it registers (no-op if it never does) — the same mark `session grant undying on` sets, so this project's whole undying set can later be resurrected together."),
+            flag!("undying", "bool", "Mark the spawned session durable in state/undying.json once it registers (no-op if it never does) — the same mark `session grant undying on` sets, so this project's whole undying set can later be resurrected together.", doors: aoide_protocol::registry::CLI_DOORS),
             flag!("task", "string", "MANAGED TASK WRAPPER MODE: the task's slug, which is also its mailbox name (^[a-z0-9][a-z0-9-]*$, the same predicate `mail send` applies). Refused while another live session already holds the slug. The run's instructions, output, mail and exit report are readable with `session watch <id>`; the report is filed to self/<slug> when the run ends. Requires no new daemon or store."),
             flag!("report-to", "string", "The mailbox this run's exit report is addressed to (^[a-z0-9][a-z0-9-]*$), when the report must outlive the parent's session. Omitted: the run's parent session id when that is itself a legal mailbox name, else the documented role mailbox `conductor` — an id that is NOT a legal mailbox name is never rewritten into one, because two ids could then collide. The child's own inbox (self/<task>) never carries the report."),
             flag!("timeout", "int", "Wall-clock deadline in seconds for the run (omitted = no deadline). It is the SUPERVISOR's clock, never inactivity: a silent child is alive until the deadline and a child printing continuously is still killed at it. On expiry the wrapper kills the direct child IT spawned and records outcome=timeout, with the post-kill status kept as secondary evidence — its own kill is never reported as the child's exit code."),
@@ -194,6 +195,7 @@ pub fn register(r: &mut Registry) {
             "spawn --task fix-flaky --instructions @brief.md -- claude",
         ],
         brief: "Spawn an agent command as a detached, conducted session.",
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["resurrect"],
@@ -221,7 +223,7 @@ pub fn register(r: &mut Registry) {
         flags: [
             flag!("id", "string", "Target session id (required unless --to is given); its socket is resolved from sessions.json.", value: "session-id", conflicts: &["to"]),
             flag!("submit", "bool", "Append the target harness's own submit keystroke (Enter for most agents, \\r for kimi — resolved from the target session's agent profile at delivery time). No-op for a --to remote send (the receiving node always submits its own way)."),
-            flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). Never authorises over MCP, which cannot approve. No-op for a --to remote send — the receiving node gates its own delivery."),
+            flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). Never authorises over MCP, which cannot approve. No-op for a --to remote send — the receiving node gates its own delivery.", doors: aoide_protocol::registry::CLI_DOORS),
             flag!("from", "string", "Sender attribution override for the delivered provenance prefix (default: AOIDE_SESSION_ID). ATTRIBUTION ONLY, not authentication — unauthenticated and as spoofable as the env var it defaults from. Over MCP a send is recorded and delivered under the attested session (else the door's own source) and this rides beside it as a cleaned claim; a value spelling a source a door derives (`node:`, `addr:`, `mcp`) is refused."),
             flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id.", value: "target", conflicts: &["id"]),
             flag!("mesh", "string", "For a `node/<query>` target: the mesh this request acts in (P-CHARTER) — the far door reads the caller's grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh. Unused by a local send."),
@@ -237,6 +239,7 @@ pub fn register(r: &mut Registry) {
         ],
         one_of: &[&["id", "to"]],
         brief: "Inject text into a conducted session (held for approval unless --yes).",
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],
@@ -255,7 +258,7 @@ pub fn register(r: &mut Registry) {
         flags: [
             flag!("tail", "int", "Show only the last N records (default 50). A non-numeric or zero value is a usage error, never a silently empty listing."),
             flag!("clip", "string", "How much of each emitted block `--json`'s `data.steps` carries: `line` (default — each block on one clipped line, the same spelling the human body shows) or `detail` (the block's own line breaks, kept longer, plus a tool call's arguments, for a details view). An unknown word is a usage error, never a silent widening. `data.lines` is unaffected: it stays the raw records."),
-            flag!("follow", "bool", "Re-read the trace every 500ms and print new records as they land; blocks until Ctrl-C. CLI-only — a follow that parks a connection makes no sense over MCP/A2A/the daemon socket."),
+            flag!("follow", "bool", "Re-read the trace every 500ms and print new records as they land; blocks until Ctrl-C. CLI-only — a follow that parks a connection makes no sense over MCP/A2A/the daemon socket.", doors: &[Door::Cli]),
         ],
         gated: false,
         implemented: true,
@@ -285,6 +288,7 @@ pub fn register(r: &mut Registry) {
             "session watch fix-flaky --snapshot",
             "session watch fix-flaky --snapshot --json",
         ],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["session", "pending", "approve"],

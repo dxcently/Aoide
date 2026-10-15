@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
 use std::process::Stdio;
 use std::time::Duration;
+use aoide_protocol::Door;
 
 // ── curl transport ((code, body) discipline from commands/usage.rs) ─────────
 
@@ -4824,6 +4825,7 @@ pub fn register_pair(r: &mut Registry) {
         handler: handle_pair_watch,
         examples: ["pair watch", "pair watch --json", "pair watch --popup"],
         brief: "Follow pairing events live, optionally as typed-code dialogs.",
+        doors: &[Door::Cli],
     ));
 }
 
