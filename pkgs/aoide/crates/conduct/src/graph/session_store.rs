@@ -4310,9 +4310,17 @@ mod hosted_death_tests {
     /// [`ended_child`], with the roster record `end` leaves it as well.
     fn ended_records(tag: &str, phase: &str, attested: bool, harness: i32, end: impl FnOnce()) -> (SessionRecord, HookRecord) {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID", "HYPRLAND_INSTANCE_SIGNATURE"]);
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SESSION_ID",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+        ]);
         let stage = crate::graph::testutil::unique_stage(tag);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        // The ended end closes the session's ssh tunnels under `XDG_RUNTIME_DIR`:
+        // point it at the stage, never at the real registry of the box.
+        std::env::set_var("XDG_RUNTIME_DIR", &stage);
         std::env::remove_var("AOIDE_SESSION_ID");
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let at = "2026-10-07T10:00:00Z";

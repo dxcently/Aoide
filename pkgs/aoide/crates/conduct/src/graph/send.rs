@@ -7136,6 +7136,13 @@ mod tests {
         assert!(chain_of("pid-held").is_empty(), "a live pid is the harness of a chainless record, and holds it");
         assert_eq!(window_of("pid-held"), "", "a stranger's bind onto an anchored record is refused");
         assert_eq!(window_of("held"), "", "and so is one onto a record anchored by its stored chain");
+        // The fake compositor answers one read per discovery, and a loaded box can
+        // miss its budget once. A turn retries the bind until it lands, so retry too.
+        let free_payload = json!({ "session_id": "pid-free", "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while window_of("pid-free") != "0xAA" && std::time::Instant::now() < deadline {
+            hook_for_profile_gated(profile, &free_payload.to_string(), false, Some(owner.id() as i32), None);
+        }
         assert_eq!(window_of("pid-free"), "0xAA", "the window binds where no live harness anchors the record");
         assert_eq!(chain_of("pid-free").first(), Some(&me), "a dead pid lets the caller's chain land");
         for c in [&mut owner, &mut harness] {
