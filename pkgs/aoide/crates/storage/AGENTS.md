@@ -243,8 +243,8 @@
   too (it is a plain idempotent function, no `Once`/env-isolation dance
   needed, unlike `migrate_conducting_stage`'s own test suite). A move that
   fails is narrated and leaves the old tree in place; a tree that moved into
-  a `state/` the lock then refuses is its one `Err`, and `aoide` and
-  `aoided` exit on it rather than read a tree they could not make private.
+  a `state/` the lock then refuses is its one `Err`, and all three binaries
+  exit on it rather than read a tree they could not make private.
 - **A checkout-relative source path is named ONCE, here — `fs::LYRA_SHELL_SRC`
   (`"pkgs/lyra-shell"`) is the pattern, not an exception.** The lyra shell's
   QML/icons/preview tree is read by `aoide-lyra`'s `commands::preview` (which
