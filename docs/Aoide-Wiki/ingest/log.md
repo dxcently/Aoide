@@ -4850,3 +4850,19 @@ Pages touched: pkgs/aoide/crates/protocol/src/feed.rs,
 pkgs/aoide/crates/storage/src/mail.rs, pkgs/aoide/crates/protocol/README.md,
 pkgs/aoide/crates/protocol/AGENTS.md, pkgs/aoide/crates/storage/README.md,
 pkgs/aoide/crates/storage/AGENTS.md, docs/architecture/MAIL.md, CONTRACTS.md
+
+## [2026-10-15] change | a box-full answer defers one letter on its own window
+
+A far `box-full` refusal is classified as a deferral, not a refusal. The entry
+records `deferred: box-full`, stays live, and waits `12 s` doubled per deferral
+(ceiling 900 s) before its next attempt. The link is not backed off, the rest
+of the drain batch goes on, and a deferred entry no longer takes a batch slot
+while it waits. A poll's custody of a container refused for a box-state reason
+is kept, not released. The word is produced by nothing yet; the destination
+starts answering it with the box registry lane.
+
+Pages touched: pkgs/aoide/crates/storage/src/outbox.rs,
+pkgs/aoide/crates/storage/src/mail.rs, pkgs/aoide/crates/client/src/mail_wire.rs,
+pkgs/aoide/crates/client/src/commands.rs, docs/architecture/MAIL.md,
+CONTRACTS.md, pkgs/aoide/crates/client/AGENTS.md,
+pkgs/aoide/crates/client/README.md

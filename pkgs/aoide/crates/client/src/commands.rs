@@ -5172,6 +5172,9 @@ fn delivery_projection(
     if has_delivered_ack(base, node, &entry.envelope.msgid) {
         return delivery_shape("delivered", None, None, None, false);
     }
+    if let Some(next) = aoide_storage::outbox::deferral_next_attempt(entry) {
+        return delivery_shape("retrying", crate::mail_wire::outcome_line(&entry.last_outcome), Some("entry"), Some(&next), false);
+    }
     let accepted = matches!(entry.last_outcome.as_str(), "accepted" | "duplicate");
     if accepted {
         return match link {
@@ -11780,6 +11783,30 @@ printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: reply-id\r\n\r\n{{"jsonrpc":"2.0","id
             aoide_storage::outbox::read_link_state("liveb").unwrap().is_none(),
             "no attempt reached the link at all"
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A deferred letter is still in the spool and waiting on its own window, so
+    /// its status is `retrying` at the entry, never `queued` and never the
+    /// link's backoff.
+    #[test]
+    fn a_deferred_entry_projects_as_retrying_with_entry_scope() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("delivery-deferred");
+
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
+        let mut entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
+        entry.tries = 1;
+        entry.last_try_at = "2026-10-15T00:00:00Z".to_string();
+        entry.last_outcome = "deferred: box-full".to_string();
+
+        let d = delivery_projection(&[], "peer-node", &entry, None);
+        assert_eq!(d["status"], "retrying");
+        assert_eq!(d["reason"], "deferred: box-full");
+        assert_eq!(d["reasonScope"], "entry");
+        assert_eq!(d["nextAttemptAt"], "2026-10-15T00:00:12Z");
+        assert_eq!(d["ackPending"], false);
 
         let _ = std::fs::remove_dir_all(&root);
     }

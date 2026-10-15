@@ -300,7 +300,7 @@ impl OutboxEntry {
     /// vocabulary, so it is read HERE and nowhere else, and it is read
     /// POSITIVELY — the answer words decide, not the absence of a prefix.
     pub fn last_attempt_was_answered(&self) -> bool {
-        ["accepted", "duplicate", "refused:"].iter().any(|word| self.last_outcome.starts_with(word))
+        ["accepted", "duplicate", "refused:", DEFERRED_PREFIX].iter().any(|word| self.last_outcome.starts_with(word))
     }
 }
 
@@ -754,9 +754,10 @@ pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// poller acks what it files, those entries retire, and the next poll gets
 /// the next batch, so a large spool drains in bounded steps instead of never.
 pub fn poll_payloads(node: &str) -> Result<Vec<(Option<crate::seal::Container>, Envelope)>, String> {
+    let now = now_epoch();
     Ok(list_entries(node)?
         .into_iter()
-        .filter(pollable)
+        .filter(|entry| pollable(entry) && deferral_due(entry, now))
         .take(POLL_BATCH_CAP)
         .map(|entry| (entry.container, entry.envelope))
         .collect())
@@ -769,6 +770,43 @@ pub fn poll_payloads(node: &str) -> Result<Vec<(Option<crate::seal::Container>, 
 /// [`poll_payloads`] for why a poll can afford to bound itself and why
 /// bounding it is what keeps a big spool draining instead of stalling.
 pub const POLL_BATCH_CAP: usize = 50;
+
+/// The `last_outcome` a deposit answer leaves when the far box was full. The
+/// entry is live and waits [`deferral_due`]'s window; it is never parked.
+pub const DEFERRED_PREFIX: &str = "deferred:";
+
+/// Seconds a deferred entry waits after its `tries`-th deferral: the link's own
+/// floor, doubled per deferral, never past [`BACKOFF_CEILING_SECS`].
+fn deferral_window_secs(tries: u32) -> u64 {
+    let doublings = tries.saturating_sub(1).min(16);
+    DRAIN_BACKOFF_FLOOR_SECS.saturating_mul(1u64 << doublings).min(BACKOFF_CEILING_SECS)
+}
+
+/// When a deferred entry may next be attempted, or `None` when it was not
+/// deferred. Its own window, from its own last try: a box's answer says
+/// nothing about the link, so the link's back-off never applies.
+pub fn deferral_next_attempt(entry: &OutboxEntry) -> Option<String> {
+    if !entry.last_outcome.starts_with(DEFERRED_PREFIX) {
+        return None;
+    }
+    let last = crate::time::parse_iso_utc(&entry.last_try_at)?;
+    Some(crate::time::iso_utc_from_epoch(last + deferral_window_secs(entry.tries) as i64))
+}
+
+/// May a drain or a poll offer this entry at `now_epoch`? Only a deferred entry
+/// waits, and only until its window passes; an entry that was never deferred,
+/// or whose last try does not parse, is due at once (a corrupt stamp fails
+/// toward being attempted, never toward being stuck).
+pub fn deferral_due(entry: &OutboxEntry, now_epoch: i64) -> bool {
+    match deferral_next_attempt(entry) {
+        Some(next) => crate::time::parse_iso_utc(&next).is_none_or(|at| now_epoch >= at),
+        None => true,
+    }
+}
+
+fn now_epoch() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
 
 /// Is one spooled entry offered to the node's own poll? See [`poll_payloads`]
 /// for the rule; held out-of-band so a test can pin each arm without a
@@ -2117,5 +2155,39 @@ mod sealed_spool_tests {
         assert!(entry.last_attempt_was_answered(), "a refusal is an answer, so the contrast holds");
         entry.last_outcome = "accepted".to_string();
         assert!(entry.last_attempt_reached_the_peer() && entry.last_attempt_was_answered());
+    }
+
+    /// The window a deferred entry waits: one doubling step per deferral from
+    /// the link's own floor, never past its ceiling. A `box-full` answer costs
+    /// the destination nothing and says nothing about the link, so it waits the
+    /// entry's own schedule and never the link's.
+    #[test]
+    fn a_deferred_entry_waits_its_backoff_and_counts_as_answered() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("outbox-deferral-window");
+        env(&dir);
+        let at = |tries: u32, last: &str| {
+            let mut entry = sealed_entry("waits");
+            entry.tries = tries;
+            entry.last_try_at = last.to_string();
+            entry.last_outcome = "deferred: box-full".to_string();
+            entry
+        };
+        let t0 = crate::time::parse_iso_utc("2026-10-15T00:00:00Z").unwrap();
+        let entry = at(1, "2026-10-15T00:00:00Z");
+        assert!(!deferral_due(&entry, t0 + 11), "one deferral waits 12 s");
+        assert!(deferral_due(&entry, t0 + 12));
+        let entry = at(2, "2026-10-15T00:00:00Z");
+        assert!(!deferral_due(&entry, t0 + 23), "two deferrals wait 24 s");
+        assert!(deferral_due(&entry, t0 + 24));
+        let entry = at(20, "2026-10-15T00:00:00Z");
+        assert!(deferral_due(&entry, t0 + BACKOFF_CEILING_SECS as i64), "the wait never passes the ceiling");
+        assert!(entry.last_attempt_was_answered(), "a deferral is an answer, not a transport failure");
+        assert!(!entry.last_attempt_reached_the_peer(), "and it did not land");
+
+        let untouched = sealed_entry("untouched");
+        assert!(deferral_due(&untouched, t0), "an entry that was never deferred is due at once");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -138,6 +138,10 @@ pub const ENTRY_TYPE_RECEIPT: &str = "receipt";
 /// filing it as correspondence would file a letter whose only content is a
 /// claim about itself.
 pub const REFUSAL_NOT_CORRESPONDENCE: &str = "not-correspondence";
+/// The far box has no room for this letter (MAIL.md §Wire): a fact about the
+/// box's state, not the letter's bytes. The sender defers and keeps the letter,
+/// and a poller keeps the hub's custody of the container.
+pub const REFUSAL_BOX_FULL: &str = "box-full";
 /// `Header.kind`/`Entry.kind`'s value for a `charter` letter (P-CHARTER) — a signed
 /// charter travelling as mail. Unlike a letter and a receipt this kind is never
 /// FILED: the enclosed charter is applied to `state/mesh/`, and the letter's local

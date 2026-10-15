@@ -886,7 +886,10 @@
   stays live (`refused` untouched, never needing `retry --refused`),
   `tries`/`lastOutcome` record the far end's own words under the same `refused:`
   word a policy refusal gets, the LINK backs off, and the next pass retries —
-  while every other word takes the `Refused` arm and parks the entry. **`refused:`
+  while every other word takes the `Refused` arm and parks the entry, except
+  `box-full`, which takes `DepositAttempt::Deferred`: the far box is full, so the
+  entry records `deferred: box-full`, stays live, waits its own window
+  (`outbox::deferral_due`), and the link is neither backed off nor parked. **`refused:`
   without the flag is not parked**: the word is how the spool records that an
   attempt was ANSWERED (and liveness reads it as reached), and only the FLAG stops
   the drain. Do not widen that set without the User's say: the words that park are

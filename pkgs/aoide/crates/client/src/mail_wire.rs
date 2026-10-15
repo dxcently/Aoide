@@ -319,6 +319,12 @@ enum DepositAttempt {
     /// which of the two shapes carried that news. The link itself is fine
     /// either way; this ONE entry is the problem.
     Refused(String),
+    /// The far end ANSWERED that its box for this letter is full (`box-full`).
+    /// The word is the far box's own state, so the letter stays live and waits
+    /// its own window (`outbox::deferral_due`): it is never parked, the link is
+    /// not backed off, and the rest of the batch goes on. Carries the bare word,
+    /// which is what the spool records.
+    Deferred(String),
     /// The far end ANSWERED, with a word about its own state rather than about
     /// this letter (`down`, `config-invalid`) — so the entry is not parked, the
     /// LINK backs off, and the next pass retries (the same treatment a transport
@@ -428,6 +434,9 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
             );
             if link_state {
                 return DepositAttempt::LinkRefused(msg);
+            }
+            if reason == aoide_storage::mail::REFUSAL_BOX_FULL {
+                return DepositAttempt::Deferred(reason.to_string());
             }
             DepositAttempt::Refused(msg)
         }
@@ -1321,7 +1330,8 @@ fn refusal_clears_on_retry(word: &str) -> bool {
     };
     matches!(
         word,
-        LOCAL_IO
+        aoide_storage::mail::REFUSAL_BOX_FULL
+            | LOCAL_IO
             | CONFIG_UNREADABLE
             | CONFIG_INVALID
             | NO_CHARTER_IN_FORCE
@@ -1517,8 +1527,12 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                     settle_deposit(&envelope, &filed_outcome);
                     refuse_container(node_name, &container.msgid, word, "", &mut refused);
                     // These bytes are refused for good, so the hub's custody ends
-                    // here rather than re-offering them forever (`refusal_clears_on_retry`).
-                    let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                    // here rather than re-offering them forever. A refusal about
+                    // this box's own state keeps it, and the hub offers them again
+                    // (`refusal_clears_on_retry`).
+                    if !refusal_clears_on_retry(word) {
+                        let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                    }
                     continue;
                 }
                 if matches!(filed_outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
@@ -2088,6 +2102,19 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
                 updated.refused = true;
                 aoide_storage::outbox::update_entry(node_name, &updated)?;
             }
+            DepositAttempt::Deferred(word) => {
+                // The far box is full: the far end answered, so the link is
+                // healthy and its state is cleared like any answer. This letter
+                // alone records the deferral and waits its own window; the batch
+                // goes on, and a parked entry is never the result.
+                contacted = true;
+                aoide_storage::outbox::clear_link_state(node_name)?;
+                let mut updated = entry;
+                updated.tries += 1;
+                updated.last_try_at = aoide_storage::time::now_iso_utc();
+                updated.last_outcome = format!("{} {word}", aoide_storage::outbox::DEFERRED_PREFIX);
+                aoide_storage::outbox::update_entry(node_name, &updated)?;
+            }
             DepositAttempt::Delivered { status } => {
                 contacted = true;
                 settle_delivered(node_name, entry, &status)?;
@@ -2115,9 +2142,10 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
 /// reason: they are permanent to a DRAIN (only the far end's poll moves them),
 /// so counting them would starve the spool identically.
 fn dialable_entries(node_name: &str) -> Result<Vec<aoide_storage::outbox::OutboxEntry>, String> {
+    let now = unix_now();
     Ok(aoide_storage::outbox::list_entries(node_name)?
         .into_iter()
-        .filter(|entry| !entry.refused && !entry.is_held())
+        .filter(|entry| !entry.refused && !entry.is_held() && aoide_storage::outbox::deferral_due(entry, now))
         .take(DRAIN_BATCH_CAP)
         .collect())
 }
@@ -5944,6 +5972,114 @@ mod tests {
         assert!(
             aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(),
             "the hub's own obligation is done once the next hop accepted it"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `box-full` answer is a verdict on the BOX, not on the letter: it is
+    /// classified as a deferral, never a refusal, so the entry is not parked.
+    #[test]
+    fn box_full_classifies_deferred_not_refused() {
+        let answer = classify_deposit_response(&serde_json::json!({
+            "status": "refused",
+            "reason": "box-full",
+            "detail": "a mailbox on this node is full; nothing was filed or acknowledged; keep the letter and retry",
+        }));
+        assert!(matches!(answer, DepositAttempt::Deferred(_)), "got {answer:?}");
+    }
+
+    /// The poll side keeps custody of a container the box has no room for: the
+    /// same bytes will fit once the box is read, so the hub offers them again.
+    #[test]
+    fn box_full_keeps_the_hubs_custody_on_a_poll() {
+        assert!(refusal_clears_on_retry(aoide_storage::mail::REFUSAL_BOX_FULL));
+        assert!(!refusal_clears_on_retry(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE));
+    }
+
+    /// A `box-full` answer on one letter defers that letter alone: the link is
+    /// not backed off, the other letter to the same node is still delivered in
+    /// the same pass, and nothing is parked.
+    #[test]
+    fn a_box_full_answer_defers_without_parking_or_backing_off_the_link() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("drain-box-full");
+
+        let full = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "full").unwrap();
+        let full_msgid = full.msgid.clone();
+        let open = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "open").unwrap();
+        let open_msgid = open.msgid.clone();
+        let full_for_door = full_msgid.clone();
+        let port = scripted_door(move |request| {
+            let body = if request.contains(&full_for_door) {
+                r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"box-full","detail":"a mailbox on this node is full; nothing was filed or acknowledged; keep the letter and retry"}}"#
+            } else {
+                r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#
+            };
+            signed_reply(request, &own_key(), 200, body)
+        });
+        let mut node = keyed_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(full)).unwrap();
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(open)).unwrap();
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        let deferred = entries.iter().find(|e| e.envelope.msgid == full_msgid).unwrap();
+        assert!(!deferred.refused, "a full box parks nothing");
+        assert_eq!(deferred.tries, 1);
+        assert_eq!(deferred.last_outcome, "deferred: box-full");
+        let delivered = entries.iter().find(|e| e.envelope.msgid == open_msgid).unwrap();
+        assert!(delivered.last_attempt_reached_the_peer(), "the second letter goes out in the same pass");
+        assert!(
+            aoide_storage::outbox::read_link_state("elsewhere").unwrap().is_none(),
+            "the link is not backed off by a box's answer"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fifty letters waiting out their deferral must not take the batch: a
+    /// fresh letter behind them is attempted in the same pass. The fifty are
+    /// minted first, a second before the fresh one, so the oldest-first order
+    /// puts them ahead of it.
+    #[test]
+    fn deferred_entries_do_not_fill_the_drain_batch() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("drain-deferred-batch");
+
+        let port = scripted_door(|request| {
+            signed_reply(request, &own_key(), 200, r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#)
+        });
+        let mut node = keyed_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let now = aoide_storage::time::now_iso_utc();
+        for i in 0..DRAIN_BATCH_CAP {
+            let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", &format!("wait {i}")).unwrap();
+            let mut entry = OutboxEntry::fresh(env);
+            entry.tries = 1;
+            entry.last_try_at = now.clone();
+            entry.last_outcome = "deferred: box-full".to_string();
+            aoide_storage::outbox::write_entry("elsewhere", &entry).unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let fresh = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "fresh").unwrap();
+        let fresh_msgid = fresh.msgid.clone();
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(fresh)).unwrap();
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        let fresh_after = entries.iter().find(|e| e.envelope.msgid == fresh_msgid).unwrap();
+        assert!(fresh_after.last_attempt_reached_the_peer(), "the fresh letter is attempted, not starved");
+        assert_eq!(
+            entries.iter().filter(|e| e.last_outcome == "deferred: box-full" && e.tries == 1).count(),
+            DRAIN_BATCH_CAP,
+            "no deferred letter was attempted before its window passed"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

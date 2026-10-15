@@ -508,9 +508,10 @@ door's audit name whitelist gains both names so they never log as bare
   containers it refused for good (`bad-msgid`, `broken-chain`,
   `unverified-origin`, `not-correspondence`, `open-failed`, and the other
   refusals of the bytes themselves). A container refused for a reason of the
-  poller's own state (its disk, its config, its charter: `local-io`,
-  `config-unreadable`, `no-charter-in-force`, and the rest of that class) is
-  never named: its custody is kept and it is offered again. The hub retires
+  poller's own state (its disk, its config, its charter, its box being full:
+  `local-io`, `config-unreadable`, `no-charter-in-force`, `box-full`, and the
+  rest of that class) is never named: its custody is kept and it is offered
+  again. The hub retires
   its own custody of the named msgids (a `transit` entry, and only that)
   before it offers
   (`aoide_storage::outbox::filed_pending`). A response can be lost, so the
@@ -678,6 +679,13 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   door: `https://` reaches a listener whose whole method set is mail, and
   the door — which parks every send — is never fronted by a
   TLS-terminating hop (H1).
+- A `box-full` answer defers that one entry, and nothing else. The far end
+  answered, so the link is healthy and clears; the entry records
+  `deferred: box-full`, keeps `refused` false, and waits its own window
+  before its next attempt: `12 s` doubled per deferral, never past the
+  ceiling. The drain goes on to the next entry in the same pass, and a
+  deferred entry takes no place in the batch until its window passes.
+  Deferred entries are offered to a poll on the same rule.
 - `now` entries are attempted on every drain; `hold` entries are never
   attempted — they leave only through the node's `mailPoll`. A node
   declared `hold` in the mesh config makes every entry toward it `hold`
@@ -827,7 +835,9 @@ dropped. Deposit `refused` reasons — `no-route`, `unknown-mesh`,
 `zone-violation`, `unverified-origin`, `bad-msgid`, `not-correspondence` —
 return to the
 depositing hop, which records `lastOutcome` on that entry and stops
-retrying it; the origin learns through `aoide mail outbox`. **Two other refused words are not verdicts on the letter**: `down` and `config-invalid` say something about
+retrying it; the origin learns through `aoide mail outbox`. **`box-full` is not a verdict on the letter either**: the far box has no
+room for it, so the entry is deferred on its own window (§Outbox) and is
+never parked. **Two other refused words are not verdicts on the letter**: `down` and `config-invalid` say something about
 the far end's own state, so the entry stays live, the LINK's ordinary back-off
 carries it back, and it is never parked (§Status).
 
@@ -1363,7 +1373,10 @@ authoritative first:
   entry's problem.
 - `retrying` — the node's own link state still records an unresolved
   failure; its reason and `nextAttemptAt` (the earliest allowed retry,
-  never a promised schedule) ride beside the status.
+  never a promised schedule) ride beside the status. An entry the far box
+  deferred (`deferred: box-full`) is `retrying` too, with scope `entry` and
+  its own `nextAttemptAt`, since the wait belongs to that entry and not to
+  the link.
 - `queued` — none of the above: nothing has gone wrong, or nothing has
   been attempted yet.
 - `failed` — reserved for a genuine local I/O failure inside `mail

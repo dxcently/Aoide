@@ -459,7 +459,7 @@ never the inbound/serve half (that's `aoide-server`).
   `attempt_deposit` builds and sends one `aoide/mailDeposit` POST,
   mirroring `spawn_on_node_via`'s exact shape (resolve bearer, sign, POST,
   parse, check `error`) with no `--via` override — a drain only ever dials
-  `node.via` as recorded. Its `DepositAttempt` has five arms:
+  `node.via` as recorded. Its `DepositAttempt` has six arms:
   `Delivered{status}` (a result whose `status` is `"accepted"` or
   `"duplicate"`), `Refused(reason)` (the far end's own policy call, e.g.
   `-32010` lacks-message as a JSON-RPC `error` for an ADMISSION refusal,
@@ -471,7 +471,9 @@ never the inbound/serve half (that's `aoide-server`).
   either way, this ONE entry isn't), `TransportFailed(reason)` (no
   response at all — the LINK is the suspect), `LinkRefused(reason)` (the far
   end answered with a word about its own state, `down` or `config-invalid`: the
-  entry stays live and the link backs off), and `Unauthenticated(reason)` (an
+  entry stays live and the link backs off), `Deferred(word)` (the far box is
+  full, `box-full`: the entry records `deferred: box-full`, stays live, waits
+  its own window, and the link is not backed off), and `Unauthenticated(reason)` (an
   answer that did not verify under the key on file: nothing in it is read, so
   the entry is recorded `unauthenticated:`, neither settled nor parked, and the
   link backs off). The one thing an unsigned answer contributes is what it

@@ -8921,7 +8921,9 @@ signature, two of them, another key's, another request's) is
 nothing and backs off the link. Only a verified `accepted` or `duplicate`
 retires a receipt, a `charter` letter or a `transit` container; a letter waits
 for its receipt. A verified JSON-RPC `error` parks the entry, an unsigned one
-never does.
+never does. A verified `refused` with `reason: "box-full"` defers the entry
+alone: it stays live, waits its own window, and the link is not backed off
+(MAIL.md §Outbox).
 
 A container takes a longer path than an envelope, and every step of it is
 still a REFUSED RESULT rather than a JSON-RPC error, because what became of
