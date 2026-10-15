@@ -363,7 +363,6 @@ fn record(name: &str, url: &str, pubkey: &str, grant_in: Option<&str>) -> node_s
     node_store::Node {
         name: name.to_string(),
         url: url.to_string(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,
