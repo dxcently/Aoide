@@ -24,7 +24,9 @@ Orient through four tiers, in order:
   Tier 1 — the CLI: `lyra <cmd>` is lyra's whole surface; every command
     takes and emits `--json`; `lyra schema --json` is the full
     machine-readable command tree.
-  Tier 2 — stdio MCP: per-session, optional — `lyra mcp serve --stdio`.
+  Tier 2 — stdio MCP: per-session, optional — `lyra mcp serve --stdio`;
+    it lists only the commands that declare `mcp` (`doors` in
+    `lyra schema --json`; absent = cli, daemon).
   Tier 3 — network MCP: enabled by the USER only, never by an agent.
 
 Command surface — every group this binary registered at boot, with its

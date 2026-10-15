@@ -623,7 +623,8 @@ Contract guarantees:
   version bump, same additive discipline as §1/§4's optional tiers — it lets
   a discovery consumer filter to only the live commands without a second
   command inventory. The A2A AgentCard (§6) is the first such consumer: its
-  `skills` list is exactly the commands with `implemented: true`.
+  `skills` list is exactly the commands with `implemented: true` and `doors`
+  naming `a2a`.
 - `examples` (optional string array) — invocation samples shown by
   `aoide <command> --help`. **Additive**, same discipline as `implemented`:
   omitted from `schema --json` entirely when empty, so a command without
@@ -636,10 +637,22 @@ Contract guarantees:
   entirely when `false`, so a non-internal command serializes byte-identical
   to before the field existed. It hides noise from the HUMAN listing only
   (`aoide guide`'s command table skips `internal` rows) — every other door
-  (`schema --json`, the MCP tool list, the A2A AgentCard's `skills`) still
-  enumerates internal commands in full; `internal` is not a second
+  (`schema --json`; the MCP tool list and the A2A AgentCard list an internal
+  command only where its `doors` name them) still enumerates it; `internal`
+  is not a second
   `implemented`-style capability filter, it is purely a display hint for one
   consumer.
+- `doors` (optional string array on a command, and on a flag) — the doors that
+  may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
+  discipline: omitted from `schema --json` when it is the default `["cli",
+  "daemon"]` (the terminal, and the aoided socket the terminal forwards
+  through). A flag's `doors` is omitted when empty, which means the command's
+  doors. Absent = `["cli","daemon"]`: a command closed to MCP and A2A until it
+  declares them. `Command::check` is the one validator: a call through a door
+  the command does not declare is refused as usage (exit 2) before the handler
+  runs, and so is a flag that is present through a door its `doors` exclude.
+  The MCP tool list and the A2A AgentCard list only the commands that declare
+  `mcp` and `a2a`, and hide the flags a door does not open.
 - Declared validation (all **additive**, same discipline: each key is omitted
   from `schema --json` at its default, so a command that declares none
   serializes byte-identical to before). On a flag: `value` (the `<placeholder>`
@@ -1160,13 +1173,16 @@ newline-delimited JSON request line → zero or more interim lines
   invocation only. A handler reached through MCP or the A2A door runs its
   direct path under its own door and never arrives here as `Door::Daemon`.
 
-**No new allowlist.** `Door::Daemon` (`aoide-protocol`) is audited exactly
-like the other three; the per-command door policy already in force for
-MCP/A2A — a CLI-only admin command's refusal, a gated command's `gated: true`,
-a long-running server command's (`mcp.serve`/`a2a.serve`) non-Cli metadata
-reply — applies unchanged, since `dispatch` routes through the SAME
-dispatcher every door calls. This module introduces no daemon-specific
-permission table, and none is planned. Untrusted input stops at the parse/
+**The door policy is the registry's `doors`, and no other.** `Door::Daemon`
+(`aoide-protocol`) is audited exactly like the other three. A command's
+`doors` (§3) is checked by the one gate in `Command::check`, for every door
+that calls `dispatch`, the daemon included. The daemon is in the default door
+set because it is the CLI's forwarding hop and the wire carries no door, so a
+forwarded call runs as Daemon. A command that declares `[cli]` alone refuses
+that hop (`secrets add`, `a2a serve`), with a usage refusal before its handler
+runs; a command closed to a door is refused there, never answered with
+metadata. This module introduces no daemon-specific permission table, and none
+is planned. Untrusted input stops at the parse/
 validate boundary: a malformed line gets one error reply and the connection
 survives; a request line over the 1 MiB cap is dropped mid-stream (checked
 incrementally, not only after a `\n` finally arrives) with one error reply
@@ -7202,8 +7218,12 @@ Server-Sent Events. The MVP door serves exactly:
   static card metadata the schema does not carry (card `url`, `version`,
   `capabilities`, input/output modes). Only **implemented** commands become
   advertised skills: The `schema --json` command entries carry an `implemented`
-  boolean (§3), and the card filters on it, so stub commands are never
-  advertised as live skills.
+  boolean (§3) and a `doors` list (§3), and the card filters on both: a skill
+  is a command that is implemented and declares `a2a`, so stub commands and
+  commands closed to A2A are never advertised. A2A itself runs no registry
+  command; `message/send` routes straight to the same gated send and spawn
+  paths, so declaring `a2a` changes what the card says, not what the door can
+  reach.
 
 - **`message/send`** — invoke; returns a Task. Execution is described under
   "Execution: `message/send`" below.

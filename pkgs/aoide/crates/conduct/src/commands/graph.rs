@@ -195,7 +195,7 @@ pub fn register(r: &mut Registry) {
             "spawn --task fix-flaky --instructions @brief.md -- claude",
         ],
         brief: "Spawn an agent command as a detached, conducted session.",
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp, Door::A2a],
     ));
     r.insert(cmd!(
         path: ["resurrect"],
@@ -239,7 +239,7 @@ pub fn register(r: &mut Registry) {
         ],
         one_of: &[&["id", "to"]],
         brief: "Inject text into a conducted session (held for approval unless --yes).",
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp, Door::A2a],
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],

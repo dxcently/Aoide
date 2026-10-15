@@ -52,9 +52,11 @@
   "missing field." A future field on `Outcome`/`Status` that skips
   serializing when absent/default needs the same pairing, or a daemon
   reply that omitted it stops parsing.
-- **`Command::check` is the one place argument rules are enforced**, run by
-  `door::parse` (so before any `special` hook) and by `Command::invoke`
-  (which every `dispatch()` uses). New `Flag`/`Command` fields are additive:
+- **`Command::check` is the one place argument rules and doors are enforced**,
+  run by `door::parse` (so before any `special` hook) and by `Command::invoke`
+  (which every `dispatch()` uses). It refuses a door the command does not
+  declare (`doors`) and a flag present through a door its `doors` exclude,
+  before any argument rule. New `Flag`/`Command` fields are additive:
   skipped from `schema --json` at their default, so an undeclared command
   serializes byte-identical. A stub is never checked (it answers 64). The
   taught-error shape (`Outcome::refuse`, `Fix`, `io_cause`) is defined in

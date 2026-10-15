@@ -60,6 +60,7 @@ pub type DispatchFn = fn(&Invocation) -> Outcome;
 pub fn tool_list(registry: &Registry) -> Value {
     let tools: Vec<Tool> = registry
         .commands()
+        .filter(|c| c.opens(Door::Mcp))
         .map(|c| {
             let mut properties: BTreeMap<String, ToolProperty> = BTreeMap::new();
             let mut required: Vec<String> = Vec::new();
@@ -73,7 +74,7 @@ pub fn tool_list(registry: &Registry) -> Value {
                     required.push(a.name.to_string());
                 }
             }
-            for f in c.flags {
+            for f in c.flags.iter().filter(|f| f.doors.is_empty() || f.doors.contains(&Door::Mcp)) {
                 properties.insert(
                     f.name.to_string(),
                     ToolProperty { kind: json_type(f.ty).to_string(), description: f.description.to_string() },
@@ -422,6 +423,7 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp],
             ..Command::BLANK
         });
         r.insert(Command {
@@ -436,27 +438,77 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+            ..Command::BLANK
+        });
+        r.insert(Command {
+            path: &["closed", "one"],
+            summary: "closed to mcp",
+            args: &[],
+            flags: &[],
+            gated: false,
+            implemented: true,
+            internal: false,
+            exit_codes: (),
+            examples: &[],
+            handler: fake_handler,
+            available: || true,
             ..Command::BLANK
         });
         r
     }
 
+    /// One tool per MCP-open command, and no tool for a command closed to MCP.
     #[test]
-    fn tool_list_is_derived_one_to_one_from_the_registry() {
+    fn tool_list_is_one_to_one_with_the_mcp_open_set() {
         let registry = fixture_registry();
         let tools = tool_list(&registry);
         let arr = tools["tools"].as_array().unwrap();
-        assert_eq!(arr.len(), registry.commands().count());
-        // Every command name appears as a tool name, and the gate surfaces.
-        let names: std::collections::HashSet<String> = arr
-            .iter()
-            .map(|t| t["name"].as_str().unwrap().to_string())
-            .collect();
-        for c in registry.commands() {
-            assert!(names.contains(&c.dotted()), "tool missing for {}", c.dotted());
-        }
+        let names: Vec<&str> = arr.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["foo.bar", "guide"]);
+        assert!(!names.contains(&"closed.one"));
         let bar = arr.iter().find(|t| t["name"] == "foo.bar").unwrap();
         assert_eq!(bar["annotations"]["gated"], true);
+    }
+
+    /// A flag closed to MCP is not advertised, and the open flag still is.
+    #[test]
+    fn tool_list_hides_the_flags_closed_to_mcp() {
+        use aoide_protocol::registry::{arg, cmd, flag, CLI_DOORS};
+        let mut r = Registry::new();
+        r.insert(cmd!(
+            path: ["send"],
+            summary: "Send.",
+            args: [arg!("text", "string", true, "Text.")],
+            flags: [
+                flag!("yes", "bool", "Yes.", doors: CLI_DOORS),
+                flag!("submit", "bool", "Submit.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        ));
+        let tools = tool_list(&r);
+        let props = tools["tools"][0]["inputSchema"]["properties"].as_object().unwrap();
+        assert!(props.contains_key("submit"), "{props:?}");
+        assert!(!props.contains_key("yes"), "{props:?}");
+    }
+
+    /// `tools/call` on a command closed to MCP is refused through the registry:
+    /// `isError` is set, the taught line names the door, and the handler never runs.
+    #[test]
+    fn tools_call_on_a_closed_command_is_refused_and_its_handler_never_runs() {
+        let req = json!({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": { "name": "closed.one", "arguments": {} }
+        });
+        static FIXTURE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+        let registry = FIXTURE.get_or_init(fixture_registry);
+        let resp = handle(&req, registry, |inv| FIXTURE.get().unwrap().get(&inv.path).unwrap().invoke("aoide", inv)).unwrap();
+        assert_eq!(resp["result"]["isError"], true, "{resp}");
+        let outcome: Value = serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert!(outcome["message"].as_str().unwrap().contains("is not open to the mcp door"), "{outcome}");
     }
 
     /// Ruling 3: a flag declared `required` (and not defaulted) is in the
@@ -477,7 +529,8 @@ mod tests {
             ],
             gated: false,
             implemented: true,
-            handler: fake_handler
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
         ));
         let tools = tool_list(&r);
         let required: Vec<&str> = tools["tools"][0]["inputSchema"]["required"]
@@ -588,20 +641,24 @@ mod tests {
         )
         .unwrap();
 
-        let sent = tools_call("send", json!({ "text": "run it", "id": id, "submit": true, "yes": true }));
+        // Without `--yes` the send parks: the MCP door cannot approve it.
+        let sent = tools_call("send", json!({ "text": "run it", "id": id, "submit": true }));
         assert_eq!(sent["data"]["state"], "pending", "{sent}");
-        assert_eq!(sent["data"]["approvalRefused"], true, "{sent}");
-        assert!(
-            sent["message"].as_str().unwrap().contains(aoide_conduct::graph::DOOR_CANNOT_APPROVE),
-            "{sent}"
-        );
+        assert_eq!(sent["data"]["gate"], "pending", "{sent}");
         assert!(
             matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
             "a refused approval reaches nothing"
         );
 
+        // `yes` is closed to MCP: the registry refuses it before the handler.
+        let forced = tools_call("send", json!({ "text": "run it", "id": id, "yes": true }));
+        assert_eq!(forced["status"], "usage", "{forced}");
+        assert!(forced["message"].as_str().unwrap().contains("`--yes` is not open to the mcp door"), "{forced}");
+
+        // `session pending approve` is closed to MCP: refused, the entry stays held.
         let approved = tools_call("session.pending.approve", json!({ "id": "0" }));
-        assert_eq!(approved["data"]["reason"], "door-cannot-approve", "{approved}");
+        assert_eq!(approved["status"], "usage", "{approved}");
+        assert!(approved["message"].as_str().unwrap().contains("is not open to the mcp door"), "{approved}");
         let raw: Value = serde_json::from_str(&std::fs::read_to_string(aoide_conduct::graph::pending_path()).unwrap()).unwrap();
         assert_eq!(raw["pending"].as_array().unwrap().len(), 1, "the entry stays held");
 

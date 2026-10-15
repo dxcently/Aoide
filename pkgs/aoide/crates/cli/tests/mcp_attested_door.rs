@@ -243,11 +243,15 @@ fn the_real_mcp_server_is_attested_by_its_ancestry_and_still_never_approves() {
     assert_eq!(held.len(), 1, "{held:?}");
     assert_eq!(held[0]["from"], "mcp:orch", "{held:?}");
 
+    // `--yes` is closed to MCP: the registry refuses it for an attested caller
+    // too, before the send handler runs, so nothing new is held.
     let out = attested.call("send", json!({ "id": "someone-else", "text": "forced", "yes": true }));
-    assert_eq!(out["data"]["approvalRefused"], true, "--yes is refused even for an attested caller: {out}");
+    assert_eq!(out["status"], "usage", "--yes is refused even for an attested caller: {out}");
+    assert!(out["message"].as_str().unwrap().contains("`--yes` is not open to the mcp door"), "{out}");
     let out = attested.call("session.pending.approve", json!({ "id": "0" }));
-    assert_eq!(out["data"]["reason"], "door-cannot-approve", "{out}");
-    assert_eq!(world.pending().len(), 2, "approving over MCP released nothing");
+    assert_eq!(out["status"], "usage", "{out}");
+    assert!(out["message"].as_str().unwrap().contains("is not open to the mcp door"), "{out}");
+    assert_eq!(world.pending().len(), 1, "approving over MCP released nothing and held nothing new");
     assert!(nothing_connected(&other_listener));
     assert!(audit_has(&world.dir, "\"door\":\"mcp\""), "the door is audited");
     drop(attested);

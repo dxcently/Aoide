@@ -211,6 +211,37 @@ mod tests {
         assert_eq!(got, expected, "MCP-open set drifted from lyra's golden snapshot");
     }
 
+    /// Every MCP-open command passes the door gate when given nothing.
+    #[test]
+    fn every_mcp_open_command_passes_the_door_gate() {
+        use aoide_protocol::audit::Door;
+        let r = crate::commands::all();
+        for c in r.commands().filter(|c| c.opens(Door::Mcp)) {
+            let mut inv = aoide_protocol::Invocation {
+                path: c.path.iter().map(|s| s.to_string()).collect(),
+                args: vec![],
+                flags: Default::default(),
+                door: Door::Mcp,
+            };
+            if let Err(refusal) = c.check("lyra", &mut inv) {
+                assert!(!refusal.what.contains("is not open to the mcp door"), "{}: {}", c.dotted(), refusal.what);
+            }
+        }
+    }
+
+    /// `mcp serve` reports the same count the MCP-open set has.
+    #[test]
+    fn mcp_serve_counts_only_the_mcp_open_commands() {
+        let inv = aoide_protocol::Invocation {
+            path: vec!["mcp".into(), "serve".into()],
+            args: vec![],
+            flags: Default::default(),
+            door: aoide_protocol::audit::Door::Cli,
+        };
+        let outcome = crate::dispatch::dispatch(&inv);
+        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 20, "{outcome:?}");
+    }
+
     #[test]
     fn every_example_parses() {
         aoide_test_support::registry_walk::every_example_parses("lyra", &crate::commands::all());

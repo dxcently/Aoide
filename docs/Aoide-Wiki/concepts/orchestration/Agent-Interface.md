@@ -20,13 +20,16 @@ so Melete's own tooling routes through the same trunk.
 Three doors open onto aoide — the CLI trunk, the MCP façade, and the
 [[A2A-Door|A2A door]] — and all three derive from the one command schema
 (`aoide schema --json`). There is one implementation; the doors cannot drift.
-The CLI is the complete surface; the other two are generated from it and
-**off by default**. The crate layout ([[Package-Layout]]) carries this
+The CLI is the complete surface; the other two are generated from the commands
+that declare them, and a command is closed to MCP and A2A until it declares
+`mcp` or `a2a` in its `doors`. The crate layout ([[Package-Layout]]) carries this
 invariant into a structural boundary: the `aoide-protocol` crate holds the
 registry, schema, and door types, so every door depends on the one contract
 rather than converging on it by convention.
 
-MCP is generated as a façade from the same command schema that backs the CLI.
+MCP is a façade over the declared set: its tool list is the commands whose
+`doors` name `mcp`, read from the same command schema that backs the CLI
+(`aoide schema --json` shows each command's `doors`).
 The MCP layer is deliberately optional and agent-added:
 
 | Setting | Value |

@@ -315,6 +315,27 @@ impl Command {
     /// fields and no required positional passes untouched. A stub is never
     /// checked: it answers 64 whatever it was given.
     pub fn check(&self, bin: &str, inv: &mut Invocation) -> Result<(), Refusal> {
+        let me = format!("{bin} {}", self.path.join(" "));
+        let door = format!("{:?}", inv.door).to_lowercase();
+        if !self.opens(inv.door) {
+            let open: Vec<String> = self.doors.iter().map(|d| format!("{d:?}").to_lowercase()).collect();
+            return Err(Refusal::new(
+                Kind::Usage,
+                format!("`{me}` is not open to the {door} door"),
+                format!("a command answers only the doors it declares; this one declares {}", open.join(", ")),
+                Fix::Run(self.fix_line(bin, inv)),
+            ));
+        }
+        for f in self.flags.iter().filter(|f| !f.doors.is_empty() && !f.doors.contains(&inv.door)) {
+            if inv.flag_present(f.name) {
+                return Err(Refusal::new(
+                    Kind::Usage,
+                    format!("`--{}` is not open to the {door} door", f.name),
+                    format!("`{me}` takes `--{}` only from a terminal", f.name),
+                    Fix::Run(self.fix_line(bin, inv)),
+                ));
+            }
+        }
         if !self.implemented {
             return Ok(());
         }
@@ -322,7 +343,6 @@ impl Command {
             inv.flags.entry(f.name.to_string()).or_insert_with(|| f.default.to_string());
         }
         let usage = |what: String, why: String, fix: String| Refusal::new(Kind::Usage, what, why, Fix::Run(fix));
-        let me = format!("{bin} {}", self.path.join(" "));
 
         // A blank positional is no positional: required arguments are satisfied
         // by the words that say something (an optional one may come first).
@@ -969,6 +989,78 @@ mod tests {
                 { "name": "Second", "heads": [{ "name": "a" }] }
             ])
         );
+    }
+
+    // ── Door gate (CONTRACTS.md §3, "doors") ─────────────────────────────
+
+    /// A handler that records it ran, in a flag the calling test owns.
+    macro_rules! runner {
+        ($flag:ident, $handler:ident) => {
+            static $flag: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            fn $handler(_: &Invocation) -> Outcome {
+                $flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                Outcome::ok("runs", "ran")
+            }
+        };
+    }
+    fn took(flag: &std::sync::atomic::AtomicBool) -> bool {
+        flag.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+    fn at(door: Door, path: &[&str], flags: &[(&str, &str)]) -> Invocation {
+        Invocation {
+            path: path.iter().map(|s| s.to_string()).collect(),
+            args: vec![],
+            flags: flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            door,
+        }
+    }
+
+    #[test]
+    fn a_command_with_no_doors_declared_refuses_mcp_and_a2a_before_its_handler_runs() {
+        runner!(RAN, runs);
+        let c = cmd!(path: ["shut", "down"], summary: "Shut.", args: [], flags: [], gated: false, implemented: true, handler: runs);
+        for door in [Door::Mcp, Door::A2a] {
+            let o = c.invoke("aoide", &at(door, &["shut", "down"], &[]));
+            assert_eq!(o.status, Status::Usage, "{door:?}");
+            assert!(o.message.contains("is not open to the"), "{}", o.message);
+            assert!(!took(&RAN), "{door:?} must not reach the handler");
+        }
+        for door in [Door::Cli, Door::Daemon] {
+            let o = c.invoke("aoide", &at(door, &["shut", "down"], &[]));
+            assert_eq!(o.status, Status::Ok, "{door:?}");
+            assert!(took(&RAN), "{door:?} runs the handler");
+        }
+    }
+
+    #[test]
+    fn a_command_that_declares_only_cli_refuses_the_daemon_hop() {
+        runner!(RAN, runs);
+        let c = cmd!(path: ["secret", "add"], summary: "Add.", args: [], flags: [], gated: false, implemented: true, handler: runs, doors: &[Door::Cli]);
+        let o = c.invoke("aoide", &at(Door::Daemon, &["secret", "add"], &[]));
+        assert_eq!(o.status, Status::Usage);
+        assert!(!took(&RAN));
+        assert_eq!(c.invoke("aoide", &at(Door::Cli, &["secret", "add"], &[])).status, Status::Ok);
+    }
+
+    #[test]
+    fn a_flag_closed_to_mcp_refuses_every_value_it_can_arrive_with_even_false() {
+        runner!(RAN, runs);
+        let c = cmd!(
+            path: ["send"], summary: "Send.", args: [],
+            flags: [flag!("yes", "bool", "Yes.", doors: CLI_DOORS), flag!("submit", "bool", "Submit.")],
+            gated: false, implemented: true, handler: runs,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        );
+        for value in ["true", "false"] {
+            let o = c.invoke("aoide", &at(Door::Mcp, &["send"], &[("yes", value)]));
+            assert_eq!(o.status, Status::Usage, "--yes {value} over mcp");
+            assert!(o.message.contains("`--yes` is not open to the mcp door"), "{}", o.message);
+            assert!(!took(&RAN));
+        }
+        assert_eq!(c.invoke("aoide", &at(Door::Mcp, &["send"], &[("submit", "true")])).status, Status::Ok);
+        assert!(took(&RAN));
+        assert_eq!(c.invoke("aoide", &at(Door::Cli, &["send"], &[("yes", "true")])).status, Status::Ok);
+        assert!(took(&RAN));
     }
 
     #[test]

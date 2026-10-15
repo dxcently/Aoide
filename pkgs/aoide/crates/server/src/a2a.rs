@@ -548,7 +548,7 @@ pub fn agent_card_from_commands<'a>(
     port: u16,
 ) -> Value {
     let skills: Vec<AgentSkill> = commands
-        .filter(|c| c.implemented)
+        .filter(|c| c.implemented && c.opens(Door::A2a))
         .map(|c| {
             let dotted = c.dotted();
             let top_level = c.path.first().copied().unwrap_or("");
@@ -6628,11 +6628,26 @@ mod tests {
 
     // (a) AgentCard generation from a small fake schema.
     #[test]
-    fn agent_card_only_advertises_implemented_commands_as_skills() {
+    fn agent_card_only_advertises_implemented_commands_that_open_to_a2a() {
         let mut r = Registry::new();
         r.insert(Command {
             path: &["foo", "bar"],
             summary: "does a thing",
+            args: &[],
+            flags: &[],
+            gated: false,
+            implemented: true,
+            internal: false,
+            exit_codes: (),
+            examples: &[],
+            handler: fake_handler,
+            available: || true,
+            doors: &[Door::Cli, Door::Daemon, Door::A2a],
+            ..aoide_protocol::registry::Command::BLANK
+        });
+        r.insert(Command {
+            path: &["foo", "closed"],
+            summary: "implemented, but closed to a2a",
             args: &[],
             flags: &[],
             gated: false,
@@ -6676,6 +6691,17 @@ mod tests {
         // shape as the pure `agent_card_from_commands` it wraps.
         let card2 = agent_card(&r, "127.0.0.1", 8710);
         assert_eq!(card2, card);
+    }
+
+    /// A2A runs no registry command: `message/send` routes straight to
+    /// `session_send`/spawn (CONTRACTS.md §6). So a command declaring the A2A
+    /// door changes the card and nothing else. This is a tripwire: if an
+    /// `invoke(` appears in this file's production code, a path has started
+    /// running registry commands and the declaration is no longer inert.
+    #[test]
+    fn a2a_runs_no_registry_command() {
+        let production = include_str!("a2a.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(!production.contains(".invoke("), "a2a.rs must not run a registry command");
     }
 
     // (b) canonical_state -> TaskState mapping, incl. needs_sudo precedence.
@@ -17442,6 +17468,7 @@ mod tests {
                 examples: &[],
                 available: || true,
                 handler: fake_handler,
+                doors: &[Door::Cli, Door::Daemon, Door::Mcp, Door::A2a],
                 ..aoide_protocol::registry::Command::BLANK
             });
         }

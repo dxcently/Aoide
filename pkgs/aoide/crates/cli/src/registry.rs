@@ -452,6 +452,135 @@ mod tests {
         assert_eq!(got, expected, "command path set drifted from the golden snapshot");
     }
 
+    /// Every MCP-open command passes the door gate when given nothing: any
+    /// refusal it returns is about its own arguments, never the door.
+    #[test]
+    fn every_mcp_open_command_passes_the_door_gate() {
+        use aoide_protocol::audit::Door;
+        let r = crate::commands::all();
+        for c in r.commands().filter(|c| c.opens(Door::Mcp)) {
+            let mut inv = aoide_protocol::Invocation {
+                path: c.path.iter().map(|s| s.to_string()).collect(),
+                args: vec![],
+                flags: Default::default(),
+                door: Door::Mcp,
+            };
+            if let Err(refusal) = c.check("aoide", &mut inv) {
+                assert!(!refusal.what.contains("is not open to the mcp door"), "{}: {}", c.dotted(), refusal.what);
+            }
+        }
+    }
+
+    /// The state-changing commands an MCP caller must never reach are refused
+    /// by the registry (the handler never runs), and the whole state root is
+    /// byte-identical afterwards. The audit line is the one thing that moves.
+    #[test]
+    fn the_mcp_door_refuses_the_state_changing_commands_and_writes_nothing() {
+        use aoide_protocol::audit::Door;
+        use std::collections::BTreeMap;
+        use std::path::{Path, PathBuf};
+
+        fn snapshot(dir: &Path, out: &mut BTreeMap<PathBuf, Vec<u8>>) {
+            let Ok(entries) = std::fs::read_dir(dir) else { return };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    snapshot(&p, out);
+                } else if let Ok(bytes) = std::fs::read(&p) {
+                    out.insert(p, bytes);
+                }
+            }
+        }
+
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = aoide_test_support::short_tmp("mcp-door-state");
+        std::fs::create_dir_all(root.join("home")).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SECRETS_HOME",
+            "XDG_RUNTIME_DIR",
+            "HOME",
+            "AOIDE_SESSION_ID",
+        ]);
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_SECRETS_HOME", root.join("secrets"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+        std::env::set_var("HOME", root.join("home"));
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let cases: [(&[&str], &[&str], &[(&str, &str)]); 7] = [
+            (&["mesh", "join"], &["home"], &[("operator", "ed25519:00"), ("replace", "true")]),
+            (&["node", "allow"], &["peer"], &[]),
+            (&["session", "end"], &[], &[("id", "x")]),
+            (&["session", "pending", "approve"], &["0"], &[]),
+            (&["config", "set"], &["upkeep.verifyCommand", "true"], &[]),
+            (&["mail", "ring"], &["worker"], &[]),
+            (&["send"], &["ship it"], &[("id", "x"), ("yes", "true")]),
+        ];
+        for (path, args, flags) in cases {
+            let inv = aoide_protocol::Invocation {
+                path: path.iter().map(|s| s.to_string()).collect(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+                flags: flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+                door: Door::Mcp,
+            };
+            let log = crate::dispatch::audit_log_path(&inv);
+            let mut before = BTreeMap::new();
+            snapshot(&root, &mut before);
+            before.remove(&log);
+
+            let outcome = crate::dispatch::dispatch(&inv);
+            assert_eq!(outcome.status, aoide_protocol::output::Status::Usage, "{path:?}: {}", outcome.message);
+            assert!(outcome.message.contains("is not open to the mcp door"), "{path:?}: {}", outcome.message);
+
+            let mut after = BTreeMap::new();
+            snapshot(&root, &mut after);
+            after.remove(&log);
+            assert_eq!(before, after, "{path:?} changed state over the mcp door");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The MCP tool list is the MCP-open set, name for name (CONTRACTS.md §3).
+    #[test]
+    fn the_mcp_tool_list_is_exactly_the_mcp_open_set() {
+        let r = crate::commands::all();
+        let tools = aoide_server::mcp::tool_list(&r);
+        let mut names: Vec<String> = tools["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+        names.sort();
+        let mut expected = vec!["guide", "schema", "send", "session.watch", "soundcheck", "spawn"];
+        expected.sort();
+        assert_eq!(names, expected);
+    }
+
+    /// The A2A card lists the commands that declare the A2A door, and only
+    /// those: `send` and `spawn` (U5). A2A still routes both by hand.
+    #[test]
+    fn the_a2a_card_lists_the_commands_that_declare_a2a() {
+        let r = crate::commands::all();
+        let card = aoide_server::a2a::agent_card(&r, "127.0.0.1", 8710);
+        let mut skills: Vec<&str> = card["skills"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap()).collect();
+        skills.sort();
+        assert_eq!(skills, ["send", "spawn"]);
+    }
+
+    /// `mcp serve` reports the same count the tool list shows.
+    #[test]
+    fn mcp_serve_counts_only_the_mcp_open_commands() {
+        let inv = aoide_protocol::Invocation {
+            path: vec!["mcp".into(), "serve".into()],
+            args: vec![],
+            flags: Default::default(),
+            door: aoide_protocol::audit::Door::Cli,
+        };
+        let outcome = crate::dispatch::dispatch(&inv);
+        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 6, "{outcome:?}");
+    }
+
     /// Golden snapshot: the commands an MCP caller may list and call. Every
     /// `doors` change updates this list in the same commit (crates/AGENTS.md).
     #[test]

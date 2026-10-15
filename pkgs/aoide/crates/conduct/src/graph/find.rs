@@ -4005,7 +4005,7 @@ mod tests {
     }
 
     #[test]
-    fn the_registrys_cc_example_works_over_mcp_and_a_quoted_value_keeps_its_space() {
+    fn the_registrys_cc_example_works_and_a_quoted_value_keeps_its_space() {
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _env) = isolated("find-words-cc");
         let node = display::local_node_name();
@@ -4035,7 +4035,8 @@ mod tests {
         assert_eq!(line, r#"cc:"pr 41""#);
 
         let mut mcp = Invocation { door: Door::Mcp, ..invocation(&["session", "find"], &[line]) };
-        find_cmd.check("aoide", &mut mcp).expect("the declared arguments accept the example");
+        let refused = find_cmd.check("aoide", &mut mcp).expect_err("session find is closed to mcp until its own-scope read lands");
+        assert_eq!(refused.kind, Kind::Usage);
         let out = session_find_with(&mcp, "osaka");
         assert_eq!(out.status, Status::Ok, "{out:?}");
         let data = out.data.as_ref().expect("the answer carries its data");

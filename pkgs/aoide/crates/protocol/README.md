@@ -26,9 +26,11 @@ other crate in this workspace sits above.
   `Command` declares `one_of` and `brief`, and `doors` (which doors may call
   it; `CLI_DOORS` = `[cli, daemon]` when absent). `Flag` declares `doors` too
   (empty = the command's doors). `Command::opens(door)` is the predicate.
-  `Command::check` enforces the other declarations (defaults applied first)
-  and `Command::invoke` is check-then-handler, the entry every `dispatch()`
-  uses.
+  `Command::check` enforces the declarations (the door gate first, then the
+  argument rules with defaults applied) and `Command::invoke` is
+  check-then-handler, the entry every `dispatch()` uses. A door the command
+  does not declare, or a flag closed to the door it came through, is refused
+  as usage before the handler runs.
 - `style` — terminal manners, decided in one place: `Style` (the role
   vocabulary — `heading`, `name`, `args`, `required`, `error`, `usage`, `why`,
   `fix`, `suggest`, `stub` — over the ANSI 16 base colors, or plain), `Color`

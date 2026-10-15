@@ -30,7 +30,8 @@ Orient through four tiers — 0: onboarding (this file + `docs/agent/README.md`
 3: network MCP, user-enabled only. The tier map lives in
 `docs/Aoide-Wiki/concepts/orchestration/Agent-Interface.md`; `aoide guide`
 prints it at runtime, and `aoide schema --json` / `lyra schema --json` is the
-machine-readable backstop at any tier.
+machine-readable backstop at any tier. MCP and A2A see only the commands that
+declare them; `schema --json` shows each command's `doors`.
 
 **Conducting — commanding other sessions (aoide's headline).** Every terminal
 is a conductable, tracked session; command another with `aoide send
@@ -83,8 +84,8 @@ and the staging/declarative/draft modes:
    session. This is a documented convention backed by code review; the
    selection tests prove unselected dendrites and songs are never read, and no
    automated coupling check exists yet.
-6. **Every operation flows through `aoided`:** one policy surface, one gate,
-   one audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`). Both doors
+6. **Every operation flows through `aoided`:** one policy surface, one gate
+   (`Command::check`, which also refuses a door a command does not declare), one audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`). Both doors
    inherit it.
 7. **Everything is a plugin.** A capability enters as ONE file (or one
    directory, when it needs more than one file) at a conventional path, and
