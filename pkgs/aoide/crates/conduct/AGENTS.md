@@ -1085,11 +1085,14 @@ in the message.
   no `sessions.json` state, no ledger exit, subagent cascade, tunnel close or
   check-lane baseline forget). The outcome begins `refused:` and carries
   `reason: harness-anchored`. `session_phase` sends a `done` phase to
-  `do_session_end`, so the phase door is no way round the caller test. The reaper spares the record while the harness lives (`reap::harness_alive`): the window signal, the orphan arm and the staleness bands skip it, and only the pid signal of the record's own pid still judges it. A
+  `do_session_end`, so the phase door is no way round the caller test. The reaper spares a record whose stored chain names a live harness (`reap::harness_alive`): the window signal, the orphan arm and the staleness bands skip it, and only the pid signal of the record's own pid still judges it. A pid-only record is not spared, since its window signal is the SUPER+Q case. A
   session that has ended (`state` `done`: its own `SessionEnd`, `/clear` and
   resume included), a dead harness, or a hook that runs under the harness
   releases the anchor, which is what lets `claude --resume` in another terminal
-  adopt the id. `hookAncestry` stores no start time, so a pid recycled by an
+  adopt the id. That release is also the done-id squat, and the other same-uid
+  residuals of this block (a descendant of the harness counting as it, the pid
+  fill on a chainless record, the namespace-local probe, the wrap-end ordering)
+  are listed under the trust model in `CONTRACTS.md`, not restated here. `hookAncestry` stores no start time, so a pid recycled by an
   unrelated live process holds the anchor until it exits; the refusal is the
   safe side. A new writer of `hookAncestry`, `parentSessionId` or a record's
   `state` on a hook-registered record goes through that test. The caller's

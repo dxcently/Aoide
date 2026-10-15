@@ -2165,7 +2165,8 @@ hook process, the daemon's `SO_PEERCRED` pid for a forwarded call, or else the
 calling process itself; a door that attests none ends nobody. A session that has
 not ended (its roster `state` is not `done`) is anchored to its harness, the
 first pid of its `hookAncestry` else its `pid`, while that process is alive. A
-caller that does not run under the harness moves nothing of the record:
+caller that does not run under the harness moves neither the record's chain nor
+its parent, and writes no fact:
 
 - a `SessionStart` for the id is a no-op that exits ok. Its audited outcome
   names the session and the harness pid, and its data carries the reason
@@ -2198,11 +2199,11 @@ byte against the profile's `session_end_continues`, never normalised; `logout`,
 `prompt_input_exit`, `other`, any value not listed and an absent field all write
 the fact. The chain stores no start time, so a pid reused by an unrelated live
 process holds the anchor until that process exits. The reaper spares the
-record while the harness lives: its window signal, its orphan arm and its
-staleness bands (72 hours at rest, a week mid-turn, from the record's last sign
-of life) never judge it, and the pid signal still judges the record's own pid.
-The reaper's staleness bands judge the record again once the harness has
-exited. The caller's ancestry is
+record while its stored chain names a live harness: its window signal, its orphan
+arm and its staleness bands (72 hours at rest, a week mid-turn, from the
+record's last sign of life) never judge it, and the pid signal still judges the
+record's own pid. A record with no stored chain is judged as before, and the
+bands judge a record again once its harness has exited. The caller's ancestry is
 read when the end is served, so a harness that has exited first leaves the hook
 re-parented and outside it: that end is plain, and the line is missing rather
 than false. `lastTool` is the tool in flight, when there
@@ -3827,10 +3828,10 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
 - **fabricate a death** by writing a child's `hooks.json` record as `phase:
   "done"` with a `death` fact: it is said as a death on the child's route, or
   to the `spawner` the fact names once that session verifies, the same reach as
-  a fabricated cursor entry. `aoide session phase` cannot write a fact, and
-  `aoide session end` writes an `end` fact only when its attested caller is
-  the child's own harness or runs under it (§ `sessions.json`), and only to the
-  spawner the child's own edge names. The live harness anchors the chain that
+  a fabricated cursor entry. A `session phase` to any phase but `done` cannot
+  write a fact. A `done` phase is `aoide session end` (§ `sessions.json`), which
+  writes an `end` fact only when its attested caller is the child's own harness
+  or runs under it, and only to the spawner the child's own edge names. The live harness anchors the chain that
   edge is read through: no hook from outside it re-homes the record's chain or
   parent first, and no `session end` or `session phase` from outside makes the
   record `done`, so it cannot be pruned and registered anew (§ `sessions.json`).
@@ -3849,6 +3850,36 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
   `sessions.json` and are not under the seal (the seal covers the wrap's own
   pid and start time, not its spawner edge). A same-uid edit of those two
   fields moves the line to another session.
+
+**Session identity, same-uid residuals.** The anchor (§ `sessions.json`)
+closes a stranger's move of a live record, and nothing else. Still open, each
+a same-uid class awaiting design B, in which the daemon owns session identity:
+
+- a done id is squattable. After a `/clear`, the old id is `done` and free, so
+  one forged `SessionStart` and one forged `UserPromptSubmit` hold it against
+  the owner's `claude --resume` (the release of a `done` anchor is what lets a
+  legitimate resume adopt the id);
+- a process the victim spawned counts as its harness. A descendant of the
+  harness, such as a Bash-tool child or a sub-claude, is inside the caller's
+  chain, so it ends the session in full, with an `end` fact to its spawner while
+  the harness lives, or re-homes it after the harness has exited;
+- liveness is read in the caller's own pid namespace. A namespaced caller
+  cannot see the harness and reads it dead, so its local-path end is plain;
+- the pid fill on a chainless record. A per-turn hook fills a pid-less,
+  chainless record with an ancestor pid of its own, which then reads as the
+  harness;
+- the wrap-end ordering. A wrap whose shell exited while its orphaned harness
+  lives is refused its own end, so the record reads `working` until the
+  harness exits: a missing line, never a false one.
+
+Closed by the anchor: a stranger's `session end`, `session phase --phase done`
+and SessionEnd hook are refused and write nothing while the harness lives,
+including a daemon-routed end with no stamped peer (fail-closed); a stranger's
+`session start` moves no window or parent of a live record, `graph link`
+re-parents none, and a per-turn bind onto an anchored record is refused; and
+the reaper neither window-, orphan- nor staleness-judges a record whose stored
+chain names a live harness. The residual classes above are the ones a same-uid process
+still reaches without the daemon.
 
 Nothing in the hook source hardens the file itself; the lane accepts these as
 the same-uid boundary. The designed fix is stance B: the seal covers the

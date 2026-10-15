@@ -128,7 +128,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "phase"],
-            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins). A `done` phase is `session end`.",
+            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins). A `done` phase (and `exit`, `finished`, `complete`, which fold to it) is `session end`.",
             args: [],
             flags: [
                 flag!("id", "string", "Session id (required)."),

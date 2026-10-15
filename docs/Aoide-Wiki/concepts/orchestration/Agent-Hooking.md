@@ -33,7 +33,7 @@ Each profile's `hook_event_map` collapses its harness's event NAMES onto shared 
 | `Stop` | `stopped` (turn over, human's move — alive at the prompt, and recently so) |
 | `Notification`, `permission_prompt` / message contains "permission" | `awaiting` (mid-turn, agent NEEDS a human) |
 | `Notification`, `idle_prompt` / message contains "waiting for your input" | `awaiting` only if currently `working` (an unseen mid-turn question); no-op otherwise |
-| `SessionEnd` | `done`, when it runs under the record's harness or the harness has exited. From outside a live harness it is refused and writes nothing |
+| `SessionEnd` | `done`, when it runs under the record's harness, when the record has no harness, or when the harness has exited. From outside a live harness it is refused and writes nothing |
 
 `stopped` and `done` are different things and never collapse: `Stop` ends a TURN,
 `SessionEnd` ends the SESSION. The one transition no event delivers is `stopped` →

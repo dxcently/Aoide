@@ -1852,10 +1852,10 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 /// and records nothing more. `caller` is the kernel's word for who is asking,
 /// the hook door's pid or the daemon's peer credentials
 /// ([`session_end_caller`]); the session ends itself only when that pid is, or
-/// runs under, the child's own harness ([`runs_under_harness`]). `attests_death`
-/// is false where the harness lives on past this id (a `/clear`, a resume) or
-/// the caller is the wrap that owns the record: the end is real and carries no
-/// fact.
+/// runs under, the child's own harness ([`runs_under_harness`]).
+/// `attests_death` is false where the harness lives on past this id (a
+/// `/clear`, a resume) or the caller is the wrap that owns the record: the end
+/// is real and carries no fact.
 ///
 /// Anyone else is refused, and writes nothing, while the session's harness is
 /// alive ([`live_harness_anchoring`]): the answer is [`anchored_refusal`], which
@@ -4696,9 +4696,9 @@ mod hosted_death_tests {
         assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"));
     }
 
-    /// `/clear` ends the old session id and leaves its claude running, so the id
-    /// is free: a `claude --resume` of it from another terminal is adopted, with
-    /// the chain, the wrap and the start hello a launch path waits for.
+    /// `/clear` ends the old session id and leaves its claude running, so the
+    /// id is free: a `claude --resume` of it from another terminal is adopted,
+    /// with the chain, the wrap and the start hello a launch path waits for.
     #[test]
     fn a_session_start_adopts_an_id_that_ended_though_its_harness_lives_on() {
         let harness = Bystander::start();
