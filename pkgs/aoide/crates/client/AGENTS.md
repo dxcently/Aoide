@@ -703,7 +703,9 @@
   replayed `accepted` leaves all three kinds spooled. Its letter write-back
   goes through `outbox::update_entry`, so a letter a receipt retired during
   the dial is not re-spooled; every post-dial write in `drain_node` does the
-  same.
+  same. The reseal writes the same way, and an entry is attempted only after
+  `outbox::still_spooled` says it is spooled. The check comes AFTER the reseal,
+  so a reseal write cannot re-spool an entry past it.
 - **A receipt retires its letter on first filing, and on a duplicate of one.**
   `settle_deposit` calls `retire_by_ack` for a receipt in either outcome; the
   retire is idempotent. `mail::deposit` answers a second receipt from the same

@@ -454,9 +454,13 @@ pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
             // direction.
             None => Ok(HandOver::Nothing),
         },
+        // `update_entry`, not `write_entry`: the entry was read a moment ago,
+        // and a receipt that retired it since must not be undone by this write.
         Reseal::Sealed(Some(entry)) | Reseal::FreshlySealed(entry) => {
             let container = entry.container.clone();
-            write_entry(node, &entry)?;
+            if !update_entry(node, &entry)? {
+                return Ok(HandOver::Nothing);
+            }
             match container {
                 Some(container) => Ok(HandOver::Container(Box::new(container))),
                 None => Ok(HandOver::Nothing),
@@ -464,7 +468,7 @@ pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
         }
         Reseal::NotUsable(parked) => {
             if let Some(entry) = parked {
-                write_entry(node, &entry)?;
+                update_entry(node, &entry)?;
             }
             Ok(HandOver::Nothing)
         }
@@ -533,6 +537,14 @@ pub fn update_entry(node: &str, entry: &OutboxEntry) -> Result<bool, String> {
         write_entry_unlocked(&node, &entry)?;
         Ok(true)
     })
+}
+
+/// Is `msgid` still spooled toward `node`? Read under the outbox lock, so a
+/// drain can skip an entry that a receipt retired after its batch was listed.
+pub fn still_spooled(node: &str, msgid: &str) -> Result<bool, String> {
+    let node = node.to_string();
+    let msgid = msgid.to_string();
+    with_lock(move || Ok(entry_path(&node, &msgid).exists()))
 }
 
 /// Spool one entry — `mail send`'s write-before-attempt (spec item 8).

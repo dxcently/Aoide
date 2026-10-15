@@ -1989,15 +1989,19 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
         use aoide_storage::outbox::Reseal;
         let entry = match aoide_storage::outbox::reseal_entry(node_name, &entry, &aoide_storage::time::now_iso_utc()) {
             Ok(Reseal::NoBinding) | Ok(Reseal::Sealed(None)) => entry,
+            // Every write here is `update_entry`: the entry was read before the
+            // dials above, and a receipt that landed during one may have retired
+            // it since. A gone entry is skipped, never written back.
             Ok(Reseal::Sealed(Some(upgraded))) | Ok(Reseal::FreshlySealed(upgraded)) => {
-                if let Err(e) = aoide_storage::outbox::write_entry(node_name, &upgraded) {
-                    return Err(format!("state/outbox: {e}"));
+                match aoide_storage::outbox::update_entry(node_name, &upgraded) {
+                    Ok(true) => *upgraded,
+                    Ok(false) => continue,
+                    Err(e) => return Err(format!("state/outbox: {e}")),
                 }
-                *upgraded
             }
             Ok(Reseal::NotUsable(parked)) => {
                 if let Some(parked) = parked {
-                    aoide_storage::outbox::write_entry(node_name, &parked)?;
+                    aoide_storage::outbox::update_entry(node_name, &parked)?;
                 }
                 continue;
             }
@@ -2006,6 +2010,12 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
             // again. Sending it in the clear is the one wrong answer.
             Err(_) => continue,
         };
+        // Attempted only while still spooled. The check follows the reseal on
+        // purpose: a reseal write that re-spooled a retired entry would pass a
+        // check placed before it. An unreadable spool is not attempted either.
+        if !aoide_storage::outbox::still_spooled(node_name, &entry.envelope.msgid).unwrap_or(false) {
+            continue;
+        }
         match attempt_deposit(&node, &entry) {
             DepositAttempt::TransportFailed(reason) => {
                 // Record the attempt on the entry that actually hit the
@@ -4642,6 +4652,245 @@ mod tests {
         assert_eq!(receipts_filed_here(), 1, "and files one receipt, however many drains run");
 
         drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A door that runs `during` on each deposit and then answers HTTP 500, a
+    /// transport failure at the dialer. Anything that is not a deposit is refused
+    /// without running `during`, so a binding exchange cannot consume the moment.
+    fn failing_deposit_door(during: impl Fn() + Send + 'static) -> (std::net::TcpListener, u16) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepter = listener.try_clone().unwrap();
+        std::thread::spawn(move || loop {
+            let Ok((mut stream, _)) = accepter.accept() else { break };
+            let request = read_full_request(&mut stream);
+            if request.contains("aoide/mailDeposit") {
+                during();
+            }
+            let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        });
+        (listener, port)
+    }
+
+    /// A receipt from `relay` for `acked`, filed and retired the way the far end's
+    /// own drain delivers it: the deposit, then the settlement a drain makes.
+    fn land_receipt_from_relay(me: &str, mesh: &str, acked: &str) {
+        let ack = far_receipt("relay", me, mesh, acked);
+        let outcome = aoide_storage::mail::deposit(ack.clone(), "relay").unwrap();
+        settle_deposit(&ack, &outcome);
+    }
+
+    /// The body of every deposit the door was handed, in order.
+    fn deposit_bodies(log: &std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> Vec<String> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .filter(|body| body.contains("aoide/mailDeposit"))
+            .map(|body| body.clone())
+            .collect()
+    }
+
+    /// The `msgid` every deposit body names, for the assertions below: a
+    /// container or a plaintext envelope both carry it in the clear.
+    fn mentions(bodies: &[String], msgid: &str) -> usize {
+        bodies.iter().filter(|body| body.contains(msgid)).count()
+    }
+
+    /// A door for a drain whose far end answers each deposit with `answer` and
+    /// runs `during` first, on the deposit that carries `first`. Binding and poll
+    /// asks get a method-not-found and an empty answer.
+    fn drain_door(
+        first: String,
+        during: impl Fn() + Send + 'static,
+        answer: impl Fn(&str) -> String + Send + 'static,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let ran = std::sync::atomic::AtomicBool::new(false);
+        answering_door(move |body| {
+            if body.contains("aoide/mailPoll") {
+                return r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string();
+            }
+            if !body.contains("aoide/mailDeposit") {
+                return r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#.to_string();
+            }
+            if body.contains(&first) && !ran.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                during();
+            }
+            answer(body)
+        })
+    }
+
+    /// **A letter a receipt retires during an earlier dial of the same pass is
+    /// never attempted, and never re-spooled, when its own turn comes.** Two
+    /// letters to one relay whose binding is already usable, so the first is
+    /// sealed and the second reaches the reseal arm while still plaintext. The
+    /// receipt for the second lands during the first dial.
+    #[test]
+    fn a_receipt_landing_in_an_earlier_dial_keeps_a_later_letter_retired_sealed() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-pass-sealed");
+
+        let me = register_local_origin();
+        let a = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "first").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let b = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "second").unwrap();
+        let (a_msgid, b_msgid, mesh) = (a.msgid.clone(), b.msgid.clone(), a.header.origin_mesh.clone());
+
+        let (me2, mesh2, b2) = (me.clone(), mesh.clone(), b_msgid.clone());
+        let (_listener, port, log) = drain_door(
+            a_msgid.clone(),
+            move || land_receipt_from_relay(&me2, &mesh2, &b2),
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::seal::learn_binding("relay", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(a)).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(b)).unwrap();
+
+        drain_node("relay").unwrap();
+        let bodies = deposit_bodies(&log);
+        assert_eq!(mentions(&bodies, &a_msgid), 1, "the first letter is dialled once: {bodies:?}");
+        assert_eq!(mentions(&bodies, &b_msgid), 0, "the retired letter is never dialled");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&b_msgid), "and it stays retired, not re-spooled: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A letter a receipt retires during an earlier dial is not attempted at all,
+    /// even where the reseal writes nothing.** With no binding the second letter's
+    /// reseal is a no-op, so only the check before the attempt stands between a
+    /// retired letter and one more dial.
+    #[test]
+    fn a_receipt_landing_in_an_earlier_dial_keeps_a_later_plain_letter_unattempted() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-pass-plain");
+
+        let me = register_local_origin();
+        let a = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "first").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let b = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "second").unwrap();
+        let (a_msgid, b_msgid, mesh) = (a.msgid.clone(), b.msgid.clone(), a.header.origin_mesh.clone());
+
+        let (me2, mesh2, b2) = (me.clone(), mesh.clone(), b_msgid.clone());
+        let (_listener, port, log) = drain_door(
+            a_msgid.clone(),
+            move || land_receipt_from_relay(&me2, &mesh2, &b2),
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(a)).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(b)).unwrap();
+
+        drain_node("relay").unwrap();
+        let bodies = deposit_bodies(&log);
+        assert_eq!(mentions(&bodies, &a_msgid), 1, "the first letter is dialled once: {bodies:?}");
+        assert_eq!(mentions(&bodies, &b_msgid), 0, "the retired letter is never dialled: {bodies:?}");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&b_msgid), "and it stays retired: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same mid-pass retirement, when the second letter's turn finds the
+    /// binding no longer usable: its reseal would park it, and the park must not
+    /// write back a letter the receipt has retired. The first dial outlives the
+    /// binding's window, so the second reseal sees it expired.
+    #[test]
+    fn a_receipt_landing_in_an_earlier_dial_keeps_a_later_letter_retired_not_usable() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-pass-parked");
+
+        let me = register_local_origin();
+        let now = aoide_storage::time::now_iso_utc();
+        let age = aoide_storage::seal::publish_binding().unwrap().age_pubkey;
+        let closes = aoide_storage::time::shift_iso_utc(&now, 2);
+        let window = aoide_storage::seal::mint_binding(&own_key(), &age, 1, &aoide_storage::time::shift_iso_utc(&now, -60), &closes).unwrap();
+        let a = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "first").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let b = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "second").unwrap();
+        let (a_msgid, b_msgid, mesh) = (a.msgid.clone(), b.msgid.clone(), a.header.origin_mesh.clone());
+
+        let (me2, mesh2, b2) = (me.clone(), mesh.clone(), b_msgid.clone());
+        let (_listener, port, log) = drain_door(
+            a_msgid.clone(),
+            move || {
+                land_receipt_from_relay(&me2, &mesh2, &b2);
+                // Outlive the window: the second letter's reseal runs after it.
+                std::thread::sleep(std::time::Duration::from_millis(3000));
+            },
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::seal::learn_binding("relay", &window).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(a)).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(b)).unwrap();
+
+        drain_node("relay").unwrap();
+        let bodies = deposit_bodies(&log);
+        assert_eq!(mentions(&bodies, &a_msgid), 1, "the first letter is sealed and dialled: {bodies:?}");
+        assert_eq!(mentions(&bodies, &b_msgid), 0, "the retired letter is never dialled: {bodies:?}");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&b_msgid), "and it is not re-spooled parked: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The far end refuses the letter it is dialled with, and a receipt for that
+    /// same letter lands during the dial. The refusal's own write-back must not
+    /// re-spool the letter the receipt retired.
+    #[test]
+    fn a_letter_retired_during_its_own_dial_stays_retired_when_the_far_end_refuses() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-dial-refused");
+
+        let me = register_local_origin();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "refused").unwrap();
+        let (msgid, mesh) = (letter.msgid.clone(), letter.header.origin_mesh.clone());
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(letter)).unwrap();
+
+        let (me2, mesh2, m2) = (me.clone(), mesh.clone(), msgid.clone());
+        let (_listener, port, _log) = drain_door(
+            msgid.clone(),
+            move || land_receipt_from_relay(&me2, &mesh2, &m2),
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"bad-msgid","detail":"no"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+
+        drain_node("relay").unwrap();
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&msgid), "the receipt retired it and the refusal does not re-spool it: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The far end's answer never arrives intact, and a receipt for the letter
+    /// lands during that dial. The transport failure's write-back must not
+    /// re-spool the letter the receipt retired.
+    #[test]
+    fn a_letter_retired_during_its_own_dial_stays_retired_when_the_transport_fails() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-dial-transport");
+
+        let me = register_local_origin();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "transport").unwrap();
+        let (msgid, mesh) = (letter.msgid.clone(), letter.header.origin_mesh.clone());
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(letter)).unwrap();
+
+        let (me2, mesh2, m2) = (me.clone(), mesh.clone(), msgid.clone());
+        let (_listener, port) = failing_deposit_door(move || land_receipt_from_relay(&me2, &mesh2, &m2));
+        register_relay(format!("http://127.0.0.1:{port}/"));
+
+        drain_node("relay").unwrap();
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&msgid), "the receipt retired it and the failed dial does not re-spool it: {left:?}");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
