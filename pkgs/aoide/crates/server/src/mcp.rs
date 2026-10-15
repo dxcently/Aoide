@@ -120,9 +120,9 @@ fn invocation_from_call(name: &str, arguments: &Value, registry: &Registry) -> O
                 args.push(value_to_string(v));
             }
         }
-        // Flags by name.
+        // Flags by name. A JSON `false` is flag-absent, for every flag.
         for f in cmd.flags {
-            if let Some(v) = obj.get(f.name) {
+            if let Some(v) = obj.get(f.name).filter(|v| **v != Value::Bool(false)) {
                 flags.insert(f.name.to_string(), value_to_string(v));
             }
         }
@@ -540,6 +540,36 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(required, ["name", "key"]);
+    }
+
+    /// A JSON `false` on a bool flag is flag-absent for every flag, not only
+    /// `send --yes`: over MCP a flag reads as present only when it is truthy.
+    /// A `true` on the other bool still arrives.
+    #[test]
+    fn a_false_bool_argument_is_flag_absent_for_every_flag() {
+        use aoide_protocol::registry::{cmd, flag};
+        let mut r = Registry::new();
+        r.insert(cmd!(
+            path: ["thing", "go"],
+            summary: "Go.",
+            args: [],
+            flags: [
+                flag!("yes", "bool", "Approve."),
+                flag!("undying", "bool", "Stay.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        ));
+        let inv = invocation_from_call(
+            "thing.go",
+            &json!({ "yes": false, "undying": true }),
+            &r,
+        )
+        .unwrap();
+        assert!(!inv.flags.contains_key("yes"), "{:?}", inv.flags);
+        assert_eq!(inv.flags.get("undying").map(String::as_str), Some("true"));
     }
 
     #[test]
