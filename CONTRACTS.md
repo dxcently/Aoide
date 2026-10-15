@@ -2182,9 +2182,9 @@ Before the death is written, the wrap owns it. The reaper leaves a hook child
 alone while the conducted wrap that hosts it runs (its pid alive) and the
 child's phase reads `working` or `awaiting`, even when the child's harness is
 dead: the wrap records the death when its own child ends, and a reap would close
-the phase first and leave nothing to record. The cost is the card: a harness that
-dies under a wrap that outlives it (a shell host, whose own child is the shell)
-leaves the child reading `working` until that wrap ends.
+the phase first and leave nothing to record. The cost is the card: a harness
+that dies under a wrap that outlives it (a shell host, whose own child is the
+shell) leaves the child reading `working` until that wrap ends.
 
 The child's session record in `sessions.json` is set to `done`: the process is
 dead, and presence reads it so. `done`, not `idle`: `done` says the process is
@@ -2192,8 +2192,8 @@ over, and the claim, not the state, decides when the record may go. No other
 path writes `death`. `aoide session phase` folds the phase it is given to its
 canonical rest and writes no fact, so no caller can make a spawner hear a
 death; `aoide session end` writes only the `end` it performs, to the spawner the
-child's own edge names. A later hook event replaces the phase and drops `death`, so the fact is
-heard only while it is still the phase.
+child's own edge names. A later hook event replaces the phase and drops
+`death`, so the fact is heard only while it is still the phase.
 
 **`shell` and `wrappedProgram` — what a conducted wrap runs.** A session
 record MAY carry two fields, both written by the conducting process at

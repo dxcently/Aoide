@@ -319,8 +319,8 @@ held against every prune until it is said. A session that ends itself (its
 `SessionEnd` hook, or `aoide session end`) while its turn is still open records
 the same fact with no status, and its spawner hears
 `[claude <petname>] ended mid-turn · last: <tool>` once; its wrap then finds the
-phase closed and adds nothing. A `done` phase with no fact is a session ending
-through its own hook after its turn closed, and says nothing. A silence before a death
+phase closed and adds nothing. A `done` phase with no fact (a session that ended
+by its own hook once its turn closed) says nothing. A silence before a death
 does not hide it. The first look at a child is a baseline and says nothing,
 except a recorded death under a day old; a child found already stopped says
 nothing, and a turn that begins and ends between two ticks is not heard. A child

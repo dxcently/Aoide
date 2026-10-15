@@ -1072,12 +1072,12 @@ in the message.
   `hosted_by` with `record_hook_deaths`), because a reap would close the phase
   before the wrap writes the death and the wrap would then find nothing to
   record. Keep the hosting test one (`hosted_by`): a child the reaper spares
-  must be one the wrap's exit can record. The cost is stated in `CONTRACTS.md` (`death`): a
-  harness that dies under a wrap that outlives it reads `working` until the wrap
-  ends. Shortening that wait belongs to the wrap (watching its own harness),
-  never to the reaper. The hook source emits no `PingEvent` and never spools: a
-  child that belongs on a ring is `remoteParent`-stamped and so is not its
-  child.
+  must be one the wrap's exit can record. The cost is stated in `CONTRACTS.md`
+  (`death`): a harness that dies under a wrap that outlives it reads `working`
+  until the wrap ends. Shortening that wait belongs to the wrap (watching its
+  own harness), never to the reaper. The hook source emits no `PingEvent` and
+  never spools: a child that belongs on a ring is `remoteParent`-stamped and so
+  is not its child.
   **The screen source is the third, as a child module
   (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
   harness has neither profile (`prompt::tracked`: `agent_profile` is none, and
