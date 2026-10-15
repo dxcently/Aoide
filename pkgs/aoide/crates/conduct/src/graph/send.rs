@@ -48,7 +48,7 @@ use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
     clear_stale_parent, do_hook_session_start, do_session_end, do_session_phase,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
-    do_subagent_spawn, ensure_session_ceiling, live_harness_outside, now_iso_utc,
+    do_subagent_spawn, ensure_session_ceiling, live_harness_anchoring, now_iso_utc,
     refresh_subagent_says,
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
     stamp_harness_session_id, stamp_session_start_at, stored_phase,
@@ -61,7 +61,7 @@ use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClas
 use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::Outcome;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
-use aoide_storage::fs::{conducting_stage_dir, pid_is_alive, with_stage_lock};
+use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
 use aoide_storage::session::pid_may_move;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1752,21 +1752,6 @@ fn own_parent_claim() -> Option<String> {
     std::env::var("AOIDE_SESSION_ID").ok().filter(|p| !p.is_empty())
 }
 
-/// The pid of the live harness that anchors the registered session `id` against
-/// this hook, when it has one: the record's harness (`harness_pid`) is alive
-/// and is not in `hook_pid`'s own process ancestry, so the hook is a stranger
-/// to it. A hook from outside the harness may not re-home the record, by chain
-/// or parent: that is what lets `session end` believe whose process asks. A
-/// harness that has exited, an unregistered id and a hook that runs under the
-/// harness all answer `None`, and a hook with no walkable pid is a stranger to
-/// every live one.
-fn live_harness_anchoring(id: &str, hook_pid: Option<i32>) -> Option<u32> {
-    let file = load_stage::<SessionsFile>(&sessions_path()).ok()?;
-    let rec = file.sessions.iter().find(|s| s.session_id == id)?;
-    let ancestry = hook_pid.map(pid_ancestry).unwrap_or_default();
-    live_harness_outside(rec, &ancestry, pid_is_alive)
-}
-
 /// The profile-parametrized core of [`hook_from_str`].
 ///
 /// Split from `session_hook` so the whole path — parse, map, execute — is
@@ -2025,9 +2010,14 @@ fn hook_for_profile_gated(
             // A SessionStart re-chains and re-parents an id that is already
             // registered, so one from outside its live harness is refused
             // whole: nothing moves, and the hook still exits ok and says so
-            // only in its audited outcome.
+            // only in its audited outcome, which names the session and its
+            // harness.
             if let Some(harness) = live_harness_anchoring(&id, hook_pid) {
-                return Outcome::ok(cmd, "no-op (anchored to a live harness)").with_data(json!({
+                return Outcome::ok(
+                    cmd,
+                    format!("no-op: session `{id}` is anchored to its live harness (pid {harness})"),
+                )
+                .with_data(json!({
                     "action": "none",
                     "reason": "harness-anchored",
                     "sessionId": id,
@@ -2332,10 +2322,9 @@ fn hook_for_profile_gated(
             do_subagent_end(&sub_id);
             Outcome::ok("session.hook", format!("subagent end {sub_id}"))
         }
-        // A process that lives on has no death to attest: no caller, no fact.
-        HookAction::End { id, continues } => {
-            do_session_end(&id, if continues { None } else { hook_pid })
-        }
+        // A process that lives on has no death to attest: the end is real and
+        // says nothing to the spawner.
+        HookAction::End { id, continues } => do_session_end(&id, hook_pid, !continues),
     };
     // Publish a harness-reported context-window ceiling onto the record
     // IMMEDIATELY (every hook carries it — pi's extension reads the active
@@ -4250,7 +4239,7 @@ mod tests {
         );
         // The shared parent ends — its on-disk sessions.json record flips to
         // `done` (sib-a/sib-b are not `kind: subagent`, so they survive intact).
-        do_session_end("orch", None);
+        do_session_end("orch", None, true);
 
         let out = deliver_local_with(
             &send_invocation(&["nope"], &[("id", target)]),
@@ -7103,7 +7092,9 @@ mod tests {
     /// between a stranger's per-turn hook and a record's chain: a windowless
     /// record's hook binds the window its caller owns and then moves the chain
     /// to the caller's. A live harness outside the caller's chain keeps the
-    /// chain; a dead one lets it move.
+    /// chain; a dead one lets it move. A record that stores no chain but a pid
+    /// holds it the same, since that pid is its harness. The window still
+    /// binds either way: it moves no chain, parent or fact.
     #[cfg(unix)]
     #[test]
     fn a_per_turn_hook_that_binds_a_window_cannot_take_the_chain_of_a_live_harness() {
@@ -7130,6 +7121,19 @@ mod tests {
         }
         assert_eq!(chain_of("held"), held, "a live harness outside the caller's chain holds it");
         assert_eq!(chain_of("free").first(), Some(&me), "a dead one lets the caller's chain land");
+
+        for (id, pid) in [("pid-held", harness.id()), ("pid-free", DEAD as u32)] {
+            do_session_start(id, Some("claude"), Some("/p"), None, None, None, None, None, Some(pid));
+            let payload = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+            hook_for_profile_gated(profile, &payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        let window_of = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().window_address
+        };
+        assert!(chain_of("pid-held").is_empty(), "a live pid is the harness of a chainless record, and holds it");
+        assert_eq!(window_of("pid-held"), "0xAA", "the window binds all the same");
+        assert_eq!(chain_of("pid-free").first(), Some(&me), "a dead pid lets the caller's chain land");
         for c in [&mut owner, &mut harness] {
             let _ = c.kill();
             let _ = c.wait();
@@ -7198,6 +7202,14 @@ mod tests {
         do_hook_session_start("r2b", Some("claude"), Some("/p"), None, None, None, &held);
         let out = hook_for_profile_gated(claude, &claude_start("r2b"), false, Some(me), None);
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "a refusal never fails the hook");
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "harness-anchored");
+        assert_eq!(data["harness"], held[0]);
+        assert!(
+            out.message.contains("`r2b`") && out.message.contains(&held[0].to_string()),
+            "the audited message names the session and its harness: {}",
+            out.message
+        );
         assert_eq!(load("r2b").hook_ancestry, held, "a live harness outside the new chain holds it");
         let _ = harness.kill();
         let _ = harness.wait();

@@ -27,13 +27,13 @@ Each profile's `hook_event_map` collapses its harness's event NAMES onto shared 
 
 | event | state |
 |---|---|
-| `SessionStart` | registers the session, `idle`. A resume folds a `stopped` record back to `idle` (resumed, not yet active) but never resets a live `working`/`awaiting` turn. For an id already registered it is a no-op (`harness-anchored` in the audited outcome) unless it runs under the record's live harness or that harness has exited: a live harness anchors its record, so no other hook re-homes its chain or parent |
+| `SessionStart` | registers the session, `idle`. A resume folds a `stopped` record back to `idle` (resumed, not yet active) but never resets a live `working`/`awaiting` turn. For an id already registered it is a no-op (`harness-anchored` in the audited outcome, naming the session and its harness) unless it runs under the record's live harness, that harness has exited, or the session has ended: a live harness anchors its record, so no hook from outside re-homes its chain or parent (a per-turn hook from outside still sets the phase, and may bind a window the record lacks) |
 | `UserPromptSubmit` | `working` (and, set-once, NAMES the session from the prompt) |
 | `PreToolUse` / `PostToolUse` | `working`, setting the owner's `activity` to the tool |
 | `Stop` | `stopped` (turn over, human's move — alive at the prompt, and recently so) |
 | `Notification`, `permission_prompt` / message contains "permission" | `awaiting` (mid-turn, agent NEEDS a human) |
 | `Notification`, `idle_prompt` / message contains "waiting for your input" | `awaiting` only if currently `working` (an unseen mid-turn question); no-op otherwise |
-| `SessionEnd` | `done` |
+| `SessionEnd` | `done`, when it runs under the record's harness or the harness has exited. From outside a live harness it closes the hook phase only: the roster record keeps its `state`, so `prune` and the reaper leave it |
 
 `stopped` and `done` are different things and never collapse: `Stop` ends a TURN,
 `SessionEnd` ends the SESSION. The one transition no event delivers is `stopped` →

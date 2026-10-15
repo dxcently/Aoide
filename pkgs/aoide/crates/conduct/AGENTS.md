@@ -1046,40 +1046,59 @@ in the message.
   so the fact needs the caller's word, and the caller is the kernel's:
   `do_session_end` takes the attested pid (the hook door's `hook_pid`, the
   daemon's `__daemon-peer-pid` stamp read by `send::door_pid`, else this
-  process; the wrap's own end passes none), and `runs_under_harness` writes the
-  fact only when the child's harness pid is in that pid's `/proc` ancestry. Any
-  other caller closes the phase plain. So does a `SessionEnd` whose `reason` the
-  profile lists in `session_end_continues` (claude: `clear` and `resume`), since
-  the harness process lives on under another session id and nothing ended
-  mid-turn: `map_hook` sets `HookAction::End { continues }` and the door passes
-  no caller. The reason is the raw payload field, matched exactly and never
-  normalised, so `logout`, `prompt_input_exit`, `other`, a disguised `clear`, an
-  unknown value and an absent field all write the fact; a harness whose profile
-  lists none never skips on the field. A second `done` on a record that carries
-  a fact is a no-op in `aoide_storage::session::upsert_hook`, so a repeated end
-  or a duplicate `SessionEnd` cannot erase it; a live phase still supersedes the
-  fact.
+  process; the wrap's own end passes its own pid, which its record names), and
+  `runs_under_harness` writes the fact only when the child's harness pid is in
+  that pid's `/proc` ancestry. A caller outside a live harness does not end its
+  session at all (below). A `SessionEnd` whose `reason` the profile lists in
+  `session_end_continues` (claude: `clear` and `resume`) ends the session with
+  `attests_death` false, since the harness process lives on under another
+  session id and nothing ended mid-turn: `map_hook` sets `continues` on
+  `HookAction::End` and the door passes `!continues`. The reason is the raw
+  payload field, matched exactly and never normalised, so `logout`,
+  `prompt_input_exit`, `other`, a disguised `clear`, an unknown value and an
+  absent field all write the fact; a harness whose profile lists none never
+  skips on the field. A second `done` on a record that carries a fact is a no-op
+  in `aoide_storage::session::upsert_hook`, so a repeated end or a duplicate
+  `SessionEnd` cannot erase it; a live phase still supersedes the fact.
 
   **A live harness anchors its record.** The caller test above holds only if a
-  stranger cannot first re-home the record onto its own chain, so
-  `session_store::live_harness_outside` (the record's `harness_pid` is alive and
-  outside the caller's chain) is the one test behind it. `ancestry_may_move`
-  refuses a chain move while it holds, whichever path asks, and the hook door
-  (`send::live_harness_anchoring`) turns a `SessionStart` from outside the
-  harness away whole and skips a per-turn hook's attested-parent re-stamp, so no
-  hook from outside moves a record's chain or parent. The refusal is an ok no-op
-  whose audited outcome says `harness-anchored`, never a failed hook. A dead
-  harness, or a hook that runs under it, releases the anchor, which is what lets
-  `claude --resume` in another terminal adopt the id. `hookAncestry` stores no
-  start time, so a pid recycled by an unrelated live process holds the anchor
-  until it exits; the refusal is the safe side. A new writer of `hookAncestry`
-  or `parentSessionId` on a hook-registered record goes through that test. The
-  caller's ancestry is read when the end is served, so a harness that exited
-  before its `SessionEnd` hook was served has left the hook re-parented: that
-  end closes plain and its line is lost, never forged. Reading the ancestry at
-  door entry would need `aoided` to stamp it at accept (a new wire stamp across
-  the server crate) and would still only narrow the race, since the hook is
-  already running when its harness dies, so the loss is accepted.
+  stranger cannot first re-home the record onto its own chain, or end it so that
+  `prune` drops it and a fresh registration takes its place.
+  `session_store::live_harness_outside` (the record's session has not ended, and
+  its `harness_pid` is alive and outside the caller's chain) is the one test
+  behind both, and `session_store::live_harness_anchoring` is its read of the
+  store for a caller's pid. `ancestry_may_move` refuses a chain move while it
+  holds, whichever path asks; the hook door turns a `SessionStart` from outside
+  the harness away whole, with `harness-anchored` as its reason and the session
+  and harness pid in its message, and skips a per-turn hook's attested-parent
+  re-stamp. A per-turn hook from outside is not refused: it still sets the
+  phase, and still binds a window the record lacks, so a forged one can put a
+  window on a windowless record; the bind moves no chain, parent or fact.
+  `session start --parent` and `graph link` still set a parent on a live record
+  and the test does not guard them; they move no chain, and a route needs the
+  host wrap's pid in the child's own chain (`host_wrap`), so no line follows.
+  `do_session_end` asks the same question of the caller. When it holds, the end
+  is `close_phase_of_live_harness`: `hooks.json` gets `phase: "done"` and a new
+  `updatedAt`, and nothing else is written. `sessions.json` keeps its `state`,
+  which is what `prune_done_scoped` and the reaper's prune of finished records
+  key on, so neither takes the record while the harness lives; no ledger exit,
+  subagent cascade, ssh tunnel close, check-lane baseline forget or fact
+  follows, and the harness's next hook reopens the phase. `session_phase` sends
+  a `done` phase to `do_session_end`, so the phase door is no way round the
+  caller test. The reaper's own staleness bands still apply to the record. A
+  session that has ended (`state` `done`: its own `SessionEnd`, `/clear` and
+  resume included), a dead harness, or a hook that runs under the harness
+  releases the anchor, which is what lets `claude --resume` in another terminal
+  adopt the id. `hookAncestry` stores no start time, so a pid recycled by an
+  unrelated live process holds the anchor until it exits; the refusal is the
+  safe side. A new writer of `hookAncestry`, `parentSessionId` or a record's
+  `state` on a hook-registered record goes through that test. The caller's
+  ancestry is read when the end is served, so a harness that exited before its
+  `SessionEnd` hook was served has left the hook re-parented: that end closes
+  plain and its line is lost, never forged. Reading the ancestry at door entry
+  would need `aoided` to stamp it at accept (a new wire stamp across the server
+  crate) and would still only narrow the race, since the hook is already running
+  when its harness dies, so the loss is accepted.
 
   **The wrap's own signals.** `WrapSignals::install` (`graph/pty.rs`) runs first
   in `session_conduct` and catches SIGTERM, SIGHUP and SIGINT with `SA_SIGINFO`
@@ -1744,13 +1763,15 @@ in the message.
   a per-turn heal (`ensure_session_window` again, through
   `session_store::chain_is_stale`). Registration is a SessionStart, or the first
   hook event of an unknown id, so a resumed harness that runs in a new process
-  gets a current chain. `ancestry_may_move` refuses only while the record's own
-  pid is alive outside the new chain: a pid-less record always takes the latest
-  chain, so two live processes under one session id resolve to the latest one.
-  The pid is the only anchor, because a chain-wide liveness test would hold a
-  stale chain for as long as any process of it lives (a shell outlives its
-  harness). It is the hook door's kernel fact, never a payload claim, and
-  attestation never reads it (`attested_record` reads only sealed pids).
+  gets a current chain. `ancestry_may_move` refuses only while the record's
+  session is live and its own pid or its harness (`harness_pid`: the first
+  stored pid, else the pid) is alive outside the new chain, on the registration
+  and the window bind alike, so two live processes under one session id do not
+  trade the chain: the holder keeps it until it exits. Those two processes are
+  the only anchors, because a chain-wide liveness test would hold a stale chain
+  for as long as any process of it lives (a shell outlives its harness). The
+  chain is the hook door's kernel fact, never a payload claim, and attestation
+  never reads it (`attested_record` reads only sealed pids).
   The heal (`chain_is_stale`) is stricter than registration. It fires only on a
   dead→live transition: the record has a stored chain and no pid of its own (its
   pid or a stored chain pid) is alive outside the hook's chain (`lives_apart`), and

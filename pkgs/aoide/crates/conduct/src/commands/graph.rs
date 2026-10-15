@@ -128,7 +128,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "phase"],
-            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins).",
+            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins). A `done` phase is `session end`.",
             args: [],
             flags: [
                 flag!("id", "string", "Session id (required)."),
@@ -144,7 +144,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "end"],
-            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown.",
+            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown. From outside a live harness it closes the hook phase only and leaves sessions.json as it was.",
             args: [],
             flags: [flag!("id", "string", "Session id to end (required).")],
             gated: false,

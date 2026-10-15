@@ -321,14 +321,18 @@ held against every prune until it is said. A session that ends itself (its
 while its turn is still open records the same fact with no status, and its
 spawner hears `[claude <petname>] ended mid-turn · last: <tool>` once; its wrap
 then finds the phase closed and adds nothing. Anyone else's `aoide session end`
-only closes the phase, since a spawner is told only what the session itself
-did. A live harness anchors its session: a hook from outside it re-homes neither
-its chain nor its parent, so a stranger cannot claim a session and then end it.
-A harness that exited before its `SessionEnd` hook was served leaves the hook
-re-parented, and that end closes plain: the line is missing, never false. A
-`SessionEnd` whose `reason` is `clear` or `resume` also closes plain: claude's
-process lives on under another session id, so nothing ended mid-turn. Any other
-reason, or none, records the fact. A `done` phase with no fact (a session that
+of a session whose harness lives only closes its hook phase, since a spawner is
+told only what the session itself did: the roster record stays as it was, so
+`prune` and the reaper leave it, and the harness's next hook reopens the phase.
+A live harness anchors its session: a hook from outside it re-homes neither its
+chain nor its parent, so a stranger can neither claim a session nor end it
+first. A harness that exited before its `SessionEnd` hook was served leaves the
+hook re-parented, and that end closes plain: the line is missing, never false. A
+`SessionEnd` whose `reason` is `clear` or `resume` ends the session with no
+fact: claude's process lives on under another session id, so nothing ended
+mid-turn, and the old id is free for a `claude --resume` of it in another
+terminal to adopt. Any other reason, or none, records the fact. A `done` phase
+with no fact (a session that
 ended by its own hook once its turn closed) says nothing. A spawner hears at
 most three such lines from one wrap's end, then one `and N more ended or died
 mid-turn`. A silence before a death does not hide it. The first look at a child

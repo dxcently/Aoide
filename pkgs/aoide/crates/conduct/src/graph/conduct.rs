@@ -2146,7 +2146,9 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // The wrap saw its own harness end: a hook child it hosts whose turn is still
     // open is recorded as died now, before this wrap ends its own record.
     record_hook_deaths(&id, std::process::id(), &death);
-    let _ = do_session_end(&id, None);
+    // The wrap ends its own record: it is the process the record names, and it
+    // tells no spawner anything its death record above did not.
+    let _ = do_session_end(&id, i32::try_from(std::process::id()).ok(), false);
     // An end signal the wrap answered is its own end: it leaves by that signal, so
     // its parent reads the signal, not a status of its own. The record is written
     // above, and the signal is taken again here in case it arrived after the loop.

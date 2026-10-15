@@ -2162,36 +2162,58 @@ the edge names a spawner; with none it only closes the phase. The child ends
 itself when the caller the door attests is its harness or runs under it, the
 harness pid being in that caller's `/proc` ancestry. The attested caller is the
 hook process, the daemon's `SO_PEERCRED` pid for a forwarded call, or else the
-calling process itself; a door that attests none ends nobody. A record's harness
-is the first pid of its `hookAncestry`, else its `pid`, and while that process
-is alive it anchors the record: only a hook that runs under it moves the
-record's chain or its parent, and a `SessionStart` or a per-turn hook from
-anywhere else is a no-op that exits ok and leaves `harness-anchored` in its
-audited outcome, so no stranger re-homes a record before ending it. The anchor
-lets go once the harness has exited, so a `claude --resume` in another terminal
-adopts the id. The chain stores no start time, so a pid reused by an unrelated
-live process holds the anchor until that process exits. A `session end` from any
-other caller only closes the phase. So does a `SessionEnd` hook whose `reason`
-is `clear` or `resume`, the two reasons after which the harness process lives on
-under another session id: that session did not end mid-turn, the conversation
-moved to a new id. The reason is read from the raw payload field and matched
-byte for byte against the profile's `session_end_continues`, never normalised;
-`logout`, `prompt_input_exit`, `other`, any value not listed and an absent field
-all write the fact. The caller's ancestry is read when the end is served, so a
-harness that has exited first leaves the hook re-parented and outside it: that
-end closes the phase plain, and the line is missing rather than false. The wrap,
-finding that phase closed when its harness then exits, writes nothing more.
-`lastTool` is the tool in flight, when there was one. `spawner` is the session
-the death is said to, resolved while the wrap still runs by the same climb a
-route takes (§ `pingback.json`) over the roster as it stands, with no seal
-check: the recorder holds no daemon key, so the ping-back verifies the spawner
-before it says anything. It is absent when the edge names nobody. A wrap sent
-SIGTERM, SIGHUP or SIGINT (only one sent to its own pid, by `kill(2)`) forwards
-it to its harness once, SIGKILLs the harness after five seconds if it has not
-gone, records the death, and then ends by that same signal. A signal the
-terminal raised keeps its default action, and a disposition that was ignored on
-entry stays ignored, since the harness inherits it. A wrap killed by SIGKILL
-writes nothing; its death is inferred by the ping-back instead, with no status.
+calling process itself; a door that attests none ends nobody. A session that has
+not ended (its roster `state` is not `done`) is anchored to its harness, the
+first pid of its `hookAncestry` else its `pid`, while that process is alive. A
+caller that does not run under the harness moves nothing of the record:
+
+- a `SessionStart` for the id is a no-op that exits ok. Its audited outcome
+  names the session and the harness pid, and its data carries the reason
+  `harness-anchored`;
+- a per-turn hook is not refused. It sets the phase like any hook, and may bind
+  a window the record lacks, but it moves neither the chain nor the parent. A
+  forged one can bind a window onto a windowless record; that moves no fact;
+- `aoide session end`, a `SessionEnd` hook and `aoide session phase --phase
+  done`, which is the same call, close the hook phase and nothing else:
+  `hooks.json` gets `phase: "done"` and a new `updatedAt`, while
+  `sessions.json`, the exit ledger, the session's subagents, its ssh tunnels and
+  its check-lane baseline are left as they were. The record's `state` is not
+  `done`, so `session prune`, which drops `done` records, and the reaper's prune
+  of them leave it, and the harness's next hook reopens the phase. The outcome
+  names the session and the harness pid.
+
+The audit log keeps an outcome's message, so it names the session and the
+harness. So no hook, `session end` or `session phase` from a stranger re-homes
+the record or makes it prunable before the end. `session start --parent` and
+`graph link` can still set the parent of a live record, but a death line needs
+the host wrap's pid in the child's own `hookAncestry`, which neither moves, so
+none follows. The anchor lets go once the harness has exited or the session has
+ended. A `SessionEnd` hook whose `reason` is `clear` or `resume`, the two
+reasons after which the harness process lives on under another session id, ends
+the session with no fact: nothing ended mid-turn, the conversation moved to a
+new id, and the old id is free for a `claude --resume` of it in another terminal
+to adopt. The reason is read from the raw payload field and matched byte for
+byte against the profile's `session_end_continues`, never normalised; `logout`,
+`prompt_input_exit`, `other`, any value not listed and an absent field all write
+the fact. The chain stores no start time, so a pid reused by an unrelated live
+process holds the anchor until that process exits. The reaper's staleness bands,
+72 hours at rest and a week mid-turn counted from the record's last sign of
+life, still judge the record as they judge any other. The caller's ancestry is
+read when the end is served, so a harness that has exited first leaves the hook
+re-parented and outside it: that end closes the phase plain, and the line is
+missing rather than false. The wrap, finding that phase closed when its harness
+then exits, writes nothing more. `lastTool` is the tool in flight, when there
+was one. `spawner` is the session the death is said to, resolved while the wrap
+still runs by the same climb a route takes (§ `pingback.json`) over the roster
+as it stands, with no seal check: the recorder holds no daemon key, so the
+ping-back verifies the spawner before it says anything. It is absent when the
+edge names nobody. A wrap sent SIGTERM, SIGHUP or SIGINT (only one sent to its
+own pid, by `kill(2)`) forwards it to its harness once, SIGKILLs the harness
+after five seconds if it has not gone, records the death, and then ends by that
+same signal. A signal the terminal raised keeps its default action, and a
+disposition that was ignored on entry stays ignored, since the harness inherits
+it. A wrap killed by SIGKILL writes nothing; its death is inferred by the
+ping-back instead, with no status.
 
 `death` is the unclaimed state. The ping-back says it once and then clears it
 from the record (§ `pingback.json`), so a record that reads `phase: "done"`
@@ -2576,7 +2598,7 @@ and `parentSessionId` together, never off `kind` alone.
 with each of three events: the registration (a SessionStart, or the first hook
 event of an unknown id, `aoide session hook`), the first window bind to the
 session, and a per-turn heal. It is the chain of the harness's latest process, self-first from the harness up (at most 8 pids). The hook process and every shell or forwarding launcher beneath the harness are never stored. The harness is found by walking up from the hook's parent: the first process whose argv[0] basename is neither a shell nor a forwarding launcher (`conduct`'s `is_invocation_plumbing`) is the harness. The owner check runs before the plumbing verdict: a process that owns a compositor client ends the walk with no harness, a shell owner included, and so does the end of the chain. Where no harness is found the door moves no chain and binds no window. When the compositor cannot be read (off Hyprland, or no client array back on its request socket), no client check applies, so an owner in the chain is not refused.
-It is replaced only where `ancestry_may_move` allows: a pid-less record always takes the new chain, and a record anchored to a live pid of its own keeps the stored chain while that pid is alive outside the new one. That pid is the only anchor, so two live processes under one session id resolve to the latest SessionStart's process. A per-turn heal is stricter. It fires only on a dead→live transition: the stored chain is non-empty, no pid of the record, its own pid or a stored chain pid, is alive outside the hook's chain (`lives_apart`; such a pid holds the chain, so the heal is blocked), and the hook's chain holds a live harness the stored chain lacks. Both chains start at the harness, so a direct child, a compound `sh -c`, an exec-in-place `sh -c` and a capture pipeline `sh -c 'tee … | HOOK'` read the same harness (`window.rs`'s `a_direct_child_hook_finds_its_harness_at_once`, `a_hook_under_a_compound_sh_c_finds_its_harness_past_the_shell`, `a_hook_under_an_exec_in_place_sh_c_finds_its_harness` and `a_capture_pipeline_hook_finds_its_harness_past_the_pipeline_shell` pin the four). So a live stored chain is not rewritten per turn. The heal needs no compositor: only the window bind does (discovery answers nothing without `HYPRLAND_INSTANCE_SIGNATURE`). A hook whose walk meets a window owner before any harness has no harness, a shell owner included: it binds nothing and moves no chain (`a_hand_run_hook_under_a_window_owner_binds_nothing`, the hook's shell under a terminal's window owner; `a_shell_that_owns_a_window_ends_the_walk_with_no_harness`, a shell that owns the window). Two residuals. A hand-run hook under an `aoide conduct` wrap or a multiplexer server (tmux, screen) takes that process as its harness and binds the window it sits under, since the plumbing list names shells and forwarding launchers only. A hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its harness and binds the same window, and its stored chain heals once per turn, since each turn's launcher is a new pid: `program_is_a_shell` reads those names, the plumbing list does not. The `--capture` install renders its tee pipeline with no flag. A capture command written by an older build carries a flag the door no longer parses (`unrecognized flag`), until `hooks install --capture` re-renders it. 
+It is replaced only where `ancestry_may_move` allows. A record whose session has ended takes it, and so does one whose own processes, its `pid` and its harness (the first stored pid, else the `pid`), are dead or inside the new chain. A record with either alive outside the new chain keeps the stored one, and a SessionStart from there is refused whole (§ `death` above), so two live processes under one session id do not trade it: the one that holds it keeps it until it exits. Only those two processes anchor, since a shell of the old chain outlives its harness. A per-turn heal is stricter. It fires only on a dead→live transition: the stored chain is non-empty, no pid of the record, its own pid or a stored chain pid, is alive outside the hook's chain (`lives_apart`; such a pid holds the chain, so the heal is blocked), and the hook's chain holds a live harness the stored chain lacks. Both chains start at the harness, so a direct child, a compound `sh -c`, an exec-in-place `sh -c` and a capture pipeline `sh -c 'tee … | HOOK'` read the same harness (`window.rs`'s `a_direct_child_hook_finds_its_harness_at_once`, `a_hook_under_a_compound_sh_c_finds_its_harness_past_the_shell`, `a_hook_under_an_exec_in_place_sh_c_finds_its_harness` and `a_capture_pipeline_hook_finds_its_harness_past_the_pipeline_shell` pin the four). So a live stored chain is not rewritten per turn. The heal needs no compositor: only the window bind does (discovery answers nothing without `HYPRLAND_INSTANCE_SIGNATURE`). A hook whose walk meets a window owner before any harness has no harness, a shell owner included: it binds nothing and moves no chain (`a_hand_run_hook_under_a_window_owner_binds_nothing`, the hook's shell under a terminal's window owner; `a_shell_that_owns_a_window_ends_the_walk_with_no_harness`, a shell that owns the window). Three residuals. A per-turn hook from outside a record's live harness still binds a window the record lacks, since only the chain is anchored; it moves no chain, parent or fact. A hand-run hook under an `aoide conduct` wrap or a multiplexer server (tmux, screen) takes that process as its harness and binds the window it sits under, since the plumbing list names shells and forwarding launchers only. A hook behind `timeout`, `script`, `nix`, `su`, `doas` or `sudo` takes that launcher as its harness and binds the same window, and its stored chain heals once per turn, since each turn's launcher is a new pid: `program_is_a_shell` reads those names, the plumbing list does not. The `--capture` install renders its tee pipeline with no flag. A capture command written by an older build carries a flag the door no longer parses (`unrecognized flag`), until `hooks install --capture` re-renders it. 
 A later
 `conduct`/`spawn`
 registration with no explicit `--parent` walks ITS OWN `/proc` ancestry and
@@ -3126,10 +3148,10 @@ same-window dedup pass (`aoide session reap`'s `superseded_agent_duplicates`)
 applies the identical `superseded_by` rule and the identical lineage carve-out,
 so a window hosting six live sessions keeps all six. A conducted PTY host
 (`conductable`) is never a candidate for either pass. "No live process of its
-own" is judged against the record's stored `hookAncestry`. A pid-less record
-takes a fresh chain at every SessionStart (`ancestry_may_move`), so for a pid-less
-record a stale chain survives only a SessionStart that was missed or refused (an
-anchored record keeps its chain while its own pid lives, by design). The residual is a SessionStart that was missed or refused: such a record holds a stale chain until a per-turn hook from its live harness heals it (`hookAncestry` above), and until then a same-depth sibling registration can still retire the record. A chainless record with no pid is never a twin (`superseded_by`).
+own" is judged against the record's stored `hookAncestry`. A record takes a
+fresh chain at a SessionStart unless its pid or its harness lives outside the
+new chain (`ancestry_may_move`), so a stale chain survives only a SessionStart
+that was missed or refused. The residual is a SessionStart that was missed or refused: such a record holds a stale chain until a per-turn hook from its live harness heals it (`hookAncestry` above), and until then a same-depth sibling registration can still retire the record. A chainless record with no pid is never a twin (`superseded_by`).
 Tab-shell residual: a chain whose tab shell stands beneath the window owner binds that window (`window_for_hook_chain`), but its heal is blocked while the tab shell lives outside the hook's chain (`lives_apart`), so such a stored chain stays stale until the shell exits.
 
 **Additive in v0 (P-CX-5):** a session record MAY also carry an optional
@@ -3805,14 +3827,19 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
   a fabricated cursor entry. `aoide session phase` cannot write a fact, and
   `aoide session end` writes an `end` fact only when its attested caller is
   the child's own harness or runs under it (§ `sessions.json`), and only to the
-  spawner the child's own edge names. The live harness anchors that edge: no
-  hook from outside it re-homes the record's chain or parent first (§
-  `sessions.json`). So besides a file edit, only a process the child's harness
-  itself runs can produce one while that harness lives, and that process can
-  equally end the child's turn. After the harness has exited a new chain may
-  adopt the id, and the line it can then cause says that a session already over
-  ended with its turn open. This is the same class as editing the `hooks.json`
-  phase itself;
+  spawner the child's own edge names. The live harness anchors the chain that
+  edge is read through: no hook from outside it re-homes the record's chain or
+  parent first, and no `session end` or `session phase` from outside makes the
+  record `done`, so it cannot be pruned and registered anew (§ `sessions.json`).
+  `session start --parent` and `graph link` can still set a parent, but they
+  move no chain, and a route needs the host wrap's pid in it. So besides a file
+  edit, only a process the child's harness itself runs can produce one while
+  that harness lives, and that process can equally end the child's turn. After
+  the harness has exited, or the session has ended, a new chain may adopt the
+  id, and the line it can then cause says that a session already over ended with
+  its turn open. A forged per-turn hook can still bind a window onto a
+  windowless record, which moves no fact. This is the same class as editing the
+  `hooks.json` phase itself;
 - **redirect** a live child's lines. On the live path the recipient is read
   through the host's `parentSessionId` and `attestedSpawner`, which live in
   `sessions.json` and are not under the seal (the seal covers the wrap's own
