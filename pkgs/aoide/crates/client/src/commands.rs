@@ -7630,7 +7630,9 @@ mod tests {
         // post_json_to_node's OWN via resolution (node.via, not the
         // resolve_dial_url helper directly) — proven by forcing a
         // connection failure and asserting the error names node.url's own
-        // host:port, never a rewritten 127.0.0.1:<port> authority.
+        // host:port, never a rewritten 127.0.0.1:<port> authority. It runs the
+        // `curl` on PATH, which `install_fake_curl` swaps under the env lock.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let mut node = fixture_node(None);
         node.url = "http://127.0.0.1:1/aoide/rpc".to_string(); // reserved, never listened on
         let err = post_json_to_node(&node, "{}", None, &[], 1).unwrap_err();
