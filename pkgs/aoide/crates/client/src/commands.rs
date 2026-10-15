@@ -7305,9 +7305,8 @@ mod tests {
 
         let mut inv = spawn_inv(&["yomi-strix", "hello"], true);
         inv.flags.insert("parent".to_string(), "live-1".to_string());
-        let (shim_dir, saved_path) = install_fake_curl("spawn-ack", &script);
+        let _shim = install_fake_curl("spawn-ack", &script);
         let out = handle_node_spawn(&inv);
-        uninstall_fake_curl(&shim_dir, saved_path);
 
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
         assert_eq!(out.data.as_ref().unwrap()["parentSessionId"], "live-1");
@@ -7349,9 +7348,8 @@ mod tests {
         node.pubkey = Some("aa11".to_string());
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
-        let (shim_dir, saved_path) = install_fake_curl("spawn-no-parent", &script);
+        let _shim = install_fake_curl("spawn-no-parent", &script);
         let out = handle_node_spawn(&spawn_inv(&["yomi-strix", "hello"], true));
-        uninstall_fake_curl(&shim_dir, saved_path);
 
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
         assert!(out.data.as_ref().unwrap()["parentSessionId"].is_null());
@@ -7627,6 +7625,7 @@ mod tests {
 
     #[test]
     fn post_json_to_node_dials_node_url_verbatim_when_node_via_is_absent() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // post_json_to_node's OWN via resolution (node.via, not the
         // resolve_dial_url helper directly) — proven by forcing a
         // connection failure and asserting the error names node.url's own
@@ -7952,23 +7951,44 @@ mod tests {
     /// fixture streams more than `MAX_RESPONSE_BYTES` from a stand-in, and the
     /// seam to do that with the real client over a loopback socket does not
     /// exist yet.
+    /// A shim body that records its own invocation next to itself and fails.
+    /// `$0` is the shim's path, so the marker sits in the shim's own directory.
     #[cfg(unix)]
-    fn with_fake_curl<T>(tag: &str, script: &str, f: impl FnOnce() -> T) -> T {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (shim_dir, saved_path) = install_fake_curl(tag, script);
-        let out = f();
-        uninstall_fake_curl(&shim_dir, saved_path);
-        out
+    const NEVER_CALLED_SHIM: &str = "touch \"$(dirname \"$0\")/curl-was-invoked\"\nexit 1\n";
+
+    /// Restores `PATH` and removes the shim directory when dropped, so a test
+    /// that panics mid-body cannot leave its fake `curl` on the process-wide
+    /// `PATH` for the tests queued behind `env_lock`.
+    #[cfg(unix)]
+    struct FakeCurl {
+        shim_dir: std::path::PathBuf,
+        saved_path: Option<String>,
     }
 
-    /// [`with_fake_curl`]'s two halves, split out for a test that ALREADY
-    /// holds `env_lock` (and cannot take it a second time): drop the shim at
-    /// the front of `PATH`, run the closure-free part between the two calls,
-    /// then restore. The shim's stdin drain is load-bearing — `post_json`
-    /// always writes to curl's stdin, and a shim that exits without reading
-    /// turns a descheduled caller's write into an EPIPE (`crates/AGENTS.md`).
     #[cfg(unix)]
-    fn install_fake_curl(tag: &str, script: &str) -> (std::path::PathBuf, Option<String>) {
+    impl Drop for FakeCurl {
+        fn drop(&mut self) {
+            match self.saved_path.take() {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+            let _ = std::fs::remove_dir_all(&self.shim_dir);
+        }
+    }
+
+    /// Puts a fake `curl` at the front of `PATH` for as long as the returned
+    /// guard lives. `PATH` is process-wide, so the caller must already hold
+    /// `env_lock`; the `try_lock` below makes a test that forgot it fail here
+    /// instead of racing another test's `curl` call.
+    /// The shim's stdin drain is load-bearing: `post_json` always writes to
+    /// curl's stdin, and a shim that exits without reading turns a descheduled
+    /// caller's write into an EPIPE (`crates/AGENTS.md`).
+    #[cfg(unix)]
+    fn install_fake_curl(tag: &str, script: &str) -> FakeCurl {
+        assert!(
+            matches!(crate::env_lock().try_lock(), Err(std::sync::TryLockError::WouldBlock)),
+            "install_fake_curl needs env_lock held by its caller"
+        );
         let shim_dir = std::env::temp_dir().join(format!(
             "aoide-client-curlshim-{tag}-{}-{}",
             std::process::id(),
@@ -7983,16 +8003,16 @@ mod tests {
         }
         let saved_path = std::env::var("PATH").ok();
         std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()));
-        (shim_dir, saved_path)
+        FakeCurl { shim_dir, saved_path }
     }
 
+    /// [`install_fake_curl`] under `env_lock`, for a test whose body is only
+    /// the call it is checking.
     #[cfg(unix)]
-    fn uninstall_fake_curl(shim_dir: &std::path::Path, saved_path: Option<String>) {
-        match saved_path {
-            Some(p) => std::env::set_var("PATH", p),
-            None => std::env::remove_var("PATH"),
-        }
-        let _ = std::fs::remove_dir_all(shim_dir);
+    fn with_fake_curl<T>(tag: &str, script: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _shim = install_fake_curl(tag, script);
+        f()
     }
 
     /// #114: an over-cap response refuses with the taught error, naming
@@ -8145,21 +8165,7 @@ mod tests {
     #[test]
     fn handle_node_add_no_verify_never_invokes_curl() {
         with_node_state("add-no-verify", || {
-            let shim_dir = std::env::temp_dir().join(format!(
-                "aoide-client-node-add-noverify-curlshim-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-            ));
-            std::fs::create_dir_all(&shim_dir).unwrap();
-            let marker = shim_dir.join("curl-was-invoked");
-            let shim = shim_dir.join("curl");
-            std::fs::write(&shim, format!("#!/bin/sh\ncat > /dev/null\ntouch {}\nexit 1\n", marker.display())).unwrap();
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            let saved_path = std::env::var("PATH").ok();
-            std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()));
+            let shim = install_fake_curl("node-add-no-verify", NEVER_CALLED_SHIM);
 
             let inv = Invocation {
                 path: vec!["node".to_string(), "add".to_string()],
@@ -8169,12 +8175,7 @@ mod tests {
             };
             let out = handle_node_add(&inv);
 
-            match saved_path {
-                Some(p) => std::env::set_var("PATH", p),
-                None => std::env::remove_var("PATH"),
-            }
-            let curl_ran = marker.exists();
-            let _ = std::fs::remove_dir_all(&shim_dir);
+            let curl_ran = shim.shim_dir.join("curl-was-invoked").exists();
 
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
             assert!(!curl_ran, "--no-verify must never invoke curl (the shim would have touched its marker)");
@@ -8277,30 +8278,11 @@ mod tests {
             let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
             let sas = aoide_storage::pairing::derive_sas(&pubkey_a, &kp.info().pubkey_hex, &"c".repeat(32), &entry.approver_nonce_hex);
 
-            let shim_dir = std::env::temp_dir().join(format!(
-                "aoide-client-approve-inbound-curlshim-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-            ));
-            std::fs::create_dir_all(&shim_dir).unwrap();
-            let marker = shim_dir.join("curl-was-invoked");
-            let shim = shim_dir.join("curl");
-            std::fs::write(&shim, format!("#!/bin/sh\ncat > /dev/null\ntouch {}\nexit 1\n", marker.display())).unwrap();
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-            let saved_path = std::env::var("PATH").ok();
-            std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()));
+            let shim = install_fake_curl("approve-inbound", NEVER_CALLED_SHIM);
 
             let outcome = approve_inbound(CodeGate::Code(sas), "pair", &id, entry, &now, now_epoch, None);
 
-            match saved_path {
-                Some(p) => std::env::set_var("PATH", p),
-                None => std::env::remove_var("PATH"),
-            }
-            let curl_ran = marker.exists();
-            let _ = std::fs::remove_dir_all(&shim_dir);
+            let curl_ran = shim.shim_dir.join("curl-was-invoked").exists();
 
             assert_eq!(outcome.status, aoide_protocol::output::Status::Ok, "{outcome:?}");
             assert!(!curl_ran, "approving an inbound request must never invoke curl — it is purely local");
@@ -11043,30 +11025,11 @@ mod tests {
         aoide_storage::outbox::write_entry("peer-node", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
         aoide_storage::outbox::back_off("peer-node", 1_000, "transport-error: HTTP 0").unwrap();
 
-        let shim_dir = std::env::temp_dir().join(format!(
-            "aoide-client-mail-outbox-curlshim-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&shim_dir).unwrap();
-        let marker = shim_dir.join("curl-was-invoked");
-        let shim = shim_dir.join("curl");
-        std::fs::write(&shim, format!("#!/bin/sh\ncat > /dev/null\ntouch {}\nexit 1\n", marker.display())).unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let saved_path = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()));
+        let shim = install_fake_curl("mail-outbox", NEVER_CALLED_SHIM);
 
         let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
 
-        match saved_path {
-            Some(p) => std::env::set_var("PATH", p),
-            None => std::env::remove_var("PATH"),
-        }
-        let curl_ran = marker.exists();
-        let _ = std::fs::remove_dir_all(&shim_dir);
+        let curl_ran = shim.shim_dir.join("curl-was-invoked").exists();
 
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
         assert!(!curl_ran, "an outbox LISTING must never dial out — the shim would have touched its marker");

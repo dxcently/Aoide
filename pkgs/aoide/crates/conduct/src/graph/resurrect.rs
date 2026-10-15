@@ -1857,6 +1857,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_re_exec_line_re_parses_to_the_recorded_argv() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let argv: Vec<String> = ["grep", "a b", "f", "it's", "x*y", "$HOME", ""].iter().map(|s| s.to_string()).collect();
         let restore = RestoreSnapshot {
             cwd: Some("/home/khoa/Aoide".into()),

@@ -2058,12 +2058,14 @@ mod tests {
 
     #[test]
     fn shot_rejects_an_unknown_what() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let out = handle_preview_shot(&inv_shot(&[("what", "nonsense")]));
         assert_eq!(out.status, Status::Usage, "{:?}", out.message);
     }
 
     #[test]
     fn shot_element_without_the_element_flag_is_a_usage_error() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let out = handle_preview_shot(&inv_shot(&[("what", "element")]));
         assert_eq!(out.status, Status::Usage, "{:?}", out.message);
         assert!(out.message.contains("--element"), "{}", out.message);
@@ -2071,6 +2073,7 @@ mod tests {
 
     #[test]
     fn shot_element_with_a_non_element_what_is_a_usage_error() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // Review item 6b: only the reverse direction (`--what element`
         // requiring `--element`) used to be enforced.
         let out = handle_preview_shot(&inv_shot(&[("what", "widget"), ("element", "Item[0]")]));
@@ -2093,6 +2096,7 @@ mod tests {
 
     #[test]
     fn shot_without_a_preview_root_is_a_clean_error() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("shot_no_root");
         let out = handle_preview_shot(&inv_shot(&[("root", root.to_str().unwrap())]));
         assert_eq!(out.status, Status::Error);
@@ -3200,6 +3204,7 @@ exit 0
 
     #[test]
     fn build_component_map_parses_every_watch_listed_file_keyed_by_stem() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let base = scratch("component_map");
         let root_qml = base.join("root.qml");
         std::fs::write(&root_qml, ROOT_QML_FOR_COMPONENT_JOIN).unwrap();
@@ -3222,6 +3227,7 @@ exit 0
 
     #[test]
     fn build_component_map_adds_the_widgets_own_file_even_when_watch_omits_it() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let base = scratch("component_map_widget_fallback");
         let widget_qml = base.join("widget.qml");
         std::fs::write(&widget_qml, ROOT_QML_FOR_COMPONENT_JOIN).unwrap();
@@ -3836,6 +3842,7 @@ exit 0
 
     #[test]
     fn notes_add_numbers_from_one_and_defaults_kind_to_note() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_add");
         let out1 = handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -3862,6 +3869,7 @@ exit 0
 
     #[test]
     fn notes_add_kind_follows_element_then_shape_then_plain() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_kinds");
         let highlight = handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -3883,6 +3891,7 @@ exit 0
 
     #[test]
     fn notes_add_rejects_rect_and_element_together() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_rect_element_conflict");
         let out = handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -3896,6 +3905,7 @@ exit 0
 
     #[test]
     fn notes_add_rejects_an_unknown_shape() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_bad_shape");
         let out = handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -3908,6 +3918,7 @@ exit 0
 
     #[test]
     fn notes_done_marks_the_matching_note() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_done");
         handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -3924,6 +3935,7 @@ exit 0
 
     #[test]
     fn notes_done_on_an_unknown_number_is_an_error_naming_it() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_done_missing");
         handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -3940,6 +3952,7 @@ exit 0
 
     #[test]
     fn notes_clear_empties_the_list_but_keeps_the_file() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_clear");
         handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -3958,6 +3971,7 @@ exit 0
 
     #[test]
     fn notes_clear_preserves_unknown_top_level_keys() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // Review item 2: `--clear` used to build a brand-new
         // `empty_notes_doc()` from scratch, silently dropping any unknown
         // top-level key the file happened to carry.
@@ -3980,6 +3994,7 @@ exit 0
 
     #[test]
     fn notes_add_normalises_a_non_array_notes_value_instead_of_panicking() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // Review item 1 BLOCKER: a hand-edited/corrupt notes.json with
         // `notes` present but not an array used to `.expect()` straight
         // into a panic on the very next `--add`.
@@ -4005,6 +4020,7 @@ exit 0
 
     #[test]
     fn notes_schema_version_is_the_json_number_zero_not_a_string() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // Review item 5: the real canvas writes `schemaVersion` as a JSON
         // NUMBER in notes.json (unlike `preview.json`'s own, which is a
         // string) -- confirmed against a live canvas run.
@@ -4031,6 +4047,7 @@ exit 0
 
     #[test]
     fn notes_numbering_restarts_after_a_clear() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_renumber_after_clear");
         handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -4051,6 +4068,7 @@ exit 0
 
     #[test]
     fn notes_read_without_a_canvas_omits_source_and_says_so() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_read_no_canvas");
         handle_preview_notes(&inv_notes(&[
             ("root", root.to_str().unwrap()),
@@ -4075,6 +4093,7 @@ exit 0
 
     #[test]
     fn notes_read_on_an_empty_root_reports_no_notes() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let root = scratch("notes_empty");
         let out = handle_preview_notes(&inv_notes(&[("root", root.to_str().unwrap())]));
         assert_eq!(out.status, Status::Ok);

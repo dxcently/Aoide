@@ -676,8 +676,7 @@ mod tests {
     // ── park_timeout (env override, module doc) ─────────────────────────
 
     fn env_lock() -> &'static std::sync::Mutex<()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        &LOCK
+        crate::env_lock()
     }
 
     #[test]

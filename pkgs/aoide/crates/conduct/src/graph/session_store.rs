@@ -4123,6 +4123,7 @@ mod tests {
     }
     #[test]
     fn reaper_grace_ignores_a_degenerate_empty_clients_snapshot() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // A momentary empty `hyprctl clients` read during a reload window must not
         // mass-reap the windowed roster: the grace downgrades it to pid-only.
         let windowed = vec![SessionRecord {

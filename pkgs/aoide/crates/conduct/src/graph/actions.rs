@@ -469,6 +469,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn verified_termination_rejects_stale_seal_and_stops_only_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let mut child = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
@@ -506,6 +507,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn a_repointed_record_cannot_steer_kill_to_a_foreign_process() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let spawn = || std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let (mut wrap, mut foreign) = (spawn(), spawn());
         let key = aoide_storage::identity::mint_ephemeral().unwrap();

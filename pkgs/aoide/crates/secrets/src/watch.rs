@@ -2163,6 +2163,7 @@ mod tests {
 
     #[test]
     fn run_zenity_entry_reports_a_spawn_error_for_a_nonexistent_shim() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // No shim is written here at all (the path is deliberately bogus),
         // so this test never touches `shim_lock` — nothing here can
         // collide with the write/exec race the lock exists to serialize.
@@ -2180,6 +2181,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_native_child_that_answers_nothing_but_an_exit_code_is_never_an_approval() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let result = run_zenity_entry("findstr", "t", "x", || false);
         assert!(
             matches!(result, ZenityResult::Cancelled | ZenityResult::DialogFailure(_)),

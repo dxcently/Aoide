@@ -228,12 +228,14 @@ mod tests {
 
     #[test]
     fn handle_pair_ask_is_cli_only() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let i = inv(&["pair", "ask"], Door::Mcp, &[("id", "abc"), ("name", "box-a"), ("context", "x")]);
         assert_eq!(handle_pair_ask(&i).status, aoide_protocol::output::Status::Usage);
     }
 
     #[test]
     fn handle_pair_ask_requires_id_name_and_context() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(handle_pair_ask(&inv(&["pair", "ask"], Door::Cli, &[])).status, aoide_protocol::output::Status::Usage);
         assert_eq!(handle_pair_ask(&inv(&["pair", "ask"], Door::Cli, &[("id", "abc")])).status, aoide_protocol::output::Status::Usage);
         assert_eq!(
@@ -246,12 +248,14 @@ mod tests {
 
     #[test]
     fn handle_pair_show_is_cli_only() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let i = inv(&["pair", "show"], Door::Mcp, &[("id", "abc"), ("name", "box-b"), ("context", "x"), ("code", "111-222")]);
         assert_eq!(handle_pair_show(&i).status, aoide_protocol::output::Status::Usage);
     }
 
     #[test]
     fn handle_pair_show_requires_id_name_context_and_code() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(handle_pair_show(&inv(&["pair", "show"], Door::Cli, &[])).status, aoide_protocol::output::Status::Usage);
         assert_eq!(
             handle_pair_show(&inv(&["pair", "show"], Door::Cli, &[("id", "abc"), ("name", "box-b")])).status,

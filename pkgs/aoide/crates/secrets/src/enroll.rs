@@ -309,6 +309,7 @@ mod tests {
 
     #[test]
     fn run_writes_a_fresh_secret_and_a_reset_ledger() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("fresh");
         run(&home, false).unwrap();
         let secret = crate::store::load_totp_secret(&home).unwrap();
@@ -319,6 +320,7 @@ mod tests {
 
     #[test]
     fn run_without_force_refuses_a_second_enrollment() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("double");
         run(&home, false).unwrap();
         let first = crate::store::load_totp_secret(&home).unwrap();
@@ -330,6 +332,7 @@ mod tests {
 
     #[test]
     fn run_with_force_regenerates_the_secret_and_resets_a_nonempty_ledger() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("force");
         run(&home, false).unwrap();
         let first = crate::store::load_totp_secret(&home).unwrap();
@@ -354,6 +357,7 @@ mod tests {
 
     #[test]
     fn show_reprints_the_seeded_secrets_uri_and_rotates_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("show");
         run(&home, false).unwrap();
         let secret_path = crate::store::totp_secret_path(&home);
@@ -376,6 +380,7 @@ mod tests {
 
     #[test]
     fn show_without_an_existing_enrollment_errors_cleanly() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("show-none");
         let err = show(&home).unwrap_err();
         assert!(err.contains("no TOTP enrollment"), "{err}");
