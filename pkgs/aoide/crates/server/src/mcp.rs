@@ -106,7 +106,10 @@ fn json_type(ty: &str) -> &'static str {
 }
 
 /// Build an [`Invocation`] from an MCP `tools/call` (tool name + arguments).
-fn invocation_from_call(name: &str, arguments: &Value, registry: &Registry) -> Option<Invocation> {
+/// `None` when the registry names no such tool. `Some(Err)` is a usage refusal
+/// of the arguments, made before any command runs: a bool flag takes JSON
+/// `true` or `false` (see [`bool_flag_value`]).
+fn invocation_from_call(name: &str, arguments: &Value, registry: &Registry) -> Option<Result<Invocation, Outcome>> {
     let cmd = registry.commands().find(|c| c.dotted() == name)?;
     let path: Vec<String> = cmd.path.iter().map(|s| s.to_string()).collect();
 
@@ -122,18 +125,42 @@ fn invocation_from_call(name: &str, arguments: &Value, registry: &Registry) -> O
         }
         // Flags by name. A JSON `false` is flag-absent, for every flag.
         for f in cmd.flags {
-            if let Some(v) = obj.get(f.name).filter(|v| **v != Value::Bool(false)) {
-                flags.insert(f.name.to_string(), value_to_string(v));
-            }
+            let Some(v) = obj.get(f.name) else { continue };
+            let value = if f.ty == "bool" {
+                match bool_flag_value(v) {
+                    Ok(Some(on)) => on,
+                    Ok(None) => continue,
+                    Err(why) => return Some(Err(Outcome::usage(cmd.dotted(), format!("`--{}` {why}", f.name)))),
+                }
+            } else if *v == Value::Bool(false) {
+                continue;
+            } else {
+                value_to_string(v)
+            };
+            flags.insert(f.name.to_string(), value);
         }
     }
 
-    Some(Invocation {
+    Some(Ok(Invocation {
         path,
         args,
         flags,
         door: Door::Mcp,
-    })
+    }))
+}
+
+/// A bool flag's value off the MCP wire: `Some("true")` for JSON `true`, `None`
+/// for the falsy spellings that read as absent, and the reason for refusing any
+/// other value. A stringified `"true"` is refused rather than read as ON, so
+/// the flag's meaning never rests on a guess about the caller's spelling.
+fn bool_flag_value(v: &Value) -> Result<Option<String>, String> {
+    match v {
+        Value::Bool(true) => Ok(Some("true".to_string())),
+        Value::Bool(false) | Value::Null => Ok(None),
+        Value::String(s) if matches!(s.as_str(), "false" | "0" | "") => Ok(None),
+        Value::Number(n) if n.as_f64() == Some(0.0) => Ok(None),
+        other => Err(format!("takes JSON `true` or `false`, not {other}")),
+    }
 }
 
 /// `pub(crate)` (not `pub`) so [`crate::daemon`]'s own `dispatch` op
@@ -177,8 +204,11 @@ fn handle(req: &Value, registry: &Registry, dispatch: DispatchFn) -> Option<Valu
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
             match invocation_from_call(name, &arguments, registry) {
-                Some(inv) => {
-                    let outcome = dispatch(&inv);
+                Some(parsed) => {
+                    let outcome = match parsed {
+                        Ok(inv) => dispatch(&inv),
+                        Err(refusal) => refusal,
+                    };
                     let text = serde_json::to_string_pretty(&outcome).unwrap_or_default();
                     let result = ToolCallResult {
                         content: vec![ToolCallContent { kind: "text".to_string(), text }],
@@ -542,9 +572,58 @@ mod tests {
         assert_eq!(required, ["name", "key"]);
     }
 
-    /// A JSON `false` on a bool flag is flag-absent for every flag, not only
-    /// `send --yes`: over MCP a flag reads as present only when it is truthy.
-    /// A `true` on the other bool still arrives.
+    /// A JSON `false` is flag-absent for every flag, not only `send --yes`. A
+    /// `true` on the other bool still arrives.
+    /// Findings 13 and 14: a bool flag reads JSON `true` as ON. JSON `false`,
+    /// `"false"`, `"0"`, `0`, `""` and `null` read as absent, and every other
+    /// value is a usage refusal that names the flag, so no falsy spelling turns
+    /// a flag on and no stringified truth is taken on trust. The four flags are
+    /// the bool flags the MCP door opens today: `send --submit`, `spawn
+    /// --windowed` and `--undying`, `session find --all`.
+    #[test]
+    fn a_bool_flag_reads_only_json_true_and_refuses_every_other_value_by_name() {
+        use aoide_protocol::registry::{cmd, flag};
+        let mut r = Registry::new();
+        r.insert(cmd!(
+            path: ["thing", "go"],
+            summary: "Go.",
+            args: [],
+            flags: [
+                flag!("submit", "bool", "Submit."),
+                flag!("windowed", "bool", "Window."),
+                flag!("undying", "bool", "Stay."),
+                flag!("all", "bool", "Everything."),
+                flag!("text", "string", "Text.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        ));
+        let absent = [json!(false), json!("false"), json!("0"), json!(0), json!(0.0), json!(""), Value::Null];
+        let refused = [json!("true"), json!("yes"), json!(1), json!(2.5), json!([]), json!({})];
+        for name in ["submit", "windowed", "undying", "all"] {
+            for v in &absent {
+                let inv = invocation_from_call("thing.go", &json!({ name: v }), &r)
+                    .expect("the tool exists")
+                    .unwrap_or_else(|e| panic!("`{name}` = {v} is absent, not refused: {e:?}"));
+                assert!(!inv.flags.contains_key(name), "`{name}` = {v} must read as absent: {:?}", inv.flags);
+            }
+            let on = invocation_from_call("thing.go", &json!({ name: true }), &r).unwrap().unwrap();
+            assert_eq!(on.flags.get(name).map(String::as_str), Some("true"), "`{name}` = true is ON");
+            for v in &refused {
+                let err = invocation_from_call("thing.go", &json!({ name: v }), &r)
+                    .expect("the tool exists")
+                    .expect_err(&format!("`{name}` = {v} is not a bool"));
+                assert_eq!(err.status, Status::Usage, "{err:?}");
+                assert!(err.message.contains(&format!("`--{name}`")), "the refusal names the flag: {}", err.message);
+                assert!(err.message.contains("true") && err.message.contains("false"), "{}", err.message);
+            }
+        }
+        let text = invocation_from_call("thing.go", &json!({ "text": "false" }), &r).unwrap().unwrap();
+        assert_eq!(text.flags.get("text").map(String::as_str), Some("false"), "a string flag keeps its own spelling");
+    }
+
     #[test]
     fn a_false_bool_argument_is_flag_absent_for_every_flag() {
         use aoide_protocol::registry::{cmd, flag};
@@ -567,6 +646,7 @@ mod tests {
             &json!({ "yes": false, "undying": true }),
             &r,
         )
+        .unwrap()
         .unwrap();
         assert!(!inv.flags.contains_key("yes"), "{:?}", inv.flags);
         assert_eq!(inv.flags.get("undying").map(String::as_str), Some("true"));

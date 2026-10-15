@@ -41,6 +41,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   ancestry to a sealed session, exactly as `aoide send` does. Keep it so:
   forwarding an MCP call to the daemon, or reading the caller's identity from
   anything in the request, would change who is attested.
+  A bool flag reads JSON `true` as ON. `false`, `"false"`, `"0"`, `0`, `""` and
+  `null` read as absent, and any other value is a usage refusal naming the
+  flag (`bool_flag_value`), so no caller's spelling turns a flag on by accident.
   `Door::Mcp.can_approve()` stays false, so `--yes`, `session pending
   approve` and `deny`, `session permit` and `mail ring` stay refused over it
   however well attested, and so does every command that would make a session's
