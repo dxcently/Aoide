@@ -3,6 +3,7 @@
 ## Invariants
 
 - A fresh structured letter mints one secure random thread ID before fanout; all copies share it. Replies explicitly retain the thread and name the parent; forwarding starts fresh.
+- **An ack is signed as `routing::own_name_in`'s name for this box in the letter's mesh** (`own_name`), the rule a letter's sender uses. A charter mesh that does not carry this box's key mints no ack and audits `mail.ack.withheld`; the hostname is never the fallback there.
 - Structured letter fanout reuses the scalar mail handler. Validate all recipients before effects, report every copy, and never retry accepted copies as a group. Metadata remains inside signed text, never unsigned envelope fields.
 
 - **`context` is daemon-owned and local-only.** The CLI must route to aoided

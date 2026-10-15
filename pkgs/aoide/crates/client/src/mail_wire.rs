@@ -494,12 +494,21 @@ fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
     // envelope's own signed `origin_mesh` — so the receipt is depositable
     // exactly where the letter was (review finding 1 covers acks too: an ack
     // minted unnamed while its request is signed for another mesh can never
-    // land).
-    let Ok(ack) = aoide_storage::mail::mint_ack_in_mesh(
+    // land). It is signed as this box's name IN THAT MESH, the same rule a
+    // letter's `from.node` follows (`own_name`): the origin checks the ack
+    // against the key it holds for that name, never for the hostname. A charter
+    // mesh that does not carry this box's key mints nothing.
+    let mesh = envelope.header.origin_mesh.clone();
+    let Some(from_node) = own_name(&mesh) else {
+        audit_ack_withheld(acked_msgid, &envelope.header.from.node, &mesh);
+        return;
+    };
+    let Ok(ack) = aoide_storage::mail::mint_ack_from(
+        &from_node,
         &envelope.header.to.name,
         envelope.header.from.clone(),
         acked_msgid,
-        &envelope.header.origin_mesh,
+        &mesh,
     ) else {
         return;
     };
@@ -521,6 +530,23 @@ fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
     if aoide_storage::outbox::write_ack_if_absent(&next, acked_msgid, &entry) == Ok(true) {
         let _ = drain_node(&next);
     }
+}
+
+/// The audit line for an ack this box will not sign: its identity key has no
+/// name in the charter mesh the letter arrived in, so there is nothing honest to
+/// sign as. The hostname is never the fallback there (`routing::own_name_in`).
+fn audit_ack_withheld(acked_msgid: &str, origin: &str, mesh: &str) {
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        "mail.ack.withheld",
+        "invalid",
+        &format!(
+            "no ack for {} to `{origin}`: mesh `{mesh}` is a charter whose lines do not carry this box's identity key, so it has no name there to sign as",
+            foreign_words(acked_msgid, LINE_MAX)
+        ),
+    );
 }
 
 /// Build the outbox entry a letter leaves this node in (P-SEAL, MAIL.md's

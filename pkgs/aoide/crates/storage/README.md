@@ -749,11 +749,14 @@ by decision — no embedded database yet
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
-  (`from.node` always `display::local_node_name()` — `self` never crosses
-  the wire, and the form it crosses as is the ADDRESS one: an OS host name is
-  case-preserved and native Windows' is conventionally upper-case while a node
-  name is grammar-lowercase, so the folded name is the single name this box
-  mints, declares and is looked up under); `verify_origin_signature` is the OTHER lookup a P-P4 caller
+  (`from.node` is the name the caller states: `mint_outbound_letter_from` and
+  `mint_ack_from` take it, and the unnamed forms state `display::local_node_name()`
+  — `self` never crosses the wire, and the form it crosses as is the ADDRESS
+  one: an OS host name is case-preserved and native Windows' is
+  conventionally upper-case while a node name is grammar-lowercase, so the
+  folded name is the single name this box mints, declares and is looked up
+  under; a caller on a charter mesh states the name its line gives this box).
+  `verify_origin_signature` is the OTHER lookup a P-P4 caller
   doesn't need — not the connection's signer (`ctx.signed_caller`, a
   door concern) but `header.from.node`'s own key, tried against the ONE
   entry `node_store` has on record under that exact name, never every

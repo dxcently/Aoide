@@ -572,7 +572,13 @@ door's audit name whitelist gains both names so they never log as bare
   `transit` container; a letter waits for its receipt.
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
-  destination. Routed like any letter, never themselves acked.
+  destination. Routed like any letter, never themselves acked. The ack is
+  signed as the destination's name IN THE LETTER'S MESH, by the same rule a
+  letter's sender uses: the name its charter line gives its identity key, or
+  its own name where the mesh is a pair mesh that no charter governs. Never the
+  OS hostname (a box named `chiyo-host` that holds the key of `chiyo` signs as
+  `chiyo`). A charter mesh whose lines do not carry the destination's key mints
+  no ack; the refusal is audited, and the origin keeps its own copy.
   A receipt's `text` is exactly one msgid — 64 lowercase hex digits and
   nothing around them. Any other text is refused `bad-msgid` and files
   nothing, because the text names a letter and nothing else.
