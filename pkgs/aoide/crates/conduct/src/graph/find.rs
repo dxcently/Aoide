@@ -1189,11 +1189,13 @@ fn local_row(sv: &SessionView, rec: Option<&SessionRecord>, merged: &[SessionRec
 
 /// A cached session's row, as its node last published it. Its mail is never
 /// read here: the node does not publish its mailboxes. Every text field the
-/// node wrote is clipped to one clean line first ([`clip`]), before anything
-/// reads it, so the project bucket's walk up the cwd, a match and every byte of
-/// output cost one line per field however long the node made it. A task is
-/// already a legal slug (`remote_task`), so it stays whole.
-fn remote_row(node: &str, mut sv: SessionView, projects: &[Project]) -> Row {
+/// node wrote is clipped to one clean line first ([`clip`]), so a match and
+/// every byte of output cost one line per field however long the node made it.
+/// Its project is the one its node published and nothing else: a bucket derived
+/// from its cwd would walk this box's disk and match this box's projects with a
+/// path the node chose. A task is already a legal slug (`remote_task`), so it
+/// stays whole.
+fn remote_row(node: &str, mut sv: SessionView) -> Row {
     for text in [&mut sv.session_id, &mut sv.state, &mut sv.cwd, &mut sv.agent] {
         *text = clip(text);
     }
@@ -1203,7 +1205,6 @@ fn remote_row(node: &str, mut sv: SessionView, projects: &[Project]) -> Row {
     {
         *text = clip(text);
     }
-    let project = project_of(&sv, projects);
     let link = |node: &str, id: &str| (clip(node), clip(id));
     Row {
         node: node.to_string(),
@@ -1218,7 +1219,7 @@ fn remote_row(node: &str, mut sv: SessionView, projects: &[Project]) -> Row {
         kind: sv.kind,
         state: sv.state,
         presence: sv.presence,
-        project,
+        project: sv.project,
         native_role: sv.native_role,
         leads: Vec::new(),
         report_to: None,
@@ -1253,7 +1254,7 @@ pub(crate) fn build_index(input: Inputs) -> Loaded {
         match cache {
             Ok(Some(entry)) => {
                 let (sessions, stale) = cached_node(&node.name, entry, input.now_epoch);
-                rows.extend(sessions.into_iter().map(|sv| remote_row(&node.name, sv, &input.projects)));
+                rows.extend(sessions.into_iter().map(|sv| remote_row(&node.name, sv)));
                 scope.push(Scope {
                     node: node.name.clone(),
                     source: "cache",
@@ -3492,7 +3493,69 @@ mod tests {
     }
 
     #[test]
-    fn a_far_cwd_of_a_quarter_million_components_costs_the_project_bucket_one_clipped_path() {
+    fn a_far_row_gets_no_project_from_a_cwd_that_names_a_manifest_directory_on_this_box() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("find-far-manifest");
+        let manifest_dir = root.join("proj");
+        let nested = manifest_dir.join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        aoide_storage::manifest::save_manifest(&manifest_dir, &aoide_storage::manifest::Manifest::default()).unwrap();
+        let cwd = nested.to_string_lossy().into_owned();
+
+        let mut inputs = empty_inputs("osaka");
+        inputs.sessions = vec![session("near-id", &cwd, "working", "2026-10-12T09:00:00Z", None)];
+        inputs.nodes = vec![node("yomi-strix", "http://127.0.0.1:9")];
+        let graph = json!({ "schemaVersion": "0", "nodes": [
+            { "id": "session:far-id", "kind": "session", "state": "idle", "agent": "kimi", "cwd": cwd },
+        ], "edges": [] });
+        inputs.caches = vec![Ok(Some(cache_entry("yomi-strix", "2026-10-12T11:59:30Z", graph)))];
+        let loaded = build_index(inputs);
+
+        let project = |id: &str| loaded.index.rows.iter().find(|r| r.session_id == id).expect("the row exists").project.clone();
+        assert_eq!(project("near-id"), Some("proj".into()), "a local row still buckets by this box's manifest");
+        assert_eq!(project("far-id"), None, "a far cwd that names a manifest directory here is only text");
+    }
+
+    #[test]
+    fn a_far_row_gets_no_project_from_a_cwd_under_a_project_root_registered_on_this_box() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root, _env) = isolated("find-far-registered");
+        let mut inputs = empty_inputs("osaka");
+        inputs.projects = vec![Project { name: "registered".into(), path: "/shared/registered".into(), ..Default::default() }];
+        inputs.sessions = vec![session("near-id", "/shared/registered/pkgs", "working", "2026-10-12T09:00:00Z", None)];
+        inputs.nodes = vec![node("yomi-strix", "http://127.0.0.1:9")];
+        let graph = json!({ "schemaVersion": "0", "nodes": [
+            { "id": "session:far-id", "kind": "session", "state": "idle", "agent": "kimi", "cwd": "/shared/registered/pkgs" },
+        ], "edges": [] });
+        inputs.caches = vec![Ok(Some(cache_entry("yomi-strix", "2026-10-12T11:59:30Z", graph)))];
+        let loaded = build_index(inputs);
+
+        let project = |id: &str| loaded.index.rows.iter().find(|r| r.session_id == id).expect("the row exists").project.clone();
+        assert_eq!(project("near-id"), Some("registered".into()), "a local row still buckets by this box's projects");
+        assert_eq!(project("far-id"), None, "a far cwd under a root registered here is only text");
+    }
+
+    #[test]
+    fn a_far_rows_stored_project_is_its_bucket_clipped_to_one_line() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root, _env) = isolated("find-far-stored");
+        let graph = json!({ "schemaVersion": "0", "nodes": [
+            { "id": "session:short", "kind": "session", "state": "idle", "agent": "kimi", "cwd": "/far", "project": "aoide" },
+            { "id": "session:long", "kind": "session", "state": "idle", "agent": "kimi", "cwd": "/far", "project": "j".repeat(5 << 20) },
+        ], "edges": [] });
+        let mut inputs = empty_inputs("osaka");
+        inputs.nodes = vec![node("yomi-strix", "http://127.0.0.1:9")];
+        inputs.caches = vec![Ok(Some(cache_entry("yomi-strix", "2026-10-12T11:59:30Z", graph)))];
+        let loaded = build_index(inputs);
+
+        let project = |id: &str| loaded.index.rows.iter().find(|r| r.session_id == id).expect("the row exists").project.clone();
+        assert_eq!(project("short"), Some("aoide".into()), "the project the node published is the bucket");
+        let long = project("long").expect("a long stored project is kept");
+        assert!(long.chars().count() <= LINE_MAX && long.ends_with('…'), "{} characters", long.chars().count());
+    }
+
+    #[test]
+    fn a_far_cwd_of_a_quarter_million_components_costs_the_row_one_clipped_path_and_buckets_nowhere() {
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_root, _env) = isolated("find-clip-walk");
         let graph = json!({ "schemaVersion": "0", "nodes": [
@@ -3506,7 +3569,9 @@ mod tests {
         let loaded = build_index(inputs);
         let took = start.elapsed();
 
-        assert_eq!(loaded.index.rows[0].project, None, "no manifest sits under a clipped path");
+        let row = &loaded.index.rows[0];
+        assert_eq!(row.project, None);
+        assert!(row.cwd.chars().count() <= LINE_MAX, "the cwd is {} characters", row.cwd.chars().count());
         assert!(took < std::time::Duration::from_secs(5), "one row with a 500,000-byte cwd took {took:?}");
     }
 

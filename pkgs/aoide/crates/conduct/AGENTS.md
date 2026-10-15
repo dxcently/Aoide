@@ -1787,7 +1787,8 @@ in the message.
   process's cwd instead (that's `grant.rs`'s "current project" concept, a
   different thing) — `project_bucket` must attribute EVERY session by its
   OWN cwd, local or node, or a multi-session listing would silently
-  misattribute every session but the first.
+  misattribute every session but the first. `graph::find` is the one reader
+  that does not: a cached row keeps only the project its node published.
 - **A project is a set of anchor roots — `anchor_for` is longest-root-wins
   across EVERY root of EVERY project, not just each project's first.**
   `cwd_under` itself stays single-root (unchanged) and is simply called
@@ -1958,9 +1959,8 @@ in the message.
   times mailboxes, and no allocation may grow with a field's length times the
   query's word count. `remote_row` clips every text field the node wrote to one
   clean line (`clip`: `LINE_MAX` characters, reading only the field's head)
-  before anything reads it, `project_of` included, whose walk up a cwd is
-  quadratic in the path's length; a task stays whole because `remote_task`
-  already bounds it. A `matched` value is clipped the same way, whichever row
+  before anything reads it; a task stays whole because `remote_task` already
+  bounds it. A `matched` value is clipped the same way, whichever row
   or letter it came from. A query takes at most `WORDS_MAX` (64) words and
   `ALTERNATIVES_MAX` (256) alternatives. The resolver's candidates are
   gathered once per answer (`Refs`), and each distinct `parent:` value is
@@ -1980,6 +1980,14 @@ in the message.
   or per-component regression; their bounds are many times the idle run so a
   loaded builder passes them, and a quadratic mutant still fails them. Keep
   both properties when touching these paths.
+- **A cached row's project is the one its node published.** `remote_row`
+  keeps the stored `project`, clipped, and calls neither `project_of` nor
+  `project_bucket`. A far cwd is a path the node chose: bucketing it would stat
+  this box's disk up the whole path and match this box's `projects.json`
+  roots, so a node could steer reads here and put itself under a local
+  project. A local row still buckets through `project_of`. A node that
+  published no project has none in find, where bare `session` may file it by
+  its cwd (the entry above on `project_bucket`).
 - **Row JSON is for a machine reader only.** `sessions` and `related`, with
   each row's `matched`, are built when `--json` is passed or the door is not
   the CLI (`teach::quiet`'s rule in aoide-client), so an MCP caller gets them

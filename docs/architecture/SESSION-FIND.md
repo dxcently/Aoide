@@ -66,7 +66,7 @@ Cost: **free** — already loaded by the roster (`collect_roster`'s inputs);
 | state | `state` merged with the `hooks.json` phase (`merged_sessions`) | `state`, presence `last-seen`/`unknown` (`cached_presence`) | free | a cached row reads "was \<state\>" |
 | node | which file the row came from — the stage (`display::local_host_name`) or `node-cache/<name>.json` | — | free | not a record field, and needs none |
 | cwd | `cwd` | `cwd` | free | |
-| project | the bucket bare `aoide session` files the row under: effective project (`effective_project_for`), else stored `project`, else a `.aoide/project.json` basename (`project_bucket`) | stored `project` (the roster's remote rule; cross-host inheritance is S-D's) | free | a box with no registered projects (osaka in the review's captures) buckets by manifest only |
+| project | the bucket bare `aoide session` files the row under: effective project (`effective_project_for`), else stored `project`, else a `.aoide/project.json` basename (`project_bucket`) | the `project` its node published, clipped, and none when it published none: a far cwd never names a bucket here (Decision 14); cross-host inheritance is S-D's | free | a box with no registered projects (osaka in the review's captures) buckets a local row by manifest only |
 | title, petname | `title`, `petname` | `title`, `petname` | free | `title` is text another session sent — untrusted |
 
 ### Roles
@@ -129,7 +129,8 @@ Three widenings, no copies: `doorbell::conducted_ancestor` becomes
 `pub(in crate::graph)`; `who.rs` splits `cached_node(node, cache)` out of
 `build_mesh_node`'s failed-probe arm (that arm becomes `cached_node` plus
 `unreachable`); and the bucket rule leaves `group_by_project` for `project_of`,
-so find and bare `session` can never file a row differently.
+so find and bare `session` file a local row the same way. A cached row is the
+one exception: it keeps only the project its node published (Decision 14).
 
 ## Query syntax
 
@@ -585,16 +586,28 @@ alternative would have given, and what the chosen call costs.
     node chooses its rows, ids, cwds and edges, one cache may hold 20 MiB, and a
     paired node can deposit letters into this box's mail. So a far row's text
     fields are clipped to one clean line of 200 characters when the row is
-    built, before the project bucket walks its cwd or a match reads it; a
-    `matched` value is clipped the same way; a query takes at most 64 words and
-    256 alternatives; the base is walked a few times in all and never once per
-    row (unread counts search each mailbox's sorted marks, a letter is decoded
-    once, and threads and reasons dedupe through sets); and a row's lists hold
-    at most 20 beside their counts. The alternative, bound only the output,
-    leaves a 5 MiB title cloned once per word into every machine reader's
-    answer: four rows at 64 words made 1.4 GB of JSON. Cost: a far field is
-    found by its first 200 characters only, and a far session id longer than
-    that names itself clipped, which no honest node produces.
+    built, before a match reads it; a `matched` value is clipped the same way;
+    a query takes at most 64 words and 256 alternatives; the base is walked a
+    few times in all and never once per row (unread counts search each
+    mailbox's sorted marks, a letter is decoded once, and threads and reasons
+    dedupe through sets); and a row's lists hold at most 20 beside their
+    counts. The alternative, bound only the output, leaves a 5 MiB title cloned
+    once per word into every machine reader's answer: four rows at 64 words
+    made 1.4 GB of JSON. Cost: a far field is found by its first 200
+    characters only, and a far session id longer than that names itself
+    clipped, which no honest node produces.
+
+14. **A far row has only the project its node published.** Its cwd is a path
+    the node chose. Deriving a bucket from it would stat this box's disk up
+    the whole path (`project_bucket`'s manifest walk) and match this box's
+    registered project roots, so a far node could steer reads on this box and
+    put itself under one of this box's projects in a `project:` answer. So a
+    cached row's project is the stored `project` its document carries, clipped
+    like the other far text, and none when the document carries none. A local
+    row is unchanged. The alternative, the bucket rule bare `session` applies
+    to every row, files a far session by this box's projects whenever the
+    fleet shares paths. Cost: a far session whose node published no project is
+    under no project here, though bare `session` may file it under one.
 
 ## How it sits with other work
 

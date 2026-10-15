@@ -781,7 +781,9 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
   the daemon pass the query as one string, split like the conductor's line
   (`agent:claude state:working` is two terms; `cc:"pr 41"` keeps its space).
   A far row's text fields, a `matched` value and each `threads` list are
-  clipped to a line or to 20 entries beside their full count.
+  clipped to a line or to 20 entries beside their full count. A cached row's
+  project is the one its node published, and none when it published none: its
+  cwd is never read against this box's disk or projects.
 - **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
   refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
   over 64 words, or one with more than 256 alternatives in all its terms, each
