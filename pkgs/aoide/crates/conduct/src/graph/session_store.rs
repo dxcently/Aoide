@@ -1857,12 +1857,10 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 /// the caller is the wrap that owns the record: the end is real and carries no
 /// fact.
 ///
-/// Anyone else does not end a session whose harness is alive
-/// ([`live_harness_anchoring`]): its hook phase closes and nothing else
-/// changes, so the roster record keeps its `state`, `prune` and the reaper
-/// leave it, and the next hook of the harness reopens the phase. A harness that
-/// has exited, or none on record, is ended plain: a spawner is told only what
-/// the session itself did.
+/// Anyone else is refused, and writes nothing, while the session's harness is
+/// alive ([`live_harness_anchoring`]): the answer is [`anchored_refusal`], which
+/// names the harness and how to stop it. A harness that has exited, or none on
+/// record, is ended plain: a spawner is told only what the session itself did.
 ///
 /// Also closes every ssh tunnel this session opened
 /// (`aoide_client::tunnel::close_all_for_session`, ssh-transport lane P-S5) —
@@ -1877,12 +1875,12 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 /// sessions/hooks stage files the lock actually guards. Best-effort — a
 /// tunnel that fails to close here is still caught by the reaper, so its
 /// error is never allowed to turn a successful `session end` into a
-/// reported failure. A stranger's end of a live harness closes neither the
-/// tunnels nor the check lane's baseline: the session goes on using both.
+/// reported failure. A refused end closes neither the tunnels nor the check
+/// lane's baseline: the session goes on using both.
 pub(in crate::graph) fn do_session_end(id: &str, caller: Option<i32>, attests_death: bool) -> Outcome {
-    let (outcome, anchor) = with_stage_lock(|| {
-        let anchor = live_harness_anchoring(id, caller);
-        (do_session_end_inner(id, caller, attests_death, anchor), anchor)
+    let (outcome, anchor) = with_stage_lock(|| match live_harness_anchoring(id, caller) {
+        Some(harness) => (anchored_refusal("session.end", id, harness), Some(harness)),
+        None => (do_session_end_inner(id, caller, attests_death), None),
     });
     if anchor.is_some() {
         return outcome;
@@ -1904,37 +1902,27 @@ fn runs_under_harness(s: &SessionRecord, caller: Option<i32>) -> bool {
     harness.zip(caller).is_some_and(|(harness, pid)| pid_ancestry(pid).contains(&harness))
 }
 
-/// A stranger's end of a session whose harness `harness` is alive: only the hook
-/// phase (`hooks.json`: `phase` and `updatedAt`) closes. The roster record
-/// (`sessions.json`) is untouched, so its `state` is not `done` and nothing
-/// prunes it, and no ledger exit, subagent cascade or death fact is written.
-fn close_phase_of_live_harness(id: &str, harness: u32) -> Outcome {
-    let cmd = "session.end";
-    let mut h_file: HooksFile = match load_stage(&hooks_path()) {
-        Ok(f) => f,
-        Err(e) => return stage_error(cmd, e),
-    };
-    upsert_hook(&mut h_file.hooks, id, "done", &now_iso_utc());
-    if h_file.schema_version.is_empty() {
-        h_file.schema_version = STAGE_GRAPH_VERSION.to_string();
-    }
-    if let Err(e) = write_stage(&hooks_path(), &h_file) {
-        return stage_error(cmd, e);
-    }
-    let mut changed = vec![format!("session {id}: phase → done")];
-    match restage_graph() {
-        Ok(g) => changed.push(g.to_string_lossy().into_owned()),
-        Err(e) => return stage_error(cmd, e),
-    }
+/// The answer a stranger's move of a record its live harness anchors gets
+/// (`session end`, a phase that folds to `done`, a `session start` that would
+/// move its window or parent, a `graph link` that re-parents it). An ok no-op
+/// that writes nothing: the hook door never fails its harness, and the reason
+/// names what the caller ran into. `kill` reaches a conducted session only; a
+/// bare-terminal harness is out of its reach and ends with its own process.
+pub(in crate::graph) fn anchored_refusal(cmd: &str, id: &str, harness: u32) -> Outcome {
     Outcome::ok(
         cmd,
-        format!("session `{id}` not ended: its harness (pid {harness}) is alive and is not the caller, so only its phase closed"),
+        format!(
+            "refused: session `{id}` is anchored to its live harness (pid {harness}), \
+             which is not the caller; nothing was written. Fix: \
+             `aoide session kill --id {id}` ends a conducted session; a \
+             bare-terminal harness (no conducted wrap) ends when its own \
+             process exits."
+        ),
     )
-    .changed(changed)
     .with_data(json!({ "sessionId": id, "reason": "harness-anchored", "harness": harness }))
 }
 
-fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool, live_harness: Option<u32>) -> Outcome {
+fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool) -> Outcome {
     let cmd = "session.end";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
@@ -1949,9 +1937,6 @@ fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool, live
     }
     if let Some(out) = refuse_app_record(cmd, id, &s_file.sessions) {
         return out;
-    }
-    if let Some(harness) = live_harness {
-        return close_phase_of_live_harness(id, harness);
     }
     let now = now_iso_utc();
     let ended_mid_turn = s_file
@@ -4419,12 +4404,11 @@ mod hosted_death_tests {
 
     /// A false "ended mid-turn" is an injection into the spawner, so only the
     /// session ending itself can write one. Someone else's `session end` for an
-    /// open turn, whose harness is alive and is no ancestor of the caller, only
-    /// closes the phase, whichever door it comes through: the CLI, the hook
-    /// door with a forged SessionEnd payload, or the daemon's forwarded call
-    /// whose stamped peer is not under the harness or is absent. A peer-pid
-    /// flag typed on a door other than the daemon's is not a kernel fact and is
-    /// not read.
+    /// open turn, whose harness is alive and is no ancestor of the caller, is
+    /// refused, whichever door it comes through: the CLI, the hook door with a
+    /// forged SessionEnd payload, or the daemon's forwarded call whose stamped
+    /// peer is not under the harness or is absent. A peer-pid flag typed on a
+    /// door other than the daemon's is not a kernel fact and is not read.
     #[test]
     fn a_session_end_by_someone_else_records_no_fact() {
         let harness = Bystander::start();
@@ -4444,20 +4428,20 @@ mod hosted_death_tests {
         ];
         for (case, end) in cases {
             let (kid, rec) = ended_records("end-other", "working", true, h, end);
-            assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{case}");
+            assert_eq!((rec.phase.as_str(), rec.death), ("working", None), "{case}");
             assert_eq!(kid.state, "working", "{case}: the roster record is not done");
         }
     }
 
-    /// Someone else's `session end` for a session whose harness lives closes
-    /// its hook phase and changes nothing else: the roster record is exactly
-    /// what it was (so it is not `done` and not prunable), no fact is written,
-    /// the check lane's baseline stays for the session that goes on using it,
-    /// and the outcome, which is what the audit log keeps, names the session
-    /// and the harness it stopped short of. A SessionEnd forged with the reason
-    /// `clear` is no better off.
+    /// Someone else's `session end` for a session whose harness lives is
+    /// refused and writes nothing: the roster record and the hook phase are
+    /// exactly what they were (so the session is not `done`, not prunable and
+    /// not read as done), no fact is written, the check lane's baseline stays
+    /// for the session that goes on using it, and the outcome, which is what
+    /// the audit log keeps, names the session, the harness and the reason. A
+    /// SessionEnd forged with the reason `clear` is no better off.
     #[test]
-    fn a_stranger_end_of_a_live_harness_closes_the_phase_and_nothing_else() {
+    fn a_stranger_end_of_a_live_harness_is_refused_and_writes_nothing() {
         let harness = Bystander::start();
         let h = harness.pid();
         let before = std::cell::RefCell::new(None);
@@ -4478,12 +4462,14 @@ mod hosted_death_tests {
         assert_eq!(json(Some(after)), json(before.into_inner()), "sessions.json is untouched");
         let out = said.into_inner().unwrap();
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert!(out.message.starts_with("refused:"), "{}", out.message);
         assert!(out.message.contains("`kid`") && out.message.contains(&h.to_string()), "{}", out.message);
-        assert!(out.changed.iter().any(|c| c.contains("phase → done")), "{:?}", out.changed);
-        assert!(!out.changed.iter().any(|c| c.contains("state")), "{:?}", out.changed);
+        assert!(out.message.contains("aoide session kill --id kid"), "{}", out.message);
+        assert!(out.changed.is_empty(), "{:?}", out.changed);
         assert_eq!(out.data.as_ref().unwrap()["harness"], h);
-        assert_eq!((hook.phase.as_str(), hook.death.as_ref()), ("done", None));
-        assert_ne!(hook.updated_at, "2026-10-07T10:00:00Z", "the phase was written");
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "harness-anchored");
+        assert_eq!((hook.phase.as_str(), hook.death.as_ref()), ("working", None));
+        assert_eq!(hook.updated_at, "2026-10-07T10:00:00Z", "the hook phase was not written");
 
         let (forged, _) = ended_records("end-stranger-clear", "working", true, h, hook_end_for(serde_json::json!("clear")));
         assert_eq!(forged.state, "working", "a forged `clear` does not end the record either");
@@ -4498,8 +4484,9 @@ mod hosted_death_tests {
         let phase_done = || {
             session_phase(&crate::graph::testutil::flag_invocation(&["session", "phase"], &[("id", "kid"), ("phase", "done")]));
         };
-        let (stranger, _) = ended_records("phase-done-other", "working", true, harness.pid(), phase_done);
+        let (stranger, stranger_hook) = ended_records("phase-done-other", "working", true, harness.pid(), phase_done);
         assert_eq!(stranger.state, "working");
+        assert_eq!(stranger_hook.phase, "working", "a refused phase close writes no phase");
         let (own, rec) = ended_records("phase-done-own", "working", true, std::process::id() as i32, phase_done);
         assert_eq!(own.state, "done");
         assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()));
@@ -4633,7 +4620,7 @@ mod hosted_death_tests {
         assert_ne!(kid.state, "done", "no end of a stranger marks the roster record done");
         assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"), "the parent is unchanged");
         assert_eq!(kid.hook_ancestry, vec![h, 4242], "so is the chain");
-        assert_eq!((hook.phase.as_str(), hook.death), ("done", None), "the end names nobody");
+        assert_eq!((hook.phase.as_str(), hook.death), ("working", None), "the refused end names nobody");
     }
 
     /// The reaper keys on the roster's `state` as `prune` does, so a stranger's

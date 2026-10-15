@@ -321,9 +321,8 @@ held against every prune until it is said. A session that ends itself (its
 while its turn is still open records the same fact with no status, and its
 spawner hears `[claude <petname>] ended mid-turn · last: <tool>` once; its wrap
 then finds the phase closed and adds nothing. Anyone else's `aoide session end`
-of a session whose harness lives only closes its hook phase, since a spawner is
-told only what the session itself did: the roster record stays as it was, so
-`prune` and the reaper leave it, and the harness's next hook reopens the phase.
+of a session whose harness lives is refused and writes nothing, since a spawner
+is told only what the session itself did.
 A live harness anchors its session: a hook from outside it re-homes neither its
 chain nor its parent, so a stranger can neither claim a session nor end it
 first. A harness that exited before its `SessionEnd` hook was served leaves the

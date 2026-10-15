@@ -1078,14 +1078,11 @@ in the message.
   and the test does not guard them; they move no chain, and a route needs the
   host wrap's pid in the child's own chain (`host_wrap`), so no line follows.
   `do_session_end` asks the same question of the caller. When it holds, the end
-  is `close_phase_of_live_harness`: `hooks.json` gets `phase: "done"` and a new
-  `updatedAt`, and nothing else is written. `sessions.json` keeps its `state`,
-  which is what `prune_done_scoped` and the reaper's prune of finished records
-  key on, so neither takes the record while the harness lives; no ledger exit,
-  subagent cascade, ssh tunnel close, check-lane baseline forget or fact
-  follows, and the harness's next hook reopens the phase. `session_phase` sends
-  a `done` phase to `do_session_end`, so the phase door is no way round the
-  caller test. The reaper's own staleness bands still apply to the record. A
+  is refused by `anchored_refusal`: nothing is written (no `hooks.json` phase,
+  no `sessions.json` state, no ledger exit, subagent cascade, tunnel close or
+  check-lane baseline forget). The outcome begins `refused:` and carries
+  `reason: harness-anchored`. `session_phase` sends a `done` phase to
+  `do_session_end`, so the phase door is no way round the caller test. The reaper's own staleness bands still apply to the record. A
   session that has ended (`state` `done`: its own `SessionEnd`, `/clear` and
   resume included), a dead harness, or a hook that runs under the harness
   releases the anchor, which is what lets `claude --resume` in another terminal

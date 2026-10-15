@@ -2174,21 +2174,18 @@ caller that does not run under the harness moves nothing of the record:
   a window the record lacks, but it moves neither the chain nor the parent. A
   forged one can bind a window onto a windowless record; that moves no fact;
 - `aoide session end`, a `SessionEnd` hook and `aoide session phase --phase
-  done`, which is the same call, close the hook phase and nothing else:
-  `hooks.json` gets `phase: "done"` and a new `updatedAt`, while
-  `sessions.json`, the exit ledger, the session's subagents, its ssh tunnels and
-  its check-lane baseline are left as they were. The record's `state` is not
-  `done`, so `session prune`, which drops `done` records, and the reaper's prune
-  of them leave it, and the harness's next hook reopens the phase. The outcome
-  names the session and the harness pid.
+  done`, which is the same call, are refused and write nothing: no `hooks.json`
+  phase, no `sessions.json` state, no exit ledger line, no subagent cascade, no
+  ssh tunnel or check-lane baseline change. The outcome is ok, its message
+  begins `refused:` and names the session and the harness pid, and its data
+  carries `reason: "harness-anchored"`. Its fix line is `aoide session kill
+  --id <id>`, which reaches a conducted session only; a bare-terminal harness
+  ends with its own process.
 
 The audit log keeps an outcome's message, so it names the session and the
 harness. So no hook, `session end` or `session phase` from a stranger re-homes
-the record or makes it prunable before the end. `session start --parent` and
-`graph link` can still set the parent of a live record, but a death line needs
-the host wrap's pid in the child's own `hookAncestry`, which neither moves, so
-none follows. The anchor lets go once the harness has exited or the session has
-ended. A `SessionEnd` hook whose `reason` is `clear` or `resume`, the two
+the record, ends it, or changes its phase or presence before the end. The
+anchor lets go once the harness has exited or the session has ended. A `SessionEnd` hook whose `reason` is `clear` or `resume`, the two
 reasons after which the harness process lives on under another session id, ends
 the session with no fact: nothing ended mid-turn, the conversation moved to a
 new id, and the old id is free for a `claude --resume` of it in another terminal
@@ -2200,9 +2197,8 @@ process holds the anchor until that process exits. The reaper's staleness bands,
 72 hours at rest and a week mid-turn counted from the record's last sign of
 life, still judge the record as they judge any other. The caller's ancestry is
 read when the end is served, so a harness that has exited first leaves the hook
-re-parented and outside it: that end closes the phase plain, and the line is
-missing rather than false. The wrap, finding that phase closed when its harness
-then exits, writes nothing more. `lastTool` is the tool in flight, when there
+re-parented and outside it: that end is plain, and the line is missing rather
+than false. `lastTool` is the tool in flight, when there
 was one. `spawner` is the session the death is said to, resolved while the wrap
 still runs by the same climb a route takes (§ `pingback.json`) over the roster
 as it stands, with no seal check: the recorder holds no daemon key, so the

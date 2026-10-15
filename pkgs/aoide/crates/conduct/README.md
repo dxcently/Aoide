@@ -302,9 +302,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   tick infers carries none. A session that ends itself with its turn open
   (`session end` run by its own harness or under it, or its `SessionEnd` hook)
   records the fact `end`, said once as `ended mid-turn`. Anyone else's `session
-  end` of a session whose harness lives only closes the hook phase: the roster
-  record stays as it was, so `prune` and the reaper leave it, and nothing is
-  said. A `SessionEnd` whose `reason` is `clear` or `resume`, after which the
+  end` of a session whose harness lives is refused and writes nothing, so
+  nothing is said. A `SessionEnd` whose `reason` is `clear` or `resume`, after which the
   harness process lives on under another session id, ends the session and says
   nothing either. A live harness anchors its record, so no hook from outside it
   re-homes its chain or parent, and no end from outside makes it prunable,

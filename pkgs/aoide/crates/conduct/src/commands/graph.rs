@@ -144,7 +144,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "end"],
-            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown. From outside a live harness it closes the hook phase only and leaves sessions.json as it was.",
+            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown. From outside a live harness it is refused and writes nothing (reason `harness-anchored`).",
             args: [],
             flags: [flag!("id", "string", "Session id to end (required).")],
             gated: false,
