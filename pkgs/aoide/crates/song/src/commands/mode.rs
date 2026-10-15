@@ -1079,7 +1079,7 @@ mod tests {
         let (root, stage) = pick_tmp("mode-reseed-pick", &["cadenza", "sonata"]);
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"))
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"), None)
             .unwrap();
         let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
 
@@ -1120,7 +1120,7 @@ mod tests {
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
         assert_eq!(current_staged_song().as_deref(), Some("cadenza"));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"), None).unwrap();
         let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
         assert!(crate::cover::staged_is_pick());
 
@@ -1164,7 +1164,7 @@ mod tests {
         let (root, stage) = pick_tmp("mode-declarative-pick", &["cadenza", "sonata"]);
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"))
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"), None)
             .unwrap();
         let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
 
@@ -1206,7 +1206,7 @@ mod tests {
         let (root, stage) = pick_tmp("mode-draft-pick-declarative", &["cadenza"]);
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"), None).unwrap();
         let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
 
         let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
@@ -1236,7 +1236,7 @@ mod tests {
         let (root, stage) = pick_tmp("mode-draft-pick-switch", &["cadenza", "etude"]);
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"), None).unwrap();
         let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(drafted.status, Status::Ok, "{:?}", drafted.data);
 

@@ -1,8 +1,8 @@
 # modules/dendrites/devtools.nix — the CLI dev-tool toolbox.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.devtools.enable (default false — shipped but off;
-#   - ON fleet-wide in modules/aggregations/base/default.nix.
+#   - Selection is the switch: no enable flag; nucleus selects it fleet-wide
+#     (modules/aggregations/nucleus/default.nix).
 #   - Carries its own dependencies; reads no other module.
 #
 # Scope: genuinely DEV-specific tools only. General command-line utilities
@@ -22,36 +22,31 @@
 #   - dxflake's openldap overlay is NOT ported (a dxflake-local build fix).
 
 {
-  config,
   lib,
   pkgs,
   ...
 }:
 {
-  options.aoide.devtools.enable = lib.mkEnableOption "the CLI dev-tool toolbox (lazygit, neovide, nix tooling, …)";
 
-  config = lib.mkMerge [
-    { aoide.devtools.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.devtools.enable {
-      # ngrok is unfree. Scoped here: the dendrite that needs unfree carries the
-      # switch (narrowest scope wins).
-      nixpkgs.config.allowUnfree = true;
+  config = {
+    # ngrok is unfree. Scoped here: the dendrite that needs unfree carries the
+    # switch (narrowest scope wins).
+    nixpkgs.config.allowUnfree = true;
 
-      environment.systemPackages = with pkgs; [
-        # ── Editors & Git ──
-        neovide # GPU-accelerated Neovim GUI
-        lazygit # terminal UI for git
+    environment.systemPackages = with pkgs; [
+      # ── Editors & Git ──
+      neovide # GPU-accelerated Neovim GUI
+      lazygit # terminal UI for git
 
-        # ── Runtimes ──
-        nodejs # cross-platform JavaScript runtime
+      # ── Runtimes ──
+      nodejs # cross-platform JavaScript runtime
 
-        # ── Nix tooling ──
-        nixfmt # formatter for Nix source code
-        nix-tree # browse Nix derivation closures
+      # ── Nix tooling ──
+      nixfmt # formatter for Nix source code
+      nix-tree # browse Nix derivation closures
 
-        # ── Networking (dev) ──
-        ngrok # expose local servers via secure tunnels
-      ];
-    })
-  ];
+      # ── Networking (dev) ──
+      ngrok # expose local servers via secure tunnels
+    ];
+  };
 }

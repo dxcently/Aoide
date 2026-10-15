@@ -2412,6 +2412,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_on_pty_drops_the_parent_harnesss_session_markers_and_keeps_the_rest() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let id = "scrub-target";
         let mut cmd = std::process::Command::new("/bin/true");
         cmd.args(["--flag"])

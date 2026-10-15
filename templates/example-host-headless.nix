@@ -10,7 +10,7 @@
 # account with no Home Manager module behind it. Two machines, one vocabulary,
 # no `if hostname ==` anywhere.
 {
-  habit.aggregation.base.enable = true;
+  habit.aggregation.nucleus.enable = true;
 
   habit.dendrites = {
     exampletool.enable = true;

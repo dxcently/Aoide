@@ -5,9 +5,9 @@
 let
   owner = "solo";
 
-  slotFiles = lib.filterAttrs (
-    n: t: t == "regular" && lib.hasSuffix ".nix" n && n != "default.nix"
-  ) (builtins.readDir ./.);
+  slotFiles = lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nix" n && n != "default.nix") (
+    builtins.readDir ./.
+  );
 
   slotOf = n: lib.removeSuffix ".nix" n;
 in

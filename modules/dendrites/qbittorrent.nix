@@ -1,7 +1,7 @@
 # modules/dendrites/qbittorrent.nix — qBittorrent desktop client.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.qbittorrent.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
 #
 # What this dendrite does:
@@ -10,23 +10,18 @@
 #   - Registers it as the handler for magnet: links and .torrent files.
 
 {
-  config,
   lib,
   pkgs,
   ...
 }:
 {
-  options.aoide.qbittorrent.enable = lib.mkEnableOption "the qBittorrent desktop client";
 
-  config = lib.mkMerge [
-    { aoide.qbittorrent.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.qbittorrent.enable {
-      environment.systemPackages = [ pkgs.qbittorrent ];
+  config = {
+    environment.systemPackages = [ pkgs.qbittorrent ];
 
-      xdg.mime.defaultApplications = {
-        "x-scheme-handler/magnet" = "org.qbittorrent.qBittorrent.desktop";
-        "application/x-bittorrent" = "org.qbittorrent.qBittorrent.desktop";
-      };
-    })
-  ];
+    xdg.mime.defaultApplications = {
+      "x-scheme-handler/magnet" = "org.qbittorrent.qBittorrent.desktop";
+      "application/x-bittorrent" = "org.qbittorrent.qBittorrent.desktop";
+    };
+  };
 }

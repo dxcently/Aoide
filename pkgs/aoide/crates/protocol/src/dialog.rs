@@ -501,6 +501,7 @@ mod tests {
 
     #[test]
     fn zenity_available_is_false_for_a_binary_name_that_does_not_exist() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         assert!(!zenity_available("aoide-protocol-dialog-test-definitely-not-a-real-binary"));
     }
 

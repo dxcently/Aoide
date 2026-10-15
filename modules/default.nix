@@ -17,6 +17,13 @@
 # targets, and what an unmatched one never costs is its work.
 {
   catalogue = {
+    # The nucleus aggregation's six services; the contract they stand on is
+    # `./nucleus`, imported by every host as an extra module.
+    aoide-config = ./dendrites/aoide-config.nix;
+    aoide-nix = ./dendrites/aoide-nix.nix;
+    aoide-packages = ./dendrites/aoide-packages.nix;
+    aoide-secrets = ./dendrites/aoide-secrets.nix;
+    aoided = ./dendrites/aoided.nix;
     audio = ./dendrites/audio.nix;
     bash = ./dendrites/bash.nix;
     btop = ./dendrites/btop.nix;
@@ -43,6 +50,7 @@
     lyra = ./dendrites/lyra;
     mcfly = ./dendrites/mcfly.nix;
     melete = ./dendrites/melete.nix;
+    melete-adapter = ./dendrites/melete-adapter.nix;
     mneme = ./dendrites/mneme.nix;
     neovim = ./dendrites/neovim.nix;
     networkmanager = ./dendrites/networkmanager.nix;

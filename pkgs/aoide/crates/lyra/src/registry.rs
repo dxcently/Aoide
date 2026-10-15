@@ -20,8 +20,8 @@
 //! canvas (a screenshot, the live/static-joined item tree, and a
 //! scaffolding notes store). I1 added `icon.collections`, `icon.list`,
 //! `icon.resolve` (the pinned icon collections, resolved into the lane's own
-//! SVG tree). See `commands/mod.rs::all()` for the assembly
-//! order.
+//! SVG tree). `clipboard.delete`, `clipboard.clear` remove cliphist
+//! history. See `commands/mod.rs::all()` for the assembly order.
 
 pub use aoide_protocol::registry::*;
 
@@ -139,6 +139,8 @@ mod tests {
             "apps.list",
             "apps.publish",
             "apps.show",
+            "clipboard.clear",
+            "clipboard.delete",
             "cover.set",
             "cover.sync",
             "element.seed",

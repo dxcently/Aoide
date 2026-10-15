@@ -496,6 +496,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn an_exited_but_unreaped_wrap_is_not_protected() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let kp = identity::mint_ephemeral().unwrap();
         let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let pid = child.id() as i32;
@@ -693,6 +694,7 @@ mod tests {
 
     #[test]
     fn attested_wrap_finds_the_conducted_ancestor_of_a_real_child_process() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // A REAL, long-lived child of THIS process: the walk starts at the
         // child's pid and must reach the test process's own wrap, so the child
         // itself is the fixture. `sleep` is a POSIX program, so native Windows

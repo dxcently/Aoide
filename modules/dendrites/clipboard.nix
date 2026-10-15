@@ -1,6 +1,6 @@
 # modules/dendrites/clipboard.nix — clipboard history provider.
 #
-# Dendrite shape: guarded on aoide.clipboard.enable, carries its own
+# Dendrite shape: selection is the switch, carries its own
 # dependencies, and keeps clipboard data in the user's XDG cache rather than
 # in the repository — cliphist's DEFAULT db path (~/.cache/cliphist/db),
 # persistent across reboots. The lane is the watcher: it records text and
@@ -9,11 +9,11 @@
 # the clipboard backend (pkgs/lyra-shell/qml/AoideClipboard.qml) and renders
 # entries as a dedicated chapter — no separate picker surface. That backend
 # copies and previews by calling the system's `cliphist` and `wl-copy` from
-# PATH itself, so it works the same on a host that runs its own watcher and
-# never selects this lane.
+# PATH itself, and deletes or clears history through `lyra clipboard`, which
+# runs the same `cliphist` — so it works the same on a host that runs its own
+# watcher and never selects this lane.
 
 {
-  config,
   lib,
   pkgs,
   ...
@@ -44,55 +44,51 @@ let
   '';
 in
 {
-  options.aoide.clipboard.enable = lib.mkEnableOption "clipboard history (cliphist + wl-clipboard, text and images)";
 
-  config = lib.mkMerge [
-    { aoide.clipboard.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.clipboard.enable {
-      # cliphist's database lives at its default XDG cache path (~/.cache/
-      # cliphist/db) — persistent across reboots. Nothing here writes clipboard
-      # data into the flake or a Nix store path.
-      environment.systemPackages = [
-        pkgs.cliphist
-        pkgs.wl-clipboard
-        clipboardWatch
-      ];
+  config = {
+    # cliphist's database lives at its default XDG cache path (~/.cache/
+    # cliphist/db) — persistent across reboots. Nothing here writes clipboard
+    # data into the flake or a Nix store path.
+    environment.systemPackages = [
+      pkgs.cliphist
+      pkgs.wl-clipboard
+      clipboardWatch
+    ];
 
-      systemd.user.services.aoide-clipboard = {
-        description = "Aoide clipboard history provider";
-        wantedBy = [ "graphical-session.target" ];
-        after = [ "graphical-session.target" ];
-        partOf = [ "graphical-session.target" ];
-        unitConfig.ConditionEnvironment = "WAYLAND_DISPLAY";
+    systemd.user.services.aoide-clipboard = {
+      description = "Aoide clipboard history provider";
+      wantedBy = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+      unitConfig.ConditionEnvironment = "WAYLAND_DISPLAY";
 
-        serviceConfig = {
-          # Dual type-specific watchers (text + image) wrapped in one process.
-          # A typeless `wl-paste --watch` misses image offers when the source
-          # also advertises text.  Text+image copies may create two cliphist
-          # entries; this is expected cliphist behaviour.
-          ExecStart = "${clipboardWatch}/bin/lyra-clipboard-watch";
-          Restart = "on-failure";
-          RestartSec = "3s";
-          # The DB and previews live under ~/.cache — the watcher sandbox
-          # allows writes only to those two trees. Keep it constrained to the
-          # Wayland/Unix resources it actually needs.
-          UMask = "0077";
-          ProtectSystem = "strict";
-          ReadWritePaths = [
-            "%h/.cache/cliphist"
-            "%h/.cache/aoide-clipboard"
-          ];
-          PrivateTmp = true;
-          NoNewPrivileges = true;
-          ProtectKernelTunables = true;
-          ProtectKernelModules = true;
-          ProtectControlGroups = true;
-          RestrictSUIDSGID = true;
-          RestrictAddressFamilies = [ "AF_UNIX" ];
-          StandardOutput = "journal";
-          StandardError = "journal";
-        };
+      serviceConfig = {
+        # Dual type-specific watchers (text + image) wrapped in one process.
+        # A typeless `wl-paste --watch` misses image offers when the source
+        # also advertises text.  Text+image copies may create two cliphist
+        # entries; this is expected cliphist behaviour.
+        ExecStart = "${clipboardWatch}/bin/lyra-clipboard-watch";
+        Restart = "on-failure";
+        RestartSec = "3s";
+        # The DB and previews live under ~/.cache — the watcher sandbox
+        # allows writes only to those two trees. Keep it constrained to the
+        # Wayland/Unix resources it actually needs.
+        UMask = "0077";
+        ProtectSystem = "strict";
+        ReadWritePaths = [
+          "%h/.cache/cliphist"
+          "%h/.cache/aoide-clipboard"
+        ];
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+        RestrictSUIDSGID = true;
+        RestrictAddressFamilies = [ "AF_UNIX" ];
+        StandardOutput = "journal";
+        StandardError = "journal";
       };
-    })
-  ];
+    };
+  };
 }

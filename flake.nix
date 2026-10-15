@@ -111,7 +111,7 @@
         inherit lib;
         extra = {
           lyra-songbook = {
-            aoideOptions = self.aoideOptions;
+            inherit (self) aoideOptions;
           };
         };
       };
@@ -226,7 +226,7 @@
         composition = inputs.habit.lib.composition;
         livery = import ./lib/livery.nix;
         songbook = import ./lib/songbook.nix;
-        catalogue = registry.catalogue;
+        inherit (registry) catalogue;
       };
 
       # ── The export surface a consumer builds against ───────────────────────
@@ -236,7 +236,11 @@
       # by `nixosModules.nucleus` instead of being threaded through the
       # consumer's `specialArgs`.
       #
-      # `nixosModules` is the catalogue plus `nucleus`: one entry per catalogue
+      # `nixosModules` is the catalogue plus `nucleus` (the option contract; the
+      # services every host carries are catalogue entries — `aoided`,
+      # `melete-adapter`, `aoide-nix`, `aoide-packages` — and `aoide-secrets` and
+      # `aoide-config` are catalogue entries a host selects by name; a consumer
+      # selects from its own aggregation): one entry per catalogue
       # name, each the PATH this flake's own registry holds for that capability
       # (a plain module, or a provider set `{ providers.<p> = <path>; }`: what
       # the constructor's `registry.catalogue` takes — the same value, spelled
@@ -262,7 +266,7 @@
       # Aoide's songbook directory, for a consumer whose hosts perform Aoide's
       # songs: what it hands `lib.songbook` and its songs hook's
       # `_module.args.songbook`.
-      songbookRoot = aoideos.songbookRoot;
+      inherit (aoideos) songbookRoot;
 
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass

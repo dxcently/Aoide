@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-28
-updated: 2026-08-31
+updated: 2026-10-12
 tags: [aoide, song, rice, architecture]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -127,7 +127,7 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 | File | Holds | Written by | Tree |
 |---|---|---|---|
 | `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage`, the lyra lane's activation seed (`home.activation.aoideSeedStage`), `lyra reload` | `song/stage/` |
-| `cover.json` | the live wallpaper: `{"path": …}` (the song's own DEFAULT) plus `"pick": true` when it is the user's own choice, `"kind": "static"/"video"/"we"` naming what the pick is (a scene carries `"weId"` instead of a path) | `lyra rice stage` (the song's derivable cover), `lyra cover set`/`cover set --clear`/`cover set --from-skwd`, `lyra rice back` | `song/stage/` |
+| `cover.json` | the live wallpaper: `{"path": …}` (the song's own DEFAULT) plus `"pick": true` when it is the user's own choice, `"kind": "static"/"video"/"we"` naming what the pick is (a scene carries `"weId"` instead of a path), and, for a picked still, `"tile": true` when it repeats at 1:1 and `"position": "tile"/"fill"` when `cover set --position` forced one | `lyra rice stage` (the song's derivable cover), `lyra cover set`/`cover set --clear`/`cover set --from-skwd`, `lyra rice back` | `song/stage/` |
 | `wallpaper-provider` | one word: the name of the SETTER that paints a song's wallpaper here — `quickshell` (the shell's own layer) or a provider of the `wallpaper` capability; absent means `quickshell` | the lyra lane's `home.activation.aoideSeedStage` (it publishes the fact `aoide.wallpaper.provider`) | `song/stage/` |
 | `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` and the host's geometry applied, `"song"` naming it — the read-only twin `rice mode declarative` re-pins that song from ([[livery]]) | the lyra lane's `home.activation.aoideSeedStage` | `song/declared/` |
 | `venue.json` | the slots the venue's `aoide.livery.override` recolours and the geometry the host sets in the declared song, per tier (`{}` with neither) — what staging lays over the runtime copy of that song ([[livery]]) | the lyra lane's `home.activation.aoideSeedStage` | `song/declared/` |

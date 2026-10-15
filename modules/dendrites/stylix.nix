@@ -21,8 +21,8 @@
 #   * It carries its OWN dependency: the Stylix NixOS module, imported by the
 #     nucleus module when the `stylix` input is present (below).
 #
-# Guarded on the FACT `aoide.stylix.enable` (declared once in
-# modules/nucleus/options.nix); the module sets it `mkDefault true`.
+# Selecting the dendrite is the switch; it sets the read-only fact
+# `aoide.stylix.enable` (declared in modules/nucleus/options.nix) to true.
 #
 # The Stylix NixOS module is this dendrite's own dependency, and it is imported
 # by the nucleus module (`lib/aoideos.nix`'s `nucleusModule`), not here — the one
@@ -240,82 +240,80 @@ in
   # evals clean whether stylix rides or not (mkIf alone still leaves a
   # definition on the undeclared path).
   config = lib.mkMerge [
-    { aoide.stylix.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.stylix.enable (
-      lib.optionalAttrs stylixPresent {
-        stylix = {
-          enable = true;
-          # The song's ground (CONTRACTS.md §1, polarity): the register the
-          # base16 ramp reads as, read straight off the option — the venue
-          # recolour `resolve` applies is a colour pass, and a register is not
-          # a colour. mkDefault, unchanged from before the field existed, so
-          # a venue or host can still name its own polarity and win.
-          polarity = lib.mkDefault config.aoide.livery.polarity;
+    { aoide.stylix.enable = true; }
+    (lib.optionalAttrs stylixPresent {
+      stylix = {
+        enable = true;
+        # The song's ground (CONTRACTS.md §1, polarity): the register the
+        # base16 ramp reads as, read straight off the option — the venue
+        # recolour `resolve` applies is a colour pass, and a register is not
+        # a colour. mkDefault, unchanged from before the field existed, so
+        # a venue or host can still name its own polarity and win.
+        polarity = lib.mkDefault config.aoide.livery.polarity;
 
-          # The ONE base16 scheme — the baked fan-out's single source.
-          base16Scheme = scheme;
+        # The ONE base16 scheme — the baked fan-out's single source.
+        base16Scheme = scheme;
 
-          # Wallpaper: the song's cover-art note (`aoide.livery.wallpaper`) when it
-          # carries one, else a deterministic solid-colour fallback (from
-          # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
-          # WHEN quickshell owns the `wallpaper` surface
-          # (`wallpaperOwnedElsewhere` = ${lib.boolToString wallpaperOwnedElsewhere}):
-          # Stylix's image stays the base-context source and the fallback; the
-          # quickshell wallpaper layer supersedes it live at render time.
-          image = lib.mkDefault wallpaper;
+        # Wallpaper: the song's cover-art note (`aoide.livery.wallpaper`) when it
+        # carries one, else a deterministic solid-colour fallback (from
+        # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
+        # WHEN quickshell owns the `wallpaper` surface
+        # (`wallpaperOwnedElsewhere` = ${lib.boolToString wallpaperOwnedElsewhere}):
+        # Stylix's image stays the base-context source and the fallback; the
+        # quickshell wallpaper layer supersedes it live at render time.
+        image = lib.mkDefault wallpaper;
 
-          # Maple is the shared cursor default; hosts can override it.
-          cursor = lib.mkDefault {
-            package = pkgs.maplestory-cursor;
-            name = "Maple";
-            size = 40;
-          };
-
-          # Fonts: the song's face tier (`aoide.livery.fonts`) when it carries
-          # one, else this lane's default. `monospace` is the tier's only
-          # role today — the terminal, where agents live. The remaining roles
-          # stay Linux Libertine: Aoide's primary face is a humanist serif,
-          # with sansSerif its companion "Linux Biolinum O" and serif the base
-          # "Linux Libertine O". NOT a nerd font — icon glyphs and musical
-          # notation fall back to the glyph-coverage set (symbola/noto) the
-          # fonts dendrite installs. `emoji` is left at its own default
-          # (noto-fonts-color-emoji).
-          fonts = lib.mkDefault {
-            inherit monospace;
-            sansSerif = {
-              package = pkgs.libertine;
-              name = "Linux Biolinum O";
-            };
-            serif = {
-              package = pkgs.libertine;
-              name = "Linux Libertine O";
-            };
-            sizes = {
-              applications = 14;
-              terminal = 14;
-              desktop = 14;
-              popups = 12;
-            };
-          };
-        }
-        # Stand down for surfaces another paint lane owns — NixOS side.
-        // lib.optionalAttrs (disabledTargets != [ ]) {
-          targets = targetDisableAttrs;
+        # Maple is the shared cursor default; hosts can override it.
+        cursor = lib.mkDefault {
+          package = pkgs.maplestory-cursor;
+          name = "Maple";
+          size = 40;
         };
 
-        # Stand down on the home-manager side too: Stylix's HM module carries the
-        # targets that collide with shell-owned surfaces (mako, dunst,
-        # gtklock, hyprlock, …). The submodule probes ITS OWN option tree, so this
-        # stays eval-safe whether or not the HM stylix module is imported for the
-        # user (stylix homeManagerIntegration autoImport).
-        habit.home =
-          { options, ... }:
-          {
-            config = lib.optionalAttrs (options ? stylix) {
-              stylix.targets = presentDisables options // hyprpaperDaemonDisable options;
-            };
+        # Fonts: the song's face tier (`aoide.livery.fonts`) when it carries
+        # one, else this lane's default. `monospace` is the tier's only
+        # role today — the terminal, where agents live. The remaining roles
+        # stay Linux Libertine: Aoide's primary face is a humanist serif,
+        # with sansSerif its companion "Linux Biolinum O" and serif the base
+        # "Linux Libertine O". NOT a nerd font — icon glyphs and musical
+        # notation fall back to the glyph-coverage set (symbola/noto) the
+        # fonts dendrite installs. `emoji` is left at its own default
+        # (noto-fonts-color-emoji).
+        fonts = lib.mkDefault {
+          inherit monospace;
+          sansSerif = {
+            package = pkgs.libertine;
+            name = "Linux Biolinum O";
           };
+          serif = {
+            package = pkgs.libertine;
+            name = "Linux Libertine O";
+          };
+          sizes = {
+            applications = 14;
+            terminal = 14;
+            desktop = 14;
+            popups = 12;
+          };
+        };
       }
-    ))
+      # Stand down for surfaces another paint lane owns — NixOS side.
+      // lib.optionalAttrs (disabledTargets != [ ]) {
+        targets = targetDisableAttrs;
+      };
+
+      # Stand down on the home-manager side too: Stylix's HM module carries the
+      # targets that collide with shell-owned surfaces (mako, dunst,
+      # gtklock, hyprlock, …). The submodule probes ITS OWN option tree, so this
+      # stays eval-safe whether or not the HM stylix module is imported for the
+      # user (stylix homeManagerIntegration autoImport).
+      habit.home =
+        { options, ... }:
+        {
+          config = lib.optionalAttrs (options ? stylix) {
+            stylix.targets = presentDisables options // hyprpaperDaemonDisable options;
+          };
+        };
+    })
   ];
 }

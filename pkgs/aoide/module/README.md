@@ -27,7 +27,7 @@ package build from the same one-line input.
   and that anchor decides only when the unit STARTS: there is no `partOf`, so
   a desktop that dies takes the paint down and leaves the daemon, its audit
   log, its gate and its doors running.
-  `modules/nucleus/aoided.nix` carries the
+  `modules/dendrites/aoided.nix` carries the
   lyra-gated `AOIDE_SONG_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
   poller — all still AoideOS-side deployment.

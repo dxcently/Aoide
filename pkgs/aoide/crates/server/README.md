@@ -23,7 +23,7 @@ The MCP door (`mcp.rs`) never approves either, but it is attested like the CLI.
 walking that process's ancestry is the caller's identity: a send from a server
 launched under a sealed session earns that session's parent and sibling rules
 and delivers, and every other MCP send parks. A server with no sealed ancestor
-(the tier-3 network façade in `modules/nucleus/aoided.nix`, a bare terminal)
+(the tier-3 network façade in `modules/dendrites/aoided.nix`, a bare terminal)
 parks them all. Attestation sees who launched the server, not who writes to its
 stdin, so a network bridge someone runs inside a conducted terminal lends that
 terminal's rights to its remote callers.

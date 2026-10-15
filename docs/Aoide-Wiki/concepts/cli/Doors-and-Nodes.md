@@ -315,7 +315,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
   address matched against a node's `url`, which resolves the record and proves
   nothing; read fresh off disk per request).
   The `aoide-a2a` systemd unit
-  (`modules/nucleus/aoided.nix`) sets
+  (`modules/dendrites/aoided.nix`) sets
   `AOIDE_A2A_BIND`/`PORT`/`SPAWN_AGENT`/`TOKEN_FILE` from the nix options;
   `AOIDE_A2A_NODE_NAME`/`AOIDE_A2A_BEARER_SECRET` are flag/env-only.
 - **Writes:** an audit record (door `a2a`) for every handled request, spawn,

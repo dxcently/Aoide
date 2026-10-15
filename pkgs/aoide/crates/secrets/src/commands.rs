@@ -1233,6 +1233,7 @@ mod tests {
     /// `approve`/`dismiss` already draw).
     #[test]
     fn watch_is_cli_only_elsewhere_a_door_hint() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let watch = inv(Door::Mcp, &["secrets", "watch"], &[], &[]);
         assert_eq!(run(&watch).status, Status::Usage);
         let watch_cli = inv(Door::Cli, &["secrets", "watch"], &[], &[]);
@@ -1245,6 +1246,7 @@ mod tests {
     /// `--popup` alone, or `--json` alone, are both still fine.
     #[test]
     fn watch_refuses_popup_and_json_together_as_a_usage_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let both = inv(Door::Cli, &["secrets", "watch"], &[], &[("popup", "true"), ("json", "true")]);
         let out = run(&both);
         assert_eq!(out.status, Status::Usage);

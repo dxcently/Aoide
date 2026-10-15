@@ -54,6 +54,13 @@ deadlocks locally. Each domain crate that touches process-global env
 so its tests serialize against each other without needing to coordinate
 across crates in the same process.
 
+A test that runs a PATH-resolved program (`curl`, `sh`, `age`, a `Command::new`
+with a bare name) holds `env_lock()` for its whole body, and so does any test
+that reads `PATH` through production code. `PATH` is process-wide: a sibling
+test that installs a shim, or blanks `PATH` to prove a tool is absent, would
+otherwise make this one run the wrong program. A new `PATH` shim restores
+`PATH` from a drop guard, so a panic cannot leave the shim for the next test.
+
 A test that replaces a real binary with a shell shim on `PATH` gives that
 shim the real one's stdin manners. `post_json` writes the request body
 (`--data-binary @-`) or the bearer header (`-H @-`) into curl's stdin and

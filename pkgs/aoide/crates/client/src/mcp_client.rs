@@ -622,16 +622,26 @@ mod tests {
         clear_melete_env();
     }
 
+    /// Restores `PATH` when dropped, so a panicking test cannot leave the shim
+    /// on the process-wide `PATH` for the tests queued behind `env_lock`.
+    #[cfg(unix)]
+    struct PathRestore(Option<String>);
+
+    #[cfg(unix)]
+    impl Drop for PathRestore {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
     #[cfg(unix)]
     fn with_curl_shim<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
-        let saved = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{}:{}", dir.display(), saved.clone().unwrap_or_default()));
-        let out = f();
-        match saved {
-            Some(p) => std::env::set_var("PATH", p),
-            None => std::env::remove_var("PATH"),
-        }
-        out
+        let _restore = PathRestore(std::env::var("PATH").ok());
+        std::env::set_var("PATH", format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default()));
+        f()
     }
 
     // cfg(unix): `#!/bin/sh` fake `curl` (see `write_curl_shim`'s note).

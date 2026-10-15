@@ -961,6 +961,7 @@ mod tests {
 
     #[test]
     fn run_code_entry_dialog_reports_a_spawn_error_for_a_nonexistent_binary() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let err = run_code_entry_dialog("/no/such/aoide-lyra-quickshell-shim", "aoide-dialog-qml-test", "t", &[], "Dismiss ask", "MARK:").unwrap_err();
         assert!(err.contains("spawning quickshell"), "{err}");
     }
@@ -992,6 +993,7 @@ mod tests {
 
     #[test]
     fn run_code_show_dialog_reports_a_spawn_error_for_a_nonexistent_binary() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let err = run_code_show_dialog("/no/such/aoide-lyra-quickshell-show-shim", "aoide-dialog-qml-show-test", "t", &[], "111-222", "MARK:").unwrap_err();
         assert!(err.contains("spawning quickshell"), "{err}");
     }

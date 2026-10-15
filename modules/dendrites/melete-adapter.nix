@@ -1,4 +1,4 @@
-# modules/nucleus/melete-adapter.nix — thin per-agent adapter on the aoided event stream.
+# modules/dendrites/melete-adapter.nix — thin per-agent adapter on the aoided event stream.
 #
 # This is the concrete exemplar of the adapter pattern described in
 # entities/aoided.md and concepts/Desktop-Architecture.md.
@@ -25,20 +25,19 @@
 #   references `aoide` for its event-stream client; Melete's own transport
 #   wiring is out of scope here.
 #
-# This module is in nucleus/ (not dendrites/) because per-agent adapters are
-# core plumbing — they are the translation layer between the neutral bus and
-# agent-specific protocols. A host disables a specific adapter by setting the
-# environment variable AOIDE_ADAPTER_MELETE_ENABLE=0 or by masking the service;
-# it does not need a separate dendrite flag for what is essentially a bus
-# participant.
+# Per-agent adapters are core plumbing — they are the translation layer between
+# the neutral bus and agent-specific protocols — so this dendrite is a member of
+# the `nucleus` aggregation. A host that does not want it drops the member
+# (`habit.dendrites.melete-adapter.enable = false`); it needs no flag of its own
+# for what is essentially a bus participant.
 {
   config,
-  lib,
   pkgs,
   ...
 }:
 
-lib.mkIf config.aoide.enable {
+{
+  aoide.enable = true;
 
   systemd.user.services.aoide-melete-adapter = {
     description = "Aoide → Melete adapter — neutral events to Melete job dispatches";

@@ -244,8 +244,8 @@ normally the entire time.
 
 ## Deployment
 
-The nix module (`modules/nucleus/secrets.nix`, `aoide.secrets.enable`,
-default off) provisions the `aoide-secrets` system user, the
+The nix module (`modules/dendrites/aoide-secrets.nix`, a catalogue dendrite a
+host selects by name: `habit.dendrites.aoide-secrets.enable = true`) provisions the `aoide-secrets` system user, the
 `aoide-secrets`/`aoide-secrets-access` groups, and a system service
 (`aoide-secrets-serve`, anchored to `multi-user.target`, no graphical-session
 dependency — the broker has no business caring whether a desktop session

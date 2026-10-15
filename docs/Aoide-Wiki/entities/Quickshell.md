@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-29
+updated: 2026-10-12
 tags: [aoide, shell, ui, qml, quickshell]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -332,7 +332,8 @@ source-of-truth is the live-watched `stage/cover.json` (written by `lyra rice
 stage` when the song's cover derives or, for a direct hot-swap, `lyra cover set
 <path-or-name>`; it carries the song it was staged for, so a cover for another
 song is ignored, and its `"pick": true` marks the user's own choice, which the
-shell refuses to draw the song's live board over), falling back to the baked `AOIDE_WALLPAPER` env store path so the
+shell refuses to draw the song's live board over, and its `"tile": true` repeats
+a picked still at 1:1 instead of cropping it), falling back to the baked `AOIDE_WALLPAPER` env store path so the
 background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
 hard cut — no crossfade.
 

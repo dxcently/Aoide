@@ -76,9 +76,12 @@ and the staging/declarative/draft modes:
    `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
-   stylix,compositor,greeter}.enable`, `aoide.quickshell.config`,
-   `aoide.wallpaper.provider`) are declared
-   once in `modules/nucleus` and set by the lane that owns them;
+   stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`) are
+   declared once in `modules/nucleus`. An enable fact is set only by its owner:
+   the one dendrite that owns it sets it `true`, it is true exactly when that
+   dendrite is selected, and a host write that takes effect fails eval
+   (`modules/nucleus/options.nix`'s `mkFact`). A host's `mkDefault` that the
+   owner outranks is dropped without error and cannot change the value;
    `aoide.sessionTarget` is the same seam declared in the core module
    (`pkgs/aoide/module/options.nix`) and set by the lane that paints a
    session. This is a documented convention backed by code review; the
@@ -144,8 +147,8 @@ pkgs/aoide/crates/AGENTS.md        (cross-crate: registry order, golden
                                      discipline, no cross-crate copying,
                                      per-crate tests only)
   pkgs/aoide/crates/<crate>/{README,AGENTS}.md   (this crate only)
-modules/AGENTS.md                  (cross-module: flags default off,
-                                     aggregate discipline, "_"-prefix shelving)
+modules/AGENTS.md                  (cross-module: the catalogue, aggregate
+                                     discipline, "_"-prefix shelving)
   modules/{nucleus,dendrites,aggregations,overrides}/{README,AGENTS}.md  (this dir only)
 ```
 

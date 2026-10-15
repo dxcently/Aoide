@@ -1,7 +1,7 @@
 # modules/dendrites/dunst.nix — the dunst notification daemon.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - one enable toggle: aoide.dunst.enable (off by default)
+#   - no enable flag: selection is the switch; its body also needs the lyra fact
 #   - carries its own dependencies: the dunst package (dunstctl rides along for
 #     history and the pause levels), libnotify for the stock `notify-send`
 #     client other aoide code already calls, and the daemon unit itself via
@@ -58,8 +58,8 @@
 # straight into history. TIMEOUT rides in the record and the QML herald owns
 # the dismiss clock. That is why no timeout is configured here.
 #
-# Enable with one line in hosts/yomi-strix/default.nix:
-#   aoide.dunst.enable = true;
+# Select it with one line in hosts/yomi-strix/default.nix:
+#   habit.dendrites.dunst.enable = true;
 #
 # hosts/ knows dendrites; dendrites never know hosts.
 #
@@ -80,91 +80,87 @@
 }:
 
 {
-  options.aoide.dunst.enable = lib.mkEnableOption "dunst notification daemon (the herald's delivery backend)";
 
-  config = lib.mkMerge [
-    { aoide.dunst.enable = lib.mkDefault true; }
-    (lib.mkIf (config.aoide.dunst.enable && config.aoide.lyra.enable) {
-      # libnotify rides along for `notify-send`: the stock client the freedesktop
-      # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
-      # alone left it missing on the box.
-      environment.systemPackages = [
-        pkgs.dunst
-        pkgs.libnotify
-      ];
+  config = lib.mkIf config.aoide.lyra.enable {
+    # libnotify rides along for `notify-send`: the stock client the freedesktop
+    # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
+    # alone left it missing on the box.
+    environment.systemPackages = [
+      pkgs.dunst
+      pkgs.libnotify
+    ];
 
-      # HM's module owns the whole daemon lifecycle: dunstrc generation from
-      # `settings`, a Type=dbus unit holding BusName=org.freedesktop.Notifications
-      # bound to the graphical session, D-Bus activation file, and a dunstrc
-      # reload trigger. Hand-rolling that (clipboard.nix style) would buy nothing.
-      habit.home.services.dunst = {
-        enable = true;
-        settings = {
-          global = {
-            # Nothing here is a dress — dunst never draws. These are the daemon
-            # behaviours the herald reads through, and nothing else.
+    # HM's module owns the whole daemon lifecycle: dunstrc generation from
+    # `settings`, a Type=dbus unit holding BusName=org.freedesktop.Notifications
+    # bound to the graphical session, D-Bus activation file, and a dunstrc
+    # reload trigger. Hand-rolling that (clipboard.nix style) would buy nothing.
+    habit.home.services.dunst = {
+      enable = true;
+      settings = {
+        global = {
+          # Nothing here is a dress — dunst never draws. These are the daemon
+          # behaviours the herald reads through, and nothing else.
 
-            # Sender text is DATA. Never parsed as markup, on either side of the
-            # seam: dunst hands it to the script verbatim, and the QML herald
-            # renders it as plain text. Untrusted text is never re-interpreted.
-            markup = "no";
+          # Sender text is DATA. Never parsed as markup, on either side of the
+          # seam: dunst hands it to the script verbatim, and the QML herald
+          # renders it as plain text. Untrusted text is never re-interpreted.
+          markup = "no";
 
-            # Duplicate stacking is the daemon's job and stays on; the herald
-            # ledger reads one entry per stack.
-            stack_duplicates = true;
-            hide_duplicate_count = false;
+          # Duplicate stacking is the daemon's job and stays on; the herald
+          # ledger reads one entry per stack.
+          stack_duplicates = true;
+          hide_duplicate_count = false;
 
-            # The window the dock ledger keeps. The stage file is the live view;
-            # this is dunst's own record behind it (`dunstctl history`).
-            history_length = 20;
+          # The window the dock ledger keeps. The stage file is the live view;
+          # this is dunst's own record behind it (`dunstctl history`).
+          history_length = 20;
 
-            # ── quiet hours ──────────────────────────────────────────────────
-            # `dunstctl set-paused true` (level 100) is total silence. Level 60 is
-            # the useful middle: ordinary toasts hold, critical (70) and the
-            # permission summons (90) still come through. Pause is enforced by the
-            # daemon BEFORE the script runs, which is precisely why quiet hours
-            # still work with the face moved to QML.
-            default_pause_level = 0;
+          # ── quiet hours ──────────────────────────────────────────────────
+          # `dunstctl set-paused true` (level 100) is total silence. Level 60 is
+          # the useful middle: ordinary toasts hold, critical (70) and the
+          # permission summons (90) still come through. Pause is enforced by the
+          # daemon BEFORE the script runs, which is precisely why quiet hours
+          # still work with the face moved to QML.
+          default_pause_level = 0;
 
-            # The feed rule's catch-all matcher is a real regex, not a glob.
-            enable_posix_regex = true;
-          };
+          # The feed rule's catch-all matcher is a real regex, not a glob.
+          enable_posix_regex = true;
+        };
 
-          # ── the feed ───────────────────────────────────────────────────────
-          # One catch-all rule: draw nothing, hand everything to aoide. `summary`
-          # is the matcher because every notification has one; `.*` matches all of
-          # them (posix regex is on above). `always_run_script` guarantees the
-          # script still runs for a notification dunst would otherwise consider
-          # suppressed.
-          #
-          # The script is `aoide herald push`, which reads the DUNST_* environment
-          # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
-          # not a shell wrapper on purpose: notification bodies are arbitrary
-          # sender text, and hand-rolled shell JSON escaping is a bug farm.
-          #
-          # `script` takes ONE executable, not a command line — dunst appends its
-          # own five positional arguments (appname summary body icon urgency), so
-          # the command's arguments cannot be written here. Hence the wrapper. Its
-          # store path is absolute on purpose: dunst resolves a bare name through
-          # PATH, and the HM user unit's PATH is not ours to rely on. The command
-          # reads the DUNST_* environment, so the positional arguments dunst adds
-          # are ignored.
-          herald-feed = {
-            summary = ".*";
-            skip_display = true;
-            always_run_script = true;
-            # `herald` left core's registry at P-A5 of the binary-split
-            # workstream — it now lives only in `lyra` (crates/lyra/src/
-            # registry.rs). Both binaries ship from the same `pkgs.aoide`
-            # derivation (P-A7), but as of P-A8 `lyra` lives in that
-            # derivation's separate `rice` output (`pkgs.aoide.rice`) — named
-            # explicitly here, same reasoning as shellbridge.nix's ExecStart.
-            script = "${pkgs.writeShellScript "aoide-herald-push" ''
-              exec ${pkgs.aoide.rice}/bin/lyra herald push
-            ''}";
-          };
+        # ── the feed ───────────────────────────────────────────────────────
+        # One catch-all rule: draw nothing, hand everything to aoide. `summary`
+        # is the matcher because every notification has one; `.*` matches all of
+        # them (posix regex is on above). `always_run_script` guarantees the
+        # script still runs for a notification dunst would otherwise consider
+        # suppressed.
+        #
+        # The script is `aoide herald push`, which reads the DUNST_* environment
+        # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
+        # not a shell wrapper on purpose: notification bodies are arbitrary
+        # sender text, and hand-rolled shell JSON escaping is a bug farm.
+        #
+        # `script` takes ONE executable, not a command line — dunst appends its
+        # own five positional arguments (appname summary body icon urgency), so
+        # the command's arguments cannot be written here. Hence the wrapper. Its
+        # store path is absolute on purpose: dunst resolves a bare name through
+        # PATH, and the HM user unit's PATH is not ours to rely on. The command
+        # reads the DUNST_* environment, so the positional arguments dunst adds
+        # are ignored.
+        herald-feed = {
+          summary = ".*";
+          skip_display = true;
+          always_run_script = true;
+          # `herald` left core's registry at P-A5 of the binary-split
+          # workstream — it now lives only in `lyra` (crates/lyra/src/
+          # registry.rs). Both binaries ship from the same `pkgs.aoide`
+          # derivation (P-A7), but as of P-A8 `lyra` lives in that
+          # derivation's separate `rice` output (`pkgs.aoide.rice`) — named
+          # explicitly here, same reasoning as shellbridge.nix's ExecStart.
+          script = "${pkgs.writeShellScript "aoide-herald-push" ''
+            exec ${pkgs.aoide.rice}/bin/lyra herald push
+          ''}";
         };
       };
-    })
-  ];
+    };
+  };
 }

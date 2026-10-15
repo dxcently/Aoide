@@ -160,6 +160,7 @@ mod tests {
 
     #[test]
     fn handle_secrets_ask_is_cli_only() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let i = inv(Door::Mcp, &[("secret", "t"), ("consumer", "m"), ("seconds", "1")]);
         let out = crate::dispatch::registry().get(&i.path).expect("registered").invoke("lyra", &i);
         assert_eq!(out.status, aoide_protocol::output::Status::Usage);
@@ -168,6 +169,7 @@ mod tests {
 
     #[test]
     fn handle_secrets_ask_requires_secret_consumer_and_seconds() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(handle_secrets_ask(&inv(Door::Cli, &[])).status, aoide_protocol::output::Status::Usage);
         assert_eq!(handle_secrets_ask(&inv(Door::Cli, &[("secret", "t")])).status, aoide_protocol::output::Status::Usage);
         assert_eq!(

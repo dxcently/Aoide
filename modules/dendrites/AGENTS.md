@@ -1,23 +1,21 @@
 # AGENTS.md — modules/dendrites
 
 Points up to `modules/AGENTS.md` for cross-module invariants (the registry,
-aggregate discipline, `_`-prefix shelving, flags-default-off) — this file
+aggregate discipline, `_`-prefix shelving) — this file
 covers only what's specific to dendrites.
 
 ## Invariants
 
 - **One file, one plain module.** A dendrite file is an ordinary NixOS module
-  (CONTRACTS.md §2). It declares `aoide.<name>.*`, sets the flag
-  `lib.mkDefault true` and guards the rest of its config with
-  `aoide.<name>.enable`, all in the same file. What it sets under
-  `habit.home` is its home half; everything else is its system half.
+  (CONTRACTS.md §2). It declares the `aoide.<name>.*` options its body reads,
+  if any, and its body is unconditional: selection is the switch. What it sets
+  under `habit.home` is its home half; everything else is its system half.
   The constructor splits the two when it wraps the module.
-- **A paint dendrite guards on a FACT, not on an option of its own.** The paint
-  lanes (`compositor`, `greeter`, `stylix`, `quickshell`, `lyra`, `wallpaper`)
-  read the fact `modules/nucleus/options.nix` declares; the lane sets it
-  `mkDefault true` — or, for a capability whose alternatives are named rather
-  than enabled (`wallpaper`), `mkDefault "<its own name>"`. Never declare
-  `aoide.<that name>.enable` a second time.
+- **A paint dendrite reads and sets FACTS, not options of its own.** Paint
+  lanes read each other only through the facts `modules/nucleus/options.nix`
+  declares. `quickshell`, `stylix` and `lyra` each set their fact
+  `true`; a `wallpaper` provider sets `aoide.wallpaper.provider` to its own name
+  (`mkDefault`). Never declare `aoide.<that name>.enable` a second time.
 - **A dependency rides the guard that needs it, never an unconditional
   `imports`.** `lib/options.nix` evaluates every dendrite in a bare
   `evalModules` to render `aoideOptions`, so a module that pulls in a
@@ -28,10 +26,10 @@ covers only what's specific to dendrites.
 - **A condition does not cover a home half's `imports` or `options`.** habit
   reads those before any condition is forced, and refuses a condition over a
   `habit.home` that carries either. Put a home half's `imports` in a
-  `habit.home` of its own beside the guarded one (`neovim.nix`), or write them
+  `habit.home` of its own beside the one that sets the rest (`neovim.nix`), or write them
   as `config` (`lyra/default.nix`).
-- **One enable toggle, default off.** `aoide.<name>.enable = false` is the
-  shape every dendrite follows — shipped but inert until a host opts in.
+- **No enable toggle.** A dendrite declares no `aoide.<name>.enable`: selection
+  is the switch, and a host that does not select it has none of its options.
 - **Carries its own dependencies; reads no other module.** Not another
   dendrite, not another half's internals — only `config.aoide.<name>.*` the file
   declares itself, plus stock options.
@@ -90,6 +88,50 @@ covers only what's specific to dendrites.
 - **`hosts/` knows dendrites; dendrites never know hosts.** No
   host-conditional logic inside a dendrite file itself.
 
+## The nucleus members
+
+`aoided`, `aoide-secrets`, `melete-adapter`, `aoide-config`, `aoide-nix` and
+`aoide-packages` are members of the `nucleus` aggregation. The rules below bind
+them in addition to the ones above.
+
+- **Nix authors runtime config; it never owns it (`aoide-config.nix`).** A CORE
+  command's configuration lives in the portable runtime file
+  (`$AOIDE_ROOT/config.toml`, CONTRACTS.md §4) because core is cargo-buildable on
+  any Linux — `aoide-config.nix` renders that file to a read-only store path and
+  POINTS `AOIDE_CONFIG` at it, whole-file or nothing. Don't add a NixOS option
+  for a new core setting: add a `config::SCHEMA` key in `aoide-storage` and let
+  `aoide.config.settings` carry it like every other key. And don't grow partial
+  management (nix owning one section, the CLI another) — two writers on one
+  document is the split-brain the point-don't-copy design exists to avoid.
+- **A member reads the contract, never another member.** `aoided` and
+  `melete-adapter` order against `aoided.service`, a unit the core module
+  defines on `aoide.enable` alone (the `aoided` dendrite adds only the AoideOS
+  deltas: doors, popup, usage poller, firewall carve, `AOIDE_SONG_TEMPLATES`);
+  none reads another member's option or config, so a host may deselect any one
+  of them and still evaluate (checked by deselecting each in turn on
+  `hosts/yomi-strix`). An option a member reads is declared in that member
+  (`aoided`: the doors; `aoide-secrets`: `members`; `aoide-config`: `settings`),
+  so it exists only while the member is selected.
+- **`aoide.mail.adapter` has `enable` and `port` and must never grow a bind
+  option.** `aoide mail serve` binds `127.0.0.1` as a constant
+  (`pkgs/aoide/crates/server/AGENTS.md`), so the unit passes only the port. The
+  unit is ordered and restarted like `aoide-a2a` (`wantedBy`/`after`/`bindsTo`
+  `aoided.service`, `Restart=on-failure`, `RestartSec=5s`). A relay's front
+  targets `aoide.mail.adapter.port` and never `aoide.a2a.port`: an unsigned
+  loopback request that reaches the door is conduct.
+- **A user unit gets no polkit session.** Anything spawned from a
+  `systemd.user.services.*` here lands outside `session-N.scope`, so polkit
+  resolves no session for it and `allow_active` never fires — the action falls
+  through to `allow_any` and is refused for want of interactive auth. A
+  privileged action reached that way needs an explicit
+  `security.polkit.extraConfig` rule keyed on `config.aoide.user`, declared in
+  the same file as the unit (`lyra/shellbridge.nix` and its power actions).
+  `pkcheck --action-id <id> --process <pid>` is the check: exit 0 is authorized,
+  exit 2 is the refusal.
+- **A new always-on service** is a dendrite plus its catalogue line and one
+  member line in `modules/aggregations/nucleus/default.nix`, not a file in
+  `modules/nucleus`.
+
 ## Extension points
 
 - **A new dendrite**: a new plain-module file here, and one line in
@@ -100,7 +142,7 @@ covers only what's specific to dendrites.
   `{ providers.<p> = <path>; }`; the catalogue entry is the DIRECTORY, and each
   provider file is a plain module of its own.
 - **Splitting a tool out of a bundled dendrite** (e.g. `devtools.nix`) is
-  warranted the moment a host needs to toggle it independently — see
+  warranted the moment a host needs to select it independently — see
   `claude-code.nix`'s header for the precedent.
 
 ## Docs update required in the same commit

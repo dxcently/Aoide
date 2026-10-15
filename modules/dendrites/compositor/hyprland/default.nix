@@ -17,9 +17,9 @@
 # rules that remain HERE (kitty rounding) are appearance, hence
 # livery's business; see that file's header for the full split.
 #
-# Guarded on the FACT `aoide.compositor.enable` (declared once in
-# modules/nucleus/options.nix), which this module sets
-# `mkDefault true`. The greeter is its own lane (modules/dendrites/greeter.nix).
+# Selecting the `hyprland` provider is the switch: this file is imported only
+# then, so its body is unconditional. The greeter is its own lane
+# (modules/dendrites/greeter.nix).
 #
 # IPC socket: exposes the Hyprland IPC socket path for shellbridge to consume.
 # shellbridge uses it to track windows and dispatch focus commands
@@ -250,117 +250,108 @@ let
   # here on purpose: they are livery's business, not behaviour.
 in
 {
-  # ── Config: only wired when the compositor fact is on ─────────────────────
-  # `aoide.compositor.enable` is a FACT, declared once in
-  # modules/nucleus/options.nix: a Wayland compositor is started on this host.
-  # No module reads another module (root AGENTS.md house rule 5), so a lane
-  # that needs a session but not THIS compositor reads the fact instead of
-  # reaching in here. This module sets it `mkDefault true`.
-  config = lib.mkMerge [
-    { aoide.compositor.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.compositor.enable {
+  config = {
 
-      # ── Enable Hyprland via NixOS programs.hyprland ────────────────────────
-      # programs.hyprland.enable installs Hyprland, sets up the session
-      # entry, and configures the NixOS service layer. The flake input
-      # (inputs.hyprland) is pre-declared in flake.nix.
-      #
-      # NOTE: the NixOS-level module has no extraConfig — the config FILE is
-      # owned by home-manager's wayland.windowManager.hyprland below. System
-      # layer = session/portal; home layer = hyprland.conf. package = null in
-      # the home module so Hyprland is installed exactly once (system side).
-      programs.hyprland.enable = true;
+    # ── Enable Hyprland via NixOS programs.hyprland ────────────────────────
+    # programs.hyprland.enable installs Hyprland, sets up the session
+    # entry, and configures the NixOS service layer. The flake input
+    # (inputs.hyprland) is pre-declared in flake.nix.
+    #
+    # NOTE: the NixOS-level module has no extraConfig — the config FILE is
+    # owned by home-manager's wayland.windowManager.hyprland below. System
+    # layer = session/portal; home layer = hyprland.conf. package = null in
+    # the home module so Hyprland is installed exactly once (system side).
+    programs.hyprland.enable = true;
 
-      habit.home = {
-        wayland.windowManager.hyprland = {
-          enable = true;
-          package = null; # system programs.hyprland provides the binary
-          portalPackage = null; # and the portal
-          configType = "hyprlang"; # explicit: classic hyprland.conf, not lua
-
-          # hyprglass — ABI-pinned to this Hyprland (see pkgs/hyprglass).
-          # HM emits the `plugin = <path>` line; config in hyprNoteConfig.
-          plugins = [ pkgs.hyprglass ];
-
-          # ── systemd / Wayland env handoff (the session-assembly seam) ──────
-          # This is what actually brings the desktop up. When enabled the HM
-          # module emits, at the TOP of hyprland.conf:
-          #   exec-once = dbus-update-activation-environment --systemd <vars>
-          #               && systemctl --user start hyprland-session.target
-          # hyprland-session.target BindsTo graphical-session.target, so this
-          # single line imports HYPRLAND_INSTANCE_SIGNATURE / WAYLAND_DISPLAY /
-          # XDG_CURRENT_DESKTOP into the systemd + D-Bus user environment and
-          # pulls up graphical-session.target — which is what every Aoide user
-          # service (quickshell, aoided, shellbridge) is `wantedBy`. Without it
-          # a bare Hyprland launch would start the compositor and NOTHING else.
-          #
-          # The HM module defaults `systemd.enable` to true; we set it EXPLICITLY
-          # so this contract survives a future edit to configType/settings that
-          # might otherwise silently drop the handoff. `variables` keeps the
-          # module default set (the vars listed above) — the clean HM path, not a
-          # hand-rolled exec-once dbus call.
-          systemd = {
-            enable = true;
-            variables = [
-              "DISPLAY"
-              "HYPRLAND_INSTANCE_SIGNATURE"
-              "WAYLAND_DISPLAY"
-              "XDG_CURRENT_DESKTOP"
-              "XDG_SESSION_TYPE"
-            ];
-          };
-
-          # Bake the livery fragment into hyprland.conf. mkBefore (order 500) so
-          # livery defaults land first; the hyprland behaviour lane's block
-          # and the screenshot dendrite's binds follow at the default order
-          # (1000). One `lines` option, several writers. (The lyra lane
-          # writes nothing here — it autostarts the shell as a systemd user
-          # service, not an exec-once.)
-          extraConfig = lib.mkBefore hyprNoteConfig;
-        };
-
-        # ── Polkit authentication agent ───────────────────────────────────────
-        # security.polkit (the daemon) is pulled up by programs.hyprland,
-        # but a polkit DAEMON without an AGENT means privileged GUI actions
-        # (mounts, network edits, the aoided rebuild gate's future polkit prompt)
-        # have nothing to present the authentication dialog — they silently fail.
-        # hyprpolkitagent is the Hyprland project's QT/QML agent: the smallest
-        # choice consistent with this compositor stack. Defined as an explicit
-        # user service (journald-logged, Restart=on-failure) rather than relying
-        # on the packaged unit landing on the systemd search path — same idiom as
-        # the lyra lane's shell service.
-        systemd.user.services.hyprpolkitagent = {
-          Unit = {
-            Description = "Hyprland Polkit authentication agent (GUI privilege prompts)";
-            PartOf = [ "graphical-session.target" ];
-            After = [ "graphical-session.target" ];
-            # Only meaningful once the Wayland session env is imported.
-            ConditionEnvironment = "WAYLAND_DISPLAY";
-          };
-          Service = {
-            ExecStart = "${pkgs.hyprpolkitagent}/libexec/hyprpolkitagent";
-            Restart = "on-failure";
-            RestartSec = 3;
-          };
-          Install.WantedBy = [ "graphical-session.target" ];
-        };
-      };
-
-      # ── XDG portal for Hyprland ────────────────────────────────────────────
-      xdg.portal = {
+    habit.home = {
+      wayland.windowManager.hyprland = {
         enable = true;
-        extraPortals = [ ]; # xdg-desktop-portal-hyprland added via programs.hyprland
+        package = null; # system programs.hyprland provides the binary
+        portalPackage = null; # and the portal
+        configType = "hyprlang"; # explicit: classic hyprland.conf, not lua
+
+        # hyprglass — ABI-pinned to this Hyprland (see pkgs/hyprglass).
+        # HM emits the `plugin = <path>` line; config in hyprNoteConfig.
+        plugins = [ pkgs.hyprglass ];
+
+        # ── systemd / Wayland env handoff (the session-assembly seam) ──────
+        # This is what actually brings the desktop up. When enabled the HM
+        # module emits, at the TOP of hyprland.conf:
+        #   exec-once = dbus-update-activation-environment --systemd <vars>
+        #               && systemctl --user start hyprland-session.target
+        # hyprland-session.target BindsTo graphical-session.target, so this
+        # single line imports HYPRLAND_INSTANCE_SIGNATURE / WAYLAND_DISPLAY /
+        # XDG_CURRENT_DESKTOP into the systemd + D-Bus user environment and
+        # pulls up graphical-session.target — which is what every Aoide user
+        # service (quickshell, aoided, shellbridge) is `wantedBy`. Without it
+        # a bare Hyprland launch would start the compositor and NOTHING else.
+        #
+        # The HM module defaults `systemd.enable` to true; we set it EXPLICITLY
+        # so this contract survives a future edit to configType/settings that
+        # might otherwise silently drop the handoff. `variables` keeps the
+        # module default set (the vars listed above) — the clean HM path, not a
+        # hand-rolled exec-once dbus call.
+        systemd = {
+          enable = true;
+          variables = [
+            "DISPLAY"
+            "HYPRLAND_INSTANCE_SIGNATURE"
+            "WAYLAND_DISPLAY"
+            "XDG_CURRENT_DESKTOP"
+            "XDG_SESSION_TYPE"
+          ];
+        };
+
+        # Bake the livery fragment into hyprland.conf. mkBefore (order 500) so
+        # livery defaults land first; the hyprland behaviour lane's block
+        # and the screenshot dendrite's binds follow at the default order
+        # (1000). One `lines` option, several writers. (The lyra lane
+        # writes nothing here — it autostarts the shell as a systemd user
+        # service, not an exec-once.)
+        extraConfig = lib.mkBefore hyprNoteConfig;
       };
 
-      # ── Environment variables for the Hyprland session ─────────────────────
-      environment.sessionVariables = {
-        # Wayland-first hints for common apps
-        NIXOS_OZONE_WL = "1";
-        MOZ_ENABLE_WAYLAND = "1";
-        QT_QPA_PLATFORM = "wayland";
-        GDK_BACKEND = "wayland,x11";
-        SDL_VIDEODRIVER = "wayland";
+      # ── Polkit authentication agent ───────────────────────────────────────
+      # security.polkit (the daemon) is pulled up by programs.hyprland,
+      # but a polkit DAEMON without an AGENT means privileged GUI actions
+      # (mounts, network edits, the aoided rebuild gate's future polkit prompt)
+      # have nothing to present the authentication dialog — they silently fail.
+      # hyprpolkitagent is the Hyprland project's QT/QML agent: the smallest
+      # choice consistent with this compositor stack. Defined as an explicit
+      # user service (journald-logged, Restart=on-failure) rather than relying
+      # on the packaged unit landing on the systemd search path — same idiom as
+      # the lyra lane's shell service.
+      systemd.user.services.hyprpolkitagent = {
+        Unit = {
+          Description = "Hyprland Polkit authentication agent (GUI privilege prompts)";
+          PartOf = [ "graphical-session.target" ];
+          After = [ "graphical-session.target" ];
+          # Only meaningful once the Wayland session env is imported.
+          ConditionEnvironment = "WAYLAND_DISPLAY";
+        };
+        Service = {
+          ExecStart = "${pkgs.hyprpolkitagent}/libexec/hyprpolkitagent";
+          Restart = "on-failure";
+          RestartSec = 3;
+        };
+        Install.WantedBy = [ "graphical-session.target" ];
       };
-    })
-  ];
+    };
+
+    # ── XDG portal for Hyprland ────────────────────────────────────────────
+    xdg.portal = {
+      enable = true;
+      extraPortals = [ ]; # xdg-desktop-portal-hyprland added via programs.hyprland
+    };
+
+    # ── Environment variables for the Hyprland session ─────────────────────
+    environment.sessionVariables = {
+      # Wayland-first hints for common apps
+      NIXOS_OZONE_WL = "1";
+      MOZ_ENABLE_WAYLAND = "1";
+      QT_QPA_PLATFORM = "wayland";
+      GDK_BACKEND = "wayland,x11";
+      SDL_VIDEODRIVER = "wayland";
+    };
+  };
 }
