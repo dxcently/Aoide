@@ -495,8 +495,9 @@ door's audit name whitelist gains both names so they never log as bare
   asks instead of being declined as one oversized body). The caller's
   verified identity must BE `node` (no polling on another's behalf), hold
   `message` in the mesh the request names, and not be `down`. **`filed` is
-  the caller's acknowledgement** — the msgids it filed out of its PREVIOUS
-  poll of this node (`aoide_storage::outbox::filed_pending`) — and the hub
+  the caller's acknowledgement** — the msgids it filed (or already held) out
+  of its PREVIOUS poll of this node, never one it refused
+  (`aoide_storage::outbox::filed_pending`) — and the hub
   retires its own custody of those (a `transit` entry, and only that) before
   it offers: a response can be lost, so the hand-over itself is not an
   acknowledgement, and anything the poller has not yet named is offered
@@ -555,18 +556,33 @@ door's audit name whitelist gains both names so they never log as bare
   `transit` container; a letter waits for its receipt.
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
-  destination. Routed like any letter, never themselves acked. **An
-  outbox entry retires when its delivery is confirmed, and what counts
-  as confirmation depends on what the entry is.** For a `letter`: a
-  receipt arrives whose verified signer is the entry's `to.node` and
-  whose text names the entry's `msgid`. For a `receipt`: the deposit
+  destination. Routed like any letter, never themselves acked.
+  A receipt's `text` is exactly one msgid — 64 lowercase hex digits and
+  nothing around them. Any other text is refused `bad-msgid` and files
+  nothing, because the text names a letter and nothing else.
+  A signer acknowledges a letter once: a second receipt from the same
+  signer for the same msgid is answered `duplicate` and files nothing,
+  however many times the destination re-acks it.
+  **An outbox entry retires when its delivery is confirmed, and what
+  counts as confirmation depends on what the entry is.** For a `letter`:
+  a receipt arrives whose verified signer is the entry's `to.node` and
+  whose text names the entry's `msgid`, and it retires the letter on its
+  first filing. For a `receipt`: the deposit
   outcome itself, `accepted` or `duplicate` — an ack needs no ack
   because an ack IS what confirmation looks like, and a lost one is
   recovered by the origin's next re-offer, which re-spools a fresh
   receipt. For a `charter` letter the same holds for a stronger reason:
   the enclosed charter is APPLIED, not filed, so there is no mailbox on
   the far end to ack from at all, and its own deposit outcome is the
-  whole confirmation there can be. Acks are still spooled like any entry, so an ack survives a
+  whole confirmation there can be.
+  **A deposit's answer is written back only onto an entry still
+  spooled.** The far end may drain its receipt straight back to this box
+  before it answers the deposit, so a letter can be retired while the
+  drain that sent it is still waiting on the answer. The write-back that
+  follows is a no-op for a retired letter; it never re-spools it. A
+  letter re-spooled by its own answer would be re-offered on the next
+  drain, re-acked, and re-retired, once per drain, for ever.
+  Acks are still spooled like any entry, so an ack survives a
   dead link instead of vanishing on it. A hub can mint a receipt; it
   cannot sign as the destination, so it cannot make an origin stop
   retrying.

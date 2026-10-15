@@ -818,12 +818,13 @@ by decision — no embedded database yet
   file mutations and a SEPARATE, non-blocking per-node `.bsy` flock a
   drain holds across its whole dial cycle — two locks, two jobs, never
   conflated (this module's own doc has the full reasoning). Pure spool
-  CRUD only: `write_entry`/`list_entries`/`remove_entry`, `retire_by_ack`
-  (spec item 7's two checks — verified signer is the entry's `to.node`,
-  text names the entry's `msgid` — folded into ONE path lookup: an entry
-  is always spooled under its own `to.node`, so indexing by the ack's
-  already-origin-verified `from.node` IS the signer check, and keying by
-  `msgid` makes a wrong `text` a plain miss) and the link-state
+  CRUD only: `write_entry`/`update_entry`/`list_entries`/`remove_entry`,
+  `retire_by_ack` (spec item 7's two checks — verified signer is the
+  entry's `to.node`, text names the entry's `msgid` — folded into ONE path
+  lookup: an entry is always spooled under its own `to.node`, so indexing
+  by the ack's already-origin-verified `from.node` IS the signer check, and
+  keying by `msgid` makes a wrong `text` a plain miss; a `text` that is not
+  one msgid retires nothing before that lookup is made) and the link-state
   trio (`read_link_state`/`back_off`/`clear_link_state`, backoff off a
   `DRAIN_BACKOFF_FLOOR_SECS` floor doubling up to its own
   `BACKOFF_CEILING_SECS` (15 min) ceiling — deliberately not

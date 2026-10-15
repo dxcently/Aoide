@@ -470,7 +470,15 @@ pub fn settle_deposit(envelope: &Envelope, outcome: &aoide_storage::mail::Deposi
             spool_and_drain_ack(envelope, &envelope.msgid)
         }
         DepositOutcome::Duplicate { filed_letter: true } => spool_and_drain_ack(envelope, &envelope.msgid),
+        // A receipt retires its letter whether this is its first filing or a
+        // re-ack of one already filed: retiring is idempotent, and the one place a
+        // verified receipt is allowed to act is here.
         DepositOutcome::Filed { kind, .. } if kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT => {
+            let _ = aoide_storage::outbox::retire_by_ack(envelope);
+        }
+        DepositOutcome::Duplicate { filed_letter: false }
+            if envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT =>
+        {
             let _ = aoide_storage::outbox::retire_by_ack(envelope);
         }
         _ => {}
@@ -1430,8 +1438,17 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                 // The hub's custody of the CONTAINER ends when it is told this
                 // box has it: the next poll of that node carries this msgid
                 // (`outbox::record_filed`), and until then the entry is offered
-                // again — a lost response must not lose the letter.
-                let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                // again — a lost response must not lose the letter. Said only once
+                // the container is on this disk: a refusal here (an unverified
+                // origin, a bad msgid) filed nothing, and telling the hub otherwise
+                // would retire its only copy.
+                if matches!(
+                    filed_outcome,
+                    aoide_storage::mail::DepositOutcome::Filed { .. }
+                        | aoide_storage::mail::DepositOutcome::Duplicate { .. }
+                ) {
+                    let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                }
             }
             aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
                 // **A duplicate is custody this box already has.** The hub is
@@ -1962,7 +1979,7 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
                 updated.last_try_at = aoide_storage::time::now_iso_utc();
                 updated.last_outcome = format!("refused: {reason}");
                 updated.refused = true;
-                aoide_storage::outbox::write_entry(node_name, &updated)?;
+                aoide_storage::outbox::update_entry(node_name, &updated)?;
             }
             DepositAttempt::Delivered { status } => {
                 contacted = true;
@@ -2016,7 +2033,7 @@ fn record_failed_attempt(
     updated.tries += 1;
     updated.last_try_at = aoide_storage::time::now_iso_utc();
     updated.last_outcome = format!("{word}: {reason}");
-    let recorded = aoide_storage::outbox::write_entry(node_name, &updated);
+    let recorded = aoide_storage::outbox::update_entry(node_name, &updated).map(|_| ());
     // The LINK's own record of the same attempt carries the same word, so a
     // reader that has only the link (an entry whose bookkeeping write failed)
     // can still tell a far end that ANSWERED from a dial that never connected.
@@ -2067,7 +2084,7 @@ fn settle_delivered(
         updated.tries += 1;
         updated.last_try_at = aoide_storage::time::now_iso_utc();
         updated.last_outcome = status.to_string();
-        aoide_storage::outbox::write_entry(node_name, &updated)?;
+        aoide_storage::outbox::update_entry(node_name, &updated)?;
     }
     Ok(())
 }
@@ -2849,12 +2866,20 @@ mod tests {
         deposit_body: &str,
         poll_body: String,
     ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let deposit = deposit_body.to_string();
+        answering_door(move |body| if body.contains("aoide/mailPoll") { poll_body.clone() } else { deposit.clone() })
+    }
+
+    /// [`recording_door`] whose answer is computed per request body, so a stand-in
+    /// can run the far end's own logic (file, mint, drain back) on its own thread.
+    fn answering_door(
+        answer: impl Fn(&str) -> String + Send + 'static,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let log = seen.clone();
-        let deposit = deposit_body.to_string();
         let accepter = listener.try_clone().unwrap();
         std::thread::spawn(move || loop {
             let Ok((mut stream, _)) = accepter.accept() else { break };
@@ -2881,8 +2906,7 @@ mod tests {
             let text = String::from_utf8_lossy(&buf).to_string();
             let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
             log.lock().unwrap().push(body.clone());
-            let answer = if body.contains("aoide/mailPoll") { poll_body.clone() } else { deposit.clone() };
-            let _ = stream.write_all(signed_reply(&text, &own_key(), 200, &answer).as_bytes());
+            let _ = stream.write_all(signed_reply(&text, &own_key(), 200, &answer(&body)).as_bytes());
         });
         (listener, port, seen)
     }
@@ -4466,6 +4490,148 @@ mod tests {
         assert_eq!(receipts.len(), 1, "exactly one receipt for the letter: {receipts:?}");
 
         drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The receipt a far end mints for `acked` and drains straight back to `me`:
+    /// signed as `far` under this process's own key, which `far`'s record holds.
+    fn far_receipt(far: &str, me: &str, mesh: &str, acked: &str) -> Envelope {
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", far);
+        let to = aoide_storage::mail::Address { node: me.to_string(), name: "alice".to_string() };
+        let ack = aoide_storage::mail::mint_ack_in_mesh("bob", to, acked, mesh).unwrap();
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        ack
+    }
+
+    fn receipts_filed_here() -> usize {
+        aoide_storage::mail::read_base().unwrap().iter().filter(|e| e.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT).count()
+    }
+
+    /// **A letter its destination files is retired once, and stays retired.**
+    /// The far end files the letter, mints its receipt and drains that receipt
+    /// straight back to this box before it answers the deposit — so the ack lands
+    /// INSIDE this box's own drain of the letter. The drain then writes the
+    /// deposit's answer back onto the entry it read before the ack. That write
+    /// used to re-spool a letter the ack had just retired: the next drain
+    /// re-offered it, the far end answered `duplicate` and minted one more
+    /// receipt, which retired it again and was written back again. One receipt per
+    /// drain, for ever — the 24k-acks-for-29-letters loop on a live box.
+    #[test]
+    fn a_letter_acked_inside_its_own_drain_is_retired_and_stays_retired() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("ack-inside-drain");
+
+        let me = register_local_origin();
+        let far = "relay";
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", far, "bob", "once").unwrap();
+        let msgid = letter.msgid.clone();
+        let mesh = letter.header.origin_mesh.clone();
+        let deposits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = deposits.clone();
+        let (listener, port, _log) = answering_door(move |body| {
+            if body.contains("aoide/mailPoll") {
+                return r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string();
+            }
+            if !body.contains("aoide/mailDeposit") {
+                return r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#.to_string();
+            }
+            let first = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+            let ack = far_receipt(far, &me, &mesh, &msgid);
+            let outcome = aoide_storage::mail::deposit(ack.clone(), far).unwrap();
+            settle_deposit(&ack, &outcome);
+            if first {
+                format!(r#"{{"jsonrpc":"2.0","id":1,"result":{{"status":"accepted","msgid":"{msgid}"}}}}"#)
+            } else {
+                r#"{"jsonrpc":"2.0","id":1,"result":{"status":"duplicate"}}"#.to_string()
+            }
+        });
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::outbox::write_entry(far, &OutboxEntry::fresh(letter)).unwrap();
+
+        drain_node(far).unwrap();
+        let left: Vec<String> = aoide_storage::outbox::list_entries(far)
+            .unwrap()
+            .iter()
+            .map(|e| format!("{} tries={} outcome={}", e.envelope.msgid, e.tries, e.last_outcome))
+            .collect();
+        assert!(left.is_empty(), "the first receipt retires the letter, and the drain does not write it back: {left:?}");
+        assert_eq!(receipts_filed_here(), 1, "one receipt for the letter");
+
+        // Distinct mint seconds, so a re-ack would be a new msgid and a new line.
+        for _ in 0..2 {
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+            drain_node(far).unwrap();
+        }
+        assert!(aoide_storage::outbox::list_entries(far).unwrap().is_empty(), "a retired letter is never re-offered");
+        assert_eq!(deposits.load(std::sync::atomic::Ordering::SeqCst), 1, "the far end is asked once");
+        assert_eq!(receipts_filed_here(), 1, "and files one receipt, however many drains run");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A hub's custody ends only for a container this box filed.** A poll hands
+    /// over a container addressed here, sealed by a known relay, whose receipt
+    /// names no msgid: this box opens it and refuses it as a bad msgid. The hub
+    /// must not be told it was filed — it would retire its only copy of an ack
+    /// nobody here holds.
+    #[test]
+    fn a_polled_container_this_box_refuses_is_not_acknowledged() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-refused-not-acked");
+
+        let me = register_local_origin();
+        // The relay's own receipt, signed by this process's key that the relay's
+        // record holds, and naming no msgid at all.
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let receipt = aoide_storage::mail::mint_ack_in_mesh(
+            "bob",
+            aoide_storage::mail::Address { node: me.clone(), name: "alice".to_string() },
+            "not a msgid",
+            "home",
+        )
+        .unwrap();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &receipt,
+            &binding,
+            "home",
+            "home",
+            &me,
+            &me,
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let msgid = container.msgid.clone();
+
+        let answer = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [container], "envelopes": [] } }).to_string();
+        let (_listener, port, _seen) =
+            recording_door(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#, answer);
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        relay.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.retain(|n| n.name != "relay");
+        nodes.push(relay);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed: {outcome:?}");
+        assert!(aoide_storage::mail::show(&msgid).unwrap().is_none(), "and nothing is on this disk");
+        assert!(
+            aoide_storage::outbox::filed_pending("relay").unwrap().is_empty(),
+            "the hub is not told a container this box refused was filed"
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
