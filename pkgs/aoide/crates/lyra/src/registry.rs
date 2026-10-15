@@ -27,6 +27,17 @@ pub use aoide_protocol::registry::*;
 
 #[cfg(test)]
 mod tests {
+    /// Finding 10: `apps publish` keeps the Daemon door it had before the door
+    /// policy. Only its `--run` flag is terminal-only.
+    #[test]
+    fn apps_publish_keeps_the_daemon_door_and_run_stays_terminal_only() {
+        let r = crate::commands::all();
+        let publish = r.get(&["apps".to_string(), "publish".to_string()]).expect("apps publish is registered");
+        assert!(publish.opens(aoide_protocol::audit::Door::Daemon), "apps publish keeps the Daemon door");
+        let run = publish.flags.iter().find(|f| f.name == "run").expect("the run flag");
+        assert_eq!(run.doors, &[aoide_protocol::audit::Door::Cli][..], "--run is terminal-only");
+    }
+
     #[test]
     fn every_command_carries_the_json_flag_and_exit_codes() {
         let r = crate::commands::all();

@@ -1091,4 +1091,42 @@ mod tests {
         let mut r = Registry::new();
         r.arrange(Layout { tagline: "", sections: &[("S", &[("ghost", "")])] });
     }
+
+    /// Finding 9: `Command::invoke` is the one gate. A production call through a
+    /// registered handler skips the door check and the value validation, so no
+    /// production source outside this file may name `handler)(`. The one call in
+    /// this file is `invoke` itself. Each file's production half is the text
+    /// before its first `#[cfg(test)]`, the split the a2a tripwire uses too.
+    #[test]
+    fn no_production_source_calls_a_registered_handler_directly() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a crate's src is readable") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut files = Vec::new();
+        for krate in std::fs::read_dir(&crates).expect("the crates directory is readable") {
+            let src = krate.expect("a directory entry").path().join("src");
+            if src.is_dir() {
+                walk(&src, &mut files);
+            }
+        }
+        let mut offenders = Vec::new();
+        for file in files.iter().filter(|f| !f.ends_with("protocol/src/registry.rs")) {
+            let text = std::fs::read_to_string(file).expect("a source file is readable");
+            let production = text.split("#[cfg(test)]").next().unwrap_or_default();
+            for (n, line) in production.lines().enumerate() {
+                if line.contains("handler)(") {
+                    offenders.push(format!("{}:{}", file.display(), n + 1));
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "a handler is called without its gate: {offenders:?}");
+    }
 }

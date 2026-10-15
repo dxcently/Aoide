@@ -136,7 +136,6 @@ pub fn register_a2a_serve(r: &mut Registry) {
         implemented: true,
         handler: handle_a2a_serve,
         brief: "Serve conducted sessions over A2A (Agent2Agent).",
-        doors: &[Door::Cli],
     ));
 }
 
@@ -152,7 +151,6 @@ pub fn register_mail_serve(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_mail_serve,
-        doors: &[Door::Cli],
     ));
 }
 

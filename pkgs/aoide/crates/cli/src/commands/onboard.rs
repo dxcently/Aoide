@@ -309,12 +309,15 @@ fn resolve_harnesses(inv: &Invocation) -> Result<Vec<&'static str>, Outcome> {
 fn run_hooks_install(agent: &str, door: Door) -> Outcome {
     let path = vec!["hooks".to_string(), "install".to_string()];
     match crate::dispatch::registry().get(&path) {
-        Some(entry) => (entry.handler)(&Invocation {
-            path,
-            args: vec![agent.to_string()],
-            flags: BTreeMap::new(),
-            door,
-        }),
+        Some(entry) => entry.invoke(
+            "aoide",
+            &Invocation {
+                path,
+                args: vec![agent.to_string()],
+                flags: BTreeMap::new(),
+                door,
+            },
+        ),
         None => Outcome::error("onboard", "hooks.install is not registered (unexpected)"),
     }
 }

@@ -547,7 +547,7 @@ pub fn agent_card_from_commands<'a>(
     bind: &str,
     port: u16,
 ) -> Value {
-    let skills: Vec<AgentSkill> = commands
+    let mut skills: Vec<AgentSkill> = commands
         .filter(|c| c.implemented && c.opens(Door::A2a))
         .map(|c| {
             let dotted = c.dotted();
@@ -560,6 +560,20 @@ pub fn agent_card_from_commands<'a>(
             }
         })
         .collect();
+    // A2A runs no registry command, so no command opens to its door. The two
+    // things `message/send` reaches are described here by hand instead: the
+    // session inject and the harness spawn, neither through the registry.
+    for (name, description) in [
+        ("send", "Inject a message into a conducted session. It is held for approval unless the caller is that session's attested parent or sibling."),
+        ("spawn", "Start a conducted agent session from the configured harness, with the message as its first prompt."),
+    ] {
+        skills.push(AgentSkill {
+            id: name.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+            tags: vec![name.to_string()],
+        });
+    }
 
     let card = AgentCard {
         name: Some("aoide".to_string()),
@@ -6680,9 +6694,12 @@ mod tests {
         assert_eq!(card["url"], "http://127.0.0.1:8710/");
         assert_eq!(card["capabilities"]["streaming"], true);
 
+        // The registry's open commands first (only `foo.bar`: `foo.closed` is
+        // closed to A2A and `foo.stub` is not implemented), then the two the
+        // card describes itself, since A2A opens no registry door.
         let skills = card["skills"].as_array().unwrap();
-        assert_eq!(skills.len(), 1, "only the implemented command becomes a skill");
-        assert_eq!(skills[0]["id"], "foo.bar");
+        let ids: Vec<&str> = skills.iter().map(|s| s["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["foo.bar", "send", "spawn"], "{ids:?}");
         assert_eq!(skills[0]["name"], "foo.bar");
         assert_eq!(skills[0]["description"], "does a thing");
         assert_eq!(skills[0]["tags"][0], "foo");
@@ -6693,15 +6710,18 @@ mod tests {
         assert_eq!(card2, card);
     }
 
-    /// A2A runs no registry command: `message/send` routes straight to
-    /// `session_send`/spawn (CONTRACTS.md §6). So a command declaring the A2A
-    /// door changes the card and nothing else. This is a tripwire: if an
-    /// `invoke(` appears in this file's production code, a path has started
-    /// running registry commands and the declaration is no longer inert.
+    /// A2A runs no registry command and starts no spawn through one: its
+    /// `message/send` routes straight to `session_send` and the harness spawn
+    /// (CONTRACTS.md §6). This is a tripwire over the production half of this
+    /// file: a call into the registry gate, or into the conduct spawn that a
+    /// registry command would reach, means a path has started running commands
+    /// the A2A door never declared.
     #[test]
     fn a2a_runs_no_registry_command() {
         let production = include_str!("a2a.rs").split("#[cfg(test)]").next().unwrap();
-        assert!(!production.contains(".invoke("), "a2a.rs must not run a registry command");
+        for reach in [".invoke(", "dispatch(", "handler)(", "session_spawn", "launch_session"] {
+            assert!(!production.contains(reach), "a2a.rs must not reach `{reach}`: A2A runs no registry command");
+        }
     }
 
     // (b) canonical_state -> TaskState mapping, incl. needs_sudo precedence.

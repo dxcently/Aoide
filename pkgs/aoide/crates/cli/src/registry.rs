@@ -593,6 +593,22 @@ mod tests {
         assert_eq!(got, expected, "MCP-open set drifted from the golden snapshot");
     }
 
+    /// Findings 2 and 10: A2A opens no registry command, because its card
+    /// describes `send` and `spawn` itself. The daemon hop keeps the serve
+    /// commands it had before the door policy, so the Daemon door still reaches
+    /// them, with the same Ok answer the handler always gave there.
+    #[test]
+    fn a2a_opens_no_registry_command_and_the_daemon_keeps_its_serve_commands() {
+        let r = crate::commands::all();
+        assert!(r.commands().all(|c| !c.opens(aoide_protocol::audit::Door::A2a)), "A2A declares no registry command");
+        for path in [["a2a", "serve"], ["mail", "serve"]] {
+            let path: Vec<String> = path.iter().map(|s| s.to_string()).collect();
+            let c = r.get(&path).expect("the serve command is registered");
+            assert!(c.opens(aoide_protocol::audit::Door::Daemon), "{path:?} keeps the Daemon door");
+            assert!(!c.opens(aoide_protocol::audit::Door::Mcp), "{path:?} stays closed to MCP");
+        }
+    }
+
     #[test]
     fn every_example_parses() {
         aoide_test_support::registry_walk::every_example_parses("aoide", &crate::commands::all());

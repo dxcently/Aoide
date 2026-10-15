@@ -623,8 +623,8 @@ Contract guarantees:
   version bump, same additive discipline as §1/§4's optional tiers — it lets
   a discovery consumer filter to only the live commands without a second
   command inventory. The A2A AgentCard (§6) is the first such consumer: its
-  `skills` list is exactly the commands with `implemented: true` and `doors`
-  naming `a2a`.
+  `skills` list is the commands with `implemented: true` and `doors` naming
+  `a2a`, then `send` and `spawn`, which the card describes by hand (see §6).
 - `examples` (optional string array) — invocation samples shown by
   `aoide <command> --help`. **Additive**, same discipline as `implemented`:
   omitted from `schema --json` entirely when empty, so a command without
@@ -7227,10 +7227,11 @@ Server-Sent Events. The MVP door serves exactly:
   advertised skills: The `schema --json` command entries carry an `implemented`
   boolean (§3) and a `doors` list (§3), and the card filters on both: a skill
   is a command that is implemented and declares `a2a`, so stub commands and
-  commands closed to A2A are never advertised. A2A itself runs no registry
-  command; `message/send` routes straight to the same gated send and spawn
-  paths, so declaring `a2a` changes what the card says, not what the door can
-  reach.
+  commands closed to A2A are never advertised. No command declares `a2a`: A2A
+  runs no registry command, and `message/send` routes straight to the gated
+  send and spawn paths. So the card lists those two by hand, described rather
+  than opened, and a path that starts running a registry command from A2A is
+  a tripwire failure (`a2a_runs_no_registry_command`).
 
 - **`message/send`** — invoke; returns a Task. Execution is described under
   "Execution: `message/send`" below.
