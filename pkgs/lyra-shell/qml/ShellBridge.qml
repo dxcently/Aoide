@@ -214,6 +214,7 @@ QtObject {
     //   bridge.riceDraft("enter", "draft-2")  // route the stage into a draft
     //   bridge.riceDraft("new")               // mint the next draft-<n>, enter it
     //   bridge.riceDraft("save")              // snapshot the stage as a draft
+    //   bridge.riceDraft("drop", "draft-2")   // delete a saved draft
     //
     // `riceMenu` answers like traceSession: `cb` EXACTLY ONCE, on its own
     // throwaway socket, no replay, the daemon's children bounded
@@ -232,10 +233,11 @@ QtObject {
     // name only for "stage" with a non-empty string, so the daemon drops the
     // line instead of staging a song called "undefined". `riceDraft` `enter`
     // and `new` from the locked declarative mode unlock it first, so a caller
-    // re-reads riceMenu to see what happened; `save` is refused there (toast:
-    // unlock first). `enter` is enter-or-create: the CLI forks the stage into a
-    // name that does not exist yet, so a stale row comes back as a copy, not a
-    // refusal. Only `enter` takes a name.
+    // re-reads riceMenu to see what happened; `save` and `drop` are refused
+    // there (toast: unlock first). `enter` is enter-or-create: the CLI forks the
+    // stage into a name that does not exist yet, so a stale row comes back as a
+    // copy, not a refusal. `drop` of a missing draft or of the draft in force is
+    // the CLI's refusal, toasted. Only `enter` and `drop` take a name.
     function riceMenu(callback) {
         _ask({ cmd: "ricemenu" }, callback,
              { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
@@ -250,7 +252,7 @@ QtObject {
 
     function riceDraft(action, name) {
         var wanted = { cmd: "ricedraft", action: "" + action }
-        if (action === "enter" && typeof name === "string" && name.length > 0)
+        if ((action === "enter" || action === "drop") && typeof name === "string" && name.length > 0)
             wanted.name = name
         sendCommand(wanted)
     }
