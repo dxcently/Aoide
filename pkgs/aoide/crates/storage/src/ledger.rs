@@ -66,7 +66,7 @@ pub struct LedgerEntry {
     pub origin: Option<String>,
     /// Projected verbatim from `SessionRecord.restore` (P-C5,
     /// durable-sessions plan) — a conducted terminal's continuously-captured
-    /// cwd/idle/argv/typed at the exact instant it left the roster, `None`
+    /// cwd/idle/argv at the exact instant it left the roster, `None`
     /// for every non-shell session and every entry predating this field.
     /// Always serializes (never `skip_serializing_if`), same
     /// closed-historical-record discipline every other field here holds —
@@ -162,7 +162,6 @@ mod tests {
                 cwd: Some("/home/khoa/Aoide".to_string()),
                 idle: true,
                 argv: None,
-                typed: Some("cargo test -p aoide-conduct".to_string()),
             }),
         };
         append_ledger_entry(&entry).unwrap();
@@ -231,6 +230,49 @@ mod tests {
         assert!(line.contains("\"restore\":null"), "serialised: {line}");
     }
 
+    /// A ledger line written while the typed capture existed keeps its `typed`
+    /// key on disk, forever: the ledger is append-only. It still reads back
+    /// with the key dropped, and a line written through the real appender
+    /// never carries one.
+    #[test]
+    fn a_legacy_typed_key_in_a_ledger_line_reads_back_and_nothing_new_writes_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let state = unique_state("legacy-typed");
+        std::fs::create_dir_all(&state).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_STATE_DIR"]);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let mut legacy = serde_json::to_value(&LedgerEntry {
+            session_id: "s-legacy".to_string(),
+            restore: Some(RestoreSnapshot { cwd: Some("/w".into()), idle: true, argv: None }),
+            ..Default::default()
+        })
+        .unwrap();
+        legacy["restore"]["typed"] = serde_json::json!("cargo test");
+        std::fs::write(session_ledger_path(), format!("{legacy}\n")).unwrap();
+
+        let before = read_ledger().unwrap();
+        assert_eq!(before.len(), 1, "the legacy line must parse");
+        assert_eq!(
+            before[0].restore,
+            Some(RestoreSnapshot { cwd: Some("/w".into()), idle: true, argv: None })
+        );
+
+        append_ledger_entry(&LedgerEntry {
+            session_id: "s-new".to_string(),
+            restore: Some(RestoreSnapshot { cwd: Some("/w".into()), idle: true, argv: None }),
+            ..Default::default()
+        })
+        .unwrap();
+        let raw = std::fs::read_to_string(session_ledger_path()).unwrap();
+        let new_line = raw.lines().last().unwrap();
+        assert!(new_line.contains("s-new"), "new line: {new_line}");
+        assert!(!new_line.contains("typed"), "new line: {new_line}");
+        let after = read_ledger().unwrap();
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[1].session_id, "s-new");
+        std::fs::remove_dir_all(&state).ok();
+    }
     #[test]
     fn an_old_line_with_no_restore_key_parses_as_none() {
         // A ledger line written before this field existed has no `restore`

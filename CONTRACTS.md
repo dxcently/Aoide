@@ -825,10 +825,8 @@ count.
   snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
   running re-execs with `--yes --submit` (never for a recorded `sudo …`,
-  which only restores the cwd); an idle session's clean unsubmitted
-  `typed` line preloads with `--yes` and permanently no `--submit`,
-  so it sits in the new prompt until a human presses Enter; idle with no
-  `typed` delivers nothing. Also the command core the daemon's own boot-time
+  which only restores the cwd); an idle session delivers nothing, its cwd
+  alone is restored. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -2210,13 +2208,15 @@ outside this proof, each under its own rule. `aoide send` and `aoide spawn
 --prompt` passes `--yes`, so no human approves it); the caller is whatever process
 ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
-boot resurrect retypes a shell's own recorded line, never for `sudo`
-(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated as one: a symlink named `claude` that points at `bash`, or a script named `claude`
-that execs a shell, passes it. It rejects the launchers the walk does not model
-and a label that does not match the wrap. It does not stop a same-uid process
-that names a shell after a harness; for that class the defence is inert content,
-since every line takes one pass as it is written (`wire_line`), and every shell
-metacharacter in it is made inert, with `!` and `"` among them.
+boot resurrect re-executes a session's recorded foreground command with Enter,
+never for `sudo`; an idle session gets its cwd only, with nothing typed
+(`resurrect.rs::restore_delivery`). The proof is that basename, and it is stated
+as one: a symlink named `claude` that points at `bash`, or a script named
+`claude` that execs a shell, passes it. It rejects the launchers the walk does
+not model and a label that does not match the wrap. It does not stop a same-uid
+process that names a shell after a harness; for that class the defence is inert
+content, since every line takes one pass as it is written (`wire_line`), and
+every shell metacharacter in it is made inert, with `!` and `"` among them.
 
 The refusals, in order, are `conduct.rs::auto_type_refusal`'s: a shell first
 (`agent` `""` or `shell`, a `restore` snapshot, or a `wrappedProgram` that is a
@@ -3000,7 +3000,7 @@ captured restore snapshot, written change-only by `aoide-conduct`'s PTY
 tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 
 ```json
-"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null, "typed": "cargo test -p aoide-conduct" }
+"restore": { "cwd": "/home/khoa/Aoide", "idle": true, "argv": null }
 ```
 
 - `cwd` — the shell's live working directory at the last tick (`None` when
@@ -3016,15 +3016,15 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.
-- `typed` — the reconstructed unsubmitted prompt line, REFUSAL-based: `Some`
-  only for a clean, unedited keystroke run since the last submit (bytes from
-  BOTH real stdin and an injection connection count, since both land in the
-  same shell readline buffer); any readline-editing byte (an escape
-  sequence, `^R`, Tab, `^U`/`^W`) or invalid UTF-8 poisons it to `None`
-  instead of guessing. Only ever populated when `idle` is true — a shell
-  mid-command has no prompt line. A silently WRONG `typed` would put text
-  the operator never composed one keystroke from running; `None` is a fully
-  acceptable product of this capture, a guess is not.
+
+A record that still carries a `typed` key inside `restore` loads with that
+key dropped; no writer emits it.
+
+`argv` and the session log (`state/sessions/<id>.log`) are a terminal record,
+like shell history: a secret written on a command line is stored with `argv`,
+here and in the ledger line, and whatever the pty echoed is in the log. The log
+holds the pty's output only, so input a program reads with echo off never
+reaches it. Both are private to the user under `state/`.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like
@@ -4484,7 +4484,7 @@ this field existed, tolerated on read the same as any other field here).
 
 `restore` (P-C5, durable-sessions plan) is `null` for every non-shell
 session and every line predating this field, and otherwise the SAME
-`{cwd, idle, argv, typed}` object `sessions.json`'s own `restore` field
+`{cwd, idle, argv}` object `sessions.json`'s own `restore` field
 carries (see above) — projected verbatim off `SessionRecord.restore` at the
 exact instant `ledger_session_exit` appends this line, never re-derived and
 never a `/proc` read here: the reap sweep's own ordering

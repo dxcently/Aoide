@@ -586,7 +586,7 @@ by decision — no embedded database yet
   didn't mint itself at the door — env AND the unsealed ledger both.
   `records::RestoreSnapshot`/`SessionRecord.restore`/`LedgerEntry.restore`
   (P-C5, durable-sessions plan) are a conducted TERMINAL's continuously-
-  captured `{cwd, idle, argv, typed}` snapshot — the SAME `RestoreSnapshot`
+  captured `{cwd, idle, argv}` snapshot — the SAME `RestoreSnapshot`
   type embedded on both, `origin`'s "additive live field, always-serialized
   ledger field" shape again, except `RestoreSnapshot`'s OWN fields never use
   `skip_serializing_if` in EITHER home, so a populated snapshot reads the
@@ -594,9 +594,8 @@ by decision — no embedded database yet
   field rather than inferred from `state`, deliberately: the reap sweep
   overwrites `state` to `"done"` before its ledger write, so idleness would
   otherwise be unrecoverable by the time `ledger_session_exit` runs.
-  `aoide-conduct` is the sole writer (its PTY tick, ~1 Hz) and the sole
-  reader of `typed`'s raw keystroke stream — this crate only holds the
-  shape, never the capture logic.
+  `aoide-conduct` is the sole writer (its PTY tick, ~1 Hz); this crate only
+  holds the shape, never the capture logic.
 - `undying` — the undying mark (durable-sessions plan, P-C1; renamed from
   "carry" at command-defrag lane U1, 2026-08-27): `state/undying.json`, the
   set of session ids marked durable so a project's whole undying set can be

@@ -1088,12 +1088,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   re-execs it (`--yes --submit`) — EXCEPT when `argv[0]`'s basename is
   `sudo` (`is_sudo_argv`, the orchestrator's ruling on durable-sessions
   plan open knob 5): a privileged command is never re-exec'd unattended, so
-  only the cwd restores. Idle (`idle: true`) with a clean `typed` line
-  preloads it (`--yes`, and — permanently — no `--submit`): the text sits
-  in the new prompt until a human presses Enter, never running itself. Idle
-  with no `typed` delivers nothing; a terminal reopened at its own cwd is
-  already the complete answer. See AGENTS.md for why the two branches are
-  never unified behind a shared boolean parameter.
+  only the cwd restores. Idle (`idle: true`) delivers nothing; a terminal
+  reopened at its own cwd is already the complete answer.
   **Bare-manifest mode (U2, command-defrag lane U):** `resurrect` with NONE
   of `--project`/`--all`/`--id` walks up from cwd
   (`aoide_storage::manifest::walk_up`) for the nearest `.aoide/
@@ -1157,8 +1153,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
   WRAPPED ARGV, never the agent label (task #100).**
   `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz
-  refresh tick, `typed_capture_active`'s buffer, the restore snapshot) comes
-  from the SAME `program_is_a_shell(&inv.args)` every refusal lane reads —
+  refresh tick and the restore snapshot) comes from the SAME
+  `program_is_a_shell(&inv.args)` every refusal lane reads —
   the program's own basename against the shell list, with the launchers a
   shell arrives through (`env`, `nix develop -c`, `setsid`, `timeout`,
   `nice`, …) resolved to what they forward to — never `agent == "shell"`.
@@ -1183,26 +1179,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   process group. `idle` is captured as its OWN field rather than read back
   off `state` later: `reap.rs`'s sweep overwrites `state` to `"done"`
   BEFORE its ledger write, so idleness is unrecoverable from `state` by
-  then. This is a CONTINUOUS capture, not a reap-time snapshot — by the
-  time a sweep condemns a session its process is already gone (the exact
-  signal it reaped on), so a `/proc` read there returns nothing, every
-  time; `doc.rs::ledger_session_exit` projects the record's last-captured
-  `restore` verbatim into the ledger line, no new call site. `typed` (the
-  reconstructed unsubmitted prompt line) is REFUSAL-based: `conduct_
-  multiplex` feeds every byte written to the master — from BOTH real stdin
-  and an injection connection, since both land in the same shell readline
-  buffer — into a capped `TypedLineBuffer`; `\r`/`\n` submit-clears it, and
-  ANY other control byte (an escape sequence, `^R`, Tab, `^U`/`^W`) or
-  invalid UTF-8 POISONS the current line to `None` rather than guessing.
-  `typed_capture_active` gates the buffer's very existence to an
-  interactive shell (`is_shell && read_stdin`) — a headless conduct never
-  reads stdin, so it never populates `typed`. See AGENTS.md for why this
-  is refusal-based, not best-effort. The same verdict is readable OFF a
-  record as `wrapped_program_is_a_shell(&rec)` (`restore.is_some()`), which
-  is how a lane that was not there at spawn time — ping-back, doorbell,
-  the A2A door — can refuse to type into a shell without knowing the
-  wrapped argv: stamped on the multiplexer's opening tick, so it is present
-  from the start of a live shell session.
+  then. This is a CONTINUOUS capture, not a reap-time snapshot — by the time a
+  sweep condemns a session its process is already gone (the exact signal it
+  reaped on), so a `/proc` read there returns nothing, every time;
+  `doc.rs::ledger_session_exit` projects the record's last-captured `restore`
+  verbatim into the ledger line, no new call site. The same verdict is
+  readable OFF a record as `wrapped_program_is_a_shell(&rec)`
+  (`restore.is_some()`), which is how a lane that was not there at spawn time
+  — ping-back, doorbell, the A2A door — can refuse to type into a shell
+  without knowing the wrapped argv: stamped on the multiplexer's opening tick,
+  so it is present from the start of a live shell session.
 - **Session origin (P-P3, `docs/architecture/PAIRING.md` decision 7;
   write-authority tightened at LANE IDENTITY P-ID0, G16/G5):**
   `session_store.rs::stamp_origin` (now `pub`, crossing the crate boundary)
