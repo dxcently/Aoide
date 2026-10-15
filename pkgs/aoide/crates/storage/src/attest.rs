@@ -140,6 +140,55 @@ pub fn pid_starttime(pid: i32) -> Option<u64> {
     aoide_protocol::win_proc::start_time(pid as u32)
 }
 
+/// The starttime of `pid` when it names a live process, read from ONE
+/// `/proc/<pid>/stat` read, so the state and the starttime come from the same
+/// instant. A zombie (exited, not yet reaped) is `None`: `kill(pid, 0)` still
+/// answers for it, but it runs nothing.
+#[cfg(unix)]
+pub fn live_pid_starttime(pid: i32) -> Option<u64> {
+    live_starttime_of_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+/// [`live_pid_starttime`]'s parse, over one `/proc/<pid>/stat` line. The comm
+/// sits in parentheses and may hold any byte, `)` included, so the fields start
+/// after the LAST `)`: a process named `x) Z 1 2` is not a zombie.
+#[cfg(unix)]
+fn live_starttime_of_stat(stat: &str) -> Option<u64> {
+    let mut fields = stat[stat.rfind(')')? + 1..].split_whitespace();
+    if matches!(fields.next()?, "Z" | "X") {
+        return None;
+    }
+    fields.nth(18)?.parse().ok()
+}
+
+/// The Windows arm: liveness is asked by the same probe `pid_is_alive` uses,
+/// because a process that has exited but is still held open still answers
+/// `GetProcessTimes`.
+#[cfg(windows)]
+pub fn live_pid_starttime(pid: i32) -> Option<u64> {
+    aoide_protocol::win_proc::is_alive(pid as u32)
+        .then(|| aoide_protocol::win_proc::start_time(pid as u32))
+        .flatten()
+}
+
+/// The kernel's boot id, the fact that separates this boot's processes from a
+/// previous boot's: `/proc` starttimes count clock ticks since boot, so a pid
+/// and starttime from a previous boot can match a live process now. `None`
+/// where it cannot be read, and then no record is protected. Windows starttimes
+/// are absolute `FILETIME`s, unique per process instance, so one fixed value
+/// stands in for the boot there.
+#[cfg(unix)]
+pub fn boot_id() -> Option<String> {
+    let id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let id = id.trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+#[cfg(windows)]
+pub fn boot_id() -> Option<String> {
+    Some("windows".to_string())
+}
+
 // ── seal verification over a live record ─────────────────────────────────
 
 /// Reconstruct the exact [`SealedIdentity`] `rec.seal` was signed over and
@@ -316,8 +365,9 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> Option<UnixStre
 /// `None` as "cannot verify, so treat the caller as UNIDENTIFIED"; there
 /// is no safe fallback for an unverifiable signature. Deliberately NOT
 /// cached process-wide, and never a file read — module doc's "live round
-/// trip" rule; the same-uid unlink-then-bind honesty note on this channel
-/// lives in `CONTRACTS.md`'s identity section, unchanged by the move.
+/// trip" rule; the same-uid honesty note on this channel (the open hole,
+/// `docs/architecture/AOIDED.md` "Socket") lives in `CONTRACTS.md`'s identity
+/// section, unchanged by the move.
 ///
 /// **Both hosts, one body**: the channel is an `AF_UNIX` socket on either
 /// one (`std`'s on Unix, `aoide_protocol::win_unix`'s native binding on
@@ -412,6 +462,19 @@ mod tests {
         let chain = pid_ancestry(me);
         assert_eq!(chain.first(), Some(&me), "the walk is self-first");
         assert!(chain.len() <= 64, "the walk is bounded");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_starttime_reads_past_a_comm_that_looks_like_a_state() {
+        // The comm is `x) Z 1 2`: the last `)` closes it, the state is S, and
+        // field 22 (after the state) is the starttime.
+        let live = "4242 (x) Z 1 2) S 1 4242 4242 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 98765 0";
+        assert_eq!(live_starttime_of_stat(live), Some(98765));
+        let zombie = "4242 (x) Z 1 2) Z 1 4242 4242 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 98765 0";
+        assert_eq!(live_starttime_of_stat(zombie), None, "a real Z state is not alive");
+        let exited = "4242 (x) Z 1 2) X 1 4242 4242 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 98765 0";
+        assert_eq!(live_starttime_of_stat(exited), None, "a real X state is not alive");
     }
 
     #[test]

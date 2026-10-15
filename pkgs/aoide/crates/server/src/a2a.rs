@@ -15,23 +15,22 @@
 //!     command registry, filtered to `implemented: true`.
 //!   - `POST /` — JSON-RPC 2.0: `tasks/get` (real), `message/send` (real —
 //!     inject into a known conductable session, or spawn a freshly conducted
-//!     one; [`decide_send_action`] below — a non-loopback Inject queues
-//!     pending unless its rails earn delivery (an `autogate` record's address
-//!     or token, judged by that record's HOME mesh; CONTRACTS.md §6 amendment
-//!     2026-08-14 and P-CHARTER; see [`ConnOrigin`]/[`should_deliver_now`]),
+//!     one; [`decide_send_action`] below. Every Inject parks in
+//!     `state/stage/pending.json` for a human: this door cannot approve a
+//!     gated send, whatever node a caller resolves to (see [`message_send`]),
 //!     `aoide/graphSummary` (real — CONTRACTS.md §7: wraps
 //!     [`resolve_graph_document`] in the federation envelope; see
 //!     [`graph_summary`]), anything else → `-32601 method not found`.
 //!
 //! A forwarded A2A message's TEXT is untrusted DATA, never executed as a
-//! command — `message/send`'s inject path types it into a target session
-//! exactly like `send` (in fact it reuses
-//! [`aoide_conduct::graph::session_send`] for that), and its spawn path never
-//! runs a client-supplied command: it only ever launches the
+//! command. `message/send`'s inject path parks the text through
+//! [`aoide_conduct::graph::session_send`], the same gated door `send` uses,
+//! and a human's approval is what types it. Its spawn path never runs a
+//! client-supplied command: it only ever launches the
 //! operator-configured `aoide.a2a.spawnAgent` executable (a rebuild-gated nix
-//! option — the user's admission), with the client-supplied prompt injected
-//! as its first turn. See [`decide_send_action`]'s doc comment for the full
-//! security model.
+//! option — the user's admission), with the client-supplied prompt held in
+//! `pending.json` as its first turn until a human approves it. See
+//! [`decide_send_action`]'s doc comment for the full security model.
 //!
 //! Extracted from root `src/a2a.rs` (Phase 4c restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md) — this is the SERVER half only. The
@@ -50,8 +49,9 @@
 //! (they only ever touched session state), so they're untouched.
 
 use aoide_conduct::graph::{
-    canonical_state, load_stage, now_iso_utc, resolve_graph_document, session_send, sessions_path,
-    Project, ProjectsFile, SessionRecord, SessionsFile,
+    canonical_state, hold_pending, load_stage, now_iso_utc, resolve_graph_document,
+    session_send, sessions_path, HoldRefused, Project, ProjectsFile, SessionRecord, SessionsFile,
+    PENDING_FILE_FULL, PENDING_FULL, PENDING_TOO_LARGE,
 };
 use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
@@ -67,7 +67,6 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 #[cfg(unix)]
-use std::os::unix::net::UnixStream;
 #[cfg(windows)]
 use aoide_protocol::win_unix::UnixStream;
 use std::path::{Path, PathBuf};
@@ -255,8 +254,8 @@ pub fn resolve_spawn_cwd(inv: &Invocation) -> String {
 /// Resolve `aoide.a2a.tokenFile`: the path to a file holding the shared
 /// secret a caller must present (`Authorization: Bearer <token>`) to be
 /// trusted as an authenticated caller (CONTRACTS.md §6 amendment,
-/// 2026-08-18) — required before Spawn runs at all, and the switch that
-/// decouples loopback's free pass once it's set (see [`effective_origin`]).
+/// required before Spawn runs at all, and the switch that
+/// stops loopback standing in for a caller once it's set.
 /// `--token-file` flag → `AOIDE_A2A_TOKEN_FILE` env (set by the `aoide-a2a`
 /// systemd unit) → default `""` (empty = no token required — today's fully
 /// open behavior, unchanged). Mirrors [`resolve_spawn_agent`]'s exact
@@ -376,29 +375,26 @@ pub fn resolve_node_name(inv: &Invocation) -> String {
 
 // ── Where a `message/send`/`message/stream` connection originated ───────────
 //
-// CONTRACTS.md §6 amendment (2026-08-14): the non-loopback pending-gate fix.
 // A connection's ORIGIN (not any client-supplied field — TCP `peer_addr()`,
-// which a hostile client cannot spoof from off-box) decides whether an
-// Inject auto-delivers or queues pending, exactly the same shape `graph
-// send`'s own gate already resolves (`conduct::graph::send::send_gate`).
+// which a hostile client cannot spoof from off-box) is an attribution input
+// only, and the key of an unproven caller's bucket in the pending queue
+// ([`inject_source`]). Nothing here delivers: every network send parks in
+// `pending.json`.
 
 /// Where one `message/send` (or `message/stream`) request's TCP connection
 /// came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnOrigin {
-    /// The connection's peer IP is loopback (127.0.0.0/8, `::1`) — today's
-    /// trusted-by-bind-address default. UNCHANGED behavior: auto-delivers,
-    /// exactly as before this amendment (hard regression requirement).
+    /// The connection's peer IP is loopback (127.0.0.0/8, `::1`). Loopback earns
+    /// nothing by its address: a tunnel that ends on loopback looks local, so
+    /// the address proves no identity.
     Loopback,
-    /// A non-loopback peer IP — gated UNLESS its rails earn auto-delivery:
-    /// the address must resolve to an `autogate` record in `state/nodes.json`
-    /// AND that record must answer under its HOME mesh's rules
-    /// ([`rail_admits`] — a pair mesh keeps the record's own flag as the whole
-    /// rule; a charter mesh wants its key on the line with `message`).
+    /// A non-loopback peer IP. The address can name a registered node (see
+    /// [`aoide_storage::node_store::resolve_node`]); it proves no identity by
+    /// itself, and an inject from it is recorded under `addr:<address>`, not
+    /// under that node.
     Remote(IpAddr),
     /// The peer address could not be determined (e.g. `peer_addr()` failed).
-    /// Fails SAFE: treated exactly like an unmatched [`Self::Remote`] — never
-    /// auto-delivered, never autogate-matched.
     Unknown,
 }
 
@@ -459,56 +455,24 @@ impl Listener {
     }
 }
 
-/// Should an Inject auto-deliver (`--yes`) rather than queue pending? Pure —
-/// unit-tested directly; the one place I/O enters is the caller, which
-/// resolves `deliver_match` from the call's rails. Loopback is unconditionally
-/// trusted (today's behavior, unchanged); a non-loopback or unknown-origin
-/// caller only bypasses the queue when its rails EARNED delivery —
-/// `deliver_match` is [`message_send`]'s `sig_autogate || rail_delivers`, NOT
-/// the bare `autogate_match`: the unsigned rails' match is what exempts a
-/// caller from the #50 uniform-response guard, while the RECORD they matched
-/// is judged by its HOME mesh (`rail_admits`: the charter's line, the shaped
-/// fail-closed arm, or a pair mesh's own flag), so an `autogate` record a
-/// charter no longer lists arrives here `false` and PENDS.
-fn should_deliver_now(origin: ConnOrigin, deliver_match: bool) -> bool {
-    match origin {
-        ConnOrigin::Loopback => true,
-        ConnOrigin::Remote(_) => deliver_match,
-        ConnOrigin::Unknown => false,
-    }
-}
-
-// ── Bearer-token authentication (CONTRACTS.md §6 amendment, 2026-08-18) ─────
+// ── Bearer-token authentication ──────────────────────────────────────────────
 //
-// The prior amendment (2026-08-14, above) trusted `ConnOrigin::Loopback`
-// unconditionally, on the assumption that only a genuinely local caller
-// could present it. Behind any reverse proxy or tunnel (`ssh -R`, a
-// tailscale funnel, cloudflared, nginx) that assumption is false: the
-// SERVER's end of the TCP connection sees the proxy's own loopback address
-// for every caller, so `classify_origin` can no longer distinguish "the
-// operator, locally" from "anyone who can reach the proxy". A token is the
-// signal that survives a proxy hop; ORIGIN alone no longer can, once one is
-// configured.
+// Behind any reverse proxy or tunnel (`ssh -R`, a tailscale funnel,
+// cloudflared, nginx) the SERVER's end of the TCP connection sees the proxy's
+// own loopback address for every caller, so `classify_origin` cannot tell
+// "the operator, locally" from "anyone who can reach the proxy". A bearer
+// token is the signal that survives a proxy hop.
 //
 // [`resolve_token_file`]/[`read_expected_token`] resolve the SERVER's own
-// expected token ONCE at `a2a serve` launch, exactly like `spawn_agent`. Two
-// separate things then key off it:
-//   - Whether the SPAWN arm may run at all ([`token_authorized`]) — the
-//     actual must-fix gap: `message/send`'s Spawn path was origin-blind
-//     entirely, gated only by `aoide.a2a.spawnAgent` being non-empty
-//     (rebuild-time only, no per-request gate whatsoever).
-//   - Whether ORIGIN still confers loopback's automatic trust for Inject
-//     ([`effective_origin`]) — once a token is configured, loopback stops
-//     being a trust signal, full stop: no separate opt-out, no
-//     `trustLoopback` bool to leave mis-set. A caller — local or not — must
-//     present the valid token to keep loopback's old free pass.
+// expected token ONCE at `a2a serve` launch, exactly like `spawn_agent`. It
+// gates the READ arms, `message/stream` as a whole and the full AgentCard
+// ([`token_authorized`]), and, once configured, it lets a caller past the
+// uniform-response guard in [`message_send`] that hides whether an
+// unauthenticated caller's `contextId` exists. Spawn never consults it: the
+// spawn gate is [`spawn_admitted`]'s signature.
 //
-// Separately, [`aoide_storage::node_store::autogated_node_token`] restores
-// PER-NODE identification for the non-loopback autogate match (replacing the
-// now-frequently-dead address match behind a proxy) — that one is keyed on
-// each registered node's OWN token, not this single server-wide expected
-// token, and works independently of whether this server-wide token is
-// configured at all (see `message_send` below).
+// Per-node bearers (a node's own `token_file`) are not this token. They are
+// matched by [`aoide_storage::node_store::resolve_node`]'s Token rung.
 
 /// The outcome of comparing a presented `Authorization: Bearer <token>`
 /// against the server's configured expected token. Pure — no I/O; the token
@@ -546,20 +510,19 @@ fn classify_token(expected: &str, presented: Option<&str>) -> TokenState {
 /// `-32005` error, not a silent fallback to the old open behavior. Pure —
 /// directly testable without a socket or a spawned process.
 ///
-/// One predicate guards two things (CONTRACTS.md §6 amendment, Phase G,
-/// 2026-08-20): the SPAWN arm of `message/send`, and the READ commands
-/// (`tasks/get`, `aoide/graphSummary`, `tasks/resubscribe`, `message/stream`).
-/// Before Phase G the reads were ungated even with a token set — harmless on
-/// loopback, but a whole-session-graph leak the moment the door faced a
-/// network. The gate is identical for both because the question is identical:
-/// does the caller hold a valid token when one is required?
+/// It guards the READ commands (`tasks/get`, `aoide/graphSummary`,
+/// `tasks/resubscribe`), `message/stream` as a whole, and the full AgentCard
+/// (CONTRACTS.md §6, "Read and card gating"). An ungated read is a
+/// whole-session-graph leak the moment the door faces a network. The SPAWN arm
+/// of `message/send` never consults it: [`spawn_admitted`] is the spawn
+/// gate.
 fn token_authorized(token_configured: bool, token_state: TokenState) -> bool {
     !token_configured || token_state == TokenState::Valid
 }
 
 /// May this caller use a READ arm? The bearer gate ([`token_authorized`]) OR a
 /// verified signature whose grant in the request's mesh holds `read`. The
-/// bearer exists to strip the loopback free pass from UNSIGNED callers, who
+/// bearer exists because UNSIGNED callers, who
 /// behind a tunnel or proxy all look loopback; a verified signature plus a
 /// grant is a stronger credential than the bearer, so it is governed by the
 /// grant alone. Writes never reach this predicate: spawn and inject keep their
@@ -569,70 +532,9 @@ fn read_admitted(bearer_ok: bool, caller: Option<SignedCaller<'_>>) -> bool {
 }
 
 /// The `-32005` unauthorized error every token-gated arm returns, so the code
-/// and message never drift between the spawn gate and the read gates.
+/// and message never drift between the read gates.
 fn unauthorized() -> (i64, String) {
     (-32005, "unauthorized: a valid A2A token is required".to_string())
-}
-
-/// The origin [`should_deliver_now`] actually sees. When no token is
-/// configured this is the IDENTITY function — `origin` passes through
-/// unchanged, so `should_deliver_now`'s own byte-identical-when-off
-/// regression pin holds by construction, not just by inspection. When a
-/// token IS configured, an origin that did NOT present a [`TokenState::Valid`]
-/// bearer is coerced to [`ConnOrigin::Unknown`] — deliberately reusing that
-/// variant's existing "never trusted, fails safe" arm in `should_deliver_now`
-/// rather than adding a fourth origin kind, since the resulting trust
-/// decision (never auto-deliver) is exactly the same either way. This is the
-/// "loopback stops being a trust signal" coupling: there is no code path
-/// where a token is required AND loopback still auto-delivers unauthenticated
-/// — the same `token_configured` bool drives both. Pure.
-fn effective_origin(origin: ConnOrigin, token_configured: bool, token_state: TokenState) -> ConnOrigin {
-    if token_configured && token_state != TokenState::Valid {
-        ConnOrigin::Unknown
-    } else {
-        origin
-    }
-}
-
-// ── Signed requests outrank loopback (CONTRACTS.md §6 amendment, 2026-08-26) ─
-//
-// An ssh `-L` port-forward delivers a tunneled node's packets from the FAR
-// box's own sshd, so `classify_origin` sees loopback for every tunneled
-// request regardless of who is really on the other end — the same proxy
-// ambiguity `effective_origin` above already resolves for a door-wide
-// token, now reachable without any token configured at all. A request
-// carrying a per-request signature that [`verify_signed_request`] already
-// verified is, by construction, a REMOTE node: [`origin_for_inject`] below
-// strips `ConnOrigin::Loopback`'s free pass from it before `should_deliver_
-// now` ever runs.
-
-/// The origin [`should_deliver_now`]'s Inject decision actually sees, once a
-/// verified per-request signature is factored in. Pure.
-///
-/// `signed_non_autogate` is `true` only when the caller both ran the request
-/// through [`verify_signed_request`] AND resolved it to a node the operator
-/// has NOT marked auto-deliver (`message_send` computes exactly
-/// `signed_caller.is_some() && !sig_autogate`). Such a caller is a remote
-/// node by construction, so it loses `ConnOrigin::Loopback`'s free pass:
-/// coerced to [`ConnOrigin::Unknown`], reusing that variant's existing
-/// fail-safe arm rather than inventing a fourth origin kind — exactly the
-/// move [`effective_origin`] already makes for an invalid door-wide token.
-///
-/// The exemption is load-bearing, not a convenience:
-/// `should_deliver_now(ConnOrigin::Unknown, _)` ignores `autogate_match`
-/// entirely, so coercing a signature-rung autogate node would leave it
-/// permanently undeliverable. It keeps riding the ordinary Loopback/Remote
-/// arms, which do consult `autogate_match`.
-///
-/// `false` therefore covers two callers: an unsigned request (`origin`
-/// passes through unchanged, so the unsigned path stays byte-identical) and
-/// an autogate-marked signed node.
-fn origin_for_inject(origin: ConnOrigin, signed_non_autogate: bool) -> ConnOrigin {
-    if signed_non_autogate {
-        ConnOrigin::Unknown
-    } else {
-        origin
-    }
 }
 
 // ── AgentCard (derived from the command registry, CONTRACTS.md §6) ──────────
@@ -873,7 +775,7 @@ impl Drop for OpeningTurnSlot {
 
 /// The opening-turn worker's whole life, in ONE function so its write order is
 /// a property of the code rather than of a closure's shape: stamp `pending`,
-/// wait for readiness and type, stamp the verdict, audit it. `pending` and the
+/// hold the turn for a human, stamp the verdict, audit it. `pending` and the
 /// verdict therefore come from the SAME thread in that order — nothing can
 /// land a verdict first and then be clobbered back to `pending` (branch
 /// re-review 2's L was a second writer of `pending`: the door's registration
@@ -883,19 +785,21 @@ impl Drop for OpeningTurnSlot {
 /// real waits.
 fn opening_turn_worker(
     id: String,
-    agent_cmd: String,
     prompt: String,
-    launch_at: String,
-    budget: Duration,
     audit_log: PathBuf,
     slot: OpeningTurnSlot,
+    from: Option<String>,
 ) {
     let _slot = slot;
     // The door's ack-path stamp can miss a record that registered after it;
     // this one closes that window. A no-op when the value is already `pending`,
     // and — being this thread's first write — always before the verdict below.
     aoide_conduct::graph::stamp_opening_turn(&id, "pending");
-    let word = spawn_inject_prompt(&id, &agent_cmd, &prompt, &launch_at, budget);
+    let word = if prompt.is_empty() {
+        "skipped-empty"
+    } else {
+        hold_opening_turn(&id, &prompt, from.as_deref())
+    };
     aoide_conduct::graph::stamp_opening_turn(&id, word);
     let _ = audit(
         &audit_log,
@@ -905,6 +809,21 @@ fn opening_turn_worker(
         word,
         &format!("opening turn for `{id}`: {word}"),
     );
+}
+
+/// The opening turn of a spawn this network door started, held rather than
+/// typed. The door cannot approve (`Door::can_approve`), so the prompt is queued
+/// for a human exactly like a send that did not clear the gate. Nothing is
+/// typed into the new session, and the verdict says so: `queue-full` when the
+/// node already holds the queue's per-source cap or the file's whole bound,
+/// `hold-failed` when the write itself failed or the prompt is over the queue's
+/// per-entry byte cap.
+fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>) -> &'static str {
+    match hold_pending(id, prompt, true, from) {
+        Ok(()) => "held-pending",
+        Err(HoldRefused::Full | HoldRefused::FileFull) => "queue-full",
+        Err(HoldRefused::Stage(_) | HoldRefused::TooLarge(_)) => "hold-failed",
+    }
 }
 
 /// One `status.message` for an opening-turn verdict — the A2A `Message` shape
@@ -1168,78 +1087,6 @@ fn paired_grant(nodes: &[aoide_storage::node_store::Node], mesh: &str, caller_ke
     Grant { caps }
 }
 
-/// **Does the record the UNSIGNED autogate rail resolved earn auto-delivery**
-/// — judged by the record's HOME mesh, because that rail carries no signed
-/// mesh of its own (the A3 review's finding 4; the same "judge the unnamed
-/// request by home" ruling [`effective_mesh`] implements).
-///
-/// ```text
-/// the record is judged by HOME's rules, never by the request (there is none):
-///   charter governs home ──> the record is VERIFIED, and its key is on the
-///                            charter's line WITH `message`, minus this box's
-///                            own `node allow … message off --mesh <home>`
-///   home charter-shaped,
-///   no decidable operator ─> NOTHING (pending — an undecidable key fails closed)
-///   home is a pair mesh ───> the record's own `autogate` flag, exactly as before
-/// ```
-///
-/// The third arm is deliberately NOT `paired_grant`: the pair mesh's rail rule
-/// has always been the operator's per-record flag, and this phase moves no
-/// pair-mesh behaviour. `verified` is required of a record that claims a
-/// charter LINE — a claim about a KEY — and never of a keyless record the rail
-/// matched by address: `node add --autogate` writes `verified: false`, so
-/// requiring it there would delete the rail rather than harden it.
-///
-/// The charter arm reuses [`grant_from`], so "the line minus local narrowing"
-/// has ONE implementation and the rail cannot drift from the door's own grant
-/// lookup. `record.verified` is asked of the MATCHED record — the one whose
-/// address or token the request presented — which is deliberately stricter
-/// than the identity-key union `grant_from` folds for refusals: the rail
-/// resolves a record, not a key.
-fn rail_admits(
-    nodes: &[aoide_storage::node_store::Node],
-    record: &aoide_storage::node_store::Node,
-    governing: Option<&aoide_storage::charter::Charter>,
-    shaped: bool,
-    mesh: &str,
-) -> bool {
-    if governing.is_none() {
-        return !shaped && record.autogate;
-    }
-    let Some(key) = record.pubkey.as_deref().filter(|k| !k.is_empty()) else {
-        return false;
-    };
-    record.verified && may_message(&grant_from(nodes, governing, shaped, mesh, key))
-}
-
-/// [`rail_admits`] with the disk reads: the matched record judged by its HOME
-/// mesh, resolved and read exactly the way the door's grant lookup resolves it
-/// (`governing` → `charter_shaped`) and exactly once per matched record. The
-/// rail carries no signed mesh, so home is the only mesh it can be judged by —
-/// the same "the unnamed case is judged by home's rules" reading
-/// [`grant_in_mesh`] makes, applied to the rail instead of to the grant.
-///
-/// **Home is READ here, never guessed** (review F6):
-/// [`aoide_storage::config::home_mesh`] answers the built-in default when
-/// `config.toml` will not load, so a box whose real `homeMesh` is a charter
-/// mesh — with an unreadable config — would be judged by the DEFAULT mesh's
-/// (pair) rules and deliver on the record's flag again. The rail therefore
-/// reads [`aoide_storage::config::home_mesh_fallible`] and PENDS on `Err`:
-/// an unreadable config has no answer to give, and the whole charter rule is
-/// exactly what a guessed mesh name would step around. (The GRANT lookup reads
-/// the same failable resolution now too — [`effective_mesh`] returns that
-/// `Err` and [`grant_in_mesh`] answers [`Grant::none`] — so the rail's `Err`
-/// arm and the grant's agree; a NAMED request still resolves from its own name
-/// without touching the config.)
-fn rail_admits_here(nodes: &[aoide_storage::node_store::Node], record: &aoide_storage::node_store::Node) -> bool {
-    let Ok(mesh) = aoide_storage::config::home_mesh_fallible() else {
-        return false;
-    };
-    let governing = aoide_storage::charter::governing(&mesh);
-    let shaped = aoide_storage::charter::charter_shaped(&mesh);
-    rail_admits(nodes, record, governing.as_ref(), shaped, &mesh)
-}
-
 /// The mesh a request acts in: the one it NAMED, or the home mesh
 /// ([`aoide_storage::config::home_mesh`], `[pairing] homeMesh`, default
 /// `home`) when it named none. The single place the unnamed case becomes a
@@ -1360,8 +1207,7 @@ fn output_read_admitted(read_ok: bool, caller: Option<SignedCaller<'_>>) -> bool
 /// session's FRAME (above), but only the node that spawned this child — the
 /// one whose key this door stamped when it admitted the spawn — may read what
 /// the child published for it. The comparison is the key, never the stored
-/// `node` label, for [`remote_parent_match`]'s own reason: a name follows a
-/// rename, a key is the identity.
+/// `node` label: a name follows a rename, a key is the identity.
 ///
 /// **The key is read off the RING first, the record second** ([`stamped_key`]):
 /// the ring outlives the record by design — that is the whole reason it exists
@@ -1813,7 +1659,7 @@ fn parse_message_send_params(
 
 /// The caller the `aoide/from` claim may be honoured for: the SIGNATURE rung's
 /// identity, and nothing else. `resolved` is `message_send`'s own resolution
-/// (which also feeds autogate/allows off the CURRENT registry) and `signed` the
+/// (which also feeds allows off the CURRENT registry) and `signed` the
 /// identity [`verify_signed_request`] proved — they agree by construction, the
 /// rung literally IS "a signature verified", and this match states that
 /// agreement instead of assuming it. A weaker rung (no resolution at all,
@@ -1851,10 +1697,8 @@ fn claimable_caller<'a>(
 /// predicate the client refuses its own unruly claim with) and a bad value is
 /// `-32602` — never silently dropped, per CONTRACTS.md §6. Refusing is the
 /// CALLER's decision, not this function's: `message_send` applies that error
-/// on the spawn side only, since the Inject arm consumes the claim as
-/// [`remote_parent_match`]'s comparison against a target record — where a
-/// malformed value is false rather than refused, exactly as an absent one is
-/// (S5).
+/// on the spawn side only. The Inject arm never reads the claim, so a malformed
+/// one there is not a refusal and not a delivery.
 fn claimed_remote_parent(
     caller: Option<SignedCaller<'_>>,
     claim: Option<&str>,
@@ -1884,82 +1728,14 @@ fn claimed_remote_parent(
     }))
 }
 
-/// Does THIS door's target prove the caller is its remote parent (P-RSA S5,
-/// CONTRACTS.md §6)? Pure over exactly three values, all of them facts the door
-/// already holds: the caller [`verify_signed_request`] proved (or `None` on
-/// every weaker rung), the caller's own `aoide/from` claim, and the TARGET
-/// record's stored `remoteParent` ([`session_remote_parent`]).
-///
-/// True only for all three at once, and the two equalities are each load-bearing:
-///
-/// - **`key` equality** is the whole security argument. The stored key was
-///   written by this door's own spawn path from the key that verified THAT
-///   request ([`claimed_remote_parent`]), so a caller can only ever match a
-///   child stamped with its own key — no node can steer another node's
-///   children, and no header, body field or registry rename changes that. The
-///   stored `node` NAME is deliberately not consulted: it is a label that
-///   follows a rename (the reader resolves the current name from the key, §4),
-///   while the key is the identity.
-/// - **`sessionId` equality** pins it to the ONE session the caller claims to
-///   have spawned. Without it, any holder of the key — i.e. the node itself,
-///   on any request — could autogate into every child it ever stamped, not
-///   just the one it is naming.
-///
-/// A `None` on either side is `false`, never a wildcard: an unsigned caller has
-/// no verified key to compare ([`claimable_caller`] hands one over for the
-/// signature rung only), a request with no claim asks for nothing, and a target
-/// with no `remoteParent` — a local session, or one spawned by anyone else —
-/// has nothing to match. Pure, so the whole table is provable without a socket,
-/// a stage file or a live registry entry.
-fn remote_parent_match(
-    caller: Option<&SignedCaller<'_>>,
-    claim: Option<&str>,
-    target: Option<&RemoteParent>,
-) -> bool {
-    match (caller, claim, target) {
-        (Some(caller), Some(claim), Some(target)) => {
-            target.key == caller.key && target.session_id == claim
-        }
-        _ => false,
-    }
-}
-
-/// The `remoteParent` a session record carries, by id — the target-side input
-/// of [`remote_parent_match`], read off `sessions.json` exactly as
-/// [`session_ref_lookup`] reads its own fields (same stage file, same one-file
-/// read per resolved id). `None` covers an unknown id, a record with no such
-/// field, and an unreadable stage: all three are "this door can prove no remote
-/// parent for that target", i.e. the same non-match, never a refusal.
-///
-/// One extra read, paid ONLY where it can change an outcome — inside the Inject
-/// arm, and only for a request that both carried a claim and proved a
-/// signature. Every other inject (and every spawn) reads exactly what it read
-/// before this phase.
+/// The `remoteParent` a session record carries, by id: the roster record's
+/// fallback inside [`stamped_key`], read off `sessions.json` the way
+/// [`session_ref_lookup`] reads its own fields. `None` covers an unknown id, a
+/// record with no such field, and an unreadable stage; all three mean "no
+/// stamped parent key", never a refusal.
 fn session_remote_parent(id: &str) -> Option<RemoteParent> {
     let sf: SessionsFile = load_stage(&sessions_path()).ok()?;
     sf.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.remote_parent.clone())
-}
-
-/// Whether `id`'s record is conducting a SHELL — the same read the ping-back
-/// and doorbell lanes make (`aoide_conduct::graph::wrapped_program_is_a_shell`,
-/// the record-side half of `program_is_a_shell`), so the whole box agrees
-/// on which sessions a submitted line must never reach.
-///
-/// Unlike [`session_remote_parent`], an unreadable stage answers **true**:
-/// this is a refusal's input, so "cannot tell" takes the safe arm — the same
-/// fail-safe direction `should_deliver_now(ConnOrigin::Unknown, _)` already
-/// takes one screen up. An unknown id (no record) answers `false` and is
-/// unreachable anyway: `decide_send_action` resolves through
-/// [`session_ref_lookup`] first, and a missing record is its own `Error` arm.
-fn session_wrapped_is_a_shell(id: &str) -> bool {
-    match load_stage::<SessionsFile>(&sessions_path()) {
-        Ok(sf) => sf
-            .sessions
-            .iter()
-            .find(|s| s.session_id == id)
-            .is_some_and(aoide_conduct::graph::wrapped_program_is_a_shell),
-        Err(_) => true,
-    }
 }
 
 fn unix_ts_now() -> u64 {
@@ -2006,22 +1782,6 @@ fn session_ref_lookup(id: &str) -> Option<SessionRef> {
     })
 }
 
-/// Deliver into a KNOWN, conductable session: reuse
-/// [`aoide_conduct::graph::session_send`] (the same gated injection door
-/// `send` uses) rather than reimplementing the socket write or its
-/// pending-queue.
-///
-/// `deliver_now` decides whether `--yes` is forced:
-/// - `true` (a loopback connection, or a non-loopback one from an
-///   `autogate`-marked node — [`should_deliver_now`]) forces delivery, same
-///   as this door's original behavior: `--submit` (the prompt is a full
-///   turn, not a keystroke), `--yes` (deliver now, don't queue).
-/// - `false` (a non-loopback, non-autogated connection — CONTRACTS.md §6
-///   amendment, 2026-08-14) OMITS `--yes` entirely: `session_send`'s own
-///   gate then does exactly what a local ungated `send` does — writes
-///   `pending.json` and reports `delivered:false`, never touching the
-///   socket. No pending-queue logic is reimplemented here.
-///
 /// Build a `submitted`-state Task keyed on `session_id`/`contextId`
 /// (NOT `task_get`, which would report the SESSION's current phase — an
 /// unrelated prior turn's state — rather than "this particular message is
@@ -2041,64 +1801,28 @@ fn submitted_task(session_id: &str) -> Value {
     serde_json::to_value(&task).expect("Task always serializes")
 }
 
-/// A delivered send returns the freshly-reloaded Task (unchanged from
-/// before). A held-pending send returns [`submitted_task`]'s Task so the
-/// synchronous JSON-RPC caller gets an honest immediate response;
-/// `tasks/get`/the SSE stream reflect the real session state once/if a
-/// human approves and delivers it.
-/// **Messaging plan P-M1, `state/mail/base.jsonl`**: this function files NO
-/// mailbase entry of its own. It builds a `send --id` [`Invocation`] and
-/// calls [`session_send`] just like `send` itself does — and since this
-/// invocation never carries a `--to` flag, `session_send` can only ever
-/// reach its LOCAL branch (`deliver_local`), which is one of the two places
-/// a delivered message gets filed (`aoide_conduct::graph::send::deliver_local`
-/// — see `aoide_storage::mail`'s module doc, and [`spawn_inject_prompt`]
-/// for the OTHER site: a brand-new spawned session's first turn, which
-/// cannot go through `deliver_local` at all — this function only ever
-/// injects into an ALREADY-REGISTERED session). So a remote node's message
-/// into an existing session lands in the mailbase through the exact same
-/// call `do_inject` already makes below; adding a second append here would
-/// double-file every A2A-delivered message. See
-/// `a_successfully_delivered_message_send_files_into_the_mailbase` below for
-/// the end-to-end proof.
-fn do_inject(
-    session_id: &str,
-    prompt: &str,
-    audit_log: &Path,
-    deliver_now: bool,
-    from: Option<&str>,
-) -> Result<Value, (i64, String)> {
+/// Queue an inject from this network door. The door never delivers, so the
+/// send is held in `pending.json` for a human to approve from a terminal or
+/// the conductor, and the caller gets [`submitted_task`]: the honest immediate
+/// answer. `tasks/get` and the SSE stream show the real state once a human has
+/// approved.
+///
+/// The send goes through [`session_send`], as `send` does, so approval and the
+/// mailbase filing at delivery (`deliver_local`) belong to the conductor. This
+/// invocation never carries `--to`, so `session_send` takes its local branch.
+/// `from` is the source [`inject_source`] derived, which `session_send` records
+/// on this door as given.
+fn do_inject(session_id: &str, prompt: &str, audit_log: &Path, from: &str) -> Result<Value, (i64, String)> {
     let mut flags = std::collections::BTreeMap::new();
     flags.insert("id".to_string(), session_id.to_string());
     flags.insert("submit".to_string(), "true".to_string());
-    if deliver_now {
-        flags.insert("yes".to_string(), "true".to_string());
-    }
     flags.insert("audit-log".to_string(), audit_log.to_string_lossy().into_owned());
-    // The resolved node's identity (P-P3, PAIRING.md decision 7), when the
-    // caller resolved to one (`aoide_storage::node_store::resolve_node` —
-    // ATTRIBUTION, not a gate, same posture `send --from` already
-    // documents): rides straight into `send`'s own EXISTING `--from`
-    // flag, so a node-driven send that lands in `pending.json` carries
-    // `"from": "node:<name>"` through the exact same field a local
-    // `--from`/`AOIDE_SESSION_ID` attribution already populates — no second
-    // attribution field invented.
-    // LANE IDENTITY P-ID3 (G9): when the caller resolved to NO attributable
-    // identity (`from` is `None` — an unpaired/unsigned node, or a resolved
-    // node this door chose not to attribute), the flag is stamped
-    // EXPLICITLY EMPTY rather than left absent. `session_send`'s own
-    // `resolve_sender` falls back to `AOIDE_SESSION_ID` off the calling
-    // process's env whenever `--from` is absent — and the "calling process"
-    // for an inbound A2A message is `aoide a2a serve` ITSELF, a long-lived
-    // process whose own ambient env has nothing to do with the remote node
-    // that just sent this message. Left alone, a remote inject could
-    // misattribute to whatever session id `a2a serve` happened to inherit
-    // at launch. `--from ""` is `resolve_sender`'s own documented
-    // "explicit no attribution" form (the same mechanism `session pending
-    // approve`'s re-drive already relies on) — it skips the env fallback
-    // outright rather than merely overwriting it, so this holds regardless
-    // of what `a2a serve`'s own env carries.
-    flags.insert("from".to_string(), from.unwrap_or_default().to_string());
+    // The source this door derived ([`inject_source`]): `session_send` reads
+    // `--from` as the entry's source on this door only because nothing a remote
+    // caller sends can reach a flag. It is never empty, so `resolve_sender`'s
+    // `AOIDE_SESSION_ID` fallback, off `a2a serve`'s own long-lived env, never
+    // applies.
+    flags.insert("from".to_string(), from.to_string());
     let inv = Invocation {
         path: vec!["send".to_string()],
         args: vec![prompt.to_string()],
@@ -2107,148 +1831,52 @@ fn do_inject(
     };
     let outcome = session_send(&inv);
     if outcome.status != Status::Ok {
-        return Err((-32603, outcome.message));
+        // Queue state answers uniformly (see `inject_answer`); an oversize
+        // prompt is a property of the caller's own text, so it gets its own
+        // code and reveals nothing about the queue.
+        let reason = outcome.data.as_ref().and_then(|d| d.get("reason")).and_then(Value::as_str);
+        let code = match reason {
+            Some(PENDING_FULL | PENDING_FILE_FULL) => QUEUE_FULL_CODE,
+            Some(PENDING_TOO_LARGE) => INVALID_PARAMS_CODE,
+            _ => -32603,
+        };
+        return Err((code, outcome.message));
     }
-    let delivered = outcome
-        .data
-        .as_ref()
-        .and_then(|d| d.get("delivered"))
-        .and_then(Value::as_bool)
-        .unwrap_or(deliver_now);
-    if delivered {
-        task_get(session_id)
-    } else {
-        Ok(submitted_task(session_id))
+    Ok(submitted_task(session_id))
+}
+
+/// The source a held inject is recorded under: this door's own account of who
+/// sent it, which the queue counts against its per-source cap and shows the
+/// approver as the sender. A caller that PROVED a node gets `node:<name>`: a
+/// verified signature, or the bearer of a `verified` node (the rungs that name
+/// a node only the real one can speak as). Every other caller, the address
+/// rung included, gets `addr:<address>`: an address match names a node's URL,
+/// not the caller behind it, so it neither borrows the node's name nor fills
+/// the node's bucket. `loopback` and `unknown` are one bucket each. Pure.
+fn inject_source(
+    resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+    origin: ConnOrigin,
+) -> String {
+    use aoide_storage::node_store::NodeRung;
+    match resolved {
+        Some((node, NodeRung::Signature)) => format!("node:{}", node.name),
+        Some((node, NodeRung::Token)) if node.verified => format!("node:{}", node.name),
+        _ => match origin {
+            ConnOrigin::Remote(ip) => format!("addr:{}", ip.to_canonical()),
+            ConnOrigin::Loopback => "addr:loopback".to_string(),
+            ConnOrigin::Unknown => "addr:unknown".to_string(),
+        },
     }
 }
 
-/// Best-effort: wait for a just-spawned conducted session to be READY to take
-/// a turn, then connect to its control socket and type `prompt` as its first
-/// turn — the same connect-and-retry shape
-/// `aoide_conduct::graph::conduct`'s own PTY-injection test uses (there,
-/// proving the production socket-write path; here, actually driving it). A
-/// missed connect after the retry budget is tolerated: the session still
-/// exists and is `conductable`, just without its opening turn typed in — a
-/// client can always follow up with a plain `send`/another
-/// `message/send`.
-///
-/// **Readiness comes FIRST** ([`aoide_conduct::graph::wait_ready`], whose fact
-/// is the target harness's own `AgentProfile::readiness`), because a bound
-/// socket is not a started agent: this door used to type at the socket the
-/// instant it appeared, which for a harness still drawing its TUI put the
-/// opening turn into a composer that was not there yet and dropped its submit
-/// keystroke — the live 2026-09-26 defect `spawn --prompt` fixed. A target
-/// that never becomes ready within `ready_budget` is typed at by NOTHING and
-/// files NO receipt: an unacknowledged letter that the sender can retry, never
-/// a receipt for a turn that never started. `ready_budget` is a parameter, not
-/// a hardcoded read of the constant, so a test can pass an observable one
-/// directly — [`do_spawn`] always passes
-/// [`aoide_conduct::graph::READY_BUDGET`].
-///
-/// **Deliberately a RAW socket write, not `session_send`/`deliver_local`.**
-/// `session_send` requires a `SessionRecord` already present in
-/// `sessions.json` with `conductable:true` and a socket path — and that
-/// record is written by the SPAWNED CHILD ITSELF, once its own `aoide
-/// conduct` process starts up and registers. At the moment `do_spawn` wants
-/// to type the opening turn, that registration may not have happened yet —
-/// exactly the race this function's own retry loop exists to survive (the
-/// socket file itself may not even exist). Routing through the session
-/// registry here would just trade the socket race for a registration race,
-/// so this stays on the raw socket path it already computed — but the WRITE
-/// is the tree's one pty-injection shape, `write_delivery`: the text, a
-/// flush, the submit-keystroke gap, then **the target harness's own
-/// `submit_key`** (`profile_for_agent`, resolved from the configured program
-/// — never a byte spelled at this call site) as a SEPARATE write. This door
-/// typed `{prompt}\n` for as long as it existed, which is a keystroke of its
-/// own and the wrong one wherever the target submits on `\r` (claude, kimi):
-/// the opening turn landed in the composer and never submitted.
-///
-/// **Messaging plan P-M1, `state/mail/base.jsonl`**: because of the above,
-/// this is the SECOND (and last) mailbase-filing site in the tree, alongside
-/// `deliver_local`'s (see `aoide_storage::mail`'s module doc) — a spawned
-/// session's first turn can never reach `deliver_local`, so it has to file
-/// itself. `from` is empty: the a2a door has no caller identity to offer
-/// today (#51's scope), same reasoning [`do_inject`]'s callers rely on.
-/// Best-effort, same tolerance as the rest of this function — a write error
-/// above is swallowed (the retry loop only confirms a bound socket, never
-/// delivery), so a failed mailbase write is no less tolerated. What the write
-/// error DOES decide is the receipt: it is filed only for a delivery that went
-/// out, so a letter is never acknowledged by a turn nobody received.
-fn spawn_inject_prompt(
-    id: &str,
-    agent_cmd: &str,
-    prompt: &str,
-    launch_at: &str,
-    ready_budget: Duration,
-) -> &'static str {
-    if prompt.is_empty() {
-        return "skipped-empty";
-    }
-    // Belt and braces on H1: `decide_send_action` already refuses a shell
-    // `spawnAgent` before anything starts, and this is the last gate before a
-    // REMOTE prompt becomes a line on a pty — so the write asks the same
-    // question itself instead of trusting its caller to have asked it (the
-    // same `program_is_a_shell` walk `-32004` above and the ping-back,
-    // doorbell and inject lanes all read). Silent by construction: this
-    // function's contract is best-effort, and a refusal that cannot be
-    // reported here would only be noise — the caller's own refusal is the
-    // taught one.
-    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    if aoide_conduct::graph::program_is_a_shell(&configured) {
-        return "skipped-shell";
-    }
-    // WHICH harness the configured command IS decides what readiness means
-    // (an unconfigured/unknown program has no profile and takes the hookless
-    // answer, the same fallback every other profile lookup in the tree takes)
-    // and which keystroke SUBMITS a line in it.
-    let agent = configured
-        .first()
-        .map(|program| aoide_conduct::graph::command_basename(program))
-        .unwrap_or_default();
-    let ready = aoide_conduct::graph::wait_ready(&agent, id, &launch_at, ready_budget);
-    if ready == aoide_conduct::graph::Ready::NotReady {
-        return "not-ready";
-    }
-    // The target harness's own submit keystroke, resolved from the SAME table
-    // every other delivery reads (`profile_for_agent`; claude when the name is
-    // unregistered). Never a byte spelled here: claude's is `\r`, and a bare
-    // `\n` only inserts a newline in its composer — the exact way this door
-    // used to type an opening turn that never submitted.
-    let submit_key = aoide_conduct::graph::profile_for_agent(&agent).submit_key;
-    let socket = aoide_conduct::graph::conduct_socket_path(id);
-    for _ in 0..300 {
-        if socket.exists() {
-            if let Ok(mut s) = UnixStream::connect(&socket) {
-                // The tree's ONE pty-injection shape: the text, a flush, the
-                // submit-keystroke gap, then the submit key as a SEPARATE
-                // write (`write_delivery`) — never one concatenated payload,
-                // which a harness reading the composer mid-paste can coalesce
-                // differently (task #124).
-                let written = aoide_conduct::graph::write_delivery(
-                    &mut s,
-                    prompt.as_bytes(),
-                    true,
-                    submit_key,
-                    aoide_conduct::graph::SUBMIT_KEYSTROKE_DELAY,
-                );
-                // A receipt acknowledges a TURN: file it only for a write that
-                // actually went out, so a broken delivery leaves the sender's
-                // letter unacknowledged (retryable) instead of acknowledged.
-                if written.is_ok() {
-                    let _ = aoide_storage::mail::file_receipt("", id, prompt);
-                    return if ready == aoide_conduct::graph::Ready::Verified {
-                        "delivered"
-                    } else {
-                        "delivered-unverified"
-                    };
-                }
-                return "write-failed";
-            }
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    "no-socket"
-}
+/// The refusal a held inject gets when its source already holds the pending
+/// queue's per-source cap (`aoide_conduct::graph::PENDING_CAP_PER_SOURCE`).
+/// The same `-32000` the pairing park answers when its own queue is full. Only
+/// a caller that proved a node identity sees it; [`message_send`] answers
+/// anyone else uniformly.
+const QUEUE_FULL_CODE: i64 = -32000;
+/// JSON-RPC "invalid params": an inject whose text is over the held-entry cap.
+const INVALID_PARAMS_CODE: i64 = -32602;
 
 /// Stamp `origin=node:<name>` directly on the just-spawned session's own
 /// record — LANE IDENTITY P-ID0 (G16/G5): this DOOR is the record-layer
@@ -2261,11 +1889,9 @@ fn spawn_inject_prompt(
 /// now REFUSES that shape from its env read entirely, and this function is
 /// the only remaining writer of a `node:*` value.
 ///
-/// Retries on the session record landing in `sessions.json`, the identical
-/// registration race [`spawn_inject_prompt`] above already tolerates
-/// (best-effort, same 300×10ms budget — ~3s): a spawn whose child never
-/// registers within that window simply never gets stamped, same as it never
-/// gets its opening turn typed. Disclosed behavior change from the pre-P-ID0
+/// Retries on the session record landing in `sessions.json` (best-effort, same
+/// 300×10ms budget — ~3s): a spawn whose child never registers within that
+/// window simply never gets stamped. Disclosed behavior change from the pre-P-ID0
 /// shape (a synchronous env write that could never "miss"): a genuinely
 /// slow-to-register child can now lose its origin stamp. Never silent about
 /// it, though — poll exhaustion with no registration found is eprintln'd by
@@ -2339,13 +1965,12 @@ fn poll_bounded_exit(
 /// always because ITS OWN attempt to exec the configured agent
 /// (`aoide-conduct::graph::pty::spawn_on_pty`) failed, since that
 /// function's own "spawn FIRST" discipline means a failed exec there returns
-/// almost instantly with no session ever registered. Names the configured
-/// program (never the full command line — no flag values, no env, no
-/// secrets) and the observed exit status only.
-fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitStatus) -> String {
-    let program = agent_cmd.split_whitespace().next().unwrap_or(agent_cmd);
+/// almost instantly with no session ever registered. Names the PROVEN harness
+/// the configured command runs (never the full command line — no flag values,
+/// no env, no secrets) and the observed exit status only.
+fn spawn_died_immediately_message(harness: &str, status: std::process::ExitStatus) -> String {
     format!(
-        "the configured agent (`{program}`) exited immediately after launch ({status}) — \
+        "the configured agent (`{harness}`) exited immediately after launch ({status}) — \
          it is likely missing from this unit's PATH, or the configured spawnAgent command line is wrong"
     )
 }
@@ -2387,9 +2012,39 @@ fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitSta
 /// addressed to its own slug (Q5's ruling). Pure — the split of the configured
 /// agent command is the same `split_whitespace` the pre-S10 argv did, so what
 /// runs is byte-identical.
-fn spawn_argv(id: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
+///
+/// `--agent` is the PROVEN `harness` (`spawn_agent_harness`), never a fixed
+/// label: the wrap's record carries it, and the ping-back, doorbell and inject
+/// readers type into the wrap only when its walked program is that harness.
+fn spawn_argv(id: &str, harness: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
     let command: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    aoide_conduct::graph::build_conduct_args(true, "a2a", id, None, task, None, None, None, &command)
+    aoide_conduct::graph::build_conduct_args(true, harness, id, None, task, None, None, None, &command)
+}
+
+/// Why a configured `spawnAgent` may not be typed into: a shell (the first turn
+/// would RUN as a command) or a command the walk does not prove to be a
+/// registered harness. Both refuse before any process starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpawnAgentRefusal {
+    Shell,
+    Unproven,
+}
+
+/// The one judgement every spawn guard reads: the registered harness a
+/// configured `spawnAgent` runs, or why it may not run at all. A shell is refused
+/// as `Shell`, and so is everything the walk reads as one without naming a
+/// program it proves: a launcher option its table does not list or refuses
+/// (`env -S`, `nice --bogus`), `sudo`/`doas`, and `busybox`. Default-deny for the rest:
+/// a wrapper with another name, a launcher the walk does not model (`taskset`), or
+/// a name with no profile is `Unproven`, because its first turn would be typed into a pty the
+/// door cannot prove is a harness. The walk itself is
+/// `aoide_conduct::graph::wrapped_harness`, never a copy of it.
+fn spawn_agent_harness(agent_cmd: &str) -> Result<&'static str, SpawnAgentRefusal> {
+    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    if aoide_conduct::graph::program_is_a_shell(&configured) {
+        return Err(SpawnAgentRefusal::Shell);
+    }
+    aoide_conduct::graph::wrapped_harness(&configured).ok_or(SpawnAgentRefusal::Unproven)
 }
 
 /// Build the spawned child's `Command`, env-sanitized, cwd-bound (when
@@ -2398,8 +2053,7 @@ fn spawn_argv(id: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
 /// directly unit-testable via `Command::get_envs()`/`Command::get_current_dir()`
 /// without an OS-level process spawn (`do_spawn` always launches
 /// `std::env::current_exe()`, which under `cargo test` is the TEST binary —
-/// see `spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_
-/// mailbase`'s doc comment for why no test here drives that spawn).
+/// see the `Spawn gate table` note above for why no test here drives that spawn).
 fn spawn_child_command(
     aoide_bin: &Path,
     argv: &[String],
@@ -2551,33 +2205,52 @@ fn do_spawn(
 ) -> Result<Value, (i64, String)> {
     // Refused FIRST and for free, the slug refusal's own shape below: a
     // `spawnAgent` that IS a shell must cost one RPC, never a process and
-    // never a line typed into a shell (H1, house rule 4). The spawn arm's
-    // first turn is written straight into the child's pty by
-    // `spawn_inject_prompt`, and a shell's stdin is a COMMAND LINE: a remote
-    // peer's prompt would RUN. The `agent` label is not the question — the
-    // configured argv is (`program_is_a_shell`, the same walk the ping-back,
-    // doorbell and inject lanes read), so `bash -lc <harness>` is the shell on
-    // its face and a launcher (`env bash`) is resolved rather than skipped.
+    // never a line typed into a shell (H1, house rule 4), and never a line typed
+    // into a pty the walk cannot prove is a harness. The spawn arm's first turn
+    // is held for a human, never typed, and a shell's stdin is a COMMAND LINE:
+    // a remote peer's prompt would RUN. The
+    // `agent` label is not the question — the configured argv is
+    // (`spawn_agent_harness`), so `bash -lc <harness>` is the shell on its face,
+    // `env claude` is resolved to its harness, and `taskset -c 0 claude` or a
+    // wrapper script is refused as unproven.
     // `-32004` is this door's own "spawn cannot be used as configured" family
     // (the empty-`spawnAgent` arm one layer up): nothing about the CALLER's
     // authority is wrong, so `-32005`/`-32006` would blame the wrong party.
-    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
-    if aoide_conduct::graph::program_is_a_shell(&configured) {
-        let msg = format!(
-            "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which is a SHELL — \
-             a remote prompt typed into it would run as a command. Set it to the harness to \
-             conduct (e.g. `claude`), not to a shell that launches one."
-        );
-        let _ = audit(
-            audit_log,
-            Door::A2a,
-            EventClass::Audit,
-            "a2a.message/send",
-            "shell-spawn-agent",
-            &msg,
-        );
-        return Err((-32004, msg));
-    }
+    let harness = match spawn_agent_harness(agent_cmd) {
+        Ok(harness) => harness,
+        Err(refusal) => {
+            let (audit_name, msg) = match refusal {
+                SpawnAgentRefusal::Shell => (
+                    "shell-spawn-agent",
+                    format!(
+                        "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which \
+                         reads as a SHELL — a remote prompt typed into it would run as a command. Set \
+                         it to the harness to conduct (e.g. `claude`), not to a shell that launches one."
+                    ),
+                ),
+                SpawnAgentRefusal::Unproven => (
+                    "unverified-spawn-agent",
+                    format!(
+                        "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which the \
+                         launcher walk does not prove to be a registered harness ({}). A remote prompt \
+                         is typed into the harness's own pty, so only a harness named as its own \
+                         program may run: set it to the harness itself (e.g. `claude`), not a wrapper, \
+                         a launcher the walk does not model (`taskset`), or a script.",
+                        aoide_protocol::agents::known_agents().join(", ")
+                    ),
+                ),
+            };
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                audit_name,
+                &msg,
+            );
+            return Err((-32004, msg));
+        }
+    };
     // Refused FIRST and for free: an unusable slug must cost one RPC, never a
     // process — nothing below these lines has run when either fires.
     let task = match spawn_task_slug(task) {        Ok(task) => task,
@@ -2623,13 +2296,7 @@ fn do_spawn(
     let aoide_bin = std::env::current_exe()
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
-    let argv = spawn_argv(&id, agent_cmd, task);
-    // This launch's start instant, taken BEFORE the child exists: the worker's
-    // readiness wait reads only a harness `SessionStart` stamped at or after
-    // it, so a leftover child record from a previous run of a reused id cannot
-    // pass for this launch's hello.
-    let launch_at = now_iso_utc();
-
+    let argv = spawn_argv(&id, harness, agent_cmd, task);
     let origin = format!("node:{node_name}");
     // Project roots are already loaded the same way `session_ref_lookup`
     // loads `sessions.json` off the stage — a missing/corrupt file degrades
@@ -2658,7 +2325,7 @@ fn do_spawn(
                 SPAWN_LIVENESS_ATTEMPTS,
                 SPAWN_LIVENESS_INTERVAL,
             ) {
-                let msg = spawn_died_immediately_message(agent_cmd, status);
+                let msg = spawn_died_immediately_message(harness, status);
                 let _ = audit(
                     audit_log,
                     Door::A2a,
@@ -2724,20 +2391,17 @@ fn do_spawn(
                 }
                 Some(slot) => {
                     let worker_id = id.clone();
-                    let agent_cmd = agent_cmd.to_string();
                     let prompt = prompt.to_string();
-                    let launch_at = launch_at.clone();
+                    let worker_from = Some(format!("node:{node_name}"));
                     let scheduled = std::thread::Builder::new()
                         .name(format!("a2a-opening-turn-{worker_id}"))
                         .spawn(move || {
                             opening_turn_worker(
                                 worker_id,
-                                agent_cmd,
                                 prompt,
-                                launch_at,
-                                aoide_conduct::graph::READY_BUDGET,
                                 worker_audit,
                                 slot,
+                                worker_from,
                             )
                         })
                         .is_ok();
@@ -2767,7 +2431,7 @@ fn do_spawn(
                 "a2a.message/send",
                 "ok",
                 &format!(
-                    "spawned conducted session `{id}` (configured agent, {origin}{}) — opening turn pending, typed by a worker once the target reports itself ready",
+                    "spawned conducted session `{id}` (configured agent, {origin}{}) — opening turn pending; it is held in pending.json for a human, never typed by this door",
                     match task {
                         Some(slug) => format!(", managed run on task `{slug}`"),
                         None => String::new(),
@@ -2805,106 +2469,44 @@ fn do_spawn(
 
 /// `message/send`: parse params, resolve [`decide_send_action`], execute.
 ///
-/// `origin` (CONTRACTS.md §6 amendment, 2026-08-14) affects the Inject
-/// branch. `expected_token`/`presented_token` (amendment, 2026-08-18) affect
-/// BOTH branches: an empty `expected_token` (no token configured) is a pure
-/// no-op on every decision below — [`effective_origin`] is the identity
-/// function and [`token_authorized`] always allows — so this whole amendment
-/// is byte-identical-when-off by construction, not merely by testing.
+/// Every Inject parks in `pending.json` for a human. This door cannot approve a
+/// gated send, so no caller is delivered, loopback or signed. What an Inject
+/// decides is only whether the caller is admitted to the queue at all.
 ///
-/// - Inject's autogate match now folds TWO independent signals: the
-///   original address match ([`aoide_storage::node_store::autogated_node_addr`],
-///   dead behind any proxy) OR a per-node token match
-///   ([`aoide_storage::node_store::autogated_node_token`], survives one) —
-///   either is sufficient, so an operator who has never set a node
-///   `token_file` sees the exact original address-only behavior.
-/// - Inject's ORIGIN is [`effective_origin`]'d before reaching
-///   [`should_deliver_now`]: once a token is configured, an unauthenticated
-///   loopback caller no longer gets the automatic pass — see that function's
-///   doc comment for why this is one switch, not two.
-/// - Spawn gained a gate it never had at all: [`token_authorized`] must pass
-///   before [`do_spawn`] runs. This is the actual must-fix gap this
-///   amendment closes — Spawn was origin-blind AND token-blind before it.
-///
-/// **Amendment (2026-08-25, P-P3): the Spawn arm is regated a SECOND time —
-/// from the door-wide bearer to a named, paired node resolved via its OWN
-/// token.** PAIRING.md decision 6: spawning requires the caller to resolve
-/// to a specific, `verified` `aoide_storage::node_store::Node` whose
-/// `allows` contains `"spawn"` — [`token_authorized`] (the 2026-08-19
-/// amendment above) is no longer consulted at all for Spawn; holding the
-/// plain door-wide bearer, with no node identity behind it, no longer
-/// reaches [`do_spawn`]. [`spawn_admitted`] is the full check, and it is
-/// narrower than "resolved to *some* node": [`aoide_storage::node_store::
-/// resolve_node`] answers via one of two rungs — a presented bearer that
-/// matches a node's own `token_file` (survives a reverse proxy) or, failing
-/// that, the TCP-observed `origin` address against that node's registered
-/// `url` (the exact same two signals [`autogated_node_token`]/
-/// [`autogated_node_addr`] already fold for the unrelated autogate
-/// question, just unfiltered by `autogate` and narrowed to ONE specific
-/// node). Spawn accepts ONLY the token rung — a bare address match resolves
-/// a node identity for attribution (Inject's `from` field, origin-stamping)
-/// and for the ordinary autogate question, but never for spawning a process
-/// attributed to that node; behind any NAT/reverse-proxy deployment an
-/// address match is exactly the shared-source-IP situation that would
-/// otherwise let one tenant spawn "as" another. The refusal is `-32006`,
-/// naming both remaining prerequisites: the pairing ceremony (`pair`)
-/// and a configured `token_file` (`node add --token-file`).
-///
-/// **Amendment (P-P4, `docs/architecture/PAIRING.md`'s "Wire authentication
-/// (paired nodes)" section): the Spawn rung requirement moves a THIRD time
-/// — from Token to Signature.** P-P3's Token rung above was an explicitly
-/// interim shape: a `token_file`'s bearer is a shared secret, not a proof
-/// of possession bound to any one request — spoofable by anyone who can
-/// read that file or sniff the header, and identical across every request
-/// the true node or an impersonator ever sends. P-P4 lands the per-request
-/// UNFORGEABLE binding that shape always named as its own future lane: an
-/// ed25519 signature over a canonical string binding method, path,
-/// timestamp, nonce, and the body's `sha2` digest
-/// (`aoide_storage::wire_auth::canonical_string`), resolved to the paired
-/// node whose stored pubkey verifies it (`verify_signed_request`, this
-/// file — #63 P-ID5: identity is the key, the `X-Aoide-Node` name is a
-/// display label), a
-/// ±120s replay window, and a bounded in-memory nonce cache — see that
-/// function's own doc comment for the full verification flow. A request
-/// that verifies resolves to [`aoide_storage::node_store::NodeRung::
-/// Signature`], the new strongest rung; [`spawn_admitted`] now accepts
-/// ONLY that rung — the Token rung, which P-P3 accepted, no longer reaches
-/// [`do_spawn`] at all, even for a genuinely paired, `verified`,
-/// `spawn`-allowed node. This is a DELIBERATE choice, not an oversight:
-/// PAIRING.md's wire-auth section states the signature "replaces bearer
-/// comparison for paired nodes" outright, and the whole point of landing
-/// unforgeable per-request binding is that a paired node's spawn admission
-/// no longer rests on a comparable, replayable secret at all. A caller that
-/// resolves via Token (paired, but this particular request wasn't signed)
-/// gets a taught error naming exactly that — "paired but not signed, your
-/// aoide is too old or isn't signing" — never confused with "never paired,"
-/// which still points at the pairing ceremony itself
-/// ([`spawn_refusal`]'s own doc comment carries the full message-selection
-/// table). Every OTHER arm this file gates (the read commands' `token_authorized`,
-/// Inject's `effective_origin`/autogate coupling, the AgentCard GET) is
-/// UNCHANGED by P-P4 — signature headers strengthen IDENTITY resolution
-/// only, and only the Spawn arm's admission requirement moves; an unpaired
-/// caller's read-arm access via the door-wide bearer is untouched, and so
-/// is a PAIRED node's — pairing/signing narrows Spawn, it grants nothing
-/// extra elsewhere in this phase.
-///
-/// **Amendment (2026-08-20, #50): a context-id send answers UNIFORMLY, not
-/// with a hard gate, once a token is configured and the caller holds
-/// neither a valid one nor an autogate match.** `message/send`'s Inject arm
-/// used to run [`session_ref_lookup`] regardless of auth — an
-/// unauthenticated caller could tell a real `contextId` from a bogus one by
-/// the response shape (`-32001` vs an injected/queued Task), and a REAL id
-/// got queued into `pending.json` with no credential at all. A hard `-32005`
-/// here (mirroring Spawn) would be wrong instead: enrolled nodes authenticate
-/// via their OWN per-node token
-/// ([`aoide_storage::node_store::autogated_node_token`]), never the
-/// server-wide one, and outbound clients send no bearer whatsoever — see the
-/// grounding above. So the guard below fires only when NEITHER credential
-/// matches, and answers with the exact same synthetic `submitted` Task
-/// [`do_inject`]'s own held-pending arm returns ([`submitted_task`]) —
-/// without ever resolving whether the id names a real session, so it never
-/// reads `sessions.json` and never touches `pending.json`. Spawn (no
-/// `contextId`, or `spawn_asked`) is untouched and keeps its own `-32005`.
+/// - **Inject admission.** With no door-wide token configured, every Inject
+///   reaches the queue. Once one is configured, a `contextId` send from a
+///   caller that proved neither that token nor a node identity gets the
+///   uniform answer: the synthetic `submitted` Task of [`submitted_task`],
+///   which names no session and touches neither `sessions.json` nor
+///   `pending.json`. An unauthenticated caller therefore cannot tell a real
+///   `contextId` from a bogus one. A node identity is a `verified` node's own
+///   bearer (the [`aoide_storage::node_store::resolve_node`] Token rung,
+///   matched against its `token_file`), or a verified per-request signature
+///   whose grant in the signed mesh holds `message` (the Signature rung). An
+///   address match alone admits nothing.
+/// - **The per-source cap.** The queue holds at most
+///   `aoide_conduct::graph::PENDING_CAP_PER_SOURCE` entries per `from`, the
+///   source [`inject_source`] derives. A proven node past it is refused
+///   `-32000` ([`QUEUE_FULL_CODE`]); any other caller gets the uniform answer.
+///   Either way nothing is queued, nothing queued is touched, and
+///   `session_send` audits the refusal.
+/// - **The source.** A queued Inject carries `node:<name>` in its `from`
+///   field when the caller proved the node (a verified signature, or a
+///   `verified` node's own bearer), and `addr:<address>` for every other
+///   caller, the address rung included. An address match never borrows the
+///   node's name, so it neither shows an approver a node that did not send it
+///   nor fills that node's bucket. The source is not a gate.
+/// - **Spawn.** [`spawn_admitted`]: the caller must resolve by a verified
+///   signature and hold `spawn` in the mesh its request names. The door-wide
+///   bearer is not consulted, and a bare address or a token match never
+///   launches a process. A refusal is `-32006`, naming the missing
+///   prerequisite ([`spawn_refusal`]).
+/// - **The `aoide/from` claim** is honoured only on the signature rung
+///   ([`claimable_caller`], [`claimed_remote_parent`]). A spawn stamps it on
+///   the child as `remoteParent`, which the ping-back history gate reads
+///   ([`history_admitted`]). No claim changes whether an Inject parks.
+/// - **Reads** are gated by [`token_authorized`] or a granted signature, and
+///   the door-wide bearer never identifies a node.
 fn message_send(
     params: &Value,
     audit_log: &Path,
@@ -2919,47 +2521,25 @@ fn message_send(
     let token_configured = !expected_token.is_empty();
     let token_state = classify_token(expected_token, presented_token);
 
-    // Node resolution hoisted ABOVE the send-action decision: the uniform-
-    // response guard below needs the autogate signals BEFORE
-    // `decide_send_action` even runs, and the Inject arm further down still
-    // needs both the autogate signals AND `resolved_node` AFTER — one
-    // `load_nodes()` per `message_send` call, not two. Values and their
-    // meaning are unchanged from before this amendment; only WHEN they're
-    // computed moved.
     let nodes = aoide_storage::node_store::load_nodes();
 
-    // The caller's resolved node IDENTITY, PLUS which rung resolved it
-    // (P-P3, PAIRING.md decision 6/7) — deliberately a SEPARATE question
-    // from `ip_autogate`/`token_autogate`/`sig_autogate` below (which fold
-    // ONLY over `autogate`-marked nodes, for the unrelated "skip the
-    // pending queue" question): `resolve_node` looks at EVERY registered
-    // node, autogate or not. Used two ways below, DELIBERATELY UNEQUALLY:
-    // the Inject arm, when it queues, stamps EITHER rung onto
-    // `pending.json`'s `from` field for attribution only (never a gate —
-    // see `do_inject`'s own doc comment); the Spawn arm's `spawn_admitted`
-    // below requires specifically the SIGNATURE rung — neither a bare
-    // address nor a bare token match must ever itself authorize launching a
-    // process attributed to the matched node (2026-08-25 narrowing, see
-    // `spawn_admitted`'s own doc comment).
+    // The caller's resolved node IDENTITY, and which rung resolved it. The
+    // Inject arm derives the entry's source from it (`inject_source`: the node's
+    // name only for a proven rung), and admission is `node_proved`, below. The
+    // Spawn arm's `spawn_admitted` requires the SIGNATURE rung, because neither
+    // a bare address nor a bare token may authorize launching a process
+    // attributed to a node.
     let addr = match origin {
         ConnOrigin::Remote(ip) => Some(ip),
         ConnOrigin::Loopback | ConnOrigin::Unknown => None,
     };
-    // P-P4 (`docs/architecture/PAIRING.md` "Wire authentication"):
-    // `signed_caller` arrives ALREADY VERIFIED — the caller
-    // (`handle_connection`, via `verify_signed_request`) checked the
-    // ed25519 signature, the replay window, and the nonce cache BEFORE this
-    // function ever ran, and only threads an identity through on success. The
-    // name it carries is the RESOLVED one (#63 P-ID5): the node record whose
-    // stored pubkey verified the signature, never the wire-claimed
-    // `X-Aoide-Node` label — so the find-by-name below is a lookup of an
-    // already-key-authenticated record, not a trust decision, and it exists
-    // only for the CURRENT registry's autogate/allows flags. When present, it
-    // is the SOLE resolution: no fallthrough to the addr/token ladder for a
-    // request that presented signature headers (fail-closed discipline, #84's
-    // own "sentinel on resolve failure, no fallthrough to a weaker rung"
-    // precedent). `None` (no signature headers on this request at all) is the
-    // untouched, existing path.
+    // `signed_caller` arrives ALREADY VERIFIED: `handle_connection` checked the
+    // ed25519 signature, the replay window and the nonce cache
+    // (`verify_signed_request`) before this function runs. Its name is the
+    // record whose stored pubkey verified the signature, never the wire's
+    // `X-Aoide-Node` label, so the lookup below is not a trust decision. When
+    // present it is the SOLE resolution: a request that presented signature
+    // headers never falls through to the address/token ladder.
     let resolved_node = match signed_caller {
         Some(caller) => nodes
             .iter()
@@ -2968,24 +2548,14 @@ fn message_send(
         None => aoide_storage::node_store::resolve_node(&nodes, addr, presented_token),
     };
 
-    // The caller's `aoide/from` claim (P-RSA S3): the spawned child's
-    // `remoteParent`. Two questions, asked separately. FIRST, may this request
-    // claim at all — `claimable_caller`'s rung table: the SIGNATURE rung's
-    // identity, or nothing; every weaker rung ignores the claim and gets one
-    // audit line, because an unsigned caller has no claim to make and a
-    // refusal there would be a new oracle where today there is only silence.
-    // SECOND, is the claim well formed — `claimed_remote_parent`'s `-32602` for
-    // a signed caller's malformed one, never a silent drop, since the value
-    // rode inside the signature's own body digest and a caller that signed it
-    // meant it. That refusal is applied on the SPAWN side only (below, after
-    // the uniform-response guard), because the spawn is the arm that BUILDS a
-    // value out of it; the Inject arm consumes the claim as a COMPARISON
-    // instead (S5, in the Inject arm below), where a malformed one simply
-    // never matches — never a refusal, and never a new failure for a request
-    // that used to be answered. The client lets no unruly claim reach this door
-    // either way — `node spawn` refuses the call, `send` drops the claim and
-    // says so on one warning line (`resolve_remote_parent_from`, P-RSA S5) — so
-    // silence here hides no bug.
+    // The caller's `aoide/from` claim: the spawned child's `remoteParent`. Two
+    // questions. FIRST, may this request claim at all: `claimable_caller` hands
+    // over an identity for the SIGNATURE rung only. Every weaker rung ignores
+    // the claim and gets one audit line. SECOND, is the claim well formed:
+    // `claimed_remote_parent`'s `-32602` for a signed caller's malformed one,
+    // applied on the SPAWN side only (below), since only a spawn builds a value
+    // out of it. The Inject arm never reads the claim. The client refuses an
+    // unruly claim before sending it, so this refusal is a backstop.
     let claimed_identity = claimable_caller(resolved_node, signed_caller);
     if claimed_identity.is_none() && claimed_from.is_some() {
         let _ = audit(
@@ -3003,66 +2573,26 @@ fn message_send(
     }
     let claim_build = claimed_remote_parent(claimed_identity, claimed_from.as_deref());
 
-    // Autogate signals — computed AFTER `resolved_node` (P-S6) so the new
-    // signature rung can join `ip_autogate`/`token_autogate` in the same
-    // fold: `resolved_node` matched via `NodeRung::Signature` whose own
-    // `autogate` flag is set is the like-for-like restoration for a node
-    // the operator already marked auto-deliver, now that a verified
-    // signature no longer rides `ConnOrigin::Loopback`'s free pass (see
-    // `origin_for_inject`). `ip_autogate`/`token_autogate` are unchanged
-    // from before this amendment.
-    let ip_rail = match origin {
-        ConnOrigin::Remote(ip) => aoide_storage::node_store::autogated_node_addr(&nodes, ip),
-        ConnOrigin::Loopback | ConnOrigin::Unknown => None,
+    // Admission to the queue, not delivery. Once a door-wide token is
+    // configured, a caller must prove a node identity this box trusts with a
+    // message, or the uniform guard below answers: a VERIFIED node's own bearer
+    // (the Token rung), or a verified signature whose grant in the signed mesh
+    // holds `message` (the Signature rung). An address match proves nothing: a
+    // tunnel or a shared NAT address looks the same for everyone behind it.
+    let node_proved = match resolved_node {
+        Some((node, aoide_storage::node_store::NodeRung::Token)) => node.verified,
+        Some((_, aoide_storage::node_store::NodeRung::Signature)) => {
+            caller_grant(signed_caller).holds("message")
+        }
+        Some((_, aoide_storage::node_store::NodeRung::Addr)) | None => false,
     };
-    let token_rail = presented_token.and_then(|t| aoide_storage::node_store::autogated_node_token(&nodes, t));
-    let ip_autogate = ip_rail.is_some();
-    let token_autogate = token_rail.is_some();
-    // P-CHARTER (review finding 5): `autogate` is a per-RECORD flag, and a
-    // record can be marked in one mesh while the request names another — so
-    // the signature rail asks the mesh too: the caller must hold `message`
-    // IN THE MESH ITS REQUEST NAMES. Without this, a caller the operator
-    // marked autogate skips the pending review queue while naming a mesh it
-    // holds nothing in, which is per-mesh trust leaking on the delivery rail.
-    let sig_autogate = matches!(
-        resolved_node,
-        Some((node, aoide_storage::node_store::NodeRung::Signature))
-            if node.autogate && may_message(&caller_grant(signed_caller))
-    );
-    // P-CHARTER (the A3 review's finding 4): the two UNSIGNED rails ask the
-    // mesh as well, read at the record's HOME mesh because that is the only
-    // mesh such a request has — it carries no signed mesh to name another, so
-    // home is `[pairing] homeMesh`, READ rather than guessed
-    // (`rail_admits_here` takes `home_mesh_fallible` and pends on `Err`; not
-    // `effective_mesh`, whose `Err` arm is a named request's own question).
-    // Two booleans, deliberately:
-    //
-    //   `autogate_match` = the rails MATCHED a record → the door admits the
-    //     caller (the #50 uniform-response guard's exemption, unchanged);
-    //   `rail_delivers`  = that record earns auto-delivery under home's rules
-    //     → Inject's delivery decision (`should_deliver_now`), and nothing
-    //     else.
-    //
-    // Folding the second into the first would be the wrong fix twice over: a
-    // charter-removed key would land on the guard's synthetic `submitted`
-    // Task (never queued, never seen by the operator) instead of PENDING, and
-    // the match itself — an enrolled record presenting its own address or
-    // token — is not what the charter judges. The ruling is "never refused
-    // outright, never delivered": pending, on both.
-    let rail_delivers = ip_rail
-        .into_iter()
-        .chain(token_rail)
-        .any(|record| rail_admits_here(&nodes, record));
-    let autogate_match = ip_autogate || token_autogate || sig_autogate;
-    let deliver_match = sig_autogate || rail_delivers;
 
-    // Uniform-response guard (see the amendment above) — mirrors
-    // `decide_send_action`'s OWN `spawn_asked`/`context_id` split exactly
-    // (`context_id.is_some() && !spawn_asked` is that function's "past this
-    // point it's a lookup, not a spawn" condition, negated the same way), so
-    // a request can never classify "spawn" for this gate and "send" for the
-    // decision or vice versa.
-    if token_configured && token_state != TokenState::Valid && !autogate_match && context_id.is_some() && !spawn_asked {
+    // Uniform-response guard. It mirrors `decide_send_action`'s own
+    // `spawn_asked`/`context_id` split (`context_id.is_some() && !spawn_asked`
+    // is that function's "a lookup, not a spawn" condition), so a request can
+    // never classify "spawn" for this gate and "send" for the decision, or the
+    // reverse.
+    if token_configured && token_state != TokenState::Valid && !node_proved && context_id.is_some() && !spawn_asked {
         let id = context_id.as_deref().expect("context_id.is_some() checked above");
         let _ = audit(
             audit_log,
@@ -3070,7 +2600,7 @@ fn message_send(
             EventClass::Audit,
             "a2a.message/send",
             "unauthorized",
-            &format!("uniform submitted Task for context `{id}` — no valid token, no autogate match (#50)"),
+            &format!("uniform submitted Task for context `{id}` — no valid token, no node identity (#50)"),
         );
         return Ok(submitted_task(id));
     }
@@ -3079,10 +2609,7 @@ fn message_send(
     // refuses: `decide_send_action`'s own spawn condition (`spawn_asked ||
     // context_id.is_none()`, the exact negation of the guard's inject one), so
     // a request can never classify "inject" for the guard and "spawn" here. An
-    // inject-shaped request that carried a malformed claim proceeds exactly as
-    // one that carried none: it reaches the Inject arm, whose
-    // `remote_parent_match` (S5) is false for either shape, so neither takes
-    // the remote-parent delivery.
+    // inject-shaped request with a malformed claim proceeds as one with none.
     let spawn_side = spawn_asked || context_id.is_none();
     let remote_parent = match claim_build {
         Ok(parent) => parent,
@@ -3102,124 +2629,16 @@ fn message_send(
 
     match decide_send_action(context_id.as_deref(), spawn_asked, spawn_agent, session_ref_lookup) {
         SendAction::Inject { session_id } => {
-            // P-RSA S5: the `aoide/from` claim, CONSUMED here. The Spawn arm
-            // stamps it onto the child it creates; THIS arm asks the mirror
-            // question of the record it is about to write into — is this
-            // caller the remote parent of that one? `remote_parent_match` is
-            // the whole predicate (signature rung + stored `remoteParent.key`
-            // == the caller's verified key + stored `sessionId` == the claim),
-            // and the `is_some_and` around it is the third of those: with no
-            // claim there is nothing to match, and the stage read
-            // (`session_remote_parent`) is skipped entirely, so an ordinary
-            // inject pays nothing for this phase.
-            //
-            // A MALFORMED claim needs no separate handling: a value outside
-            // `valid_claimed_session_id` was never stamped as any record's
-            // `sessionId` by this door, so equality is false — the claim fails
-            // to match exactly as an absent one does, which is the Inject
-            // arm's one-and-only reading of a bad claim (§6: the `-32602`
-            // stays spawn-side, where the value is actually consumed).
-            let remote_parent_hit = claimed_from.as_deref().is_some_and(|claim| {
-                remote_parent_match(
-                    claimed_identity.as_ref(),
-                    Some(claim),
-                    session_remote_parent(&session_id).as_ref(),
-                )
-            })
-            // P-CHARTER (review finding 5): the §32 remote-parent inject rule
-            // reads the grant in the request's mesh like the other two, and
-            // the capability it needs is the one the delivery itself needs —
-            // `message`. A caller whose key is stamped as a child's remote
-            // parent but who holds no grant in the mesh its request names
-            // does NOT get the without-pending delivery; it falls through to
-            // the pending queue, exactly as a stranger does.
-            && may_message(&caller_grant(signed_caller));
-            if remote_parent_hit {
-                let _ = audit(
-                    audit_log,
-                    Door::A2a,
-                    EventClass::Audit,
-                    "a2a.message/send",
-                    "autogate-remote-parent",
-                    &format!(
-                        "delivering to `{session_id}` without pending — the caller proved the \
-                         remote parent of that session (remoteParent.sessionId `{}`)",
-                        claimed_from.as_deref().unwrap_or_default(),
-                    ),
-                );
+            // Every inject queues, so a source always rides the pending entry
+            // (P-P3 decision 7): the proven node, else the caller's address.
+            let from = inject_source(resolved_node, origin);
+            match do_inject(&session_id, &prompt, audit_log, &from) {
+                // A full source: a proven node is told so. Anyone else gets the
+                // uniform answer, as a caller the guard above did not admit
+                // would. `session_send` has already audited the refusal.
+                Err((QUEUE_FULL_CODE, _)) if !node_proved => Ok(submitted_task(&session_id)),
+                other => other,
             }
-            // `should_deliver_now(ConnOrigin::Unknown, _)` is unconditionally
-            // `false` — it ignores `autogate_match` entirely (the SAME
-            // fail-safe arm `effective_origin`'s own token coercion already
-            // rides: see `uniform_response_guard_never_fires_for_a_per_node_
-            // autogated_token`'s doc comment for the pin). So the
-            // `origin_for_inject` downgrade must NOT fire for a signed node
-            // that is ITSELF signature-rung autogate-marked — that node
-            // needs `should_deliver_now`'s ordinary Loopback/Remote arms
-            // (which DO consult `autogate_match`) to keep delivering, the
-            // like-for-like restoration `sig_autogate` exists for. A signed,
-            // non-autogate node has no such exemption: it gets the downgrade
-            // unconditionally, which is the narrowing itself.
-            //
-            // A REMOTE-PARENT MATCH (P-RSA S5) rides exactly the same two
-            // rails as `sig_autogate`, and needs BOTH of them: it exempts the
-            // downgrade here (otherwise the ssh `-L` shape — which classifies
-            // as Loopback, see `origin_for_inject` — would coerce to
-            // `Unknown`, where `autogate_match` is ignored outright and the
-            // match would count for nothing) and it joins `autogate_match`
-            // below (otherwise a genuinely non-loopback origin would take
-            // `ConnOrigin::Remote`'s `autogate_match` arm and pend). It
-            // overrides neither question: a door-wide bearer that does not
-            // classify `Valid` still coerces through `effective_origin`, and
-            // the node's own `autogate` flag never had to be on for a parent
-            // to steer the child it spawned — the same independence `send_gate`
-            // gives the LOCAL parent rule (`--yes` ▸ global switch ▸
-            // parent-of-target), which delivers without pending whether the
-            // box-wide autogate switch is on or off.
-            let eff_origin = origin_for_inject(
-                effective_origin(origin, token_configured, token_state),
-                signed_caller.is_some() && !sig_autogate && !remote_parent_hit,
-            );
-            // Every OTHER rung of this decision is about the CALLER (its
-            // origin, its signature, its token). This one is about the
-            // TARGET: a session conducting a SHELL takes no line that was not
-            // held pending and approved by a human, whoever asked for it and
-            // however well they proved who they are. A shell's input is a
-            // command line, and `--agent <harness> -- bash` is a record that
-            // names a harness while running a shell — the door therefore reads
-            // the WRAP (house rule 4, `wrapped_program_is_a_shell`), exactly
-            // as the ping-back and doorbell lanes do, rather than the `agent`
-            // label it was handed. Paid only where it can matter: a decision
-            // that was going to pend anyway is left alone, and its audit line
-            // is not written.
-            let door_delivers = should_deliver_now(eff_origin, deliver_match || remote_parent_hit);
-            let shell_target = door_delivers && session_wrapped_is_a_shell(&session_id);
-            if shell_target {
-                let _ = audit(
-                    audit_log,
-                    Door::A2a,
-                    EventClass::Audit,
-                    "a2a.message/send",
-                    "shell-wrapped",
-                    &format!(
-                        "holding for a human: `{session_id}` is conducting a shell — a submitted \
-                         line would RUN in it as a command"
-                    ),
-                );
-            }
-            let deliver_now = door_delivers && !shell_target;
-            // The `from` attribution rides ONLY the QUEUED path (P-P3
-            // decision 7: "pending-queue entries a node's send creates").
-            // `session_send`'s own `from` mechanism ALSO prefixes an
-            // IMMEDIATELY-delivered payload's text ("from <sender>: ",
-            // `provenance_prefix`) — scoping this to `!deliver_now` keeps
-            // an already-autogated node's DELIVERED payload byte-identical
-            // to before this phase (pinned by
-            // `autogated_node_delivers_despite_being_non_loopback`), while
-            // still attributing every entry that actually reaches
-            // `pending.json`.
-            let from = if deliver_now { None } else { resolved_node.map(|(p, _rung)| format!("node:{}", p.name)) };
-            do_inject(&session_id, &prompt, audit_log, deliver_now, from.as_deref())
         }
         SendAction::Spawn { agent_cmd } => {
             if spawn_admitted(resolved_node, &caller_grant(signed_caller)) {
@@ -3270,7 +2689,7 @@ fn may_spawn(grant: &Grant) -> bool {
 /// no possession proof at all, and a bare shared-secret token is not bound
 /// to any one request — replayable, and identical across every request the
 /// true node or an impersonator ever sends. Both rungs keep resolving a
-/// node identity for every OTHER purpose (Inject's `from` attribution,
+/// node identity for every OTHER purpose (Inject's source, [`inject_source`],
 /// origin-stamping); this function is the ONE place the narrowing to
 /// signature-only lives, rather than re-derived at each call site — and with
 /// it the GRANT, read in the request's mesh and no other
@@ -3288,15 +2707,15 @@ fn spawn_admitted(
 
 /// The `-32006` refusal every Spawn attempt that fails [`spawn_admitted`]
 /// returns (P-P3, message content narrowed P-P4) — a distinct code from
-/// `unauthorized()`'s `-32005` (the door-wide bearer gate every OTHER arm
-/// still uses), since this is a DIFFERENT question: not "do you hold a
+/// `unauthorized()`'s `-32005` (the door-wide bearer gate of the read arms and
+/// `message/stream`), since this is a DIFFERENT question: not "do you hold a
 /// valid door-wide token" but "do you resolve, via a verified per-request
-/// SIGNATURE, to a specific node this operator has paired with and allowed
-/// to spawn." The CODE stays `-32006` across every refusal shape (no new
-/// code per shape — `message_send`'s callers already match on this one
-/// value), but the MESSAGE is now shape-specific (P-P4 requirement: "a
-/// taught error telling an unsigned paired caller that its aoide is too old
-/// / must sign," distinguishable from "you were never paired at all"):
+/// SIGNATURE, to a specific node this operator has paired with and allowed to
+/// spawn." The CODE stays `-32006` across every refusal shape (no new code per
+/// shape — `message_send`'s callers already match on this one value), but the
+/// MESSAGE is now shape-specific (P-P4 requirement: "a taught error telling an
+/// unsigned paired caller that its aoide is too old / must sign,"
+/// distinguishable from "you were never paired at all"):
 /// - **Resolved via the (now-superseded) Token rung, and genuinely
 ///   `verified`**: this caller IS a real, paired node — it just didn't sign
 ///   this request. Told to sign, not to re-pair; re-pairing would be
@@ -3731,6 +3150,7 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     );
     let audit_status = match &outcome {
         aoide_storage::mail::DepositOutcome::BadMsgid
+        | aoide_storage::mail::DepositOutcome::MalformedAck
         | aoide_storage::mail::DepositOutcome::UnverifiedOrigin
         | aoide_storage::mail::DepositOutcome::NotCorrespondence => "invalid",
         _ => "ok",
@@ -3752,6 +3172,11 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
             "status": "refused",
             "reason": "bad-msgid",
             "detail": "envelope msgid does not match the recomputed value",
+        })),
+        aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
+            "status": "refused",
+            "reason": "bad-msgid",
+            "detail": "receipt text is not exactly one msgid: it names no letter",
         })),
         aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
             "status": "refused",
@@ -4338,6 +3763,11 @@ fn deposit_sealed(
                     "status": "refused",
                     "reason": "bad-msgid",
                     "detail": "envelope msgid does not match the recomputed value",
+                })),
+                aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
+                    "status": "refused",
+                    "reason": "bad-msgid",
+                    "detail": "receipt text is not exactly one msgid: it names no letter",
                 })),
                 aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
                     "status": "refused",
@@ -5156,7 +4586,7 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
     // Phase G (CONTRACTS.md §6 amendment, 2026-08-20): the read commands are
     // token-gated by the SAME rule as spawn. Computed once; only bites when a
     // token is configured (off-path unchanged). `message/send` runs its own
-    // classify internally (it needs the full TokenState for effective_origin),
+    // classify internally (it needs the full TokenState for the bearer gate),
     // so it is not re-gated here.
     let read_ok = read_admitted(
         token_authorized(!ctx.expected_token.is_empty(), classify_token(ctx.expected_token, ctx.presented_token)),
@@ -5238,8 +4668,13 @@ fn mail_method_of(body: &[u8]) -> Option<&'static str> {
 /// What the door answers a mail method with BEFORE dispatch, when this host's
 /// declarations will not load — or that it should keep the refusal it has.
 enum PreDispatch {
-    /// The refused `config-invalid` result.
-    Unloadable(String),
+    /// The refused `config-invalid` result, which is never signed. It is reached
+    /// only when `config.toml` will not load, and the charter this node governs
+    /// is decided through that same file
+    /// ([`aoide_storage::charter::governing`] reads its operator line), so the
+    /// raw in-force read below is the only key it can be checked against, and
+    /// the door signs nothing under a charter it does not govern.
+    Unloadable { detail: String },
     /// A JSON-RPC error instead: a nonce this request reused.
     Error(i64, String),
     /// Leave the door's own `-32007` standing.
@@ -5262,6 +4697,12 @@ enum PreDispatch {
 /// them, and a `mailPoll` retires and hands over entries. The audit line is the
 /// method's own; nothing about the load error goes on the wire.
 fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path) -> PreDispatch {
+    // Only POST is a signed request (`verify_signed_request`). This arm is
+    // reached for every -32007 refusal, so it repeats that gate: a method
+    // spelled `ANSWER` must never reach the canonical string below.
+    if req.method != "POST" {
+        return PreDispatch::Keep;
+    }
     let Some(refusal) = aoide_storage::routing::declarations().err() else {
         return PreDispatch::Keep;
     };
@@ -5316,7 +4757,7 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
     }
     let detail = format!("{CONFIG_INVALID}: {refusal}");
     let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
-    PreDispatch::Unloadable(CONFIG_INVALID_DETAIL.to_string())
+    PreDispatch::Unloadable { detail: CONFIG_INVALID_DETAIL.to_string() }
 }
 
 fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
@@ -5493,7 +4934,8 @@ fn stream_task<W: Write>(
         },
     };
 
-    // SSE response headers — written exactly once, before any event.
+    // SSE response headers — written exactly once, before any event. Never
+    // signed: a stream has no single body for an answer signature to cover.
     write!(
         writer,
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
@@ -5507,6 +4949,7 @@ fn stream_task<W: Write>(
         Err((code, message)) => {
             let err = serde_json::to_value(JsonRpcResponse::err(rpc_id, code, message))
                 .expect("JsonRpcResponse always serializes");
+            // Never signed: an SSE event, part of a stream that is never signed.
             let _ = writer.write_all(sse_event(&err).as_bytes());
             let _ = writer.flush();
             let _ = audit(
@@ -5534,7 +4977,7 @@ fn stream_task<W: Write>(
         if should_emit(last_state.as_deref(), &state) || is_final {
             let event = build_stream_event(&rpc_id, &task, is_final);
             // A write/flush failure means the client hung up — best-effort,
-            // just stop.
+            // just stop. Never signed: an SSE event, as above.
             if writer.write_all(sse_event(&event).as_bytes()).is_err() || writer.flush().is_err() {
                 break;
             }
@@ -5810,14 +5253,69 @@ fn status_reason(status: u16) -> &'static str {
 
 /// Write one HTTP/1.1 response with a JSON body.
 fn write_http_response<W: Write>(w: &mut W, status: u16, body: &[u8]) -> std::io::Result<()> {
-    write!(
-        w,
-        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+    write_http_response_with(w, status, body, &[])
+}
+
+/// [`write_http_response`] with `extra` header lines after `Connection: close`.
+fn write_http_response_with<W: Write>(w: &mut W, status: u16, body: &[u8], extra: &[(&str, String)]) -> std::io::Result<()> {
+    let mut head = format!(
+        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
         status_reason(status),
         body.len(),
-    )?;
+    );
+    for (name, value) in extra {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    w.write_all(head.as_bytes())?;
     w.write_all(body)?;
     w.flush()
+}
+
+/// The answer-signature header for one response (relay-proof), or nothing.
+/// Only a JSON-RPC POST to `/` is ever signed: the card GET and every other
+/// path stay unsigned even when their signature verified, so the door's key
+/// signs nothing a client does not check. The signature covers the request's
+/// own signature and nonce, the status and the exact body bytes; a key that
+/// will not load, or is not on disk, leaves the answer unsigned and audited,
+/// and the client refuses an unsigned answer.
+fn answer_headers(req: &HttpRequest, status: u16, body: &[u8], audit_log: &Path) -> Vec<(&'static str, String)> {
+    if req.method != "POST" || req.path != "/" {
+        return Vec::new();
+    }
+    let (Some(request_signature), Some(request_nonce)) = (req.signed_signature.as_deref(), req.signed_nonce.as_deref()) else {
+        return Vec::new();
+    };
+    // Load only: answering a request must never mint this box's identity. A
+    // missing key is an unsigned answer, audited, like a key that will not load.
+    match aoide_storage::identity::load_existing() {
+        Ok(Some(kp)) => {
+            let signature = aoide_storage::wire_auth::sign_answer(&kp, request_signature, request_nonce, status, body);
+            vec![(aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE, signature)]
+        }
+        Ok(None) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.answer-unsigned",
+                "absent",
+                "no identity key is on disk, so this answer goes out unsigned",
+            );
+            Vec::new()
+        }
+        Err(e) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.answer-unsigned",
+                "error",
+                &format!("the identity key would not load, so this answer goes out unsigned: {e}"),
+            );
+            Vec::new()
+        }
+    }
 }
 
 // ── Routing ──────────────────────────────────────────────────────────────────
@@ -5925,15 +5423,24 @@ static NONCE_CACHE: Mutex<VecDeque<(String, String)>> = Mutex::new(VecDeque::new
 /// lock in this workspace (`pairing.rs`'s `PARK_LOCK` precedent): a panic
 /// inside one caller must never wedge every OTHER signed request behind a
 /// poisoned lock forever.
+///
+/// Both halves are keyed in the form the signature covers.
+/// `wire_auth::canonical_string` trims and lowercases the nonce before it
+/// signs it, so a captured request whose nonce header has only its case
+/// changed still verifies. Keying the raw text would admit that copy as a
+/// fresh nonce and run the request a second time, signed answer included.
+/// One normalisation, here, covers every caller.
 fn nonce_is_replay(key: &str, nonce: &str) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    let nonce = nonce.trim().to_ascii_lowercase();
     let mut cache = NONCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if cache.iter().any(|(p, n)| p == key && n == nonce) {
+    if cache.iter().any(|(p, n)| *p == key && *n == nonce) {
         return true;
     }
     if cache.len() >= NONCE_CACHE_CAP {
         cache.pop_front();
     }
-    cache.push_back((key.to_string(), nonce.to_string()));
+    cache.push_back((key, nonce));
     false
 }
 
@@ -5941,7 +5448,7 @@ fn nonce_is_replay(key: &str, nonce: &str) -> bool {
 /// RESOLVED record's name (#63 P-ID5 — the record whose stored pubkey verified,
 /// never the `X-Aoide-Node` label) plus the stored key that did the verifying.
 /// ONE value, because they are one fact: `message_send` loads the registry
-/// again for its own autogate/allows questions, and a consumer that took the
+/// again for its own allows questions, and a consumer that took the
 /// name from this outcome and the key from that second read could pair this
 /// request's name with a key that never verified anything (a hand-edited
 /// registry with two records sharing a name, or a same-uid edit of
@@ -5950,7 +5457,7 @@ fn nonce_is_replay(key: &str, nonce: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SignedCaller<'a> {
     /// The resolved record's name — what every downstream consumer addresses
-    /// the caller by (allows lookup, `node:<name>` origin stamp, autogate).
+    /// the caller by (allows lookup, `node:<name>` origin stamp).
     name: &'a str,
     /// The resolved record's stored public key, the one the signature was
     /// verified against. Never empty: `verify_signed_request` resolves only a
@@ -6023,7 +5530,7 @@ enum SignedRequestOutcome {
 /// hold the same proven key, so the tiebreak picks among equal-security
 /// records, it never elevates a name to identity). Shared-key records with
 /// no exact-name match refuse as ambiguous rather than picking one — their
-/// `allows`/`autogate` may differ, and guessing would grant one record's
+/// `allows` may differ, and guessing would grant one record's
 /// grants on the other's behalf.
 ///
 /// A signature no verified node's key verifies refuses with the SAME code
@@ -6059,6 +5566,16 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
             ),
         );
     };
+
+    // Domain separation (relay-proof): an answer's signature covers the string
+    // `answer\0…`, and a request's covers its own method first. Canonical
+    // strings fold the method's case, so any token spelling `ANSWER` would
+    // otherwise build the answer's tag. Only POST is a signed request, so
+    // every other method is refused before a signature is looked at. An
+    // unsigned GET of the card returns `Unsigned` above, untouched.
+    if req.method != "POST" {
+        return SignedRequestOutcome::Refused(-32007, "a signed request must be a POST".to_string());
+    }
 
     // Wire-format validity only — the VALUE never selects a record below.
     if !aoide_storage::node_store::valid_node_name(node_name) {
@@ -6674,6 +6191,7 @@ pub fn serve(
                 "server busy: too many in-flight connections, try again shortly",
             );
             let body = serde_json::to_vec(&body).unwrap_or_default();
+            // Never signed: no request was read, so there is nothing to answer.
             if let Err(e) = write_http_response(&mut stream, 503, &body) {
                 eprintln!("aoide a2a: writing 503 (busy) response: {e}");
             }
@@ -6749,6 +6267,7 @@ pub fn serve_mail(port: u16, audit_log: &Path, registry: &'static Registry) -> s
                 "server busy: too many in-flight connections, try again shortly",
             );
             let body = serde_json::to_vec(&body).unwrap_or_default();
+            // Never signed: no request was read, so there is nothing to answer.
             if let Err(e) = write_http_response(&mut stream, 503, &body) {
                 eprintln!("aoide mail serve: writing 503 (busy) response: {e}");
             }
@@ -6829,6 +6348,7 @@ fn handle_connection(
                 "error",
                 &listener.audit_detail(e.status, origin),
             );
+            // Never signed: the request did not parse, so nothing was verified.
             return write_http_response(&mut writer, e.status, &body);
         }
     };
@@ -6863,7 +6383,7 @@ fn handle_connection(
     // `resolved` AND `key` are threaded together (`SignedCaller`), both taken
     // off the ONE record this verification produced: the name is what flows
     // downstream as the caller's identity (allows lookup, `node:<name>` origin
-    // stamp, autogate), and the key is what the claim's `remoteParent.key` is
+    // stamp), and the key is what the claim's `remoteParent.key` is
     // built from — never a re-read of the registry, which `message_send` loads
     // again for its own purposes. The claimed header name is attribution only;
     // when it disagrees, the drift is audited and the resolved name still wins.
@@ -6899,17 +6419,22 @@ fn handle_connection(
             if code == -32007 {
                 if let Some(method) = mail_method_of(&req.body) {
                     match mail_unloadable_declaration(&req, method, audit_log) {
-                        PreDispatch::Unloadable(detail) => {
+                        PreDispatch::Unloadable { detail } => {
                             let body_val = JsonRpcResponse::ok(
                                 request_id(&req.body),
                                 json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }),
                             );
                             let body = serde_json::to_vec(&body_val).unwrap_or_default();
+                            // Never signed: the request was checked only against the raw
+                            // in-force charter, which this node does not govern while its
+                            // config will not load (`PreDispatch::Unloadable`).
                             return write_http_response(&mut writer, 200, &body);
                         }
                         PreDispatch::Error(err, message) => {
                             let body_val = jsonrpc_error_value(err, message);
                             let body = serde_json::to_vec(&body_val).unwrap_or_default();
+                            // Never signed: a replay answers with a nonce the request already spent,
+                            // and a signature here would bind the door to the old signature.
                             return write_http_response(&mut writer, 200, &body);
                         }
                         PreDispatch::Keep => {}
@@ -6926,6 +6451,8 @@ fn handle_connection(
                 "unauthorized",
                 &listener.audit_detail_with(&message, origin),
             );
+            // Never signed: a refused request was not verified, and the door never signs
+            // bytes an unverified sender chose.
             return write_http_response(&mut writer, 200, &body);
         }
     };
@@ -7004,13 +6531,15 @@ fn handle_connection(
         &listener.audit_detail(status, origin),
     );
 
-    write_http_response(&mut writer, status, &body)
+    // Signed only when the request's own signature verified (see `answer_headers`).
+    let extra = if verified.is_some() { answer_headers(&req, status, &body, audit_log) } else { Vec::new() };
+    write_http_response_with(&mut writer, status, &body, &extra)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_test_support::{accept_one, expect_delivery, read_delivery};
+    use std::os::unix::net::UnixStream;
     use serde_json::json;
 
     fn fake_handler(_inv: &Invocation) -> aoide_protocol::output::Outcome {
@@ -7074,18 +6603,17 @@ mod tests {
         Grant { caps: node.grant(mesh).iter().cloned().collect() }
     }
 
-    /// A minimal `Node` fixture (P-P3) — unpaired/unautogated/no-token by
+    /// A minimal `Node` fixture (P-P3) — unpaired/no-token by
     /// default, the same "mostly default, caller sets what it needs" shape
     /// `aoide_storage::node_store::tests::fixture_node` uses in its own
     /// crate; kept as a separate small copy here (this crate's tests build
     /// several ad hoc `Node { .. }` literals of their own already, and this
     /// one intentionally matches that local style rather than reaching for
     /// a cross-crate test helper that doesn't exist).
-    fn fixture_node(name: &str, url: &str, autogate: bool) -> aoide_storage::node_store::Node {
+    fn fixture_node(name: &str, url: &str) -> aoide_storage::node_store::Node {
         aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -7248,10 +6776,12 @@ mod tests {
     /// H1: a `spawnAgent` that IS a shell is refused at the ACT boundary, in
     /// `do_spawn`'s own prologue — the shape the illegal-slug refusal beside it
     /// already holds — so the refusal is audited by name and no process, no
-    /// session and no first-turn keystroke ever happens. The exact shell, a
-    /// shell reached through a launcher, and the `bash -lc <harness>` form the
-    /// door's own comment used to call legitimate are all refused; a harness
-    /// (wrapped or not) still spawns.
+    /// session and no first-turn keystroke ever happens. Refused: the exact shell,
+    /// a shell reached through a launcher, `bash -lc <harness>` (a shell that runs
+    /// the harness, so a line typed into it runs as a command), and `env -S
+    /// <harness>` (a command line whose program the walk cannot name). Which
+    /// harnesses DO pass is `spawn_agent_harness`'s own test; the spawn itself
+    /// is never driven here (`do_spawn` launches the test binary).
     #[test]
     fn do_spawn_refuses_a_shell_spawn_agent_before_anything_starts() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -7267,7 +6797,7 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         let audit_log = root.join("log");
 
-        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash"] {
+        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash", "env -S claude"] {
             let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
                 .expect_err("a shell spawnAgent must be refused, not run");
             assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
@@ -7278,6 +6808,82 @@ mod tests {
             assert!(log.contains(configured), "{log}");
         }
         // Nothing was spawned: no record, no log, no session file.
+        let sessions: Vec<aoide_storage::records::SessionRecord> =
+            load_stage::<SessionsFile>(&sessions_path())
+                .map(|f| f.sessions)
+                .unwrap_or_default();
+        assert!(sessions.is_empty(), "no session may exist after a refused spawn: {sessions:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// Default-deny, pure: a configured command is accepted only when the launcher
+    /// walk proves it runs a registered harness, and it is accepted AS that
+    /// harness (the name readiness and the submit key use). A shell is refused as
+    /// a shell; anything the walk cannot prove is unproven.
+    #[test]
+    fn spawn_agent_harness_accepts_only_a_registered_harness_the_walk_proves() {
+        let accepted: &[(&str, &str)] = &[
+            ("claude", "claude"),
+            ("claude --dangerously-skip-permissions", "claude"),
+            ("/usr/bin/claude", "claude"),
+            ("env claude", "claude"),
+            ("nix develop -c claude", "claude"),
+        ];
+        for (configured, harness) in accepted {
+            assert_eq!(spawn_agent_harness(configured), Ok(*harness), "`{configured}` runs {harness}");
+        }
+        let refused: &[(&str, SpawnAgentRefusal)] = &[
+            ("bash", SpawnAgentRefusal::Shell),
+            ("bash -lc claude", SpawnAgentRefusal::Shell),
+            ("env bash", SpawnAgentRefusal::Shell),
+            ("env -S claude", SpawnAgentRefusal::Shell),
+            ("env --split-string=claude", SpawnAgentRefusal::Shell),
+            ("taskset -c 0 claude", SpawnAgentRefusal::Unproven),
+            ("/opt/x/my-wrapper", SpawnAgentRefusal::Unproven),
+            ("no-such-agent", SpawnAgentRefusal::Unproven),
+        ];
+        for (configured, why) in refused {
+            assert_eq!(spawn_agent_harness(configured), Err(*why), "`{configured}` is refused");
+        }
+    }
+
+    /// The default-deny refusal in `do_spawn`'s prologue, for a configured command
+    /// the walk cannot prove: a launcher it does not model, a wrapper script, a
+    /// name with no profile. Audited as `unverified-spawn-agent`, and no process,
+    /// session or first-turn keystroke ever happens.
+    #[test]
+    fn do_spawn_refuses_an_unproven_spawn_agent_before_anything_starts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-unverified-spawn-agent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        let audit_log = root.join("log");
+
+        for configured in ["taskset -c 0 claude", "/opt/x/my-wrapper", "no-such-agent"] {
+            let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
+                .expect_err("an unproven spawnAgent must be refused, not run");
+            assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
+            assert!(err.1.contains("aoide.a2a.spawnAgent"), "the refusal names the option: {}", err.1);
+            assert!(err.1.contains(configured), "and the value it saw: {}", err.1);
+            let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+            assert!(log.contains("unverified-spawn-agent"), "the refusal is audited by name: {log}");
+        }
         let sessions: Vec<aoide_storage::records::SessionRecord> =
             load_stage::<SessionsFile>(&sessions_path())
                 .map(|f| f.sessions)
@@ -7626,7 +7232,7 @@ mod tests {
     /// provable on top of it on fixtures alone: no disk, no wire, no spawn.
     #[test]
     fn claimed_remote_parent_is_honoured_on_the_signature_rung_only() {
-        let node = fixture_node("yomi-strix", "http://10.0.0.9:8710/", false);
+        let node = fixture_node("yomi-strix", "http://10.0.0.9:8710/");
         let key = "ab".repeat(32);
         let signed = SignedCaller { name: "yomi-strix", key: &key, mesh: None };
 
@@ -7756,7 +7362,7 @@ mod tests {
         );
 
         // `message_send`'s own resolution + claim, verbatim: find by the
-        // verified identity's NAME (current registry, for autogate/allows),
+        // verified identity's NAME (current registry, for allows),
         // gate on the rung, stamp from the verified identity.
         let nodes = aoide_storage::node_store::load_nodes();
         let resolved = nodes
@@ -7937,13 +7543,13 @@ mod tests {
         };
 
         assert_eq!(
-            args_of(&spawn_argv("a2a-11-1790", "claude --dangerously-skip-permissions", None)),
+            args_of(&spawn_argv("a2a-11-1790", "claude", "claude --dangerously-skip-permissions", None)),
             vec![
                 "conduct",
                 "--spawned",
                 "--headless",
                 "--agent",
-                "a2a",
+                "claude",
                 "--id",
                 "a2a-11-1790",
                 "--",
@@ -7954,13 +7560,13 @@ mod tests {
              untouched (still `split_whitespace`, never a shell)"
         );
         assert_eq!(
-            args_of(&spawn_argv("a2a-11-1791", "claude", Some("fix-flaky"))),
+            args_of(&spawn_argv("a2a-11-1791", "claude", "claude", Some("fix-flaky"))),
             vec![
                 "conduct",
                 "--spawned",
                 "--headless",
                 "--agent",
-                "a2a",
+                "claude",
                 "--id",
                 "a2a-11-1791",
                 "--task",
@@ -8007,9 +7613,9 @@ mod tests {
         .into_iter()
         .collect();
 
-        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", None)), expected);
+        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", "claude", None)), expected);
         assert_eq!(
-            env_of(&spawn_argv("a2a-11-2", "claude", Some("fix-flaky"))),
+            env_of(&spawn_argv("a2a-11-2", "claude", "claude", Some("fix-flaky"))),
             expected,
             "S10 adds an argv flag and no environment at all"
         );
@@ -8780,10 +8386,25 @@ mod tests {
     // calls) with a real `UnixListener` standing in for the target session's
     // control socket, exactly like `conduct::graph::send`'s own gate tests.
 
+    /// What a network door does with an inject: the session's socket sees
+    /// nothing, and the send queues on `pending.json` (`queued` is the running
+    /// total for the test). Puts `listener` nonblocking to make that check.
+    fn assert_held_at_the_door(listener: &UnixListener, stage: &std::path::Path, queued: usize) {
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.accept().is_err(), "a network door never writes to the session's socket");
+        let queue: Value = serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).expect("the send is queued")).unwrap();
+        assert_eq!(queue["pending"].as_array().map(Vec::len), Some(queued), "{queue}");
+    }
+
+    /// A conducted harness wrap: labelled `claude`, and the launcher walk resolved
+    /// `claude` (`wrapped_program`), so it carries the proof every pty writer asks.
+    /// A test that needs another shape sets it after this.
     fn conductable_session(id: &str, socket: &std::path::Path) -> SessionRecord {
         let mut rec = fixture_session(id, "working", None);
         rec.conductable = Some(true);
         rec.socket = Some(socket.to_string_lossy().into_owned());
+        rec.agent = "claude".to_string();
+        rec.wrapped_program = Some("claude".to_string());
         rec
     }
 
@@ -8802,8 +8423,8 @@ mod tests {
     fn classify_origin_maps_cgnat_tailnet_and_lan_addresses_to_remote() {
         // Table test (M3, task #16): a Melete-triggered job dials in from a
         // real box's LAN or tailnet address, never loopback — this is the
-        // shape `classify_origin` must fold to `Remote` so `should_deliver_now`
-        // gates it, not the shape that (incorrectly) free-passes it. No
+        // shape `classify_origin` must fold to `Remote`, not the shape that
+        // (incorrectly) free-passes it. No
         // CIDR/tailnet special-casing exists or is added here: every one of
         // these is just "some non-loopback `Some(ip)`", the same arm
         // `10.0.0.5` already exercises above — this table only widens the
@@ -8825,109 +8446,6 @@ mod tests {
             let ip: IpAddr = addr.parse().unwrap();
             assert_eq!(classify_origin(Some(ip)), *expected, "address {addr}");
         }
-    }
-
-    #[test]
-    fn should_deliver_now_covers_every_origin_autogate_combination() {
-        // Loopback is unconditionally trusted — unchanged from before this
-        // amendment, regardless of any autogate match.
-        assert!(should_deliver_now(ConnOrigin::Loopback, false));
-        assert!(should_deliver_now(ConnOrigin::Loopback, true));
-        // A remote origin only delivers when it matched an autogate node.
-        let remote = ConnOrigin::Remote("10.0.0.5".parse().unwrap());
-        assert!(!should_deliver_now(remote, false));
-        assert!(should_deliver_now(remote, true));
-        // An unresolvable origin never delivers, even if (hypothetically) an
-        // autogate match were somehow claimed for it — fail-safe.
-        assert!(!should_deliver_now(ConnOrigin::Unknown, false));
-        assert!(!should_deliver_now(ConnOrigin::Unknown, true));
-    }
-
-    // ── Bearer-token authentication (CONTRACTS.md §6 amendment, 2026-08-18) ──
-    //
-    // THE REGRESSION PIN this amendment must not violate: with no token
-    // configured, every origin/autogate combination `should_deliver_now`
-    // resolves TODAY must resolve identically — the test just above this one
-    // (untouched by this amendment, still exercising the bare function) is
-    // that pin at the `should_deliver_now` level. The two tests below prove
-    // the pin holds at the INTEGRATION point too: `effective_origin` (what
-    // actually feeds `should_deliver_now` now) is the identity function when
-    // `token_configured` is false, and `token_authorized` always allows —
-    // so composing them in front of the untouched functions changes nothing
-    // on the off-path, by construction rather than by inspection alone.
-
-    #[test]
-    fn effective_origin_is_the_identity_function_when_no_token_is_configured() {
-        for origin in [
-            ConnOrigin::Loopback,
-            ConnOrigin::Remote("10.0.0.5".parse().unwrap()),
-            ConnOrigin::Unknown,
-        ] {
-            for token_state in [TokenState::Absent, TokenState::Invalid, TokenState::Valid] {
-                assert_eq!(
-                    effective_origin(origin, false, token_state),
-                    origin,
-                    "token_configured=false must pass {origin:?} through unchanged regardless of token_state"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn effective_origin_denies_loopback_once_a_token_is_configured_and_not_valid() {
-        // The "coupled loopback trust" amendment: once ANY token is
-        // configured, loopback keeps its old free pass ONLY with a valid
-        // bearer — an absent or wrong one is coerced to Unknown, which
-        // `should_deliver_now` already treats as never-trusted.
-        assert_eq!(
-            effective_origin(ConnOrigin::Loopback, true, TokenState::Absent),
-            ConnOrigin::Unknown
-        );
-        assert_eq!(
-            effective_origin(ConnOrigin::Loopback, true, TokenState::Invalid),
-            ConnOrigin::Unknown
-        );
-        // A VALID token restores loopback's original standing exactly.
-        assert_eq!(
-            effective_origin(ConnOrigin::Loopback, true, TokenState::Valid),
-            ConnOrigin::Loopback
-        );
-        // A remote origin without a valid token is ALSO coerced — it was
-        // already untrusted by default, but this proves the coercion isn't
-        // loopback-specific plumbing that happens to skip Remote.
-        assert_eq!(
-            effective_origin(ConnOrigin::Remote("10.0.0.5".parse().unwrap()), true, TokenState::Absent),
-            ConnOrigin::Unknown
-        );
-    }
-
-    #[test]
-    fn origin_for_inject_is_the_identity_function_when_unsigned() {
-        // The untouched, pre-P-S6 path: no signature headers on the request
-        // at all, so `origin` passes through byte-identical — the hard
-        // "loopback is unchanged for local callers" regression pin holds by
-        // construction here, same as `effective_origin`'s own off-path.
-        for origin in [ConnOrigin::Loopback, ConnOrigin::Remote("10.0.0.5".parse().unwrap()), ConnOrigin::Unknown] {
-            assert_eq!(origin_for_inject(origin, false), origin);
-        }
-    }
-
-    #[test]
-    fn origin_for_inject_downgrades_loopback_once_the_request_is_signed() {
-        // The P-S6 narrowing itself: a verified per-request signature is by
-        // construction a REMOTE node (an ssh tunnel makes it LOOK loopback
-        // to `peer_addr()`), so it loses Loopback's free pass — coerced to
-        // `Unknown`, `should_deliver_now`'s existing fail-safe arm, not a
-        // fourth `ConnOrigin` kind.
-        assert_eq!(origin_for_inject(ConnOrigin::Loopback, true), ConnOrigin::Unknown);
-        // A signed request was never trusted by origin anyway for these two
-        // — proving the downgrade is total, not loopback-specific plumbing
-        // that happens to skip the others.
-        assert_eq!(
-            origin_for_inject(ConnOrigin::Remote("10.0.0.5".parse().unwrap()), true),
-            ConnOrigin::Unknown
-        );
-        assert_eq!(origin_for_inject(ConnOrigin::Unknown, true), ConnOrigin::Unknown);
     }
 
     #[test]
@@ -9054,6 +8572,11 @@ mod tests {
         // this suite already follows). No node is registered at all, so
         // NEITHER the old door-wide-token gate NOR the new pairing gate can
         // possibly pass — -32006, not the old -32005.
+        //
+        // The spawn gate reads the process-global config and node registry, so
+        // this holds the env lock like every test that sets either: unlocked,
+        // it raced the bad-config tests and read their unparseable file.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let params = json!({
             "message": { "parts": [{ "kind": "text", "text": "hi" }] }
         });
@@ -9149,10 +8672,11 @@ mod tests {
     }
 
     #[test]
-    fn spawn_died_immediately_message_names_the_program_never_the_full_command_line() {
+    fn spawn_died_immediately_message_names_the_proven_harness_never_the_command_line() {
         let status = exit_one_status(); // exit code 1
-        let msg = spawn_died_immediately_message("claude --dangerously-skip-permissions", status);
-        assert!(msg.contains("`claude`"), "names the configured binary: {msg}");
+        let harness = spawn_agent_harness("claude --dangerously-skip-permissions").unwrap();
+        let msg = spawn_died_immediately_message(harness, status);
+        assert!(msg.contains("`claude`"), "names the proven harness: {msg}");
         assert!(
             !msg.contains("--dangerously-skip-permissions"),
             "never echoes flag values back — taught, not a raw command dump: {msg}"
@@ -9164,10 +8688,9 @@ mod tests {
     //
     // `spawn_child_command` and `resolve_bounded_spawn_cwd` are `do_spawn`'s
     // own pure-ish halves, factored out exactly so they're testable without a
-    // real OS-level spawn — same "never through `do_spawn` itself" precedent
-    // `spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_
-    // mailbase`'s doc comment states for `current_exe()` resolving to the
-    // TEST binary under `cargo test`.
+    // real OS-level spawn — same "never through `do_spawn` itself" precedent:
+    // `current_exe()` resolves to the TEST binary under `cargo test`, so no
+    // test drives that spawn.
 
     /// GATED on native Windows with its PROVEN reason: the fixture proves the
     /// child's environment by spawning `/bin/sh` and comparing `printf`'s exact
@@ -9351,9 +8874,9 @@ mod tests {
     // WHICH rung resolved the caller) covers token-rung-admitted /
     // addr-rung-refused, both directly against fixtures — never through
     // `message_send`/`do_spawn`, which would actually launch a process (see
-    // `spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_mailbase`'s
-    // own doc comment on why no test in this file drives `do_spawn`'s real
-    // OS-level spawn). The integration tests below drive `message_send`
+    // no test in this file drives `do_spawn`'s real OS-level spawn, because
+    // `current_exe()` under `cargo test` is the test binary). The integration
+    // tests below drive `message_send`
     // itself for the REFUSAL branches, which never reach `do_spawn` at all.
 
     #[test]
@@ -9379,7 +8902,7 @@ mod tests {
         // `Grant` fixtures, the same "never through `message_send`/
         // `do_spawn`" precedent this suite already holds for the positive
         // case.
-        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/");
         paired_allowed.verified = true;
         paired_allowed.grants = aoide_storage::node_store::grants_in("home", &["read", "spawn"]);
         let grant = grant_for(&paired_allowed, "home");
@@ -9412,7 +8935,7 @@ mod tests {
         // requirement ("a taught error telling an unsigned paired caller
         // that its aoide is too old / must sign").
         use aoide_storage::node_store::NodeRung;
-        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/");
         paired_allowed.verified = true;
         paired_allowed.grants = aoide_storage::node_store::grants_in("home", &["spawn"]);
 
@@ -9435,7 +8958,7 @@ mod tests {
         assert_eq!(code, -32006);
         assert!(msg.contains("aoide pair"), "no resolution at all must point at the pairing ceremony: {msg:?}");
 
-        let mut unverified = fixture_node("box-c", "http://10.0.0.6:8710/", false);
+        let mut unverified = fixture_node("box-c", "http://10.0.0.6:8710/");
         unverified.grants = aoide_storage::node_store::grants_in("home", &["spawn"]); // a granted set that was never actually paired.
         let (code, msg) = spawn_refusal(Some((&unverified, NodeRung::Token)), "home");
         assert_eq!(code, -32006);
@@ -9459,7 +8982,7 @@ mod tests {
     /// `identity.rs`'s own sign/verify round-trip test already takes.
     fn setup_signed_node(node_name: &str) -> aoide_storage::identity::Keypair {
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
-        let mut node = fixture_node(node_name, "http://node/", false);
+        let mut node = fixture_node(node_name, "http://node/");
         node.verified = true;
         node.pubkey = Some(kp.info().pubkey_hex);
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
@@ -9477,7 +9000,7 @@ mod tests {
     /// fixture a named-mesh test needs (review N5).
     fn setup_signed_node_with_grants(node_name: &str, mesh: &str, allows: &[&str]) -> aoide_storage::identity::Keypair {
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
-        let mut node = fixture_node(node_name, "http://node/", false);
+        let mut node = fixture_node(node_name, "http://node/");
         node.verified = true;
         node.pubkey = Some(kp.info().pubkey_hex);
         node.grants = aoide_storage::node_store::grants_in(mesh, allows);
@@ -9640,7 +9163,7 @@ mod tests {
 
         // Registered, correct pubkey, but never actually paired
         // (`verified: false`) — its key never enters the trial set.
-        let mut unverified_node = fixture_node("box-c", "http://node/", false);
+        let mut unverified_node = fixture_node("box-c", "http://node/");
         unverified_node.pubkey = Some(kp.info().pubkey_hex);
         aoide_storage::node_store::save_nodes(&[unverified_node]).unwrap();
         let req2 = signed_request(&kp, "box-c", "/", b"{}", now, &unique_nonce("unverified"));
@@ -9652,7 +9175,7 @@ mod tests {
         // A genuinely VERIFIED node, but a tampered body — the plain
         // bad-signature refusal every case above must be indistinguishable
         // from.
-        let mut verified_node = fixture_node("box-c", "http://node/", false);
+        let mut verified_node = fixture_node("box-c", "http://node/");
         verified_node.verified = true;
         verified_node.pubkey = Some(kp.info().pubkey_hex);
         aoide_storage::node_store::save_nodes(&[verified_node]).unwrap();
@@ -9813,10 +9336,10 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", &root);
 
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
-        let mut box_a = fixture_node("box-a", "http://node-a/", false);
+        let mut box_a = fixture_node("box-a", "http://node-a/");
         box_a.verified = true;
         box_a.pubkey = Some(kp.info().pubkey_hex);
-        let mut box_b = fixture_node("box-b", "http://node-b/", false);
+        let mut box_b = fixture_node("box-b", "http://node-b/");
         box_b.verified = true;
         // Well-formed but unrelated key material — never verifies anything.
         box_b.pubkey = Some("aa".repeat(32));
@@ -9882,7 +9405,7 @@ mod tests {
         // verified records CAN share a pubkey (`upsert_paired_node` matches
         // by name only — the same remote instance paired under two names).
         // Both hold the same PROVEN key, so the claimed name may pick among
-        // them (equal security, possibly different allows/autogate); with no
+        // them (equal security, possibly different allows); with no
         // exact-name match, refusing beats guessing which grants apply.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
@@ -9895,10 +9418,10 @@ mod tests {
 
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let pubkey = kp.info().pubkey_hex;
-        let mut twin_a = fixture_node("twin-a", "http://node-a/", false);
+        let mut twin_a = fixture_node("twin-a", "http://node-a/");
         twin_a.verified = true;
         twin_a.pubkey = Some(pubkey.clone());
-        let mut twin_b = fixture_node("twin-b", "http://node-b/", false);
+        let mut twin_b = fixture_node("twin-b", "http://node-b/");
         twin_b.verified = true;
         twin_b.pubkey = Some(pubkey);
         aoide_storage::node_store::save_nodes(&[twin_a, twin_b]).unwrap();
@@ -9948,10 +9471,10 @@ mod tests {
 
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let pubkey = kp.info().pubkey_hex;
-        let mut twin_a = fixture_node("twin-a", "http://node-a/", false);
+        let mut twin_a = fixture_node("twin-a", "http://node-a/");
         twin_a.verified = true;
         twin_a.pubkey = Some(pubkey.clone());
-        let mut twin_b = fixture_node("twin-b", "http://node-b/", false);
+        let mut twin_b = fixture_node("twin-b", "http://node-b/");
         twin_b.verified = true;
         twin_b.pubkey = Some(pubkey);
         aoide_storage::node_store::save_nodes(&[twin_a, twin_b]).unwrap();
@@ -10004,6 +9527,18 @@ mod tests {
         assert!(!nonce_is_replay(&tag, "n2"), "a DIFFERENT nonce for the SAME node tag is not a replay");
     }
 
+    #[test]
+    fn nonce_is_replay_is_blind_to_letter_case_and_surrounding_space() {
+        // The signature folds the nonce (`canonical_string`), so the cache must
+        // fold it too: every spelling of one nonce is one nonce, and so is every
+        // spelling of one key.
+        let tag = unique_nonce("case-node");
+        assert!(!nonce_is_replay(&tag, "AbC123"), "the first spelling is recorded");
+        assert!(nonce_is_replay(&tag, "abc123"), "the lower-case spelling is the same nonce");
+        assert!(nonce_is_replay(&tag, " ABC123 "), "and surrounding space is not a new nonce");
+        assert!(nonce_is_replay(&tag.to_uppercase(), "abc123"), "and the key's case does not split the namespace");
+    }
+
     // ── P-P5b (`node spawn`) — the real signed wire round trip ──────────────
     //
     // Both tests below build the SPAWN-SHAPED body via `aoide_client::wire::
@@ -10021,8 +9556,7 @@ mod tests {
     /// (the two-line `nodes.iter().find(name).map(|p| (p,
     /// NodeRung::Signature))`) — really admits it. This file's own
     /// established discipline (see the doc comment atop the "Spawn gate
-    /// table" section above, and `spawn_inject_prompts_success_branch_
-    /// files_the_opening_turn_into_the_mailbase`'s) is that NO test here drives
+    /// table" section above) is that NO test here drives
     /// `do_spawn`'s real process spawn, because `std::env::current_exe()`
     /// inside a `cargo test` binary is the TEST binary, not a real `aoide`
     /// — calling `message_send`'s Spawn arm all the way through on the
@@ -10291,8 +9825,8 @@ mod tests {
         });
         assert_eq!(task["id"], id, "the Inject arm's Task for the session it targeted");
 
-        // The send took the queued path — a signed, non-autogate caller is not
-        // delivered straight through — attributed to the NODE that verified,
+        // The send took the queued path — a signed caller is never delivered
+        // straight through — attributed to the NODE that verified,
         // never to the malformed claim, which nothing on this arm read.
         let pending: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
@@ -10409,7 +9943,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
-        let mut node = fixture_node("denied-node", "http://10.0.0.5:8710/", false);
+        let mut node = fixture_node("denied-node", "http://10.0.0.5:8710/");
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["read"]); // spawn explicitly absent (revoked or never granted).
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
@@ -10457,7 +9991,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
-        let mut node = fixture_node("addr-only-node", "http://10.0.0.5:8710/", false);
+        let mut node = fixture_node("addr-only-node", "http://10.0.0.5:8710/");
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["read", "spawn"]);
         // `token_file` deliberately left `None` — this node can only ever
@@ -10577,7 +10111,7 @@ mod tests {
         );
 
         // Nothing connected to the socket — no delivery was attempted.
-        assert!(listener.accept().is_err(), "a non-loopback, non-autogated send must never touch the socket");
+        assert!(listener.accept().is_err(), "a non-loopback send must never touch the socket");
 
         // `pending.json` carries the queued entry.
         let pending: serde_json::Value = serde_json::from_str(
@@ -10590,7 +10124,7 @@ mod tests {
         assert_eq!(entries[0]["text"], "inject me");
 
         // Audited through the single Door::A2a log, "pending" status — every
-        // outcome (queued/auto-delivered/error) routes through the SAME
+        // outcome (queued/delivered/error) routes through the SAME
         // audit path `send` already uses (`conduct::graph::send::
         // audit_send`), never a second logging path.
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
@@ -10610,11 +10144,13 @@ mod tests {
     }
 
     #[test]
-    fn a_held_pending_send_from_a_resolved_but_non_autogated_node_carries_its_origin() {
-        // P-P3 decision 7: a pending-queue entry a NODE's send creates
-        // carries that resolved node's identity — even an UNPAIRED,
-        // non-autogated one (attribution, not a gate — same "ATTRIBUTION,
-        // NOT SECURITY" posture `resolve_sender`/`--from` already document).
+    fn an_address_matched_inject_is_recorded_under_its_address_not_the_nodes_name() {
+        // No door token is configured, so a caller whose address matches a
+        // registered node's URL reaches the queue with no credential at all:
+        // the address rung is the case that can actually happen. The entry is
+        // recorded under the address it came from, never `node:<name>`, so an
+        // approver is not shown a node that did not send it and the node's own
+        // bucket is not the one it counts against.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -10631,9 +10167,8 @@ mod tests {
         std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
         std::env::remove_var("AOIDE_SESSION_ID");
 
-        // Registered, resolvable by address, but NOT autogate-marked — the
-        // send still queues (unaffected), but now RESOLVES to a name.
-        aoide_storage::node_store::save_nodes(&[fixture_node("watching-node", "http://10.0.0.9:8710/", false)]).unwrap();
+        // Registered and resolvable by address. The send still queues.
+        aoide_storage::node_store::save_nodes(&[fixture_node("watching-node", "http://10.0.0.9:8710/")]).unwrap();
 
         let id = "attributed-target";
         let socket = aoide_conduct::graph::conduct_socket_path(id);
@@ -10659,7 +10194,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["from"], "node:watching-node", "the resolved node's identity stamps the pending entry");
+        assert_eq!(entries[0]["from"], "addr:10.0.0.9", "an address match is recorded as the address, not as the node");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -10697,7 +10232,7 @@ mod tests {
         std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
         std::env::remove_var("AOIDE_SESSION_ID");
 
-        let mut signed_node = fixture_node("signed-node", "http://10.0.0.9:8710/", false);
+        let mut signed_node = fixture_node("signed-node", "http://10.0.0.9:8710/");
         signed_node.verified = true;
         aoide_storage::node_store::save_nodes(&[signed_node]).unwrap();
 
@@ -10717,7 +10252,7 @@ mod tests {
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "signed hello" }], "contextId": id }
         });
-        // A REMOTE, non-autogated origin with NO token presented at all —
+        // A REMOTE origin with NO token presented at all —
         // under the pre-P-P4 ladder this would resolve to nothing
         // (`resolve_node` needs a token or a matching address); it resolves
         // here purely because `signed_caller` is `Some`.
@@ -10780,7 +10315,7 @@ mod tests {
         // the addr/token ladder ever ran.
         let token_file = root.join("real-node.token");
         std::fs::write(&token_file, "real-secret").unwrap();
-        let mut real_node = fixture_node("real-node", "http://10.0.0.9:8710/", false);
+        let mut real_node = fixture_node("real-node", "http://10.0.0.9:8710/");
         real_node.token_file = Some(token_file.to_string_lossy().into_owned());
         aoide_storage::node_store::save_nodes(&[real_node]).unwrap();
 
@@ -10819,10 +10354,9 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert!(
-            entries[0].get("from").is_none() || entries[0]["from"].is_null(),
-            "a signed_caller resolving to nothing must NOT fall back to the token-resolved `real-node` — got {:?}",
-            entries[0].get("from")
+        assert_eq!(
+            entries[0]["from"], "addr:10.0.0.9",
+            "a signed_caller resolving to nothing must NOT fall back to the token-resolved `real-node`: it is recorded by address"
         );
 
         let _ = std::fs::remove_dir_all(&root);
@@ -10836,19 +10370,15 @@ mod tests {
         }
     }
 
-    /// LANE IDENTITY P-ID3 (G9): the exact `from: None` shape the test above
-    /// already produces (an unresolvable `signed_caller`), but with
-    /// `AOIDE_SESSION_ID` set in THIS PROCESS's own env first — standing in
-    /// for whatever `aoide a2a serve` might have inherited at launch. Before
-    /// the fix, `do_inject`'s bare `if let Some(f) = from` left `--from`
-    /// entirely absent on an unattributed inject, so `session_send`'s
-    /// `resolve_sender` fell back to reading THIS env var and misattributed
-    /// the pending entry to it. The fix stamps `--from ""` explicitly
-    /// whenever `from` is `None`, which `resolve_sender` documents as
-    /// skipping the env fallback outright — so the pending entry's `from`
-    /// must stay unattributed no matter what `AOIDE_SESSION_ID` says.
+    /// LANE IDENTITY P-ID3 (G9): the unresolvable `signed_caller` of the test
+    /// above, but with `AOIDE_SESSION_ID` set in THIS PROCESS's own env first
+    /// — standing in for whatever `aoide a2a serve` might have inherited at
+    /// launch. The pending entry's `from` is the door's own `addr:<address>`
+    /// and never that variable: the door stamps `--from` on every inject, so
+    /// `session_send`'s `resolve_sender` env fallback has nothing to fall back
+    /// from.
     #[test]
-    fn an_unattributed_inject_never_falls_back_to_this_processs_own_ambient_session_id() {
+    fn an_unproven_inject_never_falls_back_to_this_processs_own_ambient_session_id() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -10871,7 +10401,7 @@ mod tests {
 
         let token_file = root.join("real-node.token");
         std::fs::write(&token_file, "real-secret").unwrap();
-        let mut real_node = fixture_node("real-node", "http://10.0.0.9:8710/", false);
+        let mut real_node = fixture_node("real-node", "http://10.0.0.9:8710/");
         real_node.token_file = Some(token_file.to_string_lossy().into_owned());
         aoide_storage::node_store::save_nodes(&[real_node]).unwrap();
 
@@ -10892,9 +10422,8 @@ mod tests {
             "message": { "parts": [{ "kind": "text", "text": "hi" }], "contextId": id }
         });
         let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
-        // An unresolvable `signed_caller` ("ghost") — `do_inject` sees
-        // `from: None`, exactly the shape that used to fall through to the
-        // env.
+        // An unresolvable `signed_caller` ("ghost"): the caller proved
+        // nothing, the shape that used to fall through to the env.
         let result = message_send(
             &params,
             &audit_log,
@@ -10906,16 +10435,15 @@ mod tests {
             Some(caller("ghost")),
         );
         assert!(result.is_ok(), "{:?}", result.err());
-        assert!(listener.accept().is_err(), "unattributed + non-autogate must never touch the socket");
+        assert!(listener.accept().is_err(), "unattributed sends must never touch the socket");
 
         let pending: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert!(
-            entries[0].get("from").is_none() || entries[0]["from"].is_null(),
-            "an unattributed inject must NEVER pick up this process's own ambient AOIDE_SESSION_ID — got {:?}",
-            entries[0].get("from")
+        assert_eq!(
+            entries[0]["from"], "addr:10.0.0.9",
+            "an unproven inject must NEVER pick up this process's own ambient AOIDE_SESSION_ID"
         );
 
         let _ = std::fs::remove_dir_all(&root);
@@ -10934,11 +10462,10 @@ mod tests {
     }
 
     #[test]
-    fn loopback_message_send_still_auto_delivers_exactly_as_before() {
-        // Regression test (hard requirement): this amendment must NOT change
-        // loopback semantics at all — a loopback origin still auto-delivers,
-        // byte-for-byte the same as `do_inject`'s pre-amendment unconditional
-        // `--yes` behavior.
+    fn loopback_message_send_is_held_at_the_door_like_any_other() {
+        // A loopback origin is no exception at a network door: it is held like
+        // any caller. A tunnel terminating on loopback looks exactly like this,
+        // so loopback cannot be the trusted rung here.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -10966,7 +10493,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "a loopback `message/send` with no token configured is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -10982,14 +10508,9 @@ mod tests {
             None,
             None,
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "hello loopback\r");
-
         let task = result.unwrap();
-        assert_eq!(task["id"], id);
-
-        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
-        assert!(log.contains("\"status\":\"delivered\""), "audited as delivered: {log}");
+        assert_eq!(task["status"]["state"], "submitted", "{task}");
+        assert_held_at_the_door(&listener, &stage, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11003,7 +10524,7 @@ mod tests {
     }
 
     #[test]
-    fn message_send_injects_with_an_existing_socket_and_refuses_once_it_is_removed() {
+    fn message_send_to_a_live_socket_is_held_and_a_removed_one_is_refused() {
         // The A2A-door half of the identical bug `e2758f7` fixed on `graph`:
         // a stored `conductable` session whose control socket has since been
         // deleted (`shellbridge.service` owns `$XDG_RUNTIME_DIR/aoide` with
@@ -11042,10 +10563,8 @@ mod tests {
 
         let audit_log = root.join("log");
 
-        // While the socket still exists, delivery is unaffected — byte-for-
-        // byte the same as `loopback_message_send_still_auto_delivers_
-        // exactly_as_before` above.
-        let acc = expect_delivery(listener, "an inject into an existing socket is DELIVERED");
+        // While the socket still exists the send is held like any other at this
+        // door: nothing is written, and the socket's presence changes nothing.
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "still here" }], "contextId": id }
         });
@@ -11059,9 +10578,8 @@ mod tests {
             None,
             None,
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "still here\r");
-        assert_eq!(result.unwrap()["id"], id);
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&listener, &stage, 1);
 
         // The socket file is deleted (a rebuild tearing down the runtime
         // dir) — the STORED record is untouched, but the SAME contextId
@@ -11095,12 +10613,10 @@ mod tests {
         }
     }
 
-    /// A shell child takes no auto-delivered steer from ANY rung of this door
-    /// (house rule 4): loopback included, remote-parent autogate included. The
-    /// line is held PENDING instead — a human's own approval, and nothing else,
-    /// is what lets it reach a shell. Both arms run on the same fixture, so the
-    /// difference is exactly the target record's own P-C5 capture, never the
-    /// caller's standing.
+    /// A shell child takes no steer from a network door (house rule 4). Every
+    /// line is held PENDING, and a human's own approval is what lets it reach a
+    /// shell. The P-C5 capture on the shell record is why that approval matters
+    /// for it; this door never supplies one.
     #[test]
     fn a_shell_wrapped_target_takes_no_auto_delivered_inject() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -11136,10 +10652,9 @@ mod tests {
         write_stage(&sessions_path(), &SessionsFile { schema_version: "0".to_string(), sessions: records }).unwrap();
         let audit_log = root.join("log");
 
-        // Arm 1 — an ordinary target on the door's own trusted loopback rung:
-        // delivered, exactly as before this rule existed.
+        // Both arms are held: a network door writes to no session, and the
+        // shell rule is one more reason it never delivers.
         let plain = listeners.iter().find(|(id, _)| *id == "plain-target").unwrap().1.try_clone().unwrap();
-        let acc = expect_delivery(plain, "the ordinary loopback target's message is DELIVERED");
         let result = message_send(
             &json!({ "message": { "parts": [{ "kind": "text", "text": "plain hello" }], "contextId": "plain-target" } }),
             &audit_log,
@@ -11150,14 +10665,10 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "plain hello\r");
-        assert_eq!(result.unwrap()["id"], "plain-target");
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&plain, &stage, 1);
 
-        // Arm 2 — the same call, the same loopback origin, into the shell:
-        // held, nothing on the wire, the synchronous answer the door's own
-        // held-pending shape (`submitted_task`).
         let shell = listeners.iter().find(|(id, _)| *id == "shell-target").unwrap().1.try_clone().unwrap();
-        shell.set_nonblocking(true).unwrap();
         let held = message_send(
             &json!({ "message": { "parts": [{ "kind": "text", "text": "would run" }], "contextId": "shell-target" } }),
             &audit_log,
@@ -11170,10 +10681,87 @@ mod tests {
         )
         .unwrap();
         assert_eq!(held["status"]["state"], "submitted", "{held}");
-        assert!(shell.accept().is_err(), "a shell target is never written to");
-        let log = std::fs::read_to_string(&audit_log).unwrap();
-        assert!(log.contains("shell-wrapped"), "the refusal is named, never silent: {log}");
-        assert!(log.contains("is conducting a shell"), "{log}");
+        assert_held_at_the_door(&shell, &stage, 2);
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// A harness target is held at a network door whether or not the launcher
+    /// walk proves its harness: a label of `claude` with no proof, or the wrong
+    /// proof, and a proven wrap alike. Nothing is written to any of them.
+    #[test]
+    fn a_harness_target_is_held_at_a_network_door_proven_or_not() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-unverified-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        // Every label is `claude`; only the walked program differs.
+        let walks = [("proven-target", Some("claude")), ("none-target", None), ("taskset-target", Some("taskset"))];
+        let mut records = Vec::new();
+        let mut listeners = Vec::new();
+        for (id, walked) in walks {
+            let socket = aoide_conduct::graph::conduct_socket_path(id);
+            std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+            listeners.push((id, UnixListener::bind(&socket).unwrap()));
+            let mut rec = conductable_session(id, &socket);
+            rec.agent = "claude".to_string();
+            rec.wrapped_program = walked.map(str::to_string);
+            records.push(rec);
+        }
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".to_string(), sessions: records }).unwrap();
+        let audit_log = root.join("log");
+        let listener_for = |id: &str| listeners.iter().find(|(i, _)| *i == id).unwrap().1.try_clone().unwrap();
+
+        let proven = listener_for("proven-target");
+        let result = message_send(
+            &json!({ "message": { "parts": [{ "kind": "text", "text": "proven hello" }], "contextId": "proven-target" } }),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        );
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&proven, &stage, 1);
+
+        for (n, id) in ["none-target", "taskset-target"].into_iter().enumerate() {
+            let listener = listener_for(id);
+            let held = message_send(
+                &json!({ "message": { "parts": [{ "kind": "text", "text": "held" }], "contextId": id } }),
+                &audit_log,
+                "",
+                "",
+                ConnOrigin::Loopback,
+                "",
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(held["status"]["state"], "submitted", "{held}");
+            assert_held_at_the_door(&listener, &stage, n + 2);
+        }
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11187,10 +10775,10 @@ mod tests {
     }
 
     #[test]
-    fn a_successfully_delivered_message_send_files_into_the_mailbase() {
-        // Messaging plan P-M1: `do_inject` files no entry of its own (see its
-        // doc comment) — this proves the SHARED seam actually fires for an
-        // A2A-delivered message, end to end through `message_send`.
+    fn a_message_held_at_the_network_door_files_nothing_into_the_mailbase() {
+        // Messaging plan P-M1: the mailbase entry is filed at delivery through the
+        // shared seam. A network door holds the message instead, so nothing is
+        // filed until a local approval delivers it.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -11218,33 +10806,18 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "an A2A-delivered message is DELIVERED and filed");
-
         let audit_log = root.join("log");
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "hello from a node" }], "contextId": id }
         });
-        let result = message_send(
-            &params,
-            &audit_log,
-            "",
-            "",
-            ConnOrigin::Loopback,
-            "",
-            None,
-            None,
-        );
-        let _ = acc.join().unwrap();
-        assert!(result.is_ok(), "{:?}", result.err());
+        let result = message_send(&params, &audit_log, "", "", ConnOrigin::Loopback, "", None, None);
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&listener, &stage, 1);
 
-        let entries = aoide_storage::mail::read_base().unwrap();
-        assert_eq!(entries.len(), 1, "one delivered A2A message, one mailbase entry — not two");
-        assert_eq!(entries[0].envelope.header.to.name, id);
-        assert_eq!(entries[0].envelope.text, "hello from a node");
-        // The a2a door has no caller identity to offer today (#51's scope) —
-        // `do_inject`'s Invocation never sets `--from`, and this test process
-        // has no AOIDE_SESSION_ID either, so the honest attribution is empty.
-        assert_eq!(entries[0].envelope.header.from.name, "");
+        // Filing happens at delivery, and this door never delivers: the message
+        // waits in `pending.json` and is not yet in the mailbase.
+        let entries = aoide_storage::mail::read_base().unwrap_or_default();
+        assert!(entries.is_empty(), "held, so nothing is filed yet: {entries:?}");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11254,222 +10827,6 @@ mod tests {
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-    }
-
-    #[test]
-    fn spawn_inject_prompts_success_branch_files_the_opening_turn_into_the_mailbase() {
-        // Messaging plan P-M1, the bounce-fix hole: `message/send` with NO
-        // contextId (or `spawn_asked`) resolves to `SendAction::Spawn` and
-        // `do_spawn` — a brand-new session's FIRST turn is typed by
-        // `spawn_inject_prompt`, the SECOND (and last) mailbase-filing site
-        // alongside `deliver_local`'s (see its own doc comment for why it
-        // can't reach `deliver_local`).
-        //
-        // This drives `spawn_inject_prompt` directly rather than through
-        // `message_send`/`do_spawn`: `do_spawn` launches the configured
-        // agent via `std::env::current_exe()`, which inside `cargo test` IS
-        // THE TEST BINARY ITSELF — invoking it with `conduct --agent a2a
-        // --id … -- …` would hand those words to the test harness as
-        // positional filter args and actually re-run (a subset of) this
-        // suite as a detached child process, never bind the real socket,
-        // and time out this test's 3s retry budget for nothing. No test in
-        // this file exercises `do_spawn`'s OS-level spawn for that reason
-        // (there is no `AOIDE_A2A_BIN`-style override seam for it) —
-        // `spawn_inject_prompt` is the exact function the mailbase-filing
-        // code lives in, and driving it directly against a stand-in
-        // listener is the same boundary `aoide_conduct::graph::conduct`'s
-        // own PTY-injection test already uses for the underlying
-        // socket-write mechanism (see `spawn_inject_prompt`'s doc comment).
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-
-        let id = "spawn-inject-target";
-        let launch_at = now_iso_utc();
-        // READINESS comes before the write, so this test stages the fact the
-        // hook door would have written: the target harness's own session,
-        // parented to the wrapper. Without it the gate refuses and nothing is
-        // typed — the same staged-roster shape `wait_ready` reads live.
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let stage = root.join("stage");
-        std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        write_stage(
-            &sessions_path(),
-            &SessionsFile {
-                schema_version: "0".to_string(),
-                sessions: vec![SessionRecord {
-                    session_id: "claude-child".to_string(),
-                    state: "idle".to_string(),
-                    parent_session_id: Some(id.to_string()),
-                    agent: "claude".to_string(),
-                    // THIS launch's `SessionStart`, stamped after it began —
-                    // the only child record that may satisfy the hook arm.
-                    session_start_at: Some(launch_at.clone()),
-                    harness_session_id: Some("claude-child".to_string()),
-                    ..Default::default()
-                }],
-            },
-        )
-        .unwrap();
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-
-        let acc = std::thread::spawn(move || {
-            let mut conn = accept_one(&listener, "the spawned session's opening turn is typed");
-            // Exactly the text, no more: the submit keystroke must NOT be
-            // part of this write.
-            let mut text = Vec::new();
-            let mut chunk = [0u8; 64];
-            while text.len() < "hello new session".len() {
-                let n = conn.read(&mut chunk).unwrap();
-                assert!(n > 0, "the writer closed before the text arrived");
-                text.extend_from_slice(&chunk[..n]);
-            }
-            let before_submit = Instant::now();
-            let mut submit = [0u8; 8];
-            let n = conn.read(&mut submit).unwrap();
-            (text, submit[..n].to_vec(), before_submit.elapsed())
-        });
-
-        assert_eq!(spawn_inject_prompt(id, "claude", "hello new session", &launch_at, Duration::from_millis(500)), "delivered");
-        let (text, submit, gap) = acc.join().unwrap();
-        assert_eq!(
-            String::from_utf8(text).unwrap(),
-            "hello new session",
-            "the text goes out alone — no keystroke concatenated into it"
-        );
-        assert_eq!(
-            String::from_utf8(submit).unwrap(),
-            "\r",
-            "claude's own submit key (CLAUDE_PROFILE.submit_key), never a hand-rolled `\\n`"
-        );
-        // And it is a SEPARATE, LATER write, not a lucky read boundary: the
-        // writer sleeps `SUBMIT_KEYSTROKE_DELAY` (300ms in a non-test build of
-        // aoide-conduct, which is what a dependent crate compiles) between the
-        // two writes, so the submit byte cannot arrive with the text.
-        assert!(
-            gap >= Duration::from_millis(150),
-            "the submit keystroke arrived {gap:?} after the text — one write, not two"
-        );
-
-        let entries = aoide_storage::mail::read_base().unwrap();
-        assert_eq!(entries.len(), 1, "the spawned session's opening turn is filed exactly once");
-        assert_eq!(entries[0].envelope.header.to.name, id);
-        assert_eq!(entries[0].envelope.text, "hello new session");
-        assert_eq!(entries[0].envelope.header.from.name, "", "no caller identity to offer — #51's scope");
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-    }
-
-    /// The opening turn's WRITE SHAPE, on its own: the text, then the target
-    /// profile's own submit key as a SECOND write after the keystroke gap —
-    /// never `{prompt}\n`, which is what this door used to type.
-    ///
-    /// The configured program names no profile at all, so this also pins the
-    /// resolution's fallback (claude's key, through `profile_for_agent`) and
-    /// drives the READINESS arm such a target gets: output quiescence, since it
-    /// has no `SessionStart` hook to fire — the wrapper's own log appears and
-    /// then stands still.
-    #[test]
-    fn the_opening_turn_writes_the_text_then_the_targets_submit_key_as_a_second_write() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-shape-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(root.join("stage")).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
-
-        let id = "spawn-inject-shape";
-        let launch_at = now_iso_utc();
-        // The wrapper's own record, with a log that has already spoken — what
-        // a hookless target's readiness is read off.
-        let log = root.join("wrapper.log");
-        std::fs::write(&log, "no-such-agent$ ").unwrap();
-        let mut wrap = fixture_session(id, "idle", None);
-        wrap.log_path = Some(log.to_string_lossy().into_owned());
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: "0".to_string(), sessions: vec![wrap] },
-        )
-        .unwrap();
-
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-
-        let expected = aoide_protocol::agents::CLAUDE_PROFILE.submit_key;
-        let acc = std::thread::spawn(move || {
-            let mut conn = accept_one(&listener, "the opening turn's text-then-keystroke write");
-            let mut text = Vec::new();
-            let mut chunk = [0u8; 64];
-            while text.len() < "first turn".len() {
-                let n = conn.read(&mut chunk).unwrap();
-                assert!(n > 0, "the writer closed before the text arrived");
-                text.extend_from_slice(&chunk[..n]);
-            }
-            let before_submit = Instant::now();
-            let mut submit = [0u8; 8];
-            let n = conn.read(&mut submit).unwrap();
-            (text, submit[..n].to_vec(), before_submit.elapsed())
-        });
-
-        // A budget comfortably past the quiescence window the readiness wait
-        // uses for a target with no hook.
-        assert_eq!(spawn_inject_prompt(id, "no-such-agent", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this name");
-        let (text, submit, gap) = acc.join().unwrap();
-        assert_eq!(String::from_utf8(text).unwrap(), "first turn", "the text, alone");
-        assert_eq!(
-            String::from_utf8(submit).unwrap(),
-            expected,
-            "the target profile's submit key, resolved through the table"
-        );
-        assert!(
-            gap >= Duration::from_millis(150),
-            "the keystroke is a separate, later write — it arrived {gap:?} after the text"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
     }
 
@@ -11525,49 +10882,185 @@ mod tests {
         }
     }
 
-    /// M4, the cost the handler no longer pays: an unready target makes the
-    /// wait run its whole budget. That is exactly why `do_spawn` runs
-    /// `spawn_inject_prompt` on a worker instead of on its connection handler
-    /// — 20s of a `MAX_CONN` slot is `503 server busy` for every other RPC.
+    /// An empty opening turn is not a send: the worker records `skipped-empty`
+    /// and nothing reaches the queue.
     #[test]
-    fn the_readiness_wait_is_the_cost_that_moved_off_the_handler() {
+    fn an_empty_opening_turn_is_skipped_and_queues_nothing() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
         let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-waitcost-{}-{}",
+            "aoide-a2a-empty-turn-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         std::fs::create_dir_all(root.join("stage")).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "empty-turn";
         write_stage(
             &sessions_path(),
-            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
         )
         .unwrap();
 
-        let budget = Duration::from_millis(400);
-        let launch_at = now_iso_utc();
-        let started = Instant::now();
-        let word = spawn_inject_prompt("never-ready", "claude", "hello", &launch_at, budget);
-        let took = started.elapsed();
-        assert_eq!(word, "not-ready");
-        assert!(
-            took >= Duration::from_millis(350),
-            "the wait must spend its budget on an unready target (took {took:?}) — this is the \
-             handler time the worker exists to absorb"
+        opening_turn_worker(
+            id.to_string(),
+            String::new(),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            None,
         );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("skipped-empty"));
+        assert!(!root.join("stage").join("pending.json").exists(), "an empty turn is not a send");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+    }
+
+    /// A failed queue write is `hold-failed`, end to end: the worker stamps it
+    /// on the record, nothing is typed, and the queue file the failure hit is
+    /// left as it was. The write fails inside the queue's own read, because
+    /// `pending.json` does not parse; that is the error branch a failed write
+    /// takes as well, and it is the only way this test can make the write fail
+    /// without depending on whether the suite runs as root.
+    #[test]
+    fn a_failed_queue_write_is_hold_failed_and_overwrites_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-hold-failed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let queue = root.join("stage").join("pending.json");
+        let corrupt = "{ not json";
+        std::fs::write(&queue, corrupt).unwrap();
+
+        let id = "hold-failed";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+
+        opening_turn_worker(
+            id.to_string(),
+            "hi".to_string(),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            None,
+        );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("hold-failed"), "the verdict names the failure");
+        assert_eq!(std::fs::read_to_string(&queue).unwrap(), corrupt, "the queue file was overwritten");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// A node that already holds the queue's per-source cap gets `queue-full`
+    /// for its spawn's opening turn: the worker stamps it on the record, and
+    /// nothing is queued or moved.
+    #[test]
+    fn an_opening_turn_from_a_full_source_is_queue_full_and_queues_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-queue-full-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let id = "queue-full";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+        fill_source(id, "node:busy-node");
+        let before = std::fs::read_to_string(root.join("stage").join("pending.json")).unwrap();
+
+        opening_turn_worker(
+            id.to_string(),
+            "hi".to_string(),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            Some("node:busy-node".to_string()),
+        );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("queue-full"), "the verdict names the cap");
+        let after = std::fs::read_to_string(root.join("stage").join("pending.json")).unwrap();
+        assert_eq!(after, before, "nothing queued, nothing moved");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// A prompt past the queue's per-entry byte cap is never queued: the
+    /// worker stamps `hold-failed`, the one word for "held nothing", and the
+    /// queue is exactly as it was.
+    #[test]
+    fn an_oversize_opening_turn_is_hold_failed_and_queues_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-too-large-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let id = "too-large";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+
+        opening_turn_worker(
+            id.to_string(),
+            "x".repeat(aoide_conduct::graph::PENDING_ENTRY_MAX_BYTES),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            Some("node:chatty".to_string()),
+        );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("hold-failed"), "an oversize prompt holds nothing");
+        assert!(!root.join("stage").join("pending.json").exists(), "and queues nothing");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
     }
 
@@ -11607,18 +11100,16 @@ mod tests {
             f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone())
         };
 
-        // A target with no readiness fact and no log settles at the deadline —
-        // the verdict is `not-ready`, and that is what the record ends on.
+        // A network door cannot approve, so the opening turn is held for a
+        // human, not typed: the verdict is `held-pending`, never `pending`.
         opening_turn_worker(
             id.to_string(),
-            "no-such-agent".to_string(),
             "hi".to_string(),
-            now_iso_utc(),
-            Duration::from_millis(50),
             audit_log.clone(),
             OpeningTurnSlot::acquire().expect("a slot"),
+            None,
         );
-        assert_eq!(read_word().as_deref(), Some("not-ready"), "the verdict, never `pending`");
+        assert_eq!(read_word().as_deref(), Some("held-pending"), "the verdict, never `pending`");
 
         // And a verdict already on the record is replaced by THIS worker's own
         // — the pending write in between is the same thread's, so nothing can
@@ -11626,14 +11117,12 @@ mod tests {
         aoide_conduct::graph::stamp_opening_turn(id, "delivered");
         opening_turn_worker(
             id.to_string(),
-            "no-such-agent".to_string(),
             "hi".to_string(),
-            now_iso_utc(),
-            Duration::from_millis(50),
             audit_log,
             OpeningTurnSlot::acquire().expect("a slot"),
+            None,
         );
-        assert_eq!(read_word().as_deref(), Some("not-ready"), "still ends on its own verdict");
+        assert_eq!(read_word().as_deref(), Some("held-pending"), "still ends on its own verdict");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11700,98 +11189,6 @@ mod tests {
             OpeningTurnSlot::acquire().is_some(),
             "a released slot is reusable"
         );
-    }
-
-    #[test]
-    fn spawn_inject_prompt_types_nothing_and_files_no_receipt_when_the_target_is_never_ready() {
-        // The readiness gate's refusal arm, against a real bound listener: a
-        // socket nobody's harness has announced itself behind is NOT a session
-        // ready to take a turn, so nothing is written into it and no receipt is
-        // filed — the sender's letter stays unacknowledged rather than
-        // acknowledged by a turn that never ran.
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-unready-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(root.join("stage")).unwrap();
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
-        // An empty roster: no harness under this wrapper has started.
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
-        )
-        .unwrap();
-
-        let id = "spawn-inject-unready";
-        let launch_at = now_iso_utc();
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-        listener.set_nonblocking(true).unwrap();
-
-        assert_eq!(spawn_inject_prompt(id, "claude", "hello unready target", &launch_at, Duration::from_millis(150)), "not-ready");
-
-        let deadline = Instant::now() + Duration::from_millis(600);
-        let mut typed_at = false;
-        while Instant::now() < deadline {
-            if listener.accept().is_ok() {
-                typed_at = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert!(!typed_at, "an unready target was typed at");
-        assert!(
-            aoide_storage::mail::read_base().unwrap().is_empty(),
-            "no receipt may be filed for an opening turn that never ran"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-        match saved_runtime {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-    }
-
-    #[test]
-    fn spawn_inject_prompt_on_an_empty_prompt_files_nothing() {
-        // The existing early return (`if prompt.is_empty() { return; }`) —
-        // an empty prompt never connects at all, so it must not file a
-        // mailbase entry either.
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-spawninject-empty-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-
-        let launch_at = now_iso_utc();
-        assert_eq!(spawn_inject_prompt("whatever-id", "claude", "", &launch_at, Duration::from_millis(50)), "skipped-empty");
-        assert!(aoide_storage::mail::read_base().unwrap().is_empty());
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
     }
 
     #[test]
@@ -11885,7 +11282,7 @@ mod tests {
     }
 
     #[test]
-    fn loopback_message_send_with_a_valid_token_still_auto_delivers() {
+    fn loopback_message_send_with_a_valid_token_is_held_too() {
         // The other half of the same coupling: presenting the CORRECT token
         // restores exactly the original loopback behavior — this amendment
         // narrows trust, it doesn't remove the ability to be trusted.
@@ -11917,7 +11314,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "a token-presenting loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -11932,9 +11328,8 @@ mod tests {
             "the-real-token",
             Some("the-real-token"), None
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "authenticated loopback\r");
-        assert_eq!(result.unwrap()["id"], id);
+        assert_eq!(result.unwrap()["status"]["state"], "submitted");
+        assert_held_at_the_door(&listener, &stage, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -11948,12 +11343,12 @@ mod tests {
     }
 
     #[test]
-    fn autogated_node_delivers_despite_being_non_loopback() {
+    fn a_registered_address_send_is_held_and_never_touches_the_socket() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-autogate-{}-{}",
+            "aoide-a2a-addr-held-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
@@ -11966,12 +11361,11 @@ mod tests {
         std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
         std::env::remove_var("AOIDE_SESSION_ID");
 
-        // A node explicitly marked `autogate: true`, whose url resolves (as
-        // an IP literal — no real DNS) to the connecting address.
+        // A registered node whose url resolves (as an IP literal — no real
+        // DNS) to the connecting address.
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "trusted-node".into(),
             url: "http://10.0.0.9:8710/".into(),
-            autogate: true,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -11984,7 +11378,7 @@ mod tests {
         }])
         .unwrap();
 
-        let id = "autogate-target";
+        let id = "addr-held-target";
         let socket = aoide_conduct::graph::conduct_socket_path(id);
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
@@ -11995,7 +11389,6 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(listener, "an autogated node's non-loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -12003,504 +11396,8 @@ mod tests {
         });
         let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
         let result = message_send(&params, &audit_log, "", "", remote_origin, "", None, None);
-        let got = acc.join().unwrap();
-        assert_eq!(
-            String::from_utf8(got).unwrap(),
-            "trusted send\r",
-            "an autogate-marked node's non-loopback send still auto-delivers"
-        );
-        assert!(result.is_ok());
-
-        // No pending.json entry was ever queued for this delivered send.
-        let pending_path = stage.join("pending.json");
-        if pending_path.exists() {
-            let pending: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&pending_path).unwrap()).unwrap();
-            assert!(pending["pending"].as_array().map(Vec::is_empty).unwrap_or(true));
-        }
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-    }
-
-    // ── P-CHARTER: the unsigned autogate rail answers to the charter ────────
-    //
-    // The A3 confirm review's finding 4, and the ruling it was handed: the
-    // addr/token rails matched a record's `autogate` flag and nothing else, so
-    // a machine whose charter line was REMOVED — its record still `autogate` —
-    // kept auto-delivering while its HOME mesh was a charter mesh. The rail
-    // carries no signed mesh, so the record is judged by home's rules, and a
-    // record that does not answer falls to PENDING: never refused outright,
-    // never delivered.
-
-    /// One box for those tests: `home` rooted by an operator, a charter that
-    /// LISTS the peer's line or omits it, the peer's record (`autogate`,
-    /// `verified`, that key, its own `token_file` when asked for, and a STALE
-    /// `grants[home]` either way — so a rail that still read the record would
-    /// deliver on it), and one conductable session behind a NONBLOCKING
-    /// listener. A delivery is read back off that listener afterwards; a held
-    /// send simply never connects. `Drop` restores the environment and removes
-    /// the tree, so a failing assertion cannot leak into the next test.
-    struct RailBox {
-        root: std::path::PathBuf,
-        config: std::path::PathBuf,
-        stage: std::path::PathBuf,
-        audit_log: std::path::PathBuf,
-        listener: UnixListener,
-        saved: Vec<(&'static str, Option<String>)>,
-    }
-
-    impl RailBox {
-        /// What the door wrote into the session's socket, or `None` when
-        /// nothing ever connected — which is what a HELD send looks like from
-        /// the target's side. The listener is nonblocking, so the accept itself
-        /// is the delivery question: an immediate probe, never a wait — the
-        /// rig's `accept_one` would PANIC on exactly the held case this answers
-        /// `None` for. The READ is that rig's other half (`read_delivery`), so
-        /// a peer that connects and then goes silent fails THIS test inside the
-        /// budget instead of parking it, and every test queued behind
-        /// `env_lock` with it.
-        fn delivered(&self) -> Option<String> {
-            let (mut conn, _) = self.listener.accept().ok()?;
-            let bytes = read_delivery(&mut conn, "the rail's session socket receives the delivered message");
-            Some(String::from_utf8_lossy(&bytes).into_owned())
-        }
-
-        /// Break `config.toml` past parsing — the input review F6 is about. A
-        /// MISSING config is not a load error (`config::load` answers the
-        /// defaults), so the fence is about a config that exists and will not
-        /// read: this is that.
-        fn break_config(&self) {
-            std::fs::write(&self.config, "this is not a config at all ][\n").unwrap();
-            assert!(aoide_storage::config::load().is_err(), "the premise: the box's config no longer loads");
-        }
-
-        /// The queue this box holds — empty when a send was delivered (or
-        /// swallowed by the uniform-response guard, which never touches it).
-        fn pending(&self) -> Vec<serde_json::Value> {
-            let Ok(text) = std::fs::read_to_string(self.stage.join("pending.json")) else {
-                return Vec::new();
-            };
-            serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .and_then(|v| v["pending"].as_array().cloned())
-                .unwrap_or_default()
-        }
-
-        /// The `message/send` this box receives from the peer's address —
-        /// the exact call `handle_connection`'s Inject arm makes.
-        fn send(&self, text: &str, expected_token: &str, presented_token: Option<&str>, origin: ConnOrigin) -> Result<Value, (i64, String)> {
-            let params = json!({
-                "message": { "parts": [{ "kind": "text", "text": text }], "contextId": RAIL_SESSION }
-            });
-            message_send(&params, &self.audit_log, "", "", origin, expected_token, presented_token, None)
-        }
-    }
-
-    impl Drop for RailBox {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.root);
-            for (key, value) in &self.saved {
-                match value {
-                    Some(v) => std::env::set_var(key, v),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
-
-    /// The session every [`RailBox`] exposes, and the address its record
-    /// resolves to. Short on purpose: `XDG_RUNTIME_DIR` is the box's own root,
-    /// so this id's socket path has to fit `sun_path`.
-    const RAIL_SESSION: &str = "rail";
-    const RAIL_PEER_ADDR: &str = "10.0.0.9";
-
-    fn rail_box(tag: &str, mesh: &str, peer_url: &str, listed: bool, token: Option<&str>) -> RailBox {
-        let root = aoide_test_support::short_tmp(tag);
-        let mut saved = Vec::new();
-        for key in ["AOIDE_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_CONFIG"] {
-            saved.push((key, std::env::var(key).ok()));
-        }
-        std::env::remove_var("AOIDE_CONFIG");
-
-        // 1. An operator roots `mesh` and signs a charter naming the peer — or,
-        //    for `listed: false`, one that does not name it at all.
-        charter_machine(&root, "operator", "opbox");
-        let init = aoide_storage::charter::init(mesh).unwrap();
-        let op_line = aoide_storage::charter::node_line().unwrap();
-        charter_machine(&root, "peer", "peerbox");
-        let peer_line = aoide_storage::charter::node_line().unwrap();
-        let peer_key = aoide_storage::charter::parse(&format!(
-            "mesh = \"{mesh}\"\nversion = 1\nrelays = []\n\n[nodes]\n{peer_line}\n"
-        ))
-        .unwrap()
-        .nodes
-        .values()
-        .next()
-        .unwrap()
-        .key
-        .clone();
-
-        charter_machine(&root, "operator", "opbox");
-        let named = if listed { format!("{op_line}\n{peer_line}\n") } else { format!("{op_line}\n") };
-        std::fs::write(
-            aoide_storage::charter::source_path(mesh),
-            format!("mesh = \"{mesh}\"\nversion = 0\nrelays = []\n\n[nodes]\n{named}"),
-        )
-        .unwrap();
-        aoide_storage::charter::sign(mesh, None).unwrap();
-        let bytes = std::fs::read(aoide_storage::charter::source_path(mesh)).unwrap();
-        let sig = std::fs::read(aoide_storage::charter::source_sig_path(mesh)).unwrap();
-
-        // 2. The peer's box takes the charter and trusts ONLY the operator key
-        //    — no pairing with anybody, so `mesh` is a charter mesh here. It is
-        //    also the box's NAMED home: the rail carries no signed mesh, so
-        //    `[pairing] homeMesh` is the one that judges it.
-        charter_machine(&root, "peer", "peerbox");
-        std::fs::write(
-            root.join("peer").join("config.toml"),
-            format!(
-                "[pairing]\nhomeMesh = \"{mesh}\"\n\n[mesh.{mesh}]\noperator = \"ed25519:{}\"\n",
-                init.operator
-            ),
-        )
-        .unwrap();
-        assert_eq!(aoide_storage::charter::accept(&bytes, &sig).unwrap().charter.version, 1);
-
-        // From here on the peer's machine IS the box under test: the accepted
-        // charter lives in its state, and every path the door reads is this
-        // one's.
-        let box_root = root.join("peer");
-        std::env::set_var("AOIDE_ROOT", &box_root);
-        std::env::set_var("AOIDE_STATE_DIR", box_root.join("state"));
-        std::env::set_var("AOIDE_STAGE_DIR", box_root.join("stage"));
-        std::env::set_var("XDG_RUNTIME_DIR", &box_root);
-        let stage = box_root.join("stage");
-        std::fs::create_dir_all(&stage).unwrap();
-
-        // 3. This box's record for the peer: `autogate` and `verified`, its key
-        //    as the charter carries it, its own `token_file` where asked for,
-        //    and a stale grant in the home mesh so nothing here turns on that
-        //    grant.
-        let mut record = fixture_node("peerbox", peer_url, true);
-        record.verified = true;
-        record.pubkey = Some(peer_key);
-        record.grants = aoide_storage::node_store::grants_in(mesh, &["message"]);
-        if let Some(secret) = token {
-            let path = box_root.join("node.token");
-            std::fs::write(&path, format!("{secret}\n")).unwrap();
-            record.token_file = Some(path.to_string_lossy().into_owned());
-        }
-        aoide_storage::node_store::save_nodes(&[record]).unwrap();
-
-        // 4. One conductable session, listening and NOT accepting yet.
-        let socket = aoide_conduct::graph::conduct_socket_path(RAIL_SESSION);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        write_stage(
-            &sessions_path(),
-            &SessionsFile {
-                schema_version: "0".to_string(),
-                sessions: vec![conductable_session(RAIL_SESSION, &socket)],
-            },
-        )
-        .unwrap();
-
-        RailBox {
-            root,
-            config: box_root.join("config.toml"),
-            stage,
-            audit_log: box_root.join("log"),
-            listener,
-            saved,
-        }
-    }
-
-    /// The whole rail table, over one real box (identity, accepted charter,
-    /// record): which record the UNSIGNED rails deliver for, judged by home.
-    #[test]
-    fn the_autogate_rail_reads_the_matched_record_against_its_home_mesh() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-table", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
-        let record = aoide_storage::node_store::load_nodes().pop().unwrap();
-        let listed = aoide_storage::charter::governing("home").expect("the box's accepted charter governs home");
-        assert_eq!(
-            listed.nodes.keys().collect::<Vec<_>>(),
-            vec!["opbox", "peerbox"],
-            "the fixture's charter names the peer, by key"
-        );
-        let on = |record: &aoide_storage::node_store::Node| {
-            rail_admits(std::slice::from_ref(record), record, Some(&listed), false, "home")
-        };
-
-        assert!(on(&record), "a listed, verified record with `message` on its line delivers");
-        assert!(rail_admits_here(&[record.clone()], &record), "and the door's own disk reads agree");
-
-        let mut narrowed = record.clone();
-        narrowed.narrowed = std::collections::BTreeMap::from([("home".to_string(), vec!["message".to_string()])]);
-        assert!(
-            !on(&narrowed),
-            "`node allow peerbox message off --mesh home` narrows the charter, and the rail reads the narrowed answer"
-        );
-        assert!(on(&record), "and the narrowing belongs to the record, not to the line");
-
-        let mut read_only = listed.clone();
-        read_only.nodes.values_mut().find(|l| l.key == record.pubkey.clone().unwrap()).unwrap().grant =
-            vec!["read".to_string()];
-        assert!(
-            !rail_admits(std::slice::from_ref(&record), &record, Some(&read_only), false, "home"),
-            "a line that grants `read` and not `message` never auto-delivers a send"
-        );
-
-        // The finding's machine: the line is GONE, the record still `autogate`
-        // and still carrying the grant it was paired with.
-        let mut gone = listed.clone();
-        gone.nodes.clear();
-        assert!(
-            !rail_admits(std::slice::from_ref(&record), &record, Some(&gone), false, "home"),
-            "a key the charter no longer lists is not on the rail, whatever its record still says"
-        );
-
-        let mut unverified = record.clone();
-        unverified.verified = false;
-        assert!(!on(&unverified), "a record claiming a line it cannot be verified against does not deliver");
-
-        // `node add --autogate`'s own shape: `verified: false`, no key at all.
-        // It can claim no line, so a charter mesh pends it.
-        let keyless = fixture_node("hand-added", &format!("http://{RAIL_PEER_ADDR}:8710/"), true);
-        assert!(!on(&keyless), "a keyless record has no line to be on");
-
-        // F2's fail-closed arm: charter-shaped, operator key undecidable.
-        assert!(
-            !rail_admits(std::slice::from_ref(&record), &record, None, true, "home"),
-            "a charter mesh whose operator key cannot be decided delivers nothing"
-        );
-
-        // And the pair mesh, untouched: the flag decides, no charter is read.
-        assert!(
-            rail_admits(std::slice::from_ref(&keyless), &keyless, None, false, "home"),
-            "with no charter shaped for home the record's own flag is the whole rule, as before"
-        );
-        let quiet = fixture_node("quiet", &format!("http://{RAIL_PEER_ADDR}:8710/"), false);
-        assert!(
-            !rail_admits(std::slice::from_ref(&quiet), &quiet, None, false, "home"),
-            "an unmarked record was never autogated"
-        );
-
-        // Shaped with no decidable operator, THROUGH the disk reads: a document
-        // this node cannot honour is a charter mesh, and the rail delivers
-        // nothing in it (the same fail-closed arm `grant_from` takes).
-        std::fs::write(aoide_storage::charter::in_force_path("home"), "not a charter at all").unwrap();
-        assert!(aoide_storage::charter::charter_shaped("home"), "a document on disk is what SHAPES the mesh");
-        assert!(
-            !rail_admits_here(&[record.clone()], &record),
-            "charter-shaped with an undecidable operator key pends the rail (F2's fail-closed arm)"
-        );
-        assert!(boxed.pending().is_empty(), "and asking the question queues nothing");
-    }
-
-    /// **The finding, end to end.** A record a charter listed and no longer
-    /// does, still marked `autogate`: its send is held PENDING — not delivered,
-    /// and not refused either.
-    #[test]
-    fn a_record_the_home_charter_no_longer_lists_pends_its_autogated_send() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-gone", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), false, None);
-
-        let result = boxed.send("removed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
-        assert!(result.is_ok(), "the door ANSWERS a rail it does not deliver for: {result:?}");
-        assert_eq!(boxed.delivered(), None, "a record off the charter's line does not auto-deliver");
-        let pending = boxed.pending();
-        assert_eq!(pending.len(), 1, "it falls to the operator's queue instead: {pending:?}");
-        assert_eq!(
-            pending[0]["from"], "node:peerbox",
-            "and the queue says who knocked: {pending:?}"
-        );
-    }
-
-    /// The other half of the same rule: a key the charter DOES list with
-    /// `message` delivers exactly as an autogated record always did — the
-    /// charter narrows the rail, it does not close it.
-    #[test]
-    fn a_key_the_home_charter_lists_still_autodelivers() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-listed", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
-
-        let result = boxed.send("listed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
-        assert!(result.is_ok(), "{result:?}");
-        assert_eq!(boxed.delivered().as_deref(), Some("listed-line\r"), "the line's `message` is what the rail delivers on");
-        assert!(boxed.pending().is_empty(), "and nothing was queued");
-    }
-
-    /// The TOKEN rail is the same question, one rung over: a per-node token
-    /// that survives a proxy is not a way around the charter. The record's
-    /// address does not match here at all, so the token is the only match.
-    #[test]
-    fn the_token_rail_reads_the_same_home_charter_as_the_address_rail() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-token", "home", "http://192.0.2.99:8710/", false, Some("peer-secret"));
-
-        let result = boxed.send(
-            "token-line",
-            "",
-            Some("peer-secret"),
-            ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()),
-        );
-        assert!(result.is_ok(), "{result:?}");
-        assert_eq!(boxed.delivered(), None, "the token matched the record and the record is off the line");
-        assert_eq!(boxed.pending().len(), 1, "so it pends, exactly as the address rail does");
-    }
-
-    /// **Pending, not refused, and not swallowed.** With a door-wide token
-    /// configured the #50 guard would answer a context-id send that matched
-    /// nothing with a synthetic `submitted` Task and never touch the queue — so
-    /// a charter-unlisted record that still matches the rail must reach the
-    /// real Inject machinery and queue, or the send would vanish. The match is
-    /// what exempts the guard; the charter decides delivery, and nothing else.
-    #[test]
-    fn a_charter_unlisted_record_reaches_the_queue_rather_than_the_uniform_guard() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-guard", "home", "http://192.0.2.99:8710/", false, Some("peer-secret"));
-
-        let result = boxed.send(
-            "guard-line",
-            "door-wide-secret",
-            Some("peer-secret"),
-            ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()),
-        );
-        assert!(result.is_ok(), "{result:?}");
-        assert_eq!(boxed.delivered(), None, "a door-wide bearer it does not hold, and a record off the line");
-        assert_eq!(
-            boxed.pending().len(),
-            1,
-            "reaching `pending.json` is the proof it went through the Inject arm, not the guard's synthetic Task"
-        );
-    }
-
-    /// **A config that will not load PENDS the rail** (review F6):
-    /// `config::home_mesh` answers the built-in default when `config.toml` is
-    /// unreadable, so a box whose REAL home is a charter mesh would be judged
-    /// by the DEFAULT mesh's (pair) rules and deliver on the record's flag
-    /// again — one unreadable file stepping around the whole rule. The fence is
-    /// `home_mesh_fallible`: no answer, no delivery.
-    #[test]
-    fn an_unreadable_config_pends_the_rail_rather_than_guessing_the_default_mesh() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let url = format!("http://{RAIL_PEER_ADDR}:8710/");
-        let origin = ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap());
-
-        // This box's home is `fleet`, a charter mesh that lists the record; the
-        // DEFAULT mesh (`home`) is not shaped at all, which is exactly what a
-        // swallowed load error would silently judge the send by.
-        let loaded = rail_box("aoide-a2a-rail-cfg-loaded", "fleet", &url, true, None);
-        assert!(
-            loaded.send("cfg-line", "", None, origin).is_ok(),
-            "with a readable config the rail delivers, so the arm below is about the config alone"
-        );
-        assert_eq!(loaded.delivered().as_deref(), Some("cfg-line\r"), "named home, listed key: delivered");
-        assert!(loaded.pending().is_empty(), "and nothing was queued");
-        drop(loaded);
-
-        let broken = rail_box("aoide-a2a-rail-cfg-broken", "fleet", &url, true, None);
-        broken.break_config();
-        let result = broken.send("cfg-broken", "", None, origin);
-        assert!(result.is_ok(), "and it is answered, never refused: {result:?}");
-        assert_eq!(
-            broken.delivered(),
-            None,
-            "an unreadable config has no home mesh to judge by, so the rail PENDS rather than resolving to the default mesh's pair rules"
-        );
-        assert_eq!(broken.pending().len(), 1, "the knock still reaches the operator");
-    }
-
-    #[test]
-    fn autogated_node_delivers_via_a_matching_token_even_when_ip_does_not_match() {
-        // The actual replacement for the dead IP match: behind a proxy the
-        // caller's real address is unknowable, but a per-node TOKEN survives
-        // the hop. No global A2A token is configured here at all — this is
-        // entirely the node_store-level identification, independent of the
-        // `message_send` expected_token/presented_token plumbing.
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            // Kept SHORT deliberately: XDG_RUNTIME_DIR is set to this root, so
-            // conduct_socket_path() hangs `/aoide/session-<id>.sock` off it and
-            // the whole thing must fit SUN_LEN (107 bytes + NUL). The verbose
-            // form of this name plus a verbose session id came to exactly 108.
-            "aoide-a2a-ptok-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        let stage = root.join("stage");
-        let state = root.join("state");
-        std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", &state);
-        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
-        std::env::remove_var("AOIDE_SESSION_ID");
-
-        let token_path = root.join("node.token");
-        std::fs::write(&token_path, "node-secret\n").unwrap();
-        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
-            name: "proxied-node".into(),
-            // A URL that resolves to an address the caller is NOT actually
-            // connecting from — proving delivery here comes from the TOKEN
-            // match, not a coincidental IP match.
-            url: "http://192.0.2.99:8710/".into(),
-            autogate: true,
-            token_file: Some(token_path.to_string_lossy().into_owned()),
-            bearer_secret: None,
-            hub: false,
-            pubkey: None,
-            verified: false,
-            grants: aoide_storage::node_store::Grants::new(),
-            narrowed: aoide_storage::node_store::Grants::new(),
-            via: None,
-            added_at: "2026-08-18T00:00:00Z".into(),
-        }])
-        .unwrap();
-
-        let id = "ptok-target";
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-
-        let sf = SessionsFile {
-            schema_version: "0".to_string(),
-            sessions: vec![conductable_session(id, &socket)],
-        };
-        write_stage(&sessions_path(), &sf).unwrap();
-
-        let acc = expect_delivery(listener, "an autogated node's token-matched send is DELIVERED");
-
-        let audit_log = root.join("log");
-        let params = serde_json::json!({
-            "message": { "parts": [{ "kind": "text", "text": "token-identified send" }], "contextId": id }
-        });
-        let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
-        let result = message_send(
-            &params,
-            &audit_log,
-            "",
-            "",
-            remote_origin,
-            "",
-            Some("node-secret"),
-            None,
-        );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "token-identified send\r");
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_held_at_the_door(&listener, &stage, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -12519,15 +11416,12 @@ mod tests {
     // An ssh `-L` tunnel makes a remote node's request arrive at
     // `peer_addr()` looking exactly like a genuinely local caller — the top
     // risk the ssh-transport lane's plan names explicitly. These two tests
-    // are the pin: a signed, non-autogate node over a LOOPBACK connection
-    // must NOT get the free pass a real local caller gets (this is the
-    // regression a tunnel would otherwise introduce), while a signed,
-    // autogate-marked node over the same loopback connection keeps
-    // delivering (the like-for-like restoration — narrowing must not cost
-    // an already-trusted node its existing behavior).
+    // are the pin: a signed node over a LOOPBACK connection is still a remote
+    // node. An ssh `-L` tunnel makes it look local, and it must park like any
+    // other remote send.
 
     #[test]
-    fn signed_inject_from_a_non_autogate_node_on_a_loopback_connection_is_held_pending() {
+    fn signed_inject_from_a_node_on_a_loopback_connection_is_held_pending() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -12544,10 +11438,9 @@ mod tests {
         std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
         std::env::remove_var("AOIDE_SESSION_ID");
 
-        // Paired, verified, NOT autogate-marked — a signed send from this
-        // node must queue, never auto-deliver, whatever the connection's
-        // own origin looks like.
-        let mut signed_node = fixture_node("tunneled-node", "http://10.0.0.9:8710/", false);
+        // Paired and verified. A signed send from this node must queue,
+        // whatever the connection's own origin looks like.
+        let mut signed_node = fixture_node("tunneled-node", "http://10.0.0.9:8710/");
         signed_node.verified = true;
         aoide_storage::node_store::save_nodes(&[signed_node]).unwrap();
 
@@ -12571,8 +11464,8 @@ mod tests {
         // The defect this pin closes: an ssh `-L` forward makes a tunneled
         // node's connection classify as `ConnOrigin::Loopback`
         // (`classify_origin`, `peer_addr()`) exactly like this. Before the
-        // P-S6 narrowing, `should_deliver_now(Loopback, _)` was
-        // unconditionally `true`, so this would have auto-delivered.
+        // P-S6 narrowing, a loopback origin once earned delivery, so this
+        // would have auto-delivered.
         let result = message_send(
             &params,
             &audit_log,
@@ -12584,7 +11477,7 @@ mod tests {
             Some(caller("tunneled-node")),
         );
         assert!(result.is_ok(), "{:?}", result.err());
-        assert!(listener.accept().is_err(), "a signed, non-autogate node's send must never touch the socket, loopback or not");
+        assert!(listener.accept().is_err(), "a signed node's send must never touch the socket, loopback or not");
 
         let pending: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
@@ -12603,124 +11496,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn signed_inject_from_an_autogate_node_on_a_loopback_connection_still_auto_delivers() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = aoide_test_support::short_tmp(&format!(
-            "aoide-a2a-sig-loop-autogate-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        let stage = root.join("stage");
-        std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
-        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
-        std::env::remove_var("AOIDE_SESSION_ID");
-
-        // Paired, verified, AND autogate-marked — the operator already
-        // trusted this node to skip the pending queue; the P-S6 narrowing
-        // must not cost it that.
-        let mut signed_node = fixture_node("trusted-tunneled-node", "http://10.0.0.9:8710/", true);
-        signed_node.verified = true;
-        // The caller's own key and the grant the delivery needs, both of which
-        // a real door would have proved before this arm ran (review finding 5):
-        // autogate delivery is `message` in the request's mesh, and the grant is
-        // read by KEY.
-        signed_node.pubkey = Some("ab".repeat(32));
-        signed_node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
-        aoide_storage::node_store::save_nodes(&[signed_node]).unwrap();
-
-        let id = "sig-loop-autogate-tgt";
-        let socket = aoide_conduct::graph::conduct_socket_path(id);
-        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
-        let listener = UnixListener::bind(&socket).unwrap();
-
-        let sf = SessionsFile {
-            schema_version: "0".to_string(),
-            sessions: vec![conductable_session(id, &socket)],
-        };
-        write_stage(&sessions_path(), &sf).unwrap();
-
-        let acc = expect_delivery(listener, "a signed autogate node's loopback send is DELIVERED");
-
-        let audit_log = root.join("log");
-        let params = serde_json::json!({
-            "message": { "parts": [{ "kind": "text", "text": "trusted tunneled send" }], "contextId": id }
-        });
-        let result = message_send(
-            &params,
-            &audit_log,
-            "",
-            "",
-            ConnOrigin::Loopback,
-            "",
-            None,
-            Some(caller("trusted-tunneled-node")),
-        );
-        let got = acc.join().unwrap();
-        assert_eq!(
-            String::from_utf8(got).unwrap(),
-            "trusted tunneled send\r",
-            "an autogate-marked node's signed send still auto-delivers through a loopback-classified connection"
-        );
-        assert!(result.is_ok(), "{:?}", result.err());
-
-        let pending_path = stage.join("pending.json");
-        if pending_path.exists() {
-            let pending: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&pending_path).unwrap()).unwrap();
-            assert!(pending["pending"].as_array().map(Vec::is_empty).unwrap_or(true), "a delivered send never queues");
-        }
-
-        // Review N5: the SAME autogate-marked node, naming a mesh it holds
-        // nothing in, does NOT get the without-pending delivery — it falls to
-        // the pending queue like any stranger, because per-mesh trust is
-        // decided in the mesh the request names.
-        let away_params = serde_json::json!({
-            "message": { "parts": [{ "kind": "text", "text": "named away" }], "contextId": id }
-        });
-        let away = message_send(
-            &away_params,
-            &audit_log,
-            "",
-            "",
-            ConnOrigin::Loopback,
-            "",
-            None,
-            Some(SignedCaller { name: "trusted-tunneled-node", key: &"ab".repeat(32), mesh: Some("away") }),
-        );
-        assert!(away.is_ok(), "a held send is still a well-formed answer: {away:?}");
-        let pending: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&pending_path).unwrap_or_else(|_| "{\"pending\":[]}".to_string())).unwrap();
-        assert!(
-            !pending["pending"].as_array().map(Vec::is_empty).unwrap_or(true),
-            "an autogate-marked caller holding nothing in the mesh it NAMES is held for approval: {pending}"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        match saved_state {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
-        }
-    }
-
-    // ── P-RSA S5: a remote parent steers its own child without pending ───────
+    // ── P-RSA S5: a remote parent's inject parks like any other ─────────
     //
-    // The claim `node spawn` stamped on the child (S3) is read BACK on the
-    // Inject arm: a caller whose verified key and claimed session id both equal
-    // the target record's `remoteParent` delivers WITHOUT pending — audited
-    // `autogate-remote-parent` — and every other shape is byte-for-byte today's
-    // result. The table below is the whole predicate: signed and unsigned, key
-    // match and mismatch, session match and mismatch, and the node's own
-    // `autogate` flag on and off.
+    // The claim `node spawn` stamped on the child (S3) is stamped and read by
+    // the history gate only. An Inject never reads it, so a remote parent's
+    // inject parks in `pending.json` like every other network inject.
 
     const PARENT_KEY: &str = "aa11cc22dd33ff44";
     const PARENT_SESSION: &str = "par-1";
@@ -12732,7 +11512,7 @@ mod tests {
     /// node's key and `parent_session` — the exact shape S3's
     /// `stamp_remote_parent` leaves behind. Points `AOIDE_STAGE_DIR`/
     /// `AOIDE_STATE_DIR`/`XDG_RUNTIME_DIR` at the box and clears the ambient
-    /// autogate/session vars, so the caller must already hold `env_lock`.
+    /// session vars, so the caller must already hold `env_lock`.
     ///
     /// Returns `(stage, audit_log, listener)`: the listener sits at the child's
     /// own control socket, so a delivery is observable as bytes arriving and a
@@ -12743,7 +11523,6 @@ mod tests {
         node_name: &str,
         key: &str,
         parent_session: &str,
-        autogate: bool,
     ) -> (std::path::PathBuf, std::path::PathBuf, UnixListener) {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
@@ -12753,7 +11532,7 @@ mod tests {
         std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
         std::env::remove_var("AOIDE_SESSION_ID");
 
-        let mut node = fixture_node(node_name, "http://192.0.2.51:8710/", autogate);
+        let mut node = fixture_node(node_name, "http://192.0.2.51:8710/");
         node.verified = true;
         node.pubkey = Some(key.to_string());
         // P-CHARTER (review finding 5): delivering a `message/send` needs the
@@ -12819,134 +11598,12 @@ mod tests {
         }
     }
 
-    /// The whole predicate, table-tested against plain values (no stage file,
-    /// no socket, no registry): every `None` is `false`, and of the two
-    /// equalities the KEY is the security argument while the session id pins it
-    /// to one child.
-    #[test]
-    fn remote_parent_match_needs_a_signed_caller_its_key_and_its_session() {
-        let target = RemoteParent {
-            node: "nodeb".to_string(),
-            key: PARENT_KEY.to_string(),
-            session_id: PARENT_SESSION.to_string(),
-            extra: Default::default(),
-        };
-        let key = PARENT_KEY.to_string();
-        let caller = SignedCaller { name: "nodeb", key: &key, mesh: None };
-
-        assert!(
-            remote_parent_match(Some(&caller), Some(PARENT_SESSION), Some(&target)),
-            "signed + key match + session match is the one true row"
-        );
-        assert!(!remote_parent_match(None, Some(PARENT_SESSION), Some(&target)), "unsigned: no verified key to compare");
-        assert!(
-            !remote_parent_match(Some(&SignedCaller { name: "nodeb", key: "ff99", mesh: None }), Some(PARENT_SESSION), Some(&target)),
-            "another node's key never matches — a node steers only children stamped with its OWN key"
-        );
-        assert!(
-            !remote_parent_match(Some(&caller), Some("par-2"), Some(&target)),
-            "a claim naming some OTHER session of the same node is not this child"
-        );
-        assert!(
-            !remote_parent_match(Some(&caller), Some("not/a/session"), Some(&target)),
-            "a malformed claim matches nothing — no separate refusal on this arm (§6)"
-        );
-        assert!(!remote_parent_match(Some(&caller), None, Some(&target)), "no claim, nothing asked for");
-        assert!(!remote_parent_match(Some(&caller), Some(PARENT_SESSION), None), "a target with no remoteParent");
-        assert!(
-            remote_parent_match(Some(&SignedCaller { name: "renamed-nodeb", key: &key, mesh: None }), Some(PARENT_SESSION), Some(&target)),
-            "the stored NAME is a label, not the identity: a renamed record still matches on the key"
-        );
-    }
-
-    /// The slice's headline, with the node's own `autogate` flag OFF — the
-    /// shape a real pair is in. The origin is a genuine non-loopback address, so
-    /// nothing but the remote-parent match can deliver this: the caller is a
-    /// signed, NON-autogate node, which [`origin_for_inject`] would otherwise
-    /// coerce to `Unknown` (where `autogate_match` is ignored outright) and
-    /// which would pend even on `Remote`'s own arm.
-    #[test]
-    fn a_remote_parent_steers_its_child_without_pending_with_autogate_off() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = remote_parent_box_root("s5-parent-off");
-        let (stage, audit_log, listener) =
-            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
-
-        let acc = expect_delivery(listener, "the parent's steer is DELIVERED with the node's autogate off");
-
-        let key = PARENT_KEY.to_string();
-        let result = message_send(
-            &remote_parent_body(Some(PARENT_SESSION)),
-            &audit_log,
-            "",
-            "",
-            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
-            "",
-            None,
-            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
-        );
-        assert!(result.is_ok(), "{:?}", result.err());
-        assert_eq!(
-            String::from_utf8(acc.join().unwrap()).unwrap(),
-            "steer it\r",
-            "the parent's steer is DELIVERED, not held pending"
-        );
-
-        let log = std::fs::read_to_string(&audit_log).unwrap();
-        assert!(log.contains("autogate-remote-parent"), "its own audit label: {log}");
-        assert!(
-            !stage.join("pending.json").exists(),
-            "a delivered send never queues"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-        restore_stage_state(saved_stage, saved_state);
-    }
-
-    /// The same match with the node marked `autogate: true`: the setting the
-    /// existing door already honours must neither be required nor defeated —
-    /// a parent steers its child either way, exactly as the LOCAL parent rule
-    /// delivers regardless of the box-wide switch.
-    #[test]
-    fn a_remote_parent_steers_its_child_without_pending_with_autogate_on() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = remote_parent_box_root("s5-parent-on");
-        let (stage, audit_log, listener) =
-            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, true);
-
-        let acc = expect_delivery(listener, "the parent's steer is DELIVERED, not held pending");
-
-        let key = PARENT_KEY.to_string();
-        let result = message_send(
-            &remote_parent_body(Some(PARENT_SESSION)),
-            &audit_log,
-            "",
-            "",
-            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
-            "",
-            None,
-            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
-        );
-        assert!(result.is_ok(), "{:?}", result.err());
-        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "steer it\r");
-        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
-        assert!(!stage.join("pending.json").exists());
-
-        let _ = std::fs::remove_dir_all(&root);
-        restore_stage_state(saved_stage, saved_state);
-    }
-
     /// End to end through the REAL signature (not the [`caller`] shorthand): the
-    /// key the match reads is the one `verify_signed_request` PROVED, so a
-    /// genuinely signed node whose own key is the child's `remoteParent.key`
-    /// delivers — the same round trip S3's spawn-side tests drive, on the arm
-    /// that reads the claim back.
+    /// A genuinely signed node whose own key is the child's `remoteParent.key`
+    /// sends an inject naming the child. The inject parks, and the door
+    /// touches neither the child's socket nor anything else.
     #[test]
-    fn a_genuinely_signed_remote_parent_steers_its_child_without_pending() {
+    fn a_genuinely_signed_remote_parent_is_held_at_the_door() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -12957,7 +11614,7 @@ mod tests {
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let pubkey = kp.info().pubkey_hex.clone();
         let (stage, audit_log, listener) =
-            write_remote_parent_box(&root, "yomi-strix", &pubkey, PARENT_SESSION, false);
+            write_remote_parent_box(&root, "yomi-strix", &pubkey, PARENT_SESSION);
 
         let body = remote_parent_body(Some(PARENT_SESSION));
         let body_bytes = serde_json::to_vec(&body).unwrap();
@@ -12968,7 +11625,6 @@ mod tests {
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
 
-        let acc = expect_delivery(listener, "a genuinely signed parent's steer is DELIVERED, not held pending");
         let result = message_send(
             &body,
             &audit_log,
@@ -12980,159 +11636,27 @@ mod tests {
             Some(SignedCaller { name: &signed_name, key: &signed_key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
-        assert_eq!(
-            String::from_utf8(acc.join().unwrap()).unwrap(),
-            "steer it\r",
-            "the key that VERIFIED the signature matched the child's remoteParent.key"
-        );
-        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
-        assert!(!stage.join("pending.json").exists());
+        assert_held_at_the_door(&listener, &stage, 1);
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);
     }
 
-    /// Every non-match is today's result, byte for byte: the same response a
-    /// request with NO claim gets (only the wall-clock stamp can differ between
-    /// any two calls), the same held-pending decision, and no
-    /// `autogate-remote-parent` line. One baseline and four non-matches: a
-    /// session mismatch, a key mismatch, a malformed claim (the §6 rule: a bad
-    /// value on this arm matches nothing and is never a refusal), and an
-    /// unsigned caller carrying a perfectly matching claim.
+    /// With a door token configured and no bearer presented, an UNSIGNED
+    /// caller claiming a remote parent gets exactly the uniform `submitted`
+    /// Task every unauthenticated inject gets (#50's guard). The `aoide/from`
+    /// claim is honoured only on the signature rung, so it earns nothing here,
+    /// and nothing queues.
     #[test]
-    fn a_remote_parent_mismatch_leaves_todays_result_byte_for_byte() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = remote_parent_box_root("s5-mismatch");
-        let (stage, audit_log, listener) =
-            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
-        listener.set_nonblocking(true).unwrap();
-
-        let origin = ConnOrigin::Remote("192.0.2.51".parse().unwrap());
-        let key = PARENT_KEY.to_string();
-        let send = |claim: Option<&str>, caller_key: Option<&str>| {
-            let caller = caller_key.map(|k| SignedCaller { name: "parent-node", key: k, mesh: None });
-            message_send(&remote_parent_body(claim), &audit_log, "", "", origin, "", None, caller)
-                .expect("every non-match is answered exactly as before this phase")
-        };
-        // The baseline IS today's shape: no claim at all.
-        let baseline = send(None, Some(&key));
-        // Only the seconds-resolution stamp can differ between two calls.
-        let undated = |v: &Value| {
-            let mut v = v.clone();
-            v["status"].as_object_mut().unwrap().remove("timestamp");
-            v
-        };
-
-        for (label, claim, caller_key) in [
-            ("a session mismatch", Some("par-2"), Some(&key)),
-            // Same node name, a DIFFERENT key: the record was stamped by
-            // another node's spawn, and only the key equality can tell.
-            ("a key mismatch", Some(PARENT_SESSION), Some(&"ff99".to_string())),
-            ("a malformed claim", Some("not/a/session"), Some(&key)),
-        ] {
-            let got = send(claim, caller_key.map(String::as_str));
-            assert_eq!(undated(&got), undated(&baseline), "{label}: response changed");
-        }
-        // The unsigned row needs its claim to MATCH the record, or the test
-        // would pass for the wrong reason: same key, same session id, no
-        // signature rung — and still nothing but the ignore audit.
-        let unsigned = send(Some(PARENT_SESSION), None);
-        assert_eq!(undated(&unsigned), undated(&baseline), "an unsigned caller's matching claim changes nothing");
-
-        assert!(listener.accept().is_err(), "every non-match is held pending, never delivered");
-        let pending: Value =
-            serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
-        let entries = pending["pending"].as_array().unwrap();
-        assert_eq!(entries.len(), 5, "the baseline and all four non-matches reached the queue, none was dropped");
-        for entry in entries {
-            assert_eq!(entry["sessionId"], REMOTE_CHILD);
-        }
-
-        let log = std::fs::read_to_string(&audit_log).unwrap();
-        assert!(
-            !log.contains("autogate-remote-parent"),
-            "no non-match may claim the remote-parent label: {log}"
-        );
-        assert!(
-            log.contains("ignored-unsigned-from"),
-            "the unsigned caller's claim is ignored, and said so: {log}"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-        restore_stage_state(saved_stage, saved_state);
-    }
-
-    /// The ssh `-L` shape — the transport every real pair rides (PAIRING.md):
-    /// the request arrives at the far door's socket classified `Loopback`,
-    /// exactly as an unsigned local caller's does. This row pins the EXEMPTION,
-    /// one half of what carries the rule: without it the signed parent is
-    /// coerced to `Unknown` (where `should_deliver_now` ignores `autogate_match`
-    /// outright) and a genuinely tunneled parent would silently pend — the
-    /// production shape S5 exists to serve. Its twin, the FOLD into
-    /// `autogate_match`, is what the two `Remote` rows above pin; both are
-    /// load-bearing.
-    #[test]
-    fn a_tunneled_remote_parent_steers_its_child_without_pending() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = remote_parent_box_root("s5-parent-tunneled");
-        let (stage, audit_log, listener) =
-            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
-
-        let acc = expect_delivery(
-            listener,
-            "the tunneled parent's steer is DELIVERED — the exemption keeps it off the Unknown arm",
-        );
-
-        let key = PARENT_KEY.to_string();
-        let result = message_send(
-            &remote_parent_body(Some(PARENT_SESSION)),
-            &audit_log,
-            "",
-            "",
-            ConnOrigin::Loopback,
-            "",
-            None,
-            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
-        );
-        assert!(result.is_ok(), "{:?}", result.err());
-        assert!(
-            !stage.join("pending.json").exists(),
-            "a tunneled parent that PENDED would be the regression — assert before joining, so \
-             the failure is clean rather than a test that hangs on bytes that never arrive"
-        );
-        assert_eq!(
-            String::from_utf8(acc.join().unwrap()).unwrap(),
-            "steer it\r",
-            "the tunneled parent's steer is DELIVERED — the exemption keeps it off the Unknown arm"
-        );
-        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
-
-        let _ = std::fs::remove_dir_all(&root);
-        restore_stage_state(saved_stage, saved_state);
-    }
-
-    /// The door-wide bearer runs FIRST, and the remote-parent rule exempts
-    /// nothing from it: with a door token configured and no bearer presented, a
-    /// signed caller holding a genuinely matching parentage gets exactly the
-    /// uniform `submitted` Task every unauthenticated inject gets (#50's guard,
-    /// decided before the match is even computed). Nothing is delivered and
-    /// nothing queues, so this refusal is indistinguishable from an unknown
-    /// context.
-    #[test]
-    fn a_door_token_refuses_a_remote_parents_delivery_uniformly() {
+    fn a_door_token_refuses_an_unauthenticated_remote_parent_uniformly() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let root = remote_parent_box_root("s5-parent-token");
         let (stage, audit_log, listener) =
-            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION);
         listener.set_nonblocking(true).unwrap();
 
-        let key = PARENT_KEY.to_string();
         let task = message_send(
             &remote_parent_body(Some(PARENT_SESSION)),
             &audit_log,
@@ -13141,7 +11665,7 @@ mod tests {
             ConnOrigin::Loopback,
             "door-secret",
             None,
-            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
+            None,
         )
         .expect("the uniform response is an ANSWER, not a refusal");
 
@@ -13152,11 +11676,7 @@ mod tests {
         assert!(!stage.join("pending.json").exists(), "the uniform path never queues either");
 
         let log = std::fs::read_to_string(&audit_log).unwrap();
-        assert!(log.contains("no valid token, no autogate match"), "the guard's own audit: {log}");
-        assert!(
-            !log.contains("autogate-remote-parent"),
-            "the bearer is checked BEFORE the match, so the parent rule never even speaks: {log}"
-        );
+        assert!(log.contains("no valid token, no node identity"), "the guard's own audit: {log}");
 
         let _ = std::fs::remove_dir_all(&root);
         restore_stage_state(saved_stage, saved_state);
@@ -13314,7 +11834,7 @@ mod tests {
         write_stage(&sessions_path(), &sf).unwrap();
 
         let audit_log = root.join("log");
-        // Remote + no registered autogate node, so a real send is held
+        // Remote + no registered node, so a real send is held
         // pending rather than delivered — same as the pre-#50 Inject arm,
         // and it proves `do_inject` (not the uniform guard) ran: only that
         // path writes `pending.json`.
@@ -13336,7 +11856,7 @@ mod tests {
         let task = result.expect("a valid bearer still resolves the real Inject decision");
         assert_eq!(task["id"], real_id);
         assert_eq!(task["status"]["state"], "submitted");
-        assert!(real_listener.accept().is_err(), "not auto-delivered — held pending, same as before #50");
+        assert!(real_listener.accept().is_err(), "not delivered — held pending, same as before #50");
 
         let pending: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
@@ -13419,11 +11939,10 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = expect_delivery(real_listener, "a loopback, tokenless send with no token configured is DELIVERED");
 
         let audit_log = root.join("log");
-        // Loopback + no token configured: off-path, must auto-deliver exactly
-        // as it did before the #50 amendment.
+        // Loopback + no token configured: off-path, held at the door like any
+        // other inject. The #50 guard is not involved.
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "off-path send" }], "contextId": real_id }
         });
@@ -13437,9 +11956,8 @@ mod tests {
             None,
             None,
         );
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "off-path send\r", "no token configured: loopback still auto-delivers");
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{:?}", result.as_ref().err());
+        assert_held_at_the_door(&real_listener, &stage, 1);
 
         let bogus_params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "x" }], "contextId": bogus_id }
@@ -13485,25 +12003,16 @@ mod tests {
     }
 
     #[test]
-    fn uniform_response_guard_never_fires_for_a_per_node_autogated_token() {
+    fn uniform_response_guard_never_fires_for_a_per_node_token() {
         // A server-wide token IS configured (and the presented bearer does
-        // NOT match it), but the presented token DOES match an enrolled
-        // node's own `token_file` — the exact scenario the amendment's
-        // grounding names: enrolled nodes authenticate per-node, never
-        // against the server-wide token, so the uniform guard must not
-        // swallow this send.
-        //
-        // What "not swallowed" means here is REACHING `do_inject`, not
-        // necessarily instant delivery: a non-Valid server-wide bearer still
-        // coerces `effective_origin` to `Unknown` (the pre-existing,
-        // 2026-08-19 amendment — unrelated to #50), and `should_deliver_now`
-        // never auto-delivers on `Unknown` regardless of autogate (fail-safe
-        // pin: `should_deliver_now_covers_every_origin_autogate_combination`).
-        // So this send is correctly held PENDING — the proof that autogate
-        // exempted it from the #50 guard is that it reaches the real
-        // `session_ref_lookup`/`do_inject` machinery and queues into
-        // `pending.json` at all, which the #50 guard's own synthetic path
-        // never does.
+        // NOT match it), but the presented token DOES match a VERIFIED
+        // node's own `token_file`. A verified node's own bearer is its
+        // identity, never checked against the server-wide token, so the
+        // uniform guard must not swallow this send. The send parks: the
+        // proof it cleared the guard is that it reaches
+        // `session_ref_lookup`/`do_inject` and queues into `pending.json`,
+        // which the guard's own synthetic path never does. The unverified
+        // case is `an_unverified_node_bearer_gets_the_uniform_answer_behind_a_door_token`.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -13526,12 +12035,11 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "enrolled-node".into(),
             url: "http://192.0.2.99:8710/".into(),
-            autogate: true,
             token_file: Some(token_path.to_string_lossy().into_owned()),
             bearer_secret: None,
             hub: false,
             pubkey: None,
-            verified: false,
+            verified: true,
             grants: aoide_storage::node_store::Grants::new(),
             narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
@@ -13562,7 +12070,7 @@ mod tests {
         });
         let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
         // "server-secret" is configured server-wide; "node-secret" (what's
-        // presented) does NOT match it — only the per-node autogate match
+        // presented) does NOT match it — only the per-node token match
         // saves this from the #50 uniform guard.
         let result = message_send(
             &params,
@@ -13574,18 +12082,18 @@ mod tests {
             Some("node-secret"),
             None,
         );
-        let task = result.expect("autogate exempts this send from the #50 guard, so it's still an Ok Task");
+        let task = result.expect("the per-node token clears the #50 guard, so it's still an Ok Task");
         assert_eq!(task["id"], id);
         assert_eq!(task["status"]["state"], "submitted");
         assert!(listener.accept().is_err(), "held pending, not delivered — the non-Valid server bearer still coerces Unknown");
 
         // The proof this reached REAL Inject machinery (not the #50 guard):
         // `pending.json` carries the queued entry, exactly like an
-        // authenticated-but-not-auto-delivered send does.
+        // authenticated-but-not-delivered send does.
         let pending: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
-        assert_eq!(entries.len(), 1, "autogate exemption reaches do_inject/session_ref_lookup, unlike the #50 guard");
+        assert_eq!(entries.len(), 1, "the per-node token reaches do_inject/session_ref_lookup, unlike the #50 guard");
         assert_eq!(entries[0]["sessionId"], id);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -13597,6 +12105,517 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
         }
+    }
+
+    /// Shared setup for the two uniform-guard admission tests below: a door
+    /// token is configured, the stage and state point at one box, and the
+    /// session `id` is conductable with a nonblocking listener at its socket.
+    fn uniform_guard_box(tag: &str, id: &str) -> (std::path::PathBuf, std::path::PathBuf, UnixListener) {
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let sf = SessionsFile {
+            schema_version: "0".to_string(),
+            sessions: vec![conductable_session(id, &socket)],
+        };
+        write_stage(&sessions_path(), &sf).unwrap();
+        (root, stage, listener)
+    }
+
+    #[test]
+    fn a_verified_signed_node_clears_the_uniform_guard_behind_a_door_token() {
+        // A paired node's verified signature, with `message` granted in the
+        // mesh it signed for, is a node identity: its send reaches the queue.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "sig-guard-target";
+        let (root, stage, listener) = uniform_guard_box("sig-guard", id);
+
+        let mut paired = fixture_node("paired-node", "http://192.0.2.88:8710/");
+        paired.verified = true;
+        paired.pubkey = Some("ab12".to_string());
+        paired.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[paired]).unwrap();
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "signed hello" }], "contextId": id }
+        });
+        let signed = SignedCaller { name: "paired-node", key: "ab12", mesh: Some("home") };
+        let result = message_send(
+            &params,
+            &root.join("log"),
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.88".parse().unwrap()),
+            "server-secret",
+            None,
+            Some(signed),
+        );
+        let task = result.expect("a verified node is never answered by the guard's error path");
+        assert_eq!(task["id"], id);
+        assert_held_at_the_door(&listener, &stage, 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_signed_node_without_message_in_the_signed_mesh_gets_the_uniform_answer() {
+        // A valid signature proves who is calling, not that this box takes its
+        // messages. Without `message` in the mesh it signed for (here it holds
+        // `read` there, and `message` only in another mesh), the send is
+        // answered like an unauthenticated one and nothing queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "sig-nogrant-target";
+        let (root, stage, listener) = uniform_guard_box("sig-nogrant", id);
+
+        let mut paired = fixture_node("paired-node", "http://192.0.2.88:8710/");
+        paired.verified = true;
+        paired.pubkey = Some("ab12".to_string());
+        paired.grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        paired.grants.insert("work".to_string(), vec!["message".to_string()]);
+        aoide_storage::node_store::save_nodes(&[paired]).unwrap();
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "signed, ungranted" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let result = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.88".parse().unwrap()),
+            "server-secret",
+            None,
+            Some(SignedCaller { name: "paired-node", key: "ab12", mesh: Some("home") }),
+        );
+        let task = result.expect("the uniform arm answers Ok, never a JSON-RPC error");
+        assert_eq!(task["status"]["state"], "submitted");
+        assert!(!stage.join("pending.json").exists(), "the uniform path never queues");
+        assert!(listener.accept().is_err(), "and never touches the socket");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("no node identity"), "the guard's own audit: {log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn an_unverified_node_bearer_gets_the_uniform_answer_behind_a_door_token() {
+        // A node's own `tokenFile` bearer names it, but a record that was never
+        // verified by pairing is no identity this box trusts: the send is
+        // answered like an unauthenticated one and nothing queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "unverified-tok-target";
+        let (root, stage, listener) = uniform_guard_box("unverified-tok", id);
+
+        let token_path = root.join("node.token");
+        std::fs::write(&token_path, "node-secret\n").unwrap();
+        let mut enrolled = fixture_node("enrolled-node", "http://192.0.2.99:8710/");
+        enrolled.token_file = Some(token_path.to_string_lossy().into_owned());
+        aoide_storage::node_store::save_nodes(&[enrolled]).unwrap();
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "unverified bearer" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let result = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("10.0.0.9".parse().unwrap()),
+            "server-secret",
+            Some("node-secret"),
+            None,
+        );
+        let task = result.expect("the uniform arm answers Ok, never a JSON-RPC error");
+        assert_eq!(task["status"]["state"], "submitted");
+        assert!(!stage.join("pending.json").exists(), "the uniform path never queues");
+        assert!(listener.accept().is_err(), "and never touches the socket");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("no node identity"), "the guard's own audit: {log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// Fill `from`'s share of the pending queue to the cap, the way the door
+    /// itself queues: through `hold_pending`.
+    fn fill_source(id: &str, from: &str) {
+        for n in 0..aoide_conduct::graph::PENDING_CAP_PER_SOURCE {
+            aoide_conduct::graph::hold_pending(id, &format!("{from} #{n}"), true, Some(from)).unwrap();
+        }
+    }
+
+    fn queued_from(stage: &std::path::Path, from: &str) -> Vec<String> {
+        let queue: Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
+        queue["pending"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["from"] == from)
+            .map(|e| e["text"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn an_oversize_inject_answers_its_own_code_and_queues_nothing() {
+        // A prompt over the held-entry cap is refused `-32602` (invalid params),
+        // not the uniform `-32603` of a failed write, and the queue is untouched.
+        // Before the change the same refusal answered `-32603`.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "oversize-target";
+        let (root, stage, listener) = uniform_guard_box("oversize", id);
+
+        let path = root.join("node.token");
+        std::fs::write(&path, "node-secret\n").unwrap();
+        let mut node = fixture_node("big-node", "http://192.0.2.99:8710/");
+        node.token_file = Some(path.to_string_lossy().into_owned());
+        node.verified = true;
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let big = "x".repeat(aoide_conduct::graph::PENDING_ENTRY_MAX_BYTES + 1);
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": big }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let (code, msg) = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("10.0.0.9".parse().unwrap()),
+            "server-secret",
+            Some("node-secret"),
+            None,
+        )
+        .expect_err("an oversize prompt is refused");
+        assert_eq!(code, INVALID_PARAMS_CODE, "{msg}");
+        assert!(!stage.join("pending.json").exists(), "nothing queued");
+        assert!(listener.accept().is_err(), "nothing is delivered");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_full_source_refuses_a_proven_node_and_leaves_another_source_alone() {
+        // A proven node (a verified node's own bearer) whose source already
+        // holds the cap is refused `-32000`, audited, and nothing queued moves.
+        // Another node's send still queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "cap-target";
+        let (root, stage, listener) = uniform_guard_box("cap-proven", id);
+
+        let mut nodes = Vec::new();
+        for (name, secret) in [("full-node", "full-secret"), ("other-node", "other-secret")] {
+            let path = root.join(format!("{name}.token"));
+            std::fs::write(&path, format!("{secret}\n")).unwrap();
+            let mut node = fixture_node(name, "http://192.0.2.99:8710/");
+            node.token_file = Some(path.to_string_lossy().into_owned());
+            node.verified = true;
+            nodes.push(node);
+        }
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        fill_source(id, "node:full-node");
+        let before = queued_from(&stage, "node:full-node");
+        assert_eq!(before.len(), aoide_conduct::graph::PENDING_CAP_PER_SOURCE);
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "one too many" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let send = |bearer: &str| {
+            message_send(
+                &params,
+                &audit_log,
+                "",
+                "",
+                ConnOrigin::Remote("10.0.0.9".parse().unwrap()),
+                "server-secret",
+                Some(bearer),
+                None,
+            )
+        };
+
+        let (code, msg) = send("full-secret").expect_err("a proven node past the cap is told");
+        assert_eq!(code, QUEUE_FULL_CODE, "{msg}");
+        assert!(msg.contains("node:full-node") && msg.contains("pending sends"), "{msg}");
+        assert_eq!(queued_from(&stage, "node:full-node"), before, "the first N are intact, in order");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            log.lines().any(|l| l.contains("\"status\":\"refused\"") && l.contains("one too many")),
+            "the refusal is audited: {log}"
+        );
+
+        send("other-secret").expect("another source still queues");
+        assert_eq!(queued_from(&stage, "node:other-node"), ["one too many"]);
+        assert!(listener.accept().is_err(), "nothing is delivered either way");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_full_source_answers_a_caller_that_is_not_proven_uniformly() {
+        // With no door token every caller reaches the queue, so the cap is the
+        // only bound. A caller named by address alone proves nothing, so when
+        // its own address already holds the cap the answer is the same
+        // synthetic `submitted` Task the guard gives an unauthenticated send,
+        // and nothing is queued.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "cap-unproven-target";
+        let (root, stage, listener) = uniform_guard_box("cap-unproven", id);
+
+        aoide_storage::node_store::save_nodes(&[fixture_node("addr-node", "http://192.0.2.89:8710/")]).unwrap();
+        fill_source(id, "addr:192.0.2.89");
+        let before = queued_from(&stage, "addr:192.0.2.89");
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "address only, one too many" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let task = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+            "",
+            None,
+            None,
+        )
+        .expect("an unproven caller is never told the queue is full");
+        assert_eq!(task, {
+            let mut uniform = submitted_task(id);
+            uniform["status"]["timestamp"] = task["status"]["timestamp"].clone();
+            uniform
+        });
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89"), before, "nothing queued, nothing moved");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("\"status\":\"refused\""), "the refusal is still audited: {log}");
+        assert!(listener.accept().is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// One registered node at `192.0.2.89` that can prove itself with its own
+    /// bearer (`node-secret`), for the tests that put an address-only caller
+    /// at the same address.
+    fn bearer_node_at_the_callers_address(root: &std::path::Path) {
+        let path = root.join("addr-node.token");
+        std::fs::write(&path, "node-secret\n").unwrap();
+        let mut node = fixture_node("addr-node", "http://192.0.2.89:8710/");
+        node.token_file = Some(path.to_string_lossy().into_owned());
+        node.verified = true;
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+    }
+
+    #[test]
+    fn an_address_only_caller_fills_its_own_bucket_and_never_the_nodes() {
+        // With no door token an address-only caller at a registered node's
+        // address parks. It counts against `addr:<address>`: 32 entries fill
+        // that bucket, the next is answered uniformly and queues nothing, no
+        // entry ever carries the node's name, and the real node, proving itself
+        // with its own bearer from the same address, still queues.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "addr-bucket-target";
+        let (root, stage, listener) = uniform_guard_box("addr-bucket", id);
+        bearer_node_at_the_callers_address(&root);
+
+        let audit_log = root.join("log");
+        let send = |text: &str, bearer: Option<&str>| {
+            let params = serde_json::json!({
+                "message": { "parts": [{ "kind": "text", "text": text }], "contextId": id }
+            });
+            message_send(
+                &params,
+                &audit_log,
+                "",
+                "",
+                ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+                "",
+                bearer,
+                None,
+            )
+        };
+        let cap = aoide_conduct::graph::PENDING_CAP_PER_SOURCE;
+        for n in 0..cap + 1 {
+            send(&format!("address only {n}"), None).expect("an unproven caller always gets a task");
+        }
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89").len(), cap, "the address's bucket stops at the cap");
+        assert!(
+            queued_from(&stage, "node:addr-node").is_empty(),
+            "an address match never lands in the node's bucket"
+        );
+
+        send("the node itself", Some("node-secret")).expect("the proven node is not told its bucket is full");
+        assert_eq!(queued_from(&stage, "node:addr-node"), ["the node itself"]);
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89").len(), cap, "and the address's bucket did not move");
+        assert!(listener.accept().is_err(), "nothing is delivered either way");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_full_node_bucket_does_not_turn_an_address_only_caller_away() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "node-full-target";
+        let (root, stage, _listener) = uniform_guard_box("node-full", id);
+        bearer_node_at_the_callers_address(&root);
+        fill_source(id, "node:addr-node");
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "from the address" }], "contextId": id }
+        });
+        message_send(
+            &params,
+            &root.join("log"),
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+            "",
+            None,
+            None,
+        )
+        .expect("a task");
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89"), ["from the address"]);
+        assert_eq!(
+            queued_from(&stage, "node:addr-node").len(),
+            aoide_conduct::graph::PENDING_CAP_PER_SOURCE,
+            "the node's own bucket is untouched"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn a_door_token_holder_at_a_nodes_address_is_recorded_by_address() {
+        // The other way an address-matched caller can park: it presents the
+        // door-wide token. That token names no node, so the address rung still
+        // resolves and still proves nothing.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "door-token-target";
+        let (root, stage, _listener) = uniform_guard_box("door-token", id);
+        bearer_node_at_the_callers_address(&root);
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "door token" }], "contextId": id }
+        });
+        message_send(
+            &params,
+            &root.join("log"),
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+            "server-secret",
+            Some("server-secret"),
+            None,
+        )
+        .expect("a task");
+        assert_eq!(queued_from(&stage, "addr:192.0.2.89"), ["door token"]);
+        assert!(queued_from(&stage, "node:addr-node").is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    #[test]
+    fn an_injects_source_is_the_node_only_for_a_proven_rung() {
+        use aoide_storage::node_store::NodeRung::{Addr, Signature, Token};
+        let mut node = fixture_node("peer", "http://192.0.2.7:8710/");
+        let remote = ConnOrigin::Remote("192.0.2.7".parse().unwrap());
+        assert_eq!(inject_source(Some((&node, Signature)), remote), "node:peer");
+        assert_eq!(
+            inject_source(Some((&node, Token)), remote),
+            "addr:192.0.2.7",
+            "the bearer of an unverified node proves nothing"
+        );
+        node.verified = true;
+        assert_eq!(inject_source(Some((&node, Token)), remote), "node:peer");
+        assert_eq!(inject_source(Some((&node, Addr)), remote), "addr:192.0.2.7");
+        assert_eq!(inject_source(None, remote), "addr:192.0.2.7");
+        assert_eq!(inject_source(None, ConnOrigin::Loopback), "addr:loopback");
+        assert_eq!(inject_source(None, ConnOrigin::Unknown), "addr:unknown");
+        assert_eq!(
+            inject_source(None, ConnOrigin::Remote("::ffff:192.0.2.7".parse().unwrap())),
+            "addr:192.0.2.7",
+            "an IPv4 caller on a dual-stack socket is one source, not two"
+        );
+    }
+
+    #[test]
+    fn an_address_match_alone_gets_the_uniform_answer_behind_a_door_token() {
+        // An address proves no identity. A registered node's host that presents
+        // neither its own bearer nor a signature gets the uniform answer, and
+        // nothing reaches the queue.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let id = "addr-guard-target";
+        let (root, stage, listener) = uniform_guard_box("addr-guard", id);
+
+        aoide_storage::node_store::save_nodes(&[fixture_node("addr-node", "http://192.0.2.89:8710/")]).unwrap();
+
+        let params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "address only" }], "contextId": id }
+        });
+        let audit_log = root.join("log");
+        let result = message_send(
+            &params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.89".parse().unwrap()),
+            "server-secret",
+            None,
+            None,
+        );
+        let task = result.expect("the uniform arm answers Ok, never a JSON-RPC error");
+        assert_eq!(task["status"]["state"], "submitted");
+        assert!(!stage.join("pending.json").exists(), "the uniform path never queues");
+        assert!(listener.accept().is_err(), "and never touches the socket");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("no node identity"), "the guard's own audit: {log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
     }
 
     // ── `resolve_node_name` precedence (flag → env → hostname → default) ────
@@ -14693,7 +13712,6 @@ mod tests {
         assert!(nodes_b_final[0].verified);
         assert_eq!(nodes_b_final[0].url, "http://box-a-is-loopback-only.invalid/");
         // P-P3's lane, untouched this phase.
-        assert!(!nodes_b_final[0].autogate);
         assert!(!nodes_b_final[0].hub);
 
         // ── Step 5: A polls B's door — `aoide/pairPoll`, signed with A's OWN
@@ -15309,7 +14327,7 @@ mod tests {
 
     /// A broker secret whose stored value is EMPTY must read as a resolve
     /// failure: an empty expected bearer is the "no token configured" signal,
-    /// and treating it so would restore the loopback free pass.
+    /// and treating it so would restore loopback's standing.
     #[cfg_attr(windows, ignore = "the fixture stores through the built-in `file` backend, whose template is the POSIX preset `cat ...`")]
     #[test]
     fn resolve_inbound_bearer_fails_closed_on_an_empty_resolved_secret() {
@@ -15596,7 +14614,7 @@ mod tests {
         // registry). `Grant::none()` is what every other shape collapses to
         // — unsigned, addr-only, bare token, unknown key, or a grant in
         // another mesh — and this pins that it refuses.
-        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/");
         paired_allowed.verified = true;
         paired_allowed.grants = aoide_storage::node_store::grants_in("home", &["message"]);
 
@@ -15905,7 +14923,7 @@ mod tests {
 
         // And the local widening refusal tells the same truth.
         let mut nodes = aoide_storage::node_store::load_nodes();
-        let mut record = fixture_node("box-a", "http://10.0.0.9:8710/", false);
+        let mut record = fixture_node("box-a", "http://10.0.0.9:8710/");
         record.verified = true;
         record.pubkey = Some("bb".repeat(32));
         nodes.push(record);
@@ -16514,7 +15532,7 @@ mod tests {
     fn two_pollers_fixture() -> (String, String) {
         setup_signed_node_with_allows("box-b", &["message"]);
         let mut nodes = aoide_storage::node_store::load_nodes();
-        let mut box_c = fixture_node("box-c", "http://node/", false);
+        let mut box_c = fixture_node("box-c", "http://node/");
         box_c.verified = true;
         box_c.grants = aoide_storage::node_store::grants_in("home", &["message"]);
         nodes.push(box_c);
@@ -16530,7 +15548,7 @@ mod tests {
 
     #[test]
     fn poll_admitted_requires_a_signed_message_holder_asking_for_its_own_node() {
-        let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/");
         paired.verified = true;
         paired.grants = aoide_storage::node_store::grants_in("home", &["read", "message"]);
         let grant = grant_for(&paired, "home");
@@ -16678,7 +15696,6 @@ mod tests {
         let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -17332,7 +16349,7 @@ mod tests {
         let root = aoide_test_support::short_tmp("a2a-read-gate-mesh");
         std::env::set_var("AOIDE_STATE_DIR", &root);
 
-        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/");
         reader.verified = true;
         reader.pubkey = Some("aa11".to_string());
         reader.grants = aoide_storage::node_store::grants_in("home", &["read"]);
@@ -17384,7 +16401,7 @@ mod tests {
         let root = aoide_test_support::short_tmp("a2a-mesh-scope");
         std::env::set_var("AOIDE_STATE_DIR", &root);
 
-        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/");
         node.verified = true;
         node.pubkey = Some("aa11".to_string());
         node.grants = std::collections::BTreeMap::from([
@@ -17416,11 +16433,11 @@ mod tests {
         // Review finding 6 / CONTRACTS.md §6: twin records sharing ONE key
         // answer by UNION, so a capability either twin grants is held, and a
         // revocation is only real once it lands on BOTH.
-        let mut twin_a = fixture_node("twin-a", "http://a/", false);
+        let mut twin_a = fixture_node("twin-a", "http://a/");
         twin_a.verified = true;
         twin_a.pubkey = Some("aa11".to_string());
         twin_a.grants = aoide_storage::node_store::grants_in("home", &["spawn"]);
-        let mut twin_b = fixture_node("twin-b", "http://b/", false);
+        let mut twin_b = fixture_node("twin-b", "http://b/");
         twin_b.verified = true;
         twin_b.pubkey = Some("aa11".to_string());
         twin_b.grants = std::collections::BTreeMap::from([("home".to_string(), vec!["read".to_string()])]);
@@ -17472,7 +16489,7 @@ mod tests {
         let config = root.join("config.toml");
         std::fs::write(&config, "[pairing]\nhomeMesh = \"home\"\n").unwrap();
 
-        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/");
         node.verified = true;
         node.pubkey = Some("aa11".to_string());
         node.grants = std::collections::BTreeMap::from([
@@ -17541,7 +16558,7 @@ mod tests {
         let config = root.join("config.toml");
         std::fs::write(&config, "[pairing]\nhomeMesh = \"home\"\n").unwrap();
 
-        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/");
         node.verified = true;
         node.pubkey = Some("aa11".to_string());
         node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -17587,36 +16604,6 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_CONFIG", v),
             None => std::env::remove_var("AOIDE_CONFIG"),
         }
-    }
-
-    /// **A local path that consults no grant is unchanged** by the fence: an
-    /// unsigned loopback inject never reads a rail, a grant or the config
-    /// (`should_deliver_now(ConnOrigin::Loopback, _)` is unconditionally true),
-    /// and an ordinary `tasks/get` is the bearer gate and the stage. Both stay
-    /// byte-identical with a config that will not load.
-    #[test]
-    fn an_unreadable_config_leaves_the_local_paths_unchanged() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-cfg-local", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
-        boxed.break_config();
-        assert!(aoide_storage::config::load().is_err(), "the premise: the config no longer loads");
-
-        let result = boxed.send("local-line", "", None, ConnOrigin::Loopback);
-        assert!(result.is_ok(), "{result:?}");
-        assert_eq!(
-            boxed.delivered().as_deref(),
-            Some("local-line\r"),
-            "an unsigned loopback inject delivers exactly as before — no grant, no mesh, no config read"
-        );
-        assert!(boxed.pending().is_empty(), "and nothing was queued");
-
-        let ctx = test_ctx(&boxed.audit_log, "");
-        let task = handle_jsonrpc(
-            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": RAIL_SESSION } }),
-            &ctx,
-        );
-        assert!(task.get("error").is_none(), "an ordinary read answers: {task}");
-        assert_eq!(task["result"]["id"], RAIL_SESSION, "with the session's own task: {task}");
     }
 
     /// **The charter as the second source behind the one lookup** — every
@@ -17714,14 +16701,14 @@ mod tests {
         );
 
         // 3. A paired record in a charter mesh is INERT.
-        let mut listed = fixture_node("receiverbox", "http://10.0.0.5:8710/", false);
+        let mut listed = fixture_node("receiverbox", "http://10.0.0.5:8710/");
         listed.verified = true;
         listed.pubkey = Some(receiver_key.clone());
         listed.grants = std::collections::BTreeMap::from([
             ("home".to_string(), vec!["read".to_string(), "spawn".to_string()]),
             ("away".to_string(), vec!["read".to_string()]),
         ]);
-        let mut unlisted = fixture_node("stranger", "http://10.0.0.6:8710/", false);
+        let mut unlisted = fixture_node("stranger", "http://10.0.0.6:8710/");
         unlisted.verified = true;
         unlisted.pubkey = Some("bb22".to_string());
         unlisted.grants = std::collections::BTreeMap::from([
@@ -18178,7 +17165,7 @@ mod tests {
         let root = aoide_test_support::short_tmp("a2a-history-gate");
         std::env::set_var("AOIDE_STATE_DIR", &root);
 
-        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/");
         reader.verified = true;
         reader.pubkey = Some("key-of-mine".to_string());
         reader.grants = aoide_storage::node_store::grants_in("home", &["read"]);
@@ -18387,7 +17374,7 @@ mod tests {
         let stranger = aoide_storage::identity::mint_ephemeral().unwrap();
         let stranger_key = stranger.info().pubkey_hex;
         let mut nodes = aoide_storage::node_store::load_nodes();
-        let mut other = fixture_node("other-box", "http://other/", false);
+        let mut other = fixture_node("other-box", "http://other/");
         other.verified = true;
         other.pubkey = Some(stranger_key.clone());
         other.grants = aoide_storage::node_store::grants_in("home", &["read"]);
@@ -18736,7 +17723,7 @@ mod tests {
         // ALSO holds a verified paired record granting `message` in `home`. In
         // a charter mesh a paired record is inert — the charter answers — and
         // this test asserts that THROUGH the adapter.
-        let mut stale = fixture_node("receiverbox", "http://10.0.0.5:8710/", false);
+        let mut stale = fixture_node("receiverbox", "http://10.0.0.5:8710/");
         stale.verified = true;
         stale.pubkey = Some(receiver_key.clone());
         stale.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -18790,7 +17777,7 @@ mod tests {
         // Put the stale record back for the revocation half: the review N1
         // loophole is a PAIRED grant that must not come back in once the
         // charter stops listing the key.
-        let mut stale = fixture_node("receiverbox", "http://10.0.0.5:8710/", false);
+        let mut stale = fixture_node("receiverbox", "http://10.0.0.5:8710/");
         stale.verified = true;
         stale.pubkey = Some(receiver_key.clone());
         stale.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -19343,6 +18330,383 @@ mod tests {
         let second_body: Value = serde_json::from_str(second.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(second_body["error"]["code"], -32009, "the same nonce twice is a replay: {second_body}");
 
+        adapter_cleanup(&root, saved);
+    }
+
+    /// The A2A door's own per-connection handler on a background thread: the
+    /// same `handle_connection` `serve` runs for each accepted socket. The
+    /// listener is bound before the thread starts, so a connect cannot race it.
+    fn raise_a2a_door(port: u16, audit_log: &Path) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let audit_log = audit_log.to_path_buf();
+        std::thread::spawn(move || {
+            let registry: &'static Registry = Box::leak(Box::new(full_card_registry()));
+            for stream in listener.incoming().flatten() {
+                let audit_log = audit_log.clone();
+                std::thread::spawn(move || {
+                    let _ = handle_connection(stream, "127.0.0.1", port, &audit_log, "", "", "box-a", None, Listener::A2a, registry);
+                });
+            }
+        });
+    }
+
+    fn epoch_now() -> i64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    }
+
+    /// The check every signed-answer socket test shares: the answer is HTTP
+    /// 200 and carries `X-Aoide-Answer-Signature`, and that signature verifies
+    /// under `key` for the request it answers. A stranger's key, and another
+    /// request's signature, both fail it.
+    fn assert_answer_signed_for(request: &[u8], answer: &str, key: &aoide_storage::identity::Keypair) {
+        use aoide_storage::wire_auth::{verify_answer, HEADER_ANSWER_SIGNATURE, HEADER_NONCE, HEADER_SIGNATURE};
+        use aoide_test_support::raw_header;
+
+        let request = String::from_utf8_lossy(request).to_string();
+        let request_signature = raw_header(&request, HEADER_SIGNATURE).unwrap();
+        let request_nonce = raw_header(&request, HEADER_NONCE).unwrap();
+        assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+        let answer_body = answer.split_once("\r\n\r\n").unwrap().1;
+        let answer_signature = raw_header(answer, HEADER_ANSWER_SIGNATURE).expect("a verified request's answer is signed");
+
+        let door = key.info().pubkey_hex;
+        assert!(
+            verify_answer(&door, &request_signature, &request_nonce, 200, answer_body.as_bytes(), &answer_signature),
+            "the door's own key verifies its answer"
+        );
+        let stranger = aoide_storage::identity::mint_ephemeral().unwrap().info().pubkey_hex;
+        assert!(!verify_answer(&stranger, &request_signature, &request_nonce, 200, answer_body.as_bytes(), &answer_signature));
+        assert!(
+            !verify_answer(&door, &"00".repeat(64), &request_nonce, 200, answer_body.as_bytes(), &answer_signature),
+            "another request's signature does not verify it"
+        );
+    }
+
+    #[test]
+    fn a_verified_mail_request_is_answered_signed_by_the_door_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-signed");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-signed"))), None);
+        let answer = send_raw(port, &request);
+
+        assert_answer_signed_for(&request, &answer, &kp);
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_verified_request_is_answered_signed_on_the_a2a_door_too() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-signed-a2a");
+        let port = free_loopback_port();
+        raise_a2a_door(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/no-such-method"}"#;
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("a2a-answer-signed"))), None);
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert!(answer_body.get("error").is_some(), "an unknown method is an error answer, and it is still signed: {answer}");
+        assert_answer_signed_for(&request, &answer, &kp);
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_tampered_request_gets_an_unsigned_refusal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-tampered");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let mut request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-tampered"))), None);
+        // The same length, with one byte of the body the signature covers changed.
+        let tampered = String::from_utf8(body.to_vec()).unwrap().replace("\"id\":1", "\"id\":9");
+        request.truncate(request.len() - body.len());
+        request.extend_from_slice(tampered.as_bytes());
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(answer_body["error"]["code"], -32007, "{answer_body}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_replayed_request_gets_an_unsigned_refusal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-replayed");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-replayed"))), None);
+
+        let first = send_raw(port, &request);
+        assert_answer_signed_for(&request, &first, &kp);
+
+        let second = send_raw(port, &request);
+        let second_body: Value = serde_json::from_str(second.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(second_body["error"]["code"], -32009, "{second_body}");
+        assert_eq!(aoide_test_support::raw_header(&second, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{second}");
+        adapter_cleanup(&root, saved);
+    }
+
+    /// The nonce is single-use in any letter case (relay-proof review, HIGH).
+    /// The signature folds a nonce's case, so a captured request whose nonce
+    /// header is upper-cased still verifies. The replay cache must key it the
+    /// same way, or that copy runs a second time with a signed answer.
+    #[test]
+    fn a_replayed_request_with_its_nonce_upper_cased_is_refused_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("nonce-case-replay");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let nonce = unique_nonce("NonceCase");
+        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None);
+        let first = send_raw(port, &request);
+        assert_answer_signed_for(&request, &first, &kp);
+
+        // The captured request, byte for byte, except the nonce header's case.
+        let replay = String::from_utf8(request.clone()).unwrap().replacen(
+            &format!("{}: {nonce}", aoide_storage::wire_auth::HEADER_NONCE),
+            &format!("{}: {}", aoide_storage::wire_auth::HEADER_NONCE, nonce.to_uppercase()),
+            1,
+        );
+        let second = send_raw(port, replay.as_bytes());
+        let second_body: Value = serde_json::from_str(second.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(second_body["error"]["code"], -32009, "the upper-cased copy is a replay: {second_body}");
+        assert_eq!(aoide_test_support::raw_header(&second, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{second}");
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn an_unsigned_request_and_the_card_carry_no_answer_signature() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-unsigned");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let unsigned = send_raw(port, &raw_request("127.0.0.1", "POST", "/", body, None, None));
+        assert_eq!(aoide_test_support::raw_header(&unsigned, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{unsigned}");
+
+        let card = send_raw(port, &raw_request("127.0.0.1", "GET", "/.well-known/agent-card.json", b"", None, None));
+        assert!(card.starts_with("HTTP/1.1 200"), "{card}");
+        assert_eq!(aoide_test_support::raw_header(&card, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{card}");
+        adapter_cleanup(&root, saved);
+    }
+
+    /// Only POST is a signed request: a signed GET is refused before it is
+    /// verified, so the door signs nothing about it. The unsigned card GET
+    /// is served as before, and it is never signed either.
+    #[test]
+    fn a_signed_get_is_refused_and_the_card_stays_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-card-signed");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let signed = send_raw(
+            port,
+            &raw_request(
+                "127.0.0.1",
+                "GET",
+                "/.well-known/agent-card.json",
+                b"",
+                Some((&kp, "box-b", epoch_now(), &unique_nonce("answer-card-signed"))),
+                None,
+            ),
+        );
+        let refused: Value = serde_json::from_str(signed.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(refused["error"]["code"], -32007, "{signed}");
+        assert_eq!(aoide_test_support::raw_header(&signed, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{signed}");
+
+        let card = send_raw(port, &raw_request("127.0.0.1", "GET", "/.well-known/agent-card.json", b"", None, None));
+        assert!(card.starts_with("HTTP/1.1 200"), "{card}");
+        assert_eq!(aoide_test_support::raw_header(&card, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{card}");
+        adapter_cleanup(&root, saved);
+    }
+
+    /// Domain separation (relay-proof, review finding 3): a request whose method
+    /// is spelled `ANSWER` carries a valid signature over the `answer\0…`
+    /// form. It is refused before verification, so it spends no nonce: the
+    /// same nonce sent as a POST is then admitted and answered.
+    #[test]
+    fn a_signed_request_whose_method_is_answer_is_refused_before_verification() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-method-tag");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, Path::new("/dev/null"));
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let nonce = unique_nonce("answer-method-tag");
+        let as_answer = send_raw(
+            port,
+            &raw_request("127.0.0.1", "ANSWER", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None),
+        );
+        let refused: Value = serde_json::from_str(as_answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(refused["error"]["code"], -32007, "{as_answer}");
+        assert_eq!(aoide_test_support::raw_header(&as_answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{as_answer}");
+
+        let post = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &nonce)), None);
+        let as_post = send_raw(port, &post);
+        assert_answer_signed_for(&post, &as_post, &kp);
+        adapter_cleanup(&root, saved);
+    }
+
+    /// A config-invalid answer to a verified mail request, whose charter is in
+    /// force but was never signed for this node (no `.sig`, no operator to decide
+    /// it): nothing governs the charter, so the taught word goes out UNSIGNED.
+    #[test]
+    fn a_config_invalid_answer_without_a_governing_charter_is_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_STATE_DIR",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_CONFIG",
+            "AOIDE_A2A_NODE_NAME",
+        ]);
+        let root = aoide_test_support::unique_tmp("answer-config-invalid");
+        charter_machine(&root, "receiver", "receiverbox");
+        // The receiver's own charter line is the key the request is signed under.
+        let line = aoide_storage::charter::node_line().unwrap();
+        let in_force = aoide_storage::charter::in_force_path("home");
+        std::fs::create_dir_all(in_force.parent().unwrap()).unwrap();
+        std::fs::write(&in_force, format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n")).unwrap();
+        // A declaration set that will not load: the mail methods read config-invalid.
+        std::fs::write(root.join("receiver").join("config.toml"), "[mesh.home.status]\nnobody = \"down\"\n").unwrap();
+        assert!(aoide_storage::charter::governing("home").is_none(), "nothing signed or trusted governs this charter");
+
+        let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &root.join("receiver").join("log"));
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request(
+            "127.0.0.1",
+            "POST",
+            "/",
+            body,
+            Some((&kp, "receiverbox", epoch_now(), &unique_nonce("answer-config-invalid"))),
+            Some("home"),
+        );
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(answer_body["result"]["reason"], "config-invalid", "{answer_body}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The config-invalid answer is UNSIGNED even when the charter is one the
+    /// operator signed and this node accepted. The config-invalid word only comes
+    /// from `config::load` failing, and `charter::governing` reads that same
+    /// config (its operator line) before it will name any charter, so no
+    /// config-invalid answer is ever made under a charter this node governs, and
+    /// the door never signs one. This pins both facts.
+    #[test]
+    fn a_config_invalid_answer_is_unsigned_even_under_an_accepted_charter() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_STATE_DIR",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_CONFIG",
+            "AOIDE_A2A_NODE_NAME",
+        ]);
+        let root = aoide_test_support::unique_tmp("answer-config-invalid-governed");
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let op_line = aoide_storage::charter::node_line().unwrap();
+        charter_machine(&root, "receiver", "receiverbox");
+        let receiver_line = aoide_storage::charter::node_line().unwrap();
+
+        charter_machine(&root, "operator", "opbox");
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{op_line}\n{receiver_line}\n"),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
+        let sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+
+        charter_machine(&root, "receiver", "receiverbox");
+        let config = root.join("receiver").join("config.toml");
+        std::fs::write(&config, format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator)).unwrap();
+        assert_eq!(aoide_storage::charter::accept(&bytes, &sig).unwrap().charter.version, 1);
+        std::fs::write(
+            &config,
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n\n[mesh.home.status]\nnobody = \"down\"\n", init.operator),
+        )
+        .unwrap();
+        assert!(aoide_storage::routing::declarations().is_err(), "the declarations will not load");
+        let refusal = aoide_storage::charter::governing_refusal("home").unwrap_err();
+        assert_eq!(refusal.reason, aoide_storage::charter::CONFIG_UNREADABLE, "governing reads the same unloadable config: {refusal:?}");
+
+        let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &root.join("receiver").join("log"));
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let request = raw_request(
+            "127.0.0.1",
+            "POST",
+            "/",
+            body,
+            Some((&kp, "receiverbox", epoch_now(), &unique_nonce("answer-config-invalid-accepted"))),
+            Some("home"),
+        );
+        let answer = send_raw(port, &request);
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(answer_body["result"]["reason"], "config-invalid", "{answer_body}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The answer path only LOADS the box's identity. With no key on disk, a
+    /// verified request is answered unsigned, audited, and no key file appears.
+    /// The signer's key is a node on file with the key held only in memory.
+    #[test]
+    fn an_answer_with_no_identity_on_disk_is_unsigned_and_mints_no_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("answer-no-identity");
+        let port = free_loopback_port();
+        let audit_log = root.join("log");
+        raise_mail_adapter(port, &audit_log);
+
+        let signer = aoide_storage::identity::mint_ephemeral().unwrap();
+        let mut node = fixture_node("box-b", "http://node/");
+        node.verified = true;
+        node.pubkey = Some(signer.info().pubkey_hex);
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+        let answer = send_raw(
+            port,
+            &raw_request("127.0.0.1", "POST", "/", body, Some((&signer, "box-b", epoch_now(), &unique_nonce("answer-no-identity"))), None),
+        );
+
+        let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert!(answer_body.get("result").is_some(), "the request verified and was answered: {answer}");
+        assert_eq!(aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE), None, "{answer}");
+        assert!(!aoide_storage::identity::identity_dir().join("ed25519.key").exists(), "and the answer minted no key");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("a2a.answer-unsigned"), "the unsigned answer is audited: {log}");
         adapter_cleanup(&root, saved);
     }
 }

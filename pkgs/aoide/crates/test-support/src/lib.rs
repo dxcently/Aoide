@@ -174,6 +174,52 @@ pub fn expect_delivery(listener: UnixListener, what: &'static str) -> std::threa
     })
 }
 
+/// The stack [`on_small_stack`] runs on. A walk that recurses once per level
+/// of a depth the other side chose overflows it within a few thousand levels,
+/// and a stack overflow aborts the whole test binary — loudly, by name. A
+/// normal thread (2 MiB) or the main thread (8 MiB) would let a chain tens of
+/// thousands deep pass silently, which is exactly the fixture that proves
+/// nothing.
+pub const SMALL_STACK: usize = 256 * 1024;
+
+/// Run `work` to completion on a thread whose stack is [`SMALL_STACK`], and
+/// hand back its result (a panic inside it resumes here, so an assertion
+/// failure is still that test's failure). The fixture for "this walk must not
+/// recurse per level": give it a document a hundred thousand levels deep.
+pub fn on_small_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .name("small-stack".into())
+        .stack_size(SMALL_STACK)
+        .spawn(work)
+        .expect("spawn the small-stack thread")
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+/// `work`'s result and wall time, or `None` when it has not finished by
+/// `limit`. The work runs on a thread of its own, so a super-linear one fails
+/// the test at the limit instead of holding the suite for minutes (it is left
+/// running and dies with the test binary). A panic inside `work` resumes here.
+pub fn finishes_within<T: Send + 'static>(
+    limit: Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<(Duration, T)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let started = Instant::now();
+        let out = work();
+        let _ = tx.send((started.elapsed(), out));
+    });
+    match rx.recv_timeout(limit) {
+        Ok(done) => Some(done),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => match worker.join() {
+            Err(panic) => std::panic::resume_unwind(panic),
+            Ok(()) => unreachable!("a finished worker has sent its result"),
+        },
+    }
+}
+
 /// The built `aoide` binary beside the calling test's own executable — the
 /// REAL program a fixture needs when it must run a hook/dispatcher as its own
 /// process (its own argv, env, stdin and its own daemon probe), not an
@@ -257,6 +303,18 @@ pub fn unique_tmp(tag: &str) -> PathBuf {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// The value of header `name` in a raw HTTP message's head (a request or a
+/// response): the first blank line ends the head, the first line is the
+/// request or status line and is skipped, and the name matches
+/// case-insensitively. The value is trimmed; `None` when there is no such line.
+pub fn raw_header(raw: &str, name: &str) -> Option<String> {
+    let head = raw.split_once("\r\n\r\n").map_or(raw, |(head, _)| head);
+    head.lines().skip(1).find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim().eq_ignore_ascii_case(name).then(|| value.trim().to_string())
+    })
 }
 
 pub fn inv(path: &[&str], args: &[&str]) -> Invocation {

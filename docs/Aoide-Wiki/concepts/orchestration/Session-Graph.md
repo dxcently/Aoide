@@ -176,14 +176,28 @@ should follow).
   the merged hook phase) along with their hook records; any `kind:"subagent"`
   descendant of a dropped session cascades away with it (see "Sub-agent
   cascade" below), and children that survive get `parentSessionId` cleared
-  (un-orphaned rather than dangling). Everything removed or cleared is
-  reported.
+  (un-orphaned rather than dangling). The exception is a protected live wrap:
+  it is alive, so it keeps its `parentSessionId`, and it loses its
+  `attestedSpawner`, so a later registration under the dropped spawner's id
+  earns no autogate over it (CONTRACTS, rule 3). Everything else removed or
+  cleared is reported. A `done` record that is still a protected live wrap
+  (its own process still runs under its sealed starttime) is kept and named
+  in the reply (see the live-wrap rules in CONTRACTS.md).
 - **`spawn`** and **`send`** — the detached headless-launch command
   and the gated cross-session injection door. Full mechanism in
   [[Conductor-Channel]].
 - **`session pending list|approve|deny`** — the resolve surface over sends held
   without standing authorization (`state/stage/pending.json`); `approve`
   re-drives a held entry through `send` with `--yes`.
+- **`session find [<query>…] [--related <ref>] [--all] [--json]`** — find
+  sessions on this box and on every registered node, from the stage and each
+  node's cached graph. It reads files only: it probes no node, takes no lock
+  and writes nothing. `node pull` refreshes a cache, and the scope line names
+  each node's cache age. Terms (`agent:`, `kind:`, `state:`, `node:`,
+  `project:`, `role:`, `mailbox:`, `cc:`, `parent:`) filter and bare words
+  rank. `--related <ref>` shows <ref>'s carries and the sessions that share a
+  reason with it. The grammar and the reasons are in
+  `docs/architecture/SESSION-FIND.md`.
 - **`session trace <id>`** — render a session's own trace file, one line per
   record: the run, step by step (see "Agents enrolled from outside" above).
   `--tail N` shows the last N records (default 50), `--follow` re-reads for
@@ -283,59 +297,121 @@ lock, and never reaches the daemon. A session whose harness keeps no trace,
 or whose presence names none, is a taught error naming which of the two it
 is, never an empty listing.
 
-**And the parent hears it.** The same tick that folds the state also reads
-what each child just did and, under the resident daemon alone, delivers ONE
-line about the child to the parent that spawned it. Two sources feed it, one
-delivery. An eidolon child is read off its trace — `[eidolon <petname>]
-settled end_turn · 90 calls · 31 min · last: "…"`, `… cancelled …`, `… died
-mid-turn …` (its eidolon record was just dropped with the turn still open),
-`… asking: "…"`, `… wrapping up · 8 calls left`, `… failing · 3 tool errors
-in a row · last: <tool label>`, `… silent 12 min · last: …`. Every other
-child whose harness reports through hooks (claude, kimi, pi — any agent whose
-hook writes `hooks.json`) is read off its hook phase and the stamp of its last
-hook event, which is all that file carries — `[claude <petname>] awaiting` on
-entering a permission prompt or question (the hook says no more than that:
-the tool in flight is cleared the moment the phase leaves `working`),
-`[claude <petname>] silent 12 min · last: <the tool in flight, else
-"working">` when a `working` phase has had no hook event for 12 minutes (once
-per silence; any new hook event re-arms it; a stamp more than a day old is a
-dead record, not a silence), and `[claude <petname>] settled` when a child
-last seen `working` or `awaiting` stops. The first look at a child is a
-baseline and says nothing, a child found already stopped says nothing, and a
-turn that begins and ends between two ticks is not heard. A hook child's own
-`parentSessionId` is the wrap that hosts it, never the session that spawned
-it, so this source does not write to that edge: it climbs to the wrap's own
-`parentSessionId` and speaks only when `attestedSpawner` — the parent the
+**And the parent hears it.** The same tick that folds the state also reads what
+each child just did and, under the resident daemon alone, delivers ONE line
+about the child to the parent that spawned it. Three sources feed it, one
+delivery. An eidolon child is read off its trace —
+`[eidolon <petname>] settled end_turn · 90 calls · 31 min · last: "…"`,
+`… cancelled …`, `… died mid-turn …` (its eidolon record was just dropped with
+the turn still open), `… asking: "…"`, `… wrapping up · 8 calls left`,
+`… failing · 3 tool errors in a row · last: <tool label>`,
+`… silent 12 min · last: …`. Every other child whose harness reports through
+hooks (claude, kimi, pi — any agent whose hook writes `hooks.json`) is read off
+its hook phase and the stamp of its last hook event, which is all that file
+carries — `[claude <petname>] awaiting` on entering a permission prompt or
+question (the hook says no more than that: the tool in flight is cleared the
+moment the phase leaves `working`),
+`[claude <petname>] silent 12 min · last: <the tool in flight, else "working">`
+when a `working` phase has had no hook event for 12 minutes (once per silence;
+any new hook event re-arms it; a stamp more than a day old is a dead record, not
+a silence), `[claude <petname>] settled` when a child last seen `working` or
+`awaiting` stops through its own hook, and
+`[claude <petname>] died mid-turn · last: <the tool in flight, else "working">`
+when that open turn ends with its harness gone. The hosting wrap records that
+end itself, the moment its own child exits: the child's hook record becomes
+`done` with a fact naming the tool in flight and how the process ended (`exit
+1`, `signal 9`, or `timeout`), and the line names that status in parentheses,
+as in `… died mid-turn (exit 1) · last: …`. A wrap sent SIGTERM, SIGHUP or
+SIGINT forwards it to its harness, records the fact, and then exits by that
+signal, so the death carries its signal. When the wrap is SIGKILLed before it
+writes (SIGKILL is never caught), the tick infers the death instead, once the
+wrap is gone and the child's route still stands; that inferred line carries no
+status. The reaper leaves an open child to its running wrap when it has a
+spawner to tell, so a harness that dies under a wrap that outlives it (a shell
+host) reads `working` until the wrap ends; a child with no spawner is reaped as
+ever. The tick says each fact once, then clears it, and a recorded death is
+held against every prune until it is said. A session that ends itself (its
+`SessionEnd` hook, or `aoide session end` run by its own harness or under it)
+while its turn is still open records the same fact with no status, and its
+spawner hears `[claude <petname>] ended mid-turn · last: <tool>` once; its wrap
+then finds the phase closed and adds nothing. Anyone else's `aoide session end`
+of a session whose harness lives is refused and writes nothing, since a spawner
+is told only what the session itself did.
+A live harness anchors its session: a hook from outside it re-homes neither its
+chain nor its parent, and a `session start` or `graph link` from outside cannot
+move its window or parent, so a stranger can neither claim a session nor end it
+first. A harness that exited before its `SessionEnd` hook was served leaves the
+hook re-parented, and that end closes plain: the line is missing, never false. A
+`SessionEnd` whose `reason` is `clear` or `resume` ends the session with no
+fact: claude's process lives on under another session id, so nothing ended
+mid-turn, and the old id is free for a `claude --resume` of it in another
+terminal to adopt. Any other reason, or none, records the fact. A `done` phase
+with no fact (a session that
+ended by its own hook once its turn closed) says nothing. A spawner hears at
+most three such lines from one wrap's end, then one `and N more ended or died
+mid-turn`. A silence before a death does not hide it. The first look at a child
+is a baseline and says nothing, except a recorded death under a day old; a child
+found already stopped says nothing, and a turn that begins and ends between two
+ticks is not heard. A child the tick can no longer route is judged from the
+route its entry kept, by the rules in `CONTRACTS.md`
+(`state/stage/pingback.json`), where the orphan rule is stated once. A hook
+child's own `parentSessionId` is the wrap that hosts it, never the session that
+spawned it, so this source does not write to that edge: it climbs to the wrap's
+own `parentSessionId` and speaks only when `attestedSpawner` — the parent the
 registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
-and the child's `hookAncestry` (stamped by the hook door from the hook
-process's own credentials) holds the wrap's pid. Both wraps' pids must also
-carry a verifying daemon seal when the line is delivered, because a seal
-re-derives the pid's start time: a pid reused by another process after its
-wrap died fails it, and so does a daemon that cannot be asked (nothing is
-attested, nothing is said). The stamp itself is the registering process's own
-kernel ancestry and needs no seal. A spawner that is itself an agent is
-resolved to the wrap hosting it by the same test. A forged `session start
---parent` carries none of this and is ignored, and a child is never its own
-recipient nor its host wrap's. Two limits are known and deliberate. A detached
-`aoide spawn` that only registers after its spawner has returned has lost the
-`/proc` ancestry the stamp is read from, so it gets no stamp and its child is
-silent — never guessed. And a claude launched through another claude's Bash
-tool, with no wrap of its own in between, shares that claude's host wrap: its
-line reaches that wrap's attested spawner, an ancestor of the real launcher,
-not the launcher itself. It is not a send
-and never becomes one: the send door attests the sender from the running
-process's `/proc` ancestry, so inside the daemon the sender is the daemon and
-never the child — the line is raw-injected the doorbell's way (a live channel
-socket, else the control socket with the wrap's own submit key), with no
+and the child's `hookAncestry` (stamped by the hook door from the hook process's
+own credentials) holds the wrap's pid. On the live edge both wraps' pids must
+also carry a verifying daemon seal when the line is delivered, because a seal
+re-derives the pid's start time: a pid reused by another process after its wrap
+died fails it, and so does a daemon that cannot be asked (nothing is attested,
+nothing is said). On the gone path the host wrap may be gone instead (its pid
+dead, or no record), since a conducted wrap's program is its harness and its
+seal fails when it exits. The spawner's seal is checked at the claim, inside the
+stage lock, on both paths. The stamp itself is the registering process's own
+kernel ancestry and needs no seal. A spawner that is itself an agent is resolved
+to the wrap hosting it by the same test. A forged `session start --parent`
+carries none of this and is ignored, and a child is never its own recipient nor
+its host wrap's. Two limits are known and deliberate. A detached `aoide spawn`
+that only registers after its spawner has returned has lost the `/proc` ancestry
+the stamp is read from, so it gets no stamp and its child is silent — never
+guessed. And a claude launched through another claude's Bash tool, with no wrap
+of its own in between, shares that claude's host wrap: its line reaches that
+wrap's attested spawner, an ancestor of the real launcher, not the launcher
+itself. A wrap whose program has neither hook nor trace (a `codex`, an `aider`,
+a REPL) is read off its own screen, below: `[codex <petname>] asking: "Apply
+patch? [y/N]"`. There is no hook session under it, so the wrap itself plays the
+child and its pid must carry a verifying daemon seal; its attested spawner,
+found by the same climb, hears it. A question is heard once while it stands: the
+same one is not repeated, and a different one is a new episode. An answer clears
+that memory only on a pass that finds the record without the question, so a
+question answered and asked again with the same text between two passes is not
+heard again. There is no episode counter.
+
+It is not a send and never becomes one: the send door attests the sender from
+the running process's `/proc` ancestry, so inside the daemon the sender is the
+daemon and never the child — the line is raw-injected the doorbell's way (a live
+channel socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
-`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`
-for a trace; `hook` for a hook phase), claimed inside one short stage-lock
-section before the write, so each event is delivered at most once. A parent
-that is a shell is skipped — a line typed into a shell would run, and the WRAP
-decides that (its wrapped program's own basename, not the `agent` label a
-caller chose) — as is one whose record is gone, not conductable, or already
-`done`. The ruling is the User's (2026-09-17): a parent hears the children it
-spawned, and nothing wider.
+
+**Trust.** The trust model of the hook source's cursor
+(`state/stage/pingback.json`) is stated once, in `CONTRACTS.md` under that file.
+`state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt` for a
+trace; `hook` for a hook phase; `screen` for the question last heard), claimed
+inside one short stage-lock section before the write, so each event is delivered
+at most once.
+
+A parent is heard only on the positive proof of `CONTRACTS.md`'s `wrappedProgram`
+paragraph: its wrapped program must be the harness its agent names. The ping-back
+is one of the readers of that rule (the doorbell's PTY arm is the other;
+the A2A door types nothing, so it is not a reader), and its refusals are
+`shell-parent` and `unverified-wrap`, plus
+`not-conductable` and `parent-done` for a wrap whose record is gone, not
+conductable, or already `done`. The leading `-` of a login spelling is dropped
+for a shell name only: `-bash` is `bash`, and `-claude` stays `-claude`, which is
+not the harness.
+
+The ruling is the User's (2026-09-17): a parent hears the children it spawned,
+and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**
 (`graph/codex_app.rs`): `kind:"app"`, because it is a task inside an app
@@ -343,6 +419,125 @@ aoide does not conduct — no agent profile, no hook, no control socket, and it
 keeps out of the reaper's agent-arm entirely, since N threads of one app
 legitimately share one window address and one app-server pid. Its discovery
 is a try-flock on the thread's own writer lock plus one parsed `ps` table.
+
+## Programs with no harness — the screen
+
+A harness that reports through hooks or a trace says when it is waiting on a
+human. A program that does neither (`codex`, `gemini`, `aider`, a REPL, an
+installer in a plain conducted shell) prints `Apply patch? [y/N]` and blocks,
+and nothing else knows. The conduct wrap already relays that program's bytes,
+so it reads the answer off them: no terminal emulator, no classifier, one
+closed table.
+
+```
+ pty output ──► last 4 KiB ──► strip escapes ──► last non-empty CR/LF line
+                                                          │
+                       ┌──────────────────────────────────┘
+                       ▼
+   line stood unchanged for 3 s   AND   one table row matches its END
+      AND no Enter landed on its row, and no output has answered a typed key
+   AND child still running (the caller's fact; an interactive shell at its
+       bare prompt is never asked)
+                       │
+                       ▼
+          state: awaiting        question: "<line, ≤ 80 chars>"
+```
+
+The table is a list of named rows, each anchored to the END of the line, so a
+sentence that merely mentions a prompt is not one. A line that opens like a
+diff or a list item (`+`, `-`, `*`, `>`, `|`, `#`) matches no row.
+
+| row         | the line ends with                                                          |
+| ----------- | --------------------------------------------------------------------------- |
+| `sudo`      | `[sudo] password for <user>:`, which also raises `needsSudo`                |
+| `password`  | `password:` / `passphrase:` / `password for <name>:` / `passphrase (empty for no passphrase):` / `same passphrase again:` / `password (again):` |
+| `y-n`       | `[y/N]` `[Y/n]` `(y/n)` `(y,N)`, then at most one `?` or `:`               |
+| `yes-no`    | `(yes/no)`, `[yes/no]`, `(yes/no/[fingerprint])`, then `?` or `:`           |
+| `yes`       | `? (yes)` (npm's `Is this OK? (yes)`)                                       |
+| `press-key` | `Press Enter` / `Press return` / `Press any key`, then a tail of at most 48 characters that says `continue` (`/enter to continue or any other key to abort:`) |
+| `confirm`   | `continue?` `proceed?` `overwrite?`                                         |
+| `coreutils` | `rm:` / `cp:` / `mv:` / `ln:` lines ending in `?` (`rm: remove regular file 'x'?`) |
+
+The episode is the line. A repaint that leaves its text and its row alone (a
+cursor hide, a redraw of the same prompt) keeps the episode and its clock. It
+ends when the text changes, when output reaches a later row, when Enter lands on
+its row, or when the child exits; any other output is only more output.
+
+A printable key does not end it by itself. A key holds the question until its
+Enter, or until real program output follows it. The key's echo is not output: it
+is the typed characters, with carriage returns and escape sequences ignored, so a
+line editor's redraw of the key is still an echo. Output that is not an echo
+answers the question at once, which is how a single-key `read -n1` reads when it
+prints after its key. Line reads (`read -p`, a `y/N` in `apt`, `rm -i`, `git`)
+hold until their Enter, which is the common shape.
+
+One cost is stated plainly. A single-key reader that echoes its key and then
+goes silent stays `awaiting` until its next output: a stale state, which the
+ping-back never repeats. A read that cuts an escape sequence or a multi-byte
+character holds up to 64 cut bytes for the next read, so a split echo is judged
+whole. A read carrying an invalid UTF-8 byte is judged whole as it stands, and
+an escape cut at its end can then answer the question. The rule errs toward a
+stale `awaiting`, since a false `idle` would drop the ping-back, the sudo badge
+and the dock state.
+
+A second question printed on the same row after an answered one is never
+announced. The row is already answered, so the new question reads as the same
+line: sequential `read -n1` prompts on one line (`Continue? [y/N] Again? [y/N] `)
+are heard for the first only.
+
+Arrows, Tab, Ctrl keys and other escape sequences do not answer, and neither do
+the terminal's own replies (OSC, DCS) or X10 mouse reports. The keys are
+classified in memory for that one decision and never written to the record. The
+question is the line as it stood before the first key, so a half-typed command at
+an idle shell prompt never reads as one; the session log keeps the raw bytes it
+always kept.
+
+Three seconds is the quiet, counted from the line's last change: long enough
+that a prompt a script answers in milliseconds never flaps, short enough that a
+human waits only a moment. Matching `sudo` raises `needsSudo` (the dock's lock
+badge and the A2A `auth-required` state). That row is the human's password, not
+an agent's question, so it is shown and never announced to a spawner. A plain
+shell's own `sudo` shows at once, off the process table (`sudo_awaiting`); under
+a wrapper (`sh -c`, `make`) the screen shows it after the 3-second quiet.
+
+A shell's screen counts by what the shell was given. An interactive shell (no
+`-c` string and no script: `bash`, `bash --norc -i`) is silenced at its bare
+prompt, so a question typed or echoed there is never `awaiting`, and a `read -p`
+it runs itself goes unseen. A shell given a command or a script (`bash -c "apt
+install x"`, `sh ./run.sh`) is a program like any other, and its questions are
+heard. `sudo`, `doas` and `su` (`sudo bash`, `su`) are never silenced and never
+idle: the first prompt asks for a password, and nothing tells that prompt from
+the root shell's after it, so the password prompt is heard. The privilege
+programs this does not cover are listed in `CONTRACTS.md`'s shell-state
+paragraph. `script` is a shell at its prompt unless `-c` or `--command` appears
+after it (any dashed token with a `c` counts, so the screen only ever hears
+more). A form the launcher walk refuses (`env -S`, `sudo -i`, an option its
+table does not list) is answered as a command runner, so its questions are heard
+too: where the walk cannot resolve a form, the over-match goes toward hearing,
+never toward silence. The argv decides which, read by the walk that classes a shell; no
+process is probed for it.
+
+Precedence, highest first: **hook phase, trace, screen, presence.** A non-shell
+session whose harness is an agent with a profile (claude, kimi, pi, eidolon) is
+never watched. A non-shell record that gains a hook phase has what the screen set
+on it taken back; that takeback is computed for non-shells only, and a shell's
+`state` is its own snapshot whatever records it holds. The screen is a source of
+`state` and `question` only for a wrap that nothing else speaks for.
+
+The line is foreign text (house rule 4). It is stripped of escape sequences and
+control characters, flattened to one line, its `"` softened to `'`, cut to 80
+characters keeping its end, and stored as the record's one `question` field.
+Three places hold that text, each capped at 80 and sanitised: `sessions.json`
+(`question`), the ping-back cursor's `screen` entry in `pingback.json`, and the
+audit line of a ping that carried it. The recent output the reader works on is
+held in memory only, and a screen that matches no row leaves nothing behind.
+Everything after the matched prompt is, by the end anchor, nothing.
+
+Downstream it is an ordinary `awaiting` session: the conductor graph, the dock
+peek and the notification path that fire on `awaiting` fire here too, and a
+spawner hears it as the third ping-back source (above). The herald's summons
+card is not raised, because that card types a profile's keystrokes into the
+asking session and a program with no profile has none to type.
 
 ## Liveness reaping — the SIGKILL problem
 
@@ -358,6 +553,8 @@ a session **dead** when *any* of three independent signals fires:
 
 - **window gone** — the record has a non-empty `windowAddress` that is no
   longer among the live addresses the compositor's client list (`j/clients`) reports.
+  Not judged while the record's live harness (the first pid of its hook chain)
+  anchors it; see the veto below.
 - **pid gone** — the record has a `pid` whose `/proc/<pid>` no longer exists.
 - **stale abandonment** — every evidence stream (`last_seen`: the max of
   transcript mtime, hook `updatedAt`, and `startedAt`) has gone silent past a
@@ -369,7 +566,11 @@ a session **dead** when *any* of three independent signals fires:
   outlives it — window and pid stay live forever, so only across-the-board
   silence catches it. A live pid that is NOT its window's owning pid (per a
   window-owner map built alongside the live-address set) is read as the
-  agent's own process and vetoes the staleness signal outright.
+  agent's own process and vetoes the staleness signal outright. A live harness
+  of the hook chain (its first pid) vetoes the window signal, the staleness
+  bands and the orphan arm; the pid signal still judges the record's own pid.
+  The chain stores no start time, so a recycled pid holds the record until it
+  exits.
 
 The never-false-reap guard: if Hyprland can't be queried at all (no
 `HYPRLAND_INSTANCE_SIGNATURE`, `hyprctl` missing/failed), the window signal is
@@ -401,6 +602,15 @@ subagent-of-subagent nesting) backs both paths, so a session that dies
 **abnormally** — killed terminal, crashed process, caught by the reap sweep
 rather than exiting through `session end` — loses its sub-agent
 children exactly as cleanly as an orderly exit does.
+
+The `sub:` id prefix belongs to these nodes. Only the hook door's sub-agent
+arms create, re-key or close one, each on a harness's word, so `conduct`,
+`spawn`, `session start` and a hook's SessionStart refuse an id under the
+prefix, and the eidolon and Codex-app reconcilers enrol none: a wrap
+registered there would answer to a forged sub-agent hook. A wrap that already
+holds such an id is left alone by those arms. For the same reason a `sub:`
+node is never a spawner, and its ending or re-keying leaves no spawn stamp
+orphaned (CONTRACTS, rule 3).
 
 The same pass also retires **same-window agent duplicates**. A window hosts
 any number of agents: one desktop app window runs several headless claudes,
@@ -530,15 +740,23 @@ are consumed internally and get no `graph.json` projection:
   its own — and `aoide session` renders exactly that chain: each
   `remoteChildren` row joins the probed fold by `(node name, sessionId)` and is
   drawn indented under the parent's own row, its far descendants beneath it,
-  with the same join feeding `--json`'s `fold`/`subtree` on the entry. A row
+  with the same join feeding `--json`'s `fold`/`subtree` on the entry. The
+  far node picks the document's shape, so each far session is drawn once,
+  under the first link that reaches it, and indentation stops at 32 levels
+  (`…`) however deep the chain runs. A row
   the fold does not carry is shown `(not pulled)`, never hidden; one behind an
   expired cache TTL is shown `(stale)`, because the ledger link itself never
   expires. The conductor TUI's DAG reads neither key yet — terminal-only.
   A ledger row leaves with its parent: both roster-exit paths call
   `drop_remote_child_rows` over the ids they removed, after their own
   `sessions.json` write lands.
-- **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
-  one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
+- **`seal` + `sealedIssuedAt` + `sealedPidStarttime` + `sealedBootId`** — the
+  sealed session credential. `seal` and `sealedIssuedAt` share one lifecycle
+  (always both or neither). `sealedPidStarttime` and `sealedBootId` are the
+  minted starttime and boot id in plain text, written with them. The refusal
+  predicate reads those two fields, and CONTRACTS.md's identity section states
+  it once. Neither is authenticated, so a hand edit can set it. `aoided` mints
+  an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate
   key from `state/identity/`'s on-disk node-wire key, which any same-uid
   reader could sign with. The signature covers a canonical NUL-separated
@@ -566,7 +784,7 @@ liveness (the lane's answered threat-model fork, OQ1-A): with Yama off the
 seal degrades to liveness-only. An unreachable or impostor daemon leaves
 every seal unverifiable — never a fallback to trust.
 
-**The lane's accounting — enforced vs open.** Enforced end to end:
+**Enforced, and open.** Enforced end to end:
 `origin` is write-once and door-stamped (P-ID0); every live, pid-carrying
 session carries the seal (P-ID1); the send gate and the per-session
 socket's accept key on kernel facts plus a verified seal, never env
@@ -574,8 +792,12 @@ socket's accept key on kernel facts plus a verified seal, never env
 cross-uid `SO_PEERCRED` floor (P-ID3, [[shellbridge]], [[aoided]]); the
 secrets broker's `allowRemoteOrigin` gate is the credential's first policy
 consumer (P-ID4); the node wire resolves identity by verifying key, never
-claimed name (P-ID5, [[Node-Federation]]). Open, each named rather than
-implied closed: (1) **consumer-name authentication** — the seal
+claimed name (P-ID5, [[Node-Federation]]). The live-wrap rules in CONTRACTS.md
+refuse a same-uid end, prune, phase, or changed-field start of a protected live
+wrap (judged by the plaintext starttime and no key), ignore every hook that
+reports under such a wrap's own id, and the autogate reads a parent edge only
+where `attestedSpawner` names it. Open, each
+named: (1) **consumer-name authentication** — the seal
 authenticates the session and its class, never a self-asserted consumer
 string; (2) **OQ1-B, the own-uid daemon** — not taken; a same-uid attacker
 can race or evict the daemon's listener (`bind_socket` unlink-then-binds,
@@ -586,7 +808,11 @@ residual); (3) **a cross-uid attestation channel** — the packaged
 `aoide-secrets` broker cannot reach the operator's daemon socket or roster,
 so the origin gate is dormant in that deployment; (4) **an authenticated
 registration path** — the closer for the sweep-relaunder shape; (5)
-**per-surface dispatch-door gates** riding the attested-caller lookup.
+**per-surface dispatch-door gates** riding the attested-caller lookup; (6) **the live-wrap residuals** listed in CONTRACTS.md: a same-uid process can
+hand-edit `sessions.json`, rewrite a live record's `agent`, `cwd` or `window`,
+point the verifier at another daemon through `AOIDE_DAEMON_SOCKET`, or kill
+`aoided`. A daemon-owned session identity is the planned change for these; it is
+not built.
 
 ## Contracts (CONTRACTS.md §4, still v0)
 
@@ -602,7 +828,8 @@ registration path** — the closer for the sweep-relaunder shape; (5)
   headless-conducted session's pty-master log — [[Conductor-Channel]]),
   `hookAncestry` (up to 8 self-first `/proc` pids, the chain of the latest
   registration, bind, or heal, the auto-parenting seam above), and the identity pair `origin` and
-  `seal`/`sealedIssuedAt` (the lane's provenance and credential, above).
+  `seal`/`sealedIssuedAt`/`sealedPidStarttime`/`sealedBootId` (the lane's
+  provenance and credential, above).
   The full field list — `kind`/`conductable`,
   `contextTokens`/`contextCeiling`/`tool`/`petname` and more — is CONTRACTS.md
   §4; each is round-tripped by every rewriter regardless of whether it
@@ -646,6 +873,9 @@ registry; only `SUPER+ESCAPE` (lock) still execs the dead `shell lock` form
 - [[Node-Federation]] — the wire half of key-verified identity (P-ID5)
 - [[Secrets-Broker]] — the origin gate, the credential's first policy consumer (P-ID4)
 - [[Node-Transport]] — the reaper backstop that collects a tunnel a killed session never closed
+- [Session find](../../../architecture/SESSION-FIND.md) — designed, not built:
+  `aoide session find` over this roster, the node caches and the mail
+  cursors — what each session carries, and the sessions related to one
 
 ## Managed task runs
 

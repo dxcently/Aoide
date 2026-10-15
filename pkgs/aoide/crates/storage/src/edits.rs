@@ -143,7 +143,7 @@ pub struct EditLine {
 pub fn append(line: &EditLine) -> io::Result<()> {
     let path = edits_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::fs::ensure_write_dir(parent)?;
     }
     let mut body = serde_json::to_string(line)
         .unwrap_or_else(|e| format!("{{\"error\":\"serialize edit line: {e}\"}}"));

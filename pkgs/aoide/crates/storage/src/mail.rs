@@ -420,6 +420,15 @@ pub(crate) fn header_from_canonical_bytes(bytes: &[u8]) -> Option<Header> {
     })
 }
 
+/// Is `text` exactly one msgid: 64 lowercase hex digits, nothing around them.
+/// The one shape a receipt's text may take. A receipt's text is the msgid it
+/// acknowledges, and it becomes a path component in the outbox (`<msgid>.json`),
+/// so anything looser — a trailing newline, a `../`, a capital — is refused
+/// before it can name a file, not after.
+pub fn is_msgid(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// Recompute `msgid` from a (possibly tampered) header/text/sig triple —
 /// `hex sha256 over sig ‖ header ‖ 0x00 ‖ text`, no separator before
 /// `header`, one before `text` (MAIL.md "The envelope"). `None` only when
@@ -480,7 +489,7 @@ fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 
 fn ensure_mail_dir() -> Result<(), String> {
     let dir = mail_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))
+    crate::fs::ensure_write_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))
 }
 
 /// One-shot, idempotent `inbox.json` → typed `receipt` entries, run under
@@ -547,6 +556,9 @@ fn migrate_if_needed() -> Result<(), String> {
         None => return Err(format!("{}: no parent directory", old_path.display())),
     };
     if !migrated_path.exists() {
+        if let Some(dir) = old_path.parent() {
+            crate::fs::ensure_write_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
         std::fs::rename(&old_path, &migrated_path).map_err(|e| {
             format!("{}: rename to {}: {e}", old_path.display(), migrated_path.display())
         })?;
@@ -768,6 +780,7 @@ fn truncate_torn_tail(path: &std::path::Path) -> Result<(), String> {
         return Ok(());
     }
     let cut = bytes.iter().rposition(|&b| b == b'\n').map(|i| i + 1).unwrap_or(0);
+    ensure_mail_dir()?;
     let f = std::fs::OpenOptions::new()
         .write(true)
         .open(path)
@@ -783,6 +796,7 @@ fn append_base_line<T: Serialize>(entry: &T) -> Result<(), String> {
     let path = base_path();
     truncate_torn_tail(&path)?;
     let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+    ensure_mail_dir()?;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -801,12 +815,49 @@ fn append_seen_line(msgid: &str, received_at: &str) -> Result<(), String> {
     let path = seen_path();
     let seen = SeenEntry { msgid: msgid.to_string(), received_at: received_at.to_string() };
     let line = serde_json::to_string(&seen).map_err(|e| e.to_string())?;
+    ensure_mail_dir()?;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     f.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+    f.write_all(b"\n").map_err(|e| e.to_string())
+}
+
+/// The index a filed receipt is keyed on: the signer, the mesh the receipt is
+/// signed in, and the msgid of the letter it acknowledges. Its own msgid is not
+/// in it, since a re-ack is a new envelope.
+fn receipt_key(envelope: &Envelope) -> String {
+    serde_json::to_string(&(&envelope.header.from.node, &envelope.header.origin_mesh, &envelope.text))
+        .unwrap_or_default()
+}
+
+fn receipts_path() -> PathBuf {
+    mail_dir().join("receipts.seen")
+}
+
+/// Every receipt key already filed, read from the sidecar index: one line per
+/// filed receipt, so the read grows with the letters this box has sent and never
+/// with the base.
+fn read_receipt_keys_unlocked() -> Result<HashSet<String>, String> {
+    let path = receipts_path();
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => Ok(raw.lines().map(str::to_string).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashSet::new()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+fn append_receipt_key(key: &str) -> Result<(), String> {
+    let path = receipts_path();
+    ensure_mail_dir()?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    f.write_all(key.as_bytes()).map_err(|e| e.to_string())?;
     f.write_all(b"\n").map_err(|e| e.to_string())
 }
 
@@ -1053,12 +1104,30 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
 /// states: an ack rides ONE mesh back to the origin, and the mesh its header
 /// names is a SIGNED value the destination compares against the request's.
 /// `spool_and_drain_ack` passes the incoming letter's own `origin_mesh`, so an
-/// ack travels in the mesh the letter arrived in.
+/// ack travels in the mesh the letter arrived in. `from.node` is the OS
+/// hostname here; a caller whose box is named differently in that mesh uses
+/// [`mint_ack_from`].
 pub fn mint_ack_in_mesh(from_name: &str, to: Address, acked_msgid: &str, mesh: &str) -> Result<Envelope, String> {
+    mint_ack_from(&display::local_node_name(), from_name, to, acked_msgid, mesh)
+}
+
+/// [`mint_ack_in_mesh`] with the SENDER's node name stated explicitly, the
+/// receipt's twin of [`mint_outbound_letter_from`]: the origin checks the ack
+/// against the key it holds for `from.node`, so a box whose hostname is not its
+/// charter name must sign the ack as that name or the origin never retires its
+/// letter. Both mints share this body, so a letter and an ack can never
+/// disagree about what a mint signs.
+pub fn mint_ack_from(
+    from_node: &str,
+    from_name: &str,
+    to: Address,
+    acked_msgid: &str,
+    mesh: &str,
+) -> Result<Envelope, String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
         version: ENVELOPE_VERSION.to_string(),
-        from: Address { node: display::local_node_name(), name: from_name.to_string() },
+        from: Address { node: from_node.to_string(), name: from_name.to_string() },
         to,
         kind: ENTRY_TYPE_RECEIPT.to_string(),
         minted_at: now_iso_utc(),
@@ -1143,6 +1212,10 @@ pub enum DepositOutcome {
     /// `msgid` does not recompute from `(header, text, sig)` — tampered or
     /// corrupt in transit.
     BadMsgid,
+    /// A verified `receipt` whose `text` is not exactly one msgid
+    /// ([`is_msgid`]). It names no letter this box could retire, so it files
+    /// nothing. Answered on the wire as `bad-msgid`, with its own detail.
+    MalformedAck,
     /// [`verify_origin_signature`] returned `false`.
     UnverifiedOrigin,
     /// A `charter` envelope arrived as plaintext ([`REFUSAL_NOT_CORRESPONDENCE`])
@@ -1194,7 +1267,37 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         if envelope.header.kind == ENTRY_TYPE_CHARTER {
             return Ok(DepositOutcome::NotCorrespondence);
         }
+        // A receipt names the one letter it acknowledges, and nothing else. A
+        // verified signer's receipt whose text is anything but one msgid names
+        // no letter this box can retire, so it is refused as a bad msgid.
+        if envelope.header.kind == ENTRY_TYPE_RECEIPT && !is_msgid(&envelope.text) {
+            return Ok(DepositOutcome::MalformedAck);
+        }
         let seen = read_seen_msgids_unlocked()?;
+        // A receipt files only for a letter this box still holds, addressed to the
+        // name that letter went out as. Anything else names no letter this box can
+        // retire, so it files nothing, and is answered `duplicate`: nothing is
+        // filed and nothing is owed, so the sender retires its copy instead of
+        // parking it. This bounds the base to the letters this box has sent: a
+        // flood of distinct msgids is refused before any write.
+        let receipt_key = if envelope.header.kind == ENTRY_TYPE_RECEIPT {
+            if crate::outbox::spooled_letter_sender(&envelope.text)?.as_deref() != Some(envelope.header.to.node.as_str()) {
+                return Ok(DepositOutcome::Duplicate { filed_letter: false });
+            }
+            // The second line of defence against an ack loop. A signer acknowledges
+            // a letter once, per mesh: a second receipt from the same signer, in the
+            // same mesh, for the same acked msgid files nothing. It covers the
+            // window between a filing and the sender's own settlement, which runs
+            // after this lock is released. A receipt in another mesh is a different
+            // acknowledgement and is not conflated with this one.
+            let key = receipt_key(&envelope);
+            if read_receipt_keys_unlocked()?.contains(&key) {
+                return Ok(DepositOutcome::Duplicate { filed_letter: false });
+            }
+            Some(key)
+        } else {
+            None
+        };
         if seen.contains(&envelope.msgid) {
             // Re-derive whether the already-filed entry was a letter,
             // without a second full parse of `base.jsonl` beyond what a
@@ -1209,6 +1312,9 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         let kind = envelope.header.kind.clone();
         let msgid = envelope.msgid.clone();
         file_received_entry(envelope, via)?;
+        if let Some(key) = receipt_key {
+            append_receipt_key(&key)?;
+        }
         Ok(DepositOutcome::Filed { msgid, kind })
     })
 }
@@ -1219,6 +1325,56 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
 /// [`with_lock`] closure.
 pub fn read_base() -> Result<Vec<Entry>, String> {
     with_lock(read_entries_unlocked)
+}
+
+/// `cursors.json` read with no lock, no migration and no write: the reader
+/// maps, each name's pseudo-reader (the key equal to the name) dropped, and a
+/// name left with no reader omitted. A missing file is an empty map, since
+/// nobody is enrolled. `None` when the file is there but not in the per-reader
+/// shape: a legacy flat file that only a locked read migrates, or one that does
+/// not parse. A caller reports that as unknown, never as none.
+pub fn peek_cursors() -> Option<Cursors> {
+    let raw = match std::fs::read_to_string(cursors_path()) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(Cursors::new()),
+        Err(_) => return None,
+    };
+    let top: BTreeMap<String, serde_json::Value> = serde_json::from_str(&raw).ok()?;
+    let mut out = Cursors::new();
+    for (name, value) in top {
+        // The migration's own test for the old flat shape, verbatim.
+        if value.get("seq").and_then(serde_json::Value::as_u64).is_some() {
+            return None;
+        }
+        let cursor: Cursor = serde_json::from_value(value).ok()?;
+        let readers: Cursor = cursor.into_iter().filter(|(reader, _)| *reader != name).collect();
+        if !readers.is_empty() {
+            out.insert(name, readers);
+        }
+    }
+    Some(out)
+}
+
+/// `base.jsonl`'s correspondence entries, read with no lock and no write. Only
+/// the bytes up to the last newline count: the write path treats a tail with no
+/// newline as torn and truncates it, so a peek never reports a line the next
+/// write would remove. Transit and malformed lines are skipped, as
+/// [`read_entries_unlocked`] skips them. A missing file is empty.
+pub fn peek_base() -> Result<Vec<Entry>, String> {
+    let path = base_path();
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let complete = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    Ok(bytes[..complete]
+        .split(|&b| b == b'\n')
+        .filter_map(|line| match serde_json::from_slice::<BaseLine>(line).ok()? {
+            BaseLine::Entry(entry) => Some(*entry),
+            BaseLine::Transit(_) => None,
+        })
+        .collect())
 }
 
 /// The letters `name` holds that are UNREAD BY `reader_session`, plus that
@@ -1615,6 +1771,59 @@ mod tests {
         aoide_test_support::isolated_mail_root(tag)
     }
 
+    /// Each raw mail writer locks a wide `state/` before it creates or appends
+    /// under it, even with the mail dir already present. Each is widened and
+    /// checked on its own, so a writer that skips the gate fails by name.
+    #[cfg(unix)]
+    #[test]
+    fn mail_writes_lock_a_wide_state_they_write_into() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("mail-wide-state");
+        let state = crate::fs::state_dir();
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        let mode = || std::fs::metadata(&state).unwrap().permissions().mode() & 0o777;
+        let widen = || std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        widen();
+        append_base_line(&serde_json::json!({ "v": 0 })).unwrap();
+        assert_eq!(mode(), 0o700, "append_base_line left state/ wide");
+
+        widen();
+        std::fs::write(base_path(), "{\"v\":0}\n{\"v\":").unwrap();
+        truncate_torn_tail(&base_path()).unwrap();
+        assert_eq!(mode(), 0o700, "truncate_torn_tail left state/ wide");
+
+        widen();
+        append_seen_line("m1", "2026-10-12T00:00:00Z").unwrap();
+        assert_eq!(mode(), 0o700, "append_seen_line left state/ wide");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_legacy_inbox_with_no_rows_locks_state_before_it_renames_itself() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-wide-state");
+        let state = crate::fs::state_dir();
+        // Mint first: a fresh key locks state/ on its own, which would hide the
+        // rename. With the key in place, only the rename can lock it.
+        identity::load_or_mint().unwrap();
+        std::fs::write(legacy_inbox_path(), r#"{"entries":[]}"#).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        migrate_if_needed().unwrap();
+
+        assert!(state.join("inbox.json.migrated").exists(), "the legacy inbox was not renamed");
+        assert_eq!(
+            std::fs::metadata(&state).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "migrate_if_needed renamed inside a wide state/"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn header(from: &str, to: &str, text_kind: &str, minted_at: &str) -> Header {
         Header {
             version: ENVELOPE_VERSION.to_string(),
@@ -1648,6 +1857,107 @@ mod tests {
             "must never resolve into a real ~/.aoide tree"
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── peeks: the lock-free reads the find index is built from ──────────
+
+    #[test]
+    fn a_peek_drops_the_pseudo_reader_and_keeps_the_real_readers() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-pseudo");
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        std::fs::write(
+            cursors_path(),
+            r#"{"alice":{"alice":{"seq":2},"sess-1":{"seq":2,"rung":1}},"bob":{"bob":{"seq":1}}}"#,
+        )
+        .unwrap();
+
+        let want = Cursors::from([(
+            "alice".to_string(),
+            Cursor::from([("sess-1".to_string(), Mark { seq: 2, rung: 1 })]),
+        )]);
+        assert_eq!(
+            peek_cursors(),
+            Some(want),
+            "the pseudo-reader is nobody, so bob, whose only key is that, is absent"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_cursors_file_is_no_readers_and_a_legacy_one_is_unknown() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-missing-legacy");
+        assert_eq!(peek_cursors(), Some(Cursors::new()), "nobody is enrolled yet");
+
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        std::fs::write(cursors_path(), r#"{"alice":{"seq":3,"readers":["sess-1"]}}"#).unwrap();
+        assert_eq!(peek_cursors(), None, "the flat shape is unknown here, never an empty map");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peek_never_writes_and_never_migrates_a_legacy_file() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-untouched");
+        file_letter("alice", "bob", "hi").unwrap();
+        std::fs::write(cursors_path(), r#"{"alice":{"seq":3,"readers":["sess-1"]}}"#).unwrap();
+
+        // An old mtime, so any write since would move it to now.
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let before: Vec<_> = [base_path(), cursors_path()]
+            .into_iter()
+            .map(|p| {
+                std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_modified(old).unwrap();
+                let bytes = std::fs::read(&p).unwrap();
+                let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+                (p, bytes, mtime)
+            })
+            .collect();
+
+        assert_eq!(peek_cursors(), None);
+        assert_eq!(peek_base().unwrap().len(), 1);
+        for (p, bytes, mtime) in &before {
+            assert_eq!(&std::fs::read(p).unwrap(), bytes, "{} bytes changed", p.display());
+            assert_eq!(std::fs::metadata(p).unwrap().modified().unwrap(), *mtime, "{} was written", p.display());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peek_skips_a_torn_last_line_that_is_otherwise_complete_json() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-torn");
+        file_letter("alice", "bob", "one").unwrap();
+        let line = std::fs::read_to_string(base_path()).unwrap();
+        let torn = line.trim_end_matches('\n').to_string();
+        assert!(serde_json::from_str::<BaseLine>(&torn).is_ok(), "the tail parses: only the missing newline makes it torn");
+        std::fs::write(base_path(), format!("{line}{torn}")).unwrap();
+
+        let entries = peek_base().unwrap();
+        assert_eq!(entries.len(), 1, "a tail with no newline is not part of the file yet");
+        assert_eq!(entries[0].seq, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peek_takes_no_lock_and_completes_while_the_stage_lock_is_held() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-no-lock");
+        file_letter("alice", "bob", "hi").unwrap();
+
+        crate::fs::try_stage_lock(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send((peek_base().map(|e| e.len()), peek_cursors().is_some()));
+            });
+            let got = rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("a peek must not wait on the stage lock");
+            assert_eq!(got, (Ok(1), true));
+        })
+        .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1751,6 +2061,162 @@ mod tests {
             !verify_origin_signature(&unknown),
             "no key on record for from.node must refuse, never fall back to any other key"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A verified signer's receipt for `alice-host`, as that node would mint it.
+    fn alice_receipt(text: &str, minted_at: &str, alice: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", "bob", ENTRY_TYPE_RECEIPT, minted_at);
+        h.from.node = "alice-host".to_string();
+        let (sig, msgid) = seal(&h, text, alice);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// [`alice_receipt`] signed in `mesh` (`header.origin_mesh`), so the same
+    /// acknowledgement can be minted once per mesh.
+    fn alice_receipt_in(text: &str, minted_at: &str, mesh: &str, alice: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", "bob", ENTRY_TYPE_RECEIPT, minted_at);
+        h.from.node = "alice-host".to_string();
+        h.origin_mesh = mesh.to_string();
+        let (sig, msgid) = seal(&h, text, alice);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// A letter this box sent as `yomi` and still holds under `msgid`: the one
+    /// record a receipt for it is filed against. [`header`] names `yomi` as the
+    /// sending node, so a receipt addressed to `yomi` names this box.
+    fn spool_letter_sent_as_yomi(msgid: &str) {
+        let envelope = Envelope {
+            header: header("bob", "alice", ENTRY_TYPE_LETTER, "2026-09-06T00:00:00Z"),
+            text: String::new(),
+            sig: String::new(),
+            msgid: msgid.to_string(),
+        };
+        crate::outbox::write_entry("alice-host", &crate::outbox::OutboxEntry::fresh(envelope)).unwrap();
+    }
+
+    /// `alice-host` on record under a fresh key, so its receipts verify.
+    fn alice_on_record() -> identity::Keypair {
+        let alice = identity::mint_ephemeral().unwrap();
+        let mut nodes = Vec::new();
+        crate::node_store::upsert_paired_node(
+            &mut nodes,
+            "alice-host",
+            "https://alice",
+            &alice.info().pubkey_hex,
+            "2026-09-06T00:00:00Z",
+            &["message".to_string()],
+            "home",
+        );
+        crate::node_store::save_nodes(&nodes).unwrap();
+        alice
+    }
+
+    /// **A receipt names exactly one letter, or it files nothing.** Its text
+    /// becomes a path in the outbox, so a receipt whose text is anything but one
+    /// lowercase 64-hex msgid is refused as a bad msgid, signed or not. A proper
+    /// one still files.
+    #[test]
+    fn a_receipt_whose_text_is_not_exactly_one_msgid_is_refused() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-shape");
+        let alice = alice_on_record();
+        let letter = "ab".repeat(32);
+
+        for text in [format!("{letter} "), format!("{letter}\n"), format!("../{letter}"), letter.to_uppercase()] {
+            let ack = alice_receipt(&text, "2026-09-06T00:00:01Z", &alice);
+            assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::MalformedAck, "{text:?}");
+        }
+        assert!(read_base().unwrap().is_empty(), "no malformed receipt is filed");
+
+        spool_letter_sent_as_yomi(&letter);
+        let ack = alice_receipt(&letter, "2026-09-06T00:00:01Z", &alice);
+        assert!(matches!(deposit(ack, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A signer acknowledges a letter once.** A second receipt from the same
+    /// signer naming the same msgid — a re-ack minted in a later second, so a new
+    /// msgid — is answered `duplicate` and files nothing, however many times a
+    /// sender re-acks.
+    #[test]
+    fn a_second_receipt_from_the_same_signer_for_the_same_letter_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-dedup");
+        let alice = alice_on_record();
+        let letter = "cd".repeat(32);
+
+        spool_letter_sent_as_yomi(&letter);
+        let first = alice_receipt(&letter, "2026-09-06T00:00:01Z", &alice);
+        let again = alice_receipt(&letter, "2026-09-06T00:00:02Z", &alice);
+        assert_ne!(first.msgid, again.msgid, "a re-ack is a new envelope");
+        assert!(matches!(deposit(first, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
+        assert_eq!(deposit(again, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false });
+        assert_eq!(read_base().unwrap().len(), 1, "one receipt for the letter, however many re-acks arrive");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A flood of receipts for letters this box never sent files nothing.**
+    /// Each receipt names a fresh, well-formed msgid and is properly signed, so
+    /// every one passes the shape and signature checks. None names a letter this
+    /// box holds, so none is filed, and the base and the receipt index stay empty.
+    #[test]
+    fn a_flood_of_receipts_for_letters_never_sent_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-flood");
+        let alice = alice_on_record();
+
+        for i in 0..200u32 {
+            let text = format!("{i:064x}");
+            let ack = alice_receipt(&text, "2026-09-06T00:00:01Z", &alice);
+            assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false }, "{i}");
+        }
+        assert!(read_base().unwrap().is_empty(), "no receipt for an unsent letter is filed");
+        assert!(!receipts_path().exists(), "and nothing is indexed either");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A receipt addressed to a name other than the one its letter went out as
+    /// names a letter this box did send, but not to this name: it is not filed.
+    #[test]
+    fn a_receipt_addressed_to_another_name_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-addressee");
+        let alice = alice_on_record();
+        let letter = "ef".repeat(32);
+        spool_letter_sent_as_yomi(&letter);
+
+        let mut h = header("alice", "bob", ENTRY_TYPE_RECEIPT, "2026-09-06T00:00:01Z");
+        h.from.node = "alice-host".to_string();
+        h.to.node = "elsewhere".to_string();
+        let (sig, msgid) = seal(&h, &letter, &alice);
+        let ack = Envelope { header: h, text: letter.clone(), sig, msgid };
+        assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false });
+        assert!(read_base().unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The same acknowledgement in another mesh is a different acknowledgement.**
+    /// The dedup key is the signer, the mesh and the acked msgid, so a receipt
+    /// signed in mesh `far` does not stand in for the one signed in `home`.
+    #[test]
+    fn the_same_letters_receipt_in_another_mesh_is_not_conflated() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-mesh");
+        let alice = alice_on_record();
+        let letter = "ab".repeat(32);
+        spool_letter_sent_as_yomi(&letter);
+
+        let home = alice_receipt_in(&letter, "2026-09-06T00:00:01Z", "home", &alice);
+        let far = alice_receipt_in(&letter, "2026-09-06T00:00:02Z", "far", &alice);
+        assert!(matches!(deposit(home, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
+        assert!(matches!(deposit(far, "alice-host").unwrap(), DepositOutcome::Filed { .. }), "filed, not a duplicate");
+        assert_eq!(read_base().unwrap().len(), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

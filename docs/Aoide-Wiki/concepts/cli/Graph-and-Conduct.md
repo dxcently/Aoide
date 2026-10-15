@@ -251,7 +251,10 @@ aoide graph link <child> <parent> [--json]
   anyway"`.
 - **Notes:** errors (exit 1): `reason: "self-link"`, `"child-not-found"`, or
   `"cycle"` (the walk in `doc.rs::would_cycle`). Ignores `node:*`/`a2a:*` ids
-  like any unknown local id.
+  like any unknown local id. Moving the parent of a child that already has
+  another one is refused for a door that cannot approve (MCP, A2A): the send
+  gate's parent rule reads this field, so the edge is a human's to rewrite
+  (`reason: "door-cannot-approve"`, taught and audited).
 
 ### aoide session start
 
@@ -267,7 +270,11 @@ aoide session start --id <id> [--agent <name>] [--cwd <dir>] [--window <addr>] [
   then re-stage `graph.json`. A fresh record starts `idle` with `agent`
   defaulting to `claude`; a re-start updates only the provided fields and
   preserves `startedAt` and the live state (`upsert_session`). A `--parent`
-  that would cycle is refused (exit 1, `reason: "cycle"`).
+  that would cycle is refused (exit 1, `reason: "cycle"`). A `--parent` that
+  would change an existing record's parent, to another session or by clearing
+  it, is refused for a door that cannot approve (MCP, A2A;
+  `reason: "door-cannot-approve"`, audited); a NEW record may register under a
+  parent from any door.
 - **Output:** `data: {sessionId, agent, startedAt, inserted, file}`.
 - **Notes:** registration-time same-window agent eviction: if the NEW record is
   an agent with a `windowAddress` shared by another live agent record, an
@@ -408,10 +415,11 @@ aoide session [<filter>] [--hosts] [--all] [--json]
   host/role/petname line, or `node/<rest>`), falling back to a substring
   match.
 - **Writes:** nothing.
-- **Output:** a Unicode roster grouped by PROJECT — a registered
-  `projects.json` name, else a `.aoide/project.json` manifest directory's own
-  basename, else a trailing `(no project)` bucket — or, under `--hosts`, by
-  HOST: this host, then each node. Node presence: `online` /
+- **Output:** a Unicode roster grouped by PROJECT — for a local session a
+  registered `projects.json` name, else a `.aoide/project.json` manifest
+  directory's own basename; for a session from another node only the project
+  that node published; else a trailing `(no project)` bucket — or, under
+  `--hosts`, by HOST: this host, then each node. Node presence: `online` /
   `unreachable` / `never-pulled`. Session presence: `online` / `stale` /
   `done` (`done` omitted without `--all`). `--json` mirrors either grouping
   structurally.
@@ -457,7 +465,10 @@ aoide session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON o
   [--what <notification message>]` DETACHED (opt-out:
   `AOIDE_HERALD_PERMIT` in {0,false,no,off}); the harness's message rides as
   untrusted display data. A session whose record was ended/pruned mid-process
-  self-heals by re-registering on its next event (`hook_ensure_session`).
+  self-heals by re-registering on its next event (`hook_ensure_session`). A
+  door that cannot approve (MCP, A2A) is refused before stdin is read: the
+  hook claims and clears parents and re-keys records, which only a harness
+  running its own hook command, through the CLI, may do.
 
 ### aoide spawn
 
@@ -486,6 +497,15 @@ aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>
   --submit`, in-process, the exact re-drive shape `session pending approve`
   uses to replay a held entry — never a direct socket write; `data.prompt`
   reads `none` / `delivered` / `skipped-unregistered` / `failed: <reason>`.
+  Over MCP the caller must be attested: a server launched under a sealed
+  session spawns the child as that session's own child (`--parent` is forced
+  to it, and naming another session is refused) and its `--prompt` is that
+  parent's send, which delivers. Any other MCP spawn is held whole in
+  `pending.json` and returns `data: {sessionId, state: "pending", launched:
+  false}`; nothing launches until a human approves it. An MCP spawn's `--id`
+  must be plain (`A-Za-z0-9._:-`, at most 128 characters) and must not name a
+  live session or an existing control socket, or the call is refused before
+  anything launches or is held: an approved launch binds that id's socket.
 - **Notes:** the detached counterpart to `conduct` — this call returns
   immediately while the spawned agent keeps running headless. `--windowed`
   opens a real terminal from `$AOIDE_TERMINAL` (a whitespace-split argv with
@@ -520,7 +540,20 @@ per-spec revival rule; every invocation — the empty-selection no-op included
 — writes its own `resurrect` outcome record, on top of the dispatcher's
 per-command record (the two-line shape above).
 
-**Flag mode (`--project`/`--all`/`--id`) — unchanged.**
+**Over a door that cannot approve (MCP, A2A).** `resurrect` launches
+processes, so it is judged the way `spawn` is. An MCP server launched under a
+sealed session revives as usual (a restore it would type into the revived
+terminal is still held, as for every caller of that door). With no sealed
+session, and always on the A2A door, `resurrect --project <name> …` is held
+whole in `pending.json` (a `spawn` entry whose `path` is `resurrect`, named
+`resurrect:<name>`), nothing launches, and `session pending approve` runs it as
+the approver's door; the answer is `data: {sessionId, state: "pending",
+launched: false}`. The bare form is refused there with `reason:
+"bare-resurrect-not-held"` and a line naming `--project`: it reads the process's
+working directory and launches the manifest's own commands, which a held line
+replayed from the approver's directory would neither show nor find.
+
+**Flag mode (`--project`/`--all`/`--id`).**
 
 - **Reads:** `state/session-ledger.jsonl` (the durable, append-only record
   written exactly once at roster exit, P-D8) — resolves `--project` against
@@ -720,9 +753,18 @@ aoide session pending list [--json]
   entry's `id` (its array POSITION — the schema carries no id of its own, so
   positions shift the moment any entry resolves; re-list between multiple
   resolutions in one breath).
-- **Notes:** read-only. The queue `send` parks a held injection in (no
-  `--yes`, no autogate match) and where the A2A door parks its own held
-  injects.
+- **Notes:** read-only. The queue `send` parks a held injection in when no
+  delivering rule clears it: every A2A send, an MCP send with no attested
+  rule behind it, and a whole `spawn` or `resurrect --project …` from an
+  unattested MCP caller, which `list` shows as the command that approving it
+  would run. The human line
+  spells every character a terminal would act on as a visible escape (`\n`,
+  `\x1b`, `\u{202e}`, a backslash doubled), never stripping or printing one.
+  A send's line is its whole escaped text, unclipped, and a held launch's is
+  its whole command with every non-ASCII character spelled too. The JSON
+  carries that spelling as `shown`, and `data.pending[].text` keeps the bytes
+  as they replay. One entry may
+  serialize to at most 64 KiB (`reason: "pending-too-large"`, audited).
 
 ### aoide session pending approve
 
@@ -735,8 +777,12 @@ aoide session pending approve <id> [--json]
   --yes -- <text>` (with `--submit`/`--from` carried through) the held entry
   represents, in-process through `session_send` — the SAME door `session
   permit`'s verdict-typing already goes through — then removes the entry from
-  `pending.json` under the stage lock. Resolution is the audit line, not a
-  persisted archive: the resolution record under `session.pending.approve`
+  `pending.json` under the stage lock. An entry that is a held spawn (or a
+  held `resurrect`) is launched instead, as the approver's door, with the argv
+  and flags it was held with, and a spawn is refused (`reason: "id-in-use"`, the
+  entry kept) when its `--id` has since gone live or has a control socket, since
+  launching binds that socket. Resolution is the audit line, not a persisted
+  archive: the resolution record under `session.pending.approve`
   (the injected text as `untrusted_data`), the re-driven `send`'s own outcome
   record, and the dispatcher's per-command record — three lines, the first
   two being the shape `send` alone already writes.
@@ -758,6 +804,48 @@ aoide session pending deny <id> [--json]
   shape above).
 - **Output:** `data: {id, sessionId}`. A malformed or out-of-range id fails
   cleanly, leaving the entry untouched.
+- **Notes:** the door must be able to approve, as for `approve`: over MCP or
+  A2A it is refused and audited (`reason: "door-cannot-approve"`) with every
+  entry still queued, so a caller cannot clear what a human has yet to see.
+
+### aoide session find
+
+```
+aoide session find [<query>…] [--related <ref>] [--all] [--json]
+```
+
+- **Reads:** `state/stage/{sessions,hooks,projects}.json`, every registered
+  node's cache (`state/node-cache/<name>.json`), the mailbase peeked without a
+  lock (`mail::peek_cursors`, `mail::peek_base`), and each local cwd's git
+  common dir. A far node's cache is read, never refreshed.
+- **Writes:** nothing. No lock, no daemon dispatch, no node is dialled.
+- **Output:** one line per row, then `N of M · scope: …`. The scope line names
+  where each node's rows came from: `stage`, a `cache` with its age (`(stale)`
+  past the five-minute TTL), or `never pulled`. A cached row reads
+  `was <state>`. `--related <ref>` prints the target's carries (agent, where,
+  role, mailboxes, cc, edges), then the sessions that share a reason with it,
+  each with its reasons. `--json`, or any door but the CLI, carries the same
+  facts in `data`: `query`, `scope`, `sessions` (carries, `unknown`,
+  `matched`) and `related`. The human form builds no row JSON. MCP and A2A
+  pass the query as one string, split like the conductor's line
+  (`agent:claude state:working` is two terms; `cc:"pr 41"` keeps its space);
+  the daemon's array elements are the words. A far row's text fields, a
+  letter's text, a mailbox's name and a `matched` value are clipped to a line.
+  Every list in a row (mailboxes, cc'd letters, threads, a letter's To
+  addresses, edges, a related row's reasons) holds at most 20 beside its full
+  count, and `sessions` and `related` list at most 200 rows beside `total` and
+  `more`. A cached row's project is the one its node published, and none when
+  it published none: its cwd is never read against this box's disk or
+  projects.
+- **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
+  refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
+  over 64 words, or one with more than 256 alternatives in all its terms, each
+  with its fix. An ambiguous `parent:` reference, or a `--related` name that no
+  row or cache holds, is a refusal listing the candidates, at most 20, then
+  how many more. A far session named without its node, after `--related` or
+  `parent:`, is refused with the `node/name` form. A `node/name` its node's
+  cache does not hold teaches `aoide node pull <node>` when that node was never
+  pulled or its cache is stale.
 
 ### aoide session trace
 
@@ -941,19 +1029,26 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   `/proc` ppid-ancestry (best-effort window discovery); for conducted SHELLS a
   ~1 Hz tick reads the PTY foreground pgid (`tcgetpgrp`), `/proc/<pid>/cwd`,
   `/proc/<pid>/cmdline|comm`, and `/proc/<pid>/task/<pid>/children` (the
-  sudo-prompt probe, boosted by a `[sudo] password for` text scan of the
-  output stream).
+  sudo-prompt probe). Every wrap whose program has no hook or trace profile, a
+  shell or not, also reads its own pty output for a last line that has stood
+  still on one row of a small closed table (`[y/N]`, a password prompt,
+  `Press Enter`, …) — pure text, no `/proc` — and publishes it as
+  `state: awaiting` plus a `question` line; an interactive shell at its bare
+  prompt is silenced, while a shell given `-c` or a script is heard
+  ([[Session-Graph]], "Programs with no harness — the screen").
 - **Writes:** binds the per-session control socket
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` (unlinked on exit and on start if
   stale); registers the session in `state/stage/sessions.json` with
   `conductable: true`, `socket`, the discovered `windowAddress`, and
-  `pid` = the conduct process itself; stamps a write-once `origin` off its
+  `pid` = the conduct process itself, and stamps `shell` and `wrappedProgram`
+  from the wrapped argv (the launcher walk's verdict and resolved program); stamps a write-once `origin` off its
   own inherited `AOIDE_SESSION_ORIGIN` env, refusing a `node:*` shape read
   there (a `node:*` value originates only at the A2A door's spawn —
   [[Session-Graph]]); the daemon's tick sweep seals the record
   (`seal`/`sealedIssuedAt`) within ~1s of registration, since this direct
   write never passes through the dispatch handler. Shell ticks push live
-  `cwd`/`activity`/`state`/`needsSudo` (change-only, re-staging `graph.json`);
+  `cwd`/`activity`/`state`/`needsSudo` (change-only, re-staging `graph.json`),
+  and `state`/`question` for a non-shell wrap whose screen is asking;
   `do_session_end` on exit whatever happened. Spawns `<command>` on a fresh
   PTY (`openpty`; `setsid` + `TIOCSCTTY`; slave dup'd over fds 0/1/2) with
   `AOIDE_SESSION_ID` exported, and puts the real tty in raw mode for the
@@ -990,7 +1085,10 @@ aoide conduct [--agent <name>] [--parent <sessionId>] [--id <id>] [--headless] -
   uncatchable death (SUPER+Q SIGKILL) strands the record — that is the reaper's
   case. `AOIDE_NO_CONDUCT=1` is the terminal-integration escape hatch (honored
   by the kitty launch wrapper in `modules/dendrites/kitty.nix`, not by this
-  command): the terminal starts a plain shell instead of `aoide conduct`.
+  command): the terminal starts a plain shell instead of `aoide conduct`. A
+  door that cannot approve (MCP, A2A) is refused: it runs an arbitrary
+  command and upserts a record by `--id`, so such a caller launches through
+  `spawn`, whose own gate holds or attests it.
 
 ## Related
 

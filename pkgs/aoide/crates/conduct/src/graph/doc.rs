@@ -142,6 +142,12 @@ pub fn build_graph(
         if let Some(pn) = &s.petname {
             node["petname"] = json!(pn);
         }
+        // The managed run's slug (`SessionRecord.task`, the name its inbox is
+        // filed under). Rides only when a run carries a non-empty one, so an
+        // ordinary session stays byte-for-byte as before (SESSION-FIND B1).
+        if let Some(t) = s.task.as_deref().filter(|t| !t.is_empty()) {
+            node["task"] = json!(t);
+        }
         // The native harness's own thread-role label (root order seq 404) —
         // `subagent`/`guardian_review`/… verbatim off `SessionRecord.
         // native_role`, rides only when the native harness published one.
@@ -823,7 +829,9 @@ pub(in crate::graph) fn doomed_subagent_descendants(
 }
 
 /// The prune computation: drop `done` sessions (+ their hook records); clear
-/// `parentSessionId` on surviving children of removed sessions.
+/// `parentSessionId` on surviving children of removed sessions. The no-hold form,
+/// for tests: every live prune goes through [`prune_done_sparing`].
+#[cfg(test)]
 pub fn prune_done(
     sessions: Vec<SessionRecord>,
     hooks: Vec<HookRecord>,
@@ -834,6 +842,26 @@ pub fn prune_done(
     Vec<String>,
 ) {
     prune_done_scoped(sessions, hooks, false)
+}
+
+/// [`prune_done_scoped`] with the records in `held` spared: a `done` child whose
+/// wrap-written death the tick has not claimed yet keeps its session and hook
+/// record, so the fact can still be said. Spared records are neither doomed nor
+/// cascaded, and so are not in the removed set.
+pub(crate) fn prune_done_sparing(
+    sessions: Vec<SessionRecord>,
+    hooks: Vec<HookRecord>,
+    explicit: bool,
+    held: &HashSet<String>,
+) -> (Vec<SessionRecord>, Vec<HookRecord>, Vec<String>, Vec<String>) {
+    let (spared_s, rest_s): (Vec<SessionRecord>, Vec<SessionRecord>) =
+        sessions.into_iter().partition(|s| held.contains(&s.session_id));
+    let (spared_h, rest_h): (Vec<HookRecord>, Vec<HookRecord>) =
+        hooks.into_iter().partition(|h| held.contains(&h.session_id));
+    let (mut kept_s, mut kept_h, removed, cleared) = prune_done_scoped(rest_s, rest_h, explicit);
+    kept_s.extend(spared_s);
+    kept_h.extend(spared_h);
+    (kept_s, kept_h, removed, cleared)
 }
 
 /// [`prune_done`] with the retention scope made explicit.
@@ -882,10 +910,30 @@ pub fn prune_done_scoped(
     Vec<String>,
     Vec<String>,
 ) {
+    let live = super::identity::live_sealed_wrap_ids(&sessions);
+    prune_done_keeping(sessions, hooks, explicit, &live)
+}
+
+/// [`prune_done_scoped`] with the live-wrap set supplied by the caller. A
+/// `done` record named in `live` is never dropped: its own sealed process
+/// still runs, so only that process's exit, or the reaper once the pid is
+/// gone, may end it. Every other rule here is unchanged.
+pub(crate) fn prune_done_keeping(
+    sessions: Vec<SessionRecord>,
+    hooks: Vec<HookRecord>,
+    explicit: bool,
+    live: &HashSet<String>,
+) -> (
+    Vec<SessionRecord>,
+    Vec<HookRecord>,
+    Vec<String>,
+    Vec<String>,
+) {
     let unfiled = super::taskreport::unfiled_task_runs(&sessions);
     let doomed: HashSet<&str> = sessions
         .iter()
         .filter(|s| s.state == "done")
+        .filter(|s| !live.contains(s.session_id.as_str()))
         .filter(|s| {
             let is_task_run = s.task.as_deref().is_some_and(|t| !t.is_empty());
             if !is_task_run {
@@ -934,7 +982,9 @@ pub(crate) fn drop_remote_child_rows(removed: &[String]) {
 
 /// Drop exactly `roots` (+ their subagent descendants, + their hook records)
 /// from the roster; clear `parentSessionId` on surviving children of anything
-/// removed. [`prune_done`] is this over the whole `done` set — factored apart
+/// removed, except a protected live wrap, which keeps its edge and loses its
+/// spawn stamp, since the id it names may be registered again (CONTRACTS,
+/// rule 3). [`prune_done`] is this over the whole `done` set — factored apart
 /// because the reaper needs the same drop over a NARROWER one (the superseded
 /// `done` agent siblings of a terminal that still holds a live agent — see
 /// `superseded_done_siblings` in `reap.rs`), and a second hand-rolled retain
@@ -975,8 +1025,12 @@ pub(crate) fn drop_sessions(
         .cloned()
         .map(|mut s| {
             if matches!(&s.parent_session_id, Some(p) if gone.contains(p.as_str())) {
-                s.parent_session_id = None;
-                cleared.push(s.session_id.clone());
+                if super::identity::is_protected_live_wrap(&s) {
+                    s.attested_spawner = None;
+                } else {
+                    s.set_parent_session(None);
+                    cleared.push(s.session_id.clone());
+                }
             }
             s
         })
@@ -1173,12 +1227,14 @@ mod tests {
                 session_id: "s1".into(),
                 phase: "working".into(),
                 updated_at: "2026-01-01T01:00:00Z".into(),
+                death: None,
                 extra: Map::new(),
             },
             HookRecord {
                 session_id: "s1".into(),
                 phase: "idle".into(),
                 updated_at: "2026-01-01T02:00:00Z".into(),
+                death: None,
                 extra: Map::new(),
             },
         ];
@@ -1358,12 +1414,14 @@ mod tests {
                 session_id: "p".into(),
                 phase: "Stop".into(),
                 updated_at: "1".into(),
+                death: None,
                 extra: Map::new(),
             },
             HookRecord {
                 session_id: "c1".into(),
                 phase: "PreToolUse".into(),
                 updated_at: "2".into(),
+                death: None,
                 extra: Map::new(),
             },
         ];
@@ -1688,6 +1746,29 @@ mod tests {
         assert!(node_b.get("nativeRole").is_none());
     }
     #[test]
+    fn the_graph_session_node_carries_task_only_when_a_run_set_one() {
+        // SESSION-FIND B1: a managed run publishes its slug as `task`; an
+        // ordinary session and an empty slug publish no key at all, so an
+        // untasked node's document is what it was before this key existed.
+        let tasked = SessionRecord {
+            session_id: "a".into(),
+            task: Some("review-pr".into()),
+            ..Default::default()
+        };
+        let untasked = SessionRecord { session_id: "b".into(), ..Default::default() };
+        let empty = SessionRecord {
+            session_id: "c".into(),
+            task: Some(String::new()),
+            ..Default::default()
+        };
+        let doc = build_graph(&[], &[tasked, untasked, empty], &[]);
+        let nodes = doc["nodes"].as_array().unwrap();
+        let node = |id: &str| nodes.iter().find(|n| n["id"] == format!("session:{id}")).unwrap();
+        assert_eq!(node("a")["task"], json!("review-pr"));
+        assert!(node("b").get("task").is_none());
+        assert!(node("c").get("task").is_none());
+    }
+    #[test]
     fn graph_json_publishes_effective_project_on_a_child_outside_its_cwd_anchor() {
         // The child's own cwd anchors nowhere; its owner's explicit project
         // is the resolver's rung 2 — additive `effectiveProject` carries that
@@ -1864,7 +1945,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "yomi-strix".into(),
             url: "http://yomi-strix:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1931,7 +2011,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "never-pulled".into(),
             url: "http://never:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1954,7 +2033,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "flaky".into(),
             url: "http://flaky:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1988,7 +2066,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "expired".into(),
             url: "http://expired:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2112,7 +2189,6 @@ mod tests {
             cwd: Some("/home/khoa/Aoide".into()),
             idle: true,
             argv: None,
-            typed: Some("echo hi".into()),
         });
         rec.state = "done".to_string(); // the reap-path ordering hazard this field survives.
 
@@ -2255,7 +2331,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "yomi-renamed".into(),
             url: "http://yomi-strix:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2302,7 +2377,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "nodeb".into(),
             url: "http://nodeb:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2469,7 +2543,6 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
             name: "nodeb".into(),
             url: "http://nodeb:8710/".into(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

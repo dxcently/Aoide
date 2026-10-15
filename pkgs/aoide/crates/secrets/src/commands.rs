@@ -1366,7 +1366,7 @@ mod tests {
             let refusal = &out.data.as_ref().unwrap()["refusal"];
             assert_eq!(refusal["what"], "`aoide secrets add` needs --key <key> for backend `pass`");
             assert!(refusal["why"].as_str().unwrap().contains("command template"), "{out:?}");
-            assert_eq!(refusal["fix"]["run"], "aoide secrets add t --backend pass --key <key>");
+            assert_eq!(refusal["fix"]["run"], "aoide secrets add t --backend=pass --key <key>");
             assert!(store::load_policies(home).unwrap().is_empty());
         });
     }

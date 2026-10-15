@@ -100,6 +100,10 @@
   #   aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
   #   aoide.hyprland.scrollingMonitor = "HDMI-A-1";
 
+  # Take subnet routes from the tailnet: off campus, owls-nest's
+  # 10.1.10.236/32 route is how this machine reaches *.minerva-csc.club.
+  aoide.tailscale.acceptRoutes = true;
+
   aoide.usage.enable = true;
 
   aoide.a2a.enable = true;

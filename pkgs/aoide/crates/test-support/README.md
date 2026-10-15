@@ -20,10 +20,18 @@ of those exists as a copy per crate.
   leaks env into the next test.
 - `short_tmp`/`unique_tmp` — scratch dirs; `short_tmp` is HASHED to stay inside
   the `sun_path` budget a socket needs on either host.
+- `raw_header` — one header's value from a raw HTTP head (request or
+  response), case-insensitive and trimmed, pure; the socket tests read the
+  signed-answer header through it.
 - `owner_only_file` — a feed file in the shape THIS host's reader demands
   (native Windows reads its policy off a DACL, which has no Unix equivalent).
 - `built_aoide_bin` — the real `aoide` binary beside the running test's own
   executable.
+- `on_small_stack` (and its `SMALL_STACK`) / `finishes_within` — the two
+  fixtures that make a hostile document's SHAPE a test: the first runs the
+  work on a 256 KiB stack, so a walk that recurses per level of a depth the
+  document chose aborts the binary by name; the second bounds the work's wall
+  time, so a super-linear one fails at the limit instead of holding the suite.
 - **The delivery rig**: `DELIVERY_BUDGET`, `accept_one`, `read_delivery`,
   `expect_delivery` — a fixture that expects a delivery waits for it, bounded,
   in one place.

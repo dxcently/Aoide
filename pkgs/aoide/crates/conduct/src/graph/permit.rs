@@ -46,14 +46,21 @@
 //!    `aoide_protocol::agents::PermissionKeys`.)
 //!    This guard lives in [`answer_summons`], on the answering side, because
 //!    that is where the race is: the gap between the card going up and the
-//!    button being pressed.
+//!    button being pressed. [`session_permit`] applies the same test before it
+//!    files a card, so a card never stands over a session that is not waiting.
+//! 3. ONLY A DOOR THAT CAN APPROVE RAISES A CARD. The card is the only way a
+//!    human learns to type a verdict, so a caller whose door cannot approve
+//!    (`Door::can_approve`: MCP, the network door) files nothing and is told
+//!    why. An agent or a remote peer cannot put a card over another session's
+//!    real prompt.
 
 use super::common::{require_flag, stage_error};
 use super::model::{
     hooks_path, load_stage, merged_sessions, sessions_path, HooksFile, SessionsFile,
 };
+use super::send::DOOR_CANNOT_APPROVE;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
-use aoide_protocol::output::{Outcome, Status};
+use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::Invocation;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -350,12 +357,37 @@ pub fn answer_summons(id: &str, verdict: &str) -> Outcome {
         .with_data(with(json!({ "injected": true, "key": key })))
 }
 
+/// One audit line for a summons this command refused to file. A refused card
+/// is a request that asked for a human's prompt, so it is recorded like every
+/// other refused send.
+fn audit_refusal(inv: &Invocation, id: &str, message: &str) {
+    let log = inv
+        .flags
+        .get("audit-log")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(aoide_protocol::default_audit_log);
+    let _ = aoide_protocol::append_audit(
+        &log,
+        &aoide_protocol::AuditRecord {
+            ts: super::conduct::unix_ts(),
+            door: inv.door,
+            class: aoide_protocol::EventClass::Audit,
+            command: "session.permit".to_string(),
+            status: "refused".to_string(),
+            message: format!("summons for `{id}`: {message}"),
+            untrusted_data: None,
+        },
+    );
+}
+
 /// `aoide session permit --id <id> [--tool <name>] [--what <text>]` — publish the
 /// permission summons for a conducted session.
 ///
 /// Returns as soon as the card is filed. The human's answer arrives later,
 /// through the QML herald's buttons and [`answer_summons`] — so unlike the old
-/// dunstify path, nothing here blocks for as long as the card stands.
+/// dunstify path, nothing here blocks for as long as the card stands. Refused
+/// unless the door can approve and the session is awaiting (module header,
+/// guards 2 and 3).
 pub fn session_permit(inv: &Invocation) -> Outcome {
     let cmd = "session.permit";
     let id = match require_flag(inv, "id") {
@@ -364,6 +396,19 @@ pub fn session_permit(inv: &Invocation) -> Outcome {
     };
     let tool = inv.flags.get("tool").map(String::as_str);
     let what = inv.flags.get("what").map(String::as_str);
+
+    // Guard 3: a door that cannot approve files no card (module header).
+    if !inv.door.can_approve() {
+        audit_refusal(inv, &id, DOOR_CANNOT_APPROVE);
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("no summons for `{id}`: this door cannot approve a gated send"),
+            DOOR_CANNOT_APPROVE,
+            Fix::Run(format!("aoide session permit --id {id}")),
+        )
+        .with_fields(json!({ "reason": "door-cannot-approve", "id": id, "raised": false }));
+    }
 
     let file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
@@ -402,6 +447,16 @@ pub fn session_permit(inv: &Invocation) -> Outcome {
     // is typed until the answer comes back: a summons whose verdict could never
     // be delivered is a live-looking button that cannot do anything.
     let _ = keys;
+
+    // Guard 2, applied before the card goes up: the test `answer_summons` makes
+    // on the answering side. A card over a session that is not waiting would
+    // stand over a prompt the human may already have answered in the terminal.
+    let state = live_state(&id).unwrap_or_default();
+    if state != "awaiting" {
+        audit_refusal(inv, &id, "session is not awaiting a permission answer");
+        return Outcome::error(cmd, format!("`{id}` is not awaiting ({state}) — no summons raised"))
+            .with_data(json!({ "reason": "not-awaiting", "id": id, "state": state, "raised": false }));
+    }
 
     let summary = summons_summary(tool);
     let body = summons_body(what, &session_handle(rec.title.as_deref(), &id));
@@ -680,5 +735,126 @@ mod tests {
         assert_eq!(out.data.unwrap()["reason"], "session-not-found");
 
         let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The card's only route to the herald is the shellbridge socket, so a test
+    /// reads a card off that socket: a connection arriving there is a card
+    /// filed, and no connection is a card never raised.
+    #[cfg(unix)]
+    struct Shellbridge {
+        listener: std::os::unix::net::UnixListener,
+        _env: aoide_test_support::EnvSaver,
+        root: std::path::PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl Shellbridge {
+        /// A fresh runtime dir whose `aoide/shellbridge.sock` is bound here, and
+        /// a stage dir holding one conductable session `s1` in `state`.
+        fn with_session(tag: &str, state: &str) -> Shellbridge {
+            let env = aoide_test_support::EnvSaver::capture(&[
+                "AOIDE_STAGE_DIR",
+                "XDG_RUNTIME_DIR",
+                "AOIDE_AUDIT_LOG",
+            ]);
+            let root = aoide_test_support::short_tmp(tag);
+            let stage = root.join("stage");
+            std::fs::create_dir_all(&stage).unwrap();
+            std::fs::create_dir_all(root.join("aoide")).unwrap();
+            std::env::set_var("AOIDE_STAGE_DIR", &stage);
+            std::env::set_var("XDG_RUNTIME_DIR", &root);
+            std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+            std::fs::write(
+                stage.join("sessions.json"),
+                format!(
+                    r#"{{"schemaVersion":"0","sessions":[{{"sessionId":"s1","agent":"claude","state":"{state}","startedAt":"2026-01-01T00:00:00Z","conductable":true,"socket":"/x/s1.sock"}}]}}"#
+                ),
+            )
+            .unwrap();
+            let listener =
+                std::os::unix::net::UnixListener::bind(root.join("aoide").join("shellbridge.sock")).unwrap();
+            Shellbridge { listener, _env: env, root }
+        }
+
+        fn permit(&self, door: aoide_protocol::Door) -> Outcome {
+            let mut flags = BTreeMap::new();
+            flags.insert("id".to_string(), "s1".to_string());
+            session_permit(&Invocation {
+                path: vec!["session".into(), "permit".into()],
+                args: vec![],
+                flags,
+                door,
+            })
+        }
+
+        /// The one line a filed card puts on the socket, or `None` when no
+        /// connection arrived. `publish` connects, writes and closes before it
+        /// returns, so a card that was filed is already queued here.
+        fn card(&self) -> Option<Value> {
+            self.listener.set_nonblocking(true).unwrap();
+            let (mut conn, _) = self.listener.accept().ok()?;
+            conn.set_nonblocking(false).unwrap();
+            let mut line = String::new();
+            std::io::Read::read_to_string(&mut conn, &mut line).unwrap();
+            serde_json::from_str(line.trim()).ok()
+        }
+
+        fn audit_text(&self) -> String {
+            std::fs::read_to_string(self.root.join("log")).unwrap_or_default()
+        }
+    }
+
+    /// Guard 3, the door: an MCP caller cannot file a card. The session is
+    /// awaiting and conductable, so the refusal can only be the door, and the
+    /// shellbridge socket sees no connection.
+    #[cfg(unix)]
+    #[test]
+    fn an_mcp_door_is_refused_a_summons_and_no_card_reaches_the_herald() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let bridge = Shellbridge::with_session("permit-mcp-door", "awaiting");
+
+        let out = bridge.permit(aoide_protocol::Door::Mcp);
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "door-cannot-approve", "data: {data}");
+        assert_eq!(data["raised"], false);
+        assert_eq!(data["refusal"]["why"], DOOR_CANNOT_APPROVE, "taught: {data}");
+        assert!(bridge.card().is_none(), "an MCP caller filed a card");
+        assert!(bridge.audit_text().contains("\"refused\""), "the refusal is audited");
+    }
+
+    /// Guard 2, applied before filing: a card over a session that is not
+    /// awaiting would stand over a prompt the human may already have answered.
+    #[cfg(unix)]
+    #[test]
+    fn a_summons_is_refused_for_a_session_that_is_not_awaiting() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let bridge = Shellbridge::with_session("permit-not-awaiting", "idle");
+
+        let out = bridge.permit(aoide_protocol::Door::Cli);
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "not-awaiting", "data: {data}");
+        assert_eq!(data["state"], "idle");
+        assert_eq!(data["raised"], false);
+        assert!(bridge.card().is_none(), "a card was filed over an idle session");
+    }
+
+    /// The existing behaviour kept: a local door raises the card for an
+    /// awaiting, conductable session, and the card is the summons record for
+    /// that session, sent through the shellbridge.
+    #[cfg(unix)]
+    #[test]
+    fn a_cli_door_files_the_card_for_an_awaiting_session() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let bridge = Shellbridge::with_session("permit-cli-awaiting", "awaiting");
+
+        let out = bridge.permit(aoide_protocol::Door::Cli);
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["raised"], true);
+        let card = bridge.card().expect("the card reaches the shellbridge");
+        assert_eq!(card["cmd"], "heraldpush");
+        assert_eq!(card["notification"]["sessionId"], "s1");
+        assert_eq!(card["notification"]["kind"], crate::herald::KIND_SUMMONS);
     }
 }

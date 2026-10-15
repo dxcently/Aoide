@@ -26,7 +26,7 @@ session out of the box — no opt-in. The parent-autogate rule lets an
 orchestrator freely command the children it spawned; sibling sessions
 (sharing a live parent) autogate each other too; and the reciprocal holds as
 well — a parent automatically hears the children it spawned, as the daemon's
-own one-line report off the child's trace or hook phase, never a prompted send. Headless conduct
+own one-line report off the child's trace, hook phase or screen, never a prompted send. Headless conduct
 (`--headless`, no controlling terminal at all), `spawn` (the detached
 launch command), and sender provenance (a delivered payload carries a `from
 <sender>: ` prefix) round out the no-terminal case without changing the core
@@ -75,7 +75,11 @@ central registry, no single point of failure):
    socket:      "…/session-<id>.sock"
    title:       "<chat title / current task>"
    origin:      "local"-class | "node:<name>"  (write-once; node:* only from the A2A door)
-   seal + sealedIssuedAt:  the daemon-sealed session credential (see [[Session-Graph]])
+   seal + sealedIssuedAt + sealedPidStarttime + sealedBootId:
+                           the daemon-sealed session credential, and the
+                           plaintext fields that protect a wrap (see
+                           [[Session-Graph]] and CONTRACTS.md's identity
+                           section)
 ```
 
 The wrap process is the natural owner: it already holds the `Child`, already
@@ -101,8 +105,8 @@ threads `AOIDE_SESSION_ID`, already blocks on `wait()`.
   (auto-rename) and, since aoide owns the PTY, may push an OSC-2 title
   sequence to the real terminal so the window title tracks the flow. `--to
   <name>` resolves a local id/tail4/petname or a `node/<query>` instead of a
-  raw `--id`; a node-resolved send always attempts delivery over A2A rather
-  than queuing locally — see [[Node-Federation]].
+  raw `--id`; a node-resolved send is always attempted over A2A rather than
+  queued locally; the receiving node parks it — see [[Node-Federation]].
 - **Title discovery** — a small hyprctl step (`hyprctl clients -j`, match the
   session's process to a client) populates `windowAddress` and reads the
   live chat title claude already writes to its terminal window, so
@@ -218,26 +222,52 @@ through.
   position; malformed entries surface as `state: malformed` rather than
   failing the whole read), `approve <id>` re-drives the entry through this
   exact `send` door (`--yes`, in-process) and removes it, `deny <id>`
-  removes it without injecting. This is CLI-only today — the conductor
-  TUI's own one-key approve/deny (below) is still Phase ③.
+  removes it without injecting. Approval is a local act: see the approval
+  doors below. The list spells every control, bidi and invisible character of
+  an entry as a visible escape (`\n`, `\x1b`, `\u{202e}`), so a human reads
+  what replays. The conductor's Review pane approves and denies as well: a
+  held entry takes `a` then `y`, from the entry's whole text.
+- **Approval doors.** Only a door that can approve may approve a gated
+  send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
+  the herald, and any same-uid client of the aoided socket) can. The MCP
+  door (`aoide mcp serve --stdio`, and lyra's) and the A2A door
+  (`aoide a2a serve`, loopback included) cannot: `--yes` is never read
+  there and `session pending approve` is refused with a taught line. The
+  A2A door parks every send. The MCP door is attested like the CLI, by the
+  sealed session its server process runs under, and that session's parent
+  and sibling rules deliver; any other MCP send parks. The decision is one
+  predicate, `Door::can_approve`, read from the door the invocation arrived
+  through; a caller's own claim about itself is never consulted. `deny`
+  and anything that would rewrite a session's parent (the parent rule reads
+  that field) answer to the same predicate. The full
+  table is in CONTRACTS.md (the pending-queue section). A local agent with a
+  shell can still approve through the CLI until the local design lands.
 - **Autogate policy.** Four rules ship today, all still audited, in
   priority order: `--yes` ▸ the global switch ▸ parent-of-target ▸
-  sibling-of-target ▸ else pending. The fourth is the daemon's own line,
-  never a prompted send: child-of-target.
+  sibling-of-target ▸ else pending. `--yes` and the global switch decide
+  only for a send from an approving door; the parent and sibling rules also
+  decide for an MCP send whose server runs under a sealed session, and for
+  no other door. The fourth is the daemon's own line, never a prompted
+  send: child-of-target.
   - **Parent-of-target.** A send delivers without a prompt when the
-    sender's own session is the target session's `parentSessionId` — an
-    orchestrator freely commanding a child it spawned. Cross-tree or
-    unrelated sends stay pending. This is what makes conduct-by-default a
+    sender's own session is the target session's attested parent — its
+    `parentSessionId`, where its `attestedSpawner` names the same session —
+    an orchestrator freely commanding a child it spawned. Cross-tree or
+    unrelated sends stay pending. A bare `session start --parent` or a `graph
+    link` carries no spawn-time stamp, and moving an edge drops its stamp, so
+    either earns no autogate: the send is held pending. This is what makes conduct-by-default a
     real orchestration mesh: the parent of a subtree can drive it,
     strangers cannot. The sender's session is kernel-attested, never read
-    off a forgeable env var: `aoide send` walks its own real `/proc`
+    off a forgeable env var: `aoide send` (over MCP, the `aoide mcp serve
+    --stdio` process that dispatches it) walks its own real `/proc`
     ancestry to a live session whose seal verifies against the daemon's
     current key (the sealed session credential, [[Session-Graph]]), and the
     decision is a pure, unit-tested predicate over that attested pair:
-    `sender_is_parent(sender, target_parent)`. `AOIDE_SESSION_ID` survives
+    `sender_is_parent(sender, attested_parent_of(target))`. `AOIDE_SESSION_ID` survives
     only as sender attribution (below), removed from every gate predicate.
   - **Sibling-of-target.** A send also delivers without a prompt when
-    sender and target are siblings — both parented under the SAME session,
+    sender and target are siblings — both attested under the SAME session (each side's `attestedSpawner` names
+    it),
     and that shared parent is itself still live (not `done`). The sender
     side of the pair is the same kernel-attested session the parent rule
     resolves. Sibling
@@ -247,7 +277,8 @@ through.
     sibling check ever runs — a session is trivially its own sibling on
     paper, and letting that through would let a prompt-injected send
     deliver text straight back into a session's own input stream, bypassing
-    approval. A dead/absent parent or a cross-tree pair stays gated.
+    approval. A dead/absent parent, a cross-tree pair, or an unstamped parent
+    edge on either side stays gated.
   - **Global switch.** `AOIDE_CONDUCT_AUTOGATE` in `{1,true,yes,all}`
     declares a box-wide orchestration mode where every send delivers.
   - **Child-of-target (reciprocal).** The three rules above gate a SEND —
@@ -314,48 +345,38 @@ through.
     `parentSessionId` is that wrap, and typing into it would be the child's
     own next prompt), and only over an edge the kernel attested — see
     `Session-Graph.md`'s "And the parent hears it".
-  - **Remote-parent — the same relation across machines.** The A2A door's
-    rule, not the local socket's, listed here because it answers the same
-    question — is the sender this target's parent? — for the one send that
-    cannot be asked at the session's own socket: a parent on another box.
-    `aoide send --to <node>/<session>` carries its KERNEL-ATTESTED caller as
-    the `metadata["aoide/from"]` claim (the same resolution `node spawn`
-    stamps into a child's `remoteParent`), and the receiving door delivers
-    WITHOUT pending only when all three agree: the request signed with a
-    paired node's key this door verified, that key is the target record's
-    stored `remoteParent.key`, and the claim equals its stored
-    `remoteParent.sessionId`. A claim alone proves nothing — the signature
-    rung is what makes it a claim rather than a wish — so an unsigned or
-    bearer-only caller with a claim gets one audit line and its send holds
-    pending like any stranger's. The hit rides gate label
-    `autogate-remote-parent` and does NOT exempt the door-wide bearer, which
-    is still checked first. It has no off switch either: neither the node's own
-    `autogate` flag nor the box-wide `AOIDE_CONDUCT_AUTOGATE` gates it, so the
-    levers against a node that already spawned a child are unpairing it
-    (`node remove`) or the child ending — `node allow <n> spawn off` stops only
-    NEW children. An unruly claim (an id the far door could never
-    have stamped) is dropped by the sender — one warning line, `not claiming
-    parent: <reason>` — and the send goes out unclaimed rather than failing.
-    One thing overrides every rail of it: a TARGET conducting a shell, whose
-    line is held pending whoever asks (`shell-wrapped`, N1) — a submitted
-    line in a shell's input runs. `CONTRACTS.md` §6 carries the full rule.
-  - **Autogate record — a registered node's own sends.** The same door's third
-    delivery rail, and the only one behind neither a signature nor a parent
-    claim: the Inject arm auto-delivers a send whose source ADDRESS resolves to
-    an `autogate` record's `url`, or whose presented bearer matches that
-    record's own `TokenFile`. It names no mesh (there is no signed request to
-    name one), so the door judges the matched RECORD by its HOME mesh's rules —
-    where a charter governs `[pairing] homeMesh`, the record must be `verified`
-    and its key must be on the charter's line with `message`, minus this box's
-    own `node allow … message off --mesh <home>`; where home is charter-shaped
-    with an undecidable operator key nothing on this rail delivers; where home
-    is a pair mesh the record's own flag is the whole rule, exactly as it
-    always was; and where `config.toml` will not load at all the rail PENDS
-    too — home is READ (`home_mesh_fallible`), never answered from the
-    built-in default. A record that does not answer falls to PENDING — never a
-    refusal, never a delivery — so the knock still reaches the operator as an
-    entry in `session pending list`, attributed `node:<name>`. `aoide mesh`
-    lists, on the home mesh's charter row, the records this rail answers for.
+
+    A third source speaks for a conducted program with neither hooks nor a
+    trace (a `codex`, an `aider`, a REPL): the wrap itself, once its screen has
+    held a question still for three seconds (`[y/N]`, a password prompt,
+    `Press Enter`), tells its spawner —
+
+    ```
+    [codex <petname>] asking: "Apply patch? [y/N]"
+    ```
+
+    once per question while it stands, over the same attested spawner edge, with
+    the same delivery, skips and cursor file. A `sudo` password prompt is the human's and
+    is never announced. See `Session-Graph.md`, "Programs with no harness — the
+    screen".
+  - **Remote-parent — the sender's session, as a claim.** `aoide send --to
+    <node>/<session>` carries its KERNEL-ATTESTED caller as the
+    `metadata["aoide/from"]` claim (the same resolution `node spawn` stamps
+    into a child's `remoteParent`). The receiving door reads that claim only
+    from a verified signature, and a claim from any weaker caller is ignored
+    with one audit line. On an inject the claim decides nothing: every admitted
+    remote send parks for a human or the conductor, a remote parent's included,
+    because the A2A door cannot approve. On a spawn the claim becomes the
+    child's `remoteParent` session id, stamped with the signing key. A parent
+    reads that child's ping-back history only with a signature that holds
+    `read` and whose key matches the stamped one. `node allow <n> spawn off`
+    stops only NEW children. An unruly claim (an id the far door could never
+    have stamped) is dropped by the sender, one warning line,
+    `not claiming parent: <reason>`, and the send goes out unclaimed rather
+    than failing. A shell target needs no rule of its own at this door, since
+    nothing here types into a session. The local ping-back and doorbell still
+    refuse shell targets through `auto_type_refusal`; `CONTRACTS.md` §6 carries
+    the full rule.
 - **Sender provenance.** A delivered payload that NAMES the node (carries a
   letter — a real message, not a bare keystroke answer) is prefixed on its
   first line with `from <sender>: `, where `<sender>` resolves from

@@ -413,6 +413,13 @@
               nil
               deadnix
               statix
+              # The two-mesh harness makes its test CA with openssl
+              openssl
+              # The https tests front their charter addresses with socat
+              socat
+              # The two-mesh fence raises its loopback with ip and probes with curl
+              curl
+              iproute2
             ];
           };
 

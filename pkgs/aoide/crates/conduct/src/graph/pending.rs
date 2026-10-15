@@ -1,10 +1,16 @@
 //! `session pending list|approve|deny` — the pending queue's OTHER half.
 //!
 //! `state/stage/pending.json` is where [`super::send::session_send`] parks a
-//! held injection when the gate doesn't authorise immediate delivery (no
-//! `--yes`, no autogate match) — and where the A2A door parks the same kind
-//! of held inject when its own admission check doesn't clear it
-//! (`crates/server/src/a2a.rs`, the token-gated path). Until this module,
+//! held injection when none of the gate's delivering rules clears it. A door
+//! that cannot approve (`Door::can_approve`) is cleared only by the attested
+//! parent and sibling rules, and the A2A door has no attested sender at all, so
+//! it parks every inject it admits and its spawn's opening turn
+//! (`crates/server/src/a2a.rs`). An MCP send parks unless its server runs
+//! under a sealed session that has a rule for the target, and a whole MCP spawn
+//! parks when the server has no sealed session, and so does a whole MCP
+//! `resurrect` (`PendingSend::spawn`: approving one launches it, as the
+//! approver's door, with the command, argv and flags it was held with). Until
+//! this module,
 //! nothing in the tree ever read that file back: it was a write-only dead
 //! drop, holding entries forever, invisibly. This is the read/approve/deny
 //! surface every other surface (TUI, QML, web) can render later — CLI-only,
@@ -25,7 +31,7 @@
 //! for.
 //!
 //! Addressing: `pending.json`'s `PendingSend` carries no id of its own (only
-//! `sessionId`/`text`/`submit`/`queuedAt`/`from` — see
+//! `sessionId`/`text`/`submit`/`queuedAt`/`from`/`claimed`/`spawn` — see
 //! [`super::send::PendingSend`]), so `list`'s `id` is the entry's POSITION in
 //! the array. Positions shift the
 //! moment any entry resolves, so `approve`/`deny` always re-read the file
@@ -39,12 +45,13 @@
 //! fail cleanly (a structured error, never a panic) without touching it —
 //! the entry stays exactly where it was for a human to inspect by hand.
 
-use super::common::{require_args, stage_error};
+use super::common::{clean_line, refuse_unapproving_door, require_args, stage_error, visible, visible_held};
+use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
 };
-use super::send::pending_path;
-use aoide_protocol::output::{Outcome, Status};
+use super::send::{pending_path, PendingSpawn, DOOR_CANNOT_APPROVE};
+use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::Invocation;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -54,27 +61,24 @@ use std::collections::{BTreeMap, HashSet};
 /// `sessionId` — anything without one (not an object at all, or an object
 /// missing it) cannot be addressed to a session, approved, or denied.
 fn is_malformed(v: &Value) -> bool {
-    !v.as_object()
+    let named = v
+        .as_object()
         .and_then(|o| o.get("sessionId"))
         .and_then(Value::as_str)
         .map(|s| !s.is_empty())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    // A `spawn` that does not parse, or names a command no approval launches,
+    // must not fall back to being read as a send: approving it would type its
+    // command line into a session.
+    let spawn_unreadable = v
+        .get("spawn")
+        .is_some_and(|s| serde_json::from_value::<PendingSpawn>(s.clone()).map_or(true, |p| !p.is_known()));
+    !named || spawn_unreadable
 }
 
-/// A one-line, length-bounded preview of a pending entry's text — mirrors
-/// [`super::send::one_line_title`]'s shape (not reused directly: that helper
-/// is private to `send.rs` and this is a display-only concern, not the
-/// auto-rename logic it exists for).
-fn preview(text: &str) -> String {
-    let first = text.lines().next().unwrap_or("").trim();
-    const MAX: usize = 60;
-    if first.chars().count() > MAX {
-        let mut t: String = first.chars().take(MAX - 1).collect();
-        t.push('…');
-        t
-    } else {
-        first.to_string()
-    }
+/// The spawn a held entry is, or `None` for the ordinary held send.
+fn spawn_of(v: &Value) -> Option<PendingSpawn> {
+    serde_json::from_value(v.get("spawn")?.clone()).ok()
 }
 
 /// Read `pending.json`'s `pending` array as raw JSON — not the strict
@@ -118,7 +122,12 @@ fn grammar_label(
 /// tail only (never host/role — matches `send.rs`'s composer-prefix grammar,
 /// not the fuller tree-line one `grammar_label` above renders), falling back
 /// to the raw sender id when it does not resolve to a live petnamed record.
+/// An MCP source (`mcp:<session>`) keeps its door in front of the session's
+/// name.
 fn from_label(id: &str, by_id: &BTreeMap<&str, &SessionRecord>) -> String {
+    if let Some(session) = id.strip_prefix("mcp:") {
+        return format!("mcp:{}", from_label(session, by_id));
+    }
     match by_id.get(id).and_then(|r| r.petname.as_deref()) {
         Some(petname) => format!("{petname} (…{})", aoide_storage::display::short_tail(id)),
         None => id.to_string(),
@@ -126,10 +135,11 @@ fn from_label(id: &str, by_id: &BTreeMap<&str, &SessionRecord>) -> String {
 }
 
 /// One JSON view of a pending entry for `list`'s `data.pending`, and the text
-/// line for its human render. `from` is the sender attribution
-/// [`super::send::resolve_sender`] resolved at queue time — `None`/absent for
-/// an unattributed send AND for a LEGACY entry written before this field
-/// existed (serde default on read, see [`super::send::PendingSend`]).
+/// line for its human render. `from` is the source the door derived at queue
+/// time (see [`super::send::PendingSend`]) — `None`/absent for an unattributed
+/// send AND for a LEGACY entry written before this field existed (serde
+/// default on read). `claimed` is the label an MCP caller typed, cleaned
+/// again here and rendered under its own name, never as the source.
 ///
 /// `by_id`/`ids`/`host` are the CURRENT session roster, loaded once by the
 /// caller ([`pending_list`]) and threaded through every entry — the JSON
@@ -152,6 +162,7 @@ fn entry_view(
             "submit": false,
             "queuedAt": "",
             "from": Value::Null,
+            "claimed": Value::Null,
             "state": "malformed",
         });
         let line = format!("[{index}] <malformed entry — cannot resolve; edit state/stage/pending.json by hand>");
@@ -167,23 +178,47 @@ fn entry_view(
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let json = json!({
+    let claimed = o
+        .get("claimed")
+        .and_then(Value::as_str)
+        .map(clean_line)
+        .filter(|s| !s.is_empty());
+    let spawn = spawn_of(v);
+    // A held spawn is shown from what approving it replays, whole: an approver
+    // who saw a clipped command line would be approving the rest blind. The
+    // data carries it as it replays; `shown` is what a human reads, spelled
+    // once here so every surface reads the same escapes.
+    let text = spawn.as_ref().map(PendingSpawn::command_line).unwrap_or(text);
+    let shown = if spawn.is_some() { visible_held(&text) } else { visible(&text) };
+    let plan: Vec<String> = spawn.as_ref().map(|s| s.shown.iter().map(|l| visible_held(l)).collect()).unwrap_or_default();
+    let mut json = json!({
         "id": index.to_string(),
+        "fingerprint": fingerprint(v),
         "sessionId": session_id,
         "text": text,
+        "shown": shown,
         "submit": submit,
         "queuedAt": queued_at,
         "from": from,
+        "claimed": claimed,
         "state": "pending",
     });
+    if let Some(spawn) = &spawn {
+        json["spawn"] = json!(spawn);
+        json["plan"] = json!(plan);
+    }
+    let what = match spawn {
+        Some(_) => format!("spawn {} ← {shown}", visible(&session_id)),
+        None => format!("{} ← {shown}", visible(&grammar_label(&session_id, by_id, ids, host))),
+    };
     let line = format!(
-        "[{index}] {} ← {}{}{} ({queued_at})",
-        grammar_label(&session_id, by_id, ids, host),
-        preview(&text),
+        "[{index}] {what}{}{}{} ({})",
         if submit { " [submit]" } else { "" },
         from.as_deref()
-            .map(|f| format!(" (from {})", from_label(f, by_id)))
+            .map(|f| format!(" (from {})", visible(&from_label(f, by_id))))
             .unwrap_or_default(),
+        claimed.as_deref().map(|c| format!(" (claims {c:?})")).unwrap_or_default(),
+        visible(&queued_at),
     );
     (json, line)
 }
@@ -224,12 +259,31 @@ pub fn pending_list(_inv: &Invocation) -> Outcome {
     Outcome::ok(cmd, format!("{n} pending\n{body}")).with_data(json!({ "pending": data }))
 }
 
+/// Is `id` a session that `session_send` can type into right now? The same
+/// test its own not-conductable refusal makes (`is_conductable_now`), read off
+/// the roster as it stands. A session that has not registered is absent.
+fn target_is_live(id: &str) -> bool {
+    load_stage::<SessionsFile>(&sessions_path())
+        .map(|f| f.sessions.iter().any(|s| s.session_id == id && is_conductable_now(s)))
+        .unwrap_or(false)
+}
+
+/// A short fingerprint of one raw entry: the content an approver read, named by
+/// `list --json` and matched by `--expect`. It binds a choice to the entry, not
+/// to the position the entry held when it was listed.
+fn fingerprint(v: &Value) -> String {
+    let body = serde_json::to_string(v).unwrap_or_default();
+    aoide_storage::seal::hex_encode(&aoide_storage::seal::sha256(body.as_bytes()))[..16].to_string()
+}
+
 /// Remove and return the raw entry at `index`, under the stage lock — but
-/// ONLY when it resolves to a real session (see [`is_malformed`]); a broken
-/// entry is left exactly where it was rather than destroyed by a failed
-/// resolve attempt. A missing file or an out-of-range index is the same
-/// clean "not found" error — there is nothing there to take either way.
-fn take_pending_entry(index: usize) -> Result<Value, String> {
+/// ONLY when it is the entry `observed` was read from, and resolves to a real
+/// session (see [`is_malformed`]). The checks a resolution ran on `observed`
+/// therefore cover the entry it removes, and a caller that named one with
+/// `expect` (its fingerprint) takes nothing else. A broken entry is left exactly
+/// where it was rather than destroyed by a failed resolve attempt. A missing
+/// file or an out-of-range index is the same clean "not found" error.
+fn take_pending_entry(index: usize, observed: &Value, expect: Option<&str>) -> Result<Value, String> {
     aoide_storage::fs::with_stage_lock(move || {
         let mut raw: Value = load_stage(&pending_path())?;
         let arr = raw
@@ -242,16 +296,34 @@ fn take_pending_entry(index: usize) -> Result<Value, String> {
                 "pending entry {index} is malformed — cannot resolve automatically; edit state/stage/pending.json by hand"
             ));
         }
+        let fp = fingerprint(&arr[index]);
+        if fp != fingerprint(observed) {
+            return Err(format!(
+                "pending entry {index} changed since it was read — nothing was resolved; list the queue again"
+            ));
+        }
+        if expect.is_some_and(|e| e != fp) {
+            return Err(format!(
+                "pending entry {index} is not the one named by --expect {} — nothing was resolved; list the queue again",
+                expect.unwrap_or_default()
+            ));
+        }
         let removed = arr.remove(index);
         write_stage(&pending_path(), &raw)?;
         Ok(removed)
     })
 }
 
+/// The `--expect <fingerprint>` a caller names to bind a resolution to the entry
+/// it read, if it named one.
+fn expect_flag(inv: &Invocation) -> Option<String> {
+    inv.flags.get("expect").map(|e| e.trim().to_string()).filter(|e| !e.is_empty())
+}
+
 /// One audit line per pending-resolution outcome, same shape as
 /// [`super::send::session_send`]'s own `audit_send` — the injected/dropped
 /// text rides as `untrusted_data`, never re-interpreted as a command.
-fn audit_pending(inv: &Invocation, command: &str, status: &str, message: &str, text: &str) {
+pub(super) fn audit_pending(inv: &Invocation, command: &str, status: &str, message: &str, text: &str) {
     let log = inv
         .flags
         .get("audit-log")
@@ -266,7 +338,7 @@ fn audit_pending(inv: &Invocation, command: &str, status: &str, message: &str, t
             command: command.to_string(),
             status: status.to_string(),
             message: message.to_string(),
-            untrusted_data: Some(text.to_string()),
+            untrusted_data: Some(super::send::audited_text(status, text)),
         },
     );
 }
@@ -293,6 +365,8 @@ fn parse_id(cmd: &str, raw: &str) -> Result<usize, Outcome> {
 /// forever" posture) — if delivery then fails (the target session died while
 /// queued, say), that failure is reported plainly rather than silently
 /// re-queued; the human re-sends by hand if the target is still reachable.
+/// A target that is not live yet is refused before the take, so an entry held
+/// for a session still registering is not lost to the failed delivery.
 pub fn pending_approve(inv: &Invocation) -> Outcome {
     let cmd = "session.pending.approve";
     let args = match require_args(inv, &["id"]) {
@@ -303,7 +377,76 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         Ok(i) => i,
         Err(o) => return o,
     };
-    let removed = match take_pending_entry(index) {
+    // Refused before the entry leaves the queue: a caller on a door that
+    // cannot approve gets a taught refusal and the held send stays held.
+    if let Some(refusal) = refuse_unapproving_door(
+        inv,
+        cmd,
+        "this door cannot approve a gated send".to_string(),
+        DOOR_CANNOT_APPROVE,
+        Fix::Run(format!("aoide session pending approve {index}")),
+    ) {
+        return refusal.with_fields(json!({ "id": index.to_string() }));
+    }
+    // Refused before the entry leaves the queue while its target is not live.
+    // An A2A spawn's opening turn can be held before its child has registered,
+    // and `session_send` refuses a target with no socket: taking the entry first
+    // would lose it. The entry stays put for a later approve, or a deny. A held
+    // spawn has no target yet: approving it is what creates one.
+    let Some(observed) = load_pending_array().ok().and_then(|a| a.get(index).cloned()).filter(|v| !is_malformed(v)) else {
+        // Missing or malformed: the take names which, and removes nothing.
+        let e = take_pending_entry(index, &Value::Null, None).err().unwrap_or_default();
+        audit_pending(inv, cmd, "error", &e, "");
+        return Outcome::error(cmd, e)
+            .with_data(json!({ "reason": "pending-entry-unresolvable", "id": index.to_string() }));
+    };
+    let spawn_id = spawn_of(&observed).filter(|s| !s.is_resurrect()).and_then(|s| s.flags.get("id").cloned());
+    if let Some(id) = spawn_id {
+        // The id was free when the spawn was held. Launching binds its socket,
+        // which unlinks what is there, so a session that has taken the id since
+        // keeps it and the entry stays queued for the approver to deny.
+        if super::spawn::spawn_id_in_use(&id) {
+            audit_pending(inv, cmd, "refused", &format!("approve [{index}] spawn {id}: id in use"), "");
+            return Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                format!("`{}` names a session that is live", visible(&id)),
+                "launching would take over that session's record and control socket",
+                Fix::Run(format!("aoide session pending deny {index}")),
+            )
+            .with_fields(json!({ "reason": "id-in-use", "id": index.to_string(), "sessionId": id }));
+        }
+    }
+    // A held resurrect launches only the selection its approver was shown. A
+    // plan that moved is refused here, before the entry leaves the queue.
+    let resurrect_selection = match spawn_of(&observed).filter(PendingSpawn::is_resurrect) {
+        Some(spawn) => {
+            let launch = Invocation { path: spawn.path, args: spawn.args, flags: spawn.flags, door: inv.door };
+            match super::resurrect::approved_selection(&launch, &spawn.shown) {
+                Ok(selection) => Some(selection),
+                Err(refusal) => {
+                    audit_pending(inv, cmd, "refused", &refusal.message, "");
+                    return refusal.with_fields(json!({ "id": index.to_string() }));
+                }
+            }
+        }
+        None => None,
+    };
+    let target = Some(&observed)
+        .filter(|v| spawn_of(v).is_none())
+        .and_then(|v| v.get("sessionId").and_then(Value::as_str).map(str::to_string));
+    if let Some(sid) = target.filter(|sid| !target_is_live(sid)) {
+        audit_pending(inv, cmd, "refused", &format!("approve [{index}] {sid}: target not live"), "");
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("`{}` is not live yet", visible(&sid)),
+            "the session is not live yet; approve again once it registers",
+            Fix::Run(format!("aoide session pending approve {index}")),
+        )
+        .with_fields(json!({ "reason": "target-not-live", "id": index.to_string(), "sessionId": sid }));
+    }
+    let removed = match take_pending_entry(index, &observed, expect_flag(inv).as_deref()) {
         Ok(v) => v,
         Err(e) => {
             audit_pending(inv, cmd, "error", &e, "");
@@ -313,6 +456,9 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
     };
     let o = removed.as_object().expect("take_pending_entry only returns well-formed entries");
     let session_id = o.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string();
+    if let Some(spawn) = spawn_of(&removed) {
+        return approve_spawn(inv, index, &session_id, spawn, resurrect_selection);
+    }
     let text = o.get("text").and_then(Value::as_str).unwrap_or("").to_string();
     let submit = o.get("submit").and_then(Value::as_bool).unwrap_or(false);
     let from = o
@@ -364,7 +510,8 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         return Outcome::error(
             cmd,
             format!(
-                "pending entry {index} left the queue but delivery to `{session_id}` failed: {}",
+                "pending entry {index} left the queue but delivery to `{}` failed: {}",
+                visible(&session_id),
                 inner.message
             ),
         )
@@ -376,13 +523,86 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             "sendOutcome": inner.data,
         }));
     }
-    Outcome::ok(cmd, format!("pending entry {index} approved → delivered to `{session_id}`"))
-        .changed(vec![format!("pending[{index}] for {session_id}: approved and injected")])
+    Outcome::ok(cmd, format!("pending entry {index} approved → delivered to `{}`", visible(&session_id)))
+        .changed(vec![format!("pending[{index}] for {}: approved and injected", visible(&session_id))])
         .with_data(json!({
             "id": index.to_string(),
             "sessionId": session_id,
             "injected": true,
             "sendOutcome": inner.data,
+        }))
+}
+
+/// Approve a held spawn: launch it, as the approver's door, with the argv and
+/// flags it was held with. Like a held send it has left the queue before the
+/// launch is attempted, and a launch that fails is reported plainly.
+fn approve_spawn(
+    inv: &Invocation,
+    index: usize,
+    session_id: &str,
+    spawn: PendingSpawn,
+    selection: Option<super::resurrect::Selection>,
+) -> Outcome {
+    let cmd = "session.pending.approve";
+    let line = spawn.command_line();
+    let resurrect = spawn.is_resurrect();
+    let launch = Invocation { path: spawn.path, args: spawn.args, flags: spawn.flags, door: inv.door };
+    let inner = match (resurrect, selection) {
+        (true, Some(selection)) => super::resurrect::launch_selection(&launch, &selection),
+        (true, None) => Outcome::error("resurrect", "a held resurrect was approved without the selection it was shown"),
+        (false, _) => super::spawn::session_spawn(&launch),
+    };
+    let verb = if resurrect { "resurrect" } else { "spawn" };
+    // A resurrect answers ok when it revived nothing (its failures sit in
+    // `failed`), so "launched" for one means a session came back.
+    let revived = !resurrect
+        || inner
+            .data
+            .as_ref()
+            .and_then(|d| d.get("resurrected"))
+            .and_then(Value::as_array)
+            .is_some_and(|rows| !rows.is_empty());
+    let launched = inner.status == Status::Ok && revived;
+    let status = if launched { "launched" } else { "error" };
+    audit_pending(inv, cmd, status, &format!("approve [{index}] {session_id}: {}", inner.message), &line);
+    if !launched {
+        let why = if inner.status == Status::Ok && !revived {
+            let failed: Vec<String> = inner
+                .data
+                .as_ref()
+                .and_then(|d| d.get("failed"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|f| f.get("reason").and_then(Value::as_str).map(clean_line))
+                .collect();
+            if failed.is_empty() { inner.message.clone() } else { failed.join("; ") }
+        } else {
+            inner.message.clone()
+        };
+        return Outcome::error(
+            cmd,
+            format!(
+                "pending {verb} {index} left the queue but the launch of `{}` failed: {why}",
+                visible(session_id),
+            ),
+        )
+        .with_data(json!({
+            "id": index.to_string(),
+            "sessionId": session_id,
+            "launched": false,
+            "reason": if inner.status == Status::Ok && !revived { "nothing-revived" } else { "launch-failed" },
+            "spawnOutcome": inner.data,
+        }));
+    }
+    let done = if resurrect { "resurrected" } else { "spawned" };
+    Outcome::ok(cmd, format!("pending entry {index} approved → {done} `{}`", visible(session_id)))
+        .changed(vec![format!("pending[{index}] for {}: approved and launched", visible(&session_id))])
+        .with_data(json!({
+            "id": index.to_string(),
+            "sessionId": session_id,
+            "launched": true,
+            "spawnOutcome": inner.data,
         }))
 }
 
@@ -398,7 +618,21 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
         Ok(i) => i,
         Err(o) => return o,
     };
-    let removed = match take_pending_entry(index) {
+    // Denying is the other half of resolving the queue, and a position is only
+    // good until something resolves: a caller that could deny earlier entries
+    // would shift a held spawn of its own onto the index a human just read.
+    if let Some(refusal) = refuse_unapproving_door(
+        inv,
+        cmd,
+        "this door cannot deny a held entry".to_string(),
+        "entries are addressed by position and positions shift as entries resolve, so only a door that \
+         can approve resolves them; approval comes from a terminal or the conductor",
+        Fix::Run(format!("aoide session pending deny {index}")),
+    ) {
+        return refusal.with_fields(json!({ "id": index.to_string() }));
+    }
+    let observed = load_pending_array().ok().and_then(|a| a.get(index).cloned()).unwrap_or(Value::Null);
+    let removed = match take_pending_entry(index, &observed, expect_flag(inv).as_deref()) {
         Ok(v) => v,
         Err(e) => {
             audit_pending(inv, cmd, "error", &e, "");
@@ -411,8 +645,8 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
     let text = o.get("text").and_then(Value::as_str).unwrap_or("").to_string();
 
     audit_pending(inv, cmd, "denied", &format!("deny [{index}] {session_id}"), &text);
-    Outcome::ok(cmd, format!("pending entry {index} for `{session_id}` denied — nothing injected"))
-        .changed(vec![format!("pending[{index}] for {session_id}: denied")])
+    Outcome::ok(cmd, format!("pending entry {index} for `{}` denied — nothing injected", visible(&session_id)))
+        .changed(vec![format!("pending[{index}] for {}: denied", visible(&session_id))])
         .with_data(json!({ "id": index.to_string(), "sessionId": session_id, "injected": false }))
 }
 
@@ -632,6 +866,96 @@ mod tests {
     }
 
     #[test]
+    fn approve_delivers_an_entry_a_door_derived_source_queued_and_names_it() {
+        // The A2A door queues under `node:<name>`; the CLI door refuses that
+        // spelling as a `--from`, but approval re-drives the entry with its own
+        // recorded source and must still deliver it, naming whoever queued it.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pnd-src");
+
+        let id = "apt-src";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        crate::graph::hold_pending(id, "hello from afar", true, Some("node:peer")).unwrap();
+
+        let acc = expect_delivery(listener, "an approved entry delivers under the source it was queued with");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let got = acc.join().unwrap();
+
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(String::from_utf8(got).unwrap(), "from node:peer: hello from afar\r");
+        assert!(load_pending_array().unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_shows_an_mcp_claim_under_its_own_label_and_never_as_the_source() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-claim");
+
+        let sender_id = "claim-sender";
+        do_session_start(sender_id, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        let petname = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|r| r.session_id == sender_id)
+            .and_then(|r| r.petname)
+            .expect("every minted session carries a petname (P2)");
+
+        // `claimed` is hand-written here with a control sequence in it: the
+        // queue is a file, and the screen cleans what it shows whatever wrote it.
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[
+                    {{"sessionId":"s1","text":"x","submit":false,"queuedAt":"t","from":"mcp:{sender_id}","claimed":"node:victim\u001b[2J"}},
+                    {{"sessionId":"s2","text":"y","submit":false,"queuedAt":"t","from":"mcp"}}
+                ]}}"#
+            ),
+        )
+        .unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        let data = out.data.as_ref().unwrap();
+        let arr = data["pending"].as_array().unwrap();
+        assert_eq!(arr[0]["from"], format!("mcp:{sender_id}"), "JSON from stays the raw source");
+        assert_eq!(arr[0]["claimed"], "node:victim[2J", "the claim is cleaned again on the way out");
+        assert!(arr[1]["claimed"].is_null());
+        let lines: Vec<&str> = out.message.lines().collect();
+        assert!(
+            lines[1].contains(&format!("(from mcp:{petname} (…")) && lines[1].contains("(claims \"node:victim[2J\")"),
+            "the source first, the claim under its own name: {}",
+            lines[1]
+        );
+        assert!(!lines[1].contains("(from node:victim"), "{}", lines[1]);
+        assert!(lines[2].contains("(from mcp)") && !lines[2].contains("claims"), "{}", lines[2]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn approving_a_pending_entry_files_it_into_the_mailbase_via_the_shared_delivery_seam() {
         // Messaging plan P-M1: the mailbase append lives ONLY in
         // `deliver_local` (send.rs) — `pending_approve`'s re-drive goes
@@ -811,6 +1135,126 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Path 4 of the audit: `session pending approve` on a remote door. The
+    /// refusal comes before the entry leaves the queue, so the held send is
+    /// still there afterwards and reaches nothing; the same entry approves from
+    /// the local CLI, which proves the entry itself was sound.
+    #[test]
+    fn pending_approve_from_a_remote_door_is_refused_and_the_entry_stays_held() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pnd-remote");
+
+        let id = "apr1";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello world","submit":true,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        for door in [aoide_protocol::Door::Mcp, aoide_protocol::Door::A2a] {
+            let mut inv = pending_invocation(&["session", "pending", "approve"], &["0"]);
+            inv.door = door;
+            let out = pending_approve(&inv);
+            assert_eq!(out.status, Status::Error, "{door:?}: {}", out.message);
+            assert_eq!(out.message, "this door cannot approve a gated send", "{door:?}");
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+            assert_eq!(load_pending_array().unwrap().len(), 1, "{door:?}: the entry stays held");
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "{door:?}: a refused approval delivers nothing"
+            );
+        }
+
+        listener.set_nonblocking(false).unwrap();
+        let acc = expect_delivery(listener, "the local CLI still approves the same entry");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["injected"], true);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 11: an entry held for a session that has not registered yet (an
+    /// A2A spawn's opening turn is queued before its child exists) survives an
+    /// early approve. The refusal says why, the entry stays, and the same
+    /// approve delivers it once the session registers.
+    #[test]
+    fn an_approve_before_the_target_registers_is_refused_and_keeps_the_entry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pnd-early");
+
+        let id = "apr-early";
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"opening turn","submit":true,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "target-not-live", "data: {data}");
+        assert_eq!(
+            data["refusal"]["why"], "the session is not live yet; approve again once it registers",
+            "data: {data}"
+        );
+        assert_eq!(load_pending_array().unwrap().len(), 1, "the early approve took nothing");
+
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        let acc = expect_delivery(listener, "the registered session receives the approved opening turn");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert!(load_pending_array().unwrap().is_empty(), "approved, so it left the queue");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_legacy_pending_entry_with_no_from_field_still_lists_and_approves_cleanly() {
         // An entry written before this field existed (serde default on read)
@@ -867,6 +1311,274 @@ mod tests {
             "no provenance prefix for a legacy entry with no sender to attribute"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What an approver reads is what replays. Every field of an entry a human
+    /// sees (target, text, sender, time, a held spawn's id and command) shows an
+    /// unsafe character as a visible escape: a newline stays a `\n` and the
+    /// line after it is not hidden, a bidi override is `\u{202e}`, a literal
+    /// backslash is doubled so it reads differently from an ESC, and the data
+    /// keeps the bytes. The approve and deny answers spell the id the same way.
+    #[test]
+    fn list_spells_unsafe_characters_in_every_field_a_human_reads() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-visible");
+
+        let send_text = "ok\nrm -rf ~\u{202e}txt\r\u{1b}[2J printf '\\x1b'";
+        write_stage(
+            &pending_path(),
+            &json!({
+                "schemaVersion": "0",
+                "pending": [
+                    {
+                        "sessionId": "tgt\u{1b}[2J",
+                        "text": send_text,
+                        "submit": true,
+                        "queuedAt": "2026\u{7}",
+                        "from": "mcp:evil\u{202e}",
+                    },
+                    {
+                        "sessionId": "held\u{1b}[8m",
+                        "text": "ignored for a spawn",
+                        "queuedAt": "2026-10-15T00:00:00Z",
+                        "from": "mcp",
+                        "spawn": { "args": ["sh", "-c", "echo hi\nreboot\u{202e}"], "flags": {} },
+                    },
+                ],
+            }),
+        )
+        .unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        let unsafe_in = |text: &str| text.lines().any(|l| l.chars().any(crate::graph::common::is_unsafe));
+        assert!(!unsafe_in(&out.message), "nothing a terminal would act on reaches the line: {:?}", out.message);
+
+        let lines: Vec<&str> = out.message.lines().skip(1).collect();
+        assert_eq!(lines.len(), 2, "one line per entry, none split by a newline in the text: {lines:?}");
+        assert!(
+            lines[0].contains("tgt\\x1b[2J"),
+            "the target's id is spelled: {}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("ok\\nrm -rf ~\\u{202e}txt\\r\\x1b[2J printf '\\\\x1b'"),
+            "the text after its first newline is shown, escapes spelled, a backslash doubled: {}",
+            lines[0]
+        );
+        assert!(lines[0].contains("(from mcp:evil\\u{202e})"), "{}", lines[0]);
+        assert!(lines[0].ends_with("(2026\\x07)"), "{}", lines[0]);
+        assert!(lines[1].starts_with("[1] spawn held\\x1b[8m"), "{}", lines[1]);
+        assert!(lines[1].contains("echo hi\\nreboot\\u{202e}"), "{}", lines[1]);
+
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["pending"][0]["text"], send_text, "the data keeps what replays");
+        assert_eq!(data["pending"][0]["sessionId"], "tgt\u{1b}[2J");
+        assert!(data["pending"][1]["text"].as_str().unwrap().contains("hi\nreboot\u{202e}"));
+
+        let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(denied.status, Status::Ok, "{}", denied.message);
+        assert!(denied.message.contains("tgt\\x1b[2J"), "{}", denied.message);
+        assert!(!unsafe_in(&denied.message), "{:?}", denied.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A held spawn is listed as the command that approving it would run, whole
+    /// and on one line, and its JSON carries the argv and flags to replay. A
+    /// terminal sequence in an argument is spelled out in the line a human
+    /// reads (never stripped, never raw) and left as it replays in the data.
+    /// Denying it launches nothing.
+    #[test]
+    fn a_held_spawn_lists_as_its_whole_command_and_deny_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-spawn-list");
+
+        let tail = "x".repeat(300);
+        let marker = root.join("ran");
+        let spawn = PendingSpawn {
+            args: vec!["sh".into(), "-c".into(), format!("touch {}; echo \u{1b}[2J{tail}", marker.display())],
+            flags: BTreeMap::from([("agent".into(), "claude".into()), ("windowed".into(), "true".into())]),
+            ..PendingSpawn::default()
+        };
+        crate::graph::send::hold_spawn("held-1", &spawn.command_line(), spawn.clone()).unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        let entry = &out.data.as_ref().unwrap()["pending"][0];
+        assert_eq!(entry["state"], "pending");
+        assert_eq!(entry["sessionId"], "held-1");
+        assert_eq!(entry["from"], "mcp");
+        assert_eq!(entry["spawn"]["args"][0], "sh");
+        assert_eq!(entry["spawn"]["flags"]["agent"], "claude");
+        let replayed = entry["text"].as_str().unwrap();
+        assert_eq!(replayed, spawn.command_line(), "the data is the command as it replays");
+        assert!(replayed.contains('\u{1b}'));
+        let shown = visible(replayed);
+        assert!(shown.starts_with("aoide spawn --agent=claude --windowed -- sh -c "), "{shown}");
+        assert!(shown.ends_with(&format!("{tail}'")), "the command is shown to its last character: {shown}");
+        assert!(shown.contains("\\x1b[2J"), "the escape is spelled out, not dropped: {shown}");
+        assert!(out.message.contains(&shown), "the human line carries the same whole command: {}", out.message);
+        assert!(
+            out.message.lines().all(|l| l.chars().all(|c| !crate::graph::common::is_unsafe(c))),
+            "no terminal sequence reaches the approver: {}",
+            out.message
+        );
+        assert!(out.message.contains("(from mcp)"), "{}", out.message);
+
+        let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(denied.status, Status::Ok, "{}", denied.message);
+        assert!(load_pending_array().unwrap().is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!marker.exists(), "a denied spawn never ran");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An entry whose `spawn` field does not parse is not a send: reading it as
+    /// one would approve by typing its command line into the session it names.
+    /// It is malformed, approve refuses it, and the target hears nothing.
+    #[test]
+    fn a_spawn_entry_that_does_not_parse_is_malformed_and_never_typed_as_a_send() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-spawn-bad");
+
+        let id = "live-target";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        do_session_start(id, Some("claude"), Some("/w"), None, None, Some(true), Some(socket.to_str().unwrap()), None, None);
+        std::fs::write(
+            pending_path(),
+            format!(
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"aoide spawn -- rm","spawn":"not an object","queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+            ),
+        )
+        .unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        assert_eq!(out.data.as_ref().unwrap()["pending"][0]["state"], "malformed");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(load_pending_array().unwrap().len(), 1, "the entry stays for a human to inspect");
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "nothing was typed into the session"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Attestation reaches the sending gate and nothing that approves. With a
+    /// fake daemon and this process sealed as session `orch`, an MCP caller is
+    /// attested; its `pending approve`, `session permit` and `mail ring` are
+    /// refused exactly as an unattested one's are, the held send stays held and
+    /// nothing is typed.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_caller_still_cannot_approve_permit_or_ring() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("pnd-attested-mcp");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(std::process::id()));
+        seal_record("orch", &kp);
+
+        let id = "child-of-orch";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        do_session_start(id, Some("claude"), Some("/w"), None, Some("orch"), Some(true), Some(socket.to_str().unwrap()), None, None);
+        crate::graph::send::hold_pending(id, "held", true, Some("someone")).unwrap();
+
+        let on_mcp = |path: &[&str], args: &[&str], flags: &[(&str, &str)]| {
+            let mut inv = pending_invocation(path, args);
+            inv.flags = flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            inv.door = aoide_protocol::Door::Mcp;
+            inv
+        };
+        let out = pending_approve(&on_mcp(&["session", "pending", "approve"], &["0"], &[]));
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{}", out.message);
+        let out = crate::graph::session_permit(&on_mcp(&["session", "permit"], &[], &[("id", id)]));
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{}", out.message);
+        let out = crate::graph::mail_ring(&on_mcp(&["mail", "ring"], &[], &[("for", "any-mailbox")]));
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{}", out.message);
+
+        assert_eq!(load_pending_array().unwrap().len(), 1, "the held send stays held");
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "nothing was typed into the session"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `pending deny` is the other half of resolving the queue, and entries are
+    /// addressed by position: a caller that could deny the entries ahead of its
+    /// own would slide it onto the index a human just read. Over a door that
+    /// cannot approve, attested or not, it is refused and audited, and every
+    /// entry stays at its index. The CLI is the control.
+    #[cfg(unix)]
+    #[test]
+    fn pending_deny_from_a_door_that_cannot_approve_is_refused_and_every_entry_stays() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = setup("pnd-deny-door");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(std::process::id()));
+        seal_record("orch", &kp);
+        for n in 0..3 {
+            crate::graph::send::hold_pending("target", &format!("entry {n}"), false, Some("someone")).unwrap();
+        }
+        let texts = || -> Vec<String> {
+            load_pending_array().unwrap().iter().map(|e| e["text"].as_str().unwrap().to_string()).collect()
+        };
+
+        // This process is the sealed `orch`, so an MCP call from it is attested;
+        // with `AOIDE_DAEMON_SOCKET` pointing nowhere the same call is not.
+        let attested_socket = std::env::var("AOIDE_DAEMON_SOCKET").unwrap();
+        for (door, attested) in [
+            (aoide_protocol::Door::Mcp, true),
+            (aoide_protocol::Door::Mcp, false),
+            (aoide_protocol::Door::A2a, false),
+        ] {
+            std::env::set_var(
+                "AOIDE_DAEMON_SOCKET",
+                if attested { attested_socket.clone() } else { root.join("dead.sock").to_string_lossy().into_owned() },
+            );
+            let mut inv = pending_invocation(&["session", "pending", "deny"], &["0"]);
+            inv.door = door;
+            let out = pending_deny(&inv);
+            assert_eq!(out.status, Status::Error, "{door:?}/{attested}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}/{attested}");
+            assert_eq!(texts(), ["entry 0", "entry 1", "entry 2"], "{door:?}/{attested}: nothing moved");
+        }
+        let refused = std::fs::read_to_string(root.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("session.pending.deny") && l.contains("\"refused\""))
+            .count();
+        assert_eq!(refused, 3, "each refusal is audited");
+
+        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(out.status, Status::Ok, "the CLI still denies: {}", out.message);
+        assert_eq!(texts(), ["entry 1", "entry 2"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -957,6 +1669,121 @@ mod tests {
         let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["not-a-number"]));
         assert_eq!(out.status, Status::Usage);
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    /// An entry whose spawn names a reserved `sub:` id, or carries a `--parent`,
+    /// is not one an approval may launch, however it got into the queue: approve
+    /// refuses it at take time and the entry stays where it is. Before the
+    /// check moved into `is_known`, approve trusted the hold-time checks alone.
+    #[test]
+    fn approve_refuses_a_held_spawn_that_no_hold_would_queue_and_keeps_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-reserved-id");
+        let reserved = PendingSpawn {
+            flags: BTreeMap::from([("id".into(), "sub:escape".into())]),
+            ..PendingSpawn::default()
+        };
+        crate::graph::send::hold_spawn("sub:escape", &reserved.command_line(), reserved).unwrap();
+
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(load_pending_array().unwrap().len(), 1, "the entry is kept, not consumed");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `--expect <fingerprint>` binds a resolution to the entry the caller read:
+    /// a wrong fingerprint takes nothing, and the fingerprint `list` prints takes
+    /// exactly that entry. Before the bind, the position alone decided what went.
+    #[test]
+    fn deny_with_a_stale_fingerprint_takes_nothing_and_the_listed_one_takes_its_entry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-expect");
+        for id in ["held-a", "held-b"] {
+            let spawn = PendingSpawn::default();
+            crate::graph::send::hold_spawn(id, &spawn.command_line(), spawn).unwrap();
+        }
+        let listed = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        let fp = listed.data.as_ref().unwrap()["pending"][0]["fingerprint"].as_str().unwrap().to_string();
+
+        let deny = |expect: &str| {
+            let inv = Invocation {
+                path: vec!["session".into(), "pending".into(), "deny".into()],
+                args: vec!["0".into()],
+                flags: BTreeMap::from([("expect".to_string(), expect.to_string())]),
+                door: aoide_protocol::Door::Cli,
+            };
+            pending_deny(&inv)
+        };
+        let stale = deny("0000000000000000");
+        assert_eq!(stale.status, Status::Error, "{}", stale.message);
+        assert_eq!(load_pending_array().unwrap().len(), 2, "a stale bind takes nothing");
+
+        let bound = deny(&fp);
+        assert_eq!(bound.status, Status::Ok, "{}", bound.message);
+        let left = load_pending_array().unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0]["sessionId"], "held-b", "the listed entry, and only it, was denied");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A held send's human line is its whole escaped text, not a clip of its
+    /// first sixty characters: the tail that matters is shown, and the JSON
+    /// carries the same spelling as `shown`. Before the change the line stopped
+    /// at sixty characters with an ellipsis and the JSON had no `shown`.
+    #[test]
+    fn a_send_preview_is_the_whole_escaped_text_and_json_carries_shown() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-whole-preview");
+        let text = format!("{} \n rm -rf ~", "x".repeat(300));
+        crate::graph::send::hold_pending("held-long", &text, false, Some("node:victim")).unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        assert!(out.message.contains("rm -rf ~"), "the tail is on the line: {}", out.message);
+        assert!(out.message.contains("\\n rm"), "the newline is spelled: {}", out.message);
+        assert!(!out.message.contains('…'), "nothing is clipped: {}", out.message);
+        let shown = out.data.as_ref().unwrap()["pending"][0]["shown"].as_str().unwrap().to_string();
+        assert!(shown.ends_with("\\n rm -rf ~"), "{shown}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The queue file is bounded in its stored form: the pretty-printed JSON
+    /// that `write_stage` writes, not a compact count. Holds of a large entry
+    /// fill it until the file bound refuses one, and the file on disk never
+    /// passes the bound.
+    #[test]
+    fn the_file_bound_refuses_a_hold_and_the_stored_file_stays_under_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-file-bound");
+        let big = "x".repeat(60_000);
+        let mut refused = None;
+        for i in 0..400 {
+            let from = format!("node:{i}");
+            if let Err(e) = crate::graph::send::hold_pending(&format!("id{i}"), &big, true, Some(&from)) {
+                refused = Some(e);
+                break;
+            }
+        }
+        assert!(matches!(refused, Some(crate::graph::send::HoldRefused::FileFull)), "the bound must bite: {refused:?}");
+        let stored = std::fs::metadata(crate::graph::send::pending_path()).unwrap().len() as usize;
+        assert!(stored <= crate::graph::send::PENDING_FILE_MAX_BYTES, "{stored} bytes on disk");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deny_spells_the_session_id_it_names_in_its_changed_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-changed-id");
+        let spawn = PendingSpawn { args: vec!["true".into()], ..PendingSpawn::default() };
+        crate::graph::send::hold_spawn("bad\n  changed: ok", &spawn.command_line(), spawn).unwrap();
+        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert!(out.changed.iter().all(|c| !c.contains('\n')), "{:?}", out.changed);
+        assert!(out.changed.iter().any(|c| c.contains("bad\\n  changed: ok")), "{:?}", out.changed);
         let _ = std::fs::remove_dir_all(&root);
     }
 

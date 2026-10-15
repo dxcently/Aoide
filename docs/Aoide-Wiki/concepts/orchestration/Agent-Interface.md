@@ -35,6 +35,29 @@ The MCP layer is deliberately optional and agent-added:
 | Per-session | agents spawn `aoide mcp serve --stdio` |
 | Network MCP | user-only; never agent-enabled |
 
+An MCP caller is attested the way a CLI caller is, and never approves. The stdio
+server dispatches in its own process, so the gate walks that process's ancestry
+to the sealed session it runs under. A send from a server launched under a
+conducted session earns that session's parent and sibling rules and delivers: an
+orchestrator's MCP server can talk to the children it spawned. A send from any
+other server, or to a session the sealed one has no rule for, parks as pending.
+`--yes` and the autogate switch are never read over MCP, and `session pending
+approve` and `deny`, `session permit` and `mail ring` are refused there for
+every caller, attested or not, as is anything that would rewrite a session's
+parent (the parent rule reads that field, so a new session may register under a
+parent but an existing one is never re-parented over MCP). Approval comes from a
+terminal (the CLI) or the conductor. A `spawn` follows the same line: from an
+attested caller it launches the child under that session and its first prompt
+delivers, and from any other caller the whole spawn parks until a human approves
+it. A `resurrect` is judged the same way, since it launches processes: an
+attested caller revives the sessions it names, and from any other caller
+`resurrect --project …` parks whole until a human approves it (bare `resurrect`,
+which reads the working directory's manifest, is refused there and taught to
+name a project). The restore that resurrect would type into a revived terminal is not a send a
+caller makes, so it stays held over MCP either way. The A2A door has no sealed
+ancestor, so it parks every send. See [[Conductor-Channel|the gate]] for the
+doors and the rule.
+
 ## A2A: the interop door
 
 The [[A2A-Door|A2A door]] (Agent2Agent, a Linux Foundation protocol) is the
@@ -60,8 +83,8 @@ order:
 |---|---|---|
 | 0 | `aoide guide` + repo root `AGENTS.md` + `docs/agent/` | Onboarding: the core-vs-paint boundary, the house rules, the read order. Read before acting; the house rules are non-negotiable. |
 | 1 | the CLI — `aoide <cmd>` / `lyra <cmd>` | Full capability. `aoide` is the complete orchestration surface, `lyra` the complete painted surface (AoideOS); the registry behind `schema --json` enumerates every command of each. Both carry the same house rules. |
-| 2 | stdio MCP | Per-session, agent-spawned, optional — `aoide mcp serve --stdio`. Off by default. |
-| 3 | network MCP | User-enabled only, never agent-enabled: the dedicated Aoide connector (below). |
+| 2 | stdio MCP | Per-session, agent-spawned, optional — `aoide mcp serve --stdio`. Off by default. Attested by the conducted session it runs under; the harness's own MCP permission prompt is the user's approval for one connection, and aoide keeps no activation state. |
+| 3 | network MCP | User-enabled only, never agent-enabled: the dedicated Aoide connector (below). Has no sealed ancestor, so every send and spawn through it parks. |
 
 `aoide schema --json` / `lyra schema --json` is the machine-readable
 backstop at any tier; the MCP tool list generates from it. Tier 0's
@@ -79,6 +102,14 @@ status. The same one-schema-two-doors rule applies: it is the same generated
 MCP façade as the stdio path, just network-exposed by the user (Tailscale
 tailnet or Cloudflare funnel). It is never agent-enabled; the user enables it
 once and it stays up.
+
+Its server runs under systemd, not under a conducted session, so attestation
+finds no sealed session behind it and everything it sends or spawns parks for
+a local human to approve. There is no separate network door and no network
+exception to the gate. One caveat follows from what attestation sees: it names
+who launched an MCP server, not who writes to its stdin. A network bridge that
+someone runs inside a conducted terminal lends that terminal's rights to its
+remote callers, so run any bridge outside a conducted session.
 
 ## Agent-first ergonomics
 

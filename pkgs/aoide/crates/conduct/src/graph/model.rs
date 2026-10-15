@@ -229,6 +229,19 @@ pub fn merged_sessions(sessions: &[SessionRecord], hooks: &[HookRecord]) -> Vec<
     merged
 }
 
+/// The process a hook child's liveness is read off: the harness its hook door
+/// walked to (the first `hookAncestry` pid), or the record's own `pid` where it
+/// stamps none. The hook source reads a death off it, and the wrap that hosted
+/// the harness asks the same question about its own child, so both probe one
+/// process.
+pub(crate) fn harness_pid(rec: &SessionRecord) -> Option<u32> {
+    rec.hook_ancestry
+        .first()
+        .and_then(|pid| u32::try_from(*pid).ok())
+        .filter(|pid| *pid > 0)
+        .or(rec.pid)
+}
+
 /// The canonical session-state vocabulary the desktop renders VERBATIM — no
 /// widget-side regex derivation (that split-brain is what this replaces). Every
 /// producer (hooks, `conduct`, the reaper) writes one of these onto
@@ -260,6 +273,15 @@ pub fn merged_sessions(sessions: &[SessionRecord], hooks: &[HookRecord]) -> Vec<
 /// existing `pub use self::model::{…canonical_state…}` keeps re-exporting it
 /// onward untouched (`crate::graph::canonical_state` + all its callers).
 pub use aoide_protocol::canonical_state;
+
+/// Clear the screen's episode off a record, together: its `question` and its
+/// `needsSudo` lock badge. Every writer that ends the episode goes through here
+/// (the session's end, the reaper's done write, the wrap's refresh once it is
+/// `done`), so a timed-out `sudo` cannot leave its badge behind.
+pub(crate) fn clear_screen_ask(rec: &mut SessionRecord) {
+    rec.question = None;
+    rec.needs_sudo = None;
+}
 
 pub(in crate::graph) fn sorted_projects(projects: &[Project]) -> Vec<Project> {
     let mut p = projects.to_vec();

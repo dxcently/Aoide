@@ -8,7 +8,10 @@
 
 mod common;
 
-use common::{fixture, env_lock, door_post, door_post_tampered, AWAY, HOME, ONE_SIDED_GATE, OPERATOR, TWO_KEYS};
+use common::{
+    door_post, door_post_tampered, env_lock, fixture, free_port, raise_door, tls_front, trust_front_certificate, AWAY, HOME,
+    ONE_SIDED_GATE, OPERATOR, TWO_KEYS,
+};
 
 use aoide::dispatch::{dispatch, Invocation};
 use aoide_protocol::output::Status;
@@ -486,6 +489,115 @@ fn a_host_whose_name_is_not_its_charter_name_still_hops_and_still_receives() {
     }
 }
 
+/// **An ack is signed as the name this box holds IN THE LETTER'S MESH, not as its
+/// hostname.** `chiyo` files a letter from `osaka` in `home`, where its key is
+/// `chiyo`'s line, while its OS name is `chiyo-host`. The receipt the filing
+/// spools must say `chiyo`, or `osaka` checks it against a key it holds for
+/// `chiyo-host` (none), refuses it, and never retires its letter. Before the
+/// fix the ack carried `chiyo-host` and `retire_by_ack` returned nothing.
+#[test]
+fn a_host_whose_name_is_not_its_charter_name_acks_as_the_charter_name() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("ack-host-vs-line");
+    fx.enter("osaka");
+    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "chiyo", "conductor", "ack me", HOME)
+        .unwrap();
+    let msgid = letter.msgid.clone();
+    aoide_storage::outbox::write_entry("sakaki", &aoide_storage::outbox::OutboxEntry::fresh(letter.clone())).unwrap();
+
+    fx.enter("chiyo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
+    let outcome = aoide_storage::mail::deposit(letter.clone(), "conductor").unwrap();
+    assert!(matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }), "{outcome:?}");
+    aoide_client::mail_wire::settle_deposit(&letter, &outcome);
+    // The spooled ack goes out sealed, so the wire carries its container and the
+    // outbox envelope is redacted. The origin opens the container, as the door does.
+    let entry = ["osaka", "sakaki", "chiyo"]
+        .iter()
+        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
+        .find(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
+        .expect("the filing spools an ack toward the origin");
+    assert_eq!(entry.envelope.header.from.node, "chiyo", "the ack is signed as the charter name, never the hostname");
+
+    fx.enter("osaka");
+    let ack = match entry.container.as_ref() {
+        Some(container) => match aoide_storage::seal::deposit_container(container, HOME).unwrap() {
+            aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => (*envelope).clone(),
+            other => panic!("the origin opens the ack's container: {other:?}"),
+        },
+        None => entry.envelope.clone(),
+    };
+    assert!(matches!(
+        aoide_storage::mail::deposit(ack.clone(), "conductor").unwrap(),
+        aoide_storage::mail::DepositOutcome::Filed { .. } | aoide_storage::mail::DepositOutcome::Duplicate { .. }
+    ));
+    assert_eq!(
+        aoide_storage::outbox::retire_by_ack(&ack).unwrap().as_deref(),
+        Some(msgid.as_str()),
+        "the origin verifies the ack against chiyo's key and retires its letter"
+    );
+}
+
+/// **A pair mesh names no charter, so its ack is signed as this box's own name
+/// there, which is the hostname.** The fallback `own_name_in` keeps for a mesh no
+/// charter governs; `family` has no declaration on this fixture.
+#[test]
+fn a_pair_mesh_ack_is_signed_as_the_boxs_own_name() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("ack-pair-mesh");
+    fx.enter("chiyo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
+    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "chiyo", "conductor", "pair", "family")
+        .unwrap();
+    // The filing is taken as given: `family` holds no key for `osaka`, so a real
+    // deposit would stop at the origin check. This test is about the ack only.
+    let filed = aoide_storage::mail::DepositOutcome::Filed {
+        msgid: letter.msgid.clone(),
+        kind: aoide_storage::mail::ENTRY_TYPE_LETTER.to_string(),
+    };
+    aoide_client::mail_wire::settle_deposit(&letter, &filed);
+    let acks: Vec<_> = ["osaka", "sakaki"]
+        .iter()
+        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
+        .map(|e| e.envelope)
+        .filter(|e| e.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
+        .collect();
+    assert_eq!(acks.len(), 1, "one ack spooled: {acks:?}");
+    assert_eq!(acks[0].header.from.node, "chiyo-host", "a pair mesh's ack carries this box's own name");
+    assert_eq!(acks[0].header.from.node, aoide_storage::display::local_node_name());
+}
+
+/// **A charter mesh whose lines do not carry this box's key mints no ack, and
+/// says why.** `evo` is a stranger in `home`; its hostname is set to `chiyo`, a
+/// member's name there, and the letter still gets no receipt. The refusal is
+/// written to the audit log, so an operator sees the stranger, not silence.
+#[test]
+fn a_charter_mesh_without_this_boxs_key_mints_no_ack_and_says_why() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("ack-stranger");
+    fx.enter("evo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo");
+    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "evo", "conductor", "stranger", HOME)
+        .unwrap();
+    // Taken as filed, as in the pair-mesh test: `evo` holds no key for `osaka`
+    // in `home`, so a real deposit would stop at the origin check.
+    let filed = aoide_storage::mail::DepositOutcome::Filed {
+        msgid: letter.msgid.clone(),
+        kind: aoide_storage::mail::ENTRY_TYPE_LETTER.to_string(),
+    };
+    aoide_client::mail_wire::settle_deposit(&letter, &filed);
+    let spooled: Vec<_> = ["osaka", "sakaki", "chiyo"]
+        .iter()
+        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
+        .collect();
+    assert!(
+        spooled.iter().all(|e| e.envelope.header.kind != aoide_storage::mail::ENTRY_TYPE_RECEIPT),
+        "no ack is minted: {spooled:?}"
+    );
+    let audit = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap_or_default();
+    assert!(audit.contains("mail.ack.withheld"), "the withheld ack is audited: {audit}");
+}
+
 /// **A learnt binding is only usable if it is the DECLARED key's.** A binding is
 /// stored per NAME, so a file left by an earlier pairing — or written by anything
 /// on this machine — would otherwise seal a letter to a key the mesh no longer
@@ -921,7 +1033,6 @@ fn two_mesh_door(
     let record = |node: &str, key: String, mesh: &str| aoide_storage::node_store::Node {
         name: node.to_string(),
         url: "ssh://self".to_string(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,
@@ -2027,4 +2138,107 @@ fn a_charter_letter_bypasses_a_status_hold() {
         aoide_storage::outbox::list_entries("sakaki").unwrap().iter().all(|e| e.is_held()),
         "an ordinary letter toward the held hop is held"
     );
+}
+
+/// **A box that holds only the charter polls its relay through the charter's
+/// https address.** `sakaki` is the relay the letter waits at, and `chiyo` has
+/// never paired with it: there is no record of `sakaki` in `chiyo`'s state. The
+/// letter goes out from `osaka` while `sakaki`'s address has no front (so it stays
+/// in `osaka`'s spool), `sakaki` pulls it and holds it for `chiyo`, and only then
+/// does `sakaki`'s https address come up. `chiyo` asks it by the charter alone: the
+/// relay proves the charter's key, the poll goes out signed, and the letter is filed.
+#[test]
+fn a_poll_node_holding_only_the_charter_files_its_letter_through_the_relays_https_address() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("charter-only-poll");
+    trust_front_certificate();
+    let _osaka = fx.doors(&["osaka"]);
+    let sakaki_door = free_port();
+    let _sakaki = raise_door(&fx.boxes["sakaki"], "sakaki", sakaki_door);
+
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["charter only"],
+        &[("to", "chiyo/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    assert_eq!(sent.data.as_ref().unwrap()["next"], "sakaki");
+    let msgid = sent.data.as_ref().unwrap()["msgid"].as_str().unwrap().to_string();
+    assert_eq!(aoide_storage::outbox::list_entries("sakaki").unwrap().len(), 1, "waiting at the relay");
+
+    fx.enter("sakaki");
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    let osaka_key = aoide_storage::charter::governing(HOME).unwrap().nodes["osaka"].key.clone();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "osaka",
+        &format!("http://127.0.0.1:{}/", fx.ports["osaka"]),
+        &osaka_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    let pulled = aoide_client::mail_wire::poll_node("osaka", None).unwrap();
+    assert!(pulled.refused.is_empty(), "nothing refused: {:?}", pulled.refused);
+    assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held toward chiyo");
+
+    let _front = tls_front(fx.ports["sakaki"], sakaki_door);
+    fx.enter("chiyo");
+    assert!(
+        !aoide_storage::node_store::load_nodes().iter().any(|n| n.name == "sakaki"),
+        "chiyo holds no pair record for its relay"
+    );
+    assert!(
+        aoide_client::mail_wire::pollable_nodes().contains(&"sakaki".to_string()),
+        "the bare sweep asks the charter's relay too"
+    );
+    let received = aoide_client::mail_wire::poll_node("sakaki", None).expect("the charter alone reaches the relay");
+    assert_eq!(received.filed, 1, "the poller filed it: {:?}", received.refused);
+    assert_eq!(
+        aoide_storage::mail::filed_kind(&msgid).as_deref(),
+        Some(aoide_storage::mail::ENTRY_TYPE_LETTER),
+        "the letter is in the destination's own mailbase"
+    );
+}
+
+/// **A charter's relay address answered by another machine is refused before
+/// anything moves.** The charter says `sakaki` is at this https address and holds
+/// its key, but `yomi`'s door is what answers there. `chiyo`'s identity check reads
+/// `yomi`'s signed binding, which is not the key the charter gives `sakaki`, so no
+/// poll is sent: `yomi`'s door sees the binding request and nothing else.
+#[test]
+fn a_charter_relay_whose_address_answers_as_another_machine_is_refused_before_any_poll() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("charter-relay-impostor");
+    trust_front_certificate();
+    let yomi_door = free_port();
+    let _yomi = raise_door(&fx.boxes["yomi"], "yomi", yomi_door);
+    let _front = tls_front(fx.ports["sakaki"], yomi_door);
+
+    fx.enter("chiyo");
+    let err = aoide_client::mail_wire::poll_node("sakaki", None)
+        .expect_err("a machine the charter does not name for the relay is refused");
+    assert!(err.contains("does not give it"), "{err}");
+    let chiyo_log = std::fs::read_to_string(fx.boxes["chiyo"].join("log")).unwrap_or_default();
+    assert!(chiyo_log.contains("mail.poll.relay-key-mismatch"), "the mismatch is audited: {chiyo_log}");
+    let yomi_log = std::fs::read_to_string(fx.boxes["yomi"].join("log")).unwrap_or_default();
+    assert!(yomi_log.contains("a2a.aoide/binding"), "yomi's door answered the identity check: {yomi_log}");
+    assert!(!yomi_log.contains("a2a.aoide/mailPoll"), "and no poll reached it: {yomi_log}");
+}
+
+/// **A poll with no way to its relay is a refusal, never an empty mailbox.** `ghost`
+/// has no pair record and no charter names it, so `mail poll` refuses before any
+/// dial, taught, and does not answer "0 filed".
+#[test]
+fn a_mail_poll_naming_a_node_with_no_record_and_no_charter_line_is_refused_taught() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("poll-undeclared");
+    fx.enter("chiyo");
+    let out = dispatch(&cli_invocation(&["mail", "poll"], &["ghost"], &[]));
+    assert_eq!(out.status, Status::Error, "a refusal, not an answer: {}", out.message);
+    assert!(out.message.contains("`ghost` cannot be polled"), "{}", out.message);
+    let why = out.data.as_ref().and_then(|d| d["refusal"]["why"].as_str()).unwrap_or_default();
+    assert!(why.contains("charter") && why.contains("pair"), "the taught why names the charter and the pair record: {why}");
 }

@@ -27,6 +27,7 @@
   rustPlatform,
   git,
   curl,
+  socat,
   paint ? true,
   ...
 }:
@@ -182,9 +183,12 @@ rustPlatform.buildRustPackage {
   # refusal against a reserved port, or a real loopback HTTP round trip
   # through a reused tunnel record) rather than mocking the transport, so
   # `curl` needs the same PATH availability `git` already has here.
+  # `socat` is the TLS front the mesh_transit https tests dial through
+  # (cli/tests/common/mod.rs `tls_front`), so it is on PATH in the check phase.
   nativeCheckInputs = [
     git
     curl
+    socat
   ];
 
   meta = {

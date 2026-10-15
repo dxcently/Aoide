@@ -332,7 +332,7 @@ mod tests {
         let i = inv(&["secrets", "add"], &["x"], &[("key", "x")]);
         let r = broker_user(&i, "secrets add must run as the broker user (uid 0). Run: sudo -u aoide-secrets aoide secrets add ...");
         assert!(!r.what.contains("..."), "{}", r.what);
-        assert_eq!(fix_of(r), "sudo -u aoide-secrets aoide secrets add x --key x");
+        assert_eq!(fix_of(r), "sudo -u aoide-secrets aoide secrets add x --key=x");
     }
 
     #[test]
@@ -340,7 +340,7 @@ mod tests {
         let i = inv(&["secrets", "add"], &["Bad__Name"], &[("key", "k")]);
         let r = invalid_name(&i, "secret", "Bad__Name");
         assert_eq!(r.kind, Kind::Usage);
-        assert_eq!(fix_of(r), "aoide secrets add bad-name --key k");
+        assert_eq!(fix_of(r), "aoide secrets add bad-name --key=k");
         let hopeless = invalid_name(&i, "secret", "___");
         assert!(matches!(hopeless.fix, Fix::Set(_)));
     }

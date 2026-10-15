@@ -45,7 +45,9 @@ The server serves:
   an existing conducted session named by `contextId`, or **spawns** a new
   conducted agent. The spawn runs a **configured** agent
   (`aoide.a2a.spawnAgent`), never a client-supplied command — the client
-  supplies only the prompt. A spawn may also name a task
+  supplies only the prompt, and that prompt is the spawned session's opening
+  turn. The door parks it in `pending.json` for a human rather than typing it.
+  A spawn may also name a task
   (`metadata["aoide/task"]`), which makes the child the SAME
   [[Managed-Task-Wrapper|managed task run]] a local `aoide spawn --task`
   produces: task mailbox, exit report, a record the routine prune retains. A
@@ -67,11 +69,11 @@ registering it into `state/nodes.json`. `node pull` refreshes its cached
 graph over `aoide/graphSummary`. `node spawn <name> -- <text>` starts a new
 session on a PAIRED node's own configured agent: it POSTs a signed,
 spawn-shaped `message/send` to the node's A2A door, and the node's own
-paired+signature+allows gate is the sole authority. `send --to
+paired+signature+grant gate is the sole authority. `send --to
 node/<name>` (or `--to <name>/<session>`) drives an EXISTING remote session:
-it resolves the target against the node's cached graph and delivers over the
-same `message/send` RPC — mutually exclusive with `--id`, and a remote send
-always attempts delivery since the receiving node gates its own inject. Each
+it resolves the target against the node's cached graph and sends over the
+same `message/send` RPC — mutually exclusive with `--id`. A remote send is
+always attempted, and the receiving node parks it for its own approver. Each
 registered node folds into the [[Session-Graph]] as a root node, so a remote
 instance appears in the DAG beside aoide's own sessions. The message text is
 untrusted data, never executed.
@@ -105,9 +107,11 @@ precedence). The dock renders this same signal as the Conductor gadget's
 
 The A2A door fits the [[Governance]] model — the user admits, agents propose,
 git records — with one adaptation forced by the wire: **a request/response
-cannot block on a human admission**, so there is no interactive per-request
-gate like `send`'s pending/approve dance. The admission is moved entirely
-to **rebuild time** instead.
+cannot block on a human admission**, so nothing a remote caller sends is
+delivered on the wire at all. Every admitted remote send parks in the
+receiving node's `pending.json`, the same queue `send` uses, and a human (or
+the conductor) approves it there. Enabling the door is admitted at
+**rebuild time**.
 
 - **Admitted at rebuild time.** Enabling the door (`aoide.a2a.enable`) and
   setting the spawn target (`aoide.a2a.spawnAgent`) are nix options, so both go
@@ -129,13 +133,14 @@ to **rebuild time** instead.
 - **Bounded per request.** A `message/send` spawn runs **only** the configured
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door
-  returns a structured error rather than launching anything; if it is a
-  SHELL (`bash`, `bash -lc <harness>`, `env bash`), the door refuses it the
-  same way and before any process starts, because the spawn's first turn is
-  a line typed into that pty and a shell would run it. An inject steers a
-  session already running under aoide's conductor, the same door `send`
-  uses. A forwarded A2A message is **data**, routed through the dispatcher, never
-  executed — the A2A door adds no new trust tier.
+  returns a structured error rather than launching anything. The configured
+  command is default-denied: it runs only as a proven harness (`claude`,
+  `env claude`), and the rule is stated once in `CONTRACTS.md` (the spawnAgent
+  paragraph). An inject steers a session already running under aoide's
+  conductor, through the same gated door `send` uses: it parks in that
+  session's pending queue until a terminal or the conductor approves it. A
+  forwarded A2A message is **data**, routed
+  through the dispatcher, never executed — the A2A door adds no new trust tier.
 - **A spawn's child is the local wrapper, always headless.** The door has no
   terminal to hand a child, so its spawn is `conduct --spawned --headless`,
   built by the ONE argv builder a local `aoide spawn` uses
@@ -159,45 +164,48 @@ to **rebuild time** instead.
   mail-side doorbell write lands in its input, where a non-headless wrap with no
   channel would have been skipped. All of it is the local wrapper's own
   semantics, reached through this door — not a second set of rules.
-- **Non-loopback callers are gated at request time.** `message/send`
-  classifies the caller's address first (`a2a::classify_origin` →
-  `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
-  caller falls back to the same interactive pending-approval queue
-  `send` uses — auto-delivering on an autogate match: the OR of the
-  address check, the per-node `tokenFile` check, the signature-rung
-  `autogate` flag on the resolved node's own record, and a matched
-  remote-parent claim — the node that spawned this very session steering its
-  own child ([[Node-Federation]]; the claim and its three-way match are
-  CONTRACTS.md §6's remote-parent rule); an `Unknown` origin (the address
-  couldn't be read at all) is never auto-delivered, failing safe like an
-  unmatched `Remote`.
-  A verified signature outranks loopback for this question: a request
-  `verify_signed_request` already verified is remote by construction (an
-  ssh `-L` forward terminates at loopback on this end), so
-  `origin_for_inject` strips `Loopback`'s free pass from it — and then the
-  node's own `autogate` flag, with `message` in the mesh the request signed
-  for, or a matched remote-parent claim decides
-  delivery, never the arrival address ([[Node-Transport]]).
-  This is the one interactive per-request gate the wire otherwise lacks —
-  added for [[Node-Federation|node federation]]'s non-loopback case, which
-  the original loopback-only design didn't need to cover.
+- **Inject never delivers at this door.** An inject that is admitted parks in
+  `pending.json`, the same queue the local `send` uses. The door records the
+  entry's source itself, from what the caller proved: `node:<name>` for a
+  verified signature or a `verified` node's own bearer, `addr:<address>` for
+  every other caller, whichever node its address happens to match. The source
+  is not a gate. The door cannot approve, because `Door::can_approve` is true
+  only for the local CLI and the daemon. A network caller therefore queues a
+  steer and cannot release it. A human releases it with
+  `aoide session pending approve`, or the conductor does.
+- **Inject admission.** What an inject decides is only whether the caller
+  reaches that queue at all. With no door-wide token configured, every inject
+  does. Once one is configured, a `contextId` send from a caller that proved
+  neither that token nor a node identity gets the uniform answer: the
+  synthetic `submitted` Task (#50), which names no session and touches neither
+  `sessions.json` nor `pending.json`. An unauthenticated caller therefore
+  cannot tell a real `contextId` from a bogus one. A node identity is ONLY a
+  `verified` node's own bearer (the Token rung, matched against its
+  `tokenFile`) or a verified per-request signature whose grant in the signed
+  mesh holds `message` (the Signature rung). An address match alone admits
+  nothing.
+- **The queue is capped per source.** `pending.json` holds at most 32 entries
+  per `from`, the source the door derived above, so an address-only caller can
+  fill only its own `addr:<address>` bucket and never a node's. Past that, a
+  caller that proved a node identity is refused `-32000`, any other caller gets
+  the uniform answer, and nothing queued is touched. A spawn's opening turn at
+  the cap records `queue-full`.
 - **Pairing gates Spawn; the door-wide bearer gates only unsigned reads.**
   A spawn runs only for an identified, paired node: `spawn_admitted`
   requires a request resolved on the Signature rung (a verified per-request
   ed25519 signature against some `verified` node's stored pubkey —
-  [[Node-Federation]]'s Signature rung) whose record's `allows` contains
-  `"spawn"`. Every refusal is `-32006` with a shape-specific taught message
-  — a paired-but-unsigned caller is told to sign, a signed caller lacking
-  the grant is told the exact `node allow` fix, everyone else is told to
-  pair and sign. `aoide.a2a.tokenFile` (read once at `a2a serve` launch,
-  compared with a length-independent byte scan
-  `node_store::token_bytes_eq`) is a legacy escape for unpaired callers:
-  it authenticates the read arms (`tasks/get`, the AgentCard GET,
-  `aoide/graphSummary`), still `-32005`-gating them, and answers Inject's
-  autogate question — it never reaches Spawn. Empty (the default) leaves
-  the read arms open exactly as an untokenized server always was. The
-  bearer gates UNSIGNED callers only: its job is to strip the loopback free
-  pass from callers a tunnel or proxy makes look local. A signed caller is
+  [[Node-Federation]]'s Signature rung) whose grant in the mesh the request
+  names holds `"spawn"`. Every refusal is `-32006` with a shape-specific taught
+  message — a paired-but-unsigned caller is told to sign, a signed caller
+  lacking the grant is told the exact `node allow` fix, everyone else is told
+  to pair and sign. `aoide.a2a.tokenFile` (read once at `a2a serve` launch,
+  compared with a length-independent byte scan `node_store::token_bytes_eq`)
+  authenticates the read arms (`tasks/get`, the AgentCard GET,
+  `aoide/graphSummary`), still `-32005`-gating them, and it is the token the
+  Inject admission above tests. It never reaches Spawn. Empty (the default)
+  leaves the read arms open exactly as an untokenized server always was. The
+  bearer gates UNSIGNED callers only: its job is to tell the operator apart
+  from callers a tunnel or proxy makes look local. A signed caller is
   governed by its grants instead — a verified signature whose grant in the
   request's mesh includes `read` reads `tasks/get`, `tasks/resubscribe` and
   `aoide/graphSummary` with no bearer, so a paired peer's `node pull` works
@@ -226,45 +234,36 @@ to **rebuild time** instead.
   rather than falling back to no-token-configured behavior, so every bearer
   check on that connection is denied. When `bearer-secret` is unset, the
   file mechanism above is unchanged.
-- **Loopback is trusted unconditionally only while no token is configured.**
-  `effective_origin(origin, token_configured, token_state)`
-  coerces any caller — loopback included — that did not present the valid
-  token to `ConnOrigin::Unknown` before `should_deliver_now` ever sees it,
-  which never auto-delivers. There is no separate "trust loopback" toggle: behind a
-  reverse proxy or tunnel (`ssh -R`, a tailscale funnel, cloudflared, nginx)
-  the server sees the proxy's own loopback address for every caller, so an
-  unconditional loopback trust hands a remote attacker the same standing as
-  the operator. A caller that presents the valid token keeps
-  loopback's original standing exactly.
+- **Loopback earns nothing by its address.** Loopback is a peer address like
+  any other, and it proves no identity. Once a door-wide token is configured,
+  a loopback caller that did not present it gets the same uniform answer as
+  any other unauthenticated caller. There is no separate "trust loopback"
+  toggle, because behind a reverse proxy or tunnel (`ssh -R`, a tailscale
+  funnel, cloudflared, nginx) the server sees the proxy's own loopback address
+  for every caller, so an unconditional loopback trust would hand a remote
+  attacker the same standing as the operator. A caller that presents the valid
+  token reaches the queue, and its send still parks.
 - **Per-node tokens identify WHICH node, not just whether one is trusted.**
   `Node.tokenFile` (`state/nodes.json`, set via `node add --token-file
   <path>`) is a separate, per-node secret from the server-wide `tokenFile`
-  above — a legacy escape for unpaired callers, like it.
-  `node_store::autogated_node_token` folds a presented token
-  against every registered node's own token file, and Inject's autogate
-  match is the OR of the address check, this token check, the
-  signature-rung `autogate` flag (the flag opens that rail too; what it
-  delivers on is `message` in the mesh the request SIGNED for), and a
-  matched remote-parent claim — the
-  node that spawned this very session steering its own child
-  (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared
-  secret could never tell two nodes apart, so identifying which node called
-  needs one file per node, not one flag for the whole door.
-  **The match is not the delivery.** The address and token rails carry no
-  request signature, so they name no mesh: the door judges the record they
-  matched by its HOME mesh's rules (`aoide-server::a2a::rail_admits` — where a
-  charter governs `[pairing] homeMesh`, the record must be `verified` and its
-  key on the charter's line with `message`, minus this box's own
-  `node allow … off --mesh`; a charter-shaped home with an undecidable
-  operator key, or a `config.toml` that will not load, delivers nothing; a
-  pair-mesh home keeps the record's own flag as the whole rule). A record the
-  charter does not answer for is held PENDING — never refused — so the knock
-  reaches the operator as a `session pending list` entry attributed
-  `node:<name>`; the #50 uniform-response guard is still exempted by the
-  MATCH, which is what keeps that send a real pending entry instead of a
-  synthetic unqueued answer. The address rung is an address match with an
-  address match's limits (a first-match tie-break, live DNS, spoofable from
-  where it matches — CONTRACTS.md §6, review F5).
+  above, and like it a legacy escape for unpaired callers. A presented token
+  that matches a node's own token file resolves that node
+  (`node_store::resolve_node`'s Token rung, tried first), and that node's
+  Inject is never answered with the uniform response. A shared secret could
+  never tell two nodes apart, so identifying which node called needs one file
+  per node, not one flag for the whole door. The node's own token authenticates
+  no read and never reaches Spawn.
+- **An address match names a node and proves nothing.** The address rung
+  (`NodeRung::Addr`) resolves a node's record only, with an address match's own
+  limits: a first-match tie-break, live DNS, and spoofability from where it
+  matches (CONTRACTS.md §6, review F5). An inject from it is recorded as
+  `addr:<address>`, never under the node's name. Once a door-wide token is
+  configured it admits nothing.
+- **The `aoide/from` claim is honoured only on the signature rung.** A claim
+  from any other caller is ignored with one audit line. A spawn stamps an
+  honoured claim on the child as its `remoteParent`, and a malformed one is
+  refused `-32602` on a spawn only. An inject carrying one proceeds as if it
+  had none, since no claim changes whether an Inject parks.
 - **The outbound direction has its own bearer.** `node add --bearer-secret
   <name>` records a secret THIS instance resolves through the local secrets
   broker, as consumer `a2a-client`, on every outbound call to that node —

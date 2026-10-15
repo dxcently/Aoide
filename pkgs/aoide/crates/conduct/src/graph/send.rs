@@ -28,6 +28,17 @@
 //! client-side self-send guard this file used to carry (removed; see
 //! `deliver_local`'s own comment on exactly why removing it is sound).
 //!
+//! **The MCP door is attested the same way.** `aoide mcp serve --stdio`
+//! dispatches in its own process, so the process whose ancestry is walked is
+//! the MCP server, and a server launched under a sealed session earns that
+//! session's parent and sibling rules and delivers. It never earns `--yes`, the
+//! autogate switch or an approval: an MCP caller has none of them, and a send
+//! with no sealed ancestor, or to a session the sealed one has no rule for,
+//! parks. The A2A door runs inside aoided with no sealed ancestor and so
+//! parks every send. Attestation names who launched the server, not who writes
+//! to its stdin: a network bridge run inside a conducted terminal lends that
+//! terminal's rights to its remote callers.
+//!
 //! `send` has two ways to name a target (messaging plan P-C3):
 //! `--id <id>` (the original, unchanged) or `--to <target>` (resolved via
 //! `aoide_storage::addr::resolve`, mutually exclusive with `--id` — see
@@ -46,9 +57,11 @@ use super::model::{
 };
 use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
-    clear_stale_parent, do_hook_session_start, do_session_end, do_session_phase,
+    audit_ignored_wrap_hook, clear_stale_parent, do_hook_session_start, do_session_end,
+    do_session_phase, protected_wrap, reserved_id_refusal,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
-    do_subagent_spawn, ensure_session_ceiling, now_iso_utc, refresh_subagent_says,
+    do_subagent_spawn, ensure_session_ceiling, live_harness_anchoring, now_iso_utc,
+    refresh_subagent_says,
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
     stamp_harness_session_id, stamp_session_start_at, stored_phase,
 };
@@ -58,13 +71,13 @@ use super::window::{
 };
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClass, CLAUDE_PROFILE};
 use aoide_protocol::{Door, Invocation};
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
 use aoide_storage::session::pid_may_move;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 #[cfg(windows)]
@@ -98,10 +111,9 @@ use std::path::{Path, PathBuf};
 /// pass a real, explicit delay when they need to observe the boundary.
 // `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is a SECOND production
 // caller of `write_delivery`, alongside `deliver_local_with` below — both
-// raw-inject, both want the exact same submit-keystroke gap — and
-// `aoide-server`'s A2A door (`a2a::spawn_inject_prompt`) is the THIRD, from
-// another crate: a spawned session's opening turn is a pty injection like any
-// other and must not carry a keystroke spelling of its own.
+// raw-inject, both want the exact same submit-keystroke gap. A spawned
+// session's opening turn is a pty injection like any other and must not carry
+// a keystroke spelling of its own.
 #[cfg(not(test))]
 pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 #[cfg(test)]
@@ -121,13 +133,91 @@ pub struct PendingSend {
     pub submit: bool,
     #[serde(rename = "queuedAt", default)]
     pub queued_at: String,
-    /// The sender attribution [`resolve_sender`] resolved at queue time (see
-    /// its doc — attribution, not security). `skip_serializing_if` keeps an
+    /// The source of this entry: who the door it arrived through says sent
+    /// it (see [`PendingOrigin`]). It is the key the per-source cap counts and
+    /// the only identity an approver is shown. `skip_serializing_if` keeps an
     /// unattributed entry's JSON byte-identical to before this field existed;
     /// `default` on read means a LEGACY entry written before this field
     /// existed deserializes with `from: None`, not a parse failure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
+    /// The label a caller typed as `--from` on a door that derives its own
+    /// source, cleaned. A claim, never an identity: it keys nothing and is
+    /// shown only under that name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed: Option<String>,
+    /// Set on a held spawn, whose `text` is the command line shown to the
+    /// approver and whose `session_id` is the id its child will register
+    /// under. Nothing is typed for one: approving it launches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn: Option<PendingSpawn>,
+}
+
+/// A launch a door held instead of running: the command, argv and flags it
+/// was asked for, replayed whole by `session pending approve`. The command is
+/// `spawn` or `resurrect`, the two ways an unattested caller would otherwise
+/// start a process.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingSpawn {
+    /// The command path to replay. Absent on an entry written before this
+    /// field existed, which was always a `spawn`.
+    #[serde(default = "spawn_path")]
+    pub path: Vec<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub flags: BTreeMap<String, String>,
+    /// What a held resurrect showed its approver: one line per candidate, and
+    /// what each would type. Empty for a spawn. Approval launches only a
+    /// selection that still reads this way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shown: Vec<String>,
+}
+
+fn spawn_path() -> Vec<String> {
+    vec!["spawn".to_string()]
+}
+
+impl Default for PendingSpawn {
+    fn default() -> Self {
+        Self { path: spawn_path(), args: Vec::new(), flags: BTreeMap::new(), shown: Vec::new() }
+    }
+}
+
+impl PendingSpawn {
+    /// The command a held launch replays, as one shell line: `aoide spawn
+    /// --flag=value … -- <command>` (or `aoide resurrect --project=<name> …`),
+    /// every word quoted. The approver's view spells it through `visible_held`,
+    /// so a copy of that view is not a paste.
+    pub fn command_line(&self) -> String {
+        Invocation {
+            path: self.path.clone(),
+            args: self.args.clone(),
+            flags: self.flags.clone(),
+            door: Door::Cli,
+        }
+        .command_line("aoide", &["windowed", "undying", "all"], !self.args.is_empty())
+    }
+
+    /// Is this a command an approval may launch? Anything else in a queue file
+    /// is not replayed. The rules a hold applies (a plain id, no `--parent`, a
+    /// resurrect that names its project) are judged here too, so an entry held by
+    /// an older build, or edited by hand, is listed as malformed and never
+    /// launched on a word the hold would have refused.
+    pub fn is_known(&self) -> bool {
+        match self.path.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+            ["spawn"] => {
+                !self.flags.contains_key("parent")
+                    && self.flags.get("id").is_none_or(|id| super::spawn::spawn_id_is_plain(id))
+            }
+            ["resurrect"] => self.flags.contains_key("project"),
+            _ => false,
+        }
+    }
+
+    pub fn is_resurrect(&self) -> bool {
+        self.path == ["resurrect"]
+    }
 }
 
 /// `pending.json` container.
@@ -197,12 +287,24 @@ fn autogate_env() -> bool {
     )
 }
 
+/// The parent a gate may honour: a record's `parentSessionId`, but only where
+/// `attestedSpawner` names the same id. The stamp is written only at
+/// registration, where the kernel backed the edge; a bare `session start
+/// --parent` or a `graph link` never carries one, and moving an edge drops
+/// its stamp (`SessionRecord::set_parent_session`). An edge with no matching
+/// stamp is a caller's word, so it earns no autogate.
+fn attested_parent_of(rec: &SessionRecord) -> Option<&str> {
+    let parent = rec.parent_session_id.as_deref().filter(|p| !p.is_empty())?;
+    (rec.attested_spawner.as_deref() == Some(parent)).then_some(parent)
+}
+
 /// The parent-autogate rule (pure, unit-tested): the sender may freely command a
-/// child it spawned. True when the target session's `parentSessionId` equals the
-/// SENDER's own `AOIDE_SESSION_ID` — both present and non-empty. A cross-tree or
-/// unrelated send (no id, empty id, or a mismatch) is NOT autogated and stays
-/// pending. This is what lets an orchestrator steer the children it conducted
-/// without a prompt while every other send remains gated.
+/// child it spawned. True when the target's ATTESTED parent (see
+/// [`attested_parent_of`]) equals the SENDER's own kernel-attested session id —
+/// both present and non-empty. A cross-tree or unrelated send (no id, empty id,
+/// a mismatch, or a parent edge the spawn never stamped) is NOT autogated and
+/// stays pending. This is what lets an orchestrator steer the children it
+/// conducted without a prompt while every other send remains gated.
 fn sender_is_parent(sender_session: Option<&str>, target_parent: Option<&str>) -> bool {
     match (sender_session, target_parent) {
         (Some(s), Some(p)) => !s.is_empty() && s == p,
@@ -211,11 +313,12 @@ fn sender_is_parent(sender_session: Option<&str>, target_parent: Option<&str>) -
 }
 
 /// The sibling-autogate rule (pure, unit-tested): the sender and the target
-/// may freely talk to each other when they are SIBLINGS — both parented under
-/// the SAME session, and that shared parent is itself still live (not
-/// `done`). A dead/absent parent, a cross-tree pair, or either side unparented
-/// stays gated. `parent_live` is resolved by the caller against the already-
-/// loaded sessions file (no I/O here).
+/// may freely talk to each other when they are SIBLINGS — both ATTESTED under
+/// the SAME session (see [`attested_parent_of`]), and that shared parent is
+/// itself still live (not `done`). A dead/absent parent, a cross-tree pair, an
+/// unattested edge on either side, or either side unparented stays gated.
+/// `parent_live` is resolved by the caller against the already-loaded sessions
+/// file (no I/O here).
 ///
 /// Deliberately blind to whether sender == target: a self-send trivially
 /// satisfies `a == b` here too (same record, same parent field read twice)
@@ -249,6 +352,26 @@ fn sibling_autogate_enabled() -> bool {
     }
 }
 
+/// The taught line a send from a door that cannot approve carries back to its
+/// caller, and the one `session pending approve` refuses with. One string, so
+/// the send outcome, the approve refusal and the A2A audit cannot drift.
+pub const DOOR_CANNOT_APPROVE: &str =
+    "this door cannot approve a gated send; approval comes from a terminal or the conductor";
+
+/// The two rules that rest on an attested sender and nothing else: the
+/// parent-of-target rule, then the sibling rule, else pending. The gate of a
+/// door that cannot approve, which has no `--yes` and no autogate switch to
+/// consult; [`send_gate`]'s own tail for a door that can.
+fn attested_gate(sender_is_parent: bool, is_sibling: bool) -> SendGate {
+    if sender_is_parent {
+        SendGate::AutogateParent
+    } else if is_sibling && sibling_autogate_enabled() {
+        SendGate::AutogateSibling
+    } else {
+        SendGate::Pending
+    }
+}
+
 /// Resolve the gate: `--yes`, then the global autogate switch, then the
 /// parent-of-target rule, then the sibling rule, else pending.
 fn send_gate(yes: bool, sender_is_parent: bool, is_sibling: bool) -> SendGate {
@@ -256,12 +379,8 @@ fn send_gate(yes: bool, sender_is_parent: bool, is_sibling: bool) -> SendGate {
         SendGate::Yes
     } else if autogate_env() {
         SendGate::Autogate
-    } else if sender_is_parent {
-        SendGate::AutogateParent
-    } else if is_sibling && sibling_autogate_enabled() {
-        SendGate::AutogateSibling
     } else {
-        SendGate::Pending
+        attested_gate(sender_is_parent, is_sibling)
     }
 }
 
@@ -321,7 +440,10 @@ fn sanitize_sender(raw: &str) -> String {
 /// same-uid process connecting directly (bypassing `aoide send`
 /// altogether) still injects with no gate and no attribution at all. This
 /// label remains strictly additive display information, never a trust
-/// boundary, for exactly that reason.
+/// boundary, for exactly that reason. For the same reason a send that PARKS
+/// on the MCP or the A2A door does not take it as its source:
+/// [`pending_origin`] derives the source from the door, and on MCP this label
+/// rides only as a cleaned `claimed`.
 fn resolve_sender(inv: &Invocation) -> Option<String> {
     match inv.flags.get("from") {
         Some(f) if f.is_empty() => None, // explicit anonymous — env fallback skipped.
@@ -398,19 +520,195 @@ fn one_line_title(text: &str) -> String {
     }
 }
 
-fn record_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), String> {
+/// The most entries `pending.json` holds for one source. The source is the
+/// `from` an entry records, and the door a send arrived through derives it
+/// ([`PendingOrigin`]): `node:<name>` or `addr:<address>` for the network door,
+/// `mcp` or `mcp:<session>` for MCP, the attributed session for a local door,
+/// and every entry that names none counts as one more source. A send past it
+/// is refused and audited, and nothing already queued is touched, so one
+/// sender cannot fill a human's approval queue.
+pub const PENDING_CAP_PER_SOURCE: usize = 32;
+
+/// The `reason` a send refused at [`PENDING_CAP_PER_SOURCE`] carries, so a
+/// door that answers its own callers (`aoide-server`'s `do_inject`) can tell
+/// it from any other failure.
+pub const PENDING_FULL: &str = "pending-full";
+
+/// The most bytes one queued entry may serialize to, a send's text and a
+/// spawn's argv alike. The count cap bounds how many entries a sender holds;
+/// this bounds how big each is, so neither a human's screen nor
+/// `pending.json`, rewritten whole on every change, can be swollen by a single
+/// caller.
+pub const PENDING_ENTRY_MAX_BYTES: usize = 64 * 1024;
+
+/// The `reason` an entry refused at [`PENDING_ENTRY_MAX_BYTES`] carries.
+pub const PENDING_TOO_LARGE: &str = "pending-too-large";
+
+/// The most bytes `pending.json` may hold in all, measured as `write_stage`
+/// writes it. The count and entry caps bound one source and one entry; this
+/// bounds the file, which holds every source at once and is rewritten whole on
+/// each change.
+pub const PENDING_FILE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// The `reason` a send refused at [`PENDING_FILE_MAX_BYTES`] carries.
+pub const PENDING_FILE_FULL: &str = "pending-file-full";
+
+/// How much of a refused entry's text the audit line keeps: the head, enough
+/// to tell what was tried, never the whole oversize body.
+pub(super) const AUDIT_REFUSED_TEXT_MAX: usize = 256;
+
+/// The `reason` a send refused for a `--from` that spells a source only a door
+/// derives carries ([`is_door_source`]).
+const RESERVED_FROM: &str = "reserved-from";
+
+/// Why a send was not queued.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HoldRefused {
+    /// Its source already holds [`PENDING_CAP_PER_SOURCE`] entries.
+    Full,
+    /// The entry serializes to this many bytes, over [`PENDING_ENTRY_MAX_BYTES`].
+    TooLarge(usize),
+    /// Queued, the file would hold more than [`PENDING_FILE_MAX_BYTES`].
+    FileFull,
+    /// The stage could not be read or written.
+    Stage(String),
+}
+
+/// Who a held send is recorded as coming from, derived by the door it arrived
+/// through and never read off what the caller typed. `from` is the source: the
+/// key [`PENDING_CAP_PER_SOURCE`] counts and the only identity an approver is
+/// shown. `claimed` is the label a caller on an MCP door typed as `--from`,
+/// cleaned: a claim, kept apart, never a key and never shown as the source.
+///
+/// The spellings a door derives (`node:<name>`, `addr:<address>`, `mcp`,
+/// `mcp:<session>`) are its alone. A `--from` that spells one on any other
+/// door is refused ([`is_door_source`]), so a caller can neither fill another
+/// source's bucket nor show an approver a source it does not have.
+#[derive(Debug, PartialEq, Eq)]
+struct PendingOrigin {
+    from: Option<String>,
+    claimed: Option<String>,
+}
+
+impl PendingOrigin {
+    /// The audit line's account of the caller: the derived source first, the
+    /// claim under its own name.
+    fn note(&self) -> Option<String> {
+        match (&self.from, &self.claimed) {
+            (Some(from), Some(claimed)) => Some(format!("from {from}, claims {claimed:?}")),
+            (Some(from), None) => Some(format!("from {from}")),
+            (None, Some(claimed)) => Some(format!("claims {claimed:?}")),
+            (None, None) => None,
+        }
+    }
+}
+
+/// The MCP door's source when no session is attested behind the caller.
+const MCP_SOURCE: &str = "mcp";
+
+/// Is `from` spelled the way a door derives its own source? Only that door may
+/// record it.
+fn is_door_source(from: &str) -> bool {
+    from == MCP_SOURCE || ["node:", "addr:", "mcp:"].iter().any(|prefix| from.starts_with(prefix))
+}
+
+/// Derive the origin of a send this invocation is about to park. `attested`
+/// is the kernel-attested session of the calling process
+/// ([`deliver_local_with`]'s resolver), read only on the MCP door.
+///
+/// - `A2a`: the `from` the door itself put on the invocation
+///   (`aoide-server`'s `do_inject`): `node:<name>` for a caller that proved
+///   a node, `addr:<address>` for one that did not. No caller of that door can
+///   set a flag.
+/// - `Mcp`: `mcp:<attested session>`, else `mcp`, one bucket for every caller
+///   with no session behind it. The `--from` the caller typed rides as
+///   `claimed`.
+/// - `Cli`, `Daemon`: the attribution [`resolve_sender`] resolved, as always.
+///
+/// `Err` carries the `--from` that spells a source only a door derives.
+fn pending_origin(inv: &Invocation, attested: impl FnOnce() -> Option<String>) -> Result<PendingOrigin, String> {
+    if inv.door == Door::A2a {
+        let from = inv.flags.get("from").filter(|f| !f.is_empty()).map(|f| sanitize_sender(f));
+        return Ok(PendingOrigin { from, claimed: None });
+    }
+    let typed = resolve_sender(inv);
+    if let Some(spelled) = typed.as_deref().filter(|t| is_door_source(t)) {
+        return Err(spelled.to_string());
+    }
+    if inv.door != Door::Mcp {
+        return Ok(PendingOrigin { from: typed, claimed: None });
+    }
+    let from = match attested() {
+        Some(session) => format!("{MCP_SOURCE}:{session}"),
+        None => MCP_SOURCE.to_string(),
+    };
+    let claimed = typed.map(|t| common::clean_line(&t)).filter(|t| !t.is_empty());
+    Ok(PendingOrigin { from: Some(from), claimed })
+}
+
+/// The bytes `value` takes on disk, as `write_stage` writes it. A value that
+/// does not serialize is a refusal, never a zero-byte entry that passes a cap.
+fn stored_len<T: Serialize>(value: &T) -> Result<usize, HoldRefused> {
+    serde_json::to_string_pretty(value)
+        .map(|body| body.len())
+        .map_err(|e| HoldRefused::Stage(format!("pending.json: serialize: {e}")))
+}
+
+/// Queue one held send. The entry's size is judged first, so an oversize entry
+/// is refused whatever the queue holds, and the source cap, the file cap and
+/// the append happen under ONE stage lock, so two callers racing for the last
+/// slot cannot both take it.
+fn record_pending(
+    id: &str,
+    text: &str,
+    submit: bool,
+    origin: &PendingOrigin,
+    spawn: Option<PendingSpawn>,
+) -> Result<(), HoldRefused> {
     with_stage_lock(|| {
-        let mut file: PendingFile = load_stage(&pending_path())?;
-        file.schema_version = STAGE_GRAPH_VERSION.to_string();
-        file.pending.push(PendingSend {
+        let mut file: PendingFile = load_stage(&pending_path()).map_err(HoldRefused::Stage)?;
+        let entry = PendingSend {
             session_id: id.to_string(),
             text: text.to_string(),
             submit,
             queued_at: now_iso_utc(),
-            from: from.map(str::to_string),
-        });
-        write_stage(&pending_path(), &file)
+            from: origin.from.clone(),
+            claimed: origin.claimed.clone(),
+            spawn,
+        };
+        let bytes = stored_len(&entry)?;
+        if bytes > PENDING_ENTRY_MAX_BYTES {
+            return Err(HoldRefused::TooLarge(bytes));
+        }
+        if file.pending.iter().filter(|p| p.from == origin.from).count() >= PENDING_CAP_PER_SOURCE {
+            return Err(HoldRefused::Full);
+        }
+        file.schema_version = STAGE_GRAPH_VERSION.to_string();
+        file.pending.push(entry);
+        if stored_len(&file)? > PENDING_FILE_MAX_BYTES {
+            return Err(HoldRefused::FileFull);
+        }
+        write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)
     })
+}
+
+/// Park a send in `pending.json` without touching any socket: the one seam the
+/// A2A door uses to hold text it was asked to inject outside `session_send`,
+/// its spawn's opening turn (`aoide-server`'s `opening_turn_worker`). `from` is
+/// that door's own resolution, `node:<name>` for the node whose signature it
+/// verified; no other door calls this. Same queue, same cap, so `session
+/// pending approve` treats it exactly like any other held send.
+pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
+    record_pending(id, text, submit, &PendingOrigin { from: from.map(str::to_string), claimed: None }, None)
+}
+
+/// Park a spawn the MCP door could not attribute, to launch only when a human
+/// approves it. `id` is the id its child will register under, `command` the
+/// line the approver is shown, and the entry counts against the MCP door's
+/// own bucket, the one every unattested MCP send shares.
+pub fn hold_spawn(id: &str, command: &str, spawn: PendingSpawn) -> Result<(), HoldRefused> {
+    let origin = PendingOrigin { from: Some(MCP_SOURCE.to_string()), claimed: None };
+    record_pending(id, command, false, &origin, Some(spawn))
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -472,22 +770,34 @@ fn set_session_name_if_unset(id: &str, name: &str) {
 /// One audit line per send outcome, through aoided's audit path. The injected
 /// text rides as `untrusted_data` (never the message) — forwarded agent-bound
 /// text is data, never re-interpreted as a command (the house rule). The
-/// resolved [`resolve_sender`] attribution (when present) is folded into the
-/// audit MESSAGE — never into `untrusted_data`, which stays exactly the
-/// injected text — so the audit trail names who claimed to send it.
+/// caller is folded into the audit MESSAGE — never into `untrusted_data`, which
+/// stays exactly the injected text. A caller on the MCP door typed its
+/// `--from` itself, so the line records it as a claim (`claims "…"`, cleaned),
+/// never as `from`: the record names the door the line carries and what the
+/// caller said, not an identity nobody checked.
 ///
 /// `pub(in crate::graph)`: the ping-back (`graph/pingback.rs`, P-EIDOLON
 /// slice E5b) audits its own automated line through this SAME helper — one
 /// audit shape for anything that reaches a session's input, the sibling
 /// `audit_pending`/`audit_resurrect` precedent.
 pub(in crate::graph) fn audit_send(inv: &Invocation, status: &str, message: &str, text: &str) {
+    let note = resolve_sender(inv).map(|sender| match inv.door {
+        Door::Mcp => format!("claims {:?}", common::clean_line(&sender)),
+        _ => format!("from {sender}"),
+    });
+    audit_send_noted(inv, status, message, text, note);
+}
+
+/// [`audit_send`] with the caller's account already derived: a send that
+/// parks has its [`PendingOrigin`], the source the queue will hold it under.
+fn audit_send_noted(inv: &Invocation, status: &str, message: &str, text: &str, note: Option<String>) {
     let log = inv
         .flags
         .get("audit-log")
         .map(PathBuf::from)
         .unwrap_or_else(aoide_protocol::default_audit_log);
-    let message = match resolve_sender(inv) {
-        Some(sender) => format!("{message} (from {sender})"),
+    let message = match note {
+        Some(note) => format!("{message} ({note})"),
         None => message.to_string(),
     };
     let _ = aoide_protocol::append_audit(
@@ -499,9 +809,20 @@ pub(in crate::graph) fn audit_send(inv: &Invocation, status: &str, message: &str
             command: "send".to_string(),
             status: status.to_string(),
             message,
-            untrusted_data: Some(text.to_string()),
+            untrusted_data: Some(audited_text(status, text)),
         },
     );
+}
+
+/// The text an audit line keeps for `status`. A refused send or hold was never
+/// queued and no one reads it back whole, so a refusal keeps only its head: enough
+/// to tell what was tried, never a body as large as the transport admits.
+pub(super) fn audited_text(status: &str, text: &str) -> String {
+    if status == "refused" {
+        text.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()
+    } else {
+        text.to_string()
+    }
 }
 
 /// `aoide send (--id <id> | --to <target>) [--submit] [--yes] -- <text
@@ -595,7 +916,7 @@ pub fn session_send(inv: &Invocation) -> Outcome {
 /// benign fallback: the credential's whole security property rests on a
 /// LIVE daemon (OQ1-A, process liveness) — nothing to authenticate against
 /// otherwise.
-fn real_attested_sender(sessions: &[SessionRecord]) -> Option<String> {
+pub(in crate::graph) fn real_attested_sender(sessions: &[SessionRecord]) -> Option<String> {
     let pubkey = aoide_client::daemon::daemon_seal_pubkey_hex()?;
     crate::graph::identity::attested_sender(std::process::id() as i32, sessions, |rec| {
         crate::graph::identity::verify_seal_over(rec, &pubkey)
@@ -765,8 +1086,8 @@ fn deliver_local(inv: &Invocation, id: &str) -> Outcome {
 /// `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is the second production
 /// caller — raw injection into a target wrap's socket, no gate, no provenance
 /// prefix, exactly this function's own contract — and `aoide-server`'s
-/// `a2a::spawn_inject_prompt` the third, typing a brand-new session's opening
-/// turn over the same control socket. Every pty injection in the tree goes
+/// `spawn --prompt` the third, typing a brand-new session's first turn over the
+/// same control socket. Every pty injection in the tree goes
 /// through here, which is the point: the keystroke shape (payload, flush, the
 /// gap, then the TARGET's own submit key alone) has one implementation.
 pub fn write_delivery(
@@ -794,7 +1115,7 @@ pub fn write_delivery(
 /// real `attested_sender`/`verify_seal_over` pair against a test keypair,
 /// proving the actual cryptographic machinery, not a stub) — see `mod
 /// tests` below.
-fn deliver_local_with(
+pub(in crate::graph) fn deliver_local_with(
     inv: &Invocation,
     id: &str,
     resolve_sender_id: impl Fn(&[SessionRecord]) -> Option<String>,
@@ -842,7 +1163,6 @@ fn deliver_local_with(
     }
     let is_conductable = super::doc::is_conductable_now(rec);
     let socket = rec.socket.clone().filter(|s| !s.is_empty());
-    let target_parent = rec.parent_session_id.clone();
     if !is_conductable {
         let message = match (rec.conductable == Some(true), socket.as_deref()) {
             (true, Some(path)) => {
@@ -877,49 +1197,153 @@ fn deliver_local_with(
     // peercred-derived ancestry roots back to the target's OWN session,
     // unconditionally, un-bypassably — stronger than the old guard, which
     // only ever covered well-behaved callers of `aoide send`).
-    let (is_parent, is_sibling) = if yes || autogate_env() {
-        (false, false) // never examined — send_gate's own precedence short-circuits first.
+    // The parent a gate may honour: attested by the spawn stamp (see
+    // [`attested_parent_of`]), never a bare `parentSessionId`.
+    let target_parent = attested_parent_of(rec).map(str::to_string);
+    // What a door earns. The CLI and daemon doors can approve, so `--yes` and
+    // the autogate switch outrank identity and identity is read only when
+    // neither decides. MCP cannot approve: it earns the two rules that rest on
+    // an attested sender and nothing else, so it always walks its own ancestry
+    // and never reads `--yes` or the switch. The A2A door runs inside aoided
+    // with no sealed ancestor to walk, so it earns nothing.
+    let may_approve = inv.door.can_approve();
+    let walks_ancestry = may_approve || inv.door == Door::Mcp;
+    let attested = if walks_ancestry && !(may_approve && (yes || autogate_env())) {
+        resolve_sender_id(&file.sessions)
     } else {
-        let sender = resolve_sender_id(&file.sessions);
-        let is_parent = sender_is_parent(sender.as_deref(), target_parent.as_deref());
-        let sender_parent: Option<String> = sender
-            .as_deref()
-            .and_then(|sid| file.sessions.iter().find(|s| s.session_id == sid))
-            .and_then(|r| r.parent_session_id.clone());
-        let parent_live = target_parent
-            .as_deref()
-            .filter(|p| !p.is_empty())
-            .and_then(|p| file.sessions.iter().find(|s| s.session_id == p))
-            .map(|r| aoide_protocol::canonical_state(&r.state) != "done")
-            .unwrap_or(false);
-        let is_sibling =
-            siblings_share_live_parent(sender_parent.as_deref(), target_parent.as_deref(), parent_live);
-        (is_parent, is_sibling)
+        None
     };
-    let gate = send_gate(yes, is_parent, is_sibling);
+    let is_parent = sender_is_parent(attested.as_deref(), target_parent.as_deref());
+    let sender_parent: Option<String> = attested
+        .as_deref()
+        .and_then(|sid| file.sessions.iter().find(|s| s.session_id == sid))
+        .and_then(attested_parent_of)
+        .map(str::to_string);
+    let parent_live = target_parent
+        .as_deref()
+        .filter(|p| !p.is_empty())
+        .and_then(|p| file.sessions.iter().find(|s| s.session_id == p))
+        .map(|r| aoide_protocol::canonical_state(&r.state) != "done")
+        .unwrap_or(false);
+    let is_sibling = siblings_share_live_parent(sender_parent.as_deref(), target_parent.as_deref(), parent_live);
+    let gate = if may_approve {
+        send_gate(yes, is_parent, is_sibling)
+    } else {
+        attested_gate(is_parent, is_sibling)
+    };
     // The provenance attribution — `--from` or `AOIDE_SESSION_ID` (see
     // [`resolve_sender`]) — is resolved once here, from the ORIGINAL
-    // invocation, and reused for both the pending record and (below) the
-    // delivered payload's prefix, so a queued-then-approved send still names
-    // whoever queued it, not whoever approved it.
-    let attributed_sender = resolve_sender(inv);
+    // invocation, and reused for the delivered payload's prefix (below), so a
+    // queued-then-approved send still names whoever queued it, not whoever
+    // approved it. Over MCP the attested session is the attribution, never the
+    // label the caller typed: that rides only as a claim. What a PARKED send
+    // is recorded under is not this: the door derives it ([`pending_origin`]),
+    // because the queue's cap and the approver's screen must not take a
+    // caller's word for who it is.
+    let attributed_sender = if inv.door == Door::Mcp { attested.clone() } else { resolve_sender(inv) };
     if !gate.delivers() {
-        if let Err(e) = record_pending(&id, &text, submit, attributed_sender.as_deref()) {
-            return stage_error(cmd, e);
+        let origin = match pending_origin(inv, || attested.clone()) {
+            Ok(origin) => origin,
+            Err(spelled) => {
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    format!("send to `{id}` not queued: `--from {spelled}` names a source only a door can derive"),
+                    "`node:`, `addr:` and `mcp` sources are recorded by the door a send arrives through, \
+                     so a caller cannot claim one",
+                    Fix::None("leave --from off, or give a label of your own"),
+                )
+                .with_fields(json!({ "reason": RESERVED_FROM, "id": id, "from": spelled }));
+                audit_send(inv, "refused", &out.message, &text);
+                return out;
+            }
+        };
+        match record_pending(&id, &text, submit, &origin, None) {
+            Ok(()) => {}
+            Err(HoldRefused::Stage(e)) => return stage_error(cmd, e),
+            Err(HoldRefused::Full) => {
+                let what = match origin.from.as_deref() {
+                    Some(from) => format!(
+                        "send to `{id}` not queued: `{from}` already holds {PENDING_CAP_PER_SOURCE} pending sends"
+                    ),
+                    None => format!(
+                        "send to `{id}` not queued: unattributed senders already hold {PENDING_CAP_PER_SOURCE} pending sends"
+                    ),
+                };
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    what,
+                    "the approval queue holds a bounded number of sends per sender, so one sender cannot fill it",
+                    Fix::Run("aoide session pending list".to_string()),
+                )
+                .with_fields(json!({
+                    "reason": PENDING_FULL,
+                    "id": id,
+                    "from": origin.from,
+                    "cap": PENDING_CAP_PER_SOURCE,
+                }));
+                audit_send_noted(inv, "refused", &out.message, &text, origin.note());
+                return out;
+            }
+            Err(HoldRefused::TooLarge(bytes)) => {
+                // A door that can approve may deliver the text itself, so its
+                // refusal names that way out; no other door has one.
+                let way_out: &'static str = if may_approve {
+                    "send less text at a time, or pass --yes to deliver this one now"
+                } else {
+                    "send less text at a time"
+                };
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    format!("send to `{id}` not queued: the entry is {bytes} bytes, over the {PENDING_ENTRY_MAX_BYTES} a held entry may be"),
+                    "a human reads every held entry, and the queue file is rewritten whole on each change, \
+                     so one entry is bounded in size",
+                    Fix::None(way_out),
+                )
+                .with_fields(json!({
+                    "reason": PENDING_TOO_LARGE,
+                    "id": id,
+                    "from": origin.from,
+                    "bytes": bytes,
+                    "maxBytes": PENDING_ENTRY_MAX_BYTES,
+                }));
+                audit_send_noted(inv, "refused", &out.message, &text, origin.note());
+                return out;
+            }
+            Err(HoldRefused::FileFull) => {
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    format!("send to `{id}` not queued: the approval queue file is full at {PENDING_FILE_MAX_BYTES} bytes"),
+                    "pending.json is rewritten whole on each change, so every source shares one bound",
+                    Fix::Run("aoide session pending list".to_string()),
+                )
+                .with_fields(json!({ "reason": PENDING_FILE_FULL, "id": id, "from": origin.from }));
+                audit_send_noted(inv, "refused", &out.message, &text, origin.note());
+                return out;
+            }
         }
-        let out = Outcome::ok(
-            cmd,
-            format!("send to `{id}` held pending approval (no --yes / autogate)"),
-        )
-        .changed(vec![format!("pending send queued for {id}")])
-        .with_data(json!({
-            "id": id,
-            "state": "pending",
-            "delivered": false,
-            "submit": submit,
-            "gate": gate.label(),
-        }));
-        audit_send(inv, "pending", &out.message, &text);
+        // `yes` asked for approval this door is not allowed to give: the send
+        // still parks, and the caller is told why, in the taught line.
+        let refused = yes && !may_approve;
+        let message = if refused {
+            format!("send to `{id}` held pending approval — {DOOR_CANNOT_APPROVE}")
+        } else {
+            format!("send to `{id}` held pending approval (no --yes / autogate)")
+        };
+        let out = Outcome::ok(cmd, message)
+            .changed(vec![format!("pending send queued for {id}")])
+            .with_data(json!({
+                "id": id,
+                "state": "pending",
+                "delivered": false,
+                "submit": submit,
+                "gate": gate.label(),
+                "approvalRefused": refused,
+            }));
+        audit_send_noted(inv, "pending", &out.message, &text, origin.note());
         return out;
     }
 
@@ -948,12 +1372,11 @@ fn deliver_local_with(
     // nothing, and the one caller that legitimately produces this shape —
     // `resurrect`'s restore delivery, putting a session's own prior
     // bytes back at its own prompt — needs those bytes verbatim (a prefixed
-    // re-exec is a shell syntax error; a prefixed preload is a line no human
-    // typed). Note this keys off the ATTRIBUTED sender, never the gate's
-    // own kernel-attested sender identity (LANE IDENTITY P-ID2) — restore
-    // is delivered from another session's env, which is exactly why it was
-    // mis-prefixed. Not a gate
-    // widening: attribution was already caller-asserted (`--from ""` is the
+    // re-exec is a shell syntax error). Note this keys off the ATTRIBUTED
+    // sender, never the gate's own kernel-attested sender identity (LANE
+    // IDENTITY P-ID2) — restore is delivered from another session's env,
+    // which is exactly why it was mis-prefixed. Not a gate widening:
+    // attribution was already caller-asserted (`--from ""` is the
     // documented explicit-anonymous form that also skips the prefix), and
     // the audit line still records the attributed sender either way.
     //
@@ -1065,7 +1488,15 @@ fn deliver_local_with(
             "title": title,
             "gate": gate.label(),
         }));
-    audit_send(inv, "delivered", &out.message, &text);
+    // An MCP send names the session the kernel attested, with the caller's own
+    // label beside it as a claim, exactly as a parked one does.
+    match inv.door {
+        Door::Mcp => {
+            let note = pending_origin(inv, || attested.clone()).ok().and_then(|origin| origin.note());
+            audit_send_noted(inv, "delivered", &out.message, &text, note);
+        }
+        _ => audit_send(inv, "delivered", &out.message, &text),
+    }
     out
 }
 
@@ -1200,14 +1631,12 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// door would reject outright.
 /// The RECEIVING node's own `message_send` Inject arm
 /// (`aoide-server::a2a::message_send` → `do_inject`) is where the real gate
-/// lives: it decides deliver-now vs. hold-pending off ITS OWN node-trust
-/// config (`should_deliver_now`/autogate — CONTRACTS.md §6), unconditionally
-/// forcing `submit=true` on its side regardless of what this caller's
-/// `--submit` flag says. So `--submit`/`--yes` are ACCEPTED but UNUSED
-/// here — there is nothing on this side left for them to gate — and NOT
-/// silently: [`ignored_remote_flags`] collects whichever of them was
-/// actually passed and both delivery-attempt arms below fold a note into
-/// the returned `Outcome` (`message` + `data.ignoredFlags`) so a caller who
+/// lives: every inject it receives parks for a human, whatever this caller's
+/// `--submit` flag says (CONTRACTS.md §6). So `--submit`/`--yes` are ACCEPTED
+/// but UNUSED here — there is nothing on this side left for them to gate — and
+/// NOT silently: [`ignored_remote_flags`] collects whichever of them was
+/// actually passed and both delivery-attempt arms below fold a note into the
+/// returned `Outcome` (`message` + `data.ignoredFlags`) so a caller who
 /// habitually passes them sees they did nothing, rather than guessing.
 ///
 /// No title auto-rename, no local provenance prefix: both are operations on
@@ -1224,21 +1653,22 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
 /// `--parent` (`aoide_client::commands::resolve_remote_parent`), because `send`
 /// has no `--parent` flag and the parent steering a child it spawned is exactly
 /// the caller the spawn path stamped into that child's `remoteParent`. The
-/// receiving door reads the claim as `remote_parent_match`: a match delivers
-/// without pending (`autogate-remote-parent`), a mismatch changes nothing. The
-/// env is never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1
-/// closes), so no daemon and no sealed ancestry simply means no claim.
+/// receiving door reads the claim only to stamp a spawn it admits, and a
+/// network door parks the send for a human whatever the claim says. The env is
+/// never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1 closes),
+/// so no daemon and no sealed ancestry simply means no claim.
 ///
 /// `Err` is the resolver's own "this node would sign a claim the far door
 /// refuses" case, and the two callers answer it differently because they were
-/// asked for different things. `node spawn` REFUSES the call (a caller who named
-/// a parentage gets one or hears why). A `send` DROPS the claim and delivers
+/// asked for different things. `node spawn` REFUSES the call (a caller who
+/// named a parentage gets one or hears why). A `send` DROPS the claim and sends
 /// anyway, naming the reason on one warning line: it was never asked for a
-/// parentage — the claim is an autogate shortcut, not the request — and the
-/// door's Inject arm reads a malformed claim as a non-match, never as a refusal
-/// (`a2a.rs`'s own `remote_parent_match`), so an unruly id costs this send the
-/// autogate and nothing else. Neither path lets one reach the wire: the one that
-/// refuses never signs, the other signs nothing.
+/// parentage — the claim is a label the far door may audit, not the request —
+/// and the door applies a malformed claim only to a spawn, so an inject
+/// carrying one proceeds as one with none (`a2a.rs`'s `claimed_remote_parent`).
+/// An unruly id costs this send its audit label and nothing else. Neither path
+/// lets one reach the wire: the one that refuses never signs, the other signs
+/// nothing.
 fn remote_parent_claim() -> Result<Option<String>, String> {
     aoide_client::commands::resolve_remote_parent(None)
 }
@@ -1414,7 +1844,10 @@ enum HookAction {
     /// unanswered AskUserQuestion); a settled `idle`/`done` session must not be
     /// flipped by the ~60s idle heartbeat.
     PhaseIfRunning { id: String, phase: String },
-    End { id: String },
+    /// The session ended. `continues`: the payload's `reason` is one the
+    /// profile names as leaving the harness process alive under another
+    /// session id, so the end is no death and says nothing to a spawner.
+    End { id: String, continues: bool },
 }
 
 /// Map ONE hook payload (`session_id`, `hook_event_name`, optional `cwd`) to a
@@ -1645,7 +2078,13 @@ fn map_hook(profile: &AgentProfile, payload: &Value) -> Option<HookAction> {
                 sub_id: format!("sub:{k}"),
             })
         }
-        HookClass::SessionEnd => Some(HookAction::End { id: id.to_string() }),
+        HookClass::SessionEnd => Some(HookAction::End {
+            id: id.to_string(),
+            continues: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| profile.session_end_continues.contains(&reason)),
+        }),
         // A DEDICATED needs-input event (kimi: `PermissionRequest`) — the same
         // unconditional `awaiting` a permission Notification yields. Claude's
         // map can never produce this class at the top level (its Awaiting only
@@ -1665,7 +2104,7 @@ fn map_hook(profile: &AgentProfile, payload: &Value) -> Option<HookAction> {
 /// profile — the test-facing wrapper (production resolves the profile from
 /// `--agent` via [`hook_profile_for`] and calls [`hook_for_profile`]).
 #[cfg(test)]
-fn hook_from_str(buf: &str) -> Outcome {
+pub(super) fn hook_from_str(buf: &str) -> Outcome {
     let profile = agent_profile(CLAUDE_PROFILE.name).expect("the claude profile is registered");
     hook_for_profile(profile, buf)
 }
@@ -1791,6 +2230,7 @@ fn own_parent_claim() -> Option<String> {
 /// `None` → nothing touched, no error (fail-closed, never a guess from
 /// cwd/title/workspace).
 fn hook_ensure_session(
+    door: Door,
     profile: &AgentProfile,
     payload: &Value,
     id: &str,
@@ -1798,7 +2238,16 @@ fn hook_ensure_session(
     attest: bool,
     claim: Option<&str>,
 ) -> Option<ParentClaim> {
-    hook_ensure_session_with(profile, payload, id, hook_pid, attest, real_attested_wrap, claim)
+    hook_ensure_session_with(
+        door,
+        profile,
+        payload,
+        id,
+        hook_pid,
+        attest,
+        real_attested_wrap,
+        claim,
+    )
 }
 
 /// [`hook_ensure_session`]'s actual body, parameterized over the
@@ -1821,6 +2270,7 @@ fn hook_ensure_session(
 /// turns that into the outcome's trace, because only the caller knows which arm
 /// this hook arrived on ([`claim_trace`]).
 fn hook_ensure_session_with(
+    door: Door,
     profile: &AgentProfile,
     payload: &Value,
     id: &str,
@@ -1834,7 +2284,9 @@ fn hook_ensure_session_with(
     }
     let attested = attest.then(|| hook_pid.and_then(&resolve_wrap)).flatten();
     if let Some(w) = attested.as_deref() {
-        stamp_attested_parent(id, w);
+        if live_harness_anchoring(id, hook_pid).is_none() {
+            stamp_attested_parent(id, w);
+        }
     }
     let reported = vouched_payload_pid(payload, hook_pid);
     let existing = load_stage::<SessionsFile>(&sessions_path()).ok();
@@ -1903,6 +2355,7 @@ fn hook_ensure_session_with(
         hook_pid.and_then(discover_window_from).map(|(addr, _)| addr)
     };
     let _ = do_hook_session_start(
+        door,
         id,
         Some(profile.name),
         cwd.as_deref(),
@@ -1922,7 +2375,14 @@ fn hook_ensure_session_with(
 /// [`hook_for_profile_gated`] directly with the real `may_ring` value.
 #[cfg(test)]
 fn hook_for_profile(profile: &'static AgentProfile, buf: &str) -> Outcome {
-    hook_for_profile_gated(profile, buf, true, Some(std::process::id() as i32), own_parent_claim().as_deref())
+    hook_for_profile_gated(
+        Door::Cli,
+        profile,
+        buf,
+        true,
+        Some(std::process::id() as i32),
+        own_parent_claim().as_deref(),
+    )
 }
 
 /// `may_ring` gates ONLY the Stop-hook ring replay inside `HookAction::
@@ -1940,6 +2400,7 @@ fn hook_for_profile(profile: &'static AgentProfile, buf: &str) -> Outcome {
 /// passed in — never read here, so the daemon-routed path can never pick up
 /// `aoided`'s own `AOIDE_SESSION_ID` (see [`own_parent_claim`]).
 fn hook_for_profile_gated(
+    door: Door,
     profile: &'static AgentProfile,
     buf: &str,
     may_ring: bool,
@@ -1959,7 +2420,21 @@ fn hook_for_profile_gated(
     // mapping (identity for claude; kimi's prompt array, tool_call_id, and
     // agent_name land on user_prompt / tool_use_id / agent_type).
     (profile.normalize_payload)(&mut payload);
-    let Some(action) = map_hook(profile, &payload) else {
+    let action = map_hook(profile, &payload);
+    // A harness never reports under its wrap's own id: a hook child, which is
+    // what a wrap hosts, has an id of its own. So a payload naming a protected
+    // live wrap is ignored whole, whatever its event, before any arm or stamp
+    // below can act on it. Only a SessionStart is left to its arm, which judges
+    // it field by field against the same record ([`protected_wrap`]) and writes
+    // nothing either way (CONTRACTS, rule 2).
+    if !matches!(action, Some(HookAction::Start { .. })) {
+        let named = payload.get("session_id").and_then(Value::as_str).filter(|s| !s.is_empty());
+        if let Some(id) = named.filter(|id| protected_wrap(id).is_some()) {
+            audit_ignored_wrap_hook(door, id);
+            return noop("live-sealed-wrap");
+        }
+    }
+    let Some(action) = action else {
         // Even an event this door has no graph ACTION for (kimi's
         // PreCompact/StopFailure, a Notification whose detail classifies as
         // neither awaiting tier, …) still carries the harness's own raw
@@ -1995,6 +2470,29 @@ fn hook_for_profile_gated(
     let mut claim_note: Option<String> = None;
     let inner = match action {
         HookAction::Start { id, cwd } => {
+            // First, ahead of `clear_stale_parent` and every other write below:
+            // a start under the reserved `sub:` prefix is refused before it can
+            // touch the sub-agent node that holds the id.
+            if let Some(refusal) = reserved_id_refusal("session.start", &id) {
+                return fold_hook_outcome(cmd, refusal, None, claim_note);
+            }
+            // A SessionStart re-chains and re-parents an id that is already
+            // registered, so one from outside its live harness is refused
+            // whole: nothing moves, and the hook still exits ok and says so
+            // only in its audited outcome, which names the session and its
+            // harness.
+            if let Some(harness) = live_harness_anchoring(&id, hook_pid) {
+                return Outcome::ok(
+                    cmd,
+                    format!("no-op: session `{id}` is anchored to its live harness (pid {harness})"),
+                )
+                .with_data(json!({
+                    "action": "none",
+                    "reason": "harness-anchored",
+                    "sessionId": id,
+                    "harness": harness,
+                }));
+            }
             // A claude launched INSIDE a conducted session inherits its parent's
             // `AOIDE_SESSION_ID` in the HOOK PROCESS's env — thread it as the
             // parent so a claude-conducting-claude (or a claude-in-a-shell) nests
@@ -2072,7 +2570,8 @@ fn hook_for_profile_gated(
             // boundary.
             let mid_turn = stored_phase(&id) == "working";
             let pid = vouched_payload_pid(&payload, hook_pid);
-            let out = do_hook_session_start(
+            let (out, wrote_nothing) = do_hook_session_start(
+                door,
                 &id,
                 Some(profile.name),
                 cwd.as_deref(),
@@ -2081,6 +2580,13 @@ fn hook_for_profile_gated(
                 pid,
                 &chain,
             );
+            // A start refused or judged on a protected live wrap wrote nothing,
+            // so nothing lands after it: no `sessionStartAt`, no lane run, no
+            // phase fold, and none of the stamps after this match (CONTRACTS,
+            // rule 2).
+            if wrote_nothing {
+                return fold_hook_outcome(cmd, out, None, claim_note);
+            }
             // The harness's own hello, timestamped: the one writer of
             // `sessionStartAt`, and the fact a first-turn injection waits on
             // (`wait_ready`). Stamped AFTER `do_hook_session_start` above, so the
@@ -2119,7 +2625,7 @@ fn hook_for_profile_gated(
             // env-parent threading), fresh idle. Attested (`Some(hook_pid)`):
             // this arm fires once per turn (Stop/UserPromptSubmit/Awaiting),
             // the rate the re-parenting walk is actually worth paying.
-            claim_note = hook_ensure_session(profile, &payload, &id, hook_pid, true, claim)
+            claim_note = hook_ensure_session(door, profile, &payload, &id, hook_pid, true, claim)
                 .and_then(|c| claim_trace(&c, may_ring));
             // Backfill a still-empty windowAddress on any later hook — covers a
             // session that registered before the window mapped (or before this
@@ -2213,7 +2719,7 @@ fn hook_for_profile_gated(
         HookAction::PhaseIfRunning { id, phase } => {
             // Attested — the other once-per-turn hook (an idle ping outside
             // an active turn), same rate as the `Phase` self-heal above.
-            claim_note = hook_ensure_session(profile, &payload, &id, hook_pid, true, claim)
+            claim_note = hook_ensure_session(door, profile, &payload, &id, hook_pid, true, claim)
                 .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&id, hook_pid);
             do_session_phase_if(&id, &phase, "working")
@@ -2228,7 +2734,9 @@ fn hook_for_profile_gated(
             // call; the walk buys nothing here (a wrap cannot change
             // mid-tool-call), so only the pid refresh / fresh registration
             // below runs.
-            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+            claim_note = hook_ensure_session(
+                door, profile, &payload, &session, hook_pid, false, claim,
+            )
                 .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session, hook_pid);
             // Spawn the child FIRST so it exists before its parent's activity
@@ -2246,7 +2754,9 @@ fn hook_for_profile_gated(
         } => {
             // Unattested — PostToolUse, the same every-tool-call rate as
             // ToolStart above.
-            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+            claim_note = hook_ensure_session(
+                door, profile, &payload, &session, hook_pid, false, claim,
+            )
                 .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session, hook_pid);
             if let Some(sub) = end_sub {
@@ -2264,7 +2774,9 @@ fn hook_for_profile_gated(
             to_sub_id,
         } => {
             // Unattested — a subagent handoff, not a wrap change.
-            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+            claim_note = hook_ensure_session(
+                door, profile, &payload, &session, hook_pid, false, claim,
+            )
                 .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session, hook_pid);
             do_subagent_rekey(&from_sub_id, &to_sub_id);
@@ -2284,7 +2796,9 @@ fn hook_for_profile_gated(
             create,
         } => {
             // Unattested — same reasoning as SubRekey above.
-            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+            claim_note = hook_ensure_session(
+                door, profile, &payload, &session, hook_pid, false, claim,
+            )
                 .and_then(|c| claim_trace(&c, may_ring));
             do_subagent_spawn(&sub_id, &session, &agent_type, &agent_type, create);
             Outcome::ok("session.hook", format!("subagent {sub_id}"))
@@ -2293,7 +2807,9 @@ fn hook_for_profile_gated(
             do_subagent_end(&sub_id);
             Outcome::ok("session.hook", format!("subagent end {sub_id}"))
         }
-        HookAction::End { id } => do_session_end(&id),
+        // A process that lives on has no death to attest: the end is real and
+        // says nothing to the spawner.
+        HookAction::End { id, continues } => do_session_end(&id, hook_pid, !continues),
     };
     // Publish a harness-reported context-window ceiling onto the record
     // IMMEDIATELY (every hook carries it — pi's extension reads the active
@@ -2365,13 +2881,22 @@ fn hook_for_profile_gated(
             refresh_subagent_says(profile, sid, cwd);
         }
     }
-    // Fold the inner outcome into an ok envelope — exit 0, no matter what.
-    // The check lane's note (if SessionStart or the PromptSubmit drain
-    // produced one — Stop itself never does, see the `phase == "stopped"`
-    // gate above) rides on the SAME message, separated by an em dash: this is
-    // the one text channel that actually reaches the harness
-    // (`hooks::door_command`'s claude wrapper stopped swallowing stdout for
-    // exactly this reason), so the note has nowhere else to go.
+    fold_hook_outcome(cmd, inner, lane_note, claim_note)
+}
+
+/// Fold the inner outcome into an ok envelope — exit 0, no matter what.
+/// The check lane's note (if SessionStart or the PromptSubmit drain
+/// produced one — Stop itself never does, see the `phase == "stopped"`
+/// gate in [`hook_for_profile_gated`]) rides on the SAME message, separated
+/// by an em dash: this is the one text channel that actually reaches the
+/// harness (`hooks::door_command`'s claude wrapper stopped swallowing stdout
+/// for exactly this reason), so the note has nowhere else to go.
+fn fold_hook_outcome(
+    cmd: &str,
+    inner: Outcome,
+    lane_note: Option<String>,
+    claim_note: Option<String>,
+) -> Outcome {
     let note_for_data = lane_note.clone();
     let claim_for_data = claim_note.clone();
     let message = match (lane_note, claim_note) {
@@ -2450,6 +2975,18 @@ const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
 /// the one of the three that is not ordinary same-uid input.
 pub const DAEMON_PEER_PID_FLAG: &str = "__daemon-peer-pid";
 
+/// The door's own peer pid on a daemon-run invocation
+/// ([`DAEMON_PEER_PID_FLAG`]), or `None` when the door stamped none.
+/// `session_end_caller` reads it only on `Door::Daemon`, which the daemon
+/// builds literally. `session_hook` reads it wherever the forwarded payload
+/// ([`STDIN_PAYLOAD_FLAG`]) rides, and no other door can carry either key: the
+/// daemon overwrites the stamp, the CLI refuses a flag its command does not
+/// declare, and the MCP and A2A doors build their flags from declared names. So
+/// a flag typed by a caller never passes for a kernel fact.
+pub(in crate::graph) fn door_pid(inv: &Invocation) -> Option<i32> {
+    inv.flags.get(DAEMON_PEER_PID_FLAG).and_then(|s| s.parse::<i32>().ok()).filter(|p| *p > 0)
+}
+
 /// Internal-only flag key carrying the HOOK PROCESS's own `AOIDE_SESSION_ID`
 /// across the same daemon hop the payload rides — never set by a real
 /// CLI/MCP/A2A caller, never registered in `commands/graph.rs`'s `flags:`
@@ -2481,7 +3018,9 @@ const HOOK_PARENT_FLAG: &str = "__daemon-hook-parent";
 /// second time on the daemon's side, so the already-read bytes ride along
 /// on [`STDIN_PAYLOAD_FLAG`] instead of the wire growing a new field. The
 /// daemon-side invocation (flag present) skips both the routing attempt AND
-/// the real stdin read, using the forwarded payload directly.
+/// the real stdin read, using the forwarded payload directly. Only the CLI
+/// door routes ([`hook_as_read`]). A door that cannot approve is refused before
+/// any stdin is read, so no other door reaches this arm.
 ///
 /// **The two arms, and the one rule between them.** The hook is the only
 /// process that can read what a harness reports about itself — its own pid and
@@ -2497,6 +3036,22 @@ const HOOK_PARENT_FLAG: &str = "__daemon-hook-parent";
 /// launcher.
 pub fn session_hook(inv: &Invocation) -> Outcome {
     use std::io::Read;
+    // Refused before stdin is read. A hook registers sessions and re-stamps their
+    // parents from a payload its own process reads: that is a harness's hook
+    // subprocess, which is the CLI, and a door that cannot approve must not move
+    // a session's parent (`reparent_refusal`). Over stdio MCP the stdin is the
+    // JSON-RPC stream itself, so reading it would also swallow the caller's
+    // next requests.
+    if let Some(refusal) = common::refuse_unapproving_door(
+        inv,
+        "session.hook",
+        "the hook door is not open to this door".to_string(),
+        "a hook registers sessions and moves their parents from a payload on its own stdin, \
+         and moving a parent is approving",
+        Fix::None("a harness runs `aoide session hook` itself, from its hook command"),
+    ) {
+        return refusal;
+    }
     let profile = match hook_profile_for(inv) {
         Ok(p) => p,
         Err(o) => return o,
@@ -2506,9 +3061,9 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
     // the same ruling `doorbell.rs`'s own module doc states. `invocation_
     // from_dispatch_request` (`aoide-server`'s `daemon.rs`) builds a
     // `Door::Daemon` invocation LITERALLY, never off the wire, so this is
-    // trustworthy on both branches below: the STDIN_PAYLOAD_FLAG branch is
-    // exactly that routed invocation, and the local-fallback branch's `inv`
-    // is whatever door the ORIGINAL caller actually used.
+    // trustworthy on both arms: the STDIN_PAYLOAD_FLAG branch below is
+    // exactly that routed invocation, and `hook_as_read`'s `inv` is whatever
+    // door the ORIGINAL caller actually used.
     let may_ring = inv.door == Door::Daemon;
     if let Some(payload) = inv.flags.get(STDIN_PAYLOAD_FLAG) {
         // Daemon side: the ONLY pid this arm may walk is the door's own
@@ -2520,19 +3075,28 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
         // and stamps no ancestry, never falling back to this process's own —
         // that would be `aoided`'s ancestry, the false fact this door exists to
         // stop recording.
-        let door_pid = inv
-            .flags
-            .get(DAEMON_PEER_PID_FLAG)
-            .and_then(|s| s.parse::<i32>().ok())
-            .filter(|p| *p > 0);
+        let door_pid = door_pid(inv);
         // The claim comes off the wire or not at all — deliberately no env
         // fallback here (`own_parent_claim`'s own doc). It is CHECKED against
         // `door_pid`'s ancestry before it is used.
         let claim = inv.flags.get(HOOK_PARENT_FLAG).map(String::as_str).filter(|p| !p.is_empty());
-        return hook_for_profile_gated(profile, payload, may_ring, door_pid, claim);
+        return hook_for_profile_gated(inv.door, profile, payload, may_ring, door_pid, claim);
     }
     let mut buf = String::new();
     let _ = std::io::stdin().lock().read_to_string(&mut buf);
+    hook_as_read(inv, profile, buf)
+}
+
+/// The hook process's own arm, once its payload is read: route it to the
+/// daemon or run it here. Only the CLI door routes. The daemon runs whatever
+/// it receives as `Door::Daemon`, which is the one door whose Stop hook rings
+/// a parent's armed mailboxes (`may_ring`), so a hook from MCP or the network
+/// door that reached it would ring as the daemon's own.
+/// `aoide_client::daemon::daemon_dispatch` answers `None` for every other
+/// door. A non-approving door never reaches this function, so `may_ring` is
+/// false only where a test calls it directly.
+pub(in crate::graph) fn hook_as_read(inv: &Invocation, profile: &'static AgentProfile, buf: String) -> Outcome {
+    let may_ring = inv.door == Door::Daemon;
     // THIS process is the hook: its own pid IS the kernel fact, and its own env
     // claim is the harness's launcher. Read once, so a daemon appearing or dying
     // between two events cannot change the answer.
@@ -2553,7 +3117,7 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
         return outcome;
     }
     // Local, no-daemon fallback: THIS process is the hook itself.
-    hook_for_profile_gated(profile, &buf, may_ring, Some(hook_pid), claim.as_deref())
+    hook_for_profile_gated(inv.door, profile, &buf, may_ring, Some(hook_pid), claim.as_deref())
 }
 
 #[cfg(test)]
@@ -2566,7 +3130,23 @@ mod tests {
     use crate::graph::model::{hooks_path, merged_sessions, HooksFile, SessionRecord};
     use crate::graph::testutil::*;
     use aoide_test_support::{accept_one, expect_delivery, read_delivery};
-    use crate::graph::session_store::{do_hook_session_start, do_session_start, stamp_seal};
+    use crate::graph::session_store::{
+        do_hook_session_start, do_session_start, stamp_attested_spawner, stamp_seal,
+    };
+
+    #[test]
+    fn attested_parent_is_honoured_only_where_the_spawn_stamp_names_it() {
+        let rec = |parent: Option<&str>, attested: Option<&str>| SessionRecord {
+            parent_session_id: parent.map(str::to_string),
+            attested_spawner: attested.map(str::to_string),
+            ..session("c", "/w", "idle", "t", None)
+        };
+        assert_eq!(attested_parent_of(&rec(Some("p"), Some("p"))), Some("p"));
+        assert_eq!(attested_parent_of(&rec(Some("p"), None)), None, "a bare --parent edge");
+        assert_eq!(attested_parent_of(&rec(Some("p"), Some("q"))), None, "a rewritten edge");
+        assert_eq!(attested_parent_of(&rec(None, Some("p"))), None, "a stamp with no edge");
+        assert_eq!(attested_parent_of(&rec(Some(""), Some(""))), None);
+    }
 
     #[test]
     fn parent_autogate_decision_is_exact_and_guarded() {
@@ -3829,6 +4409,777 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    // ── Approval doors: which door may approve a gated send ─────────────────
+
+    fn send_on(door: Door, args: &[&str], flags: &[(&str, &str)]) -> Invocation {
+        Invocation {
+            door,
+            ..send_invocation(args, flags)
+        }
+    }
+
+    /// Stage a conductable target whose socket is a stand-in listener, so a
+    /// test can prove by `accept` whether anything reached it. The caller
+    /// owns the env (`EnvVars::save` + the stage it points at).
+    fn door_fixture(tag: &str, parent: Option<&str>) -> (std::path::PathBuf, String, UnixListener) {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let id = format!("{tag}-target");
+        let socket = conduct_socket_path(&id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        do_session_start(
+            &id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            parent,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        (root, id, listener)
+    }
+
+    /// [`door_fixture`] with its parent edge kernel-backed, the way `conduct`
+    /// writes it: the parent rule reads an edge only where its stamp names the
+    /// same parent (see `attested_parent_of`).
+    fn attested_door_fixture(tag: &str, parent: &str) -> (std::path::PathBuf, String, UnixListener) {
+        let (root, id, listener) = door_fixture(tag, Some(parent));
+        stamp_attested_spawner(&id, Some(parent));
+        (root, id, listener)
+    }
+
+    fn nothing_connected(listener: &UnixListener) -> bool {
+        matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock)
+    }
+
+    const DOOR_ENV: &[&str] = &[
+        "AOIDE_STAGE_DIR",
+        "XDG_RUNTIME_DIR",
+        "AOIDE_AUDIT_LOG",
+        "AOIDE_CONDUCT_AUTOGATE",
+        "AOIDE_SESSION_ID",
+        "AOIDE_CONDUCT_SIBLING_AUTOGATE",
+    ];
+
+    /// Path 1 of the audit: `--yes` on a send from an MCP or A2A door. The
+    /// send still parks, reaches nothing, and carries the taught line.
+    #[test]
+    fn a_yes_send_from_a_remote_door_parks_and_never_reaches_the_socket() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        for (door, tag) in [(Door::Mcp, "door-yes-mcp"), (Door::A2a, "door-yes-a2a")] {
+            let (root, id, listener) = door_fixture(tag, None);
+            let out = session_send(&send_on(
+                door,
+                &["do", "a", "thing"],
+                &[("id", &id), ("submit", "true"), ("yes", "true")],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{door:?}: {}", out.message);
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["state"], "pending", "{door:?}");
+            assert_eq!(data["gate"], "pending", "{door:?}");
+            assert_eq!(data["approvalRefused"], true, "{door:?}");
+            assert!(out.message.contains(DOOR_CANNOT_APPROVE), "{door:?}: {}", out.message);
+            assert!(nothing_connected(&listener), "{door:?}: a refused approval delivers nothing");
+            let pf: PendingFile = load_stage(&pending_path()).unwrap();
+            assert!(pf.pending.iter().any(|p| p.session_id == id && p.text == "do a thing"), "{door:?}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    fn queued() -> Vec<PendingSend> {
+        load_stage::<PendingFile>(&pending_path()).map(|f| f.pending).unwrap_or_default()
+    }
+
+    fn queued_from(from: &str) -> Vec<String> {
+        queued().into_iter().filter(|p| p.from.as_deref() == Some(from)).map(|p| p.text).collect()
+    }
+
+    fn audit_lines(root: &Path) -> Vec<Value> {
+        std::fs::read_to_string(root.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .collect()
+    }
+
+    /// Fill `from`'s bucket the way the A2A door does, through the one seam it
+    /// uses for text it holds outside `session_send`.
+    fn fill_bucket(id: &str, from: &str) -> Vec<String> {
+        let texts: Vec<String> = (0..PENDING_CAP_PER_SOURCE).map(|n| format!("{from} #{n}")).collect();
+        for text in &texts {
+            hold_pending(id, text, true, Some(from)).unwrap();
+        }
+        texts
+    }
+
+    /// The pending queue holds at most `PENDING_CAP_PER_SOURCE` sends per
+    /// source. On the CLI door the source is the attribution the send resolved.
+    /// The next one from a full source is refused and audited, the first N stay
+    /// exactly as queued, and another source still queues.
+    #[test]
+    fn a_full_source_is_refused_and_audited_and_another_source_still_queues() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("pending-cap", None);
+        let send_from = |from: &str, text: &str| {
+            session_send(&send_on(Door::Cli, &[text], &[("id", &id), ("from", from)]))
+        };
+        let first: Vec<String> = (0..PENDING_CAP_PER_SOURCE).map(|n| format!("send {n}")).collect();
+        for text in &first {
+            let out = send_from("flooder", text);
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        }
+
+        let out = send_from("flooder", "one too many");
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], PENDING_FULL);
+        assert_eq!(data["from"], "flooder");
+        assert_eq!(data["cap"], PENDING_CAP_PER_SOURCE);
+        assert_eq!(queued_from("flooder"), first, "the first N are intact, in order");
+        let refused = audit_lines(&root)
+            .into_iter()
+            .find(|r| r["status"] == "refused")
+            .expect("the refusal is audited");
+        assert_eq!(refused["untrusted_data"], "one too many", "{refused}");
+        assert!(refused["message"].as_str().unwrap().contains("flooder"), "{refused}");
+
+        let out = send_from("someone-else", "still welcome");
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("someone-else"), ["still welcome"]);
+        assert!(nothing_connected(&listener), "a door that cannot approve delivers nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One entry is bounded in size as well as in number: a send whose entry
+    /// serializes past `PENDING_ENTRY_MAX_BYTES` is refused with a taught
+    /// refusal and audited with only the head of its text, the queue is
+    /// untouched, and one just under the cap still queues. The A2A door's seam
+    /// (`hold_pending`) answers `TooLarge` too, so it can tell its caller.
+    #[test]
+    fn an_entry_over_the_byte_cap_is_refused_audited_and_leaves_the_queue_alone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("pending-bytes", None);
+        let near = "a".repeat(PENDING_ENTRY_MAX_BYTES - 1024);
+        let out = session_send(&send_on(Door::Mcp, &[near.as_str()], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "under the cap queues: {}", out.message);
+        assert_eq!(queued().len(), 1);
+
+        let big = format!("head-of-it {}", "b".repeat(PENDING_ENTRY_MAX_BYTES));
+        for door in [Door::Mcp, Door::Cli, Door::A2a] {
+            let out = session_send(&send_on(door, &[big.as_str()], &[("id", &id), ("from", "flooder")]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["reason"], PENDING_TOO_LARGE, "{door:?}: {data}");
+            assert_eq!(data["maxBytes"], PENDING_ENTRY_MAX_BYTES);
+            assert!(data["bytes"].as_u64().unwrap() as usize > PENDING_ENTRY_MAX_BYTES);
+            assert!(data["refusal"]["why"].is_string() && data["refusal"]["fix"]["none"].is_string(), "taught: {data}");
+            // A door that can approve has a way out, and the line names it: the
+            // refusal would otherwise leave a human with no path to deliver.
+            let fix = data["refusal"]["fix"]["none"].as_str().unwrap();
+            assert_eq!(fix.contains("--yes"), matches!(door, Door::Cli), "{door:?}: {fix}");
+        }
+        assert_eq!(queued().len(), 1, "nothing of an oversize send was queued");
+        let refused: Vec<Value> = audit_lines(&root).into_iter().filter(|r| r["status"] == "refused").collect();
+        assert_eq!(refused.len(), 3, "each refusal is audited: {refused:?}");
+        for r in &refused {
+            let kept = r["untrusted_data"].as_str().unwrap();
+            assert!(kept.starts_with("head-of-it"), "the audit keeps the head: {r}");
+            assert!(kept.chars().count() <= AUDIT_REFUSED_TEXT_MAX, "and only the head: {}", kept.len());
+        }
+
+        let held = hold_pending(&id, &big, true, Some("node:big"));
+        assert!(matches!(held, Err(HoldRefused::TooLarge(n)) if n > PENDING_ENTRY_MAX_BYTES), "{held:?}");
+        assert_eq!(queued().len(), 1);
+        assert!(nothing_connected(&listener), "a door that cannot approve delivers nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The MCP door derives its own source, so an MCP caller cannot name
+    /// another's. `--from node:victim` is refused with a taught refusal: nothing
+    /// of it is queued, the victim's bucket (full, written by the A2A door's own
+    /// seam) is exactly as it was, and the approver is shown no `node:victim`
+    /// entry the victim did not send. The refusal is audited with the door and
+    /// the claim, not as a `from`.
+    #[test]
+    fn an_mcp_caller_cannot_name_a_node_as_its_source() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("mcp-node-claim", None);
+        let victim = fill_bucket(&id, "node:victim");
+
+        let out = session_send(&send_on(Door::Mcp, &["phish"], &[("id", &id), ("from", "node:victim")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], RESERVED_FROM);
+        assert!(out.message.contains("node:victim"), "{}", out.message);
+        assert!(data["refusal"]["why"].as_str().unwrap().contains("door"), "taught why: {data}");
+        assert!(data["refusal"]["fix"]["none"].is_string(), "taught fix: {data}");
+        assert_eq!(queued_from("node:victim"), victim, "the victim's bucket is exactly as it was");
+        assert!(queued().iter().all(|p| p.text != "phish"), "nothing of the refused send is queued");
+
+        let refused = audit_lines(&root)
+            .into_iter()
+            .find(|r| r["status"] == "refused")
+            .expect("the refusal is audited");
+        let message = refused["message"].as_str().unwrap();
+        assert_eq!(refused["door"], "mcp", "{refused}");
+        assert!(message.contains("claims \"node:victim\""), "the claim is named as a claim: {message}");
+        assert!(!message.contains("(from node:victim)"), "and never as the sender: {message}");
+
+        let out = session_send(&send_on(Door::Mcp, &["honest"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("mcp"), ["honest"], "an MCP caller is queued under the MCP door");
+        assert!(nothing_connected(&listener));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every other door is held to the same rule for the spellings a door
+    /// derives: a CLI caller cannot claim a node, an address, or the MCP door.
+    #[test]
+    fn a_cli_send_cannot_spell_a_source_only_a_door_derives() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("cli-door-source", None);
+        for spelled in ["node:victim", "addr:192.0.2.9", "mcp", "mcp:some-session"] {
+            let out = session_send(&send_on(Door::Cli, &["phish"], &[("id", &id), ("from", spelled)]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{spelled}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], RESERVED_FROM, "{spelled}");
+        }
+        assert!(queued().is_empty(), "none of them queued");
+
+        let out = session_send(&send_on(Door::Cli, &["fine"], &[("id", &id), ("from", "orchestrator-1")]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("orchestrator-1"), ["fine"], "an ordinary label still keys its own bucket");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Rotating `--from` over MCP escapes nothing: the cap key is the door's,
+    /// so every label lands in one bucket and the next send is refused. The
+    /// labels survive as claims, a node's own bucket is not touched, and the
+    /// refusal names the bucket the caller really sits in.
+    #[test]
+    fn rotating_from_over_mcp_does_not_escape_the_cap() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("mcp-rotate", None);
+        for n in 0..PENDING_CAP_PER_SOURCE {
+            let out = session_send(&send_on(
+                Door::Mcp,
+                &[&format!("send {n}")],
+                &[("id", &id), ("from", &format!("label-{n}"))],
+            ));
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{n}: {}", out.message);
+        }
+        let held = queued();
+        assert!(held.iter().all(|p| p.from.as_deref() == Some("mcp")), "one bucket for every label");
+        assert_eq!(held[3].claimed.as_deref(), Some("label-3"), "the label is kept, as a claim");
+
+        let out = session_send(&send_on(Door::Mcp, &["one more"], &[("id", &id), ("from", "label-fresh")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], PENDING_FULL);
+        assert_eq!(data["from"], "mcp");
+        assert_eq!(queued().len(), PENDING_CAP_PER_SOURCE, "nothing was added");
+
+        hold_pending(&id, "from a node", true, Some("node:peer")).expect("a node's own bucket is unaffected");
+        assert_eq!(queued_from("node:peer"), ["from a node"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An MCP caller with an attested session behind it is bucketed by that
+    /// session, so one agent filling its bucket does not turn another away.
+    /// A caller with none shares the MCP bucket.
+    #[test]
+    fn an_mcp_callers_attested_session_has_a_bucket_of_its_own() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("mcp-attested", None);
+        let send_as = |attested: Option<&str>, text: &str| {
+            let attested = attested.map(str::to_string);
+            deliver_local_with(&send_on(Door::Mcp, &[text], &[("id", &id), ("from", "same-label")]), &id, move |_| {
+                attested.clone()
+            })
+        };
+        for n in 0..PENDING_CAP_PER_SOURCE {
+            send_as(Some("sess-a"), &format!("a {n}"));
+        }
+        assert_eq!(queued_from("mcp:sess-a").len(), PENDING_CAP_PER_SOURCE);
+
+        let out = send_as(Some("sess-a"), "a too many");
+        assert_eq!(out.data.as_ref().unwrap()["reason"], PENDING_FULL, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["from"], "mcp:sess-a");
+
+        send_as(Some("sess-b"), "b 0");
+        send_as(None, "nobody 0");
+        assert_eq!(queued_from("mcp:sess-b"), ["b 0"]);
+        assert_eq!(queued_from("mcp"), ["nobody 0"]);
+
+        let log = audit_lines(&root);
+        let pending = log.iter().find(|r| r["status"] == "pending").expect("a parked send is audited");
+        assert!(
+            pending["message"].as_str().unwrap().contains("from mcp:sess-a, claims \"same-label\""),
+            "the audit names the derived source first and the claim as a claim: {pending}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The label an MCP caller typed is cleaned before it is stored, so it
+    /// cannot carry a control sequence or a second line to an approver's screen.
+    #[test]
+    fn an_mcp_claim_is_cleaned_and_never_the_source() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("mcp-claim-clean", None);
+        let out = session_send(&send_on(
+            Door::Mcp,
+            &["hi"],
+            &[("id", &id), ("from", "boss\u{1b}[2J\nsecond line\u{202e}")],
+        ));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        let held = queued();
+        assert_eq!(held[0].from.as_deref(), Some("mcp"));
+        assert_eq!(held[0].claimed.as_deref(), Some("boss[2J second line"), "control and bidi marks gone, one line");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The A2A door's own resolution is recorded as the door gave it, and it
+    /// never falls back to the serving process's environment.
+    #[test]
+    fn the_a2a_doors_own_source_is_recorded_as_given() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("a2a-own-source", None);
+        std::env::set_var("AOIDE_SESSION_ID", "a-stray-session");
+        for (from, text) in [("node:peer", "from a node"), ("addr:192.0.2.9", "from an address")] {
+            let out = session_send(&send_on(Door::A2a, &[text], &[("id", &id), ("from", from)]));
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+            assert_eq!(queued_from(from), [text]);
+        }
+        let out = session_send(&send_on(Door::A2a, &["no source"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        let held = queued();
+        assert_eq!(held.last().unwrap().from, None, "no source stays none; the ambient session is not one");
+        assert!(held.iter().all(|p| p.claimed.is_none()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Path 2 of the audit: the box-wide autogate environment. It is read from
+    /// the dispatching process's own env (`autogate_env`), and it must not
+    /// approve a remote door's send. Controls: the same env still delivers
+    /// from the local CLI, so the door is what changed, not the env rule.
+    #[test]
+    fn the_autogate_env_never_approves_a_send_from_a_remote_door() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        for (door, tag) in [(Door::Mcp, "env-mcp"), (Door::A2a, "env-a2a")] {
+            let (root, id, listener) = door_fixture(tag, None);
+            std::env::set_var("AOIDE_CONDUCT_AUTOGATE", "1"); // after the fixture, which clears it.
+            let out = session_send(&send_on(door, &["hi"], &[("id", &id), ("submit", "true")]));
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["state"], "pending", "{door:?}: {}", out.message);
+            assert_eq!(data["approvalRefused"], false, "{door:?}: nothing was asked for");
+            assert!(nothing_connected(&listener), "{door:?}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        let (root, id, listener) = door_fixture("env-control-cli", None);
+        std::env::set_var("AOIDE_CONDUCT_AUTOGATE", "1");
+        let acc = expect_delivery(listener, "the autogate env still delivers from the local CLI");
+        let out = session_send(&send_invocation(&["hi"], &[("id", &id), ("submit", "true")]));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The resolver of a caller the kernel attests as session `who`.
+    fn attested(who: &'static str) -> impl Fn(&[SessionRecord]) -> Option<String> {
+        move |_| Some(who.to_string())
+    }
+
+    /// The MCP door is attested the way the CLI is: a caller whose ancestry
+    /// walks to a sealed session that parents the target earns the parent rule
+    /// and delivers, with no `--yes`. The provenance names the attested session,
+    /// never the label the caller typed, and the audit line records both, the
+    /// label as a claim. `deliver_local_with` takes the resolver as a parameter
+    /// so the test can name the parent without a live daemon.
+    #[test]
+    fn an_attested_mcp_parent_sends_to_its_own_child_and_it_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = attested_door_fixture("parent-mcp", "the-parent");
+        let acc = expect_delivery(listener, "an attested MCP parent's send reaches its child");
+        let out = deliver_local_with(
+            &send_on(Door::Mcp, &["hi"], &[("id", &id), ("submit", "true"), ("from", "boss")]),
+            &id,
+            attested("the-parent"),
+        );
+        let got = acc.join().unwrap();
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "delivered", "{}", out.message);
+        assert_eq!(data["gate"], "autogate-parent");
+        assert_eq!(String::from_utf8(got).unwrap(), "from the-parent: hi\r", "the attested session, not `boss`");
+        assert!(queued().is_empty(), "a delivered send parks nothing");
+        let delivered = audit_lines(&root)
+            .into_iter()
+            .find(|r| r["status"] == "delivered")
+            .expect("the delivery is audited");
+        assert_eq!(delivered["door"], "mcp", "{delivered}");
+        let message = delivered["message"].as_str().unwrap();
+        assert!(message.contains("from mcp:the-parent, claims \"boss\""), "{message}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Attestation buys the rules, not a pass: a caller the kernel names but who
+    /// neither parents nor shares a live parent with the target parks, in the
+    /// bucket of the session it proved.
+    #[test]
+    fn an_attested_mcp_sender_to_an_unrelated_session_parks() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("unrelated-mcp", Some("the-parent"));
+        let out = deliver_local_with(
+            &send_on(Door::Mcp, &["hi"], &[("id", &id), ("submit", "true")]),
+            &id,
+            attested("a-stranger"),
+        );
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "pending", "{}", out.message);
+        assert_eq!(data["gate"], "pending");
+        assert!(nothing_connected(&listener));
+        assert_eq!(queued_from("mcp:a-stranger"), ["hi"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A caller with no sealed ancestor earns nothing, even for a target that
+    /// has a parent: it parks in the MCP door's shared bucket.
+    #[test]
+    fn an_unattested_mcp_send_parks() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("unattested-mcp", Some("the-parent"));
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hi"], &[("id", &id)]), &id, |_| None);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert!(nothing_connected(&listener));
+        assert_eq!(queued_from("mcp"), ["hi"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The network door has no sealed ancestor to attest, so the parent rule is
+    /// closed to it whatever a resolver would say; the CLI is the control.
+    #[test]
+    fn the_a2a_door_parks_for_the_parent_a_resolver_would_name_and_the_cli_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = attested_door_fixture("parent-a2a", "the-parent");
+        let out = deliver_local_with(
+            &send_on(Door::A2a, &["hi"], &[("id", &id), ("submit", "true")]),
+            &id,
+            attested("the-parent"),
+        );
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert!(nothing_connected(&listener));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let (root, id, listener) = attested_door_fixture("parent-cli", "the-parent");
+        let acc = expect_delivery(listener, "the parent rule still delivers from the local CLI");
+        let out = deliver_local_with(
+            &send_on(Door::Cli, &["hi"], &[("id", &id), ("submit", "true")]),
+            &id,
+            attested("the-parent"),
+        );
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-parent");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The sibling rule is the CLI's too: an attested MCP sender and the target
+    /// share a live parent, so the send delivers, and the opt-out env parks it.
+    #[test]
+    fn an_attested_mcp_sibling_delivers_and_the_opt_out_parks() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = attested_door_fixture("sibling-mcp", "orch");
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, None);
+        do_session_start("sib-a", Some("claude"), Some("/w"), None, Some("orch"), None, None, None, None);
+        stamp_attested_spawner("sib-a", Some("orch"));
+
+        let acc = expect_delivery(listener, "an attested MCP sibling's send is delivered");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hey"], &[("id", &id)]), &id, attested("sib-a"));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-sibling", "{}", out.message);
+
+        std::env::set_var("AOIDE_CONDUCT_SIBLING_AUTOGATE", "0");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["again"], &[("id", &id)]), &id, attested("sib-a"));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("mcp:sib-a"), ["again"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// MCP never approves, however well attested. `--yes` is refused with the
+    /// taught line and the box-wide autogate switch is not read, so a caller the
+    /// kernel names but who is neither parent nor sibling parks exactly as an
+    /// unattested one does.
+    #[test]
+    fn an_attested_mcp_send_still_cannot_approve_with_yes_or_the_autogate_env() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("approve-mcp", Some("the-parent"));
+        let out = deliver_local_with(
+            &send_on(Door::Mcp, &["hi"], &[("id", &id), ("yes", "true")]),
+            &id,
+            attested("a-stranger"),
+        );
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "pending", "{}", out.message);
+        assert_eq!(data["approvalRefused"], true);
+        assert!(out.message.contains(DOOR_CANNOT_APPROVE), "{}", out.message);
+
+        std::env::set_var("AOIDE_CONDUCT_AUTOGATE", "1");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hi again"], &[("id", &id)]), &id, attested("a-stranger"));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert!(nothing_connected(&listener));
+        assert_eq!(queued_from("mcp:a-stranger"), ["hi", "hi again"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn start_on(door: Door, id: &str, parent: &str) -> Invocation {
+        Invocation {
+            path: vec!["session".to_string(), "start".to_string()],
+            args: Vec::new(),
+            flags: [("id", id), ("parent", parent)].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            door,
+        }
+    }
+
+    fn link_on(door: Door, child: &str, parent: &str) -> Invocation {
+        Invocation {
+            path: vec!["graph".to_string(), "link".to_string()],
+            args: vec![child.to_string(), parent.to_string()],
+            flags: BTreeMap::new(),
+            door,
+        }
+    }
+
+    fn parent_of(id: &str) -> Option<String> {
+        load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == id)
+            .and_then(|s| s.parent_session_id)
+    }
+
+    /// An attested MCP caller cannot adopt a session by writing itself in as its
+    /// parent: `session start --id T --parent me` is an upsert and `graph link`
+    /// a plain write, and the parent rule reads the field they set, so either
+    /// would turn "the parent may command its child" into "anyone may". Neither
+    /// door that cannot approve changes a record that exists, both refusals are
+    /// audited, and the send that follows parks. The CLI is the control: it
+    /// re-parents, and then the rule delivers.
+    #[test]
+    fn an_attested_mcp_caller_cannot_adopt_a_session_by_reparenting_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, id, listener) = door_fixture("reparent-mcp", Some("the-parent"));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("dead.sock"));
+
+        for door in [Door::Mcp, Door::A2a] {
+            for out in [
+                crate::graph::session_start(&start_on(door, &id, "me")),
+                crate::graph::link(&link_on(door, &id, "me")),
+            ] {
+                assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+                assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+                assert_eq!(parent_of(&id).as_deref(), Some("the-parent"), "{door:?}: the parent moved");
+            }
+        }
+        let refused: Vec<(String, String)> = audit_lines(&root)
+            .into_iter()
+            .filter(|r| r["status"] == "refused")
+            .map(|r| (r["command"].as_str().unwrap().to_string(), r["door"].as_str().unwrap().to_string()))
+            .collect();
+        for expected in [
+            ("session.start", "mcp"), ("graph.link", "mcp"), ("session.start", "a2a"), ("graph.link", "a2a"),
+        ] {
+            assert!(refused.contains(&(expected.0.to_string(), expected.1.to_string())), "{expected:?} in {refused:?}");
+        }
+
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hi"], &[("id", &id)]), &id, attested("me"));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert!(nothing_connected(&listener), "the adoption did not take, so nothing was typed");
+
+        // The same value again is not a change, so no door is refused for it.
+        let out = crate::graph::session_start(&start_on(Door::Mcp, &id, "the-parent"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+
+        // A door that can approve moves it, and the rule it feeds then delivers.
+        let out = crate::graph::session_start(&start_on(Door::Cli, &id, "me"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(parent_of(&id).as_deref(), Some("me"));
+        let out = crate::graph::link(&link_on(Door::Cli, &id, "the-parent"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(parent_of(&id).as_deref(), Some("the-parent"));
+        let out = crate::graph::session_start(&start_on(Door::Daemon, &id, "me"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        // The edge the rule reads is the kernel-backed stamp a spawn writes; a
+        // re-parent by a door that can approve moves the field, not the stamp.
+        stamp_attested_spawner(&id, Some("me"));
+        let acc = expect_delivery(listener, "the parent rule delivers once a door that can approve made it so");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["now"], &[("id", &id)]), &id, attested("me"));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Registering is not re-parenting: a session that does not exist yet takes
+    /// its parent from any door that registers today, so an orchestrator's MCP
+    /// server still builds its tree.
+    #[test]
+    fn a_new_session_registers_under_a_parent_over_mcp() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, _id, _listener) = door_fixture("register-mcp", None);
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("dead.sock"));
+        for (door, fresh) in [(Door::Mcp, "fresh-mcp"), (Door::A2a, "fresh-a2a")] {
+            let out = crate::graph::session_start(&start_on(door, fresh, "me"));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{door:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["inserted"], true);
+            assert_eq!(parent_of(fresh).as_deref(), Some("me"), "{door:?}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The hook door registers sessions and re-stamps their parents from a
+    /// payload on its own stdin, so it is a re-parenting path of its own. A door
+    /// that cannot approve is refused before the payload is read, and nothing it
+    /// carried is applied: a SessionStart for an existing session, with the
+    /// parent claim the process's own environment would supply, leaves it where
+    /// it was. The daemon door, which a harness's hook reaches, still applies it.
+    #[test]
+    fn a_hook_from_a_door_that_cannot_approve_moves_no_parent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, id, _listener) = door_fixture("hook-mcp", Some("the-parent"));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("dead.sock"));
+        let payload = format!(r#"{{"session_id":"{id}","hook_event_name":"SessionStart","cwd":"/w","source":"resume"}}"#);
+        let hook_on = |door| Invocation {
+            path: vec!["session".to_string(), "hook".to_string()],
+            args: Vec::new(),
+            flags: [(STDIN_PAYLOAD_FLAG, payload.as_str()), (HOOK_PARENT_FLAG, "me")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            door,
+        };
+        for door in [Door::Mcp, Door::A2a] {
+            let out = session_hook(&hook_on(door));
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+            assert_eq!(parent_of(&id).as_deref(), Some("the-parent"), "{door:?}: the hook moved the parent");
+        }
+        // The control: the door a real hook reaches runs it. With no peer pid to
+        // check the claim against, the resumed session registers parentless and
+        // its stale parent is cleared, which is what the refused doors must not do.
+        let out = session_hook(&hook_on(Door::Daemon));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(parent_of(&id).as_deref(), Some("the-parent"), "the daemon door is not refused");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `conduct` registers its child under any `--parent` and over any
+    /// non-conductable `--id`, and runs its command at once; it is not a door
+    /// that cannot approve may reach. Nothing launches and nothing registers.
+    #[cfg(unix)]
+    #[test]
+    fn conduct_from_a_door_that_cannot_approve_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, _listener) = door_fixture("conduct-mcp", Some("the-parent"));
+        let marker = root.join("ran");
+        let touch = format!("touch {}", marker.display());
+        for door in [Door::Mcp, Door::A2a] {
+            let out = crate::graph::conduct::session_conduct(&Invocation {
+                path: vec!["conduct".to_string()],
+                args: vec!["sh".to_string(), "-c".to_string(), touch.clone()],
+                flags: [("id", id.as_str()), ("parent", "me")]
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                door,
+            });
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "door-cannot-approve", "{door:?}");
+        }
+        assert!(!marker.exists(), "the command ran");
+        assert_eq!(parent_of(&id).as_deref(), Some("the-parent"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The same, with the production resolver and no injection: a fake daemon
+    /// answers the key fetch, this test process is the sealed session that
+    /// parents the target, and `session_send` over MCP walks its own ancestry to
+    /// it. Without the seal the identical send parks, and so does the network
+    /// door with it.
+    #[cfg(unix)]
+    #[test]
+    fn the_real_resolver_attests_an_mcp_send_by_the_callers_sealed_ancestor() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, id, listener) = attested_door_fixture("real-mcp", "orch");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        let me = std::process::id();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me));
+
+        let out = session_send(&send_on(Door::Mcp, &["unsealed"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "an unsealed ancestor attests nothing");
+        assert!(nothing_connected(&listener));
+
+        seal_record("orch", &kp);
+        let out = session_send(&send_on(Door::A2a, &["network"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "the network door has no ancestry to walk");
+        assert!(nothing_connected(&listener));
+
+        let acc = expect_delivery(listener, "a sealed ancestor attests the MCP send");
+        let out = session_send(&send_on(Door::Mcp, &["sealed"], &[("id", &id)]));
+        let got = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", out.message);
+        assert!(String::from_utf8(got).unwrap().ends_with("sealed"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The local CLI's `send --yes` still approves and delivers (the local
+    /// case is unchanged by this lane). The Daemon arm is the other local
+    /// door, which the conductor and herald reach through aoided.
+    #[test]
+    fn the_local_cli_send_yes_still_approves_and_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        for (door, tag) in [(Door::Cli, "local-yes-cli"), (Door::Daemon, "local-yes-daemon")] {
+            let (root, id, listener) = door_fixture(tag, None);
+            let acc = expect_delivery(listener, "a local `--yes` send reaches the target's socket");
+            let out = session_send(&send_on(door, &["go"], &[("id", &id), ("submit", "true"), ("yes", "true")]));
+            let got = acc.join().unwrap();
+            assert_eq!(out.data.as_ref().unwrap()["gate"], "yes", "{door:?}: {}", out.message);
+            assert_eq!(String::from_utf8(got).unwrap(), "go\r", "{door:?}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
     // ── LANE IDENTITY P-ID2: the kernel-attested gate ───────────────────────
 
     /// Seal an ALREADY-REGISTERED session record (`do_session_start`'s own
@@ -3862,7 +5213,7 @@ mod tests {
             issued_at,
         };
         let seal_hex = aoide_storage::sealed_id::mint_seal(kp, &identity);
-        crate::graph::session_store::stamp_seal(id, &seal_hex, issued_at);
+        crate::graph::session_store::stamp_seal(id, &seal_hex, issued_at, starttime);
     }
 
     /// The REAL `attested_sender`/`verify_seal_over` pipeline (module doc
@@ -3904,7 +5255,9 @@ mod tests {
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
 
-        // Register a conductable CHILD whose parent is the sender (`orch`).
+        // Register a conductable CHILD whose parent is the sender (`orch`),
+        // and stamp the spawn-time edge the way conduct's own registration does
+        // (`attestedSpawner`, kernel-backed): only a stamped edge autogates.
         do_session_start(
             id,
             Some("claude"),
@@ -3916,6 +5269,7 @@ mod tests {
             None,
             None,
         );
+        stamp_attested_spawner(id, Some("orch"));
 
         let acc = expect_delivery(listener, "a parent's send is DELIVERED without `--yes`");
 
@@ -4004,6 +5358,8 @@ mod tests {
             None,
             None,
         );
+        stamp_attested_spawner(target, Some("orch"));
+        stamp_attested_spawner("sib-a", Some("orch"));
 
         // (a) sender and target share a live parent, no --yes, no env autogate,
         // sender is NOT the target's parent → DELIVERED, sibling label.
@@ -4114,6 +5470,9 @@ mod tests {
             None,
         );
 
+        // The spawn-time edge, as conduct stamps it: only a stamped parent edge
+        // is one the sibling predicate may read.
+        stamp_attested_spawner(id, Some("orch"));
         let acc = expect_delivery(listener, "a self-attested sender's payload still reaches the socket");
 
         // The resolver truthfully attests the sender AS the target itself —
@@ -4200,7 +5559,7 @@ mod tests {
         );
         // The shared parent ends — its on-disk sessions.json record flips to
         // `done` (sib-a/sib-b are not `kind: subagent`, so they survive intact).
-        do_session_end("orch");
+        do_session_end("orch", None, true);
 
         let out = deliver_local_with(
             &send_invocation(&["nope"], &[("id", target)]),
@@ -4441,7 +5800,6 @@ mod tests {
         aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -4934,12 +6292,12 @@ mod tests {
 
     /// The ruling on S5's client half: an UNRULY attested id does not refuse
     /// the send. `node spawn` would — its caller named a parentage — but a
-    /// `send --to` was never asked for one: the claim is an autogate shortcut,
-    /// and the door's Inject arm reads a malformed claim as a non-match
-    /// (`remote_parent_match`), never as a refusal. So the send goes out with
-    /// NO claim (the same delivery it gets today with no daemon to attest
-    /// against) and names the reason on one warning line, rather than failing
-    /// a send that works.
+    /// `send --to` was never asked for one: the claim is a label, and the door
+    /// applies a malformed claim only to a spawn, so an inject carrying one
+    /// proceeds as one with none (`claimed_remote_parent`). So the send goes
+    /// out with NO claim (the same delivery it gets today with no daemon to
+    /// attest against) and names the reason on one warning line, rather than
+    /// failing a send that works.
     /// GATED on Unix with its reason (see [`install_capturing_curl`]): the
     /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch — the
     /// subject (an unruly claim degrades to no claim) is host-neutral.
@@ -5283,6 +6641,42 @@ mod tests {
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "session_id": "s" })).is_none());
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "hook_event_name": "SessionStart" })).is_none());
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "session_id": "", "hook_event_name": "SessionStart" })).is_none());
+    }
+    /// Whether a SessionEnd leaves the harness process alive is the profile's
+    /// word on the payload's raw `reason`: claude names `clear` and `resume`,
+    /// compared exactly; a harness that names none never skips on the field.
+    #[test]
+    fn a_session_end_continues_only_for_a_reason_the_profile_names() {
+        let continues = |profile: &AgentProfile, reason: Option<Value>| {
+            let mut payload = json!({ "session_id": "s", "hook_event_name": "SessionEnd" });
+            if let Some(reason) = reason {
+                payload["reason"] = reason;
+            }
+            match map_hook(profile, &payload) {
+                Some(HookAction::End { id, continues }) if id == "s" => continues,
+                other => panic!("a SessionEnd maps to End, got {other:?}"),
+            }
+        };
+        for reason in ["clear", "resume"] {
+            assert!(continues(&CLAUDE_PROFILE, Some(json!(reason))), "{reason}");
+        }
+        let gone = [
+            Some(json!("logout")),
+            Some(json!("prompt_input_exit")),
+            Some(json!("other")),
+            Some(json!("clear\u{200b}")),
+            Some(json!("CLEAR")),
+            Some(json!(["clear"])),
+            Some(json!(null)),
+            None,
+        ];
+        for reason in gone {
+            assert!(!continues(&CLAUDE_PROFILE, reason.clone()), "{reason:?}");
+        }
+        for name in ["kimi", "pi"] {
+            let profile = agent_profile(name).unwrap();
+            assert!(!continues(profile, Some(json!("clear"))), "{name} documents no reason");
+        }
     }
     #[test]
     fn hook_garbage_stdin_is_an_ok_noop_never_nonzero() {
@@ -6755,13 +8149,13 @@ mod tests {
 
         // (i) Start-shaped: the `Phase` arm's registration self-heal asks for
         // the walk (`attest: true`) — re-stamps the stale parent onto it.
-        hook_ensure_session_with(profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
+        hook_ensure_session_with(aoide_protocol::Door::Cli, profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("wrap-x".to_string()), "Start-shaped re-stamps");
         assert_eq!(calls.get(), 1);
 
         // (ii) PhaseIfRunning-shaped: same `attest: true`, same treatment.
         restage_stale("c1");
-        hook_ensure_session_with(profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
+        hook_ensure_session_with(aoide_protocol::Door::Cli, profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("wrap-x".to_string()), "PhaseIfRunning-shaped re-stamps");
         assert_eq!(calls.get(), 2);
 
@@ -6769,7 +8163,7 @@ mod tests {
         // invoked (the call count does not move), so the stale parent from
         // ToolStart/ToolEnd/SubRekey/SubEnsure's shared shape survives untouched.
         restage_stale("c1");
-        hook_ensure_session_with(profile, &payload, "c1", Some(4242), false, resolve_wrap_x, None);
+        hook_ensure_session_with(aoide_protocol::Door::Cli, profile, &payload, "c1", Some(4242), false, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("old-wrap".to_string()), "ToolStart-shaped never re-stamps");
         assert_eq!(calls.get(), 2, "attest: false must never call the resolver");
     }
@@ -6789,7 +8183,7 @@ mod tests {
         let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
 
         let payload = json!({ "session_id": "c2", "hook_event_name": "Stop" });
-        hook_ensure_session_with(profile, &payload, "c2", Some(4242), true, |_| Some("wrap-x".to_string()), Some("env-parent"));
+        hook_ensure_session_with(aoide_protocol::Door::Cli, profile, &payload, "c2", Some(4242), true, |_| Some("wrap-x".to_string()), Some("env-parent"));
 
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = s.sessions.iter().find(|s| s.session_id == "c2").unwrap();
@@ -6971,7 +8365,7 @@ mod tests {
 
         // 3. The CLI arm walks itself: the client is the child `c`, which is not
         // one of this process's ancestors, so no window.
-        hook_for_profile_gated(profile, &start("hc"), false, Some(me), None);
+        hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &start("hc"), false, Some(me), None);
         assert!(load("hc").window_address.is_empty(), "the child is not this process's ancestor");
 
         // 4. Backfill through the door: a windowless session, then a per-turn hook
@@ -6992,7 +8386,7 @@ mod tests {
 
         // 5. A pid-less record with a stale stored chain binds through the door, and
         // the chain of the process that bound it replaces the stale one.
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "hs", Some("claude"), Some("/p"), None, None, None,
             &[2_000_000_000, 2_000_000_001],
         );
@@ -7013,11 +8407,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&fake_dir);
     }
 
+    /// The window bind is the one route where only the chain rule stands
+    /// between a stranger's per-turn hook and a record's chain: a windowless
+    /// record's hook binds the window its caller owns and then moves the chain
+    /// to the caller's. A live harness outside the caller's chain keeps the
+    /// chain; a dead one lets it move. A record that stores no chain but a pid
+    /// holds it the same, since that pid is its harness. A live harness outside
+    /// the caller's chain also anchors the record against the bind itself: the
+    /// window stays unbound. Where no live harness anchors it, the window binds
+    /// and moves no chain, parent or fact.
+    #[cfg(unix)]
+    #[test]
+    fn a_per_turn_hook_that_binds_a_window_cannot_take_the_chain_of_a_live_harness() {
+        const DEAD: i32 = 2_000_000_000;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("anchor-bind");
+        let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let me = std::process::id() as i32;
+        let mut owner = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut harness = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let (_fake_env, fake_dir) = fake_hypr_socket("anchor-bind");
+        std::env::set_var("AOIDE_TEST_CLIENT_PID", owner.id().to_string());
+        std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "com.example.App");
+        let chain_of = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().hook_ancestry
+        };
+        let held = vec![harness.id() as i32, DEAD];
+        let free = vec![DEAD, DEAD + 1];
+        for (id, stored) in [("held", &held), ("free", &free)] {
+            do_hook_session_start(aoide_protocol::Door::Cli, id, Some("claude"), Some("/p"), None, None, None, stored);
+            let payload = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+            hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        assert_eq!(chain_of("held"), held, "a live harness outside the caller's chain holds it");
+        assert_eq!(chain_of("free").first(), Some(&me), "a dead one lets the caller's chain land");
+
+        for (id, pid) in [("pid-held", harness.id()), ("pid-free", DEAD as u32)] {
+            do_session_start(id, Some("claude"), Some("/p"), None, None, None, None, None, Some(pid));
+            let payload = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+            hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        let window_of = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().window_address
+        };
+        assert!(chain_of("pid-held").is_empty(), "a live pid is the harness of a chainless record, and holds it");
+        assert_eq!(window_of("pid-held"), "", "a stranger's bind onto an anchored record is refused");
+        assert_eq!(window_of("held"), "", "and so is one onto a record anchored by its stored chain");
+        // The fake compositor answers one read per discovery, and a loaded box can
+        // miss its budget once. A turn retries the bind until it lands, so retry too.
+        let free_payload = json!({ "session_id": "pid-free", "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while window_of("pid-free") != "0xAA" && std::time::Instant::now() < deadline {
+            hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &free_payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        assert_eq!(window_of("pid-free"), "0xAA", "the window binds where no live harness anchors the record");
+        assert_eq!(chain_of("pid-free").first(), Some(&me), "a dead pid lets the caller's chain land");
+        for c in [&mut owner, &mut harness] {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        let _ = std::fs::remove_dir_all(&fake_dir);
+    }
+
     /// A SessionStart refreshes the stored hook chain only where trust allows. A
-    /// dead chain moves. A pid-less record's chain moves even over a live process
-    /// outside the new one, and a record anchored to a live pid of its own outside
-    /// the new chain is refused. A sealed record's chain moves but its pid does not
-    /// (pid trust).
+    /// dead chain moves. A pid-less record's chain moves even over a live shell
+    /// or terminal outside the new one, but not over its live harness, and a
+    /// record anchored to a live pid of its own outside the new chain is
+    /// refused. A sealed record's chain moves but its pid does not (pid trust).
     /// An unsealed record whose pid is dead takes the pi payload's pid (the
     /// unchanged `pid_may_move` path).
     #[test]
@@ -7052,36 +8510,87 @@ mod tests {
         };
 
         // r1: a dead chain, unsealed. The chain moves to this hook's own ancestry.
-        do_hook_session_start("r1", Some("claude"), Some("/p"), None, None, None, &[DEAD, DEAD + 1, DEAD + 2]);
-        hook_for_profile_gated(claude, &claude_start("r1"), false, Some(me), None);
+        do_hook_session_start(aoide_protocol::Door::Cli, "r1", Some("claude"), Some("/p"), None, None, None, &[DEAD, DEAD + 1, DEAD + 2]);
+        hook_for_profile_gated(aoide_protocol::Door::Cli, claude, &claude_start("r1"), false, Some(me), None);
         assert_eq!(load("r1").hook_ancestry, mine, "a dead chain is replaced");
 
         // r2: pid-less, and the stored chain holds a live process outside the new
         // one. A pid-less record follows its latest SessionStart, so the chain moves.
         let mut live = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let l = live.id() as i32;
-        do_hook_session_start("r2", Some("claude"), Some("/p"), None, None, None, &[DEAD, l]);
-        hook_for_profile_gated(claude, &claude_start("r2"), false, Some(me), None);
+        do_hook_session_start(aoide_protocol::Door::Cli, "r2", Some("claude"), Some("/p"), None, None, None, &[DEAD, l]);
+        hook_for_profile_gated(aoide_protocol::Door::Cli, claude, &claude_start("r2"), false, Some(me), None);
         assert_eq!(load("r2").hook_ancestry, mine, "a pid-less record follows its latest SessionStart");
         let _ = live.kill();
         let _ = live.wait();
 
+        // r2b: pid-less, and the live process outside the new chain is its
+        // harness. The SessionStart is a stranger's and is refused whole: the
+        // chain stays.
+        let mut harness = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let held = vec![harness.id() as i32, DEAD];
+        do_hook_session_start(aoide_protocol::Door::Cli, "r2b", Some("claude"), Some("/p"), None, None, None, &held);
+        let out = hook_for_profile_gated(aoide_protocol::Door::Cli, claude, &claude_start("r2b"), false, Some(me), None);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "a refusal never fails the hook");
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "harness-anchored");
+        assert_eq!(data["harness"], held[0]);
+        assert!(
+            out.message.contains("`r2b`") && out.message.contains(&held[0].to_string()),
+            "the audited message names the session and its harness: {}",
+            out.message
+        );
+        assert_eq!(load("r2b").hook_ancestry, held, "a live harness outside the new chain holds it");
+        let _ = harness.kill();
+        let _ = harness.wait();
+
         // r3: sealed, dead pid, dead chain. The pi payload's pid is refused by
         // `pid_may_move`, and the chain still refreshes.
-        do_hook_session_start(
+        do_hook_session_start(aoide_protocol::Door::Cli,
             "r3", Some("pi"), Some("/p"), None, None, Some(DEAD as u32),
             &[DEAD, DEAD + 1, DEAD + 2],
         );
-        stamp_seal("r3", "seal-r3", 1);
-        hook_for_profile_gated(pi, &pi_start("r3", me), false, Some(me), None);
+        stamp_seal("r3", "seal-r3", 1, 1);
+        hook_for_profile_gated(aoide_protocol::Door::Cli, pi, &pi_start("r3", me), false, Some(me), None);
         let r3 = load("r3");
         assert_eq!(r3.hook_ancestry, mine, "a sealed record's chain may still refresh");
         assert_eq!(r3.pid, Some(DEAD as u32), "its pid never moves by request");
 
         // r4: unsealed, dead pid. The pi payload's pid takes it (the unchanged path).
-        do_hook_session_start("r4", Some("pi"), Some("/p"), None, None, Some(DEAD as u32), &[DEAD]);
-        hook_for_profile_gated(pi, &pi_start("r4", me), false, Some(me), None);
+        do_hook_session_start(aoide_protocol::Door::Cli, "r4", Some("pi"), Some("/p"), None, None, Some(DEAD as u32), &[DEAD]);
+        hook_for_profile_gated(aoide_protocol::Door::Cli, pi, &pi_start("r4", me), false, Some(me), None);
         assert_eq!(load("r4").pid, Some(me as u32), "an unsealed dead pid is replaced");
+    }
+
+    /// A per-turn hook follows its session to the wrap that hosts it now, as a
+    /// `--resume` under a new wrap needs, but only for a hook that runs under
+    /// the session's harness or whose harness has exited. A stranger's hook,
+    /// attested to a wrap of its own, does not re-parent a session whose
+    /// harness lives.
+    #[cfg(unix)]
+    #[test]
+    fn a_per_turn_hook_from_outside_the_live_harness_does_not_re_parent_the_session() {
+        const DEAD: i32 = 2_000_000_000;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("anchor-parent");
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let me = std::process::id() as i32;
+        let mut live = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        for wrap in ["wrapk", "wrapa"] {
+            do_session_start(wrap, Some("claude"), Some("/w"), None, None, Some(true), None, None, None);
+        }
+        let parent = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().parent_session_id
+        };
+        let prompt = |id: &str| json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+        for (id, harness, want) in [("held", live.id() as i32, "wrapk"), ("free", DEAD, "wrapa")] {
+            do_hook_session_start(aoide_protocol::Door::Cli, id, Some("claude"), Some("/w"), None, Some("wrapk"), None, &[harness, 4242]);
+            hook_ensure_session_with(aoide_protocol::Door::Cli, claude, &prompt(id), id, Some(me), true, |_| Some("wrapa".to_string()), None);
+            assert_eq!(parent(id).as_deref(), Some(want), "{id}");
+        }
+        let _ = live.kill();
+        let _ = live.wait();
     }
 
     /// L2, at the door's own entry point: a `session hook` served with a payload
@@ -7110,7 +8619,7 @@ mod tests {
 
         // The daemon arm (`may_ring` is `inv.door == Door::Daemon`) with the
         // door's pid absent.
-        let out = hook_for_profile_gated(profile, &start("d1"), true, None, Some("w"));
+        let out = hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &start("d1"), true, None, Some("w"));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         let file: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = file.sessions.iter().find(|s| s.session_id == "d1").unwrap();
@@ -7119,7 +8628,7 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["parentClaim"], json!(null));
 
         // The local arm, the same claim, its own real pid: linked.
-        let out = hook_for_profile_gated(
+        let out = hook_for_profile_gated(aoide_protocol::Door::Cli,
             profile,
             &start("d2"),
             false,
@@ -7311,5 +8820,862 @@ mod tests {
         let (target, _chain) = kill_target("c1", &s.sessions)
             .expect("c1 must still resolve through the wrap that hosts it");
         assert_eq!(target.session_id, "w");
+    }
+
+    /// A hook process inside one sealed wrap, carrying another conducted
+    /// wrap's id, may not give that wrap a parent edge: a send to it from the
+    /// sealed wrap is held pending, never autogated.
+    #[test]
+    fn a_hook_naming_a_foreign_conducted_wrap_earns_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-hook-foreign-wrap");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start(
+            "attacker", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32),
+        );
+        seal_test_session("attacker", me, "", &kp);
+        let victim = "victim";
+        let socket = conduct_socket_path(victim);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            victim,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        let payload = json!({ "session_id": victim, "hook_event_name": "UserPromptSubmit", "cwd": "/w" });
+        hook_ensure_session_with(aoide_protocol::Door::Cli, &CLAUDE_PROFILE, &payload, victim, Some(me), true, |_| {
+            Some("attacker".to_string())
+        }, None);
+
+        let rec = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == victim)
+            .unwrap();
+        assert_eq!(rec.parent_session_id, None, "a hook names no edge of a conducted wrap");
+        assert_eq!(rec.attested_spawner, None);
+
+        let out = deliver_local_with(
+            &send_invocation(&["go"], &[("id", victim)]),
+            victim,
+            test_resolver(kp.info().pubkey_hex.clone()),
+        );
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending", "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A spawn-time stamp that a rewrite moved away from and then back to the
+    /// same parent is not the spawn-time edge any more: the send is held
+    /// pending. The first send proves the stamp did autogate while it stood.
+    #[test]
+    fn a_rewritten_edge_does_not_revive_its_old_stamp() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-rewrite-revives-nothing");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+        seal_test_session("orch", me, "", &kp);
+        let id = "spawned";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        stamp_attested_spawner(id, Some("orch"));
+        let send = || {
+            deliver_local_with(
+                &send_invocation(&["go"], &[("id", id)]),
+                id,
+                test_resolver(kp.info().pubkey_hex.clone()),
+            )
+        };
+
+        let stamped = send();
+        assert_eq!(stamped.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", stamped.message);
+
+        do_session_start(id, Some("claude"), Some("/w"), None, Some("elsewhere"), None, None, None, None);
+        do_session_start(id, Some("claude"), Some("/w"), None, Some("orch"), None, None, None, None);
+        let rewritten = send();
+        assert_eq!(rewritten.data.as_ref().unwrap()["gate"], "pending", "{}", rewritten.message);
+        assert_eq!(rewritten.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A parent edge the caller wrote with `session start
+    /// --parent` carries no spawn-time stamp, so it earns no autogate. The
+    /// send is held pending, exactly as an unrelated send is.
+    #[test]
+    fn bare_session_start_parent_earns_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-high3-bare-parent");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+        seal_test_session("orch", me, "local", &kp);
+
+        let id = "bare-child";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        let out = deliver_local_with(
+            &send_invocation(&["go"], &[("id", id)]),
+            id,
+            test_resolver(kp.info().pubkey_hex.clone()),
+        );
+
+        assert_eq!(
+            out.data.as_ref().unwrap()["gate"],
+            "pending",
+            "a bare --parent edge is a caller's word, not a spawn: {}",
+            out.message
+        );
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The grant side keeps verifying: a spawn-time
+    /// stamp earns the autogate only while the daemon's key verifies the
+    /// parent's seal. A restarted daemon's key verifies nothing, so the send is
+    /// held pending.
+    #[test]
+    fn autogate_refuses_a_spawn_stamp_whose_seal_does_not_verify() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = unique_stage("send-autogate-unverified");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        let restarted = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+        seal_test_session("orch", me, "", &kp);
+        let id = "spawned-unverified";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        stamp_attested_spawner(id, Some("orch"));
+
+        let out = deliver_local_with(
+            &send_invocation(&["go"], &[("id", id)]),
+            id,
+            test_resolver(restarted.info().pubkey_hex.clone()),
+        );
+
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending", "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The sibling form: two bare `--parent` edges naming one live
+    /// parent are not siblings for the gate. Both sides must carry the stamp.
+    #[test]
+    fn bare_sibling_edges_earn_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_CONDUCT_SIBLING_AUTOGATE",
+        ]);
+        let root = unique_stage("send-high3-bare-sibling");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_CONDUCT_SIBLING_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, None);
+        do_session_start(
+            "sib-a", Some("claude"), Some("/w"), None, Some("orch"), None, None, None, Some(me as u32),
+        );
+        seal_test_session("sib-a", me, "", &kp);
+        let target = "sib-b";
+        let socket = conduct_socket_path(target);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            target,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("orch"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+
+        let out = deliver_local_with(
+            &send_invocation(&["hey"], &[("id", target)]),
+            target,
+            test_resolver(kp.info().pubkey_hex.clone()),
+        );
+
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending", "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["delivered"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A pruned spawner's id registered again is not the spawner. The protected
+    /// survivor keeps its edge to that id, but the prune dropped its spawn
+    /// stamp, so a send from the id's new holder is held pending. The first
+    /// send proves the stamp did autogate while the spawner stood.
+    #[test]
+    fn a_spawner_id_registered_again_after_a_prune_earns_no_autogate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let root = unique_stage("send-pruned-spawner-reused");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("no-such-aoided.sock"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+
+        let me = std::process::id() as i32;
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        let register_spawner = || {
+            do_session_start("P", Some("claude"), Some("/w"), None, None, None, None, None, Some(me as u32));
+            seal_test_session("P", me, "", &kp);
+        };
+        register_spawner();
+        // The survivor runs as a child of this process, so the sender walk from
+        // this process finds `P` and never the survivor.
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let wrap_pid = child.id() as i32;
+        let id = "survivor";
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let _listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            Some("P"),
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            Some(wrap_pid as u32),
+        );
+        stamp_attested_spawner(id, Some("P"));
+        seal_test_session(id, wrap_pid, "", &kp);
+        let load = |sid: &str| {
+            load_stage::<SessionsFile>(&sessions_path())
+                .unwrap()
+                .sessions
+                .into_iter()
+                .find(|s| s.session_id == sid)
+        };
+        assert!(crate::graph::identity::is_protected_live_wrap(&load(id).unwrap()), "control: protected");
+        let send = || {
+            deliver_local_with(
+                &send_invocation(&["go"], &[("id", id)]),
+                id,
+                test_resolver(kp.info().pubkey_hex.clone()),
+            )
+        };
+        let stamped = send();
+        assert_eq!(stamped.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", stamped.message);
+
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == "P").unwrap().state = "done".into();
+        write_stage(&sessions_path(), &file).unwrap();
+        let pruned = crate::graph::prune(&flag_invocation(&["session", "prune"], &[]));
+        assert_eq!(pruned.data.as_ref().unwrap()["removed"], json!(["P"]), "{}", pruned.message);
+        register_spawner();
+
+        let reused = send();
+        assert_eq!(reused.data.as_ref().unwrap()["gate"], "pending", "{}", reused.message);
+        assert_eq!(reused.data.as_ref().unwrap()["delivered"], false);
+        let survivor = load(id).expect("the protected survivor is kept");
+        assert_eq!(survivor.parent_session_id.as_deref(), Some("P"), "it keeps its edge");
+        assert_eq!(survivor.attested_spawner, None, "and the prune dropped its spawn stamp");
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A protected live wrap registered as this process, with its `hooks.json`
+    /// phase `stopped`, for the hook start tests below.
+    fn protected_wrap_for_hook_start(kp: &aoide_storage::identity::Keypair) {
+        protected_wrap_named("wrap", kp);
+    }
+
+    fn protected_wrap_named(id: &str, kp: &aoide_storage::identity::Keypair) {
+        let me = std::process::id() as i32;
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some("/nonexistent/wrap.sock"),
+            None,
+            Some(me as u32),
+        );
+        seal_test_session(id, me, "", kp);
+        let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        crate::graph::upsert_hook(&mut hooks.hooks, id, "stopped", &now_iso_utc());
+        write_stage(&hooks_path(), &hooks).unwrap();
+    }
+
+    /// The whole hook door's SessionStart on a protected wrap, with `cwd`: the
+    /// verdict is `inner`, and nothing lands after it. No `sessionStartAt`, no
+    /// `harnessSessionId`, no `contextCeiling`, no phase fold, and both roster
+    /// files byte-identical.
+    fn assert_a_protected_hook_start_lands_nothing(tag: &str, cwd: &str, inner: &str) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root(tag);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        protected_wrap_for_hook_start(&kp);
+        let sessions = std::fs::read(sessions_path()).unwrap();
+        let phases = std::fs::read(hooks_path()).unwrap();
+        let payload = format!(
+            r#"{{ "session_id": "wrap", "hook_event_name": "SessionStart", "cwd": "{cwd}", "context_ceiling": 200000 }}"#
+        );
+
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let out = hook_for_profile_gated(Door::Cli, claude, &payload, false, Some(me), None);
+
+        assert_eq!(out.data.as_ref().unwrap()["innerStatus"], inner, "{}", out.message);
+        let rec = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == "wrap")
+            .unwrap();
+        assert_eq!(rec.session_start_at, None, "no sessionStartAt");
+        assert_eq!(rec.harness_session_id, None, "no harnessSessionId");
+        assert_eq!(rec.context_ceiling, None, "no contextCeiling");
+        assert_eq!(std::fs::read(sessions_path()).unwrap(), sessions, "sessions.json is byte-identical");
+        assert_eq!(std::fs::read(hooks_path()).unwrap(), phases, "the stopped phase is not folded");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refused_hook_start_on_a_protected_wrap_lands_nothing() {
+        assert_a_protected_hook_start_lands_nothing("hook-start-refused-lands", "/elsewhere", "Error");
+    }
+
+    #[test]
+    fn a_same_fields_hook_start_on_a_protected_wrap_lands_nothing() {
+        assert_a_protected_hook_start_lands_nothing("hook-start-no-op-lands", "/w", "Ok");
+    }
+
+    /// The world a hook naming a protected wrap runs in: the wrap, an audit log
+    /// of its own, and no compositor. The caller holds `env_lock`.
+    fn forged_hook_world(tag: &str) -> (EnvVars, aoide_test_support::EnvSaver, PathBuf) {
+        forged_hook_world_for(tag, "wrap")
+    }
+
+    fn forged_hook_world_for(
+        tag: &str,
+        wrap_id: &str,
+    ) -> (EnvVars, aoide_test_support::EnvSaver, PathBuf) {
+        let env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (root_env, root) = aoide_test_support::isolated_mail_root(tag);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        protected_wrap_named(wrap_id, &kp);
+        (env, root_env, root)
+    }
+
+    fn wrap_audit_lines(root: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(root.join("audit.log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("live-sealed-wrap"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn stage_bytes() -> (Vec<u8>, Vec<u8>) {
+        (std::fs::read(sessions_path()).unwrap(), std::fs::read(hooks_path()).unwrap())
+    }
+
+    fn hook_phase(id: &str) -> Option<String> {
+        load_stage::<HooksFile>(&hooks_path())
+            .unwrap_or_default()
+            .hooks
+            .into_iter()
+            .find(|h| h.session_id == id)
+            .map(|h| h.phase)
+    }
+
+    fn stored(id: &str) -> Option<SessionRecord> {
+        load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == id)
+    }
+
+    /// A permission prompt reported under a protected wrap's own id is ignored
+    /// whole: the phase is not written, which also keeps the herald summons from
+    /// being raised (it is spawned from that arm, after the phase). The refusal
+    /// is audited on the door the hook arrived on.
+    #[test]
+    fn a_forged_awaiting_naming_a_protected_wrap_writes_nothing_and_is_audited() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-awaiting");
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = |id: &str| {
+            format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "cwd": "/w" }}"#
+            )
+        };
+
+        hook_for_profile_gated(Door::Cli, claude, &payload("plain"), false, Some(me), None);
+        assert_eq!(hook_phase("plain").as_deref(), Some("awaiting"), "control: this payload reaches the awaiting arm");
+        let (sessions, phases) = stage_bytes();
+
+        let out = hook_for_profile_gated(Door::Daemon, claude, &payload("wrap"), false, Some(me), None);
+
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "live-sealed-wrap", "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["action"], "none");
+        assert_ne!(hook_phase("wrap").as_deref(), Some("awaiting"), "the wrap's phase is not forged");
+        assert_eq!(stage_bytes(), (sessions, phases), "both roster files are byte-identical");
+        let audit = wrap_audit_lines(&root);
+        assert_eq!(audit.len(), 1, "one audit line: {audit:?}");
+        assert!(audit[0].contains("\"door\":\"daemon\""), "the line names the door the hook arrived on: {audit:?}");
+        assert!(audit[0].contains("`wrap`"), "and the wrap: {audit:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Every other event class, and one the profile does not map at all, is
+    /// ignored the same way: no phase, no `contextCeiling`, no
+    /// `harnessSessionId`, no window and no chain filled, no sub-agent node
+    /// spawned or ended, and no end. The hook process stands under a window
+    /// owner, so an unguarded hook would bind the wrap's empty window.
+    #[cfg(unix)]
+    #[test]
+    fn a_forged_hook_naming_a_protected_wrap_stamps_binds_and_spawns_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-turns");
+        let (_hypr, _hypr_root) = crate::graph::testutil::fake_hypr_socket("forged-turns-hypr");
+        let me = std::process::id() as i32;
+        let ancestry = crate::graph::window::pid_ancestry(me);
+        assert!(ancestry.len() >= 3, "the test process has a window owner above it");
+        std::env::set_var("AOIDE_TEST_CLIENT_PID", ancestry[1].to_string());
+        let mut hook = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let hook_pid = hook.id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = |id: &str, event: &str, extra: &str| {
+            format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "{event}", "cwd": "/w", "context_ceiling": 200000{extra} }}"#
+            )
+        };
+
+        let control = hook_for_profile_gated(
+            Door::Cli, claude, &payload("plain", "UserPromptSubmit", r#", "user_prompt": "go""#), false, Some(hook_pid), None,
+        );
+        let plain = stored("plain").unwrap_or_else(|| panic!("control: the hook registers a session: {}", control.message));
+        assert_eq!(plain.window_address, "0xAA", "control: this rig lets a hook bind a window");
+        assert_eq!(plain.context_ceiling, Some(200000), "control: and stamp a ceiling");
+        assert_eq!(plain.harness_session_id.as_deref(), Some("plain"));
+        let (sessions, phases) = stage_bytes();
+        assert!(stored("wrap").unwrap().window_address.is_empty(), "the wrap holds no window");
+
+        let events = [
+            ("UserPromptSubmit", r#", "user_prompt": "go""#),
+            ("Stop", ""),
+            ("PreToolUse", r#", "tool_name": "Bash", "tool_use_id": "tu1""#),
+            ("PreToolUse", r#", "tool_name": "Task", "tool_use_id": "tuT", "tool_input": { "description": "look" }"#),
+            ("PostToolUse", r#", "tool_name": "Bash", "tool_use_id": "tu1""#),
+            ("SubagentStart", r#", "parent_tool_use_id": "tuT", "agent_type": "Explore""#),
+            ("SubagentStop", r#", "parent_tool_use_id": "tuT""#),
+            ("Notification", r#", "notification_type": "idle_prompt""#),
+            ("SessionEnd", ""),
+            ("PreCompact", ""),
+        ];
+        for (n, (event, extra)) in events.iter().enumerate() {
+            let out = hook_for_profile_gated(
+                Door::Cli, claude, &payload("wrap", event, extra), false, Some(hook_pid), None,
+            );
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "live-sealed-wrap", "{event}: {}", out.message);
+            assert_eq!(stage_bytes(), (sessions.clone(), phases.clone()), "{event} left both roster files byte-identical");
+            assert_eq!(wrap_audit_lines(&root).len(), n + 1, "{event} is audited");
+        }
+        let wrap = stored("wrap").unwrap();
+        assert_eq!(wrap.context_ceiling, None);
+        assert_eq!(wrap.harness_session_id, None);
+        assert!(wrap.window_address.is_empty() && wrap.hook_ancestry.is_empty(), "no window and no chain");
+        assert_ne!(wrap.state, "done", "the wrap is not ended");
+        let _ = hook.kill();
+        let _ = hook.wait();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The herald's approve/deny card is raised by a detached `aoide session
+    /// permit` that the phase arm spawns, which no in-process test can see (under
+    /// libtest `spawn_summons` re-enters nothing). So this runs the REAL hook
+    /// binary against a fake shellbridge: a conductable record that is not
+    /// protected gets its card (the control), and a protected wrap gets none.
+    #[cfg(unix)]
+    #[test]
+    fn a_forged_awaiting_raises_no_summons_card_for_a_protected_wrap() {
+        use std::io::Write as _;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-summons");
+        let _runtime_env = EnvVars::save(&["XDG_RUNTIME_DIR", "AOIDE_HERALD_PERMIT"]);
+        let runtime = unique_stage("forged-summons-run");
+        std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+        std::env::remove_var("AOIDE_HERALD_PERMIT");
+        std::fs::create_dir_all(runtime.join("aoide")).unwrap();
+        let bridge = UnixListener::bind(runtime.join("aoide").join("shellbridge.sock")).unwrap();
+        bridge.set_nonblocking(true).unwrap();
+        let me = std::process::id();
+        do_session_start(
+            "unsealed", Some("claude"), Some("/w"), None, None, Some(true), Some("/nonexistent/unsealed.sock"), None, Some(me),
+        );
+        let run_hook = |id: &str| {
+            let payload = format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "Notification", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "cwd": "/w" }}"#
+            );
+            let mut child = std::process::Command::new(built_aoide_bin())
+                .args(["session", "hook", "--agent", "claude"])
+                .env_remove("AOIDE_SESSION_ID")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("the built aoide binary runs");
+            child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+            assert!(child.wait().unwrap().success(), "a hook never fails its harness");
+        };
+
+        run_hook("unsealed");
+        let mut card = accept_one(&bridge, "the unsealed conductable record gets its summons card");
+        let line = String::from_utf8(read_delivery(&mut card, "the card is one line")).unwrap();
+        assert!(line.contains("heraldpush") && line.contains("permit-unsealed"), "control: {line}");
+
+        run_hook("wrap");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            assert!(bridge.accept().is_err(), "a protected wrap raised a summons card");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_ne!(hook_phase("wrap").as_deref(), Some("awaiting"), "and its phase is not forged");
+        let audit = wrap_audit_lines(&root);
+        assert!(
+            audit.iter().any(|l| l.contains("\"door\":\"cli\"") && l.contains("a hook naming `wrap`")),
+            "the refusal is audited on the door the hook arrived on: {audit:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&runtime);
+    }
+
+    /// What a wrap hosts is unaffected: its harness child reports under an id of
+    /// its own, and every one of that child's hooks lands on the child. The
+    /// phase arm runs for it, `awaiting` included, and the wrap's record is
+    /// not touched.
+    #[test]
+    fn a_protected_wraps_harness_child_hooks_still_land_on_the_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world("forged-child");
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = |event: &str, extra: &str| {
+            format!(
+                r#"{{ "session_id": "harness-uuid", "hook_event_name": "{event}", "cwd": "/w", "context_ceiling": 200000{extra} }}"#
+            )
+        };
+        let wrap_before = serde_json::to_value(stored("wrap").unwrap()).unwrap();
+        let since = now_iso_utc();
+
+        for (event, extra) in [
+            ("SessionStart", ""),
+            ("UserPromptSubmit", r#", "user_prompt": "go""#),
+            ("Notification", r#", "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash""#),
+        ] {
+            let out = hook_for_profile_gated(Door::Cli, claude, &payload(event, extra), false, Some(me), Some("wrap"));
+            assert_eq!(out.data.as_ref().unwrap()["action"], "applied", "{event}: {}", out.message);
+        }
+
+        assert_eq!(hook_phase("harness-uuid").as_deref(), Some("awaiting"), "the child's phase arm ran");
+        let child = stored("harness-uuid").expect("the child is registered");
+        assert_eq!(child.parent_session_id.as_deref(), Some("wrap"));
+        assert_eq!(child.context_ceiling, Some(200000));
+        assert_eq!(child.harness_session_id.as_deref(), Some("harness-uuid"));
+        assert_eq!(
+            crate::graph::wait_ready("claude", "wrap", &since, std::time::Duration::from_millis(500)),
+            crate::graph::Ready::Verified,
+            "readiness opens on the child's SessionStart"
+        );
+        let wrap_after = serde_json::to_value(stored("wrap").unwrap()).unwrap();
+        assert_eq!(wrap_after, wrap_before, "the wrap's own record is untouched");
+        assert!(wrap_audit_lines(&root).is_empty(), "nothing the child sent is refused or audited");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The `sub:` namespace belongs to the sub-agent hooks: a harness's
+    /// SessionStart under such an id registers nothing, while a Task tool call
+    /// still spawns its `sub:` node.
+    #[test]
+    fn a_hook_start_under_a_sub_prefixed_id_registers_nothing_while_a_task_still_spawns_its_node() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root("hook-start-sub-id");
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let hook = |payload: &str| hook_for_profile_gated(Door::Cli, claude, payload, false, Some(me), None);
+
+        let start = hook(r#"{ "session_id": "sub:x", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+
+        assert_eq!(start.data.as_ref().unwrap()["innerStatus"], "Usage", "{}", start.message);
+        assert!(stored("sub:x").is_none(), "no record is registered under a reserved id");
+
+        hook(r#"{ "session_id": "owner", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+        hook(
+            r#"{ "session_id": "owner", "hook_event_name": "PreToolUse", "cwd": "/w", "tool_name": "Task",
+                 "tool_use_id": "tuT", "tool_input": { "description": "look", "subagent_type": "Explore" } }"#,
+        );
+        let node = stored("sub:tuT").expect("a Task call still creates its sub-agent node");
+        assert_eq!(node.kind.as_deref(), Some("subagent"));
+        assert_eq!(node.parent_session_id.as_deref(), Some("owner"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A forged SessionStart under the id of a live `sub:` node is refused
+    /// before anything is written, `clear_stale_parent` included: with no wrap
+    /// and no claim it would otherwise clear the node's `parentSessionId`.
+    #[test]
+    fn a_forged_hook_start_under_a_live_sub_node_leaves_its_parent_alone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root("hook-start-live-sub");
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let hook = |payload: &str| hook_for_profile_gated(Door::Cli, claude, payload, false, Some(me), None);
+        hook(r#"{ "session_id": "owner", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+        hook(
+            r#"{ "session_id": "owner", "hook_event_name": "PreToolUse", "cwd": "/w", "tool_name": "Task",
+                 "tool_use_id": "tuT", "tool_input": { "description": "look", "subagent_type": "Explore" } }"#,
+        );
+        let node = serde_json::to_value(stored("sub:tuT").expect("control: the Task node exists")).unwrap();
+        assert_eq!(node["parentSessionId"], "owner", "control: it hangs under its owner");
+
+        let out = hook(r#"{ "session_id": "sub:tuT", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+
+        assert_eq!(out.data.as_ref().unwrap()["innerStatus"], "Usage", "{}", out.message);
+        assert_eq!(serde_json::to_value(stored("sub:tuT")).unwrap(), node, "the node is untouched");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A protected live wrap holding a `sub:` id from before the prefix was
+    /// reserved, and forged payloads that name it through a field other than
+    /// `session_id` (so the hook door's own guard never sees it). They arrive
+    /// under an ordinary session's id, and each must leave the wrap's record
+    /// and its phase as they were.
+    fn assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(tag: &str, fragments: &[&str]) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world_for(tag, "sub:x");
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let hook = |fragment: &str| {
+            let payload = format!(r#"{{ "session_id": "plain", "cwd": "/w", {fragment} }}"#);
+            hook_for_profile_gated(Door::Cli, claude, &payload, false, Some(me), None)
+        };
+        hook(r#""hook_event_name": "UserPromptSubmit", "user_prompt": "go""#);
+        let wrap = || (serde_json::to_value(stored("sub:x")).unwrap(), hook_phase("sub:x"));
+        let before = wrap();
+        assert_eq!(before.0["sessionId"], "sub:x", "control: the wrap is on the roster");
+        assert_eq!(before.1.as_deref(), Some("stopped"));
+
+        for fragment in fragments {
+            let out = hook(fragment);
+            assert_eq!(out.data.as_ref().unwrap()["action"], "applied", "{fragment}: {}", out.message);
+            assert_eq!(wrap(), before, "the wrap survives {fragment}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The Task call and both SubagentStart shapes create or enrich `sub:<id>`;
+    /// on a wrap that holds the id they would re-kind it.
+    #[test]
+    fn a_forged_subagent_spawn_naming_a_protected_sub_prefixed_wrap_leaves_it_alone() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-spawn",
+            &[
+                r#""hook_event_name": "PreToolUse", "tool_name": "Task", "tool_use_id": "x""#,
+                r#""hook_event_name": "SubagentStart", "parent_tool_use_id": "x", "agent_type": "Explore""#,
+                r#""hook_event_name": "SubagentStart", "agent_id": "x", "agent_type": "Explore""#,
+            ],
+        );
+    }
+
+    /// A returning Task and both SubagentStop shapes remove `sub:<id>`.
+    #[test]
+    fn a_forged_subagent_end_naming_a_protected_sub_prefixed_wrap_leaves_it_alone() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-end",
+            &[
+                r#""hook_event_name": "PostToolUse", "tool_name": "Task", "tool_use_id": "x""#,
+                r#""hook_event_name": "SubagentStop", "parent_tool_use_id": "x""#,
+                r#""hook_event_name": "SubagentStop", "agent_id": "x""#,
+            ],
+        );
+    }
+
+    /// An async dispatch's PostToolUse renames `sub:<tool_use_id>`.
+    #[test]
+    fn a_forged_subagent_rekey_naming_a_protected_sub_prefixed_wrap_leaves_it_alone() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-rekey",
+            &[
+                r#""hook_event_name": "PostToolUse", "tool_name": "Task", "tool_use_id": "x",
+                   "tool_response": { "isAsync": true, "agentId": "y" }"#,
+            ],
+        );
+    }
+
+    /// A tool run "inside" `sub:<id>` writes that owner's phase and activity.
+    #[test]
+    fn a_forged_owner_naming_a_protected_sub_prefixed_wrap_writes_no_phase_or_activity() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-owner",
+            &[
+                r#""hook_event_name": "PreToolUse", "tool_name": "Bash", "parent_tool_use_id": "x""#,
+                r#""hook_event_name": "PostToolUse", "tool_name": "Bash", "parent_tool_use_id": "x""#,
+            ],
+        );
+    }
+
+    /// Spawn readiness reads the harness child's own record, never the wrap's,
+    /// so under a protected wrap the child's SessionStart still opens it.
+    #[test]
+    fn a_protected_wraps_harness_child_still_opens_readiness() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root("hook-start-protected-ready");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        protected_wrap_for_hook_start(&kp);
+        let since = now_iso_utc();
+
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let payload = r#"{ "session_id": "harness-uuid", "hook_event_name": "SessionStart", "cwd": "/w" }"#;
+        hook_for_profile_gated(Door::Cli, claude, payload, false, Some(me), Some("wrap"));
+
+        let ready = crate::graph::wait_ready("claude", "wrap", &since, std::time::Duration::from_millis(500));
+        assert_eq!(ready, crate::graph::Ready::Verified);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

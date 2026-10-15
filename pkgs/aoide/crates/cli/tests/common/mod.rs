@@ -471,6 +471,60 @@ fn line_at(line: &str, address: &str) -> String {
     at
 }
 
+/// The loopback TLS front a charter's `https://` address is dialled through in a
+/// test: `socat` terminates TLS on `port` with the fixture's own self-signed
+/// certificate (`tests/fixtures/tls/`) and forwards every connection to the door
+/// standing on `target`. Killed when this drops.
+///
+/// A real `https://` relay cannot be stood up in a test any other way: the door
+/// speaks plain HTTP and the client dials with curl, which needs TLS on the far
+/// side. The certificate is a throwaway loopback identity, trusted by this test
+/// process alone through [`trust_front_certificate`].
+pub struct TlsFront {
+    child: std::process::Child,
+}
+
+impl Drop for TlsFront {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn tls_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tls")
+}
+
+/// Point curl at the front's certificate for this process. The fixture's
+/// environment guard captures `CURL_CA_BUNDLE`, so it is restored with the rest.
+pub fn trust_front_certificate() {
+    std::env::set_var("CURL_CA_BUNDLE", tls_dir().join("localhost.crt"));
+}
+
+/// Stand up the TLS front: `https://127.0.0.1:<port>/` reaches the door on
+/// `target`. Returns once the front accepts connections.
+pub fn tls_front(port: u16, target: u16) -> TlsFront {
+    let dir = tls_dir();
+    let child = std::process::Command::new("socat")
+        .arg(format!(
+            "OPENSSL-LISTEN:{port},reuseaddr,fork,cert={},key={},verify=0",
+            dir.join("localhost.crt").display(),
+            dir.join("localhost.key").display()
+        ))
+        .arg(format!("TCP:127.0.0.1:{target}"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .expect("socat is on PATH: it is the TLS front a charter's https address is tested through");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(std::time::Instant::now() < deadline, "the TLS front on {port} never came up");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    TlsFront { child }
+}
+
 /// A fixture that restores the environment when its guard drops, and removes
 /// its own root when the [`Fixture`] does.
 pub fn fixture(tag: &str) -> (EnvSaver, Fixture) {
@@ -480,6 +534,7 @@ pub fn fixture(tag: &str) -> (EnvSaver, Fixture) {
         "AOIDE_STAGE_DIR",
         "AOIDE_A2A_NODE_NAME",
         "AOIDE_CONFIG",
+        "CURL_CA_BUNDLE",
     ]);
     let fixture = Fixture::build(tag);
     (guard, fixture)
