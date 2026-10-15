@@ -265,20 +265,28 @@ in the message.
   passes `PendingSpawn::is_known`. A held resurrect's `shown` plan is checked
   by `resurrect::approved_selection` before the take, so a ledger that moved
   since the hold refuses without consuming the entry. Hold-time pins: a held
-  spawn's `cwd` and a relative argv[0] are absolute, an `@file` is inlined, and
-  `--instructions -` is refused (`reason: unpinnable-input`). The one unpinned
+  spawn's `cwd` and a relative argv[0] are absolute, an `@file` is inlined
+  when it is a regular file (a stat that follows symlinks, so `@/dev/stdin`
+  and its kin are refused before any read), and `--instructions -` is refused
+  (`reason: unpinnable-input`). The one unpinned
   input is a bare argv[0], resolved through the approver's `PATH`. Pinned by
   `deny_with_a_stale_fingerprint_takes_nothing_and_the_listed_one_takes_its_entry`,
   `approve_refuses_a_held_spawn_that_no_hold_would_queue_and_keeps_it`,
   `a_held_resurrect_refuses_to_launch_a_plan_its_approver_was_not_shown`,
-  `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`
-  and `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin`.
+  `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`,
+  `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin` and
+  `an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read`.
 - **Spawn ids are distinct per call and never a socket that answers.**
   A minted id carries a process-wide counter, since the clock is seconds
   (`spawn_id`). `spawn_id_in_use` is a `connect` probe, so a socket file nothing
-  listens on does not hold an explicit `--id`. Pinned by
-  `two_holds_in_one_second_get_distinct_ids_and_both_queue` and
-  `a_stale_socket_file_does_not_hold_an_explicit_id`.
+  listens on does not hold an explicit `--id`. Over MCP an `--id` may name no
+  existing record at all, live or done (`refuse_spawn_id`, `reason:
+  id-in-use`), and a leading `-` is never a plain id. The child's argv binds
+  the id as one `--id=<id>` token. Pinned by
+  `two_holds_in_one_second_get_distinct_ids_and_both_queue`,
+  `a_stale_socket_file_does_not_hold_an_explicit_id`,
+  `an_mcp_spawn_refuses_the_id_of_a_done_sibling_and_keeps_its_edges` and
+  `a_dash_led_id_is_a_bad_id_and_the_child_argv_binds_it_as_one_token`.
 - **A parked send's source is derived by its door, never read off the caller.**
   `pending_origin` (`graph/send.rs`) is the one place an entry's `from` is
   chosen: the A2A door's own `--from` (`node:<name>` or `addr:<address>`, set

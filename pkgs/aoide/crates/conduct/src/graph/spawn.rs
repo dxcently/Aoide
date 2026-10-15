@@ -212,6 +212,13 @@ pub fn build_conduct_args(
     args
 }
 
+/// Is `path` a regular file once symlinks are followed? A stat, never a read:
+/// `@/dev/stdin`, `@/proc/self/fd/0` and `@/dev/fd/0` name the MCP server's own
+/// transport, and reading one blocks the JSON-RPC loop until EOF.
+fn is_regular_file(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file())
+}
+
 /// Read `--instructions`'s value in its three accepted forms: `@<path>` (the
 /// file's own bytes, read here and now), `-` (this process's stdin, to EOF;
 /// the CLI door only, since over MCP stdin is the protocol channel, and the
@@ -219,9 +226,13 @@ pub fn build_conduct_args(
 /// literal text, verbatim — no shell, no expansion, no escaping). Every
 /// failure is a taught error; nothing is spawned on one. The bytes are
 /// carried verbatim: they are the operator's, and this path never appends
-/// environment, tokens or credentials to them.
-fn read_instructions(spec: &str) -> Result<String, String> {
+/// environment, tokens or credentials to them. Over a door that is not the
+/// terminal, `@<path>` must be a regular file, judged before any read.
+fn read_instructions(spec: &str, door: Door) -> Result<String, String> {
     if let Some(path) = spec.strip_prefix('@') {
+        if door != Door::Cli && !is_regular_file(std::path::Path::new(path)) {
+            return Err(format!("`--instructions @{path}` is not a regular file, and this door reads only one"));
+        }
         std::fs::read_to_string(path).map_err(|e| format!("reading --instructions @{path}: {e}"))
     } else if spec == "-" {
         use std::io::Read as _;
@@ -844,6 +855,9 @@ fn pin_held_inputs(args: &[String], mut flags: BTreeMap<String, String>) -> Resu
             return Err("`--instructions -` reads the approver's stdin, which a held spawn cannot pin".to_string());
         }
         if let Some(path) = spec.strip_prefix('@') {
+            if !is_regular_file(std::path::Path::new(&absolute(path))) {
+                return Err(format!("`--instructions @{path}` is not a regular file, and a held spawn pins only one"));
+            }
             let text = std::fs::read_to_string(absolute(path))
                 .map_err(|e| format!("reading --instructions @{path} at hold time: {e}"))?;
             if text.starts_with('@') || text == "-" {
@@ -1021,7 +1035,7 @@ pub(in crate::graph) fn launch_session(inv: &Invocation, spawner: Option<&str>) 
                 "`--instructions -` reads stdin, which over this door is the protocol channel; pass @<file> or the text",
             )
         }
-        (Some(_), Some(spec)) => match read_instructions(spec) {
+        (Some(_), Some(spec)) => match read_instructions(spec, inv.door) {
             Ok(text) => Some(text),
             Err(e) => {
                 return Outcome::usage(cmd, e)
@@ -2882,5 +2896,37 @@ mod tests {
         let argv = build_conduct_args(false, "claude", "--headless", None, None, None, None, None, &["true".to_string()]);
         assert!(argv.iter().any(|a| a == "--id=--headless"), "{argv:?}");
         assert!(!argv.iter().any(|a| a == "--headless"), "a bare id is never a token of its own: {argv:?}");
+    }
+
+    /// Finding 12: over a door that is not the terminal, `@<path>` reads only a
+    /// regular file. The stdin-shaped spellings, and a symlink to one, name the
+    /// MCP server's own transport, so each is refused by a stat before any read,
+    /// on the attested task path and on the hold path alike.
+    #[cfg(unix)]
+    #[test]
+    fn an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-instructions-regular");
+        let link = root.join("stdin-link");
+        std::os::unix::fs::symlink("/dev/stdin", &link).unwrap();
+        let link = link.to_string_lossy().into_owned();
+        let brief = root.join("brief.md");
+        std::fs::write(&brief, "BRIEF").unwrap();
+        let brief = brief.to_string_lossy().into_owned();
+
+        for spec in ["@/dev/stdin", "@/proc/self/fd/0", "@/dev/fd/0", &format!("@{link}")] {
+            let err = read_instructions(spec, Door::Mcp).expect_err(spec);
+            assert!(err.contains("not a regular file"), "{spec}: {err}");
+            let pinned = pin_held_inputs(&["true".to_string()], BTreeMap::from([("instructions".to_string(), spec.to_string())]));
+            assert!(pinned.is_err(), "the hold path refuses {spec} too");
+
+            let inv = mcp_spawn(&["true"], &[("task", "t1"), ("instructions", spec)]);
+            let out = session_spawn_with(&inv, |_| Some("parent-id".to_string()));
+            assert_eq!(out.status, Status::Usage, "{spec}: {out:?}");
+            assert_eq!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("bad-instructions"), "{spec}: {out:?}");
+        }
+        assert_eq!(read_instructions(&format!("@{brief}"), Door::Mcp).as_deref(), Ok("BRIEF"), "a regular file still reads");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
