@@ -20,14 +20,13 @@
 //! steps that read the gate's own state print a skip line. IP literals only: the
 //! namespace has no name resolution path to the gate.
 //!
-//! Bootstrap seeds. Two steps hand-write what pairing would teach a box. Each is
-//! marked `BOOTSTRAP` where it is written.
-//!  * charter-poll: a poll node asks its relay with a key-bearing record in
-//!    `nodes.json`. Delete `seed_relays` once a poll node asks from the charter.
-//!  * cross-mesh seal: a letter to another mesh is sealed with the destination's
-//!    age binding, learned by the origin from the destination's charter line.
-//!    Delete `seed_cross_mesh` and the `seed_peer` in `labbox_takes_home` once a
-//!    seal reads the destination's binding from the charter itself.
+//! Bootstrap seed. One step hand-writes what pairing would teach a box: a letter
+//! to another mesh is sealed with the destination's age binding, which the origin
+//! learns from the destination's charter line. A charter declares only its own
+//! mesh's end boxes, so a box cannot read another mesh's binding from a charter it
+//! holds. Marked `BOOTSTRAP` where it is written (`seed_cross_mesh`, and the
+//! `seed_peer` in `labbox_takes_home`). It stands in for the unbuilt cross-mesh
+//! origin gate; delete it once a seal reads that binding from the charter itself.
 
 #![cfg(target_os = "linux")]
 
@@ -388,12 +387,6 @@ fn in_root<T>(root: &Path, f: impl FnOnce() -> T) -> T {
     f()
 }
 
-/// BOOTSTRAP (charter-poll): the gate as a key-bearing relay record.
-fn seed_relay(root: &Path, gate_url: &str, gate_key: &str, mesh: &str) {
-    let relay = record(GATE, gate_url, gate_key, Some(mesh));
-    in_root(root, || node_store::save_nodes(&[relay.clone()]).unwrap());
-}
-
 /// BOOTSTRAP (cross-mesh seal): a node of ANOTHER mesh, pinned by its key, with its
 /// age binding learned from its own charter line.
 fn seed_peer(root: &Path, dest: &str, dest_key: &str, source: &Path) {
@@ -526,11 +519,10 @@ fn path_up(path: PathBuf) -> impl Fn() -> bool {
 
 /// Why this host cannot run the fence, or `None` when it can.
 fn tools_missing() -> Option<String> {
-    let probes: [(&str, &[&str]); 5] = [
+    let probes: [(&str, &[&str]); 4] = [
         ("unshare", &["-rn", "true"]),
         ("socat", &["-V"]),
         ("curl", &["--version"]),
-        ("ssh", &["-V"]),
         ("ip", &["-V"]),
     ];
     probes.iter().find_map(|(program, args)| {
@@ -543,7 +535,7 @@ fn tools_missing() -> Option<String> {
             .unwrap_or(false);
         (!ok).then(|| {
             format!(
-                "`{program} {}` does not run here: the fence needs unprivileged user namespaces (`unshare -rn`), and the rest need socat, curl, ssh and iproute2 on PATH",
+                "`{program} {}` does not run here: the fence needs unprivileged user namespaces (`unshare -rn`), and the rest need socat, curl and iproute2 on PATH",
                 args.join(" ")
             )
         })
@@ -563,7 +555,6 @@ fn openssl_missing() -> bool {
 struct Gate {
     /// The gate's own box, when the harness runs the gate. `None` when external.
     root: Option<Root>,
-    pubkey: String,
     /// The address every end box dials, as both charters declare it.
     url: String,
     /// The gate's address inside each end box's namespace.
@@ -716,7 +707,6 @@ impl Lab {
         }
         take_charter(&labbox, &operator_keys[LAB], &sources[LAB], LAB);
 
-        let gate_pubkey = node_keys[GATE].clone();
         Lab {
             dir,
             reaper,
@@ -724,7 +714,6 @@ impl Lab {
             operator,
             gate: Gate {
                 root: gate_root,
-                pubkey: gate_pubkey,
                 url: gate_url,
                 fence_ip: gate_fence_ip,
                 front: gate_front,
@@ -754,13 +743,8 @@ impl Lab {
         self.dir.join("runs")
     }
 
-    /// BOOTSTRAP (charter-poll): each poll node's relay record for the gate.
-    fn seed_relays(&self) {
-        seed_relay(&self.homebox.dir, &self.gate.url, &self.gate.pubkey, HOME);
-        seed_relay(&self.labbox.dir, &self.gate.url, &self.gate.pubkey, LAB);
-    }
-
     /// BOOTSTRAP (cross-mesh seal): homebox learns labbox's binding from lab's charter.
+    /// Why: home's charter does not declare labbox, and the cross-mesh origin gate is unbuilt.
     fn seed_cross_mesh(&self) {
         seed_peer(&self.homebox.dir, LABBOX, &self.node_keys[LABBOX], &self.sources[LAB]);
     }
@@ -885,6 +869,7 @@ impl Lab {
 
     /// BOOTSTRAP (cross-mesh seal): labbox takes home's charter by hand, then learns
     /// homebox's binding for its reply. Done here so A5n sees the missing charter.
+    /// Why: lab's charter does not declare homebox, and the cross-mesh origin gate is unbuilt.
     fn labbox_takes_home(&self) {
         take_charter(&self.labbox, &self.operator_keys[HOME], &self.sources[HOME], HOME);
         seed_peer(&self.labbox.dir, HOMEBOX, &self.node_keys[HOMEBOX], &self.sources[HOME]);
@@ -961,14 +946,16 @@ impl Lab {
             let udp = r.probe("a7-udp", "printf x | socat -T3 - UDP:8.8.8.8:53");
             assert!(udp.stdout.is_empty(), "A7 {}: UDP to 8.8.8.8:53 gets no answer: {}", r.name, udp.dump());
 
-            let ssh_public = r.probe("a7-ssh", "ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=3 -p 22 1.1.1.1 true");
-            assert_ne!(ssh_public.code, Some(0), "A7 {}: ssh to 1.1.1.1 fails: {}", r.name, ssh_public.dump());
+            // A plain TCP connect to port 22 (the ssh port): socat exits 0 only when
+            // the connection is made, so any nonzero exit is a refusal or a timeout.
+            let public_22 = r.probe("a7-public-22", "socat -T3 /dev/null TCP:1.1.1.1:22,connect-timeout=3");
+            assert_ne!(public_22.code, Some(0), "A7 {}: TCP to 1.1.1.1:22 cannot connect: {}", r.name, public_22.dump());
 
-            let ssh_gate = r.probe(
-                "a7-ssh-gate",
-                &format!("ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=3 -p 22 {} true", self.gate.fence_ip),
+            let gate_22 = r.probe(
+                "a7-gate-22",
+                &format!("socat -T3 /dev/null TCP:{}:22,connect-timeout=3", self.gate.fence_ip),
             );
-            assert_ne!(ssh_gate.code, Some(0), "A7 {}: ssh to the gate fails: {}", r.name, ssh_gate.dump());
+            assert_ne!(gate_22.code, Some(0), "A7 {}: TCP to the gate's port 22 cannot connect: {}", r.name, gate_22.dump());
 
             if let (Some(front), Some(plain)) = (self.gate.front_port, self.gate.mail_port) {
                 let via_front = r.probe("a7-front", &format!("curl -sS -o /dev/null --max-time 5 https://127.0.0.1:{front}/"));
@@ -976,7 +963,7 @@ impl Lab {
                 let via_plain = r.probe("a7-plain", &format!("curl -sS -o /dev/null --max-time 5 http://127.0.0.1:{plain}/"));
                 assert_eq!(via_plain.code, Some(7), "A7 {}: the adapter is not reachable from the fence: {}", r.name, via_plain.dump());
             }
-            pass("A7", format!("{}: bridge answers; 1.1.1.1:443, UDP 8.8.8.8:53, ssh, and the gate's other ports all fail", r.name));
+            pass("A7", format!("{}: bridge answers; 1.1.1.1:443, UDP 8.8.8.8:53, TCP 22, and the gate's front and adapter fail", r.name));
         }
 
         if let (Some(front), Some(plain)) = (self.gate.front_port, self.gate.mail_port) {
@@ -1057,25 +1044,25 @@ impl Lab {
         pass("A9b", "homebox hands far-bound mail to the gate (step 2); the gate refuses it no-route");
     }
 
-    /// A9c: a relay record is present and the relay is down. The poll reports
-    /// unreachable, never polled, and files nothing.
+    /// A9c: labbox holds no record of the gate, so the charter alone names its relay,
+    /// and the relay is down. The poll reports unreachable, never polled, and files
+    /// nothing.
     fn a9c_no_relay(&mut self) {
         let Some(front) = self.gate.front else {
             skip("A9c", "the gate is external: the harness cannot take its front down");
             return;
         };
-        let relay = in_root(&self.labbox.dir, node_store::load_nodes)
-            .into_iter()
-            .find(|n| n.name == GATE)
-            .expect("A9c: labbox holds the relay record before the relay goes down");
-        assert_eq!(relay.url, self.gate.url, "A9c: the record names the gate's address");
+        assert!(
+            !in_root(&self.labbox.dir, node_store::load_nodes).iter().any(|n| n.name == GATE),
+            "A9c: labbox holds no record of the gate, so the charter alone names its relay"
+        );
         self.reaper.stop(front);
         let poll = self.labbox.run("a9c-poll", &["mail", "poll", GATE, "--mesh", "lab", "--json"]);
         let p = poll.json("A9c poll");
         let row = &p["data"]["nodes"][0];
         assert_ne!(row["status"], "polled", "A9c: a poll with no reachable relay does not report polled: {p}");
         assert_eq!(p["data"]["filed"], 0, "A9c: nothing is filed: {p}");
-        pass("A9c", format!("relay record present, relay down: poll reports {}, filed 0", row["status"]));
+        pass("A9c", format!("no record, charter relay down: poll reports {}, filed 0", row["status"]));
     }
 
     /// A9a: home's charter without `[gates]`, so lab's gate into home is one-sided.
@@ -1143,7 +1130,6 @@ fn two_mesh_mail_round_trips_over_https_with_443_only_boxes() {
         }
     }
     let mut lab = Lab::build(external);
-    lab.seed_relays();
     lab.a1();
     lab.a2();
     lab.seed_cross_mesh();

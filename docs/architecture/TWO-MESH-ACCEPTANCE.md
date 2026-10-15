@@ -2,8 +2,9 @@
 
 The procedure that proves two charter meshes exchange mail through one gate,
 over HTTPS, with each end box reaching nothing but that gate. Design:
-[MAIL.md](MAIL.md) (Transit, the four steps), [HTTPS-MESH-API.md](HTTPS-MESH-API.md)
-("Charters", "Transports and relays"). The single-mesh live runbook is
+[MAIL.md](MAIL.md) (Transit, the four steps),
+[HTTPS-MESH-API.md](HTTPS-MESH-API.md) ("Charters", "Transports and relays").
+The single-mesh live runbook is
 [H1-LIVE-ACCEPTANCE.md](H1-LIVE-ACCEPTANCE.md).
 
 ```text
@@ -29,7 +30,7 @@ cargo test -p aoide-cli --test two_mesh_https -- --ignored --nocapture
 ```
 
 It needs unprivileged user namespaces (`unshare -rn`), and `socat`, `curl`,
-`ssh`, `ip` and `openssl` on `PATH`. It skips with a printed reason when one is
+`ip` and `openssl` on `PATH`. It skips with a printed reason when one is
 missing. A passing run removes its roots; a failing run keeps them and prints
 the path, with every command's stdout and stderr under `runs/`.
 
@@ -44,8 +45,10 @@ then dial the gate you name:
 | `AOIDE_TWO_MESH_GATE_CA` | The PEM bundle the end boxes trust for that gate. |
 | `AOIDE_TWO_MESH_GATE_LINE` | A file holding the gate's node line, named `gate`, with no address. `aoide identity --json` on the gate prints it as `data.nodeLine`. |
 
-Steps that read the gate's own state (A2b, A4, A9a, A9c) print a skip line,
-since that state is not on this box. The rest run unchanged.
+Steps that read the gate's own box are skipped there and print a skip line:
+A1 (the gate's charter), A2b, A4, A9a, A9b and A9c. Two checks inside A5n and
+A7 (the gate's outbox, and the gate's front and adapter from a fence) are left
+out without a line. The rest run unchanged.
 
 ## What each assertion proves
 
@@ -59,20 +62,24 @@ since that state is not on this box. The rest run unchanged.
 | A5 | With the origin's charter the destination files exactly that letter, origin verified. |
 | A6 | A reply travels back the same way and is filed. |
 | A6b | The receipt for the first letter returns and retires it from the sender's outbox. **Fails until cross-mesh receipts route.** |
-| A7 | From inside each fence the gate answers and 1.1.1.1:443, UDP 8.8.8.8:53, ssh, and the gate's other ports do not. The host reaches the same targets, so the failures are the fence's. |
+| A7 | From inside each fence the gate answers. 1.1.1.1:443, UDP 8.8.8.8:53, TCP port 22 (on 1.1.1.1 and on the gate's address), and the gate's front and adapter ports on 127.0.0.1 do not. The host reaches the front and the adapter, so the refusals are the fence's. |
 | A8 | With no CA bundle, https fails at verification (exit 60), nothing is filed, and a send stays spooled. |
 | A9b | A letter to a mesh with no gate is refused `no-route` at the gate. The sender hands it to its relay first. |
-| A9c | A poll with the relay record present and the relay down reports `unreachable`, never `polled`. |
-| A9a | When home drops its gate into lab, the gate's route for lab flips from a hop to a refusal. |
+| A9c | labbox holds no record of the gate, so the charter alone names the relay. With the relay down, the poll reports `unreachable`, never `polled`, and files nothing. |
+| A9a | When home drops its gate into lab, the gate's route for lab flips from a hop to a refusal. The refusal reads `not-a-member`, not `one-sided-gate`; the test logs that as a finding. |
 
 ## Bootstrap seeds
 
-Two steps write node records by hand, because the design does not yet pair them
-for the case. Each is marked `BOOTSTRAP` in the test:
+One step writes node records by hand. Each write is marked `BOOTSTRAP` in the
+test, and each is a cross-mesh seal:
 
-- charter-poll: a poll node asks its relay from a key-bearing record in `nodes.json`.
-- cross-mesh seal: a letter to another mesh is sealed with the destination's
-  binding, which the origin learns from the destination's charter line.
+- homebox learns labbox's age binding (`seed_cross_mesh`). Home's charter does
+  not declare labbox, so the binding cannot come from a charter homebox holds.
+- labbox learns homebox's age binding for the reply (`labbox_takes_home`), for
+  the same reason: lab's charter does not declare homebox.
 
-Remove a seed when the design does the same from the charter alone; the
-assertions it supports stay as they are.
+Both stand in for the unbuilt cross-mesh origin gate. A seed goes when a seal
+reads the binding from the charter itself; the assertions it supports stay.
+
+A poll node needs no seed. It asks its relay from the signed charter alone, with
+no record of the relay in its state.
