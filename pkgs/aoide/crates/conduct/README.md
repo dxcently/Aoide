@@ -1041,23 +1041,26 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   The outcome is a toast through the shared `notify`, on success and failure;
   the audit line is `ricemode action <stage|declarative>: <ok|failed>` and
   carries no song name.
-  `{"cmd":"ricedraft","action":"enter|new|save","name"?}` is fire-and-forget
-  like `ricemode`, its outcome a toast through the shared `notify`. The set is
-  closed (`RiceDraftAction::from_wire`: `enter` takes a `name` that is one argv
-  token, `new` and `save` refuse one, so a mistaken caller is dropped rather
+  `{"cmd":"ricedraft","action":"enter|new|save|drop","name"?}` is
+  fire-and-forget like `ricemode`, its outcome a toast through the shared
+  `notify`. The set is closed (`RiceDraftAction::from_wire`: `enter` and `drop`
+  take a `name` that is one argv token, `new` and `save` refuse one, so a mistaken caller is dropped rather
   than read as success), planned by the pure `rice_draft_plan` and run step by
   step by `dispatch_rice_draft`, each step `lyra rice … --json`, unbounded,
   stopping at the first failure — `partial` when an earlier step had
   succeeded, which nothing rolls back. From declarative, `enter` and `new` first
   run a BARE `rice mode stage` (house rule 10: it restores `stagingSong`,
-  never the declared song), and `save` is a
-  taught refusal, `declarative mode is locked — unlock first, then save the
-  draft`: the stage there is the declared song, `rice draft save` nests under
-  the song the stage names, and the listing names `stagingSong`, so a save
-  would land where the menu never looks. `enter` is enter-or-create: `rice
-  mode draft` forks the stage into a name that does not exist yet, and the
-  bridge cannot tell. The audit line is one per action
-  (`ricedraft action <enter|new|save>: <ok|partial|failed>`) and carries
+  never the declared song), and `save` and `drop` are taught refusals,
+  `declarative mode is locked — unlock first, then save the draft` / `…then
+  delete the draft`: the stage there is the declared song, `rice draft
+  save`/`drop` act on the song the stage names, and the listing names
+  `stagingSong`, so a save would land, and a drop would delete, where the menu
+  never looks (unlocking first would change the mode as a side effect).
+  Elsewhere `drop` is one step, `rice draft drop <name>`; a missing draft or
+  the draft in force is the CLI's refusal, toasted as its own message.
+  `enter` is enter-or-create: `rice mode draft` forks the stage into a name
+  that does not exist yet, and the bridge cannot tell. The audit line is one
+  per action (`ricedraft action <enter|new|save|drop>: <ok|partial|failed>`) and carries
   neither a draft nor a song name.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE

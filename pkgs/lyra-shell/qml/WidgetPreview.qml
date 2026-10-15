@@ -273,10 +273,10 @@ ShellRoot {
         // The menu's draft gesture — only logs, like sendCommand: the real one is
         // fire-and-forget and its outcome is a daemon toast. The logged line is
         // the one ShellBridge.riceDraft would send: a name only for a non-empty
-        // string on `enter`.
+        // string on `enter` or `drop`.
         function riceDraft(action, name) {
             var wanted = { action: "" + action }
-            if (action === "enter" && typeof name === "string" && name.length > 0)
+            if ((action === "enter" || action === "drop") && typeof name === "string" && name.length > 0)
                 wanted.name = name
             canvas.log("bridge.riceDraft " + JSON.stringify(wanted))
         }
