@@ -486,13 +486,14 @@ windowed path with its resolved argv. Rules:
 - **Post-spawn restore delivery (P-C6).** Once a terminal candidate's spawn
   actually registers, its `restore` snapshot decides what — if anything —
   lands in the new pty, through `session_send` in-process, never a direct
-  socket write. Not idle, with a foreground `argv`: re-exec it (`--yes
-  --submit`) — the session was demonstrably running it when it left — EXCEPT
-  when `argv[0]`'s basename is `sudo`, which is never re-exec'd unattended
-  (only the cwd restores; a privileged command popping a password prompt in
-  a terminal nobody is watching is not a restore). Idle: nothing is
-  delivered; a terminal reopened at its own cwd already being the complete
-  answer.
+  socket write. Not idle, with a foreground `argv`: type it at the prompt
+  (`--yes`, never `--submit`) — the session was demonstrably running it when
+  it left, and the human who reads the line presses Enter — EXCEPT when
+  `restore_argv_refusal` refuses the argv (a privilege program such as `sudo`,
+  a shell-form argv, an assignment prefix, a control character, a line over
+  4096 bytes; `CONTRACTS.md` lists them once), which restores the cwd only.
+  Idle: nothing is delivered; a terminal reopened at its own cwd already being
+  the complete answer.
 - The conductor gains a keybind invoking resurrect for the focused
   project (`conductor/src/commands.rs` — the TUI already maps keys onto
   typed commands).

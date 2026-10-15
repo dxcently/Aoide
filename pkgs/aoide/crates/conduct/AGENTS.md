@@ -1298,7 +1298,12 @@ in the message.
   (`command_label`) and `restore.argv` come from that line, never from
   `running_pid`: `doas` execs into the root shell and `su` hands the
   foreground to its child, so the pid would name a root command, which
-  resurrect would then type.
+  resurrect would then type. The rule reaches exactly `sudo`, `doas` and `su`,
+  and what they wrap: only these read as a shell, and only a shell has an idle
+  verdict or a restore. `run0`, `runuser`, `pkexec`, `sudoedit`, `setpriv`,
+  `chroot`, `sg`, `newgrp`, `dzdo`, `ksu` and `busybox su` are non-shell wraps
+  with no restore, so they are not detected here. `PRIVILEGE_PROGRAMS` is the
+  restore refusal's list, wider than this rule's scope.
 - **The executable baseline is the file the spawn started, read from its path
   (`resolve_program`, once; `PtyChild::image`; `shell_baseline`), never from
   `/proc`.** A `/proc/<pid>/exe` read can land after the shell has exec'd its
@@ -1306,7 +1311,8 @@ in the message.
   path with the name as argv[0], so the baseline and the exec are one file. The
   CPU sample is taken on every tick. Don't move either read into
   `shell_at_prompt`. `busybox` is known by the canonical name of that file,
-  never by argv[0], so an `sh` that links to it has no baseline.
+  never by argv[0], so an `sh` that is a symlink to it has no baseline. A hard
+  link named `sh` is not caught.
 - **`proc_argv` and `proc_command` are deliberately two functions, never
   merged (P-C5).** `proc_command` is a DISPLAY label — it basename-
   collapses `argv[0]` and truncates at 48 chars — built for the roster's

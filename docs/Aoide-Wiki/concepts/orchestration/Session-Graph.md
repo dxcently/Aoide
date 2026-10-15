@@ -446,15 +446,16 @@ A shell's screen counts by what the shell was given. An interactive shell (no
 prompt, so a question typed or echoed there is never `awaiting`, and a `read -p`
 it runs itself goes unseen. A shell given a command or a script (`bash -c "apt
 install x"`, `sh ./run.sh`) is a program like any other, and its questions are
-heard. A privilege program (`sudo bash`, `su`) is never silenced and never idle:
-it asks for a password first, and nothing tells that prompt from the root
-shell's after it, so the password prompt is heard. `script` is a shell at its prompt unless `-c` or `--command` appears
-after it (any dashed token with a `c` counts, so the screen only ever hears
-more). A form the launcher walk refuses (`env -S`, `sudo -i`, an option its
+heard. `sudo`, `doas` and `su` (`sudo bash`, `su`) are never silenced and never
+idle: the first prompt asks for a password, and nothing tells that prompt from
+the root shell's after it, so the password prompt is heard. `script` is a shell
+at its prompt unless `-c` or `--command` appears after it (any dashed token with
+a `c` counts, so the screen only ever hears more). A form the launcher walk
+refuses (`env -S`, `sudo -i`, an option its
 table does not list) is answered as a command runner, so its questions are heard
 too: where the walk cannot resolve a form, the over-match goes toward hearing,
-never toward silence. The argv decides which, read by the walk that classes a
-shell; no process is probed for it.
+never toward silence. The argv decides which, read by the walk that classes a shell; no
+process is probed for it.
 
 Precedence, highest first: **hook phase, trace, screen, presence.** A non-shell
 session whose harness is an agent with a profile (claude, kimi, pi, eidolon) is

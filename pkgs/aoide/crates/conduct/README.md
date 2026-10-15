@@ -318,8 +318,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `restore.idle` are both read off. An interactive shell is idle at its bare
   prompt (the pgid check); a command shell (`bash -c …`) is working while a
   child runs, once its executable is no longer the one it started as (or
-  cannot be read), or while its CPU time rises. A session whose argv runs a
-  privilege program is never idle, and is labelled and recorded by its own
+  cannot be read), or while its CPU time rises. A session whose argv runs
+  `sudo`, `doas` or `su` is never idle, and is labelled and recorded by its own
   conducted line. The wrap keeps that line, the executable and the CPU memory
   for it (`ShellWatch`; see AGENTS.md and CONTRACTS.md, the shell-state
   paragraph).
@@ -1091,13 +1091,13 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   command core in-process without ever risking its own tick on a
   headless box.
   **Post-spawn restore delivery (P-C6):** once a terminal candidate's spawn
-  actually registers, `restore_delivery` decides what, if anything, lands in
-  the new pty, through `send::session_send` in-process, never a direct socket
-  write. A working session's recorded argv is typed at its prompt (`--yes`,
-  never `--submit`) unless `restore_argv_refusal` refuses it, and then only
-  its cwd restores. The refusals are listed once, in CONTRACTS.md's restore
-  paragraph. An idle session delivers nothing; a terminal reopened at its own
-  cwd is already the complete answer.
+  actually registers, `restore_delivery` decides what — if anything — lands
+  in the new pty, through `send::session_send` in-process, never a
+  direct socket write. Working (`idle: false`) with a foreground `argv` is
+  typed at its prompt (`--yes`, never `--submit`) unless `restore_argv_refusal`
+  refuses it, and then only the cwd restores (the refusals are in CONTRACTS.md's
+  restore paragraph). Idle (`idle: true`) delivers nothing; a terminal
+  reopened at its own cwd is already the complete answer.
   **Bare-manifest mode (U2, command-defrag lane U):** `resurrect` with NONE
   of `--project`/`--all`/`--id` walks up from cwd
   (`aoide_storage::manifest::walk_up`) for the nearest `.aoide/

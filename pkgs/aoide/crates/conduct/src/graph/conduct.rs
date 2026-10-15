@@ -67,7 +67,9 @@ const SHELL_BASENAMES: &[&str] = &[
 /// shell on the pty. [`runs_a_privilege_program`] reads it for the restore
 /// refusals, for a wrap that is never idle ([`ShellWatch::privileged`]) and,
 /// through [`program_is_an_interactive_shell`], for the screen. A basename
-/// match, and `busybox <applet>` counts through its applet.
+/// match, and `busybox <applet>` counts through its applet. Only `sudo`, `doas`
+/// and `su` read as a shell, so only they reach the never-idle rule; the rest
+/// are non-shell wraps with no restore.
 pub(in crate::graph) const PRIVILEGE_PROGRAMS: &[&str] = &[
     "sudo", "doas", "su", "pkexec", "run0", "sudoedit", "runuser", "setpriv", "chroot", "sg",
     "newgrp", "dzdo", "ksu",
@@ -1338,9 +1340,11 @@ struct ExeId {
 #[derive(Debug)]
 struct ShellWatch {
     /// The conducted argv, when it runs a privilege program
-    /// ([`runs_a_privilege_program`]). Such a session is never idle, and this
-    /// line is its `activity` and `restore.argv`, never the root foreground it
-    /// hands the terminal to.
+    /// ([`runs_a_privilege_program`]). A shell that does, which is `sudo`,
+    /// `doas` or `su` and what they wrap, is never idle, and this line is its
+    /// `activity` and `restore.argv`, never the root foreground it hands the
+    /// terminal to. The other programs of [`PRIVILEGE_PROGRAMS`] are non-shell
+    /// wraps, which never reach a tick.
     privileged: Option<Vec<String>>,
     /// The identity of the file the spawn started (see [`shell_baseline`]). A
     /// later identity that differs, or none at all, means the shell exec'd into
@@ -1386,7 +1390,8 @@ fn first_exec_image(file: &std::path::Path) -> Option<std::path::PathBuf> {
 /// path and never from `/proc`, where a shell that has already exec'd shows its
 /// command. `busybox` has none: its applets all run inside one executable, so
 /// the comm check decides there. It is known by the name of the file the
-/// symlinks lead to, so an `sh` that links to it has none either.
+/// symlinks lead to, so an `sh` that is a symlink to it has none either. A hard
+/// link named `sh` is not caught.
 #[cfg(target_os = "linux")]
 fn shell_baseline(image: Option<&std::path::Path>) -> Option<ExeId> {
     let file = std::fs::canonicalize(first_exec_image(image?)?).ok()?;
@@ -5454,7 +5459,7 @@ mod tests {
 
     /// The spoof a non-setuid process can run on itself: it renames itself `bash`
     /// and makes its own executable unreadable with `PR_SET_DUMPABLE 0`. The
-    /// shell here IS python3, an `sh` on a private `PATH` that links to its ELF,
+    /// shell here IS python3, an `sh` on a private `PATH` symlinked to its ELF,
     /// so nothing execs and the baseline is python3's own file. Once comm says
     /// `bash` and the executable cannot be read, the verdict settles on working,
     /// though there is no child and the CPU is flat: three seconds of ticks that
@@ -5532,18 +5537,20 @@ mod tests {
 
     /// `busybox` has no baseline, since its applets never change the executable.
     /// It is known by the file the spawned path resolves to, never by the name:
-    /// an `sh` that links to it has none, nor has a script it interprets, while a
-    /// link named `busybox` to another file has one. The stand-in is built here;
-    /// a nix busybox ships no applet links.
+    /// an `sh` that is a symlink to it has none, nor has a script it interprets,
+    /// while a symlink named `busybox` to another file has one. A hard link named
+    /// `sh` is not caught: it is the same file under another name, and symlinks
+    /// are all the name is read through. The stand-in is built here; a nix
+    /// busybox ships no applet links.
     #[cfg(target_os = "linux")]
     #[test]
-    fn a_shell_linked_to_busybox_has_no_baseline() {
+    fn a_shell_symlinked_to_busybox_has_no_baseline() {
         let dir = unique_stage("baseline-busybox");
         let busybox = dir.join("busybox");
         std::fs::write(&busybox, b"\x7fELF").expect("the stand-in");
         let sh = dir.join("sh");
-        std::os::unix::fs::symlink(&busybox, &sh).expect("an sh that links to busybox");
-        assert_eq!(shell_baseline(Some(&sh)), None, "an sh linked to busybox");
+        std::os::unix::fs::symlink(&busybox, &sh).expect("an sh that is a symlink to busybox");
+        assert_eq!(shell_baseline(Some(&sh)), None, "an sh symlinked to busybox");
         assert_eq!(shell_baseline(Some(&busybox)), None);
         let script = dir.join("probe.sh");
         std::fs::write(&script, format!("#!{} sh\n", sh.display())).expect("the script");
@@ -5551,9 +5558,12 @@ mod tests {
         let other = dir.join("standin-sh");
         std::fs::write(&other, b"\x7fELF").expect("another stand-in");
         let named = dir.join("named");
-        std::fs::create_dir(&named).expect("a dir for the misnamed link");
-        std::os::unix::fs::symlink(&other, named.join("busybox")).expect("a link named busybox");
+        std::fs::create_dir(&named).expect("a dir for the misnamed symlink");
+        std::os::unix::fs::symlink(&other, named.join("busybox")).expect("a symlink named busybox");
         assert_eq!(shell_baseline(Some(&named.join("busybox"))), identity_of(&other));
+        let hard = named.join("sh");
+        std::fs::hard_link(&busybox, &hard).expect("an sh that is a hard link to busybox");
+        assert_eq!(shell_baseline(Some(&hard)), identity_of(&busybox), "a hard link is not caught");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -5646,7 +5656,7 @@ mod tests {
         a_privileged_session_records_its_own_line(
             "sb-doas",
             &["doas", "bash"],
-            "#!/bin/sh\nexec sh -c 'sleep 30'\n",
+            "#!/bin/sh\nexec sleep 30\n",
             |pid| std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim_end() == "sleep"),
         );
     }
