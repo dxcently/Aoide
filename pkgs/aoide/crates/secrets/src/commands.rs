@@ -28,7 +28,7 @@
 //!   value, ever, so they still run through the ordinary dispatch + audit
 //!   path like any other command), but **CLI-only, door-gated the SAME way
 //!   as `serve`/`exec`/`enroll`** (bounce-fix item 2, P-V2 review —
-//!   [`require_cli`]): an earlier revision left them reachable over MCP/
+//!   the door gate): an earlier revision left them reachable over MCP/
 //!   A2A/Daemon doors, which would let any agent already talking to aoide
 //!   `secrets grant <secret> <itself>` and self-escalate. The gate returns
 //!   the door-hint `Outcome` and returns BEFORE any `store::load_policies`/
@@ -41,7 +41,7 @@
 //!   from STDIN (never argv) and forwards it to the broker's `put` op over
 //!   the socket. **NOT special-cased**, unlike `serve`/`exec`/`enroll`:
 //!   [`handle_secrets_put`] is a PLAIN handler — CLI-only via the SAME
-//!   [`require_cli`] gate as the admin quartet (an agent putting values is
+//!   the door gate as the admin quartet (an agent putting values is
 //!   exactly what the design forbids), then it delegates the stdin-read +
 //!   socket round trip to `crate::client::run_put`. This differs from
 //!   `exec`/`enroll` in the one way that matters: `put`'s wire reply never
@@ -70,7 +70,7 @@
 //!   audit_put`'s new `replaced` field) sees which one happened.
 //! - `set-totp` (P-V4e) — `secrets set-totp <name> on|off`: flips an
 //!   EXISTING policy's `requireTotp` bit without hand-editing `policy.json`.
-//!   Same `require_cli` gate as the rest of the admin surface; unknown name
+//!   Same door gate as the rest of the admin surface; unknown name
 //!   is a clean error; re-setting the same state is idempotent and reports
 //!   "unchanged" honestly (house rule: report exactly what changed) rather
 //!   than calling `.changed(...)` on a no-op write. Appended newest in
@@ -80,7 +80,7 @@
 //!   policy's new `automation.enabled` bit; `secrets automate <name>
 //!   grant|revoke <consumer>` edits `automation.consumers` (the consumer
 //!   name checked with the SAME [`valid_secret_name`] validation as every
-//!   other name in this crate). Same `require_cli` + `require_admin_identity`
+//!   other name in this crate). Same door gate + `require_admin_identity`
 //!   gate as the rest of the admin surface; idempotent both ways — flipping
 //!   to the state it already has, or granting/revoking a consumer already
 //!   in/out of the list, reports "unchanged" and writes nothing (house rule
@@ -112,7 +112,7 @@
 //!   the value, `broker::handle_approve`'s doc); [`handle_secrets_dismiss`]
 //!   refuses a parked ask outright ([`crate::client::dismiss`]). All three
 //!   are **operator-side over the socket, same as `put`/`exec`** — CLI-only
-//!   via [`require_cli`], but deliberately NOT gated by
+//!   via the door gate, but deliberately NOT gated by
 //!   [`require_admin_identity`]: they never touch `policy.json`, only the
 //!   broker's in-memory [`crate::park::ParkRegistry`] over the wire.
 //!
@@ -129,7 +129,7 @@
 //!   policy metadata, read by the BROKER over the socket op `status`
 //!   ([`crate::client::status`], [`crate::broker::handle_status`]).
 //!   Operator-side exactly like `pending`/`put`/`exec`: CLI-only via
-//!   [`require_cli`], deliberately NOT [`require_admin_identity`] (it reads
+//!   the door gate, deliberately NOT [`require_admin_identity`] (it reads
 //!   nothing locally and writes nothing anywhere — the broker owns the
 //!   read). NO value, NO backend `key`, NO backend probe of any kind, and
 //!   **no direct-home fallback**: an unreachable broker (or an older broker
@@ -139,7 +139,7 @@
 //! - `watch` — a foreground, line-mode broker-event narrator + prompt
 //!   surface (`crate::watch`'s own module doc has the full mechanism).
 //!   [`handle_secrets_watch`] only gates the door (CLI-only, same
-//!   [`require_cli`] as `pending`/`approve`/`dismiss` — no admin-identity
+//!   the door gate as `pending`/`approve`/`dismiss` — no admin-identity
 //!   check, same reasoning), refuses `--popup`+`--json` together as a usage
 //!   error (tracker #71 Part 2, this commit — the `--popup` flag is
 //!   registered on this same `cmd!` entry), and records the launch; the
@@ -149,7 +149,7 @@
 //! - `migrate` (P-G2, task #72) — `secrets migrate <name> [--backend
 //!   <target>]`: moves an EXISTING secret's stored VALUE from its policy's
 //!   current backend to a target backend (default `age`) and flips the
-//!   policy row. Admin command, DIRECT-HOME — same `require_cli` +
+//!   policy row. Admin command, DIRECT-HOME — the door gate +
 //!   `require_admin_identity` gate as `add`/`rm`/`grant`, never the
 //!   socket. See [`handle_secrets_migrate`]'s own doc and `README.md`'s
 //!   "Migrating a secret between backends" for the full ordering/removal
@@ -170,7 +170,7 @@
 //! `allow-remote-origin`/`migrate`
 //! also carry the admin-identity guard** ([`require_admin_identity`], `home::admin_identity_check`'s
 //! module doc — the yomi-strix incident, 2026-08-22): called right after
-//! [`require_cli`] in every one of those handlers, BEFORE
+//! the door gate in every one of those handlers, BEFORE
 //! `store::load_policies`/`store::save_policies` ever runs, it refuses the
 //! call outright when this process's effective uid doesn't own the
 //! secrets home — plain `sudo` (root, euid 0) is explicitly one of the
@@ -463,45 +463,30 @@ pub fn register(r: &mut Registry) {
 
 /// See `crate::broker`'s module doc for the accept loop this launch record
 /// hands off to (in the owning app crate's `special` hook, not here).
-fn handle_secrets_serve(inv: &Invocation) -> Outcome {
-    match inv.door {
-        Door::Cli => Outcome::ok("secrets.serve", "starting the secrets broker").with_data(json!({
-            "secretsHome": home::secrets_home().to_string_lossy(),
-            "socket": crate::socket::socket_path().to_string_lossy(),
-        })),
-        _ => Outcome::usage(
-            "secrets.serve",
-            "secrets serve is a long-running broker; run `aoide secrets serve` from a terminal (not over this door)",
-        ),
-    }
+fn handle_secrets_serve(_inv: &Invocation) -> Outcome {
+    Outcome::ok("secrets.serve", "starting the secrets broker").with_data(json!({
+        "secretsHome": home::secrets_home().to_string_lossy(),
+        "socket": crate::socket::socket_path().to_string_lossy(),
+    }))
 }
 
 /// See `crate::client`'s module doc for the resolve+exec flow this launch
 /// record hands off to (in the owning app crate's `special` hook).
-fn handle_secrets_exec(inv: &Invocation) -> Outcome {
-    match inv.door {
-        Door::Cli => Outcome::ok("secrets.exec", "resolving secret to exec"),
-        _ => Outcome::usage(
-            "secrets.exec",
-            "secrets exec spawns a child with inherited stdio; run it from a CLI terminal (not over this door)",
-        ),
-    }
+fn handle_secrets_exec(_inv: &Invocation) -> Outcome {
+    Outcome::ok("secrets.exec", "resolving secret to exec")
 }
 
 /// See `crate::enroll`'s module doc for the secret-generation/persistence/
 /// printing flow this hands off to (in the owning app crate's `special`
 /// hook, not here — same split as `handle_secrets_serve`/`handle_secrets_exec`
 /// above). This handler itself does no secrets-home I/O: it gates the door
-/// (reusing [`require_cli`]) and, unless `--show` (which rotates nothing),
+/// (reusing the door gate) and, unless `--show` (which rotates nothing),
 /// the broker-user identity — the one place that refusal can print the whole
 /// command, since `enroll::run` has no invocation — then returns a plain
 /// confirmation `Outcome` with no secret content; the `secretsHome` field
 /// mirrors `handle_secrets_serve`'s own `with_data`.
 fn handle_secrets_enroll(inv: &Invocation) -> Outcome {
     let cmd = "secrets.enroll";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     if !inv.flag_present("show") {
         if let Some(refusal) = require_admin_identity(inv, cmd) {
             return refusal;
@@ -513,25 +498,6 @@ fn handle_secrets_enroll(inv: &Invocation) -> Outcome {
     }))
 }
 
-/// Shared door gate for the admin commands and the operator-side socket
-/// commands: CLI-only, same shape as `handle_secrets_serve`/
-/// `handle_secrets_exec`'s own door check. Returns `Some(refusal)` on any
-/// non-`Cli` door — the caller must return it immediately, before touching
-/// `store::load_policies`/`store::save_policies`, so a gated call never
-/// mutates `policy.json`.
-fn require_cli(inv: &Invocation, cmd: &str) -> Option<Outcome> {
-    match inv.door {
-        Door::Cli => None,
-        _ => Some(
-            teach::cli_only(
-                inv,
-                "secrets commands change or release what the broker guards, so they take a person at a terminal, never another door",
-            )
-            .into_outcome(cmd),
-        ),
-    }
-}
-
 /// The yomi-strix incident's guard (2026-08-22, this crate's `AGENTS.md`/
 /// `home.rs`'s module doc): refuses an admin command BEFORE it ever calls
 /// `store::load_policies`/`store::save_policies` when this process's
@@ -541,7 +507,7 @@ fn require_cli(inv: &Invocation, cmd: &str) -> Option<Outcome> {
 /// `policy.json` to `root:root` and bricked the broker (and every
 /// subsequent admin command, including the correctly-spelled `sudo -u
 /// aoide-secrets` retry) in the field. Called immediately after
-/// [`require_cli`] in every handler below. The refusal's fix is the user's
+/// the door gate in every handler below. The refusal's fix is the user's
 /// own command line behind `sudo -u aoide-secrets`, whole.
 fn require_admin_identity(inv: &Invocation, cmd: &str) -> Option<Outcome> {
     home::admin_identity_check(&home::secrets_home(), &inv.path[1])
@@ -615,9 +581,6 @@ fn admin_dispatch(
 
 fn handle_secrets_add(inv: &Invocation) -> Outcome {
     let cmd = "secrets.add";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let name = inv.args[0].clone();
     if !valid_secret_name(&name) {
         return teach::invalid_name(inv, "secret", &name).into_outcome(cmd);
@@ -659,9 +622,6 @@ fn handle_secrets_add(inv: &Invocation) -> Outcome {
 
 fn handle_secrets_rm(inv: &Invocation) -> Outcome {
     let cmd = "secrets.rm";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let name = inv.args[0].clone();
     let fields = serde_json::Map::from_iter([("name".to_string(), json!(name.clone()))]);
     admin_dispatch(cmd, inv, fields, || crate::admin::rm(&home::secrets_home(), &name))
@@ -672,9 +632,6 @@ fn handle_secrets_rm(inv: &Invocation) -> Outcome {
 /// `false` removes it if present — [`crate::admin::grant`]/[`crate::admin::
 /// revoke`]'s own job).
 fn edit_consumer(inv: &Invocation, cmd: &str, want_listed: bool) -> Outcome {
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let (name, consumer) = (inv.args[0].clone(), inv.args[1].clone());
     let fields = serde_json::Map::from_iter([
         ("name".to_string(), json!(name.clone())),
@@ -699,7 +656,7 @@ fn handle_secrets_revoke(inv: &Invocation) -> Outcome {
 }
 
 /// `secrets put <name>` (P-V4c, `--force` P-67) — CLI-only via the SAME
-/// [`require_cli`] gate as the admin quartet (module doc: an agent putting
+/// the door gate as the admin quartet (module doc: an agent putting
 /// values is exactly what the design forbids), then a PLAIN delegation to
 /// `crate::client::run_put`, which reads the value from stdin, warns +
 /// confirms before an overwrite (module doc), and does the socket round
@@ -712,9 +669,6 @@ fn handle_secrets_revoke(inv: &Invocation) -> Outcome {
 /// this envelope even by accident.
 fn handle_secrets_put(inv: &Invocation) -> Outcome {
     let cmd = "secrets.put";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let name = inv.args[0].clone();
     if !valid_secret_name(&name) {
         return teach::invalid_name(inv, "secret", &name).into_outcome(cmd);
@@ -751,16 +705,13 @@ fn switch(state: &str) -> bool {
 
 /// `secrets set-totp <name> on|off` — the direct replacement for the
 /// hand-edited `jq` one-liner against `policy.json` this command exists to
-/// retire. Same `require_cli` gate as the rest of the admin surface; an
+/// retire. Same door gate as the rest of the admin surface; an
 /// unknown secret name is a taught refusal, never a silent no-op. Idempotent
 /// (house rule 2 — "report exactly what changed"): re-setting the state a
 /// policy already has writes NOTHING and reports "unchanged" rather than
 /// calling `.changed(...)` on a write that never happened.
 fn handle_secrets_set_totp(inv: &Invocation) -> Outcome {
     let cmd = "secrets.set-totp";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let (name, state) = (inv.args[0].clone(), inv.args[1].clone());
     let want = switch(&state);
     let fields =
@@ -770,7 +721,7 @@ fn handle_secrets_set_totp(inv: &Invocation) -> Outcome {
 
 /// `secrets automate <name> on|off | grant|revoke <consumer>` (P-N1) — the
 /// admin command behind `crate::policy::Policy::automation`. Same
-/// `require_cli` + `require_admin_identity` gate, same idempotency
+/// the door gate + `require_admin_identity` gate, same idempotency
 /// discipline as `set-totp` above: a state already in place, or a
 /// consumer already granted/revoked, reports "unchanged" and never
 /// rewrites `policy.json`. `grant`/`revoke`'s `<consumer>` is checked with
@@ -780,9 +731,6 @@ fn handle_secrets_set_totp(inv: &Invocation) -> Outcome {
 /// admit is refused by [`crate::admin::automate_consumer`], on both paths.
 fn handle_secrets_automate(inv: &Invocation) -> Outcome {
     let cmd = "secrets.automate";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let (name, action) = (inv.args[0].clone(), inv.args[1].clone());
 
     match action.as_str() {
@@ -817,9 +765,6 @@ fn handle_secrets_automate(inv: &Invocation) -> Outcome {
 /// same admin gate, same idempotent "unchanged" reporting.
 fn handle_secrets_expose(inv: &Invocation) -> Outcome {
     let cmd = "secrets.expose";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let (name, state) = (inv.args[0].clone(), inv.args[1].clone());
     let want = switch(&state);
     let fields =
@@ -833,13 +778,10 @@ fn handle_secrets_expose(inv: &Invocation) -> Outcome {
 /// "The origin gate" section for the boundary it enforces, exactly). Same
 /// admin family spelling as `expose`/`set-totp` (`<name> on|off`, the
 /// hyphenated-command precedent `set-totp` established), same
-/// `require_cli` + broker-first `admin_dispatch` routing, same idempotency:
+/// the door gate + broker-first `admin_dispatch` routing, same idempotency:
 /// re-setting the current state reports "unchanged" and writes nothing.
 fn handle_secrets_allow_remote_origin(inv: &Invocation) -> Outcome {
     let cmd = "secrets.allow-remote-origin";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let (name, state) = (inv.args[0].clone(), inv.args[1].clone());
     let want = switch(&state);
     let fields =
@@ -849,7 +791,7 @@ fn handle_secrets_allow_remote_origin(inv: &Invocation) -> Outcome {
 
 /// `secrets status` — the value-free inventory READ, over the socket, by the
 /// SAME operator-side gate as `pending`/`approve`/`dismiss`: CLI-only via
-/// [`require_cli`], deliberately NOT [`require_admin_identity`], because
+/// the door gate, deliberately NOT [`require_admin_identity`], because
 /// this handler reads no local file at all — the broker owns the read
 /// (`broker::handle_status`), and the operator uid that runs the CLI is
 /// usually not the uid that could read the secrets home anyway (this
@@ -873,9 +815,6 @@ fn handle_secrets_allow_remote_origin(inv: &Invocation) -> Outcome {
 /// no probe results, no verdict about whether a resolve would succeed.
 fn handle_secrets_status(inv: &Invocation) -> Outcome {
     let cmd = "secrets.status";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let socket = crate::socket::socket_path();
     match crate::client::status(&socket) {
         Ok(report) => {
@@ -950,7 +889,7 @@ fn status_text(secrets: &[crate::client::StatusSecret]) -> String {
     out
 }
 
-/// `secrets pending` (P-N2) — CLI-only via the SAME [`require_cli`] gate as
+/// `secrets pending` (P-N2) — CLI-only via the the door gate as
 /// `put`/`exec`, but deliberately **NOT** [`require_admin_identity`]: this
 /// is the operator-side socket surface (task requirement — "like put/exec,
 /// NOT admin/euid commands"), reading in-memory broker state over the socket
@@ -961,9 +900,6 @@ fn status_text(secrets: &[crate::client::StatusSecret]) -> String {
 /// nothing.
 fn handle_secrets_pending(inv: &Invocation) -> Outcome {
     let cmd = "secrets.pending";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     match crate::client::pending(&crate::socket::socket_path()) {
         Ok(asks) => {
             let data: Vec<serde_json::Value> = asks
@@ -993,9 +929,6 @@ fn handle_secrets_pending(inv: &Invocation) -> Outcome {
 /// parked connection, never this reply).
 fn handle_secrets_approve(inv: &Invocation) -> Outcome {
     let cmd = "secrets.approve";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let (id, totp) = (inv.args[0].clone(), inv.flags["totp"].clone());
     let socket = crate::socket::socket_path();
     match crate::client::approve(&socket, &id, &totp) {
@@ -1010,9 +943,6 @@ fn handle_secrets_approve(inv: &Invocation) -> Outcome {
 /// dismissal happened, no value ever exists on this path at all.
 fn handle_secrets_dismiss(inv: &Invocation) -> Outcome {
     let cmd = "secrets.dismiss";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let id = inv.args[0].clone();
     let socket = crate::socket::socket_path();
     match crate::client::dismiss(&socket, &id) {
@@ -1023,7 +953,7 @@ fn handle_secrets_dismiss(inv: &Invocation) -> Outcome {
 
 /// `secrets watch` (this commit) — special-cased the SAME way as `serve`/
 /// `exec`/`enroll`: this handler only gates the door (CLI-only, same
-/// [`require_cli`] as `pending`/`approve`/`dismiss` — NOT
+/// the door gate as `pending`/`approve`/`dismiss` — NOT
 /// [`require_admin_identity`], since watch touches no `policy.json` either,
 /// only the broker-owned events feed (P-G4, task #77 — corrected from the
 /// mirrored aoide log, `watch.rs`'s own module doc) and the broker's
@@ -1034,11 +964,8 @@ fn handle_secrets_dismiss(inv: &Invocation) -> Outcome {
 /// dispatched from `cli`'s `special` hook, blocking forever until Ctrl-C —
 /// see that crate's `run_cli` doc comment and `crate::watch`'s own module
 /// doc.
-fn handle_secrets_watch(inv: &Invocation) -> Outcome {
+fn handle_secrets_watch(_inv: &Invocation) -> Outcome {
     let cmd = "secrets.watch";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     Outcome::ok(cmd, "watching secret events")
 }
 
@@ -1054,7 +981,7 @@ fn handle_secrets_watch(inv: &Invocation) -> Outcome {
 /// SAME `aoide_protocol::audit` call every admin command's generic dispatch
 /// audit already goes through, just with the richer, migrate-specific
 /// message this one extra line adds. `door` is the invocation's own door
-/// (always `Cli` in practice — `require_cli` already refused anything
+/// (always `Cli` in practice — the door gate already refused anything
 /// else) rather than a hardcoded `Door::Daemon`, since this code is not
 /// the daemon speaking.
 fn audit_migrate(door: Door, name: &str, source: &str, target: &str, status: &str, reason: Option<&str>) {
@@ -1076,7 +1003,7 @@ fn audit_migrate(door: Door, name: &str, source: &str, target: &str, status: &st
 /// an EXISTING secret's stored value from its policy's CURRENT backend to
 /// a TARGET backend (default `age`, [`DEFAULT_BACKEND`]), then flips the
 /// policy's own `backend` field. Admin command, same door + euid gate as
-/// `add`/`rm`/`grant` (`require_cli` + `require_admin_identity`) — mirrors
+/// `add`/`rm`/`grant` (the door gate + `require_admin_identity`) — mirrors
 /// their DIRECT-HOME wire shape exactly: no socket round trip, the same
 /// `store::load_policies`/`save_policies` round trip every other CRUD command
 /// here already uses. The moved value exists ONLY as a local `String`
@@ -1094,9 +1021,6 @@ fn audit_migrate(door: Door, name: &str, source: &str, target: &str, status: &st
 /// backend's own store untouched.
 fn handle_secrets_migrate(inv: &Invocation) -> Outcome {
     let cmd = "secrets.migrate";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let name = inv.args[0].clone();
     let target = inv.flags["backend"].clone();
     let door = inv.door;

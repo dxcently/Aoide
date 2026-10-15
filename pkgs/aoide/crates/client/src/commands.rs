@@ -4009,11 +4009,8 @@ pub(crate) fn reject_by_id(cmd: &str, id: &str) -> Outcome {
 /// until Ctrl-C makes no sense over MCP/A2A, the same reasoning
 /// `secrets watch`/`events tail` already established for the same shape
 /// of command.
-fn handle_pair_watch(inv: &Invocation) -> Outcome {
+fn handle_pair_watch(_inv: &Invocation) -> Outcome {
     let cmd = "pair.watch";
-    if inv.door != aoide_protocol::Door::Cli {
-        return teach::cli_only(inv, cmd, "it is a foreground follow that blocks until Ctrl-C");
-    }
     Outcome::ok(cmd, "watching pairing events")
 }
 

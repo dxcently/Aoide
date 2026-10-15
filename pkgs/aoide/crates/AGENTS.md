@@ -117,6 +117,19 @@ to its declarations the day it is registered.
 - `Outcome::usage`/`Outcome::error` remain for callers not yet migrated; new
   refusals use `refuse`.
 
+## Doors: declared, checked once
+
+A command's doors are DECLARED on its registry entry (`doors`, default
+`[Cli, Daemon]`), and a flag's on the flag (`doors`, default: every door its
+command opens). `Command::check` (`aoide-protocol::registry`) is the one gate:
+`dispatch()`, MCP `tools/call` and A2A all pass through it before a handler
+runs, and a refusal is the registry's (`Kind::Usage`, "is not open to the
+{door} door"), never the handler's. A handler reads `inv.door` only to answer
+an open door differently (`local_daemon`'s `Door::Daemon => None`), never to
+refuse one. MCP's `tools/list` and A2A's card list exactly what their door
+opens, so a command is closed to both until its entry says otherwise, and
+each app crate's `mcp_open_paths_match_the_golden_snapshot` pins that set.
+
 ## Listing layout
 
 Each app crate declares how its binary lists its commands once, as a `Layout`

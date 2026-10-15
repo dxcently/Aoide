@@ -62,9 +62,9 @@
   `consumer` field at all.** `broker::put_gate` is a SEPARATE function from
   `resolve_gate` — it never calls `verify_totp_gate`, on ANY policy,
   `requireTotp` or not. This is deliberate, not an oversight: `secrets put`
-  is CLI-only/admin-side (`commands::handle_secrets_put`'s `require_cli`
-  gate), never agent-facing, so there is no separate consumer identity to
-  authorize and no code check to run — see `broker.rs`'s module doc for the
+  is CLI-only/admin-side (`doors: &[Door::Cli]`), never agent-facing, so
+  there is no separate consumer identity to authorize and no code check to
+  run — see `broker.rs`'s module doc for the
   full reasoning. Don't add a TOTP or consumer check to `put_gate` "for
   symmetry with resolve"; the two ops have different threat models on
   purpose.
@@ -348,7 +348,7 @@
   to a real `std::fs::metadata(home)` stat and a real `home::effective_uid`
   (`libc::geteuid`, zero new deps — `libc` is already this crate's
   dependency). `commands::require_admin_identity` calls it right after
-  `require_cli` in `add`/`rm`/`grant`/`revoke`/`set-totp`;
+  the door gate in `add`/`rm`/`grant`/`revoke`/`set-totp`;
   `enroll::run` calls it directly (its real work happens from `cli`'s
   `special` hook, outside `commands.rs`'s own dispatch) — `enroll::show`
   does NOT carry it (read-only, nothing to corrupt), and neither does
@@ -1015,7 +1015,7 @@
   for the shape; the next admin command that touches `policy.json`/
   `totp.secret` calls `commands::require_admin_identity` (or, if its real
   work lives outside `commands.rs`'s own dispatch the way `enroll::run`'s
-  does, `home::admin_identity_check` directly) right after its `require_cli`
+  does, `home::admin_identity_check` directly) right after its door gate
   gate, before any read-modify-write.
 - **Two live UX gaps closed at P-V4e** — `secrets set-totp <name> on|off`
   (`commands::handle_secrets_set_totp`) flips an existing policy's
@@ -1119,7 +1119,7 @@
   `policy.require_totp` directly. `secrets automate <name> on|off|grant|
   revoke` and `secrets expose <name> on|off` are plain handlers
   (`commands::handle_secrets_automate`/`handle_secrets_expose`) — same
-  `require_cli` + `require_admin_identity` gate, same idempotent
+  the door gate + `require_admin_identity` gate, same idempotent
   "unchanged" reporting as `set-totp`, appended LAST in `register()`
   (golden 61 -> 63).
 - **A `totp_required` `true` result with no code PARKS instead of refusing
@@ -1130,7 +1130,7 @@
   blocks the CONNECTION'S OWN THREAD on `park::wait_for_outcome`, which is
   why `serve`'s accept loop moved to thread-per-connection this phase
   (invariant above — a hard constraint, not a style choice). Three new
-  CLI-only, `require_cli`-but-NOT-`require_admin_identity` commands complete
+  CLI-only, door-gated but NOT `require_admin_identity` commands complete
   or refuse a parked ask over the socket, same operator-side-not-admin-side
   shape `put`/`exec` already draw: `secrets pending` (lists asks, never a
   value), `secrets approve <id> --totp <code>` (validates with the SAME

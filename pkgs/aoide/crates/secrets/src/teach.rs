@@ -245,16 +245,6 @@ pub fn invalid_name(inv: &Invocation, kind: &str, name: &str) -> Refusal {
     )
 }
 
-/// A command that only a person at a terminal may run, reached over another door.
-pub fn cli_only(inv: &Invocation, why: &str) -> Refusal {
-    Refusal::new(
-        Kind::Usage,
-        format!("`aoide {}` is CLI-only", inv.path.join(" ")),
-        why.to_string(),
-        Fix::Run(line(inv)),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

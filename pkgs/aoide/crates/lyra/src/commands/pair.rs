@@ -147,9 +147,6 @@ pub const EXIT_INFRA_FAILURE: i32 = DIALOG_EXIT_INFRA_FAILURE;
 
 fn handle_pair_ask(inv: &Invocation) -> Outcome {
     let cmd = "pair.ask";
-    if inv.door != Door::Cli {
-        return Outcome::usage(cmd, "pair ask is a desktop dialog -- CLI-only");
-    }
     let Some(id) = inv.flags.get("id").filter(|s| !s.is_empty()) else {
         return Outcome::usage(cmd, "pair ask requires --id <id>");
     };
@@ -176,9 +173,6 @@ fn handle_pair_ask(inv: &Invocation) -> Outcome {
 
 fn handle_pair_show(inv: &Invocation) -> Outcome {
     let cmd = "pair.show";
-    if inv.door != Door::Cli {
-        return Outcome::usage(cmd, "pair show is a desktop dialog -- CLI-only");
-    }
     let Some(id) = inv.flags.get("id").filter(|s| !s.is_empty()) else {
         return Outcome::usage(cmd, "pair show requires --id <id>");
     };
@@ -231,7 +225,9 @@ mod tests {
     #[test]
     fn handle_pair_ask_is_cli_only() {
         let i = inv(&["pair", "ask"], Door::Mcp, &[("id", "abc"), ("name", "box-a"), ("context", "x")]);
-        assert_eq!(handle_pair_ask(&i).status, aoide_protocol::output::Status::Usage);
+        let out = crate::dispatch::registry().get(&i.path).expect("registered").invoke("lyra", &i);
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+        assert!(out.message.contains("is not open to the mcp door"), "{}", out.message);
     }
 
     #[test]
@@ -249,7 +245,9 @@ mod tests {
     #[test]
     fn handle_pair_show_is_cli_only() {
         let i = inv(&["pair", "show"], Door::Mcp, &[("id", "abc"), ("name", "box-b"), ("context", "x"), ("code", "111-222")]);
-        assert_eq!(handle_pair_show(&i).status, aoide_protocol::output::Status::Usage);
+        let out = crate::dispatch::registry().get(&i.path).expect("registered").invoke("lyra", &i);
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+        assert!(out.message.contains("is not open to the mcp door"), "{}", out.message);
     }
 
     #[test]

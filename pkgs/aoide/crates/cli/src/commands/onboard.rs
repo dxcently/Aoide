@@ -56,13 +56,6 @@ pub fn register(r: &mut Registry) {
 
 fn handle_onboard(inv: &Invocation) -> Outcome {
     let cmd = "onboard";
-    if inv.door != Door::Cli {
-        return Outcome::usage(
-            cmd,
-            "onboard is an interactive install flow; run `aoide onboard` from a terminal (not over this door)",
-        );
-    }
-
     let quiet = inv.flag_present("json");
     let say = |s: &str| {
         if !quiet {

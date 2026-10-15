@@ -80,9 +80,6 @@ pub const EXIT_INFRA_FAILURE: i32 = DIALOG_EXIT_INFRA_FAILURE;
 
 fn handle_secrets_ask(inv: &Invocation) -> Outcome {
     let cmd = "secrets.ask";
-    if inv.door != Door::Cli {
-        return Outcome::usage(cmd, "secrets ask is a desktop dialog -- CLI-only");
-    }
     let Some(secret) = inv.flags.get("secret").filter(|s| !s.is_empty()) else {
         return Outcome::usage(cmd, "secrets ask requires --secret <name>");
     };
@@ -164,7 +161,9 @@ mod tests {
     #[test]
     fn handle_secrets_ask_is_cli_only() {
         let i = inv(Door::Mcp, &[("secret", "t"), ("consumer", "m"), ("seconds", "1")]);
-        assert_eq!(handle_secrets_ask(&i).status, aoide_protocol::output::Status::Usage);
+        let out = crate::dispatch::registry().get(&i.path).expect("registered").invoke("lyra", &i);
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+        assert!(out.message.contains("is not open to the mcp door"), "{}", out.message);
     }
 
     #[test]

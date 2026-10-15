@@ -51,13 +51,6 @@ pub fn register(r: &mut Registry) {
 
 fn handle_onboard(inv: &Invocation) -> Outcome {
     let cmd = "onboard";
-    if inv.door != Door::Cli {
-        return Outcome::usage(
-            cmd,
-            "onboard is an interactive install flow; run `lyra onboard` from a terminal (not over this door)",
-        );
-    }
-
     let options = match read_aoide_options() {
         Ok(o) => o,
         Err(e) => return Outcome::error(cmd, format!("deriving the aoide.* option set: {e}")),

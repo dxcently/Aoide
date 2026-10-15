@@ -13,7 +13,7 @@ use std::collections::HashSet;
 fn local_daemon(inv: &Invocation) -> Option<Outcome> {
     match inv.door {
         Door::Daemon => None,
-        Door::Cli => Some(
+        _ => Some(
             aoide_client::daemon::daemon_dispatch(inv).unwrap_or_else(|| {
                 Outcome::error(
                     inv.dotted(),
@@ -21,10 +21,6 @@ fn local_daemon(inv: &Invocation) -> Option<Outcome> {
                 )
             }),
         ),
-        _ => Some(Outcome::error(
-            inv.dotted(),
-            "session management is local-only",
-        )),
     }
 }
 

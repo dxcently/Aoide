@@ -19,19 +19,11 @@ use serde_json::json;
 // non-interactive door (MCP/daemon), returns the "run it from a terminal"
 // outcome. The CLI door short-circuits in run_cli AFTER dispatching here,
 // so on the Cli path this is the audit record, not a stub.
-fn handle_conductor(inv: &Invocation) -> Outcome {
-    match inv.door {
-        Door::Cli => Outcome::ok("conductor", "raising the conductor over the agent sessions")
-            .with_data(json!({
-                "interactive": true,
-                "stageDir": aoide_storage::fs::conducting_stage_dir().to_string_lossy(),
-            })),
-        _ => Outcome::ok(
-            "conductor",
-            "conductor is interactive; run `aoide conductor` from a terminal (not over this door)",
-        )
-        .with_data(json!({ "interactive": true, "door": "non-cli" })),
-    }
+fn handle_conductor(_inv: &Invocation) -> Outcome {
+    Outcome::ok("conductor", "raising the conductor over the agent sessions").with_data(json!({
+        "interactive": true,
+        "stageDir": aoide_storage::fs::conducting_stage_dir().to_string_lossy(),
+    }))
 }
 
 pub fn register(r: &mut Registry) {

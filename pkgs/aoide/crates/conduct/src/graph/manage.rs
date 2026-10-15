@@ -29,12 +29,11 @@ use serde_json::Value;
 pub(in crate::graph) fn local_daemon(inv: &Invocation) -> Option<Outcome> {
     match inv.door {
         Door::Daemon => None,
-        Door::Cli => Some(
+        _ => Some(
             aoide_client::daemon::daemon_dispatch(inv).unwrap_or_else(|| {
                 Outcome::error(inv.dotted(), "aoided must be running for project management")
             }),
         ),
-        _ => Some(Outcome::error(inv.dotted(), "project management is local-only")),
     }
 }
 

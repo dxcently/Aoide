@@ -12,18 +12,14 @@ use sha2::{Digest, Sha256};
 /// The local CLI asks aoided to read; its own token environment is never forwarded.
 pub fn session_context(inv: &Invocation) -> Outcome {
     const CMD: &str = "context";
-    match inv.door {
-        Door::Cli => {
-            // Six sequential reads/handshake requests plus one cleanup, 15s each.
-            let mut out = crate::daemon::daemon_dispatch_with_timeout(inv, std::time::Duration::from_secs(120))
-                .unwrap_or_else(|| failure("aoided must be running to fetch agent context"));
-            if out.status != aoide_protocol::output::Status::Ok && out.data.is_none() {
-                out.data = Some(json!({"complete":false}));
-            }
-            return out;
+    if inv.door == Door::Cli {
+        // Six sequential reads/handshake requests plus one cleanup, 15s each.
+        let mut out = crate::daemon::daemon_dispatch_with_timeout(inv, std::time::Duration::from_secs(120))
+            .unwrap_or_else(|| failure("aoided must be running to fetch agent context"));
+        if out.status != aoide_protocol::output::Status::Ok && out.data.is_none() {
+            out.data = Some(json!({"complete":false}));
         }
-        Door::Daemon => {}
-        _ => return Outcome::error(CMD, "context is local-only; remote doors cannot use the daemon's Mneme credential"),
+        return out;
     }
     let Some(id) = inv.flags.get("id").filter(|id| !id.is_empty()) else {
         return Outcome::usage(CMD, "usage: aoide context --id <session-id>");
@@ -191,11 +187,13 @@ mod tests {
 
     #[test]
     fn remote_doors_cannot_reach_credentials_or_network() {
+        let mut r = aoide_protocol::registry::Registry::new();
+        register(&mut r);
         for door in [Door::Mcp, Door::A2a] {
-            let out = session_context(&Invocation { path: vec!["context".into()],
-                args:vec![], flags:Default::default(), door });
-            assert_eq!(out.status, aoide_protocol::output::Status::Error);
-            assert!(out.message.contains("local-only"));
+            let inv = Invocation { path: vec!["context".into()], args: vec![], flags: Default::default(), door };
+            let out = r.get(&inv.path).expect("registered").invoke("aoide", &inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{door:?}");
+            assert!(out.message.contains("is not open to the"), "{}", out.message);
         }
     }
 }
