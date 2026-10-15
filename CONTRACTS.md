@@ -1100,6 +1100,11 @@ harness. The listener thread and the request loop share one `Arc<Mutex<_>>`
 around stdout so a pushed notification and a `tools/call` reply never
 interleave on the wire.
 
+A `tools/call` dispatches in this same process, so the send gate attests its
+caller by walking this server's own ancestry (§3, "Approval doors"): a server
+launched under a sealed session sends and spawns as that session, and any other
+server's sends and spawns park.
+
 ### Daemon wire — the fourth door (`docs/architecture/AOIDED.md`, P-D2/P-D4)
 
 `aoided`'s own control socket (`$AOIDE_DAEMON_SOCKET`, else
@@ -2175,7 +2180,8 @@ process starts, through the argv twin `conduct.rs::wrapped_harness`, which reads
 before a record exists. Three other paths type without a human and are outside
 this proof, each under its own rule. `aoide send` and `aoide spawn --prompt`
 type the text their caller hands them into the target it names (`spawn --prompt`
-passes `--yes`, so no human approves it); the caller is whatever process ran the
+passes `--yes`, so no human approves it; over MCP `--yes` is never read, and the
+attested parent rule delivers it); the caller is whatever process ran the
 command, an agent included, and nothing here inspects the content. The send
 gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
 boot resurrect retypes a shell's own recorded line, never for `sudo`
@@ -3525,8 +3531,9 @@ Cli             `aoide` at a terminal, a local agent    yes         --yes, globa
 Daemon          aoided's own dispatch: the conductor,   yes         the same routes as Cli
                 the herald (shellbridge verdict), and
                 any same-uid client of the aoided socket
-Mcp             `aoide mcp serve --stdio`, and          no          queued only; `session pending
-                `lyra mcp serve --stdio`                            approve` is refused
+Mcp             `aoide mcp serve --stdio`, and          no          the parent and sibling rules,
+                `lyra mcp serve --stdio`                            when the server runs under a
+                                                                    sealed session; else queued
 A2a             `aoide a2a serve`, loopback included    no          queued only; an inbound inject, or
                                                                     a spawn's opening turn, parks
                                                                     whatever its origin, token or
@@ -3537,8 +3544,36 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   under a source its door derives (§3, `pending.json`), touches no socket,
   and returns the taught line. `approvalRefused: true` marks a parked send
   that asked for `--yes`.
-- A spawn's `--prompt` and a resurrect's restore go through the same door, so
-  over MCP they park too and report `held-pending`, never as typed.
+- The MCP door is attested like the CLI. `aoide mcp serve --stdio` dispatches
+  in its own process, so the gate walks that process's `/proc` ancestry to a
+  session whose seal verifies against the daemon's live public key
+  (`real_attested_sender`; an unreachable daemon is an unidentified sender). A
+  caller so identified earns the two rules that rest on identity: its session
+  is the target's parent, or shares a live parent with the target (opt-out
+  `AOIDE_CONDUCT_SIBLING_AUTOGATE`). Either delivers, and the delivered
+  payload and the audit line name the attested session, with the `--from` the
+  caller typed beside it as a claim. Nothing else on this door delivers:
+  `--yes` and `AOIDE_CONDUCT_AUTOGATE` are never read, and a send with no
+  sealed ancestor, or to a session the sealed one has no rule for, parks. The
+  door still approves nothing. `session pending approve`, `session permit` and
+  `mail ring` stay refused for an attested caller, whatever it asks for.
+- The A2A door has no sealed ancestor, because it runs inside aoided, and the
+  tier-3 network façade (`modules/nucleus/aoided.nix`) has none either. Every
+  send through them parks. There is no separate network door.
+- Attestation names who launched the MCP server, not who writes to its stdin.
+  A network bridge someone runs inside a conducted terminal lends that
+  terminal's rights to its remote callers, so such a bridge belongs outside any
+  conducted session.
+- An MCP `spawn` is judged the same way. From an attested caller it launches
+  with that session as the child's `--parent` (a `--parent` naming any other
+  session is refused), and its `--prompt` is the parent's own send to its
+  child, which the parent rule delivers. From an unattested caller the whole
+  spawn parks, as a `pending.json` entry carrying `spawn` (§3) under the `mcp`
+  source, and nothing launches until a human runs `session pending approve`,
+  which launches it as that approver's door.
+- A restore is not a send a caller makes. `resurrect`'s restore typed into a
+  revived session rests on the door's `--yes`, so over MCP it parks and reports
+  `held-pending`, attested or not, and a `resurrect` is never held as a spawn.
 - `session permit` is refused on a door that cannot approve (`reason:
   "door-cannot-approve"`, taught line `DOOR_CANNOT_APPROVE`). It files no
   summons card, and the refusal is audited. A card is how a human is asked for
@@ -3550,7 +3585,9 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
 - `session pending approve` for an entry whose target is not live yet (no
   conductable record with a socket on disk) is refused with `reason:
   "target-not-live"`, and the entry stays queued. An A2A spawn's opening turn
-  can be held before its child registers, so approve again once it does.
+  can be held before its child registers, so approve again once it does. A
+  held spawn has no target yet, since approving it is what creates one, so it
+  skips that check.
 - The MCP door has no generic passthrough. Every command is its own tool,
   and `spawn` and `conduct` take one `command` argument, which is one argv
   element, so an MCP caller cannot express `aoide send --yes` as a child
@@ -3571,9 +3608,11 @@ second pending-queue implementation. The gate's delivering rules are `--yes`,
 the global switch, parent-of-target, sibling-of-target, and the reciprocal
 child-of-target — the last is the daemon's OWN one-line report about a parent's
 eidolon child, never a send: it never reaches this file at all, so a child's
-progress is never held pending while a stranger's send still is. Those rules
-decide only for a send that arrives through a door that can approve (the table
-below); on any other door a send parks whatever it asks for. Read and resolved
+progress is never held pending while a stranger's send still is. `--yes` and
+the global switch decide only for a send that arrives through a door that can
+approve (the table below). The parent and sibling rules decide for those doors
+and for an MCP send whose server runs under a sealed session, and on any other
+send a door that cannot approve parks whatever it asks for. Read and resolved
 by `aoide session pending list/approve/deny`: `list` enumerates every entry (a
 malformed one — a stale hand-edited line — surfaces as `"state": "malformed"`
 rather than failing the read); `approve` re-drives the entry through the SAME
@@ -3602,7 +3641,14 @@ before anything is queued, with `reason: "reserved-from"` and a taught line, and
 audited as `refused`; the refusal sits where an entry is created, so approval
 still re-drives an entry with the source it was queued under. The audit line of
 a send names that source as `from` and an MCP caller's label as `claims`, never
-the label as the sender. The queued `submit:true` flag means
+the label as the sender. The optional `spawn` field, `{ "args": […],
+"flags": {…} }`, makes the entry a held spawn instead of a held send: the argv
+and flags the launch will run with, `sessionId` being the id its child will
+register under and `text` the command line an approver is shown. `list` renders
+it as that whole command, `approve` launches it as the approver's door rather
+than typing into a target, and `deny` drops it with nothing launched. An entry
+whose `spawn` does not parse is `"state": "malformed"` and is never read as a
+send. The queued `submit:true` flag means
 only "submit the line" — the concrete keystroke (`\n`, or `\r` for kimi) is
 resolved at DELIVERY time from the target session's own agent profile, never
 memoized at queue time. `list`'s HUMAN line renders both the target and `from`
@@ -3612,7 +3658,8 @@ fields `data.pending[].sessionId`/`.from` stay the entry's raw canonical ids,
 verbatim, always; `.claimed` is the stored label, cleaned once more.
 
 The queue holds at most `PENDING_CAP_PER_SOURCE` (32) entries per source, where
-the source is the entry's `from`; every entry with no `from` counts as one more
+the source is the entry's `from`, a held spawn counting against the `mcp` bucket
+with the sends that share it; every entry with no `from` counts as one more
 source (`crates/conduct/src/graph/send.rs::record_pending`). Because the door
 derives the source, a caller cannot rotate it to dodge the cap, and cannot name
 another source to fill that source's bucket. The count and the
@@ -3628,7 +3675,8 @@ door parks every send").
   "schemaVersion": "0",
   "pending": [
     { "sessionId": "conduct-6364-1786576226", "text": "/compact keep only operational records", "submit": true, "queuedAt": "2026-08-13T14:01:10Z", "from": "conduct-1122-1786570000" },
-    { "sessionId": "conduct-6364-1786576226", "text": "run the tests", "submit": true, "queuedAt": "2026-08-13T14:02:31Z", "from": "mcp:conduct-1122-1786570000", "claimed": "orchestrator" }
+    { "sessionId": "conduct-6364-1786576226", "text": "run the tests", "submit": true, "queuedAt": "2026-08-13T14:02:31Z", "from": "mcp:conduct-1122-1786570000", "claimed": "orchestrator" },
+    { "sessionId": "spawn-held", "text": "aoide spawn --id spawn-held -- ./agent.sh", "submit": false, "queuedAt": "2026-08-13T14:03:02Z", "from": "mcp", "spawn": { "args": ["./agent.sh"], "flags": { "id": "spawn-held" } } }
   ]
 }
 ```
@@ -6571,7 +6619,9 @@ caller proved the node, and `addr:<address>` otherwise. Nothing is written to
 the session's socket, whatever the origin, token or signature. No approval route
 opens here: not `--yes` (`do_inject` never sets it), not
 `AOIDE_CONDUCT_AUTOGATE`, not the parent-of-target or sibling rules, and not an
-identity-based rule. Loopback earns nothing by its address. A tunnel that
+identity-based rule: the attested rules the MCP door earns (§3) need a sealed
+ancestor to walk to, and this door runs inside aoided with none. Loopback earns
+nothing by its address. A tunnel that
 terminates on loopback is indistinguishable from a local caller, so a loopback
 caller parks like any other.
 

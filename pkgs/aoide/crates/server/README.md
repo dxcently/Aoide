@@ -17,6 +17,16 @@ spawn's opening turn is held the same way, verdict `held-pending`, or
 `queue-full` at the cap. The gate that decides this is `aoide_conduct::graph::
 Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
 
+The MCP door (`mcp.rs`) never approves either, but it is attested like the CLI.
+`serve_stdio` dispatches in its own process, so the sealed session found by
+walking that process's ancestry is the caller's identity: a send from a server
+launched under a sealed session earns that session's parent and sibling rules
+and delivers, and every other MCP send parks. A server with no sealed ancestor
+(the tier-3 network façade in `modules/nucleus/aoided.nix`, a bare terminal)
+parks them all. Attestation sees who launched the server, not who writes to its
+stdin, so a network bridge someone runs inside a conducted terminal lends that
+terminal's rights to its remote callers.
+
 ## Named seams (what it exposes)
 
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
@@ -184,7 +194,8 @@ Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
   verbatim or narrated otherwise. `poll_once` is the bounded, non-blocking
   core a test drives directly; `tail` is the thin `SIGINT`-handling wrapper
   around it, mirroring `aoide_secrets::watch`'s own tail-loop shape.
-- `mcp` — `serve_stdio`, the MCP stdio server. `initialize` answers
+- `mcp` — `serve_stdio`, the MCP stdio server, which dispatches in-process:
+  the process attestation walks is this one. `initialize` answers
   unconditionally with `capabilities.experimental["claude/channel"]` and
   `instructions` (P-M5c-2, `docs/architecture/CLAUDE-CHANNEL-PROOF.md`,
   CONTRACTS.md §3's "MCP door" subsection). When `AOIDE_SESSION_ID` is set

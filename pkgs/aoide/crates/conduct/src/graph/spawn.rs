@@ -19,6 +19,16 @@
 //! and threads it into `do_session_start` — no re-implementation needed
 //! here).
 //!
+//! **The MCP door spawns only as an attested caller** ([`session_spawn_with`]).
+//! A server launched under a sealed session (the same ancestry walk `send`
+//! uses) launches the child with that session as its `--parent`, and the
+//! `--prompt` is that session's own parent-to-child send, which the parent rule
+//! delivers. A server with no sealed session has its WHOLE spawn held in
+//! `pending.json` (`PendingSend::spawn`) and nothing launches until a human
+//! runs `session pending approve`, which replays it with the approver's door.
+//! `resurrect` reaches [`launch_session`] directly: its argv is the harness's
+//! own resume line, not a caller's command.
+//!
 //! `--windowed` (P-D7) is the sibling launch mode: instead of detaching a
 //! headless `conduct --headless` child, it execs a real terminal (its
 //! invocation named by `$AOIDE_TERMINAL`, env only) that runs the exact SAME
@@ -33,11 +43,13 @@
 
 use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, unix_ts};
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
-use super::send::session_send;
+use super::common::stage_error;
+use super::pending::audit_pending;
+use super::send::{deliver_local_with, hold_spawn, real_attested_sender, HoldRefused, PendingSpawn, PENDING_CAP_PER_SOURCE};
 use super::session_store::now_iso_utc;
 use super::undying::nothing_to_restore_warning;
-use aoide_protocol::output::{Outcome, Status};
-use aoide_protocol::Invocation;
+use aoide_protocol::output::{Fix, Kind, Outcome, Status};
+use aoide_protocol::{Door, Invocation};
 use aoide_storage::fs::session_logs_dir;
 use aoide_storage::undying::{load_undying, save_undying, set_undying};
 use serde_json::json;
@@ -628,8 +640,8 @@ pub fn wait_ready(agent: &str, id: &str, since: &str, budget: Duration) -> Ready
 /// no declarable fact at all gets output settling only, and its delivery is
 /// reported as unverified). `prompt` in the result is `none` (no flag),
 /// `skipped-unregistered`, `not-ready` (no readiness within [`READY_BUDGET`],
-/// nothing typed), `held-pending` (the calling door cannot approve, so the
-/// prompt is queued in `pending.json` for a human and nothing is typed),
+/// nothing typed), `held-pending` (the send gate queued the opening turn in
+/// `pending.json` for a human and nothing is typed),
 /// `delivered`, `delivered-unverified`, or `failed: …`.
 ///
 /// `--task <slug>` turns the run into a MANAGED TASK WRAPPER run
@@ -654,6 +666,95 @@ pub fn wait_ready(agent: &str, id: &str, since: &str, budget: Duration) -> Ready
 /// (`$WAYLAND_DISPLAY`/`$DISPLAY` both absent — a headless host, told to use
 /// plain `spawn` instead).
 pub fn session_spawn(inv: &Invocation) -> Outcome {
+    session_spawn_with(inv, real_attested_sender)
+}
+
+/// [`session_spawn`] with the sender-identity resolver injected, the way
+/// `send`'s `deliver_local_with` takes its own, so the door's decision is
+/// testable without a live daemon.
+///
+/// Only the MCP door is judged here. It is attested the way the CLI is: a
+/// resolver that walks this process's ancestry to a sealed session. A caller
+/// with such a session launches, as that session's child, and its `--prompt`
+/// is a parent-to-child send. A caller with none has its whole spawn held in
+/// `pending.json` for a human; nothing launches. Every other door launches.
+fn session_spawn_with(
+    inv: &Invocation,
+    resolve_spawner: impl Fn(&[super::model::SessionRecord]) -> Option<String>,
+) -> Outcome {
+    if inv.door != Door::Mcp || inv.args.is_empty() {
+        return launch_session(inv, None);
+    }
+    let sessions: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+    let Some(spawner) = resolve_spawner(&sessions.sessions) else {
+        return hold_whole_spawn(inv);
+    };
+    match inv.flags.get("parent").filter(|p| **p != spawner) {
+        Some(parent) => Outcome::refuse(
+            "spawn",
+            Kind::Refused,
+            format!("spawn not launched: `--parent {parent}` is not this caller's session"),
+            "an MCP spawn is parented by the session that launched the server, so a caller cannot \
+             register a child under another session",
+            Fix::None("leave --parent off"),
+        )
+        .with_fields(json!({ "reason": "parent-not-attested", "parent": parent })),
+        None => launch_session(inv, Some(&spawner)),
+    }
+}
+
+/// The id a spawn's child registers under: the caller's `--id`, else one minted
+/// from this process and the clock.
+fn spawn_id(inv: &Invocation) -> String {
+    inv.flags
+        .get("id")
+        .cloned()
+        .unwrap_or_else(|| format!("spawn-{}-{}", std::process::id(), unix_ts()))
+}
+
+/// Hold a spawn whole, for a human to approve with `session pending approve`.
+/// The id is fixed now so the approved launch registers under the one the
+/// caller was told. A `--parent` is not kept: the caller proved no session, so
+/// it cannot place a child under one.
+fn hold_whole_spawn(inv: &Invocation) -> Outcome {
+    let cmd = "spawn";
+    let id = spawn_id(inv);
+    let mut flags = inv.flags.clone();
+    let parent_dropped = flags.remove("parent").is_some();
+    flags.insert("id".to_string(), id.clone());
+    let spawn = PendingSpawn { args: inv.args.clone(), flags };
+    let line = spawn.command_line();
+    match hold_spawn(&id, &line, spawn) {
+        Ok(()) => {
+            let note = if parent_dropped { ", its --parent dropped" } else { "" };
+            let out = Outcome::ok(cmd, format!("spawn of `{id}` held pending approval{note}: nothing launched"))
+                .changed(vec![format!("pending spawn queued for {id}")])
+                .with_data(json!({ "sessionId": id, "state": "pending", "launched": false }));
+            audit_pending(inv, cmd, "pending", &out.message, &line);
+            out
+        }
+        Err(HoldRefused::Stage(e)) => stage_error(cmd, e),
+        Err(HoldRefused::Full) => {
+            let out = Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                format!("spawn of `{id}` not queued: the MCP door already holds {PENDING_CAP_PER_SOURCE} pending sends"),
+                "the approval queue holds a bounded number of sends per sender, so one sender cannot fill it",
+                Fix::Run("aoide session pending list".to_string()),
+            )
+            .with_fields(json!({ "reason": super::send::PENDING_FULL, "sessionId": id }));
+            audit_pending(inv, cmd, "refused", &out.message, &line);
+            out
+        }
+    }
+}
+
+/// Launch the spawn `inv` describes, with no door judgement: [`session_spawn`]
+/// decides who may reach this, and `resurrect` reaches it directly, because its
+/// argv is the harness's own resume line and not a caller's command.
+/// `spawner` is the attested session an MCP caller launched as. It becomes the
+/// child's `--parent`, and the `--prompt` is judged as that session's send.
+pub(in crate::graph) fn launch_session(inv: &Invocation, spawner: Option<&str>) -> Outcome {
     let cmd = "spawn";
     if inv.args.is_empty() {
         return Outcome::usage(
@@ -667,11 +768,8 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         .get("agent")
         .cloned()
         .unwrap_or_else(|| default_label(&inv.args));
-    let id = inv
-        .flags
-        .get("id")
-        .cloned()
-        .unwrap_or_else(|| format!("spawn-{}-{}", std::process::id(), unix_ts()));
+    let id = spawn_id(inv);
+    let parent = spawner.map(str::to_string).or_else(|| inv.flags.get("parent").cloned());
 
     let windowed = inv.flag_present("windowed");
     let cwd = inv.flags.get("cwd").map(String::as_str);
@@ -808,7 +906,7 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         !windowed,
         &agent,
         &id,
-        inv.flags.get("parent").map(String::as_str),
+        parent.as_deref(),
         task.as_deref(),
         instructions_path.as_deref(),
         timeout_secs,
@@ -945,12 +1043,13 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
                     flags.insert("id".to_string(), id.clone());
                     flags.insert("yes".to_string(), "true".to_string());
                     flags.insert("submit".to_string(), "true".to_string());
-                    let inner = session_send(&Invocation {
+                    let prompt = Invocation {
                         path: vec!["send".to_string()],
                         args: vec![text.clone()],
                         flags,
                         door: inv.door,
-                    });
+                    };
+                    let inner = deliver_local_with(&prompt, &id, |_| spawner.map(str::to_string));
                     if inner.status != Status::Ok {
                         format!("failed: {}", inner.message)
                     } else if inner.data.as_ref().and_then(|d| d.get("state")).and_then(serde_json::Value::as_str)
@@ -1407,65 +1506,208 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Finding 5, spawn: an MCP caller's `--prompt` is parked, never typed. The
-    /// ready-harness fixture of `prompt_is_injected_once_the_harness_reports_
-    /// itself_ready`, with the door set to MCP: the prompt reports
-    /// `held-pending`, pending.json holds the prompt, and the child's pty never
-    /// sees its text.
-    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`,
-    /// a `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run.
+    /// A stage, a runtime dir and an audit log of this test's own, and the
+    /// built binary for the detached child to re-exec.
     #[cfg(unix)]
-    #[test]
-    fn an_mcp_door_spawn_prompt_is_held_pending_and_never_typed() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&[
-            "AOIDE_STAGE_DIR",
-            "AOIDE_STATE_DIR",
-            "XDG_RUNTIME_DIR",
-            "AOIDE_AUDIT_LOG",
-            "AOIDE_CONDUCT_SPAWN_EXE",
-        ]);
-
-        let root = unique_stage("spawn-prompt-mcp");
+    fn spawn_stage(tag: &str) -> std::path::PathBuf {
+        let root = unique_stage(tag);
         let stage = root.join("stage");
-        let state = root.join("state");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         std::env::set_var("XDG_RUNTIME_DIR", &root);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        root
+    }
 
-        let id = "spawn-prompt-mcp";
-        let bin = built_aoide_bin();
+    #[cfg(unix)]
+    const SPAWN_ENV: &[&str] = &[
+        "AOIDE_STAGE_DIR",
+        "AOIDE_STATE_DIR",
+        "XDG_RUNTIME_DIR",
+        "AOIDE_AUDIT_LOG",
+        "AOIDE_CONDUCT_SPAWN_EXE",
+        "AOIDE_DAEMON_SOCKET",
+    ];
+
+    #[cfg(unix)]
+    fn mcp_spawn(args: &[&str], flags: &[(&str, &str)]) -> Invocation {
+        Invocation { door: Door::Mcp, ..spawn_invocation(args, flags) }
+    }
+
+    #[cfg(unix)]
+    fn held_spawns() -> Vec<crate::graph::send::PendingSend> {
+        load_stage::<crate::graph::send::PendingFile>(&crate::graph::send::pending_path())
+            .map(|f| f.pending)
+            .unwrap_or_default()
+    }
+
+    /// An attested MCP caller launches, as the child of the session the kernel
+    /// named, and its `--prompt` is that session's send to its own child: it
+    /// DELIVERS, where a door that could not attest held it. Nothing is injected
+    /// here: a fake daemon answers the key fetch, this test process is the
+    /// sealed session `orch`, and `session_spawn` walks its own ancestry to it.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_spawn_launches_and_its_first_prompt_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-mcp-attested");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon_once(&kp.info().pubkey_hex));
+        crate::graph::session_store::do_session_start(
+            "orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(std::process::id()),
+        );
+        seal_record("orch", &kp);
+
+        let id = "spawn-mcp-attested";
         let child_cmd = format!(
             "printf '%s' '{{\"session_id\":\"claude-uuid-mcp\",\"hook_event_name\":\"SessionStart\",\"cwd\":\"/w\",\"source\":\"startup\"}}' \
              | {} session hook --agent claude; exec timeout 5 cat",
-            bin.display()
+            built_aoide_bin().display()
         );
-
-        let mut inv = spawn_invocation(
+        let out = session_spawn(&mcp_spawn(
             &["sh", "-c", child_cmd.as_str()],
             &[("id", id), ("agent", "claude"), ("prompt", "say pong")],
-        );
-        inv.door = aoide_protocol::Door::Mcp;
-        let out = session_spawn(&inv);
-        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        ));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         let data = out.data.as_ref().unwrap();
-        assert_eq!(data["prompt"], "held-pending", "data: {data}");
+        assert_eq!(data["registered"], true, "data: {data}");
+        assert_eq!(data["prompt"], "delivered", "data: {data}");
 
-        let raw: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(crate::graph::send::pending_path()).unwrap()).unwrap();
-        let held = raw["pending"].as_array().expect("pending.json holds the prompt");
-        assert_eq!(held.len(), 1, "pending: {raw}");
-        assert_eq!(held[0]["sessionId"], id);
-        assert_eq!(held[0]["text"], "say pong");
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let child = s.sessions.iter().find(|r| r.session_id == id).expect("the child registered");
+        assert_eq!(child.parent_session_id.as_deref(), Some("orch"), "parented by the attested caller");
+        assert!(held_spawns().is_empty(), "nothing was parked");
 
         let log_path = data["logPath"].as_str().expect("logPath once registered");
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let logged = std::fs::read_to_string(log_path).unwrap_or_default();
-        assert!(!logged.contains("say pong"), "an MCP door typed the prompt: {logged:?}");
+        let deadline = Instant::now() + Duration::from_millis(4000);
+        let mut logged = String::new();
+        while Instant::now() < deadline && !logged.contains("say pong") {
+            logged = std::fs::read_to_string(log_path).unwrap_or_default();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(logged.contains("say pong"), "the prompt reached the child's pty: {logged:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
+    /// The child's parent is the session the kernel attested, and a caller
+    /// cannot name another: a `--parent` that is not the attested session is
+    /// refused before anything launches. The same flag naming the attested
+    /// session itself is accepted.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_spawn_cannot_name_another_sessions_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-mcp-parent");
+        let marker = root.join("launched");
+        let touch = format!("touch {}; sleep 1", marker.display());
+
+        let out = session_spawn_with(
+            &mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "adopted"), ("parent", "victim")]),
+            |_| Some("orch".to_string()),
+        );
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "parent-not-attested");
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!marker.exists(), "nothing launched under another session's name");
+        assert!(held_spawns().is_empty());
+
+        let out = session_spawn_with(
+            &mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "own-child"), ("parent", "orch")]),
+            |_| Some("orch".to_string()),
+        );
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An MCP caller with no sealed ancestor launches nothing: the whole spawn,
+    /// its command, its flags and its prompt, is held for a human. The held
+    /// entry carries the id the caller was told, drops a `--parent` it could not
+    /// prove, and counts against the MCP door's bucket. `session pending
+    /// approve` from a local door is what launches it, as the very command it
+    /// was held with.
+    #[cfg(unix)]
+    #[test]
+    fn an_unattested_mcp_spawn_parks_whole_and_nothing_launches_until_a_human_approves() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-mcp-unattested");
+        let marker = root.join("launched");
+        let touch = format!("touch {}; sleep 1", marker.display());
+
+        let id = "held-spawn";
+        let out = session_spawn(&mcp_spawn(
+            &["sh", "-c", touch.as_str()],
+            &[("id", id), ("agent", "claude"), ("prompt", "say pong"), ("parent", "victim")],
+        ));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "pending", "data: {data}");
+        assert_eq!(data["launched"], false);
+        assert_eq!(data["sessionId"], id);
+
+        let held = held_spawns();
+        assert_eq!(held.len(), 1, "{held:?}");
+        let entry = &held[0];
+        assert_eq!(entry.session_id, id);
+        assert_eq!(entry.from.as_deref(), Some("mcp"));
+        let spawn = entry.spawn.as_ref().expect("a held spawn, not a held send");
+        assert_eq!(spawn.args, ["sh", "-c", touch.as_str()]);
+        assert_eq!(spawn.flags.get("prompt").map(String::as_str), Some("say pong"));
+        assert_eq!(spawn.flags.get("id").map(String::as_str), Some(id));
+        assert!(!spawn.flags.contains_key("parent"), "a parent nobody proved is not kept");
+        assert!(entry.text.starts_with("aoide spawn "), "the approver is shown the command: {}", entry.text);
+
+        std::thread::sleep(Duration::from_millis(600));
+        assert!(!marker.exists(), "the held command ran");
+        let roster: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+        assert!(roster.sessions.iter().all(|r| r.session_id != id), "no session registered");
+        assert!(!conduct_socket_path(id).exists(), "no control socket was bound");
+
+        let approve = crate::graph::pending::pending_approve(&Invocation {
+            path: vec!["session".into(), "pending".into(), "approve".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::new(),
+            door: Door::Cli,
+        });
+        assert_eq!(approve.status, Status::Ok, "msg: {}", approve.message);
+        assert_eq!(approve.data.as_ref().unwrap()["launched"], true);
+        let deadline = Instant::now() + Duration::from_millis(4000);
+        while Instant::now() < deadline && !marker.exists() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(marker.exists(), "approving the held spawn launched its command");
+        assert!(held_spawns().is_empty(), "approved, so it left the queue");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Held spawns share the MCP bucket with every other unattested MCP send,
+    /// so a caller cannot park more than the cap, and the refusal is audited.
+    #[cfg(unix)]
+    #[test]
+    fn a_full_mcp_bucket_refuses_one_more_spawn_and_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-mcp-full");
+        let marker = root.join("launched");
+        let touch = format!("touch {}", marker.display());
+        for n in 0..PENDING_CAP_PER_SOURCE {
+            let out = session_spawn_with(
+                &mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", &format!("held-{n}"))]),
+                |_| None,
+            );
+            assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{n}: {}", out.message);
+        }
+        let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "one-more")]), |_| None);
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], crate::graph::send::PENDING_FULL);
+        assert_eq!(held_spawns().len(), PENDING_CAP_PER_SOURCE);
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!marker.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -33,9 +33,19 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   Inject the door admits parks in `pending.json` for a human, whoever the caller
   is, so no network send is delivered. A spawn's opening turn is held with
   `hold_pending`, not typed, verdict `held-pending` (or `queue-full` at the
-  queue's per-source cap). The MCP side of the same
-  rule is conduct's. Admission decides who gets a queue entry (see the Inject
-  admission bullet below); approval is what this rule withholds.
+  queue's per-source cap). Admission decides who gets a queue entry (see the
+  Inject admission bullet below); approval is what this rule withholds.
+- **The MCP door is attested by its own process and never approves.**
+  `mcp::serve_stdio` hands every `tools/call` to the injected dispatcher
+  in-process, as `Door::Mcp`, and conduct's gate walks THIS process's `/proc`
+  ancestry to a sealed session, exactly as `aoide send` does. Keep it so:
+  forwarding an MCP call to the daemon, or reading the caller's identity from
+  anything in the request, would change who is attested.
+  `Door::Mcp.can_approve()` stays false, so `--yes`, `session pending approve`,
+  `session permit` and `mail ring` stay refused over it however well attested. The tier-3 network
+  façade has no sealed ancestor, so every send from it parks. A network bridge
+  run INSIDE a conducted terminal lends that terminal's rights to its remote
+  callers; that is a documented limit of attesting the launcher, not a bug.
 
 ## Invariants
 

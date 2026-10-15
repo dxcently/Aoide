@@ -486,6 +486,12 @@ aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>
   --submit`, in-process, the exact re-drive shape `session pending approve`
   uses to replay a held entry — never a direct socket write; `data.prompt`
   reads `none` / `delivered` / `skipped-unregistered` / `failed: <reason>`.
+  Over MCP the caller must be attested: a server launched under a sealed
+  session spawns the child as that session's own child (`--parent` is forced
+  to it, and naming another session is refused) and its `--prompt` is that
+  parent's send, which delivers. Any other MCP spawn is held whole in
+  `pending.json` and returns `data: {sessionId, state: "pending", launched:
+  false}`; nothing launches until a human approves it.
 - **Notes:** the detached counterpart to `conduct` — this call returns
   immediately while the spawned agent keeps running headless. `--windowed`
   opens a real terminal from `$AOIDE_TERMINAL` (a whitespace-split argv with
@@ -721,8 +727,9 @@ aoide session pending list [--json]
   positions shift the moment any entry resolves; re-list between multiple
   resolutions in one breath).
 - **Notes:** read-only. The queue `send` parks a held injection in when no
-  delivering rule clears it, and where every send from a door that cannot
-  approve (MCP, A2A) parks.
+  delivering rule clears it: every A2A send, an MCP send with no attested
+  rule behind it, and a whole `spawn` from an unattested MCP caller, which
+  `list` shows as the command that approving it would run.
 
 ### aoide session pending approve
 
@@ -735,7 +742,9 @@ aoide session pending approve <id> [--json]
   --yes -- <text>` (with `--submit`/`--from` carried through) the held entry
   represents, in-process through `session_send` — the SAME door `session
   permit`'s verdict-typing already goes through — then removes the entry from
-  `pending.json` under the stage lock. Resolution is the audit line, not a
+  `pending.json` under the stage lock. An entry that is a held spawn is
+  launched instead, as the approver's door, with the argv and flags it was
+  held with. Resolution is the audit line, not a
   persisted archive: the resolution record under `session.pending.approve`
   (the injected text as `untrusted_data`), the re-driven `send`'s own outcome
   record, and the dispatcher's per-command record — three lines, the first

@@ -53,6 +53,19 @@ asked to inject (A2A's spawn opening turn). The same predicate refuses
 `session permit` (no summons card) and `mail ring` (no ring) on those doors.
 CONTRACTS.md's approval-doors section has the table.
 
+The MCP door cannot approve, but it is attested like the CLI. `aoide mcp serve
+--stdio` dispatches in its own process, so the gate walks that process's
+ancestry to a sealed session (`real_attested_sender`), and a send from a server
+launched under one earns that session's parent and sibling rules and delivers.
+It never reads `--yes` or the autogate switch. A send with no sealed ancestor,
+or to a session the sealed one has no rule for, parks, and so does every send
+from the A2A door, which runs inside aoided with no sealed ancestor. A spawn
+follows the send: an attested MCP caller's child is parented by its session and
+its `--prompt` is a parent-to-child send that delivers, and an unattested
+caller's whole spawn is held in `pending.json` (`PendingSend::spawn`) until a
+human approves it. A restore or a resurrect is not a send a caller makes, and
+stays held over MCP.
+
 The queue holds at most `PENDING_CAP_PER_SOURCE` entries per `from`, and the
 door a send arrived through derives that source: the A2A door's own
 `node:<name>` or `addr:<address>`, `mcp:<session>` (the caller's kernel-attested

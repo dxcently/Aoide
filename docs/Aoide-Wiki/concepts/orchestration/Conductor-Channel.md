@@ -221,22 +221,25 @@ through.
   removes it without injecting. Approval is a local act: see the approval
   doors below. This is CLI-only today — the conductor
   TUI's own one-key approve/deny (below) is still Phase ③.
-- **Approval doors.** Only a door that can approve may deliver a gated
+- **Approval doors.** Only a door that can approve may approve a gated
   send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
   the herald, and any same-uid client of the aoided socket) can. The MCP
   door (`aoide mcp serve --stdio`, and lyra's) and the A2A door
-  (`aoide a2a serve`, loopback included) cannot: a send through them parks
-  as pending whatever it asks for, `--yes` included, and
-  `session pending approve` is refused there with a taught line. The
-  decision is one predicate, `Door::can_approve`, read from the door the
-  invocation arrived through; a caller's own claim about itself is never
-  consulted. The full table is in CONTRACTS.md (the pending-queue section).
-  A local agent with a shell can still approve through the CLI until the
-  local design lands.
+  (`aoide a2a serve`, loopback included) cannot: `--yes` is never read
+  there and `session pending approve` is refused with a taught line. The
+  A2A door parks every send. The MCP door is attested like the CLI, by the
+  sealed session its server process runs under, and that session's parent
+  and sibling rules deliver; any other MCP send parks. The decision is one
+  predicate, `Door::can_approve`, read from the door the invocation arrived
+  through; a caller's own claim about itself is never consulted. The full
+  table is in CONTRACTS.md (the pending-queue section). A local agent with a
+  shell can still approve through the CLI until the local design lands.
 - **Autogate policy.** Four rules ship today, all still audited, in
   priority order: `--yes` ▸ the global switch ▸ parent-of-target ▸
-  sibling-of-target ▸ else pending. They decide only for a send from an
-  approving door. The fourth is the daemon's own line, never a prompted
+  sibling-of-target ▸ else pending. `--yes` and the global switch decide
+  only for a send from an approving door; the parent and sibling rules also
+  decide for an MCP send whose server runs under a sealed session, and for
+  no other door. The fourth is the daemon's own line, never a prompted
   send: child-of-target.
   - **Parent-of-target.** A send delivers without a prompt when the
     sender's own session is the target session's `parentSessionId` — an
@@ -244,7 +247,8 @@ through.
     unrelated sends stay pending. This is what makes conduct-by-default a
     real orchestration mesh: the parent of a subtree can drive it,
     strangers cannot. The sender's session is kernel-attested, never read
-    off a forgeable env var: `aoide send` walks its own real `/proc`
+    off a forgeable env var: `aoide send` (over MCP, the `aoide mcp serve
+    --stdio` process that dispatches it) walks its own real `/proc`
     ancestry to a live session whose seal verifies against the daemon's
     current key (the sealed session credential, [[Session-Graph]]), and the
     decision is a pure, unit-tested predicate over that attested pair:

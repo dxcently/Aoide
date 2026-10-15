@@ -74,11 +74,23 @@ aoide mcp serve [--stdio] [--json]
   stdin closes (exit 0) or an I/O error (exit 1,
   `eprintln "aoide mcp serve: …"`). Implementation:
   `pkgs/aoide/crates/server/src/mcp.rs`.
-- **Notes:** the server itself is not gated, but a gated `send` through it
-  always parks, since this door cannot approve. Off by default
-  (`aoide.mcp.enable = false`); spawned
-  per session as `aoide mcp serve --stdio`. One implementation, two doors —
-  the tool list cannot drift from `schema --json`.
+- **Notes:** the server itself is not gated. The door cannot approve, so
+  `--yes`, `session pending approve`, `session permit` and `mail ring` are
+  refused over it for every caller. It is attested like the CLI: the process
+  that dispatches a `tools/call` is this server, so the send gate walks its
+  ancestry to a sealed session. A server launched under one earns that
+  session's parent and sibling rules, so its sends to the session's children
+  deliver and its spawns launch as that session's children, with the first
+  prompt delivered. A server with no sealed ancestor (the network façade
+  under systemd, a bare terminal) parks every send and holds every spawn whole
+  for a local human; restoring or resurrecting a session over MCP is held too.
+  Attestation names who launched the server, not who writes to its stdin, so
+  a network bridge run inside a conducted terminal lends that terminal's
+  rights to its remote callers. Off by default (`aoide.mcp.enable = false`);
+  spawned per session as `aoide mcp serve --stdio`, where the harness's own
+  MCP permission prompt is the approval for one connection and aoide keeps no
+  activation state. One implementation, two doors — the tool list cannot
+  drift from `schema --json`.
 
 ### aoide daemon
 

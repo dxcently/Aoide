@@ -57,8 +57,11 @@
 //! take a turn ([`super::spawn::wait_ready`], the same gate `spawn --prompt`
 //! passes; a target that never becomes ready is reported `not-ready` and typed
 //! at by nothing) — its `restore` snapshot decides what — if anything — lands
-//! in the new pty, through [`super::send::session_send`], never a direct socket
-//! write:
+//! in the new pty, through [`send_restore`] (the gated send), never a direct
+//! socket write. A restore is not a send a caller makes: it rests on the door's
+//! `--yes` alone, so an MCP door parks it even when its server is attested, and
+//! the revived session's spawn is the harness's own resume line, launched
+//! without the MCP spawn gate:
 //! - **not idle, with a foreground `argv`** — the session was demonstrably
 //!   RUNNING something when it left. Re-exec it, `--yes --submit` and all:
 //!   the never-auto-run rule below covers the typed-but-unsubmitted case,
@@ -167,9 +170,9 @@
 
 use super::common::{require_flag, stage_error};
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
-use super::send::session_send;
+use super::send::deliver_local_with;
 use super::session_store::{stamp_origin, stamp_resumed_from};
-use super::spawn::session_spawn;
+use super::spawn::launch_session;
 use aoide_protocol::agents::agent_profile;
 use aoide_protocol::output::{Outcome, Status};
 use aoide_protocol::Invocation;
@@ -314,7 +317,7 @@ fn is_sudo_argv(argv: &[String]) -> bool {
 /// `resurrect_one`'s real spawn. See the module doc's safety-invariant
 /// paragraph: the two branches below are never unified behind a shared
 /// boolean parameter — each hardcodes its own flag map inline.
-/// The outcome word for one restore, from the answer `session_send` gave it.
+/// The outcome word for one restore, from the answer [`send_restore`] gave it.
 /// Pure, so the held-pending mapping is testable without a spawn: a send the
 /// door parked is `held-pending`, never reported as typed.
 fn restore_word(inner: &Outcome, submit: bool, ready: super::spawn::Ready) -> String {
@@ -335,6 +338,15 @@ fn restore_word(inner: &Outcome, submit: bool, ready: super::spawn::Ready) -> St
     } else {
         format!("{word}-unverified")
     }
+}
+
+/// Type a restore into the revived session through the one gated injection
+/// door. A restore is the session's own earlier bytes going back to its own
+/// prompt, so what authorises it is the door's `--yes` and nothing else: it
+/// names no sender, even to a caller the kernel can attest. A door that cannot
+/// approve parks it, whoever is calling.
+fn send_restore(inv: &Invocation, new_id: &str) -> Outcome {
+    deliver_local_with(inv, new_id, |_| None)
 }
 
 fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreSnapshot) -> Option<Invocation> {
@@ -453,7 +465,7 @@ fn resurrect_one(
     // (the ledger's own old id, or a reused `--id`) cannot pass for the new
     // one's hello.
     let launch_at = super::session_store::now_iso_utc();
-    let out = session_spawn(&spawn_inv);
+    let out = launch_session(&spawn_inv, None);
     if out.status != aoide_protocol::output::Status::Ok {
         failed.push(json!({
             "sessionId": c.entry.session_id,
@@ -554,7 +566,7 @@ fn resurrect_one(
                         .and_then(|r| restore_delivery(door, &new_id, r))
                         .expect("checked just above");
                     let submit = inv.flags.contains_key("submit");
-                    restore_word(&session_send(&inv), submit, ready)
+                    restore_word(&send_restore(&inv, &new_id), submit, ready)
                 }
             }
         }
@@ -1131,7 +1143,7 @@ fn clean_spawn_from_spec(
     flags.insert("agent".to_string(), spec.agent.clone());
     flags.insert("windowed".to_string(), "true".to_string());
     flags.insert("cwd".to_string(), dir.to_string());
-    let out = session_spawn(&Invocation { path: vec!["spawn".to_string()], args: argv, flags, door });
+    let out = launch_session(&Invocation { path: vec!["spawn".to_string()], args: argv, flags, door }, None);
     if out.status != Status::Ok {
         failed.push(json!({
             "host": spec.host, "dir": spec.dir, "agent": spec.agent,
@@ -2641,7 +2653,7 @@ mod tests {
         };
         let inv = restore_delivery(aoide_protocol::Door::Mcp, id, &restore)
             .expect("an idle restore with a typed line constructs a send");
-        let inner = session_send(&inv);
+        let inner = send_restore(&inv, id);
         assert_eq!(
             restore_word(&inner, false, crate::graph::spawn::Ready::Verified),
             "held-pending",
@@ -2661,6 +2673,98 @@ mod tests {
         assert_eq!(held[0]["sessionId"], id);
         assert_eq!(held[0]["text"], "echo hello");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A restore is not a send, so attestation does not buy it: the revived
+    /// session is parented by the sealed session this process stands for, which
+    /// is exactly the relationship that delivers an ordinary MCP send, and the
+    /// restore is still held. The control is the ordinary send of the same bytes
+    /// through the same door, which the real resolver delivers, so the fixture
+    /// is shown to be attested rather than assumed.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_callers_restore_is_held_pending_though_its_send_would_deliver() {
+        use crate::graph::send::session_send;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+            "AOIDE_DAEMON_SOCKET",
+        ]);
+        let (root, _proj_path) = setup("resurrect-mcp-attested");
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        crate::graph::session_store::do_session_start(
+            "orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(std::process::id()),
+        );
+        seal_record("orch", &kp);
+
+        let id = "rs-attested";
+        let socket = crate::graph::conduct::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        crate::graph::session_store::do_session_start(
+            id, Some("claude"), Some("/w"), None, Some("orch"), Some(true), Some(socket.to_str().unwrap()), None, None,
+        );
+        let restore = RestoreSnapshot { idle: true, typed: Some("echo hello".to_string()), ..Default::default() };
+        let inv = restore_delivery(aoide_protocol::Door::Mcp, id, &restore).unwrap();
+
+        let inner = send_restore(&inv, id);
+        assert_eq!(restore_word(&inner, false, crate::graph::spawn::Ready::Verified), "held-pending", "{}", inner.message);
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "an attested MCP caller's restore typed into the session"
+        );
+
+        listener.set_nonblocking(false).unwrap();
+        let acc = aoide_test_support::expect_delivery(listener, "the same bytes as an ordinary attested send");
+        let sent = session_send(&inv);
+        let _ = acc.join().unwrap();
+        assert_eq!(sent.data.as_ref().unwrap()["gate"], "autogate-parent", "the control: {}", sent.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Resurrect is not a spawn the MCP door judges: its argv is the harness's
+    /// own resume line, not a caller's command. Over MCP with no attested
+    /// session it reaches the launch exactly as before, and fails there on the
+    /// headless host's missing terminal; it is not held in `pending.json`.
+    #[test]
+    fn a_resurrect_over_mcp_reaches_the_launch_and_is_not_held_as_a_spawn() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_TERMINAL",
+            "AOIDE_DAEMON_SOCKET",
+            "WAYLAND_DISPLAY",
+            "DISPLAY",
+        ]);
+        let (root, proj_path) = setup("resurrect-mcp-launch");
+        std::env::remove_var("AOIDE_TERMINAL");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("WAYLAND_DISPLAY");
+        std::env::remove_var("DISPLAY");
+        set_ledger(&[ledger_entry("ledger-old-mcp", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "ledger-old-mcp", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let mut inv = flag_invocation(&["resurrect"], &[("project", "proj")]);
+        inv.door = aoide_protocol::Door::Mcp;
+        let out = session_resurrect(&inv);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let failed = out.data.as_ref().unwrap()["failed"].as_array().unwrap().clone();
+        assert_eq!(failed.len(), 1, "{failed:?}");
+        assert!(failed[0]["reason"].as_str().unwrap().contains("AOIDE_TERMINAL"), "{failed:?}");
+        assert!(!crate::graph::send::pending_path().exists(), "no spawn was held");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

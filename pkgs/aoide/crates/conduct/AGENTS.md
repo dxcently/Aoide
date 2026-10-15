@@ -101,15 +101,15 @@ in the message.
 
 - **Only an approving door may approve a gated send.** `Door::can_approve`
   (`graph/send.rs`) is the one predicate: `Cli` and `Daemon` approve, `Mcp`
-  and `A2a` never do. `--yes`, the global autogate environment, and the
-  parent/sibling rules are read only past that check, so a send from a
-  remote door parks whatever it asks for, and `pending_approve` refuses
-  before it takes an entry off the queue, both when the door cannot approve
-  and when the entry's target is not live yet. The same predicate gates the
-  other two things a human's approval answers: `session_permit` files no
-  summons card for a door that cannot approve (or for a session that is not
-  `awaiting`), and `mail_ring` refuses before any forward, so such a caller
-  never types into a reader. The predicate is exhaustive over
+  and `A2a` never do. `--yes` and the global autogate environment are read
+  only past that check, so a send from a remote door parks whatever it asks
+  for unless an attested rule delivers it (next bullet), and
+  `pending_approve` refuses before it takes an entry off the queue, both when
+  the door cannot approve and when the entry's target is not live yet. The
+  same predicate gates the other two things a human's approval answers:
+  `session_permit` files no summons card for a door that cannot approve (or
+  for a session that is not `awaiting`), and `mail_ring` refuses before any
+  forward, so such a caller never types into a reader. The predicate is exhaustive over
   `Door`, so a new door must be decided there. The door is the invocation's
   own `Door`, set where the request arrived: a caller's claim about itself is
   never read. A routed command (`daemon_dispatch`) reaches aoided as
@@ -117,6 +117,48 @@ in the message.
   `None` for every other door, which runs its own local path. A routed
   command must never be the approving path.
   `pkgs/aoide/crates/conduct/src/graph/send.rs`'s door tests pin each path.
+- **The MCP door is attested like the CLI and approves nothing.**
+  `deliver_local_with` walks the dispatching process's ancestry
+  (`resolve_sender_id`, `real_attested_sender`) for a door that can approve
+  (unless `--yes` or the environment already decided) and for `Door::Mcp`,
+  and never for `A2a`, which runs inside aoided with no sealed ancestor. An
+  approving door ends in `send_gate`, which reads `--yes` and the environment
+  first. `Mcp` ends in `attested_gate`: the parent rule, then the sibling
+  rule (and its opt-out), else pending, with no `--yes` and no switch to read.
+  Keep it so: an attested MCP sender must never reach `may_ring` (that is
+  `Door::Daemon` alone), `pending_approve`, `session_permit` or `mail_ring`,
+  and an MCP send is attributed to the attested session, never to the `--from`
+  it typed, which rides as `claims`. The identity is who launched the server,
+  not who writes to its stdin, so a network bridge run inside a conducted
+  terminal lends that terminal's rights to its remote callers. Pinned by
+  `an_attested_mcp_parent_sends_to_its_own_child_and_it_delivers`,
+  `an_attested_mcp_sender_to_an_unrelated_session_parks`,
+  `an_unattested_mcp_send_parks`,
+  `an_attested_mcp_sibling_delivers_and_the_opt_out_parks`,
+  `an_attested_mcp_send_still_cannot_approve_with_yes_or_the_autogate_env`,
+  `an_attested_mcp_caller_still_cannot_approve_permit_or_ring`,
+  `the_a2a_door_parks_for_the_parent_a_resolver_would_name_and_the_cli_delivers`
+  and, through the real resolver,
+  `the_real_resolver_attests_an_mcp_send_by_the_callers_sealed_ancestor`.
+- **An MCP spawn launches only as an attested caller, and a restore never
+  does.** `session_spawn_with` judges the MCP door: the resolved session
+  becomes the child's `--parent` (a `--parent` naming any other session is
+  refused), and the `--prompt` is sent through `deliver_local_with` with that
+  session as the sender, so the parent rule delivers it. With no sealed
+  session the whole spawn is held with `hold_spawn` under the shared `mcp`
+  source, its id fixed so the approved launch registers under the one the
+  caller was told, and `pending approve` replays it with the approver's door.
+  `resurrect` reaches `launch_session` directly and types its restore through
+  `send_restore`, whose resolver names no sender: a restore rests on the
+  door's `--yes`, so an MCP door parks it even when its server is attested.
+  Pinned by `an_attested_mcp_spawn_launches_and_its_first_prompt_delivers`,
+  `an_attested_mcp_spawn_cannot_name_another_sessions_child`,
+  `an_unattested_mcp_spawn_parks_whole_and_nothing_launches_until_a_human_approves`,
+  `a_full_mcp_bucket_refuses_one_more_spawn_and_launches_nothing`,
+  `a_held_spawn_lists_as_its_whole_command_and_deny_launches_nothing`,
+  `a_spawn_entry_that_does_not_parse_is_malformed_and_never_typed_as_a_send`,
+  `an_attested_mcp_callers_restore_is_held_pending_though_its_send_would_deliver`
+  and `a_restore_over_an_mcp_door_is_held_pending_and_never_typed`.
 - **`pending.json` has one writer, and it holds the per-source cap.**
   `record_pending` (`graph/send.rs`) counts the entries carrying the new
   entry's `from` and appends under ONE stage lock, refusing at
@@ -2283,8 +2325,11 @@ in the message.
   actually running `deliver_local`: a request dispatched through `aoided`'s
   socket resolves against the daemon's own ancestry, not the original caller's.
   Don't "fix" this by threading a peercred pid into `send.rs` without opening
-  that as its own scoped phase. A network door never reaches that resolution,
-  because its send parks first (`Door::can_approve`). P-ID3 closed only the
+  that as its own scoped phase. A network door never reaches that resolution:
+  the walk is skipped for `Door::A2a`, which runs inside aoided with no sealed
+  ancestor, so its send parks. An MCP send resolves in the MCP server's own
+  process, whose ancestry names who launched the server and not who writes to
+  its stdin. P-ID3 closed only the
   ATTRIBUTION half of that gap (`aoided`'s `invocation_from_dispatch_request`
   and `a2a::do_inject` both stamp an absent `from` explicit-empty rather than
   let it fall through to their own process's ambient `AOIDE_SESSION_ID`), not

@@ -28,6 +28,17 @@
 //! client-side self-send guard this file used to carry (removed; see
 //! `deliver_local`'s own comment on exactly why removing it is sound).
 //!
+//! **The MCP door is attested the same way.** `aoide mcp serve --stdio`
+//! dispatches in its own process, so the process whose ancestry is walked is
+//! the MCP server, and a server launched under a sealed session earns that
+//! session's parent and sibling rules and delivers. It never earns `--yes`, the
+//! autogate switch or an approval: an MCP caller has none of them, and a send
+//! with no sealed ancestor, or to a session the sealed one has no rule for,
+//! parks. The A2A door runs inside aoided with no sealed ancestor and so
+//! parks every send. Attestation names who launched the server, not who writes
+//! to its stdin: a network bridge run inside a conducted terminal lends that
+//! terminal's rights to its remote callers.
+//!
 //! `send` has two ways to name a target (messaging plan P-C3):
 //! `--id <id>` (the original, unchanged) or `--to <target>` (resolved via
 //! `aoide_storage::addr::resolve`, mutually exclusive with `--id` — see
@@ -64,7 +75,7 @@ use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
 use aoide_storage::session::pid_may_move;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 #[cfg(windows)]
@@ -133,6 +144,35 @@ pub struct PendingSend {
     /// shown only under that name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed: Option<String>,
+    /// Set on a held spawn, whose `text` is the command line shown to the
+    /// approver and whose `session_id` is the id its child will register
+    /// under. Nothing is typed for one: approving it launches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn: Option<PendingSpawn>,
+}
+
+/// A `spawn` a door held instead of launching: the argv and flags it was
+/// asked for, replayed whole by `session pending approve`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct PendingSpawn {
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub flags: BTreeMap<String, String>,
+}
+
+impl PendingSpawn {
+    /// The line an approver is shown, and could paste: `aoide spawn --flag
+    /// value … -- <command>`, every word quoted.
+    pub fn command_line(&self) -> String {
+        Invocation {
+            path: vec!["spawn".to_string()],
+            args: self.args.clone(),
+            flags: self.flags.clone(),
+            door: Door::Cli,
+        }
+        .command_line("aoide", &["windowed", "undying"], true)
+    }
 }
 
 /// `pending.json` container.
@@ -260,6 +300,20 @@ fn sibling_autogate_enabled() -> bool {
 pub const DOOR_CANNOT_APPROVE: &str =
     "this door cannot approve a gated send; approval comes from a terminal or the conductor";
 
+/// The two rules that rest on an attested sender and nothing else: the
+/// parent-of-target rule, then the sibling rule, else pending. The gate of a
+/// door that cannot approve, which has no `--yes` and no autogate switch to
+/// consult; [`send_gate`]'s own tail for a door that can.
+fn attested_gate(sender_is_parent: bool, is_sibling: bool) -> SendGate {
+    if sender_is_parent {
+        SendGate::AutogateParent
+    } else if is_sibling && sibling_autogate_enabled() {
+        SendGate::AutogateSibling
+    } else {
+        SendGate::Pending
+    }
+}
+
 /// Resolve the gate: `--yes`, then the global autogate switch, then the
 /// parent-of-target rule, then the sibling rule, else pending.
 fn send_gate(yes: bool, sender_is_parent: bool, is_sibling: bool) -> SendGate {
@@ -267,12 +321,8 @@ fn send_gate(yes: bool, sender_is_parent: bool, is_sibling: bool) -> SendGate {
         SendGate::Yes
     } else if autogate_env() {
         SendGate::Autogate
-    } else if sender_is_parent {
-        SendGate::AutogateParent
-    } else if is_sibling && sibling_autogate_enabled() {
-        SendGate::AutogateSibling
     } else {
-        SendGate::Pending
+        attested_gate(sender_is_parent, is_sibling)
     }
 }
 
@@ -468,10 +518,13 @@ impl PendingOrigin {
     }
 }
 
+/// The MCP door's source when no session is attested behind the caller.
+const MCP_SOURCE: &str = "mcp";
+
 /// Is `from` spelled the way a door derives its own source? Only that door may
 /// record it.
 fn is_door_source(from: &str) -> bool {
-    from == "mcp" || ["node:", "addr:", "mcp:"].iter().any(|prefix| from.starts_with(prefix))
+    from == MCP_SOURCE || ["node:", "addr:", "mcp:"].iter().any(|prefix| from.starts_with(prefix))
 }
 
 /// Derive the origin of a send this invocation is about to park. `attested`
@@ -501,8 +554,8 @@ fn pending_origin(inv: &Invocation, attested: impl FnOnce() -> Option<String>) -
         return Ok(PendingOrigin { from: typed, claimed: None });
     }
     let from = match attested() {
-        Some(session) => format!("mcp:{session}"),
-        None => "mcp".to_string(),
+        Some(session) => format!("{MCP_SOURCE}:{session}"),
+        None => MCP_SOURCE.to_string(),
     };
     let claimed = typed.map(|t| common::clean_line(&t)).filter(|t| !t.is_empty());
     Ok(PendingOrigin { from: Some(from), claimed })
@@ -510,7 +563,13 @@ fn pending_origin(inv: &Invocation, attested: impl FnOnce() -> Option<String>) -
 
 /// Queue one held send. The cap is counted and the entry appended under ONE
 /// stage lock, so two callers racing for the last slot cannot both take it.
-fn record_pending(id: &str, text: &str, submit: bool, origin: &PendingOrigin) -> Result<(), HoldRefused> {
+fn record_pending(
+    id: &str,
+    text: &str,
+    submit: bool,
+    origin: &PendingOrigin,
+    spawn: Option<PendingSpawn>,
+) -> Result<(), HoldRefused> {
     with_stage_lock(|| {
         let mut file: PendingFile = load_stage(&pending_path()).map_err(HoldRefused::Stage)?;
         if file.pending.iter().filter(|p| p.from == origin.from).count() >= PENDING_CAP_PER_SOURCE {
@@ -524,6 +583,7 @@ fn record_pending(id: &str, text: &str, submit: bool, origin: &PendingOrigin) ->
             queued_at: now_iso_utc(),
             from: origin.from.clone(),
             claimed: origin.claimed.clone(),
+            spawn,
         });
         write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)
     })
@@ -536,7 +596,16 @@ fn record_pending(id: &str, text: &str, submit: bool, origin: &PendingOrigin) ->
 /// verified; no other door calls this. Same queue, same cap, so `session
 /// pending approve` treats it exactly like any other held send.
 pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
-    record_pending(id, text, submit, &PendingOrigin { from: from.map(str::to_string), claimed: None })
+    record_pending(id, text, submit, &PendingOrigin { from: from.map(str::to_string), claimed: None }, None)
+}
+
+/// Park a spawn the MCP door could not attribute, to launch only when a human
+/// approves it. `id` is the id its child will register under, `command` the
+/// line the approver is shown, and the entry counts against the MCP door's
+/// own bucket, the one every unattested MCP send shares.
+pub fn hold_spawn(id: &str, command: &str, spawn: PendingSpawn) -> Result<(), HoldRefused> {
+    let origin = PendingOrigin { from: Some(MCP_SOURCE.to_string()), claimed: None };
+    record_pending(id, command, false, &origin, Some(spawn))
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -733,7 +802,7 @@ pub fn session_send(inv: &Invocation) -> Outcome {
 /// benign fallback: the credential's whole security property rests on a
 /// LIVE daemon (OQ1-A, process liveness) — nothing to authenticate against
 /// otherwise.
-fn real_attested_sender(sessions: &[SessionRecord]) -> Option<String> {
+pub(in crate::graph) fn real_attested_sender(sessions: &[SessionRecord]) -> Option<String> {
     let pubkey = aoide_client::daemon::daemon_seal_pubkey_hex()?;
     crate::graph::identity::attested_sender(std::process::id() as i32, sessions, |rec| {
         crate::graph::identity::verify_seal_over(rec, &pubkey)
@@ -932,7 +1001,7 @@ pub fn write_delivery(
 /// real `attested_sender`/`verify_seal_over` pair against a test keypair,
 /// proving the actual cryptographic machinery, not a stub) — see `mod
 /// tests` below.
-fn deliver_local_with(
+pub(in crate::graph) fn deliver_local_with(
     inv: &Invocation,
     id: &str,
     resolve_sender_id: impl Fn(&[SessionRecord]) -> Option<String>,
@@ -1015,43 +1084,48 @@ fn deliver_local_with(
     // peercred-derived ancestry roots back to the target's OWN session,
     // unconditionally, un-bypassably — stronger than the old guard, which
     // only ever covered well-behaved callers of `aoide send`).
-    // A door that cannot approve (`Door::can_approve`) never reaches the gate's
-    // inputs at all: its send parks below, so identity is not resolved for it.
+    // What a door earns. The CLI and daemon doors can approve, so `--yes` and
+    // the autogate switch outrank identity and identity is read only when
+    // neither decides. MCP cannot approve: it earns the two rules that rest on
+    // an attested sender and nothing else, so it always walks its own ancestry
+    // and never reads `--yes` or the switch. The A2A door runs inside aoided
+    // with no sealed ancestor to walk, so it earns nothing.
     let may_approve = inv.door.can_approve();
-    let (is_parent, is_sibling) = if !may_approve || yes || autogate_env() {
-        (false, false) // never examined — send_gate's own precedence short-circuits first.
+    let walks_ancestry = may_approve || inv.door == Door::Mcp;
+    let attested = if walks_ancestry && !(may_approve && (yes || autogate_env())) {
+        resolve_sender_id(&file.sessions)
     } else {
-        let sender = resolve_sender_id(&file.sessions);
-        let is_parent = sender_is_parent(sender.as_deref(), target_parent.as_deref());
-        let sender_parent: Option<String> = sender
-            .as_deref()
-            .and_then(|sid| file.sessions.iter().find(|s| s.session_id == sid))
-            .and_then(|r| r.parent_session_id.clone());
-        let parent_live = target_parent
-            .as_deref()
-            .filter(|p| !p.is_empty())
-            .and_then(|p| file.sessions.iter().find(|s| s.session_id == p))
-            .map(|r| aoide_protocol::canonical_state(&r.state) != "done")
-            .unwrap_or(false);
-        let is_sibling =
-            siblings_share_live_parent(sender_parent.as_deref(), target_parent.as_deref(), parent_live);
-        (is_parent, is_sibling)
+        None
     };
+    let is_parent = sender_is_parent(attested.as_deref(), target_parent.as_deref());
+    let sender_parent: Option<String> = attested
+        .as_deref()
+        .and_then(|sid| file.sessions.iter().find(|s| s.session_id == sid))
+        .and_then(|r| r.parent_session_id.clone());
+    let parent_live = target_parent
+        .as_deref()
+        .filter(|p| !p.is_empty())
+        .and_then(|p| file.sessions.iter().find(|s| s.session_id == p))
+        .map(|r| aoide_protocol::canonical_state(&r.state) != "done")
+        .unwrap_or(false);
+    let is_sibling = siblings_share_live_parent(sender_parent.as_deref(), target_parent.as_deref(), parent_live);
     let gate = if may_approve {
         send_gate(yes, is_parent, is_sibling)
     } else {
-        SendGate::Pending
+        attested_gate(is_parent, is_sibling)
     };
     // The provenance attribution — `--from` or `AOIDE_SESSION_ID` (see
     // [`resolve_sender`]) — is resolved once here, from the ORIGINAL
     // invocation, and reused for the delivered payload's prefix (below), so a
     // queued-then-approved send still names whoever queued it, not whoever
-    // approved it. What a PARKED send is recorded under is not this: the door
-    // derives it ([`pending_origin`]), because the queue's cap and the
-    // approver's screen must not take a caller's word for who it is.
-    let attributed_sender = resolve_sender(inv);
+    // approved it. Over MCP the attested session is the attribution, never the
+    // label the caller typed: that rides only as a claim. What a PARKED send
+    // is recorded under is not this: the door derives it ([`pending_origin`]),
+    // because the queue's cap and the approver's screen must not take a
+    // caller's word for who it is.
+    let attributed_sender = if inv.door == Door::Mcp { attested.clone() } else { resolve_sender(inv) };
     if !gate.delivers() {
-        let origin = match pending_origin(inv, || resolve_sender_id(&file.sessions)) {
+        let origin = match pending_origin(inv, || attested.clone()) {
             Ok(origin) => origin,
             Err(spelled) => {
                 let out = Outcome::refuse(
@@ -1067,7 +1141,7 @@ fn deliver_local_with(
                 return out;
             }
         };
-        match record_pending(&id, &text, submit, &origin) {
+        match record_pending(&id, &text, submit, &origin, None) {
             Ok(()) => {}
             Err(HoldRefused::Stage(e)) => return stage_error(cmd, e),
             Err(HoldRefused::Full) => {
@@ -1260,7 +1334,15 @@ fn deliver_local_with(
             "title": title,
             "gate": gate.label(),
         }));
-    audit_send(inv, "delivered", &out.message, &text);
+    // An MCP send names the session the kernel attested, with the caller's own
+    // label beside it as a claim, exactly as a parked one does.
+    match inv.door {
+        Door::Mcp => {
+            let note = pending_origin(inv, || attested.clone()).ok().and_then(|origin| origin.note());
+            audit_send_noted(inv, "delivered", &out.message, &text, note);
+        }
+        _ => audit_send(inv, "delivered", &out.message, &text),
+    }
     out
 }
 
@@ -4379,22 +4461,93 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Path 3 of the audit: the parent rule. It decides from the sender's
-    /// identity, which the caller resolves; a remote door must not reach it.
-    /// `deliver_local_with` takes the resolver as a parameter so the test can
-    /// name the parent without a live daemon. The Cli arm is the control.
+    /// The resolver of a caller the kernel attests as session `who`.
+    fn attested(who: &'static str) -> impl Fn(&[SessionRecord]) -> Option<String> {
+        move |_| Some(who.to_string())
+    }
+
+    /// The MCP door is attested the way the CLI is: a caller whose ancestry
+    /// walks to a sealed session that parents the target earns the parent rule
+    /// and delivers, with no `--yes`. The provenance names the attested session,
+    /// never the label the caller typed, and the audit line records both, the
+    /// label as a claim. `deliver_local_with` takes the resolver as a parameter
+    /// so the test can name the parent without a live daemon.
     #[test]
-    fn a_parent_targeted_send_delivers_locally_and_parks_from_mcp() {
+    fn an_attested_mcp_parent_sends_to_its_own_child_and_it_delivers() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(DOOR_ENV);
         let (root, id, listener) = door_fixture("parent-mcp", Some("the-parent"));
+        let acc = expect_delivery(listener, "an attested MCP parent's send reaches its child");
+        let out = deliver_local_with(
+            &send_on(Door::Mcp, &["hi"], &[("id", &id), ("submit", "true"), ("from", "boss")]),
+            &id,
+            attested("the-parent"),
+        );
+        let got = acc.join().unwrap();
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "delivered", "{}", out.message);
+        assert_eq!(data["gate"], "autogate-parent");
+        assert_eq!(String::from_utf8(got).unwrap(), "from the-parent: hi\r", "the attested session, not `boss`");
+        assert!(queued().is_empty(), "a delivered send parks nothing");
+        let delivered = audit_lines(&root)
+            .into_iter()
+            .find(|r| r["status"] == "delivered")
+            .expect("the delivery is audited");
+        assert_eq!(delivered["door"], "mcp", "{delivered}");
+        let message = delivered["message"].as_str().unwrap();
+        assert!(message.contains("from mcp:the-parent, claims \"boss\""), "{message}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Attestation buys the rules, not a pass: a caller the kernel names but who
+    /// neither parents nor shares a live parent with the target parks, in the
+    /// bucket of the session it proved.
+    #[test]
+    fn an_attested_mcp_sender_to_an_unrelated_session_parks() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("unrelated-mcp", Some("the-parent"));
         let out = deliver_local_with(
             &send_on(Door::Mcp, &["hi"], &[("id", &id), ("submit", "true")]),
             &id,
-            |_| Some("the-parent".to_string()),
+            attested("a-stranger"),
         );
-        assert_eq!(out.data.as_ref().unwrap()["state"], "pending");
-        assert_eq!(out.data.as_ref().unwrap()["gate"], "pending");
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "pending", "{}", out.message);
+        assert_eq!(data["gate"], "pending");
+        assert!(nothing_connected(&listener));
+        assert_eq!(queued_from("mcp:a-stranger"), ["hi"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A caller with no sealed ancestor earns nothing, even for a target that
+    /// has a parent: it parks in the MCP door's shared bucket.
+    #[test]
+    fn an_unattested_mcp_send_parks() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("unattested-mcp", Some("the-parent"));
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hi"], &[("id", &id)]), &id, |_| None);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert!(nothing_connected(&listener));
+        assert_eq!(queued_from("mcp"), ["hi"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The network door has no sealed ancestor to attest, so the parent rule is
+    /// closed to it whatever a resolver would say; the CLI is the control.
+    #[test]
+    fn the_a2a_door_parks_for_the_parent_a_resolver_would_name_and_the_cli_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("parent-a2a", Some("the-parent"));
+        let out = deliver_local_with(
+            &send_on(Door::A2a, &["hi"], &[("id", &id), ("submit", "true")]),
+            &id,
+            attested("the-parent"),
+        );
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
         assert!(nothing_connected(&listener));
         let _ = std::fs::remove_dir_all(&root);
 
@@ -4403,10 +4556,92 @@ mod tests {
         let out = deliver_local_with(
             &send_on(Door::Cli, &["hi"], &[("id", &id), ("submit", "true")]),
             &id,
-            |_| Some("the-parent".to_string()),
+            attested("the-parent"),
         );
         let _ = acc.join().unwrap();
         assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-parent");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The sibling rule is the CLI's too: an attested MCP sender and the target
+    /// share a live parent, so the send delivers, and the opt-out env parks it.
+    #[test]
+    fn an_attested_mcp_sibling_delivers_and_the_opt_out_parks() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("sibling-mcp", Some("orch"));
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, None);
+        do_session_start("sib-a", Some("claude"), Some("/w"), None, Some("orch"), None, None, None, None);
+
+        let acc = expect_delivery(listener, "an attested MCP sibling's send is delivered");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hey"], &[("id", &id)]), &id, attested("sib-a"));
+        let _ = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-sibling", "{}", out.message);
+
+        std::env::set_var("AOIDE_CONDUCT_SIBLING_AUTOGATE", "0");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["again"], &[("id", &id)]), &id, attested("sib-a"));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert_eq!(queued_from("mcp:sib-a"), ["again"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// MCP never approves, however well attested. `--yes` is refused with the
+    /// taught line and the box-wide autogate switch is not read, so a caller the
+    /// kernel names but who is neither parent nor sibling parks exactly as an
+    /// unattested one does.
+    #[test]
+    fn an_attested_mcp_send_still_cannot_approve_with_yes_or_the_autogate_env() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("approve-mcp", Some("the-parent"));
+        let out = deliver_local_with(
+            &send_on(Door::Mcp, &["hi"], &[("id", &id), ("yes", "true")]),
+            &id,
+            attested("a-stranger"),
+        );
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["state"], "pending", "{}", out.message);
+        assert_eq!(data["approvalRefused"], true);
+        assert!(out.message.contains(DOOR_CANNOT_APPROVE), "{}", out.message);
+
+        std::env::set_var("AOIDE_CONDUCT_AUTOGATE", "1");
+        let out = deliver_local_with(&send_on(Door::Mcp, &["hi again"], &[("id", &id)]), &id, attested("a-stranger"));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
+        assert!(nothing_connected(&listener));
+        assert_eq!(queued_from("mcp:a-stranger"), ["hi", "hi again"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The same, with the production resolver and no injection: a fake daemon
+    /// answers the key fetch, this test process is the sealed session that
+    /// parents the target, and `session_send` over MCP walks its own ancestry to
+    /// it. Without the seal the identical send parks, and so does the network
+    /// door with it.
+    #[cfg(unix)]
+    #[test]
+    fn the_real_resolver_attests_an_mcp_send_by_the_callers_sealed_ancestor() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[DOOR_ENV, &["AOIDE_DAEMON_SOCKET"]].concat());
+        let (root, id, listener) = door_fixture("real-mcp", Some("orch"));
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", fake_seal_daemon(&kp.info().pubkey_hex));
+        let me = std::process::id();
+        do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(me));
+
+        let out = session_send(&send_on(Door::Mcp, &["unsealed"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "an unsealed ancestor attests nothing");
+        assert!(nothing_connected(&listener));
+
+        seal_record("orch", &kp);
+        let out = session_send(&send_on(Door::A2a, &["network"], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "the network door has no ancestry to walk");
+        assert!(nothing_connected(&listener));
+
+        let acc = expect_delivery(listener, "a sealed ancestor attests the MCP send");
+        let out = session_send(&send_on(Door::Mcp, &["sealed"], &[("id", &id)]));
+        let got = acc.join().unwrap();
+        assert_eq!(out.data.as_ref().unwrap()["gate"], "autogate-parent", "{}", out.message);
+        assert!(String::from_utf8(got).unwrap().ends_with("sealed"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
