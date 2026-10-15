@@ -213,11 +213,13 @@ pub fn build_conduct_args(
 }
 
 /// Read `--instructions`'s value in its three accepted forms: `@<path>` (the
-/// file's own bytes, read here and now), `-` (this process's stdin, to EOF)
-/// and anything else (the operator's literal text, verbatim — no shell, no
-/// expansion, no escaping). Every failure is a taught error; nothing is
-/// spawned on one. The bytes are carried verbatim: they are the operator's,
-/// and this path never appends environment, tokens or credentials to them.
+/// file's own bytes, read here and now), `-` (this process's stdin, to EOF;
+/// the CLI door only, since over MCP stdin is the protocol channel, and the
+/// caller refuses it before this runs) and anything else (the operator's
+/// literal text, verbatim — no shell, no expansion, no escaping). Every
+/// failure is a taught error; nothing is spawned on one. The bytes are
+/// carried verbatim: they are the operator's, and this path never appends
+/// environment, tokens or credentials to them.
 fn read_instructions(spec: &str) -> Result<String, String> {
     if let Some(path) = spec.strip_prefix('@') {
         std::fs::read_to_string(path).map_err(|e| format!("reading --instructions @{path}: {e}"))
@@ -1006,6 +1008,12 @@ pub(in crate::graph) fn launch_session(inv: &Invocation, spawner: Option<&str>) 
         );
     }
     let instructions = match (task.as_deref(), inv.flags.get("instructions")) {
+        (Some(_), Some(spec)) if spec == "-" && inv.door != Door::Cli => {
+            return Outcome::usage(
+                cmd,
+                "`--instructions -` reads stdin, which over this door is the protocol channel; pass @<file> or the text",
+            )
+        }
         (Some(_), Some(spec)) => match read_instructions(spec) {
             Ok(text) => Some(text),
             Err(e) => {
@@ -2811,5 +2819,22 @@ mod tests {
         assert!(over.message.contains(&format!("{} characters", TASK_MAX + 1)), "the refusal names the length: {}", over.message);
         let bad = task_slug_refusal("spawn", "s1", "Not A Slug").expect("a non-slug is refused");
         assert!(bad.message.contains("not a legal mailbox name"), "{}", bad.message);
+    }
+
+    /// `--instructions -` reads this process's stdin. Over MCP stdin IS the
+    /// JSON-RPC transport. An unattested caller is held before any read; an
+    /// attested one launches, so that path must refuse before it reads.
+    #[test]
+    fn instructions_from_stdin_is_refused_over_mcp_before_any_read() {
+        let flags = [("task".to_string(), "t1".to_string()), ("instructions".to_string(), "-".to_string())];
+        let inv = Invocation {
+            path: vec!["spawn".into()],
+            args: vec!["true".into()],
+            flags: flags.into_iter().collect(),
+            door: Door::Mcp,
+        };
+        let out = session_spawn_with(&inv, |_| Some("parent-id".to_string()));
+        assert_eq!(out.status, Status::Usage, "{out:?}");
+        assert!(out.message.contains("stdin"), "{}", out.message);
     }
 }
