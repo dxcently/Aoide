@@ -175,10 +175,11 @@ hand edit.
 ### The loop and the unit
 
 `aoide_server::daemon` grows `serve(config) -> io::Result<!>`-shaped
-`run_loop`: take both locks and bind the socket (next section), spawn
-the accept thread, then tick (~1s): poll the secrets Follower, run the
-hand-edit sweep, run the periodic jobs L4 adds. Thread model mirrors the
-secrets broker (`broker.rs:315`): thread-per-connection via fallible
+`run_loop`: lock `state/` owner-only, refusing to start when it cannot;
+take both locks and bind the socket (next section); spawn the accept
+thread; then tick (~1s): poll the secrets Follower, run the hand-edit
+sweep, run the periodic jobs L4 adds. Thread model mirrors the secrets
+broker (`broker.rs:315`): thread-per-connection via fallible
 `thread::Builder::spawn` (drop one connection, never unwind the accept
 loop), 250ms backoff on accept error. The `aoided` binary
 (`cli/src/bin/aoided.rs`) calls it with the assembled registry and dispatch
