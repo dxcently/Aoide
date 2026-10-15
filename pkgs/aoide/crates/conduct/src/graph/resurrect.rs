@@ -326,7 +326,7 @@ fn restore_argv_refusal(argv: &[String]) -> Option<&'static str> {
 
 /// The refusal a restore's recorded foreground gets, or `None`. An idle session
 /// has no foreground argv to refuse, so `None` for it.
-fn restore_refused_because(restore: &RestoreSnapshot) -> Option<&'static str> {
+pub(in crate::graph) fn restore_refused_because(restore: &RestoreSnapshot) -> Option<&'static str> {
     if restore.idle {
         return None;
     }

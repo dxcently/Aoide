@@ -1315,11 +1315,15 @@ in the message.
   check alone; keep it that way. The reads and their order are CONTRACTS.md's
   shell-state paragraph.
 - **A privileged session is never idle, and nothing is read for it.**
-  `ShellWatch::privileged` is fixed at the spawn from
+  `ShellWatch::privileged` holds the conducted argv when
   `runs_a_privilege_program(&inv.args)`, and `shell_at_prompt` answers working
   on it before its first read. Keep that check first: a stand-in that is not
   setuid passes every later read as idle at its password prompt, and an idle
-  verdict is what lets `restore.typed` record what was typed there.
+  verdict is what lets `restore.typed` record what was typed there. Its
+  `activity` (`command_label`) and `restore.argv` come from that line, never
+  from `running_pid`: `doas` execs into the root shell and `su` hands the
+  foreground to its child, so the pid would name a root command, which
+  resurrect would then type.
 - **The executable baseline is the file the spawn started, read from its path
   (`resolve_program`, once; `PtyChild::image`; `shell_baseline`), never from
   `/proc`.** A `/proc/<pid>/exe` read can land after the shell has exec'd its

@@ -319,9 +319,10 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   prompt (the pgid check); a command shell (`bash -c …`) is working while a
   child runs, once its executable is no longer the one it started as (or
   cannot be read), or while its CPU time rises. A session whose argv runs a
-  privilege program is never idle. The wrap keeps that fact, the executable
-  and the CPU memory for it (`ShellWatch`; see AGENTS.md and CONTRACTS.md, the
-  shell-state paragraph).
+  privilege program is never idle, and is labelled and recorded by its own
+  conducted line. The wrap keeps that line, the executable and the CPU memory
+  for it (`ShellWatch`; see AGENTS.md and CONTRACTS.md, the shell-state
+  paragraph).
 - **`common::strip_ansi`** (re-exported at `graph::strip_ansi`) is the one escape
   stripper: the screen source reads its window through it, and
   `aoide-conductor`'s log tail renders through it.

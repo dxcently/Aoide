@@ -2420,15 +2420,16 @@ process table tells that prompt from the root shell's after it: a privilege
 program that is not setuid keeps its own executable there, with no child and
 flat CPU. So `restore.idle` stays false and no `typed` line is ever recorded
 for it, and a resurrect never retypes what was typed at its password prompt.
-It is never an interactive shell either, so its password prompt is heard and
-reads `awaiting`: by sudo's own witness for `sudo`, and by the screen's password
-row for `doas` and `su`. The accepted losses: a quiet root prompt under
-`sudo bash` reads `working · sudo bash`; while a root command runs there, the
-dock label shows `sudo bash`, not the command, since sudo's relay (`use_pty`,
-its default) holds the terminal; and resurrect refuses it, since its recorded
-argv is `sudo bash`, and restores the cwd only. Once `doas` or `su` hands the
-terminal to the shell it started, the label and the recorded argv are that
-shell's foreground process, as for any shell.
+Its `activity` and `restore.argv` come from its own conducted line, never the
+root foreground it hands the terminal to (`doas` execs into the root shell, `su`
+hands the foreground to its child), so no root command's argv reaches the stage
+file. It is never an interactive shell either, so its password prompt is heard
+and reads `awaiting`: by sudo's own witness for `sudo`, and by the screen's
+password row for `doas` and `su`. The accepted losses, for every privilege
+program: a quiet root prompt reads `working · <line>` (`working · sudo bash`);
+while a root command runs, the dock label shows the privilege line, not the
+command; and resurrect refuses it, since its recorded argv is a privilege
+program, and restores the cwd only.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
@@ -3074,19 +3075,22 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
 - `argv` — RAW, uncollapsed, unclipped `argv` off `/proc/<pid>/cmdline`
   (`proc_argv`) of the running process while not idle: the foreground group
   leader, or the shell's own pid when a command shell runs under itself, which
-  records the shell's own command line (`sh -c …`). `None` while idle. Never
+  records the shell's own command line (`sh -c …`). A session whose argv runs
+  a privilege program records its own conducted argv instead (`doas bash`),
+  never the root foreground it hands the terminal to. `None` while idle. Never
   the DISPLAY label `activity` carries (`proc_command` basename-collapses
   `argv[0]` and truncates at 48 chars) — re-exec'ing that string would run
   the wrong or a truncated binary.
 - `typed` — the reconstructed unsubmitted prompt line, REFUSAL-based: `Some`
-  only for a clean, unedited keystroke run since the last submit (bytes from
-  BOTH real stdin and an injection connection count, since both land in the
-  same shell readline buffer); any readline-editing byte (an escape
-  sequence, `^R`, Tab, `^U`/`^W`) or invalid UTF-8 poisons it to `None`
-  instead of guessing. Only ever populated when `idle` is true — a shell
-  mid-command has no prompt line. A silently WRONG `typed` would put text
-  the operator never composed one keystroke from running; `None` is a fully
-  acceptable product of this capture, a guess is not.
+  only for a clean, unedited run of keystrokes from real stdin since the last
+  submit. Bytes from an injection connection land in the same shell readline
+  buffer but were not typed, so they poison the line to `None` until its
+  Enter, as does any readline-editing byte (an escape sequence, `^R`, Tab,
+  `^U`/`^W`) or invalid UTF-8, instead of guessing. Only ever populated when
+  `idle` is true — a shell mid-command has no prompt line. A silently WRONG
+  `typed` would put text the operator never composed one keystroke from
+  running; `None` is a fully acceptable product of this capture, a guess is
+  not.
 
 Absent for every non-shell session and every legacy record predating this
 field; readers must tolerate both forms. No `graph.json` projection — like

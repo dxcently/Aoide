@@ -1033,32 +1033,33 @@ fn generic_command_label(argv: &[String]) -> Option<String> {
     }
 }
 
-/// A short one-line label for a process's command: a known editor shows as
-/// `"<editor> <file>"` ([`friendly_editor_command`]); anything else shows the
-/// process's own argv joined with `argv[0]` collapsed to its basename
-/// ([`generic_command_label`], e.g. `cargo test`), falling back to `comm`.
-/// Clipped to a roster-friendly width. Used as a conducted shell's live
-/// `activity`. Both facts come from the one process-table reader pair below
-/// ([`proc_argv`]/[`proc_comm`]), never from a `/proc` path spelled here.
-fn proc_command(pid: i32) -> Option<String> {
-    let clip = |s: &str| -> String {
-        let one = s.split_whitespace().collect::<Vec<_>>().join(" ");
-        if one.chars().count() <= 48 {
-            one
-        } else {
-            let head: String = one.chars().take(47).collect();
-            format!("{head}…")
-        }
-    };
-    if let Some(argv) = proc_argv(pid) {
-        if let Some(friendly) = friendly_editor_command(&argv) {
-            return Some(clip(&friendly));
-        }
-        if let Some(label) = generic_command_label(&argv) {
-            return Some(clip(&label));
-        }
+/// A label folded to one line and clipped to a roster-friendly width.
+fn clip_label(s: &str) -> String {
+    let one = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.chars().count() <= 48 {
+        one
+    } else {
+        let head: String = one.chars().take(47).collect();
+        format!("{head}…")
     }
-    proc_comm(pid).map(|c| clip(&c)).filter(|c| !c.is_empty())
+}
+
+/// A short one-line label for an argv: a known editor shows as
+/// `"<editor> <file>"` ([`friendly_editor_command`]); anything else shows the
+/// argv joined with `argv[0]` collapsed to its basename
+/// ([`generic_command_label`], e.g. `cargo test`). Clipped ([`clip_label`]).
+fn command_label(argv: &[String]) -> Option<String> {
+    friendly_editor_command(argv).or_else(|| generic_command_label(argv)).map(|l| clip_label(&l))
+}
+
+/// A process's [`command_label`], falling back to its `comm`. Used as a
+/// conducted shell's live `activity`. Both facts come from the one
+/// process-table reader pair below ([`proc_argv`]/[`proc_comm`]), never from a
+/// `/proc` path spelled here.
+fn proc_command(pid: i32) -> Option<String> {
+    proc_argv(pid)
+        .and_then(|argv| command_label(&argv))
+        .or_else(|| proc_comm(pid).map(|c| clip_label(&c)).filter(|c| !c.is_empty()))
 }
 
 /// Pure NUL-split of a raw `/proc/<pid>/cmdline` buffer into argv — split out
@@ -1336,10 +1337,12 @@ struct ExeId {
 /// reports them.
 #[derive(Debug)]
 struct ShellWatch {
-    /// The argv runs a privilege program ([`runs_a_privilege_program`]). Such a
-    /// session is never idle, so nothing typed at its password prompt is ever
-    /// recorded.
-    privileged: bool,
+    /// The conducted argv, when it runs a privilege program
+    /// ([`runs_a_privilege_program`]). Such a session is never idle, so nothing
+    /// typed at its password prompt is ever recorded, and this line is its
+    /// `activity` and `restore.argv`, never the root foreground it hands the
+    /// terminal to.
+    privileged: Option<Vec<String>>,
     /// The identity of the file the spawn started (see [`shell_baseline`]). A
     /// later identity that differs, or none at all, means the shell exec'd into
     /// its command or made its executable unreadable.
@@ -1350,7 +1353,7 @@ struct ShellWatch {
 }
 
 impl ShellWatch {
-    fn new(privileged: bool, exe_at_spawn: Option<ExeId>) -> Self {
+    fn new(privileged: Option<Vec<String>>, exe_at_spawn: Option<ExeId>) -> Self {
         Self { privileged, exe_at_spawn, cpu_at_last_tick: None }
     }
 }
@@ -1464,7 +1467,7 @@ fn shell_at_prompt(
     exe_of: impl Fn(i32) -> Option<ExeId>,
     cpu_of: impl Fn(i32) -> Option<u64>,
 ) -> bool {
-    if watch.privileged {
+    if watch.privileged.is_some() {
         return false;
     }
     let cpu = cpu_of(shell_pid);
@@ -1586,7 +1589,10 @@ fn restore_snapshot(
 /// P-C5 restore snapshot via [`restore_snapshot`]. `prompt` is the screen's
 /// standing question, if any. `typed` comes from `conduct_multiplex`'s own
 /// typed-line buffer (`None` for a headless session, which never reads stdin) —
-/// this function has no access to the keystroke stream itself.
+/// this function has no access to the keystroke stream itself. A privileged
+/// session ([`ShellWatch::privileged`]) is labelled and recorded by its own
+/// conducted line, never by the root foreground it hands the terminal to, so
+/// no root command's argv reaches the stage file and resurrect refuses it.
 ///
 /// The foreground process group comes from the seam
 /// ([`Pty::foreground_pgid`]), which is `tcgetpgrp(2)` on Unix and `0` — "no
@@ -1616,6 +1622,7 @@ fn conduct_refresh_shell(
         proc_cpu_ticks,
     );
     let cwd = cwd_for(fg, shell_pid, proc_cwd);
+    let own = watch.privileged.as_deref();
     let (state, activity, needs_sudo, question) = shell_snapshot(
         fg,
         shell_pid,
@@ -1623,10 +1630,12 @@ fn conduct_refresh_shell(
         interactive,
         prompt,
         proc_comm,
-        proc_command,
+        |pid| own.map_or_else(|| proc_command(pid), command_label),
         proc_has_children,
     );
-    let restore = restore_snapshot(fg, shell_pid, idle, cwd.clone(), typed, proc_argv);
+    let restore = restore_snapshot(fg, shell_pid, idle, cwd.clone(), typed, |pid| {
+        own.map_or_else(|| proc_argv(pid), |argv| Some(argv.to_vec()))
+    });
     let facts = ShellFacts { cwd: cwd.as_deref(), activity: activity.as_deref(), state, restore };
     do_session_refresh(id, Some(facts), needs_sudo, question.as_deref());
 }
@@ -1635,11 +1644,12 @@ fn conduct_refresh_shell(
 const TYPED_LINE_CAP: usize = 4096;
 
 /// The P-C5 typed-but-unsubmitted prompt-line buffer, reconstructed from the
-/// raw keystroke stream written into the pty master — from BOTH real stdin
-/// and injection connections (`conduct_multiplex`'s two write sites both
-/// `feed` it the same way, since both land in the SAME shell readline
-/// buffer). REFUSAL-based, not reconstruction-based: readline editing (arrow
-/// keys, `^R` history search, Tab completion, `^U`/`^W` kills) means the
+/// operator's own keystrokes on real stdin ([`TypedLineBuffer::feed`]). Bytes
+/// from an injection connection land in the SAME shell readline buffer but
+/// were not typed, so they poison the line until its Enter
+/// ([`TypedLineBuffer::feed_injected`]). REFUSAL-based, not
+/// reconstruction-based: readline editing (arrow keys, `^R` history search,
+/// Tab completion, `^U`/`^W` kills) means the
 /// keystroke stream is no longer the prompt buffer, so replaying it verbatim
 /// would be WRONG, not merely lossy — a silently wrong `typed` puts text the
 /// operator never composed one keystroke from running. Any control byte
@@ -2135,8 +2145,8 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(e) => return Outcome::error(cmd, format!("failed to conduct `{program}`: {e}")),
     };
-    let shell_watch =
-        ShellWatch::new(runs_a_privilege_program(&inv.args), shell_baseline(child.image()));
+    let privileged = runs_a_privilege_program(&inv.args).then(|| inv.args.clone());
+    let shell_watch = ShellWatch::new(privileged, shell_baseline(child.image()));
 
     // Bind the per-session injection socket (best-effort: a bind failure leaves
     // the session running but un-injectable — recorded as conductable=false).
@@ -2943,14 +2953,14 @@ mod tests {
     fn shell_at_prompt_is_the_process_group_alone_for_an_interactive_shell() {
         // An interactive shell at its own prompt is idle whatever sits beneath
         // it: neither the child table nor the comm is consulted.
-        assert!(shell_at_prompt(100, 100, true, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
-        assert!(shell_at_prompt(0, 100, true, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, true, &mut ShellWatch::new(None, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(shell_at_prompt(0, 100, true, &mut ShellWatch::new(None, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_working_for_a_command_shell_that_has_a_child() {
         // `sh -c 'sleep 30; true'`: the shell stays alive with `sleep` as its
         // child.
-        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sh".to_string()), |pid| {
+        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(None, None), |_| Some("sh".to_string()), |pid| {
                 assert_eq!(pid, 100);
                 Some(true)
             }, |_| None, |_| None));
@@ -2960,19 +2970,19 @@ mod tests {
         // `sh -c 'sleep 30'`: bash exec-optimizes, so pid 100 IS `sleep`, with
         // no
         // children. It is no longer a shell, so it is working.
-        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(None, None), |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_idle_for_a_command_shell_that_is_still_a_shell_with_no_child() {
-        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None, None), |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
         // A fact that cannot be read answers as an idle shell, as it always
         // has.
-        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| None, |_| None, |_| None, |_| None));
-        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sh".to_string()), |_| None, |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None, None), |_| None, |_| None, |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None, None), |_| Some("sh".to_string()), |_| None, |_| None, |_| None));
         // Native Windows: comm carries `.exe`, and a host with no foreground
         // group
         // answers 0, so the bare test is the pid's own process name.
-        assert!(shell_at_prompt(0, 100, false, &mut ShellWatch::new(false, None), |_| Some("bash.exe".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(shell_at_prompt(0, 100, false, &mut ShellWatch::new(None, None), |_| Some("bash.exe".to_string()), |_| Some(false), |_| None, |_| None));
     }
     /// R3 (F5): a command that runs only builtins has no child and never
     /// execs, so its CPU time is the only sign it is busy. A rise between
@@ -2980,7 +2990,7 @@ mod tests {
     /// sample.
     #[test]
     fn a_builtin_only_command_loop_reads_working_while_its_cpu_time_rises() {
-        let mut watch = ShellWatch::new(false, None);
+        let mut watch = ShellWatch::new(None, None);
         let cpu = |ticks: u64| move |_: i32| Some(ticks);
         let read = |watch: &mut ShellWatch, ticks: u64| {
             shell_at_prompt(100, 100, false, watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, cpu(ticks))
@@ -2994,7 +3004,7 @@ mod tests {
     /// readable tick compares against the last reading it actually had.
     #[test]
     fn an_unreadable_cpu_tick_keeps_the_last_sample() {
-        let mut watch = ShellWatch::new(false, None);
+        let mut watch = ShellWatch::new(None, None);
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| Some(5)));
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
         assert!(!shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| Some(9)));
@@ -3007,17 +3017,17 @@ mod tests {
     #[test]
     fn an_exec_is_read_by_the_executable_not_the_name() {
         let at_spawn = Some(ExeId { dev: 1, ino: 10 });
-        let mut watch = ShellWatch::new(false, at_spawn);
+        let mut watch = ShellWatch::new(None, at_spawn);
         assert!(
             !shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| Some(ExeId { dev: 1, ino: 11 }), |_| None),
             "an exec'd process renamed to bash is working"
         );
-        let mut watch = ShellWatch::new(false, at_spawn);
+        let mut watch = ShellWatch::new(None, at_spawn);
         assert!(
             shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| at_spawn, |_| None),
             "the shell itself, still its own executable, is idle"
         );
-        let mut watch = ShellWatch::new(false, None);
+        let mut watch = ShellWatch::new(None, None);
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None));
         assert!(!shell_at_prompt(100, 100, false, &mut watch, |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
     }
@@ -3027,12 +3037,12 @@ mod tests {
     /// the name decides, as it always did.
     #[test]
     fn an_unreadable_exe_with_a_baseline_is_an_exec() {
-        let mut watch = ShellWatch::new(false, Some(ExeId { dev: 1, ino: 10 }));
+        let mut watch = ShellWatch::new(None, Some(ExeId { dev: 1, ino: 10 }));
         assert!(
             !shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None),
             "an unreadable executable with a baseline reads working"
         );
-        let mut watch = ShellWatch::new(false, None);
+        let mut watch = ShellWatch::new(None, None);
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None));
     }
     /// Never idle: a session whose argv runs a privilege program is working
@@ -3042,7 +3052,7 @@ mod tests {
     #[test]
     fn a_privileged_session_is_working_before_anything_is_read() {
         let at_spawn = Some(ExeId { dev: 1, ino: 10 });
-        let mut watch = ShellWatch::new(true, at_spawn);
+        let mut watch = ShellWatch::new(Some(vec!["sudo".to_string(), "bash".to_string()]), at_spawn);
         assert!(!shell_at_prompt(
             100,
             100,
@@ -3053,7 +3063,7 @@ mod tests {
             |_| panic!("the executable is not probed"),
             |_| panic!("CPU is not probed"),
         ));
-        let mut watch = ShellWatch::new(false, at_spawn);
+        let mut watch = ShellWatch::new(None, at_spawn);
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| at_spawn, |_| Some(5)));
     }
 
@@ -3061,11 +3071,11 @@ mod tests {
     fn shell_at_prompt_is_working_while_a_foreground_command_holds_the_terminal() {
         // A foreground group that is not the shell: working, and neither fact
         // is probed.
-        assert!(!shell_at_prompt(200, 100, false, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
-        assert!(!shell_at_prompt(200, 100, true, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(!shell_at_prompt(200, 100, false, &mut ShellWatch::new(None, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(!shell_at_prompt(200, 100, true, &mut ShellWatch::new(None, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
         // A host with no foreground group that still has a live child
         // (Windows).
-        assert!(!shell_at_prompt(0, 100, false, &mut ShellWatch::new(false, None), |_| Some("cmd.exe".to_string()), |_| Some(true), |_| None, |_| None));
+        assert!(!shell_at_prompt(0, 100, false, &mut ShellWatch::new(None, None), |_| Some("cmd.exe".to_string()), |_| Some(true), |_| None, |_| None));
     }
     #[test]
     fn shell_snapshot_a_working_command_shell_labels_its_own_command() {
@@ -5846,6 +5856,83 @@ mod tests {
             "sb-builtin",
             &["sh", "-c", "i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done"],
         );
+    }
+
+    /// Never idle, for the line it records: a privilege program that hands the
+    /// terminal to a root foreground is still labelled and recorded by its own
+    /// conducted line, so no root command's argv reaches the stage file and
+    /// resurrect refuses it. `script` is a stand-in named `argv[0]` on a private
+    /// `PATH`, and `handed` holds once it has handed the terminal over.
+    #[cfg(target_os = "linux")]
+    fn a_privileged_session_records_its_own_line(tag: &str, argv: &[&str], script: &str, handed: impl Fn(i32) -> bool) {
+        let bin = unique_stage(&format!("{tag}-bin"));
+        let stand_in = bin.join(argv[0]);
+        std::fs::write(&stand_in, script).expect("the stand-in");
+        std::fs::set_permissions(&stand_in, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("its mode");
+        let session = LiveSession::start_with(tag, argv, true, Some(&bin));
+        let ticked = session.wait_for(std::time::Duration::from_secs(10), |r| {
+            r.restore.as_ref().is_some_and(|x| x.argv.is_some())
+        });
+        assert!(ticked.is_some(), "the session never recorded a running argv");
+        let shell = session.conducted_pid(std::time::Duration::from_secs(10)).expect("the stand-in starts");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !handed(shell) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(handed(shell), "the stand-in never handed the terminal to its root foreground");
+        let line: Vec<String> = argv.iter().map(|a| a.to_string()).collect();
+        let label = argv.join(" ");
+        let own = |r: &SessionRecord| {
+            r.restore.as_ref().is_some_and(|x| x.argv.as_ref() == Some(&line))
+                && r.activity.as_deref() == Some(label.as_str())
+        };
+        // Three ticks after the handover, any of which would record the root
+        // foreground.
+        let leaked = session.wait_for(std::time::Duration::from_secs(3), |r| !own(r));
+        assert!(leaked.is_none(), "the root foreground reached the record: {leaked:?}");
+        let restore = session
+            .wait_for(std::time::Duration::from_secs(1), |_| true)
+            .and_then(|r| r.restore)
+            .expect("a shell's restore snapshot");
+        assert_eq!(restore.argv.as_ref(), Some(&line));
+        assert_eq!(super::super::resurrect::restore_refused_because(&restore), Some("a privilege program"));
+        drop(session);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    /// `doas` execs into the root shell, which runs its command in place: the
+    /// conducted pid itself becomes the root foreground.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_doas_session_records_its_own_line_after_it_execs_its_shell() {
+        a_privileged_session_records_its_own_line(
+            "sb-doas",
+            &["doas", "bash"],
+            "#!/bin/sh\nexec sh -c 'sleep 30'\n",
+            |pid| std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim_end() == "sleep"),
+        );
+    }
+
+    /// `su` stays the parent and hands the terminal to its child, whose command
+    /// takes the foreground group. Modelled by a job-control script whose
+    /// foreground job owns the terminal.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_su_session_records_its_own_line_while_its_child_holds_the_terminal() {
+        a_privileged_session_records_its_own_line(
+            "sb-su",
+            &["su", "-"],
+            "#!/bin/sh\nset -m\nsh -c 'sleep 30'\n",
+            |pid| terminal_foreground_of(pid).is_some_and(|fg| fg != pid),
+        );
+    }
+
+    /// The foreground process group of `pid`'s terminal (`tpgid`), off
+    /// `/proc/<pid>/stat`.
+    #[cfg(target_os = "linux")]
+    fn terminal_foreground_of(pid: i32) -> Option<i32> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?.1.split_whitespace().nth(5)?.parse().ok()
     }
 
     /// The ELF file `python3` on PATH runs, as python3 reads its own
