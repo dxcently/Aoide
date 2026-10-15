@@ -926,7 +926,7 @@ const LIST_MAX: usize = 20;
 
 /// The most rows a machine answer lists, beside `total` and `more`. The human
 /// form lists every row.
-const ROWS_MAX: usize = 200;
+const ROWS_MAX: usize = 100;
 
 /// The edges a row carries, read off the index. The lists hold at most
 /// [`LIST_MAX`] identities; the counts are the full sizes.
@@ -1935,11 +1935,14 @@ fn scope_json(scope: &[Scope]) -> Value {
 /// [`Carries`] holds `None`. Each list holds at most [`LIST_MAX`], beside its
 /// `*Count`.
 fn carries_json(c: &Carries, row: &Row, lists: bool) -> Value {
+    // A list row shows fewer mailboxes and leads than the target does; each
+    // count beside them is still the whole list.
+    let shown = if lists { LIST_MAX } else { ROW_LIST_MAX };
     let mut mailboxes = Map::new();
     if let Some(reads) = &c.reads {
         mailboxes.insert(
             "reads".into(),
-            json!(reads.iter().map(|m| json!({ "name": m.name, "unread": m.unread, "via": m.via })).collect::<Vec<_>>()),
+            json!(reads.iter().take(shown).map(|m| json!({ "name": m.name, "unread": m.unread, "via": m.via })).collect::<Vec<_>>()),
         );
         mailboxes.insert("readsCount".into(), json!(c.reads_count));
     }
@@ -1956,7 +1959,7 @@ fn carries_json(c: &Carries, row: &Row, lists: bool) -> Value {
         "role": {
             "task": row.task,
             "nativeRole": row.native_role,
-            "leads": row.leads.iter().take(LIST_MAX).collect::<Vec<_>>(),
+            "leads": row.leads.iter().take(shown).collect::<Vec<_>>(),
             "leadsCount": row.leads.len(),
         },
         "mailboxes": Value::Object(mailboxes),
@@ -1998,7 +2001,15 @@ fn carries_json(c: &Carries, row: &Row, lists: bool) -> Value {
     out
 }
 
-fn row_json(loaded: &Loaded, row: &Row, matched: Option<&Vec<Matched>>, lists: bool) -> Value {
+/// How many `matched` entries a machine row lists, beside `matchedCount`. Every
+/// match still ranks the row; only the explanation is cut.
+const MATCHED_MAX: usize = 8;
+
+/// How many mailboxes and leads a machine list row lists, beside their counts.
+/// The `--related` target lists [`LIST_MAX`] of each.
+const ROW_LIST_MAX: usize = 8;
+
+fn row_json(loaded: &Loaded, row: &Row, matched: Option<&[Matched]>, lists: bool) -> Value {
     let c = carries(&loaded.index, row);
     let mut out = json!({
         "node": row.node,
@@ -2014,8 +2025,10 @@ fn row_json(loaded: &Loaded, row: &Row, matched: Option<&Vec<Matched>>, lists: b
     if let Some(ms) = matched {
         out["matched"] = json!(ms
             .iter()
+            .take(MATCHED_MAX)
             .map(|m| json!({ "term": m.term, "field": m.field, "value": m.value, "how": grade_name(m.how) }))
             .collect::<Vec<_>>());
+        out["matchedCount"] = json!(ms.len());
     }
     out
 }
@@ -3179,7 +3192,7 @@ mod tests {
         assert!(text.lines().count() >= 2001, "the human form lists every row");
         assert!(human < std::time::Duration::from_secs(10), "2001 rows took {human:?}");
         assert!(machine < std::time::Duration::from_secs(10), "their JSON took {machine:?}");
-        assert!(json.len() < 200 * 1000, "the JSON is {} bytes for 200 listed rows", json.len());
+        assert!(json.len() < ROWS_MAX * 1000, "the JSON is {} bytes for the listed rows", json.len());
     }
 
     #[test]
@@ -3659,7 +3672,7 @@ mod tests {
         assert!(json.len() < 64 << 10, "three rows that read 40,001 mailboxes made {} bytes", json.len());
         for session in data["sessions"].as_array().expect("sessions ride in the answer") {
             let mailboxes = &session["carries"]["mailboxes"];
-            assert_eq!(mailboxes["reads"].as_array().map(Vec::len), Some(20));
+            assert_eq!(mailboxes["reads"].as_array().map(Vec::len), Some(ROW_LIST_MAX), "a list row shows its first mailboxes");
             assert_eq!(mailboxes["readsCount"], 40_001);
             let first = mailboxes["reads"][0]["name"].as_str().expect("a name");
             assert!(first.chars().count() <= LINE_MAX && first.ends_with('…'), "a 5 MiB name is one clipped line");
@@ -3709,11 +3722,11 @@ mod tests {
         let loaded = loaded_with(rows);
 
         let (text, data) = list_view(&loaded, &query(""), true, true).expect("the list answers");
-        assert_eq!(data["sessions"].as_array().map(Vec::len), Some(200));
+        assert_eq!(data["sessions"].as_array().map(Vec::len), Some(ROWS_MAX));
         assert_eq!(data["total"], 20_000);
-        assert_eq!(data["more"], 19_800);
-        assert_eq!(text.lines().count(), 1 + 200 + 1 + 1, "the far claim line, the same 200 rows, one more line, then the count");
-        assert!(text.contains("and 19800 more rows"), "{text}");
+        assert_eq!(data["more"], json!(20_000 - ROWS_MAX));
+        assert_eq!(text.lines().count(), 1 + ROWS_MAX + 1 + 1, "the far claim line, the same rows, one more line, then the count");
+        assert!(text.contains(&format!("and {} more rows", 20_000 - ROWS_MAX)), "{text}");
         let (human, _) = list_view(&loaded, &query(""), true, false).expect("the list answers");
         assert!(human.lines().count() > 20_000, "the human form lists every row");
 
@@ -3730,12 +3743,12 @@ mod tests {
         let loaded = loaded_with(rows);
 
         let (text, data) = related_view(&loaded, "yomi-strix/p0", &query(""), true, true).expect("the target resolves");
-        assert_eq!(data["related"].as_array().map(Vec::len), Some(200));
+        assert_eq!(data["related"].as_array().map(Vec::len), Some(ROWS_MAX));
         assert_eq!(data["total"], 19_999, "every other child of one parent is a sibling");
-        assert_eq!(data["more"], 19_799);
+        assert_eq!(data["more"], json!(19_999 - ROWS_MAX));
         assert_eq!(data["sessions"].as_array().map(Vec::len), Some(1), "the target is the one session");
-        assert!(text.contains("and 19799 more related"), "the message stops at the rows its data lists");
-        assert!(text.lines().count() < 230, "{} lines", text.lines().count());
+        assert!(text.contains(&format!("and {} more related", 19_999 - ROWS_MAX)), "the message stops at the rows its data lists");
+        assert!(text.lines().count() < ROWS_MAX + 30, "{} lines", text.lines().count());
     }
 
     /// Four far sessions, each with a 5 MiB title, one of them with a 1 MiB cwd
@@ -4052,10 +4065,9 @@ mod tests {
     }
 
     /// The most a machine answer's message and data hold together, serialized.
-    /// The fixture's fields sit at their clips, as `build_index` leaves them.
-    /// Stated once in SESSION-FIND.md: 8 MiB. Measured by
+    /// Stated once in SESSION-FIND.md: 1 MiB. Measured by
     /// [`the_worst_machine_answer_serializes_under_its_stated_bound`].
-    const MACHINE_BYTES: usize = 8 << 20;
+    const MACHINE_BYTES: usize = 1 << 20;
 
     /// The answer a caller gets for `text` and `data`: the message and the data
     /// as the server serializes them, together.
@@ -4066,12 +4078,17 @@ mod tests {
     #[test]
     fn the_worst_machine_answer_serializes_under_its_stated_bound() {
         let long = |c: char| c.to_string().repeat(LINE_MAX);
-        let mut rows: Vec<Row> = (0..200)
+        // Every local row reads the same forty mailboxes and threads, each
+        // distinct, so each related row holds twenty distinct reasons.
+        let names: Vec<String> = (0..40).map(|i| format!("m{i:03}{}", "m".repeat(LINE_MAX - 4))).collect();
+        let threads: Vec<Rc<Thread>> =
+            (0..20).map(|i| Rc::new(Thread { id: format!("{i:0>200}"), subject: format!("{i:0>200}") })).collect();
+        let mut rows: Vec<Row> = (0..ROWS_MAX)
             .map(|i| Row {
                 title: Some(long('e')),
                 leads: (0..25).map(|_| long('p')).collect(),
                 mail: Some(MailFacts {
-                    reads: (0..40).map(|_| ReadMailbox { name: long('m'), unread: 1, via: Some(long('w')) }).collect(),
+                    reads: names.iter().map(|n| ReadMailbox { name: n.clone(), unread: 1, via: Some(long('w')) }).collect(),
                     cc: (0..20)
                         .map(|_| {
                             Rc::new(CcLetter {
@@ -4084,46 +4101,54 @@ mod tests {
                             })
                         })
                         .collect(),
-                    threads: (0..20).map(|_| Rc::new(Thread { id: long('i'), subject: long('s') })).collect(),
+                    threads: threads.clone(),
                 }),
                 ..local(&format!("s{i}"), &long('n'), "idle")
             })
             .collect();
-        rows.extend((0..200).map(|i| Row {
+        rows.extend((0..ROWS_MAX).map(|i| Row {
             title: Some(long('e')),
             remote_parent: Some((long('r'), long('q'))),
             parent: Some(("yomi-strix".into(), long('k'))),
             remote_children: (0..20).map(|_| (long('c'), long('d'))).collect(),
             cwd: long('/'),
+            agent: "claude".into(),
             ..cached("yomi-strix", &format!("f{i}"), &long('n'), "idle")
         }));
         let loaded = loaded_with(rows);
-        let words: Vec<String> = vec!["e".to_string(); WORDS_MAX];
+        // The longest echo a query can make: one term of ALTERNATIVES_MAX values,
+        // every value at its clip and only the first one matching, then the rest
+        // of the words bare, so every row matches every word.
+        let mut alternatives = vec!["claude".to_string()];
+        alternatives.extend((1..ALTERNATIVES_MAX).map(|i| format!("{i}{}", long('z'))));
+        let mut words = vec![format!("agent:{}", alternatives.join(","))];
+        words.extend(std::iter::repeat_n("e".to_string(), WORDS_MAX - 1));
 
         let (text, data) = list_view(&loaded, &parse(&words).expect("sixty-four words parse"), true, true).expect("the list answers");
         let list = answer_bytes(text, data);
         assert!(list <= MACHINE_BYTES, "the worst list answer is {list} bytes");
 
         let target = loaded.index.rows[0].session_id.clone();
-        let (text, data) = related_view(&loaded, &target, &query(""), true, true).expect("the target resolves");
+        let (text, data) = related_view(&loaded, &target, &parse(&words).expect("the words parse"), true, true).expect("the target resolves");
         let related = answer_bytes(text, data);
         assert!(related <= MACHINE_BYTES, "the worst related answer is {related} bytes");
     }
 
     #[test]
     fn a_long_query_word_echoes_one_clipped_line_and_its_term_is_named_by_index() {
-        let rows: Vec<Row> = (0..200).map(|i| Row { agent: "claude".into(), ..local(&format!("s{i}"), &format!("p{i}"), "idle") }).collect();
+        let rows: Vec<Row> = (0..ROWS_MAX).map(|i| Row { agent: "claude".into(), ..local(&format!("s{i}"), &format!("p{i}"), "idle") }).collect();
         let loaded = loaded_with(rows);
         let words = vec![format!("agent:claude,{}", "x".repeat(1 << 20))];
 
         let (text, data) = list_view(&loaded, &parse(&words).expect("the word parses"), false, true).expect("the list answers");
-        assert_eq!(data["sessions"].as_array().map(Vec::len), Some(200));
+        assert_eq!(data["sessions"].as_array().map(Vec::len), Some(ROWS_MAX));
         for session in data["sessions"].as_array().expect("sessions ride") {
             assert_eq!(session["matched"][0]["term"], 0, "a term is named by its place in the query");
+            assert_eq!(session["matchedCount"], 1, "the count is the full number of matches");
         }
         assert!(data["query"]["words"][0].as_str().is_some_and(|w| w.chars().count() <= LINE_MAX), "the echo is one line");
         let bytes = answer_bytes(text, data);
-        assert!(bytes < 256 << 10, "200 rows that matched a 1 MiB word made {bytes} bytes");
+        assert!(bytes < 1 << 20, "{ROWS_MAX} rows that matched a 1 MiB word made {bytes} bytes");
     }
 
     #[test]
@@ -4150,8 +4175,10 @@ mod tests {
         let loaded = loaded_with(vec![row]);
 
         let (_, data) = list_view(&loaded, &query(""), false, true).expect("the list answers");
-        assert_eq!(data["sessions"][0]["carries"]["role"]["leads"].as_array().map(Vec::len), Some(20));
+        assert_eq!(data["sessions"][0]["carries"]["role"]["leads"].as_array().map(Vec::len), Some(ROW_LIST_MAX));
         assert_eq!(data["sessions"][0]["carries"]["role"]["leadsCount"], 25);
+        let (_, data) = related_view(&loaded, "a", &query(""), false, true).expect("the target resolves");
+        assert_eq!(data["sessions"][0]["carries"]["role"]["leads"].as_array().map(Vec::len), Some(LIST_MAX), "the target lists twenty");
         let (text, _) = related_view(&loaded, "a", &query(""), false, false).expect("the target resolves");
         assert!(text.contains("leads proj0, proj1, "), "{text}");
         assert!(text.contains("and 5 more"), "{text}");

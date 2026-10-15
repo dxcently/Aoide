@@ -309,7 +309,8 @@ facts in `data`:
                    "edges":     { "parent", "childrenCount", "siblingsCount", "wrap",
                                   "remoteParent", "remoteChildrenCount", "repo" } },
                  "unknown": ["mailboxes", "cc", "threads"],
-                 "matched": [{ "term": <index in words>, "field", "value", "how": "exact" | "prefix" | "substring" }] }],
+                 "matched": [{ "term": <index in words>, "field", "value", "how": "exact" | "prefix" | "substring" }],
+                 "matchedCount" }],
   "related":  [{ "origin", "node", "sessionId", "reasons": [{ "kind", "detail" }], "reasonsCount" }],
   "total", "more" }
 ```
@@ -325,11 +326,14 @@ Every list in a row holds at most 20, beside its full count: `children`,
 `siblings`, `remoteChildren`, `reads` (the first by name), `leads` (the first by
 name), `cc` (the newest letters), `threads` (the first filed), a letter's `to`,
 and a related row's `reasons` (the strongest). Each `…Count` key is the full
-size on every row. `matched` is the one list that is not capped at 20: it holds
-one entry per query word, at most 64, and rides only on a machine row. A machine answer lists at most 200 rows, in its `sessions`
-or `related` and in its `message` alike, beside `total` and `more`; the
-message adds one `and N more` line for the rows it leaves out. The human form
-lists every row, and a target's mailboxes line or a related row's reasons that
+size on every row. A machine list row lists 8 of its `reads` and 8 of its
+`leads` (the counts stay whole), and the `--related` target lists 20 of each.
+`matched` is capped at 8 per machine row beside `matchedCount`, the full number
+of query words that matched; every match still ranks the row. A machine answer
+lists at most 100 rows, in its `sessions` or `related` and in its `message`
+alike, beside `total` and `more`; the message adds one `and N more` line for the
+rows it leaves out. The human form lists every row and builds no `matched`
+(it shows none), and a target's mailboxes line or a related row's reasons that
 are cut begin with their full count. A machine answer's size is bounded by a
 constant (Decision 13).
 `cacheAge` is the cache's age in seconds, `null` for this box's rows. An absent
@@ -617,24 +621,37 @@ alternative would have given, and what the chosen call costs.
     - a query takes at most 64 words and 256 alternatives; its echo is clipped
       one word and one value at a time; and a `matched` entry names its term by
       its index in `words`, so no answer repeats a query word once per row;
-    - a machine answer lists at most 200 rows, in its `message` as in its data,
-      and every list in a row holds at most 20 beside its count (a list row
-      carries cc and threads as counts only);
+    - a machine answer lists at most 100 rows, in its `message` as in its data,
+      every list in a row holds at most 20 beside its count (a machine list
+      row shows 8 mailboxes and 8 leads, and carries cc and threads as counts
+      only), and a row lists at most 8 `matched` entries beside `matchedCount`;
     - a letter is decoded once and held once, and each row that reads its
       mailbox holds a pointer to it; a row visits only the letters filed to the
       mailboxes it reads; threads, mailboxes and reasons pair through sets.
 
     **The bound: a machine answer, its `message` and `data` serialized together,
-    is at most 8 MiB.** The measured worst case is 6.1 MB: 200 local rows that
-    each read 20 listed mailboxes, lead 20 projects and match 64 words against
-    200-character fields, and 200 far rows with every field at its clip, built
-    by `the_worst_machine_answer_serializes_under_its_stated_bound`. The largest
-    term is the `matched` list, 64 entries of up to 200 characters per row. A
-    1 MiB bound would need that list shortened, which this bound does not do.
+    is at most 1 MiB.** The measured worst case, built by
+    `the_worst_machine_answer_serializes_under_its_stated_bound`, is 909,626
+    bytes for a list and 677,473 bytes for a related answer. That fixture has
+    100 local rows, each reading 40 distinct 200-character mailboxes and holding
+    20 threads and 20 cc'd letters with 20 recipients each, and 100 far rows,
+    every field at its clip. Its query is one term of 256 alternatives, every
+    value at its clip, plus 63 bare words, so every row matches every word.
 
-    Cost: a far field is matched on its first 200 characters after whitespace is
-    collapsed and control characters are stripped, read from its first 800 raw
-    characters, so a needle past that window is not found. A local cwd is
+    What dominated, and what was capped to reach the bound. On the same
+    fixture with 200 rows, 64 `matched` entries per row and 20 mailboxes and
+    leads per list row, the list answer measured 3.28 MB; the row fields at
+    their clips are the floor that the caps cannot remove. The caps taken, each
+    with its count kept beside the list: `matched` to 8 per row; a list row's
+    mailboxes and leads to 8; and the machine row limit to 100. The row limit is
+    the one that holds the bound, since 200 rows of fields at 200 characters do
+    not fit in 1 MiB.
+
+    Cost: a machine answer names at most 100 of the rows that match, so a caller
+    that wants the rest narrows the query. A far field is matched on its first
+    200 characters after whitespace is collapsed and control characters are
+    stripped, read from its first 800 raw characters, so a needle past that
+    window is not found. A local cwd is
     matched the same way. A mail fact's copies cost a pointer each, so memory
     is the letters plus one pointer per reader.
 

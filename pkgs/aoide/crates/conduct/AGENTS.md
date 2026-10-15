@@ -1987,11 +1987,14 @@ in the message.
   pointer to it. Every list in a row holds at most `LIST_MAX` (20) beside its
   full count: edges, `reads`, `leads`, `cc`, `threads`, a letter's `to`, a
   related row's `reasons`, and the candidates a refusal names (with `and N
-  more`). `matched` holds one entry per query word. A machine answer lists at
-  most `ROWS_MAX` (200) rows in its message and its data alike, plus one `and N
-  more` line, beside `total` and `more`; the human form lists them all. A list
-  row carries `cc` and `threads` as counts only. The serialized machine answer
-  is bounded by 8 MiB, stated in SESSION-FIND.md Decision 13 and measured by
+  more`). A machine list row lists `ROW_LIST_MAX` (8) of its mailboxes and
+  leads, and carries `cc` and `threads` as counts only. `matched` holds one
+  entry per query word, and a machine row lists `MATCHED_MAX` (8) of them beside
+  `matchedCount`; ranking reads every match. A machine answer lists at most
+  `ROWS_MAX` (100) rows in its message and its data alike, plus one `and N
+  more` line, beside `total` and `more`; the human form lists them all. The
+  serialized machine answer is bounded by 1 MiB, stated in SESSION-FIND.md
+  Decision 13 and measured by
   `the_worst_machine_answer_serializes_under_its_stated_bound`. A new list in a
   row takes a cap and a count, and a new string a node or letter wrote takes a
   `clip` where it is read. The letter visit test counts work through `VISITS`,
