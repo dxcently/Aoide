@@ -44,6 +44,7 @@
 //! `lyra`'s.
 
 use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, unix_ts, wrapped_harness};
+use aoide_protocol::agents::agent_profile;
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::common::stage_error;
 use super::pending::audit_pending;
@@ -729,9 +730,21 @@ fn session_spawn_with(
         // Finding 0: an MCP caller launches only a registered harness the launcher
         // walk proves. Any other argv waits in pending.json, shown in full, for a
         // human to approve from the terminal. It is never refused and never launched here.
-        None if wrapped_harness(&inv.args).is_none() => hold_whole_spawn(inv),
+        None if !mcp_launch_is_bare(&inv.args) => hold_whole_spawn(inv),
         None => launch_session(inv, Some(&spawner)),
     }
+}
+
+/// Over MCP, a harness launches unheld only when its argv names it by a bare
+/// name. Every token up to the last one whose basename is the harness's launch
+/// token must be slash-free, so `/tmp/x/claude`, `./claude` and `env /tmp/x/claude`
+/// wait for a human, and bare `claude` resolves through the server's own PATH.
+/// Over-holds on purpose: a slash anywhere in the launcher prefix holds.
+fn mcp_launch_is_bare(argv: &[String]) -> bool {
+    let Some(name) = wrapped_harness(argv) else { return false };
+    let Some(launch) = agent_profile(name).and_then(|p| p.launch.first().copied()) else { return false };
+    let Some(last) = argv.iter().rposition(|a| command_basename(a) == launch) else { return false };
+    argv[..=last].iter().all(|a| !a.contains('/'))
 }
 
 /// The longest `--id` a spawn from a door that cannot approve may name.
@@ -3038,6 +3051,35 @@ mod tests {
         let out = session_spawn_with(&mcp_spawn(&["claude"], &[("id", "harness-one")]), |_| Some("orch".to_string()));
         assert_ne!(out.data.as_ref().and_then(|d| d["state"].as_str()), Some("pending"), "a registered harness is not held: {out:?}");
         assert!(held_spawns().is_empty(), "nothing was queued");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Residual ruling: over MCP a harness launches unheld only by a bare name,
+    /// resolved through the server's own PATH. A path to a harness is held whole.
+    #[cfg(unix)]
+    #[test]
+    fn an_mcp_harness_named_by_path_is_held_and_bare_claude_launches() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["PATH", "AOIDE_CONDUCT_SPAWN_EXE", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let root = spawn_stage("spawn-harness-by-path");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("claude"), "#!/bin/sh\nsleep 2\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &bin);
+        let by_path = bin.join("claude").to_string_lossy().into_owned();
+        let cases: [Vec<&str>; 3] = [vec![by_path.as_str()], vec!["./claude"], vec!["/usr/bin/env", by_path.as_str()]];
+        for (n, argv) in cases.iter().enumerate() {
+            let id = format!("by-path-{n}");
+            let out = session_spawn_with(&mcp_spawn(argv, &[("id", id.as_str())]), |_| Some("orch".to_string()));
+            assert_eq!(out.status, Status::Ok, "{argv:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().and_then(|d| d["state"].as_str()), Some("pending"), "{argv:?}: {out:?}");
+        }
+        assert_eq!(held_spawns().len(), cases.len(), "each path-named harness is held");
+        let bare = session_spawn_with(&mcp_spawn(&["claude"], &[("id", "bare-claude")]), |_| Some("orch".to_string()));
+        assert_ne!(bare.data.as_ref().and_then(|d| d["state"].as_str()), Some("pending"), "bare claude launches: {bare:?}");
+        assert_eq!(held_spawns().len(), cases.len(), "bare claude queued nothing");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

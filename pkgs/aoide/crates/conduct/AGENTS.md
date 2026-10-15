@@ -199,8 +199,10 @@ in the message.
   `mcp` source, its id fixed so the approved launch registers under the one the
   caller was told, and `pending approve` replays it with the approver's door.
   An attested MCP spawn whose argv `wrapped_harness` does not recognise as a
-  registered harness is held whole the same way, shown as its full escaped
-  argv (a shell, `aoide`/`lyra`, `env sh`, an interpreter, any unknown program).
+  registered harness, or whose harness is named by a path (`/tmp/x/claude`,
+  `./claude`, `env /tmp/x/claude`; `mcp_launch_is_bare`), is held whole the same
+  way, shown as its full escaped argv (a shell, `aoide`/`lyra`, `env sh`, an
+  interpreter, any unknown program). Only a bare harness name launches.
   It is never refused outright and never launched by the MCP call; only
   `pending approve` from a human door launches it. The accepted residual: a
   recognised harness is an agent with its own shell, so a launched MCP spawn can

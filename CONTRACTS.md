@@ -1205,9 +1205,10 @@ first when a node is still there to receive it.
 
 An MCP spawn is judged by its argv, not only by its caller. A spawn from an
 attested caller launches only when `wrapped_harness` recognises a registered
-harness; any other argv is held whole in `pending.json` and launches only
-through `pending approve` on a human door. Nothing is refused outright, and
-nothing unrecognised launches over MCP. A launched harness is an agent with its
+harness named by a bare name, resolved through the server's own PATH. A path to
+a harness (`/tmp/x/claude`, `./claude`, `env /tmp/x/claude`) is held like any
+other argv, and so is any argv the walk does not recognise. Held entries launch
+only through `pending approve` on a human door. Nothing is refused outright. A launched harness is an agent with its
 own shell, so it can steer its own child; that residual is accepted.
 
 ---
