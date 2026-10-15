@@ -61,7 +61,7 @@
 //! live-incident fix).** The deployed popup watcher unit had
 //! `AOIDE_RICE_BIN` set, chose the `lyra` dialog for a real parked ask, and
 //! `lyra`'s own `quickshell` spawn ENOENT'd (`quickshell` wasn't on the
-//! unit's own `PATH` — fixed nix-side, `modules/nucleus/secrets.nix`). On
+//! unit's own `PATH` — fixed nix-side, `modules/dendrites/aoide-secrets.nix`). On
 //! screen: nothing. In the journal: nothing after the `parked` line — the
 //! ask sat parked until its own timeout with no operator-visible signal at
 //! all, the exact "invisible failure" shape this crate keeps re-learning
@@ -72,7 +72,7 @@
 //!    ask`'s own failure `eprintln!`s (`crates/lyra/src/lib.rs`'s `special`
 //!    hook) land directly in THIS process's stderr, which the deployed unit
 //!    already routes to the journal (`StandardError = "journal"`,
-//!    `modules/nucleus/secrets.nix`). [`popup_loop`] adds its OWN
+//!    `modules/dendrites/aoide-secrets.nix`). [`popup_loop`] adds its OWN
 //!    `eprintln!` alongside it, naming the ask id and which binary failed —
 //!    the two together give an operator both the specific cause (from
 //!    `lyra`'s own line) and the consequence (from this crate's).

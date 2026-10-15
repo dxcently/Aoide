@@ -38,7 +38,7 @@ t=$(mktemp -d) || exit 1
 trap 'rm -rf "$t"' EXIT
 T="$root/templates"
 
-mkdir -p "$t"/modules/{aggregations/base,aggregations/workspace,aggregations/landmine,overrides,dendrites/notifications,dendrites/compositor/hyprland,nucleus} \
+mkdir -p "$t"/modules/{aggregations/nucleus,aggregations/workspace,aggregations/landmine,overrides,dendrites/notifications,dendrites/compositor/hyprland,nucleus} \
          "$t"/hosts/{examplehost,exampleserver} "$t"/users "$t"/pkgs/example-tool
 
 cp "$T/example-default-registry.nix"          "$t/modules/default.nix"
@@ -74,7 +74,7 @@ EOF
 cat > "$t/modules/dendrites/compositor/landmine.nix" <<'EOF'
 throw "compositor/landmine.nix was imported — an unselected provider was evaluated"
 EOF
-cat > "$t/modules/aggregations/base/default.nix" <<'EOF'
+cat > "$t/modules/aggregations/nucleus/default.nix" <<'EOF'
 # The smallest an aggregation body gets: a name, and what it selects. Both
 # hosts take it, and it names a member workspace also names — two aggregations
 # wanting one dendrite on the same terms merge into one selection.

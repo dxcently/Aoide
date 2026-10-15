@@ -1,10 +1,10 @@
 # modules/dendrites/mneme.nix — the Mneme vault MCP server.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.mneme.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads only its own aoide.mneme.* options
 #     plus config.aoide.user.
-#   - Enable with one line in hosts/: aoide.mneme.enable = true;
+#   - Select with one line in hosts/: habit.dendrites.mneme.enable = true;
 #
 # What this dendrite does (ported from dxflake modules/dendrites/mneme.nix):
 #   - Seeds ~/.local/bin/mneme from the pinned pkgs/mneme launcher on pin change
@@ -37,7 +37,6 @@ let
 in
 {
   options.aoide.mneme = {
-    enable = lib.mkEnableOption "the Mneme vault MCP server";
 
     binPath = lib.mkOption {
       type = lib.types.str;
@@ -68,92 +67,89 @@ in
     };
   };
 
-  config = lib.mkMerge [
-    { aoide.mneme.enable = lib.mkDefault true; }
-    (lib.mkIf cfg.enable {
-      # Seed the runtime binary from the pinned launcher on pin change (parity
-      # with the melete dendrite; the running binary stays replaceable).
-      system.activationScripts.mnemeSeed = {
-        deps = [ "users" ];
-        text = ''
-          bindir="$(dirname ${lib.escapeShellArg cfg.binPath})"
-          bin=${lib.escapeShellArg cfg.binPath}
-          stamp="$bindir/.mneme-pinned"
-          want="${pkgs.mneme.version}"
-          if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ] || [ ! -e "$bin" ]; then
-            install -Dm755 ${pkgs.mneme}/bin/mneme "$bin"
-            printf '%s' "$want" > "$stamp"
-            chown -R ${user}:users "$bindir"
-          fi
-        '';
-      };
-
-      # Let the aoide user restart mneme.service / tailscaled-mneme.service
-      # without auth (config/env changes applied without root). Mirrors melete.
-      security.polkit.extraConfig = ''
-        polkit.addRule(function(action, subject) {
-          if (action.id === "org.freedesktop.systemd1.manage-units" &&
-              (action.lookup("unit") === "mneme.service" ||
-               action.lookup("unit") === "tailscaled-mneme.service") &&
-              subject.user === "${user}") {
-            return polkit.Result.YES;
-          }
-        });
+  config = {
+    # Seed the runtime binary from the pinned launcher on pin change (parity
+    # with the melete dendrite; the running binary stays replaceable).
+    system.activationScripts.mnemeSeed = {
+      deps = [ "users" ];
+      text = ''
+        bindir="$(dirname ${lib.escapeShellArg cfg.binPath})"
+        bin=${lib.escapeShellArg cfg.binPath}
+        stamp="$bindir/.mneme-pinned"
+        want="${pkgs.mneme.version}"
+        if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ] || [ ! -e "$bin" ]; then
+          install -Dm755 ${pkgs.mneme}/bin/mneme "$bin"
+          printf '%s' "$want" > "$stamp"
+          chown -R ${user}:users "$bindir"
+        fi
       '';
+    };
 
-      # Second, userspace Tailscale node dedicated to Mneme — its own :443 funnel.
-      # Runs unprivileged in userspace-networking mode with an isolated
-      # socket/statedir, so it never touches the primary tailscaled. Auth + funnel
-      # config persist in the statedir, so it re-serves :443 -> mneme on restart
-      # with no re-login.
-      systemd.services.tailscaled-mneme = {
-        description = "Tailscale node for Mneme (userspace, own :443 funnel)";
-        after = [ "network-online.target" ];
-        wants = [ "network-online.target" ];
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          Type = "simple";
-          User = user;
-          Environment = [ "HOME=${home}" ];
-          ExecStart = lib.concatStringsSep " " [
-            "${pkgs.tailscale}/bin/tailscaled"
-            "--tun=userspace-networking"
-            "--socket=${home}/.local/state/tailscaled-mneme/tailscaled.sock"
-            "--statedir=${home}/.local/state/tailscaled-mneme"
-            "--port=0"
-          ];
-          Restart = "on-failure";
-          RestartSec = 5;
-        };
-      };
+    # Let the aoide user restart mneme.service / tailscaled-mneme.service
+    # without auth (config/env changes applied without root). Mirrors melete.
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (action.id === "org.freedesktop.systemd1.manage-units" &&
+            (action.lookup("unit") === "mneme.service" ||
+             action.lookup("unit") === "tailscaled-mneme.service") &&
+            subject.user === "${user}") {
+          return polkit.Result.YES;
+        }
+      });
+    '';
 
-      # The MCP server. ConditionPathExists guards against crash-looping until
-      # binary + vault + env all exist (clean cold-host state when enabled without
-      # deployment).
-      systemd.services.mneme = {
-        description = "Mneme — vault MCP server";
-        after = [ "network-online.target" ];
-        wants = [ "network-online.target" ];
-        wantedBy = [ "multi-user.target" ];
-        unitConfig.ConditionPathExists = [
-          cfg.binPath
-          cfg.vaultPath
-          cfg.envFile
+    # Second, userspace Tailscale node dedicated to Mneme — its own :443 funnel.
+    # Runs unprivileged in userspace-networking mode with an isolated
+    # socket/statedir, so it never touches the primary tailscaled. Auth + funnel
+    # config persist in the statedir, so it re-serves :443 -> mneme on restart
+    # with no re-login.
+    systemd.services.tailscaled-mneme = {
+      description = "Tailscale node for Mneme (userspace, own :443 funnel)";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "simple";
+        User = user;
+        Environment = [ "HOME=${home}" ];
+        ExecStart = lib.concatStringsSep " " [
+          "${pkgs.tailscale}/bin/tailscaled"
+          "--tun=userspace-networking"
+          "--socket=${home}/.local/state/tailscaled-mneme/tailscaled.sock"
+          "--statedir=${home}/.local/state/tailscaled-mneme"
+          "--port=0"
         ];
-        serviceConfig = {
-          Type = "simple";
-          User = user;
-          Environment = [
-            "HOME=${home}"
-            "PATH=${home}/.local/bin:/etc/profiles/per-user/${user}/bin:/run/current-system/sw/bin"
-          ];
-          EnvironmentFile = cfg.envFile;
-          WorkingDirectory = cfg.vaultPath;
-          ExecStart = cfg.binPath;
-          Restart = "on-failure";
-          RestartSec = 10;
-        };
+        Restart = "on-failure";
+        RestartSec = 5;
       };
-    })
-  ];
+    };
+
+    # The MCP server. ConditionPathExists guards against crash-looping until
+    # binary + vault + env all exist (clean cold-host state when enabled without
+    # deployment).
+    systemd.services.mneme = {
+      description = "Mneme — vault MCP server";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      unitConfig.ConditionPathExists = [
+        cfg.binPath
+        cfg.vaultPath
+        cfg.envFile
+      ];
+      serviceConfig = {
+        Type = "simple";
+        User = user;
+        Environment = [
+          "HOME=${home}"
+          "PATH=${home}/.local/bin:/etc/profiles/per-user/${user}/bin:/run/current-system/sw/bin"
+        ];
+        EnvironmentFile = cfg.envFile;
+        WorkingDirectory = cfg.vaultPath;
+        ExecStart = cfg.binPath;
+        Restart = "on-failure";
+        RestartSec = 10;
+      };
+    };
+  };
 }

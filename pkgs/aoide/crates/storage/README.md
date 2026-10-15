@@ -274,7 +274,7 @@ by decision — no embedded database yet
   assumption (root `AGENTS.md`), so a CORE command's configuration cannot
   live in a NixOS module option: on a non-nix host that option does not
   exist, and "rebuild to change a grant" is not an operation. Nix is ONE
-  authoring front-end (`modules/nucleus/config.nix`) that renders the whole
+  authoring front-end (`modules/dendrites/aoide-config.nix`) that renders the whole
   file to a READ-ONLY store path and points `$AOIDE_CONFIG` at it —
   immutability IS the provenance, so there is no marker field to go stale
   and the two worlds never write the same path. `source` resolves in two

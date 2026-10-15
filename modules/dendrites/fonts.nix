@@ -1,10 +1,9 @@
 # modules/dendrites/fonts.nix — the system font set (glyph coverage).
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.fonts.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
-#     see modules/aggregations/base/default.nix).
+#   - Selected by the nucleus aggregation (modules/aggregations/nucleus/default.nix), or one line in hosts/.
 #
 # What this dendrite does (ported from dxflake modules/dendrites/fonts.nix):
 #   - Installs the system-wide font set. Aoide's desktop look leans on
@@ -28,38 +27,33 @@
 # cleanly (agreeing definitions never conflict) — verified by eval.
 
 {
-  config,
   lib,
   pkgs,
   ...
 }:
 {
-  options.aoide.fonts.enable = lib.mkEnableOption "the system font set (broad glyph coverage: musical notation, CJK, emoji, nerd fonts)";
 
-  config = lib.mkMerge [
-    { aoide.fonts.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.fonts.enable {
-      # corefonts is unfree. Scoped here so a host can enable fonts without also
-      # pulling the devtools dendrite (which sets the same switch for its own
-      # unfree packages). Agreeing mkIf definitions merge cleanly.
-      nixpkgs.config.allowUnfree = true;
+  config = {
+    # corefonts is unfree. Scoped here so a host can enable fonts without also
+    # pulling the devtools dendrite (which sets the same switch for its own
+    # unfree packages). Agreeing mkIf definitions merge cleanly.
+    nixpkgs.config.allowUnfree = true;
 
-      fonts.packages = with pkgs; [
-        corefonts # Microsoft core web fonts (unfree)
-        noto-fonts # broad Unicode coverage incl. Musical Symbols
-        noto-fonts-cjk-sans # CJK sans coverage
-        noto-fonts-color-emoji # colour emoji
-        material-icons # Material Design UI glyphs
-        font-awesome # Font Awesome UI glyphs
-        fira-code-symbols # programming-ligature symbols
-        symbola # symbol coverage incl. musical notation (U+1D100…)
-        nerd-fonts.jetbrains-mono # nerd-patched JetBrains Mono
-        nerd-fonts.comic-shanns-mono # nerd-patched Comic Shanns Mono
-        nerd-fonts.shure-tech-mono # nerd-patched Share Tech Mono
-        libertine # PRIMARY desktop face — Linux Libertine/Biolinum (stylix points here)
-        nerd-fonts.lekton # nerd-patched alternate face (glyph-complete)
-        nerd-fonts.tinos # alternate face
-      ];
-    })
-  ];
+    fonts.packages = with pkgs; [
+      corefonts # Microsoft core web fonts (unfree)
+      noto-fonts # broad Unicode coverage incl. Musical Symbols
+      noto-fonts-cjk-sans # CJK sans coverage
+      noto-fonts-color-emoji # colour emoji
+      material-icons # Material Design UI glyphs
+      font-awesome # Font Awesome UI glyphs
+      fira-code-symbols # programming-ligature symbols
+      symbola # symbol coverage incl. musical notation (U+1D100…)
+      nerd-fonts.jetbrains-mono # nerd-patched JetBrains Mono
+      nerd-fonts.comic-shanns-mono # nerd-patched Comic Shanns Mono
+      nerd-fonts.shure-tech-mono # nerd-patched Share Tech Mono
+      libertine # PRIMARY desktop face — Linux Libertine/Biolinum (stylix points here)
+      nerd-fonts.lekton # nerd-patched alternate face (glyph-complete)
+      nerd-fonts.tinos # alternate face
+    ];
+  };
 }

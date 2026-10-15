@@ -184,7 +184,7 @@ const MAIL_ADAPTER_AUDIT_TAG: &str = "mail-adapter";
 
 /// Resolve the bind address + port for `a2a serve`: `--bind`/`--port` flags →
 /// `AOIDE_A2A_BIND`/`AOIDE_A2A_PORT` env (set by the `aoide-a2a` systemd unit,
-/// `modules/nucleus/aoided.nix`) → the loopback defaults
+/// `modules/dendrites/aoided.nix`) → the loopback defaults
 /// (`aoide.a2a.bindAddress`/`aoide.a2a.port`, `127.0.0.1`/`8710`).
 pub fn resolve_bind_port(inv: &Invocation) -> (String, u16) {
     let bind = inv
@@ -221,7 +221,7 @@ pub fn resolve_mail_adapter_port(inv: &Invocation) -> u16 {
 /// Resolve `aoide.a2a.spawnAgent`: the command `message/send`'s SPAWN path
 /// conducts for a client that names no known session (or explicitly asks to
 /// spawn). `--spawn-agent` flag → `AOIDE_A2A_SPAWN_AGENT` env (set by the
-/// `aoide-a2a` systemd unit, `modules/nucleus/aoided.nix`) → default `""`
+/// `aoide-a2a` systemd unit, `modules/dendrites/aoided.nix`) → default `""`
 /// (empty = spawning disabled — [`decide_send_action`] returns a structured
 /// error rather than launching anything). The client NEVER supplies this
 /// command — only the operator, via the rebuild-gated nix option

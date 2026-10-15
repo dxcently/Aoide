@@ -1,7 +1,7 @@
 # modules/aggregations
 
 Memberships. An aggregation is a named group of catalogue entries a host
-selects with ONE line — `habit.aggregation.base.enable = true;` — plus whatever that
+selects with ONE line — `habit.aggregation.nucleus.enable = true;` — plus whatever that
 group has to say about the platform. It names no file: a member is a catalogue
 name, so a grouping change never moves a dendrite.
 
@@ -28,12 +28,19 @@ a host can take a group and drop one member
 }
 ```
 
-The four bodies today are `base` (the command line every host carries,
-including `aoide.enable` and the stateVersion the deleted `hosts/common` used to
-hold), `desktop` (a graphical session's platform: audio, clipboard,
-notifications, screenshots, network, a browser), `agents` (the coding agents a
-workstation runs) and `aoideos` (the desktop itself: compositor, greeter,
-hyprland, quickshell, lyra, songbook, stylix).
+The four bodies today are `nucleus` (what every host carries beside the option
+contract: the daemon and its units, the secrets broker, the nix settings, the
+`aoide` binaries and the command line, plus the stateVersion
+the deleted `hosts/common` used to hold), `desktop` (a graphical session's
+platform: audio, clipboard, notifications, screenshots, network, a browser),
+`agents` (the coding agents a workstation runs) and `aoideos` (the desktop
+itself: compositor, greeter, hyprland, quickshell, lyra, songbook, stylix).
+
+`nucleus` is the repo's floor by convention: an aggregation any host can
+deselect a member of. What must be present on a host that selects nothing is not
+a member but the option contract, `modules/nucleus`, imported as an extra module
+(`nixosModules.nucleus`). A consumer takes the contract and writes its own
+`nucleus` aggregation over the exported catalogue names.
 
 ## The seams
 

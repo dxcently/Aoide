@@ -391,476 +391,463 @@ let
 in
 {
   # shellbridge is this capability's other half (lyra owns the bridge,
-  # docs/architecture/PACKAGE-LAYOUT.md): the file self-gates on the facts, so
+  # docs/architecture/PACKAGE-LAYOUT.md): the file gates on the facts it reads, so
   # importing it beside this lane is the whole wiring.
   imports = [ ./shellbridge.nix ];
 
-  # ── Config: only wired when the lyra fact is on ────────────────────────────
-  # `aoide.lyra.enable` is a FACT, declared once in
-  # modules/nucleus/options.nix, and this module sets it
-  # `mkDefault true`.
-  config = lib.mkMerge [
-    { aoide.lyra.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.lyra.enable {
+  # ── Config ─────────────────────────────────────────────────────────────────
+  # Selecting the dendrite is the switch; it sets the read-only fact
+  # `aoide.lyra.enable` (declared in modules/nucleus/options.nix) to true.
+  config = {
+    aoide.lyra.enable = true;
 
-      # ── What this lane brings into existence ────────────────────────────────
-      # One thing, and it is a FACT rather than this lane's own option: the
-      # directory the shell runs. Quickshell itself is the `quickshell` lane's
-      # (package and the `aoide-quickshell` service); no module reads another
-      # module (root AGENTS.md house rule 5), so this lane NAMES the config it
-      # deploys into and the shell lane reads that name. Lyra paints a song —
-      # deploy the tree, seed the stage, restart the rice — and the shell lane
-      # is what knows how to run a shell on the result.
-      #
-      # The shell lane spells `<dir>/shell.qml` for quickshell's entry point,
-      # so `$AOIDE_ROOT/run/qml` here is the same command line as the day the
-      # service lived in this file.
-      aoide.quickshell.config = qmlDir;
+    # ── What this lane brings into existence ────────────────────────────────
+    # One thing, and it is a FACT rather than this lane's own option: the
+    # directory the shell runs. Quickshell itself is the `quickshell` lane's
+    # (package and the `aoide-quickshell` service); no module reads another
+    # module (root AGENTS.md house rule 5), so this lane NAMES the config it
+    # deploys into and the shell lane reads that name. Lyra paints a song —
+    # deploy the tree, seed the stage, restart the rice — and the shell lane
+    # is what knows how to run a shell on the result.
+    #
+    # The shell lane spells `<dir>/shell.qml` for quickshell's entry point,
+    # so `$AOIDE_ROOT/run/qml` here is the same command line as the day the
+    # service lived in this file.
+    aoide.quickshell.config = qmlDir;
 
-      # ── The templates this host ships ───────────────────────────────────────
-      # `pkgs.lyra-songbook` is the baseline `AOIDE_SONG_TEMPLATES`: what
-      # `lyra rice compose` and the repo-less manifest regeneration fall back
-      # to. Its default is the WHOLE committed songbook (the flake's own
-      # `packages` output); a host overrides it with what it actually built
-      # in, so a `_server` ships an empty templates dir and yomi ships
-      # sonata's folder and no other. `builtin.json` records the selection
-      # itself — `{ declared, songs, packages }` — which is what runtime
-      # staging checks a non-built-in song's needs against before refusing to
-      # stage it (the machine owns its songbook; the baseline is the fallback).
-      #
-      # An overlay rather than a reference, because the templates dir is read
-      # by units that resolve `pkgs.lyra-songbook` themselves (`aoided`'s
-      # session variables, shellbridge's `AOIDE_SONG_TEMPLATES`) — house rule
-      # 5: neither of those names this lane.
-      nixpkgs.overlays = [
-        (_final: prev: {
-          # A FRESH `callPackage`, never `.override` on whatever the walker's
-          # overlay left in `prev`: application order across the base
-          # (lib/aoideos.nix) and this lane is not a contract, so
-          # `prev.lyra-songbook` may not exist yet. A fresh call also names
-          # every argument here rather than inheriting them — including
-          # `aoideOptions`, which this lane derives itself because the
-          # walker's own `extra` (lib/pkgs.nix) is that overlay's business,
-          # not this lane's. Both overlays may define the name; the walker's
-          # step-aside makes whichever is applied second yield, so this
-          # lane's answer wins in either order.
-          lyra-songbook = prev.callPackage ../../../pkgs/lyra-songbook {
+    # ── The templates this host ships ───────────────────────────────────────
+    # `pkgs.lyra-songbook` is the baseline `AOIDE_SONG_TEMPLATES`: what
+    # `lyra rice compose` and the repo-less manifest regeneration fall back
+    # to. Its default is the WHOLE committed songbook (the flake's own
+    # `packages` output); a host overrides it with what it actually built
+    # in, so a `_server` ships an empty templates dir and yomi ships
+    # sonata's folder and no other. `builtin.json` records the selection
+    # itself — `{ declared, songs, packages }` — which is what runtime
+    # staging checks a non-built-in song's needs against before refusing to
+    # stage it (the machine owns its songbook; the baseline is the fallback).
+    #
+    # An overlay rather than a reference, because the templates dir is read
+    # by units that resolve `pkgs.lyra-songbook` themselves (`aoided`'s
+    # session variables, shellbridge's `AOIDE_SONG_TEMPLATES`) — house rule
+    # 5: neither of those names this lane.
+    nixpkgs.overlays = [
+      (_final: prev: {
+        # A FRESH `callPackage`, never `.override` on whatever the walker's
+        # overlay left in `prev`: application order across the base
+        # (lib/aoideos.nix) and this lane is not a contract, so
+        # `prev.lyra-songbook` may not exist yet. A fresh call also names
+        # every argument here rather than inheriting them — including
+        # `aoideOptions`, which this lane derives itself because the
+        # walker's own `extra` (lib/pkgs.nix) is that overlay's business,
+        # not this lane's. Both overlays may define the name; the walker's
+        # step-aside makes whichever is applied second yield, so this
+        # lane's answer wins in either order.
+        lyra-songbook = prev.callPackage ../../../pkgs/lyra-songbook {
+          songs = builtIn;
+          builtin = {
+            declared = config.aoide.song;
             songs = builtIn;
-            builtin = {
-              declared = config.aoide.song;
-              songs = builtIn;
-              packages = songbookLib.packagesFor builtIn;
-            };
-            inherit aoideOptions songbook;
+            packages = songbookLib.packagesFor builtIn;
           };
-        })
-      ];
-
-      # ── Surface-ownership registry ──────────────────────────────────────────
-      # Declare every Quickshell-owned surface. Stylix reads this registry and
-      # stands down for these surfaces (concepts/Notes).
-      aoide.surfaces = {
-        bar.owner = "quickshell";
-        # dunst owns notification DELIVERY — the bus name, history, stacking and
-        # the pause levels — but it draws NOTHING (`skip_display` on every rule;
-        # modules/dendrites/dunst.nix). Quickshell owns the SURFACE: the `herald`
-        # popup slot and the dock's `herald-center` ledger, both drawn from
-        # stage/herald.json. The stand-down below keys on "not stylix", so
-        # Stylix's dunst/mako targets stay disabled either way — which is still
-        # what we want, since a Stylix-generated dunstrc would fight the
-        # dendrite's.
-        notifications.owner = "quickshell";
-        launcher.owner = "quickshell";
-        osd.owner = "quickshell";
-        lockscreen.owner = "quickshell";
-        greeter.owner = "quickshell";
-        wallpaper.owner = "quickshell";
-        agentWidgets.owner = "quickshell";
-        sessionGraph.owner = "quickshell";
-      };
-
-      # ── What the shell needs to speak to hardware ───────────────────────────
-      # The Quickshell PACKAGE and its service belong to the `quickshell` lane
-      # (it is the lane that knows how to run a shell, with or without lyra);
-      # these two live here because it is THIS lane's widget that shells out to
-      # them.
-      #
-      #   pkgs.pavucontrol — the colonnade's `[ mixer ]` tag launches it.
-      #   pkgs.pulseaudio  — for `pactl` only; pipewire-pulse remains the
-      #                      server. The bluetooth bay writes the A2DP ↔
-      #                      headset profile with `pactl set-card-profile`
-      #                      (neither Quickshell.Bluetooth nor
-      #                      Quickshell.Services.Pipewire exposes a card
-      #                      profile — checked against both modules'
-      #                      compiled qmltypes).
-      #
-      # Sonata's `_widgets/bar.nix` declares those same two names (the record
-      # is what a song says it needs), so the hard-coded pair and
-      # `packagesFor builtIn` agree today — `lib.unique` is what makes that a
-      # checked coincidence rather than an assumption: the union is a set, not
-      # a concatenation, and a song declaring a package the lane already
-      # carries adds nothing.
-      environment.systemPackages = lib.unique (
-        [
-          pkgs.pavucontrol
-          pkgs.pulseaudio # for `pactl` only; pipewire-pulse remains the server
-        ]
-        # …plus what the built-in songs' own widgets declare. `composeSong`
-        # reads each `_widgets/` record's `packages` (lib/song.nix); until this
-        # slice nothing installed them. A shelf-less song declares none —
-        # there is no record to declare them in.
-        ++ map (name: pkgs.${name}) (songbookLib.packagesFor builtIn)
-      );
-
-      # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────
-      # The config tree (bar/notif/launcher/OSD/lockscreen/greeter/wallpaper)
-      # lands at /home/<user>/Aoide/run/qml/ — a gitignored root-runtime dir,
-      # never the repo's checked-in tree (CONTRACTS.md §2).
-      #
-      # `home.file` would manage this as a tree of symlinks into the nix
-      # store, which is the RIGHT semantics for most home-manager-installed
-      # config — but the runtime writes into this tree (`lyra rice stage`
-      # syncs a staged song's widget bodies into run/qml/songs/<song>/, and
-      # Quickshell live-reloads on file change). A symlink tree makes that
-      # permanently hostile to the NEXT switch: home-manager finds a real
-      # file where it expects to manage a symlink and refuses to activate
-      # until every stray file is hand-diffed against the fresh store build
-      # and removed — exactly the failure this rsync replaces.
-      #
-      # `rsync -a --delete` makes the deployed tree self-healing instead: a
-      # switch always reasserts the store over it, rather than refusing to
-      # proceed. run/qml is a deploy target, never a source: a hand edit
-      # there is lost at the next switch. A song is edited in the runtime
-      # songbook (`$AOIDE_ROOT/song/songbook/<song>`, house rule 10), and a
-      # STAGED song lives there, not here — `aoide-rice-reload` (below)
-      # re-syncs its widget bodies into run/qml once the switch is done.
-      # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
-      # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
-      # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
-      # still resolve lexically to the outer module scope, unshadowed by the pattern.
-      # ── The machine's own songbook first (house rule 10) ─────────────────────
-      # The machine OWNS `~/.aoide/song/songbook` (CONTRACTS.md §5): its
-      # built-in songs plus whatever it made itself, never a link to or a sync
-      # of the repo. Activation runs `lyra rice refresh` over the built-in set,
-      # which applies one three-way rule per file (shipped copy, machine copy,
-      # the hash recorded at the last refresh):
-      #
-      #   - a file the machine never edited takes the repo's change, and a
-      #     built-in song absent from the machine is added whole;
-      #   - a file the machine edited, or one with no record, is kept and
-      #     reported, never overwritten;
-      #   - `takes/` and `drafts/` and any symlink at a song's path are never
-      #     touched.
-      #
-      # What refresh wrote is recorded in
-      # `$AOIDE_ROOT/song/declared/songbook/<song>.json`, outside the song
-      # folder so nothing that reads the songbook sees it. The command is the
-      # CLI twin of this step: `lyra rice refresh [--check]` does by hand what
-      # activation does, and `--check` writes nothing and reports each file's
-      # state. A dry-run activation runs exactly that `--check`. A failure
-      # fails the activation.
-      #
-      # Gated on the BUILT-IN set, not on the active song: a host that builds a
-      # song in as `available` without performing it still gets refreshed, and
-      # a host that built none in gets no refresh step at all. Its OWN
-      # definition of the user's home — two definitions of one submodule MERGE
-      # (that is the module system's job), while a single `//` between them
-      # would take the right-hand `home` whole and silently drop the other's
-      # activation entries.
-      #
-      # The source is the deployed baseline (`pkgs.lyra-songbook`, which this
-      # host already restricted to its built-in set, `builtin.json` included,
-      # which a bare `rice refresh` reads).
-      habit.home =
-        { lib, ... }:
-        {
-          # Two gates, two sets — merged by the module system, not by `//`
-          # (which merges one level deep: the second `home` would take the
-          # whole key and drop the first one's activation entries), and not by
-          # two assignments to this option path, which one module file may not
-          # make.
-          config = lib.mkMerge [
-            (lib.optionalAttrs (builtIn != [ ]) {
-              home.activation.aoideSeedSongbook = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                run ${pkgs.coreutils}/bin/mkdir -p "${config.aoide.root}/song/songbook"
-                if [[ -v DRY_RUN ]]; then
-                  ${refreshCmd} --check
-                else
-                  ${refreshCmd}
-                fi
-              '';
-            })
-
-            # ── No song, nothing to paint ──────────────────────────────────────
-            # Every entry below reaches for the ACTIVE song (activeSongLivery,
-            # seedStageScript's jq --arg, or a shell entry deployed FROM the song's
-            # QML) — with `aoide.song` null there is no active song to bake, so this
-            # whole block is `lib.optionalAttrs`-gated on `config.aoide.song != null`
-            # rather than `lib.mkIf`: optionalAttrs never forces its `attrs` argument
-            # when the condition is false (plain nix laziness, no module-system
-            # merging involved at this attrset-literal level), so a null-song host's
-            # eval never touches `${config.aoide.song}` here — no deployed QML, no
-            # seeded stage, no restart of the rice; not an empty surface, simply
-            # absent. A host that names a song gets exactly today's behaviour.
-            #
-            # The `aoide-quickshell` unit is NOT part of this gate: it belongs to the
-            # `quickshell` lane, which starts a shell on whatever config this lane
-            # deployed — or on a directory the host brought itself, song or no song.
-            # A null-song host with no such directory still runs no shell (that lane's
-            # own bare case).
-            (lib.optionalAttrs (config.aoide.song != null) {
-              home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                run mkdir -p "${config.aoide.root}/run"
-                run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
-                  "${quickshellConfig}/qml/" "${config.aoide.root}/run/qml/"
-              '';
-
-              # ── Seed the live stage twin from the active song ──────────────────────
-              # `song/stage/livery.json` is what LiveryState.qml hot-reloads
-              # (CONTRACTS.md §4). A host that never ran `lyra rice stage <name>` would
-              # otherwise carry a stale/absent stage twin even though the
-              # compositor/Stylix/QML tree were all built from the active song. This
-              # writes the declared song into both twins — `song/stage/livery.json`
-              # and `song/declared/livery.json` — on every activation:
-              # `seedStageScript` (above) does the actual write. It RENAMES over
-              # `stage/livery.json` and never writes through it, so a drafted song's
-              # own file is untouched while its routing link is replaced.
-              # `song/stage/cover.json` is never touched (CONTRACTS.md §4). The seed
-              # is declared truth, written the same way whatever the mode: the staged
-              # or drafted song `stage/mode.json` names is brought back afterwards by
-              # `aoide-rice-reload` (below).
-              home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" ] ''
-                run ${seedStageScript}
-              '';
-
-              # ── Reassert the paint on EVERY activation ─────────────────────────────
-              # A rebuild only restarts units whose definitions changed, so a
-              # long-running quickshell survives every no-diff switch — including one
-              # that has silently lost its Wayland outputs and moved the whole scene
-              # onto a placeholder screen (live incident 2026-08-28: "There are no
-              # outputs - creating placeholder screen"; unit active, desktop bare).
-              # House ruling: activation always brings the rice elements back up.
-              # try-restart bounces a running shell onto the freshly rsynced tree and
-              # re-acquired outputs, no-ops when the unit is stopped (headless/
-              # session-less activation must not start or fail anything), and never
-              # fails the switch.
-              #
-              # ONE try-restart names both units, so systemd orders them: the shell is
-              # stopped, `aoide-rice-reload` (Before the shell, below) writes the staged
-              # or drafted song over the declared seed, and only then does the shell
-              # start. Ordered after the three writes (the QML rsync, the stage seed and
-              # the songbook seed, which the reload reads), so the reload lands over the
-              # fresh seed and the restarted shell reads the new tree, never the old
-              # one; after `reloadSystemd`, so a unit this switch introduces is loaded;
-              # and after `onFilesChange`, where home-manager's `hyprctl reload
-              # config-only` runs on hosts whose home-manager hyprland package is
-              # non-null — a config reload after the reload would reset the keywords it
-              # applied live. (The compositor lane sets that package to null, so there
-              # only Hyprland's own file watcher reloads the config.) Both units no-op
-              # when inactive (a boot activation has no session); the session's own
-              # start of them is what restores the song then. The switch waits for both
-              # jobs, and the reload is bounded (below), so a hung child delays it by
-              # that bound and no more.
-              #
-              # This is the REBUILD-side half of the recovery, not the whole of it:
-              # the identical lockup recurring live, mid-session, with no rebuild in
-              # sight is what `aoide-quickshell-healthcheck.timer` (below) exists to
-              # catch — of the two, that timer is the only one that ever runs
-              # unprompted.
-              home.activation.aoideRestartRice =
-                lib.hm.dag.entryAfter
-                  [
-                    "aoideDeployQml"
-                    "aoideSeedSongbook"
-                    "aoideSeedStage"
-                    "onFilesChange"
-                    "reloadSystemd"
-                  ]
-                  ''
-                    run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
-                      ${pkgs.systemd}/bin/systemctl --user try-restart aoide-rice-reload.service aoide-quickshell.service || true
-                  '';
-
-              # ── Confirm the restart above actually landed ──────────────────────────
-              # `aoideRestartRice` is fire-and-forget: `try-restart ... || true` means
-              # a switch reports success whether the shell came back painted or landed
-              # straight in the placeholder-screen lockup its own restart was meant to
-              # fix. `aoide-quickshell-healthcheck.timer` (below) WOULD catch that
-              # within ~15s regardless — this entry doesn't close a hole the timer
-              # leaves open, it exists so the confirmation is immediate and visible in
-              # the rebuild output itself, instead of waiting on the first timer tick
-              # (or on someone noticing a bare desktop). Sleep 5s first: quickshell
-              # logs "Configuration Loaded" ~1s after launch and its layer surfaces
-              # follow shortly after (live journal), so checking instantly would just
-              # race the shell's own startup — not a false positive (health.rs's
-              # journal-line gate means a fresh clean start always reads healthy,
-              # never falsely stuck), just a wasted check. Gated on `aoide.lyra.enable`
-              # like the healthcheck units below, since it execs the same lyra binary
-              # they do — folded into the script body (an `''${lib.optionalString …}''`
-              # around the run lines) rather than `lib.mkIf` on the whole DAG-entry
-              # value or `lib.optionalAttrs` around this binding, since a plain `if`
-              # inside the script is the one idiom that never has to ask whether
-              # `mkIf` composes through `hm.dag.entryAfter`'s attrset shape.
-              home.activation.aoideVerifyRice = lib.hm.dag.entryAfter [ "aoideRestartRice" ] ''
-                ${lib.optionalString config.aoide.lyra.enable ''
-                  run ${pkgs.coreutils}/bin/sleep 5
-                  run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
-                    ${pkgs.aoide.rice}/bin/lyra quickshell healthcheck || true
-                ''}
-              '';
-
-              # ── Live mid-session watchdog: the placeholder-screen lockup ───────────
-              # `aoideRestartRice` (above) only reasserts the paint on a REBUILD.
-              # Nothing caught the SAME failure live, mid-session, with no rebuild in
-              # sight — the incident it documents recurred twice more the next day
-              # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=always`
-              # is structurally blind to this lockup: the process never exits, it just
-              # sits `active` painted onto Qt's internal placeholder screen, so
-              # systemd has nothing to restart on. `lyra quickshell healthcheck`
-              # (crates/song/src/health.rs) is the periodic check that closes the gap
-              # — it confirms BOTH the journal's placeholder-screen line AND a live
-              # `hyprctl layers` zero-surface reading before acting (health.rs's own
-              # module doc carries the two-signal reasoning), then restarts the unit
-              # on a retry ladder rather than immediately every tick: immediate on
-              # the first restart, then 15s/60s/5m, settling at a 15-minute floor it
-              # never drops below — but never gives up either, so a genuinely
-              # flapping output still gets restarted forever instead of eventually
-              # being abandoned. A unit that is installed but stopped or parked
-              # `failed` (StartLimit) is reported as not running and left alone:
-              # the watchdog cannot tell a deliberate stop from a parked or
-              # never-started unit, and a restart could undo the decision.
-              #
-              # `quickshell` is a lyra-only command family (left core's registry at
-              # P-A5), so this execs `pkgs.aoide.rice` — lyra's own droppable output
-              # (P-A8) — the same reference shellbridge.nix's `shellbridge` service
-              # uses for the same reason. Gated on `aoide.lyra.enable` like that
-              # service too: a host that flips it off while leaving this lane on
-              # must not start a unit that execs a binary this build left uninstalled.
-              #
-              # Unlike `shellbridge`/`aoide-graph-reap` (NixOS-level `systemd.user.
-              # services`, whose module gives a flat `path`/`description` sugar),
-              # this pair is nested inside `habit.home`
-              # like `aoide-quickshell` right above — home-manager's OWN systemd
-              # module has no such sugar (checked against its `modules/systemd.nix`:
-              # only `Unit`/`Service`/`Install` freeform sections exist, and no
-              # `path` option at all), so this follows `aoide-quickshell`'s own
-              # Unit/Service/Install shape instead, with `hyprctl`/`notify-send`
-              # (needed by health.rs's `hyprctl_json`/`notify_still_flapping`,
-              # neither of which is guaranteed present on this manager's PATH) added
-              # via an explicit `PATH=` `Environment` entry — the only knob this
-              # schema offers for it. `systemctl`/`journalctl` ride the same
-              # `lib.makeBinPath` list (health.rs's `active_enter_timestamp`/
-              # `journal_tail_since`/`restart_service` all shell out to them) rather
-              # than leaning on an ambient default the way `aoide-graph-reap` does
-              # under NixOS's richer default environment.
-              systemd.user.services.aoide-quickshell-healthcheck = lib.mkIf config.aoide.lyra.enable {
-                Unit = {
-                  Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=always cannot catch";
-                  PartOf = [ "graphical-session.target" ];
-                  After = [ "graphical-session.target" ];
-                };
-                Service = {
-                  Type = "oneshot";
-                  ExecStart = "${pkgs.aoide.rice}/bin/lyra quickshell healthcheck";
-
-                  Environment = [
-                    "PATH=${
-                      lib.makeBinPath [
-                        pkgs.systemd
-                        pkgs.hyprland
-                        pkgs.libnotify
-                      ]
-                    }"
-                    # Same "a configured aoide.root must win" reasoning as
-                    # aoide-quickshell's own Environment above — health.rs's restart
-                    # backoff marker lives under $AOIDE_ROOT/state.
-                    "AOIDE_ROOT=${config.aoide.root}"
-                  ];
-
-                  NoNewPrivileges = true;
-                  StandardOutput = "journal";
-                  StandardError = "journal";
-                };
-              };
-
-              systemd.user.timers.aoide-quickshell-healthcheck = lib.mkIf config.aoide.lyra.enable {
-                Unit = {
-                  Description = "Aoide Quickshell healthcheck timer — periodic placeholder-screen sweep (~15s)";
-                  PartOf = [ "graphical-session.target" ];
-                };
-                Timer = {
-                  # First check 20s after the session comes up (let the shell finish
-                  # its own startup/output-negotiation first); thereafter every 15s
-                  # since the previous run finished — cheap enough (one systemctl
-                  # show, a short journalctl tail, two hyprctl calls) to run often,
-                  # and every check speeds up how quickly a live lockup is noticed.
-                  OnActiveSec = "20s";
-                  OnUnitActiveSec = "15s";
-                  AccuracySec = "2s";
-                };
-                Install.WantedBy = [ "graphical-session.target" ];
-              };
-
-              # ── Bring the staged or drafted song back after a login or a switch ────
-              # The activation lays DECLARED truth over the runtime tree (the rsync
-              # and the seed above), and a login or a switch would leave the desktop
-              # on it. `stage/mode.json` is what remembers the last staged song or
-              # the routed draft, and `lyra reload` is its reader: it re-stages that
-              # song (staging), re-routes and re-syncs the draft (draft), or reloads
-              # the shell alone (declarative) — palette, cover, widget bodies, slot
-              # map, registry, compositor keywords and terminal colours. Nix never
-              # reads the mode; this unit only runs the reader. Gated on
-              # `aoide.lyra.enable` like the healthcheck above, since it execs the
-              # same lyra binary.
-              #
-              # Four constraints are invisible from this file:
-              #   - BEFORE the shell, so the shell's first frame is the staged song,
-              #     not the declared one; the activation's try-restart (above) orders
-              #     the same way, the shell being down while the reload writes.
-              #   - In the user MANAGER, never as an activation step: home-manager's
-              #     NixOS activation carries no HYPRLAND_INSTANCE_SIGNATURE, so the
-              #     compositor half of the reload (`live::apply_live`) would skip,
-              #     and the manager has it by the time graphical-session.target is
-              #     up. For the same reason there is no `PATH=`: the manager's own
-              #     reaches hyprctl, kitty, nix-instantiate, quickshell and the
-              #     wallpaper provider's helper without this lane naming other lanes'
-              #     packages (house rule 5).
-              #   - The `-` prefix plus RemainAfterExit: a refused or failed reload
-              #     still leaves the unit active, so the activation's try-restart
-              #     reaches it on the next switch (it skips a unit that is not active).
-              #   - BOUNDED by `timeout`: a oneshot has no start timeout
-              #     (`TimeoutStartSec` is infinity), and `lyra reload` runs children
-              #     with no deadline of their own (nix-instantiate, `quickshell ipc
-              #     call`, hyprctl, the wallpaper provider's helper). One hung child
-              #     would hold the shell's start, which waits on this unit, and the
-              #     activation's try-restart, which waits on both jobs. `timeout`
-              #     ends the run with a non-zero exit, which the `-` already
-              #     forgives, so the unit stays active; a `TimeoutStartSec` would
-              #     leave it failed, and a try-restart skips a failed unit.
-              systemd.user.services.aoide-rice-reload = lib.mkIf config.aoide.lyra.enable {
-                Unit = {
-                  Description = "Aoide rice reload: bring the staged or drafted song back after a login or a switch";
-                  After = [ "graphical-session.target" ];
-                  PartOf = [ "graphical-session.target" ];
-                  Before = [ "aoide-quickshell.service" ];
-                };
-                Service = {
-                  Type = "oneshot";
-                  RemainAfterExit = true;
-                  ExecStart = "-${pkgs.coreutils}/bin/timeout 60 ${pkgs.aoide.rice}/bin/lyra reload";
-                  Environment = [
-                    "AOIDE_ROOT=${config.aoide.root}"
-                    # Same declaration as aoide-quickshell's own: the staging path's one
-                    # session-sourced variable, spelled on the unit so a reload after a
-                    # switch stages from THIS build's songbook.
-                    "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
-                  ];
-                };
-                Install.WantedBy = [ "graphical-session.target" ];
-              };
-            })
-          ];
+          inherit aoideOptions songbook;
         };
-    })
-  ];
+      })
+    ];
+
+    # ── Surface-ownership registry ──────────────────────────────────────────
+    # Declare every Quickshell-owned surface. Stylix reads this registry and
+    # stands down for these surfaces (concepts/Notes).
+    aoide.surfaces = {
+      bar.owner = "quickshell";
+      # dunst owns notification DELIVERY — the bus name, history, stacking and
+      # the pause levels — but it draws NOTHING (`skip_display` on every rule;
+      # modules/dendrites/dunst.nix). Quickshell owns the SURFACE: the `herald`
+      # popup slot and the dock's `herald-center` ledger, both drawn from
+      # stage/herald.json. The stand-down below keys on "not stylix", so
+      # Stylix's dunst/mako targets stay disabled either way — which is still
+      # what we want, since a Stylix-generated dunstrc would fight the
+      # dendrite's.
+      notifications.owner = "quickshell";
+      launcher.owner = "quickshell";
+      osd.owner = "quickshell";
+      lockscreen.owner = "quickshell";
+      greeter.owner = "quickshell";
+      wallpaper.owner = "quickshell";
+      agentWidgets.owner = "quickshell";
+      sessionGraph.owner = "quickshell";
+    };
+
+    # ── What the shell needs to speak to hardware ───────────────────────────
+    # The Quickshell PACKAGE and its service belong to the `quickshell` lane
+    # (it is the lane that knows how to run a shell, with or without lyra);
+    # these two live here because it is THIS lane's widget that shells out to
+    # them.
+    #
+    #   pkgs.pavucontrol — the colonnade's `[ mixer ]` tag launches it.
+    #   pkgs.pulseaudio  — for `pactl` only; pipewire-pulse remains the
+    #                      server. The bluetooth bay writes the A2DP ↔
+    #                      headset profile with `pactl set-card-profile`
+    #                      (neither Quickshell.Bluetooth nor
+    #                      Quickshell.Services.Pipewire exposes a card
+    #                      profile — checked against both modules'
+    #                      compiled qmltypes).
+    #
+    # Sonata's `_widgets/bar.nix` declares those same two names (the record
+    # is what a song says it needs), so the hard-coded pair and
+    # `packagesFor builtIn` agree today — `lib.unique` is what makes that a
+    # checked coincidence rather than an assumption: the union is a set, not
+    # a concatenation, and a song declaring a package the lane already
+    # carries adds nothing.
+    environment.systemPackages = lib.unique (
+      [
+        pkgs.pavucontrol
+        pkgs.pulseaudio # for `pactl` only; pipewire-pulse remains the server
+      ]
+      # …plus what the built-in songs' own widgets declare. `composeSong`
+      # reads each `_widgets/` record's `packages` (lib/song.nix); until this
+      # slice nothing installed them. A shelf-less song declares none —
+      # there is no record to declare them in.
+      ++ map (name: pkgs.${name}) (songbookLib.packagesFor builtIn)
+    );
+
+    # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────
+    # The config tree (bar/notif/launcher/OSD/lockscreen/greeter/wallpaper)
+    # lands at /home/<user>/Aoide/run/qml/ — a gitignored root-runtime dir,
+    # never the repo's checked-in tree (CONTRACTS.md §2).
+    #
+    # `home.file` would manage this as a tree of symlinks into the nix
+    # store, which is the RIGHT semantics for most home-manager-installed
+    # config — but the runtime writes into this tree (`lyra rice stage`
+    # syncs a staged song's widget bodies into run/qml/songs/<song>/, and
+    # Quickshell live-reloads on file change). A symlink tree makes that
+    # permanently hostile to the NEXT switch: home-manager finds a real
+    # file where it expects to manage a symlink and refuses to activate
+    # until every stray file is hand-diffed against the fresh store build
+    # and removed — exactly the failure this rsync replaces.
+    #
+    # `rsync -a --delete` makes the deployed tree self-healing instead: a
+    # switch always reasserts the store over it, rather than refusing to
+    # proceed. run/qml is a deploy target, never a source: a hand edit
+    # there is lost at the next switch. A song is edited in the runtime
+    # songbook (`$AOIDE_ROOT/song/songbook/<song>`, house rule 10), and a
+    # STAGED song lives there, not here — `aoide-rice-reload` (below)
+    # re-syncs its widget bodies into run/qml once the switch is done.
+    # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
+    # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
+    # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
+    # still resolve lexically to the outer module scope, unshadowed by the pattern.
+    # ── The machine's own songbook first (house rule 10) ─────────────────────
+    # The machine OWNS `~/.aoide/song/songbook` (CONTRACTS.md §5): its
+    # built-in songs plus whatever it made itself, never a link to or a sync
+    # of the repo. Activation runs `lyra rice refresh` over the built-in set,
+    # which applies one three-way rule per file (shipped copy, machine copy,
+    # the hash recorded at the last refresh):
+    #
+    #   - a file the machine never edited takes the repo's change, and a
+    #     built-in song absent from the machine is added whole;
+    #   - a file the machine edited, or one with no record, is kept and
+    #     reported, never overwritten;
+    #   - `takes/` and `drafts/` and any symlink at a song's path are never
+    #     touched.
+    #
+    # What refresh wrote is recorded in
+    # `$AOIDE_ROOT/song/declared/songbook/<song>.json`, outside the song
+    # folder so nothing that reads the songbook sees it. The command is the
+    # CLI twin of this step: `lyra rice refresh [--check]` does by hand what
+    # activation does, and `--check` writes nothing and reports each file's
+    # state. A dry-run activation runs exactly that `--check`. A failure
+    # fails the activation.
+    #
+    # Gated on the BUILT-IN set, not on the active song: a host that builds a
+    # song in as `available` without performing it still gets refreshed, and
+    # a host that built none in gets no refresh step at all. Its OWN
+    # definition of the user's home — two definitions of one submodule MERGE
+    # (that is the module system's job), while a single `//` between them
+    # would take the right-hand `home` whole and silently drop the other's
+    # activation entries.
+    #
+    # The source is the deployed baseline (`pkgs.lyra-songbook`, which this
+    # host already restricted to its built-in set, `builtin.json` included,
+    # which a bare `rice refresh` reads).
+    habit.home =
+      { lib, ... }:
+      {
+        # Two gates, two sets — merged by the module system, not by `//`
+        # (which merges one level deep: the second `home` would take the
+        # whole key and drop the first one's activation entries), and not by
+        # two assignments to this option path, which one module file may not
+        # make.
+        config = lib.mkMerge [
+          (lib.optionalAttrs (builtIn != [ ]) {
+            home.activation.aoideSeedSongbook = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              run ${pkgs.coreutils}/bin/mkdir -p "${config.aoide.root}/song/songbook"
+              if [[ -v DRY_RUN ]]; then
+                ${refreshCmd} --check
+              else
+                ${refreshCmd}
+              fi
+            '';
+          })
+
+          # ── No song, nothing to paint ──────────────────────────────────────
+          # Every entry below reaches for the ACTIVE song (activeSongLivery,
+          # seedStageScript's jq --arg, or a shell entry deployed FROM the song's
+          # QML) — with `aoide.song` null there is no active song to bake, so this
+          # whole block is `lib.optionalAttrs`-gated on `config.aoide.song != null`
+          # rather than `lib.mkIf`: optionalAttrs never forces its `attrs` argument
+          # when the condition is false (plain nix laziness, no module-system
+          # merging involved at this attrset-literal level), so a null-song host's
+          # eval never touches `${config.aoide.song}` here — no deployed QML, no
+          # seeded stage, no restart of the rice; not an empty surface, simply
+          # absent. A host that names a song gets exactly today's behaviour.
+          #
+          # The `aoide-quickshell` unit is NOT part of this gate: it belongs to the
+          # `quickshell` lane, which starts a shell on whatever config this lane
+          # deployed — or on a directory the host brought itself, song or no song.
+          # A null-song host with no such directory still runs no shell (that lane's
+          # own bare case).
+          (lib.optionalAttrs (config.aoide.song != null) {
+            home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              run mkdir -p "${config.aoide.root}/run"
+              run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
+                "${quickshellConfig}/qml/" "${config.aoide.root}/run/qml/"
+            '';
+
+            # ── Seed the live stage twin from the active song ──────────────────────
+            # `song/stage/livery.json` is what LiveryState.qml hot-reloads
+            # (CONTRACTS.md §4). A host that never ran `lyra rice stage <name>` would
+            # otherwise carry a stale/absent stage twin even though the
+            # compositor/Stylix/QML tree were all built from the active song. This
+            # writes the declared song into both twins — `song/stage/livery.json`
+            # and `song/declared/livery.json` — on every activation:
+            # `seedStageScript` (above) does the actual write. It RENAMES over
+            # `stage/livery.json` and never writes through it, so a drafted song's
+            # own file is untouched while its routing link is replaced.
+            # `song/stage/cover.json` is never touched (CONTRACTS.md §4). The seed
+            # is declared truth, written the same way whatever the mode: the staged
+            # or drafted song `stage/mode.json` names is brought back afterwards by
+            # `aoide-rice-reload` (below).
+            home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" ] ''
+              run ${seedStageScript}
+            '';
+
+            # ── Reassert the paint on EVERY activation ─────────────────────────────
+            # A rebuild only restarts units whose definitions changed, so a
+            # long-running quickshell survives every no-diff switch — including one
+            # that has silently lost its Wayland outputs and moved the whole scene
+            # onto a placeholder screen (live incident 2026-08-28: "There are no
+            # outputs - creating placeholder screen"; unit active, desktop bare).
+            # House ruling: activation always brings the rice elements back up.
+            # try-restart bounces a running shell onto the freshly rsynced tree and
+            # re-acquired outputs, no-ops when the unit is stopped (headless/
+            # session-less activation must not start or fail anything), and never
+            # fails the switch.
+            #
+            # ONE try-restart names both units, so systemd orders them: the shell is
+            # stopped, `aoide-rice-reload` (Before the shell, below) writes the staged
+            # or drafted song over the declared seed, and only then does the shell
+            # start. Ordered after the three writes (the QML rsync, the stage seed and
+            # the songbook seed, which the reload reads), so the reload lands over the
+            # fresh seed and the restarted shell reads the new tree, never the old
+            # one; after `reloadSystemd`, so a unit this switch introduces is loaded;
+            # and after `onFilesChange`, where home-manager's `hyprctl reload
+            # config-only` runs on hosts whose home-manager hyprland package is
+            # non-null — a config reload after the reload would reset the keywords it
+            # applied live. (The compositor lane sets that package to null, so there
+            # only Hyprland's own file watcher reloads the config.) Both units no-op
+            # when inactive (a boot activation has no session); the session's own
+            # start of them is what restores the song then. The switch waits for both
+            # jobs, and the reload is bounded (below), so a hung child delays it by
+            # that bound and no more.
+            #
+            # This is the REBUILD-side half of the recovery, not the whole of it:
+            # the identical lockup recurring live, mid-session, with no rebuild in
+            # sight is what `aoide-quickshell-healthcheck.timer` (below) exists to
+            # catch — of the two, that timer is the only one that ever runs
+            # unprompted.
+            home.activation.aoideRestartRice =
+              lib.hm.dag.entryAfter
+                [
+                  "aoideDeployQml"
+                  "aoideSeedSongbook"
+                  "aoideSeedStage"
+                  "onFilesChange"
+                  "reloadSystemd"
+                ]
+                ''
+                  run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
+                    ${pkgs.systemd}/bin/systemctl --user try-restart aoide-rice-reload.service aoide-quickshell.service || true
+                '';
+
+            # ── Confirm the restart above actually landed ──────────────────────────
+            # `aoideRestartRice` is fire-and-forget: `try-restart ... || true` means
+            # a switch reports success whether the shell came back painted or landed
+            # straight in the placeholder-screen lockup its own restart was meant to
+            # fix. `aoide-quickshell-healthcheck.timer` (below) WOULD catch that
+            # within ~15s regardless — this entry doesn't close a hole the timer
+            # leaves open, it exists so the confirmation is immediate and visible in
+            # the rebuild output itself, instead of waiting on the first timer tick
+            # (or on someone noticing a bare desktop). Sleep 5s first: quickshell
+            # logs "Configuration Loaded" ~1s after launch and its layer surfaces
+            # follow shortly after (live journal), so checking instantly would just
+            # race the shell's own startup — not a false positive (health.rs's
+            # journal-line gate means a fresh clean start always reads healthy,
+            # never falsely stuck), just a wasted check. It execs the same lyra binary
+            # the healthcheck units below do, so it is part of this lane's body and
+            # needs no gate of its own.
+            home.activation.aoideVerifyRice = lib.hm.dag.entryAfter [ "aoideRestartRice" ] ''
+              run ${pkgs.coreutils}/bin/sleep 5
+              run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
+                ${pkgs.aoide.rice}/bin/lyra quickshell healthcheck || true
+            '';
+
+            # ── Live mid-session watchdog: the placeholder-screen lockup ───────────
+            # `aoideRestartRice` (above) only reasserts the paint on a REBUILD.
+            # Nothing caught the SAME failure live, mid-session, with no rebuild in
+            # sight — the incident it documents recurred twice more the next day
+            # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=always`
+            # is structurally blind to this lockup: the process never exits, it just
+            # sits `active` painted onto Qt's internal placeholder screen, so
+            # systemd has nothing to restart on. `lyra quickshell healthcheck`
+            # (crates/song/src/health.rs) is the periodic check that closes the gap
+            # — it confirms BOTH the journal's placeholder-screen line AND a live
+            # `hyprctl layers` zero-surface reading before acting (health.rs's own
+            # module doc carries the two-signal reasoning), then restarts the unit
+            # on a retry ladder rather than immediately every tick: immediate on
+            # the first restart, then 15s/60s/5m, settling at a 15-minute floor it
+            # never drops below — but never gives up either, so a genuinely
+            # flapping output still gets restarted forever instead of eventually
+            # being abandoned. A unit that is installed but stopped or parked
+            # `failed` (StartLimit) is reported as not running and left alone:
+            # the watchdog cannot tell a deliberate stop from a parked or
+            # never-started unit, and a restart could undo the decision.
+            #
+            # `quickshell` is a lyra-only command family (left core's registry at
+            # P-A5), so this execs `pkgs.aoide.rice` — lyra's own droppable output
+            # (P-A8) — the same reference shellbridge.nix's `shellbridge` service
+            # uses for the same reason.
+            #
+            # Unlike `shellbridge`/`aoide-graph-reap` (NixOS-level `systemd.user.
+            # services`, whose module gives a flat `path`/`description` sugar),
+            # this pair is nested inside `habit.home`
+            # like `aoide-quickshell` right above — home-manager's OWN systemd
+            # module has no such sugar (checked against its `modules/systemd.nix`:
+            # only `Unit`/`Service`/`Install` freeform sections exist, and no
+            # `path` option at all), so this follows `aoide-quickshell`'s own
+            # Unit/Service/Install shape instead, with `hyprctl`/`notify-send`
+            # (needed by health.rs's `hyprctl_json`/`notify_still_flapping`,
+            # neither of which is guaranteed present on this manager's PATH) added
+            # via an explicit `PATH=` `Environment` entry — the only knob this
+            # schema offers for it. `systemctl`/`journalctl` ride the same
+            # `lib.makeBinPath` list (health.rs's `active_enter_timestamp`/
+            # `journal_tail_since`/`restart_service` all shell out to them) rather
+            # than leaning on an ambient default the way `aoide-graph-reap` does
+            # under NixOS's richer default environment.
+            systemd.user.services.aoide-quickshell-healthcheck = {
+              Unit = {
+                Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=always cannot catch";
+                PartOf = [ "graphical-session.target" ];
+                After = [ "graphical-session.target" ];
+              };
+              Service = {
+                Type = "oneshot";
+                ExecStart = "${pkgs.aoide.rice}/bin/lyra quickshell healthcheck";
+
+                Environment = [
+                  "PATH=${
+                    lib.makeBinPath [
+                      pkgs.systemd
+                      pkgs.hyprland
+                      pkgs.libnotify
+                    ]
+                  }"
+                  # Same "a configured aoide.root must win" reasoning as
+                  # aoide-quickshell's own Environment above — health.rs's restart
+                  # backoff marker lives under $AOIDE_ROOT/state.
+                  "AOIDE_ROOT=${config.aoide.root}"
+                ];
+
+                NoNewPrivileges = true;
+                StandardOutput = "journal";
+                StandardError = "journal";
+              };
+            };
+
+            systemd.user.timers.aoide-quickshell-healthcheck = {
+              Unit = {
+                Description = "Aoide Quickshell healthcheck timer — periodic placeholder-screen sweep (~15s)";
+                PartOf = [ "graphical-session.target" ];
+              };
+              Timer = {
+                # First check 20s after the session comes up (let the shell finish
+                # its own startup/output-negotiation first); thereafter every 15s
+                # since the previous run finished — cheap enough (one systemctl
+                # show, a short journalctl tail, two hyprctl calls) to run often,
+                # and every check speeds up how quickly a live lockup is noticed.
+                OnActiveSec = "20s";
+                OnUnitActiveSec = "15s";
+                AccuracySec = "2s";
+              };
+              Install.WantedBy = [ "graphical-session.target" ];
+            };
+
+            # ── Bring the staged or drafted song back after a login or a switch ────
+            # The activation lays DECLARED truth over the runtime tree (the rsync
+            # and the seed above), and a login or a switch would leave the desktop
+            # on it. `stage/mode.json` is what remembers the last staged song or
+            # the routed draft, and `lyra reload` is its reader: it re-stages that
+            # song (staging), re-routes and re-syncs the draft (draft), or reloads
+            # the shell alone (declarative) — palette, cover, widget bodies, slot
+            # map, registry, compositor keywords and terminal colours. Nix never
+            # reads the mode; this unit only runs the reader.
+            #
+            # Four constraints are invisible from this file:
+            #   - BEFORE the shell, so the shell's first frame is the staged song,
+            #     not the declared one; the activation's try-restart (above) orders
+            #     the same way, the shell being down while the reload writes.
+            #   - In the user MANAGER, never as an activation step: home-manager's
+            #     NixOS activation carries no HYPRLAND_INSTANCE_SIGNATURE, so the
+            #     compositor half of the reload (`live::apply_live`) would skip,
+            #     and the manager has it by the time graphical-session.target is
+            #     up. For the same reason there is no `PATH=`: the manager's own
+            #     reaches hyprctl, kitty, nix-instantiate, quickshell and the
+            #     wallpaper provider's helper without this lane naming other lanes'
+            #     packages (house rule 5).
+            #   - The `-` prefix plus RemainAfterExit: a refused or failed reload
+            #     still leaves the unit active, so the activation's try-restart
+            #     reaches it on the next switch (it skips a unit that is not active).
+            #   - BOUNDED by `timeout`: a oneshot has no start timeout
+            #     (`TimeoutStartSec` is infinity), and `lyra reload` runs children
+            #     with no deadline of their own (nix-instantiate, `quickshell ipc
+            #     call`, hyprctl, the wallpaper provider's helper). One hung child
+            #     would hold the shell's start, which waits on this unit, and the
+            #     activation's try-restart, which waits on both jobs. `timeout`
+            #     ends the run with a non-zero exit, which the `-` already
+            #     forgives, so the unit stays active; a `TimeoutStartSec` would
+            #     leave it failed, and a try-restart skips a failed unit.
+            systemd.user.services.aoide-rice-reload = {
+              Unit = {
+                Description = "Aoide rice reload: bring the staged or drafted song back after a login or a switch";
+                After = [ "graphical-session.target" ];
+                PartOf = [ "graphical-session.target" ];
+                Before = [ "aoide-quickshell.service" ];
+              };
+              Service = {
+                Type = "oneshot";
+                RemainAfterExit = true;
+                ExecStart = "-${pkgs.coreutils}/bin/timeout 60 ${pkgs.aoide.rice}/bin/lyra reload";
+                Environment = [
+                  "AOIDE_ROOT=${config.aoide.root}"
+                  # Same declaration as aoide-quickshell's own: the staging path's one
+                  # session-sourced variable, spelled on the unit so a reload after a
+                  # switch stages from THIS build's songbook.
+                  "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
+                ];
+              };
+              Install.WantedBy = [ "graphical-session.target" ];
+            };
+          })
+        ];
+      };
+  };
 }

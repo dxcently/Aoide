@@ -1,10 +1,9 @@
 # modules/dendrites/bash.nix — the interactive bash environment.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.bash.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
-#     see modules/aggregations/base/default.nix).
+#   - Selected by the nucleus aggregation (modules/aggregations/nucleus/default.nix), or one line in hosts/.
 #
 # What this dendrite does (ported from dxflake modules/dendrites/bash.nix):
 #   - Enables programs.bash + completion for the aoide user (home-manager).
@@ -23,93 +22,89 @@
 # it). The other dendrites this one leans on (fastfetch, mcfly, yazi, nh) are
 # their own files — enable them alongside bash for the full experience.
 
-{ config, lib, ... }:
+{ lib, ... }:
 let
   flakeDir = "/home/khoa/Aoide";
 in
 {
-  options.aoide.bash.enable = lib.mkEnableOption "the interactive bash environment (aliases, greeting, tty1 → Hyprland)";
 
-  config = lib.mkMerge [
-    { aoide.bash.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.bash.enable {
-      habit.home =
-        { pkgs, ... }:
-        {
-          home.packages = with pkgs; [ lsd ];
+  config = {
+    habit.home =
+      { pkgs, ... }:
+      {
+        home.packages = with pkgs; [ lsd ];
 
-          programs.bash = {
-            enable = true;
-            enableCompletion = true;
+        programs.bash = {
+          enable = true;
+          enableCompletion = true;
 
-            # tty1 login → launch the desktop (guarded so a headless login is safe).
-            profileExtra = ''
-              if [ "$(tty)" = "/dev/tty1" ] && command -v Hyprland >/dev/null; then
-                exec Hyprland &> /dev/null
-              fi
-            '';
+          # tty1 login → launch the desktop (guarded so a headless login is safe).
+          profileExtra = ''
+            if [ "$(tty)" = "/dev/tty1" ] && command -v Hyprland >/dev/null; then
+              exec Hyprland &> /dev/null
+            fi
+          '';
 
-            # Greeting on every interactive shell.
-            initExtra = ''
-              fastfetch
-            '';
+          # Greeting on every interactive shell.
+          initExtra = ''
+            fastfetch
+          '';
 
-            # mcfly history search + the yazi `y` cd-wrapper.
-            bashrcExtra = ''
-              command -v mcfly >/dev/null && eval "$(mcfly init bash)"
+          # mcfly history search + the yazi `y` cd-wrapper.
+          bashrcExtra = ''
+            command -v mcfly >/dev/null && eval "$(mcfly init bash)"
 
-              function y() {
-              local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-              yazi "$@" --cwd-file="$tmp"
-              if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-                builtin cd -- "$cwd"
-              fi
-              rm -f -- "$tmp"
-                 }
-            '';
+            function y() {
+            local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+            yazi "$@" --cwd-file="$tmp"
+            if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+              builtin cd -- "$cwd"
+            fi
+            rm -f -- "$tmp"
+               }
+          '';
 
-            shellAliases = {
-              # editor
-              v = "nvim";
-              nv = "nvim";
+          shellAliases = {
+            # editor
+            v = "nvim";
+            nv = "nvim";
 
-              # Aoide `ad*` nh family (rehomed from dxflake's `dx*`).
-              ad = "cd ${flakeDir}";
-              adrebuild = "nh os switch ${flakeDir}/";
-              adupdate = "nh os switch ${flakeDir}/ --update";
-              # Re-lock just the first-party corner and switch. `adupdate` moves
-              # every input including nixpkgs; this one moves only what we own,
-              # so a muse bump never drags a world rebuild behind it.
-              adbump = "nix flake update --flake ${flakeDir} aoide && nh os switch ${flakeDir}/";
-              adboot = "nh os boot ${flakeDir}/";
-              adtest = "nh os test ${flakeDir}/";
-              adbuild = "nh os build ${flakeDir}/";
-              adrollback = "nh os rollback";
-              adcheck = "nix flake check ${flakeDir}/";
-              adgens = "nh os info";
-              adclean = "nh clean all";
+            # Aoide `ad*` nh family (rehomed from dxflake's `dx*`).
+            ad = "cd ${flakeDir}";
+            adrebuild = "nh os switch ${flakeDir}/";
+            adupdate = "nh os switch ${flakeDir}/ --update";
+            # Re-lock just the first-party corner and switch. `adupdate` moves
+            # every input including nixpkgs; this one moves only what we own,
+            # so a muse bump never drags a world rebuild behind it.
+            adbump = "nix flake update --flake ${flakeDir} aoide && nh os switch ${flakeDir}/";
+            adboot = "nh os boot ${flakeDir}/";
+            adtest = "nh os test ${flakeDir}/";
+            adbuild = "nh os build ${flakeDir}/";
+            adrollback = "nh os rollback";
+            adcheck = "nix flake check ${flakeDir}/";
+            adgens = "nh os info";
+            adclean = "nh clean all";
 
-              # navigation / power
-              ".." = "cd ..";
-              reboot = "systemctl reboot";
-              shutdown = "systemctl poweroff";
-              poweroff = "systemctl poweroff";
-              sleep = "systemctl suspend";
-              hibernate = "systemctl hibernate";
-              lock = "hyprlock";
+            # navigation / power
+            ".." = "cd ..";
+            reboot = "systemctl reboot";
+            shutdown = "systemctl poweroff";
+            poweroff = "systemctl poweroff";
+            sleep = "systemctl suspend";
+            hibernate = "systemctl hibernate";
+            lock = "hyprlock";
 
-              # lsd
-              ls = "lsd";
-              ll = "lsd -l";
-              la = "lsd -la";
-              lt = "lsd --tree";
+            # lsd
+            ls = "lsd";
+            ll = "lsd -l";
+            la = "lsd -la";
+            lt = "lsd --tree";
 
-              # tools
-              lg = "lazygit";
-              crc = "claude --rc";
-            };
+            # tools
+            lg = "lazygit";
+            crc = "claude --rc";
           };
         };
-    })
-  ];
+      };
+  };
 }

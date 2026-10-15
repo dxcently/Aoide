@@ -8,122 +8,117 @@
 # a flat dendrite (CONTRACTS.md §2).
 #
 # Dendrite shape:
-#   - Guarded on aoide.fastfetch.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies (including the bundled logo); reads no other
 #     module.
-#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
-#     see modules/aggregations/base/default.nix).
+#   - Selected by the nucleus aggregation (modules/aggregations/nucleus/default.nix), or one line in hosts/.
 #
 # Design: a clean, system-fitting greeting — a compact lyre, aligned key
 # columns, and two subtly music-marked section rules (hardware / software).
 # The bash dendrite calls `fastfetch` on every interactive shell (initExtra),
 # so enabling both gives the login greeting.
 
-{ config, lib, ... }:
+{ lib, ... }:
 {
-  options.aoide.fastfetch.enable = lib.mkEnableOption "the fastfetch greeting (compact Aoide lyre)";
 
-  config = lib.mkMerge [
-    { aoide.fastfetch.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.fastfetch.enable {
-      habit.home =
-        { pkgs, ... }:
-        {
-          programs.fastfetch = {
-            enable = true;
-            package = pkgs.fastfetch;
-            settings = {
-              logo = {
-                type = "file";
-                source = ./ascii-fetch;
-                width = 14;
-                height = 7;
-                padding = {
-                  top = 1;
-                  left = 2;
-                  right = 3;
-                };
+  config = {
+    habit.home =
+      { pkgs, ... }:
+      {
+        programs.fastfetch = {
+          enable = true;
+          package = pkgs.fastfetch;
+          settings = {
+            logo = {
+              type = "file";
+              source = ./ascii-fetch;
+              width = 14;
+              height = 7;
+              padding = {
+                top = 1;
+                left = 2;
+                right = 3;
               };
-              display = {
-                separator = "  ";
-              };
-              modules = [
-                {
-                  type = "title";
-                  key = "♪ ";
-                  format = "{user-name}@{host-name}";
-                }
-                {
-                  type = "custom";
-                  format = "╶─────────────────────────╴";
-                }
-                {
-                  type = "os";
-                  key = "os    ";
-                }
-                {
-                  type = "kernel";
-                  key = "kernel";
-                }
-                {
-                  type = "uptime";
-                  key = "uptime";
-                }
-                { type = "break"; }
-                {
-                  type = "custom";
-                  # Section rule with a subtle music mark (kept short so it never
-                  # runs past a tiled terminal's edge).
-                  format = "♪ hardware ╶──────────────╴";
-                }
-                {
-                  type = "host";
-                  key = "host  ";
-                }
-                {
-                  type = "cpu";
-                  key = "cpu   ";
-                  format = "{name}";
-                }
-                {
-                  type = "gpu";
-                  key = "gpu   ";
-                  format = "{name}";
-                }
-                {
-                  type = "memory";
-                  key = "ram   ";
-                }
-                { type = "break"; }
-                {
-                  type = "custom";
-                  format = "♪ software ╶──────────────╴";
-                }
-                {
-                  type = "wm";
-                  key = "wm    ";
-                }
-                {
-                  type = "shell";
-                  key = "shell ";
-                }
-                {
-                  type = "terminal";
-                  key = "term  ";
-                }
-                {
-                  type = "theme";
-                  key = "theme ";
-                }
-                { type = "break"; }
-                {
-                  type = "colors";
-                  symbol = "circle";
-                }
-              ];
             };
+            display = {
+              separator = "  ";
+            };
+            modules = [
+              {
+                type = "title";
+                key = "♪ ";
+                format = "{user-name}@{host-name}";
+              }
+              {
+                type = "custom";
+                format = "╶─────────────────────────╴";
+              }
+              {
+                type = "os";
+                key = "os    ";
+              }
+              {
+                type = "kernel";
+                key = "kernel";
+              }
+              {
+                type = "uptime";
+                key = "uptime";
+              }
+              { type = "break"; }
+              {
+                type = "custom";
+                # Section rule with a subtle music mark (kept short so it never
+                # runs past a tiled terminal's edge).
+                format = "♪ hardware ╶──────────────╴";
+              }
+              {
+                type = "host";
+                key = "host  ";
+              }
+              {
+                type = "cpu";
+                key = "cpu   ";
+                format = "{name}";
+              }
+              {
+                type = "gpu";
+                key = "gpu   ";
+                format = "{name}";
+              }
+              {
+                type = "memory";
+                key = "ram   ";
+              }
+              { type = "break"; }
+              {
+                type = "custom";
+                format = "♪ software ╶──────────────╴";
+              }
+              {
+                type = "wm";
+                key = "wm    ";
+              }
+              {
+                type = "shell";
+                key = "shell ";
+              }
+              {
+                type = "terminal";
+                key = "term  ";
+              }
+              {
+                type = "theme";
+                key = "theme ";
+              }
+              { type = "break"; }
+              {
+                type = "colors";
+                symbol = "circle";
+              }
+            ];
           };
         };
-    })
-  ];
+      };
+  };
 }

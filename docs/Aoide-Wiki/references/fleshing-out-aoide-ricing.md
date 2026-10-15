@@ -727,7 +727,7 @@ supplies is the per-session lane above it.
 
 ## 8. The sudo door — privilege with a human inside it
 
-This is not a new invention: `modules/nucleus/aoided.nix` already declares
+This is not a new invention: `pkgs/aoide/module/aoided.nix` already declares
 aoided as owner of "the user-gated rebuild pipeline (**polkit pattern**):
 agent proposes → user admits → git records", and the compositor facet
 already runs **hyprpolkitagent** as a user service, installed explicitly

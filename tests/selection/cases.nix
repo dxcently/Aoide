@@ -21,7 +21,7 @@ let
     };
 
   desktopHost = {
-    aggregation.base.enable = true;
+    aggregation.nucleus.enable = true;
     aggregation.desktop.enable = true;
     aggregation.agents.enable = true;
     aggregation.aoideos.enable = true;

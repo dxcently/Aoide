@@ -2,10 +2,10 @@
 # Rust interactive coding harness built to replace pi for daily use).
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.eidolon.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies (pkgs/eidolon, a launcher — see its header
 #     for why); reads only config.aoide.user plus its own options.
-#   - Enable with one line in hosts/ (see hosts/yomi-strix/default.nix).
+#   - Select with one line in hosts/ (see hosts/yomi-strix/default.nix).
 #
 # What this dendrite does:
 #   - Installs `eidolon` (pkgs.eidolon, the launcher) system-wide.
@@ -13,7 +13,7 @@
 #     and the `[mneme]` vault wiring. Eidolon's own no-config fallback model is
 #     `mock`; the
 #     mere presence of that table flips it to the already-authenticated
-#     `claude` binary (aoide.claude-code.enable), so no secret store or token
+#     `claude` binary (the claude-code dendrite, when selected), so no secret store or token
 #     file is needed to get a real turn — see ~/eidolon's
 #     crates/cli/src/config.rs (`default_model`). `default_model` then names
 #     the model a new session actually starts on, ahead of that fallback
@@ -52,26 +52,22 @@
   ...
 }:
 {
-  options.aoide.eidolon.enable = lib.mkEnableOption "the Eidolon coding harness";
 
-  config = lib.mkMerge [
-    { aoide.eidolon.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.eidolon.enable {
-      environment.systemPackages = [ pkgs.eidolon ];
+  config = {
+    environment.systemPackages = [ pkgs.eidolon ];
 
-      habit.home.home.file.".config/eidolon/config.toml".text = ''
-        default_model = "ollama:deepseek-v4.1-flash"
-        fallback_model = "sonnet"
-        persona = "Rook"
+    habit.home.home.file.".config/eidolon/config.toml".text = ''
+      default_model = "ollama:deepseek-v4.1-flash"
+      fallback_model = "sonnet"
+      persona = "Rook"
 
-        [claude_cli]
+      [claude_cli]
 
-        # The vault (Mneme). Personas and notes are read from here; the
-        # passphrase is the operator's out-of-band file, not a Nix value.
-        [mneme]
-        mcp_url = "https://mneme.necoconeco.net/mcp"
-        passphrase_file = "~/.config/eidolon/mneme.pass"
-      '';
-    })
-  ];
+      # The vault (Mneme). Personas and notes are read from here; the
+      # passphrase is the operator's out-of-band file, not a Nix value.
+      [mneme]
+      mcp_url = "https://mneme.necoconeco.net/mcp"
+      passphrase_file = "~/.config/eidolon/mneme.pass"
+    '';
+  };
 }

@@ -38,12 +38,12 @@ modules/dendrites/lyra/
   (`lib/songbook.nix`'s `builtIn`): a
   selected song's records name their slot bodies by `owner`, so the lenders ship
   and seed beside it, which is what makes every manifest record resolve to a
-  directory that exists on the host. Guarded on that fact; the lane sets it
-  `mkDefault true`.
+  directory that exists on the host. Selecting the lane is the switch; it sets
+  `aoide.lyra.enable` `true`.
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
   unix-socket commands, and the only consumer of Hyprland's IPC (QML never
-  speaks an agent protocol). Self-gated on `aoide.enable && aoide.lyra.enable`:
+  speaks an agent protocol). Gated on `aoide.enable && aoide.lyra.enable`:
   lyra owns the bridge, and its `ExecStart` execs lyra out of `pkgs.aoide.rice`,
   a separate droppable output.
 - **`default.nix` — `aoide-rice-reload`, the staged song comes back.** Declared truth is laid

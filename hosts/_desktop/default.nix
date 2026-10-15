@@ -11,7 +11,7 @@
 # No list anywhere needs the new name — hosts are discovered.
 { lib, ... }:
 {
-  habit.aggregation.base.enable = true;
+  habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
   habit.aggregation.aoideos.enable = true;
 

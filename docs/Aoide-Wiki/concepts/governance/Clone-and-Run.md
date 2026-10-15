@@ -60,8 +60,7 @@ Re-running `lyra onboard` warns and backs the old file up to `<out>.bak`; a file
 **Done-state check**: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
 
 On a NixOS host the daemon is started for you: `pkgs/aoide/module/aoided.nix` writes
-the `aoided` systemd **user** unit and `modules/nucleus/aoided.nix` anchors it to
-`aoide.sessionTarget`. That module is the declared path. Off nix — a plain Linux
+the `aoided` systemd **user** unit and anchors it to `aoide.sessionTarget`. That module is the declared path. Off nix — a plain Linux
 box, a container, WSL2 — there is no unit file, and `docs/INSTALL.md` § 6 carries
 the portable equivalent (the unit body, its four environment seams, and the
 no-systemd fallback).

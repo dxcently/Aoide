@@ -21,16 +21,16 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 
 ## 1. Architecture
 
-The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, a core module by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its host module and habit's composition (`inputs.habit`, re-exported as `lib.composition`) resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
+The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, an option-contract file by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its host module and habit's composition (`inputs.habit`, re-exported as `lib.composition`) resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
 
 ```
 ~/Aoide/
 ├── modules/
-│   ├── nucleus/       core: aoided daemon, secrets, the option contract, policy
+│   ├── nucleus/       the option contract and the platform's assertions
 │   ├── dendrites/     opt-in lanes — one tree, shipped + personal branches,
 │   │                  the paint lanes among them (lyra, quickshell, compositor,
 │   │                  stylix, greeter)
-│   ├── aggregations/  named groups a host takes in one line (base, desktop, …)
+│   ├── aggregations/  named groups a host takes in one line (nucleus, desktop, …)
 │   └── overrides/     capability-scoped fixes
 ├── hosts/             one record per machine (`_`-prefixed = template to copy)
 ├── pkgs/              aoide (Rust, its own flake, consumed as a path input),
@@ -44,7 +44,7 @@ A catalogue at the centre and radial distance from it governing who may change w
 
 | Layer | Owner | What it holds |
 |---|---|---|
-| `modules/nucleus/` | upstream | The daemon, secrets, the option contract, policy. |
+| `modules/nucleus/` | upstream | The option contract and assertions every host carries. The daemon and the rest of the floor are dendrites in the `nucleus` aggregation; the secrets broker is one a host selects by name. |
 | `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (lyra, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
 | `song/songbook/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, livery.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
 

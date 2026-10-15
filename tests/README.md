@@ -62,7 +62,7 @@ what those checks actually test.
   proves that grep can fire), then applies the fixture's `outputs` to the ref
   under test's own inputs — so a commit ref really freezes the tree the consumer
   is built against — and reads the resulting hosts. `consumer` performs from the
-  fixture's own songbook: nucleus, the shell, the theme, one performed song plus
+  fixture's own songbook: the nucleus contract and its own `nucleus` group, the shell, the theme, one performed song plus
   one built in that BORROWS the performer's widgets, the deployed config, the
   seeded songbook, and the templates on the units. `aoide-songs` performs
   Aoide's own `sonata` through the `songbookRoot` export, and its lyra lane is

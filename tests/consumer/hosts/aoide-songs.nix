@@ -6,6 +6,7 @@
 # a path built into Aoide's tree. `sonata` borrows its own `_widgets/` shelf, so
 # the borrow door is exercised over Aoide's songbook too.
 _: {
+  habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
 
   habit.song.declared = "sonata";

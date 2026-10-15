@@ -1,17 +1,15 @@
-# modules/nucleus/default.nix — every unconditional core file this tree
-# ships.
+# modules/nucleus/default.nix — the contract every host carries.
 #
-# One line per file, in directory order. A new nucleus file is core
-# plumbing, not a toggle — it lands here the same way, plus one line.
+# What the dendrites and every consumer build against, and nothing that does
+# work: the option tree and the platform's assertions. Services, packages and
+# settings are members of the `nucleus` aggregation instead
+# (`modules/aggregations/nucleus`), which a host can deselect from.
+#
+# One line per file, in directory order. A new file here declares an option or
+# an invariant; anything that configures the platform is a dendrite.
 {
   imports = [
-    ./aoided.nix
     ./assertions.nix
-    ./config.nix
-    ./melete-adapter.nix
-    ./nix.nix
     ./options.nix
-    ./packages.nix
-    ./secrets.nix
   ];
 }

@@ -37,7 +37,7 @@
 # `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` (review finding, task #107: paint data on a
 # headless-core unit only drags this package's closure onto it for nothing).
 # That is `modules/dendrites/quickshell.nix`'s main `shellbridge` service
-# (execs `lyra shellbridge --run`) plus `modules/nucleus/aoided.nix`'s
+# (execs `lyra shellbridge --run`) plus `modules/dendrites/aoided.nix`'s
 # `environment.sessionVariables`, itself gated on `aoide.lyra.enable` — the
 # option that actually controls whether `lyra` is installed on this host —
 # for an operator's own interactive `lyra rice compose`. On a NixOS host this

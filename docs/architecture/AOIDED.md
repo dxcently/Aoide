@@ -3,7 +3,7 @@
 Design for the five-rung ladder that turns `aoided` from a self-check skeleton
 (`pkgs/aoide/crates/server/src/daemon.rs:29` — `run()` audits one startup
 record, prints status JSON, exits in ~25ms; unit held alive by
-`Type=oneshot` + `RemainAfterExit`, `modules/nucleus/aoided.nix`) into the
+`Type=oneshot` + `RemainAfterExit`, `modules/dendrites/aoided.nix`) into the
 resident process the house rules already describe: one policy surface, one
 gate, one audit log, everything flowing through it. Core stays
 cargo-buildable on any Linux — nothing below shells out to nix or assumes
@@ -190,7 +190,7 @@ registry, its `AGENTS.md` invariant). `aoide daemon` (the CLI command,
 non-Cli doors and gains a `--serve` special-case at `run_cli` for parity
 with `a2a serve`; the systemd unit execs the `aoided` binary as today.
 
-The unit flips per the revert note it carries (`modules/nucleus/aoided.nix`,
+The unit flips per the revert note it carries (`modules/dendrites/aoided.nix`,
 "When the daemon grows its real loop, revert to Type=simple + Restart"):
 `Type=simple`, `Restart=on-failure`, `RestartSec=5s`, drop
 `RemainAfterExit`. The `BindsTo`-anchored doors (aoide-mcp, aoide-a2a) keep
@@ -345,7 +345,7 @@ standing orchestrator:
   target when a `--to` query matches no local session and names no explicit
   node; the mail relay uses the hub as the persistent drop
   point. Both are preference, not protocol — a mesh with no hub behaves
-  exactly as today. Flags default off (house rule).
+  exactly as today. Options default off.
 
 ---
 
@@ -559,7 +559,7 @@ Blast: `aoide-protocol`, `aoide-secrets`. Gate: none.
 `aoide_server::daemon::run_loop` + `serve_daemon` (bind, accept-thread,
 `ping` + `subscribe` ops, framing, own events feed via `FeedWriter`);
 `bin/aoided.rs` wires registry+dispatch in; tick loop with no producers
-yet. `modules/nucleus/aoided.nix`: `Type=simple`, `Restart=on-failure`,
+yet. `modules/dendrites/aoided.nix`: `Type=simple`, `Restart=on-failure`,
 drop `RemainAfterExit` (the flip the unit's own comment reserves).
 Tests: serve_daemon over a tempdir socket (ping round-trip, subscribe
 receives an injected event, malformed line survives); feed file created and

@@ -2,7 +2,7 @@
 # lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `lyra
 # onboard`'s `aoide.nix` generator: `nix eval --json <checkout>#aoideOptions`
 # returns every VISIBLE, non-internal `aoide.*` option declared across
-# modules/nucleus and the dendrites the registry catalogues,
+# modules/nucleus (the contract) and the dendrites the registry catalogues,
 # narrowed to exactly what the generator needs to render one commented line —
 # name, description, and the default already rendered as nix SOURCE TEXT
 # (nixpkgs' own doc renderer does the quoting/escaping; the generator pastes

@@ -10,7 +10,7 @@
 #
 # `hyprland` is the only compositor today. Its two halves live beside this
 # file: `hyprland/default.nix` is the LOOK (livery-derived appearance and
-# session plumbing, guarded on the `aoide.compositor.enable` fact) and
+# session plumbing; selecting the provider is its switch) and
 # `hyprland/behaviour.nix` is the BEHAVIOUR (keybinds, input, tiling, window
 # rules — its own catalogue entry, `hyprland`, because `aoide.hyprland.*`
 # stays a host-facing option).
