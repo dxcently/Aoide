@@ -35,10 +35,11 @@
 //!
 //! ## The contract
 //!
-//! [`daemon_dispatch`] returns `None` exactly when nothing usable answered
-//! (no daemon listening, the connect timed out, or `inv.door` is already
-//! [`Door::Daemon`] — see the doc below) — the caller's own existing
-//! direct-path fallback runs unchanged in every one of those cases. Once a
+//! [`daemon_dispatch`] returns `None` exactly when the hop is not taken (a
+//! door other than [`Door::Cli`], see the doc below) or nothing usable
+//! answered (no daemon listening, the connect timed out) — the caller's own
+//! existing direct-path fallback runs unchanged in every one of those cases.
+//! Once a
 //! connection is actually made, ANY further failure (a write error, a read
 //! timeout, a malformed or `outcome`-less reply) becomes `Some(Outcome::
 //! error(...))` instead — a daemon that answered but broke is a real
@@ -99,15 +100,17 @@ fn connect_bounded(socket_path: &std::path::Path, timeout: Duration) -> Option<U
 /// caller's own direct stage-write path should run instead (module doc's
 /// "The contract").
 ///
-/// `inv.door == Door::Daemon` short-circuits to `None` immediately, with no
-/// connect attempt at all — this is the reentrancy guard: the injected
-/// `dispatch` fn the daemon's OWN `serve_daemon` calls IS `cli::dispatch::
-/// dispatch`, the exact same function a routed handler runs under on the
-/// CLIENT side, and `aoide_server::daemon::invocation_from_dispatch_request`
-/// always stamps `Door::Daemon` on an invocation built from the wire — so a
-/// handler running INSIDE the daemon (because a remote caller's request
-/// just landed) always sees `Door::Daemon` and takes its direct path
-/// unconditionally, rather than trying to connect to itself and recursing.
+/// **Only the CLI door hops.** Every other door short-circuits to `None`
+/// with no connect attempt at all. The wire carries no door:
+/// `aoide_server::daemon::invocation_from_dispatch_request` stamps
+/// `Door::Daemon` on every invocation it builds, so a forwarded MCP or A2A
+/// call would run inside the daemon as the daemon's own door, with the
+/// approvals and the ring that door holds (`Door::can_approve`). A non-CLI
+/// caller therefore runs its own local path, where its real door still
+/// decides. `Door::Daemon` is the reentrancy half of the same rule: the
+/// daemon's dispatch fn IS `cli::dispatch::dispatch`, so a handler already
+/// running inside the daemon takes its direct path rather than connecting
+/// to itself and recursing.
 pub fn daemon_dispatch(inv: &Invocation) -> Option<Outcome> {
     daemon_dispatch_with_timeout(inv, ROUND_TRIP_TIMEOUT)
 }
@@ -115,7 +118,7 @@ pub fn daemon_dispatch(inv: &Invocation) -> Option<Outcome> {
 /// Explicit reply bound for operations that perform bounded upstream work.
 /// The default dispatch callers retain their two-second bound; no retry occurs.
 pub fn daemon_dispatch_with_timeout(inv: &Invocation, reply_timeout: Duration) -> Option<Outcome> {
-    if inv.door == Door::Daemon {
+    if inv.door != Door::Cli {
         return None;
     }
 
@@ -180,13 +183,11 @@ fn parse_dispatch_reply(inv: &Invocation, reply: &str) -> Option<Outcome> {
 /// FILE would let whoever can forge a seal also forge the "trusted" key
 /// that vouches for it, so a live round trip is the only channel worth
 /// asking. **This is NOT a channel a same-uid attacker is locked out of**:
-/// the daemon socket is bound unlink-then-bind with no flock/pidfile
-/// (aoide_server::daemon::bind_socket), so a same-uid attacker can already
-/// race or evict the real listener and answer with a forged key of its
-/// own — closing that is P-ID3's same-uid dispatch-socket floor, not this
-/// function's job; it buys no more than the raw per-session socket a
-/// same-uid process can already connect to directly (CONTRACTS.md's own
-/// honesty note on this exact boundary).
+/// the open hole (`docs/architecture/AOIDED.md` "Socket") lets a same-uid
+/// process answer with a forged key of its own, and this fetch does not
+/// close it. It buys no more than the raw per-session socket a same-uid
+/// process can already connect to directly (CONTRACTS.md's own honesty note
+/// on this exact boundary).
 pub fn daemon_seal_pubkey_hex() -> Option<String> {
     // The fetch's BODY lives in `aoide_storage::attest::daemon_seal_pubkey_hex`
     // as of LANE IDENTITY P-ID4 — the secrets broker's origin gate needs the
@@ -275,6 +276,29 @@ mod tests {
             None => std::env::remove_var("AOIDE_DAEMON_SOCKET"),
         }
         drop(listener);
+        std::fs::remove_file(&socket_path).ok();
+    }
+
+    /// The wire carries no door, so the daemon would run a forwarded MCP or A2A
+    /// call as its own. A LIVE listener proves the door, not a dead socket, is
+    /// what keeps them home. POSIX-only for the non-blocking accept, as below.
+    #[cfg(unix)]
+    #[test]
+    fn daemon_dispatch_never_forwards_a_door_other_than_cli() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_DAEMON_SOCKET"]);
+        let socket_path = short_tmp("door").with_extension("sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
+        for door in [Door::Mcp, Door::A2a] {
+            let out = daemon_dispatch(&inv(&["session", "hook"], door));
+            assert!(out.is_none(), "{door:?} runs its own local path: {out:?}");
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "{door:?} must never connect to the daemon"
+            );
+        }
         std::fs::remove_file(&socket_path).ok();
     }
 

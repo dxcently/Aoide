@@ -82,7 +82,6 @@ fn verified_record(name: &str, url: &str, pubkey_hex: &str) -> aoide_storage::no
     aoide_storage::node_store::Node {
         name: name.to_string(),
         url: url.to_string(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,

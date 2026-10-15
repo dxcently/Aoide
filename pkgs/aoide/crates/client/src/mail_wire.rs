@@ -29,6 +29,7 @@
 //! rarely-contacted spool target should not accumulate a standing forward
 //! just because a background tick happened to touch it once.
 
+use aoide_protocol::untrusted::LINE_MAX;
 use aoide_storage::mail::Envelope;
 use aoide_storage::node_store::Node;
 use serde_json::{json, Value};
@@ -74,13 +75,94 @@ impl Drop for TunnelTeardownGuard {
 /// reused not reinvented).
 enum SignedCall {
     /// A JSON-RPC `result` member, whatever shape the method's own answer
-    /// takes — the CALLER interprets it.
+    /// takes — the CALLER interprets it. Produced ONLY from an answer whose
+    /// signature verified under the key on file for the node, so an acked
+    /// letter, a settled receipt or a filed hand-over is never the word of an
+    /// unproven sender.
     Result(Value),
     /// A JSON-RPC `error` member: the far end refused the call itself
-    /// (admission, per MAIL.md §Wire's admission/outcome split).
+    /// (admission, per MAIL.md §Wire's admission/outcome split). Verified like
+    /// [`SignedCall::Result`]. The text is the far end's own words, cleaned and
+    /// clipped ([`foreign_words`]).
     Refused(String),
     /// No usable response at all — dial/tunnel/HTTP/parse failure.
     TransportFailed(String),
+    /// An answer this box cannot check against the key on file: unsigned,
+    /// signed by another key, or addressed to a node with no key on file (never
+    /// dialled). Nothing in it is read, so an entry it carried is neither
+    /// settled nor parked, and the reason says why.
+    Unauthenticated(String),
+}
+
+/// The header an answer's signature rides, lowercased as the parser keeps it.
+const ANSWER_SIGNATURE_HEADER: &str = "x-aoide-answer-signature";
+
+/// Is `node` a record this box can check an answer against: VERIFIED, with a
+/// non-blank key on file? Anything else (a `node add` record, a pair-mesh hop
+/// declared without a key, a legacy record that is verified but keyless) has
+/// nothing to check an answer under, so it is never dialled. One predicate, so
+/// every mail call asks the same question.
+pub(crate) fn keyed_record(n: &Node) -> bool {
+    n.verified && n.pubkey.as_deref().is_some_and(|k| !k.trim().is_empty())
+}
+
+/// One answer-check line in the audit log. The words are the closed
+/// `mail.answer.*` vocabulary; the door and the adapter write their own lines
+/// through the same channel, so an operator reads both the same way.
+fn audit_answer(event: &str, message: &str) {
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        event,
+        "invalid",
+        message,
+    );
+}
+
+/// The most of a far door's own words an unsigned answer's refusal carries, in
+/// characters. A signed answer's words keep [`LINE_MAX`].
+const SAID_MAX: usize = 120;
+
+/// A far door's words, made inert to keep and to print: every character
+/// [`aoide_protocol::untrusted::is_unsafe`] refuses gone, whitespace flattened,
+/// clipped to `max` characters. **Every word a far door's answer puts in front of
+/// the operator passes through here where it is read out of the answer**, signed
+/// or not: a signature proves who spoke, never that the words are safe for a
+/// terminal, because a relay or a destination can be hostile and hold its own
+/// key. Cleaning at that one point, not at each printer, is what makes every
+/// printer of the entry's `last_outcome`, the link record, a poll's `Err` and
+/// a [`PollOutcome`] safe at once. A caller that classifies a word does so on
+/// the RAW string before it cleans, since stripping a format character can turn
+/// one word into another. The audit lines a poll writes are read by a person
+/// too, so their msgids and refusal details pass through here as well.
+fn foreign_words(words: &str, max: usize) -> String {
+    aoide_protocol::untrusted::clip_flat(&aoide_protocol::untrusted::strip_unsafe(words), max)
+}
+
+/// A stored outcome (`last_outcome`, the link record) as the one line a printer
+/// hands a person, or `None` when nothing printable is left. A build that
+/// stores it cleans it ([`foreign_words`]); an older one stored the far end's
+/// words as they came, and those files are still on disk, so every printer of a
+/// stored outcome reads it through here too.
+pub(crate) fn outcome_line(stored: &str) -> Option<String> {
+    Some(aoide_protocol::untrusted::clean_line(stored)).filter(|line| !line.is_empty())
+}
+
+/// What an unsigned answer said, as the far end wrote it: the JSON-RPC
+/// `error.message`, else the result's `reason` (a door's `config-invalid` is a
+/// refused result, not an error, and is the far end's word that its own config
+/// is broken rather than old). Shown to the operator and never acted on, so the
+/// caller cleans and clips it to [`SAID_MAX`] ([`foreign_words`]) for display,
+/// and judges the word on this raw form.
+fn unsigned_words(body: &str) -> Option<String> {
+    let answer: Value = serde_json::from_str(body).ok()?;
+    let said = answer
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .or_else(|| answer.get("result").and_then(|r| r.get("reason")))?
+        .as_str()?;
+    Some(said.to_string())
 }
 
 /// Build, sign and send one method call to `node`, mirroring
@@ -95,6 +177,24 @@ enum SignedCall {
 /// the record (`crate::commands::request_mesh`: the node's sole mesh, else
 /// the home mesh).
 fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> SignedCall {
+    // The key the answer must verify under. Without one nothing can be checked,
+    // so the node is refused before a bearer is resolved or a socket is opened.
+    if !keyed_record(node) {
+        let why = if node.verified {
+            "a verified record with no key"
+        } else {
+            "an unverified record (a `node add`, or a declaration that names no key)"
+        };
+        let msg = format!(
+            "no identity key is on file for `{}` ({why}), so its answers cannot be checked and it is not dialled — \
+             pair it (`aoide pair {}`) or give its charter line a key",
+            node.name, node.name
+        );
+        audit_answer("mail.answer.no-key", &msg);
+        return SignedCall::Unauthenticated(msg);
+    }
+    let key = node.pubkey.clone().unwrap_or_default();
+
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     let body_str = serde_json::to_string(&body).unwrap_or_default();
 
@@ -106,20 +206,94 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
         Ok(h) => h,
         Err(e) => return SignedCall::TransportFailed(format!("signing: {e}")),
     };
-    let (code, resp) = match crate::commands::post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, 15) {
+    // The answer covers the request's own signature and nonce, so both are
+    // taken from the headers that were actually sent.
+    let header = |name: &str| extra_headers.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str());
+    let (Some(request_signature), Some(request_nonce)) = (
+        header(aoide_storage::wire_auth::HEADER_SIGNATURE),
+        header(aoide_storage::wire_auth::HEADER_NONCE),
+    ) else {
+        return SignedCall::Unauthenticated(format!("the request to `{}` could not be signed, so its answer cannot be checked", node.name));
+    };
+    let answer = match crate::commands::post_json_to_node_answered(node, &body_str, bearer.as_deref(), &extra_headers, 15) {
         Ok(v) => v,
         Err(e) => return SignedCall::TransportFailed(e),
     };
-    if code != 200 {
-        return SignedCall::TransportFailed(format!("HTTP {code}"));
+    if answer.status != 200 {
+        return SignedCall::TransportFailed(format!("HTTP {}", answer.status));
     }
-    let parsed: Value = match serde_json::from_str(&resp) {
+
+    // The one signature this answer may carry. None is an unsigned answer; two
+    // or more are ambiguous and refused the same way, so no reader can pick the
+    // one that suits it.
+    let signatures: Vec<&str> = answer
+        .headers
+        .iter()
+        .filter(|(name, _)| name == ANSWER_SIGNATURE_HEADER)
+        .map(|(_, value)| value.as_str())
+        .collect();
+    let signature = match signatures.as_slice() {
+        [one] => *one,
+        [] => {
+            let words = unsigned_words(&answer.body);
+            // A door whose own config will not load answers `config-invalid`, and
+            // never signs it, so for that word the cause is its config and an
+            // upgrade would not help. Judged on the raw word.
+            let config_invalid = words.as_deref() == Some(aoide_storage::charter::CONFIG_INVALID);
+            let said = words
+                .map(|w| foreign_words(&w, SAID_MAX))
+                .filter(|w| !w.is_empty())
+                .map(|m| format!(" (it said: {m}; not acted on)"))
+                .unwrap_or_default();
+            let cause = if config_invalid {
+                format!(
+                    "it says its own config is invalid (a door in that state never signs its answer) — \
+                     fix the config on `{}`, not its version",
+                    node.name
+                )
+            } else {
+                format!(
+                    "an aoide older than this box's answers unsigned, and so does anything else standing at {} — upgrade aoide on `{}`",
+                    node.url, node.name
+                )
+            };
+            let msg = format!(
+                "`{}` answered `{method}` with no answer signature (X-Aoide-Answer-Signature), so nothing in it was \
+                 used: {cause}{said}",
+                node.name
+            );
+            audit_answer("mail.answer.unsigned", &msg);
+            return SignedCall::Unauthenticated(msg);
+        }
+        many => {
+            let msg = format!(
+                "`{}` answered `{method}` with {} answer signatures, not one, so nothing in it was used",
+                node.name,
+                many.len()
+            );
+            audit_answer("mail.answer.unsigned", &msg);
+            return SignedCall::Unauthenticated(msg);
+        }
+    };
+    // Over the exact bytes received: the body is never re-serialised or trimmed
+    // before it is checked.
+    if !aoide_storage::wire_auth::verify_answer(&key, request_signature, request_nonce, 200, answer.body.as_bytes(), signature) {
+        let msg = format!(
+            "`{}` answered `{method}`, but the answer does not verify as signed by the key on file for it ({}…) — nothing in it was used",
+            node.name,
+            key.chars().take(8).collect::<String>()
+        );
+        audit_answer("mail.answer.key-mismatch", &msg);
+        return SignedCall::Unauthenticated(msg);
+    }
+
+    let parsed: Value = match serde_json::from_str(&answer.body) {
         Ok(v) => v,
         Err(e) => return SignedCall::TransportFailed(format!("unparseable response: {e}")),
     };
     if let Some(err) = parsed.get("error") {
         let detail = err.get("message").and_then(Value::as_str).unwrap_or("(no message)");
-        return SignedCall::Refused(detail.to_string());
+        return SignedCall::Refused(foreign_words(detail, LINE_MAX));
     }
     SignedCall::Result(parsed.get("result").cloned().unwrap_or(Value::Null))
 }
@@ -153,6 +327,10 @@ enum DepositAttempt {
     /// No JSON-RPC response at all — dial/tunnel/HTTP/parse failure. The
     /// LINK is the suspect, not this entry.
     TransportFailed(String),
+    /// An answer that could not be checked against the key on file. Nothing in
+    /// it is believed: the entry stays spooled and live, and it is not parked.
+    /// The link backs off and the next pass asks again.
+    Unauthenticated(String),
 }
 
 /// The mesh one deposit acts in, for an outbox entry: **the container's own**
@@ -193,6 +371,7 @@ fn attempt_deposit(node: &Node, entry: &aoide_storage::outbox::OutboxEntry) -> D
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return DepositAttempt::Refused(detail),
         SignedCall::TransportFailed(reason) => return DepositAttempt::TransportFailed(reason),
+        SignedCall::Unauthenticated(reason) => return DepositAttempt::Unauthenticated(reason),
     };
     classify_deposit_response(&result)
 }
@@ -215,6 +394,10 @@ fn attempt_deposit(node: &Node, entry: &aoide_storage::outbox::OutboxEntry) -> D
 /// the far end was never going to send — and, when the door answers a word the
 /// sender was never taught, a mesh whose trust DID land while its own outbox
 /// says it was refused.
+///
+/// The `reason` and `detail` a refusal carries are the far end's words, signed
+/// or not, so they reach the entry's `last_outcome` and the link record cleaned
+/// and clipped ([`foreign_words`]).
 fn classify_deposit_response(result: &Value) -> DepositAttempt {
     let status = result.get("status").and_then(Value::as_str).unwrap_or("missing-status");
     match status {
@@ -222,10 +405,6 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
         other => {
             let reason = result.get("reason").and_then(Value::as_str).unwrap_or(other);
             let detail = result.get("detail").and_then(Value::as_str);
-            let msg = match detail {
-                Some(d) => format!("{reason}: {d}"),
-                None => reason.to_string(),
-            };
             // **A LINK state is not a verdict on the letter**.
             // `down` and `config-invalid` say something about the far end's own
             // state — a node its mesh quarantined, a declaration set that will not
@@ -235,9 +414,19 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
             // it back, so it flows by itself once the peer is fixed or no longer
             // `down`. Every other word (`zone-violation`, `broken-chain`,
             // `bad-msgid`, …) is a verdict on THIS letter and still parks it.
-            if reason == aoide_storage::charter::STATUS_DOWN
-                || reason == aoide_storage::charter::CONFIG_INVALID
-            {
+            // **Judged on the RAW word, before the words are cleaned**: a `down`
+            // with a format character inside is not the word `down`, and
+            // stripping the character must not make it one.
+            let link_state = reason == aoide_storage::charter::STATUS_DOWN
+                || reason == aoide_storage::charter::CONFIG_INVALID;
+            let msg = foreign_words(
+                &match detail {
+                    Some(d) => format!("{reason}: {d}"),
+                    None => reason.to_string(),
+                },
+                LINE_MAX,
+            );
+            if link_state {
                 return DepositAttempt::LinkRefused(msg);
             }
             DepositAttempt::Refused(msg)
@@ -281,7 +470,15 @@ pub fn settle_deposit(envelope: &Envelope, outcome: &aoide_storage::mail::Deposi
             spool_and_drain_ack(envelope, &envelope.msgid)
         }
         DepositOutcome::Duplicate { filed_letter: true } => spool_and_drain_ack(envelope, &envelope.msgid),
+        // A receipt retires its letter whether this is its first filing or a
+        // re-ack of one already filed: retiring is idempotent, and the one place a
+        // verified receipt is allowed to act is here.
         DepositOutcome::Filed { kind, .. } if kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT => {
+            let _ = aoide_storage::outbox::retire_by_ack(envelope);
+        }
+        DepositOutcome::Duplicate { filed_letter: false }
+            if envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT =>
+        {
             let _ = aoide_storage::outbox::retire_by_ack(envelope);
         }
         _ => {}
@@ -297,12 +494,21 @@ fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
     // envelope's own signed `origin_mesh` — so the receipt is depositable
     // exactly where the letter was (review finding 1 covers acks too: an ack
     // minted unnamed while its request is signed for another mesh can never
-    // land).
-    let Ok(ack) = aoide_storage::mail::mint_ack_in_mesh(
+    // land). It is signed as this box's name IN THAT MESH, the same rule a
+    // letter's `from.node` follows (`own_name`): the origin checks the ack
+    // against the key it holds for that name, never for the hostname. A charter
+    // mesh that does not carry this box's key mints nothing.
+    let mesh = envelope.header.origin_mesh.clone();
+    let Some(from_node) = own_name(&mesh) else {
+        audit_ack_withheld(acked_msgid, &envelope.header.from.node, &mesh);
+        return;
+    };
+    let Ok(ack) = aoide_storage::mail::mint_ack_from(
+        &from_node,
         &envelope.header.to.name,
         envelope.header.from.clone(),
         acked_msgid,
-        &envelope.header.origin_mesh,
+        &mesh,
     ) else {
         return;
     };
@@ -324,6 +530,23 @@ fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
     if aoide_storage::outbox::write_ack_if_absent(&next, acked_msgid, &entry) == Ok(true) {
         let _ = drain_node(&next);
     }
+}
+
+/// The audit line for an ack this box will not sign: its identity key has no
+/// name in the charter mesh the letter arrived in, so there is nothing honest to
+/// sign as. The hostname is never the fallback there (`routing::own_name_in`).
+fn audit_ack_withheld(acked_msgid: &str, origin: &str, mesh: &str) {
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        "mail.ack.withheld",
+        "invalid",
+        &format!(
+            "no ack for {} to `{origin}`: mesh `{mesh}` is a charter whose lines do not carry this box's identity key, so it has no name there to sign as",
+            foreign_words(acked_msgid, LINE_MAX)
+        ),
+    );
 }
 
 /// Build the outbox entry a letter leaves this node in (P-SEAL, MAIL.md's
@@ -787,7 +1010,9 @@ impl SendMeshError {
 /// That holds for an `ssh://` hop too, which used to go out unsigned under
 /// loopback treatment: it is signed now, and the receiving door refuses
 /// (`-32007`) a signed request whose key neither its registry nor its in-force
-/// charter carries. A declaration that gives no key leaves the hop unsigned.
+/// charter carries. A declaration that gives no key is a hop [`post_signed`]
+/// refuses before it dials: its answers could never be checked, so it is not
+/// dialled at all.
 ///
 /// **`mesh` is the mesh the letters in that spool RIDE**, and the declaration
 /// read is that one's alone: one node name may sit in several meshes with a
@@ -887,6 +1112,10 @@ fn spool_mesh(node_name: &str) -> Option<String> {
 /// WITHHELD rather than hand over, each `"<msgid>: <reason>"` (H1 — an
 /// adapter's `sealed-required` refusal is the one thing that explains a
 /// letter stuck at a relay with nothing filed on this end).
+///
+/// Every line of text in it is the far end's, so each is cleaned and clipped
+/// ([`foreign_words`]) before it is kept, signed answer or not: a caller prints
+/// them as they stand.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PollOutcome {
     pub filed: usize,
@@ -902,25 +1131,266 @@ pub struct PollOutcome {
     pub busy: bool,
 }
 
-pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, String> {
-    let nodes = aoide_storage::node_store::load_nodes();
-    let Some(node) = nodes.iter().find(|n| n.name == node_name) else {
-        return Ok(PollOutcome::default());
+/// The node one poll dials, the mesh it acts in, and whether that node is a
+/// charter's relay that this box holds NO record of. A relay reached
+/// that way is dialled with the charter's key and https address, and its
+/// identity is checked against that key before anything is taken over
+/// ([`relay_proves_charter_key`]).
+#[derive(Debug, Clone)]
+pub struct PollTarget {
+    pub node: Node,
+    pub mesh: String,
+    pub relay: bool,
+}
+
+/// Where a poll of `node_name` goes. A VERIFIED record answers exactly as it
+/// always has: its own key, its own grants in the mesh the poll names, verified
+/// or not. Only a name with NO record is read from the charter in force
+/// ([`charter_relay`]), so a relay that a signed charter declares needs no pair
+/// record before it can be polled. A poll with neither refuses, naming what is
+/// missing and the one fix.
+pub fn poll_target(node_name: &str, named: Option<&str>) -> Result<PollTarget, aoide_protocol::output::Refusal> {
+    if let Some(node) = aoide_storage::node_store::load_nodes().into_iter().find(|n| n.name == node_name) {
+        let mesh = crate::commands::request_mesh(&node, named, "message").map_err(|e| {
+            aoide_protocol::output::Refusal::new(
+                aoide_protocol::output::Kind::Refused,
+                format!("`{node_name}` cannot be polled"),
+                e,
+                aoide_protocol::output::Fix::Run(format!("aoide mail poll {node_name} --mesh <name>")),
+            )
+        })?;
+        return Ok(PollTarget { node, mesh, relay: false });
+    }
+    charter_relay(node_name, named)
+}
+
+/// The relay `node_name` is polled through, read from a charter alone: the
+/// mesh a send to it would name ([`send_mesh`]), and the line the same
+/// declaration gives it — its key, and an https address dialled by
+/// [`dial_node`], the resolution a drain's charter hop already uses. Refused,
+/// with the one fix, for: no charter in force declares it in a mesh this box
+/// is on; that mesh is a pair mesh (its keys are paired records); this box has
+/// no line in that mesh; the charter says `down`; or its address is not https
+/// (`poll` has no inbound address to ask, and `ssh://` needs a pair record for
+/// its tunnel).
+fn charter_relay(node_name: &str, named: Option<&str>) -> Result<PollTarget, aoide_protocol::output::Refusal> {
+    use aoide_protocol::output::{Fix, Kind, Refusal};
+    let what = format!("`{node_name}` cannot be polled");
+    let refuse = |why: String, fix: Fix| Refusal::new(Kind::Refused, what.clone(), why, fix);
+    let pair = Fix::Run(format!("aoide pair {node_name}"));
+    let charter = Fix::Run("aoide mesh charter show".to_string());
+
+    let mesh = send_mesh(node_name, named).map_err(|e| {
+        if e.data.get("reason").and_then(Value::as_str) == Some("unknown-node") {
+            refuse(
+                "no pair record of it here, and no charter in force declares it in a mesh this box is on — \
+                 a poll reaches its relay by a pair record or by the charter's line for it"
+                    .to_string(),
+                pair.clone(),
+            )
+        } else {
+            refuse(e.message, Fix::Run(format!("aoide mail poll {node_name} --mesh <name>")))
+        }
+    })?;
+    let own = match aoide_storage::identity::load_or_mint() {
+        Ok((kp, _)) => kp.info().pubkey_hex,
+        Err(e) => return Err(refuse(format!("this box's identity key cannot be read: {e}"), charter)),
     };
-    // P-CHARTER: the ONE mesh this poll acts in — the `--mesh` typed, else the
-    // sole mesh where the record holds `message`, else the home mesh; a
-    // genuine tie refuses, naming the meshes (`mail poll --mesh`). The
-    // capability-led rule is what makes a peer trusted only in `away`
-    // reachable with no flag at all (review N3). It is used for BOTH halves
-    // below: the request is SIGNED with it, and a handed-over container is
-    // verified against the mesh the letter was minted in.
-    let mesh = crate::commands::request_mesh(node, named, "message").map_err(|e| format!("mesh: {e}"))?;
+    let set = aoide_storage::routing::declarations().map_err(|r| refuse(r.detail, charter.clone()))?;
+    let declaration = match aoide_storage::routing::declaration_of(&set, &mesh) {
+        Some(Ok(declaration)) => declaration,
+        Some(Err(r)) => return Err(refuse(format!("mesh `{mesh}`'s declaration cannot be read: {}", r.detail), charter)),
+        None => return Err(refuse(format!("mesh `{mesh}` is not declared at this node"), charter)),
+    };
+    if !declaration.is_charter() {
+        return Err(refuse(
+            format!("mesh `{mesh}` is a pair mesh, whose keys are paired records, and this box holds none for `{node_name}`"),
+            pair,
+        ));
+    }
+    if aoide_storage::routing::own_name_in(&set, &mesh, &own).is_none() {
+        return Err(refuse(
+            format!("the charter of mesh `{mesh}` carries no line for this box's identity key, so it has no name there to poll as"),
+            charter,
+        ));
+    }
+    if declaration.status_of(node_name) == Some(aoide_storage::charter::STATUS_DOWN) {
+        return Err(refuse(format!("mesh `{mesh}` declares `{node_name}` down, so this box does not dial it"), charter));
+    }
+    let Some((node, _)) = dial_node(node_name, Some(&mesh)) else {
+        let why = match declaration.address_of(node_name) {
+            None => format!("mesh `{mesh}`'s charter gives `{node_name}` no address"),
+            Some(address) if matches!(aoide_storage::charter::dial_of(address), Ok(aoide_storage::charter::Dial::Poll)) => {
+                format!(
+                    "`{node_name}` is declared `poll` in mesh `{mesh}`: it has no inbound address to poll, and it is \
+                     the node that asks — its letters wait at its relay"
+                )
+            }
+            Some(address) => format!("`{node_name}` is declared at `{address}` in mesh `{mesh}`, which this box cannot poll"),
+        };
+        return Err(refuse(why, charter));
+    };
+    if node.via.is_some() {
+        return Err(refuse(
+            format!(
+                "`{node_name}` is declared at an `ssh://` address in mesh `{mesh}`, and a charter alone reaches an \
+                 https relay only — its tunnel needs a pair record"
+            ),
+            pair,
+        ));
+    }
+    if node.pubkey.is_none() {
+        return Err(refuse(format!("mesh `{mesh}`'s charter gives `{node_name}` no identity key"), charter));
+    }
+    Ok(PollTarget { node, mesh, relay: true })
+}
+
+/// The relay's identity, checked against the charter before a letter moves. Its
+/// own signed age binding (`aoide/binding`) must verify under the identity key the
+/// charter gives its line. This box sends NO binding of its own: the relay holds
+/// no record to learn one into, and the request would be refused for it. Every
+/// answer, `aoide/mailPoll`'s included, is also signed and checked under that
+/// same key by [`post_signed`] before a word of it is read, so a relay answering
+/// as any other key is refused at either call, with no unsigned or unverified
+/// fallback.
+fn relay_proves_charter_key(node: &Node, mesh: &str) -> Result<(), String> {
+    let Some(key) = node.pubkey.as_deref() else {
+        return Err(format!("relay `{}` has no charter key to check its identity against", node.name));
+    };
+    // Every refusal here is the documented relay-key mismatch (MAIL.md, the
+    // charter relay bullet), so each is audited under that one word.
+    let refuse = |msg: String| -> Result<(), String> {
+        let _ = aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::audit::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.poll.relay-key-mismatch",
+            "invalid",
+            &msg,
+        );
+        Err(msg)
+    };
+    let theirs: aoide_storage::seal::Binding =
+        match post_signed(node, "aoide/binding", json!({}), Some(mesh)) {
+            SignedCall::Result(result) => {
+                serde_json::from_value(result.get("binding").cloned().unwrap_or(Value::Null))
+                    .map_err(|e| {
+                        format!(
+                            "relay `{}` answered no readable binding: {}",
+                            node.name,
+                            foreign_words(&e.to_string(), LINE_MAX)
+                        )
+                    })?
+            }
+            SignedCall::Refused(detail) => {
+                return Err(format!("relay `{}` refused the identity check: {detail}", node.name))
+            }
+            SignedCall::TransportFailed(reason) => {
+                return Err(format!("relay `{}` did not answer the identity check: {reason}", node.name))
+            }
+            // An answer whose signature does not verify under the charter key is
+            // the same fact as a binding signed by another key: the relay did not
+            // prove the key the charter gives it.
+            SignedCall::Unauthenticated(reason) => {
+                return refuse(format!(
+                    "relay `{}` answered its identity check with a key the charter of mesh `{mesh}` does not give it, or with no proof at all — refusing to poll it ({reason})",
+                    node.name
+                ))
+            }
+        };
+    if aoide_storage::seal::verify_binding(&theirs, Some(key)) {
+        return Ok(());
+    }
+    refuse(format!(
+        "relay `{}` answered as a key that the charter of mesh `{mesh}` does not give it — refusing to poll it",
+        node.name
+    ))
+}
+
+/// Whether a container refusal can clear on a later poll. Such a refusal is a
+/// fact about THIS box's own state (its config, its charter, its disk), so the
+/// hub keeps custody and offers the container again. Every other refusal is a
+/// fact about the container: its bytes, its chain, or a key it names. The same
+/// bytes are refused the same way on every re-offer, so custody is released
+/// instead, which is recoverable because the origin keeps its own retry copy and
+/// re-sends it on its own drains.
+fn refusal_clears_on_retry(word: &str) -> bool {
+    use aoide_storage::charter::{
+        CHARTER_TAMPERED, CONFIG_INVALID, CONFIG_UNREADABLE, LOCAL_IO, NO_CHARTER_IN_FORCE, OPERATOR_MISMATCH,
+        STALE_CHARTER, UNKNOWN_OPERATOR,
+    };
+    matches!(
+        word,
+        LOCAL_IO
+            | CONFIG_UNREADABLE
+            | CONFIG_INVALID
+            | NO_CHARTER_IN_FORCE
+            | UNKNOWN_OPERATOR
+            | STALE_CHARTER
+            | CHARTER_TAMPERED
+            | OPERATOR_MISMATCH
+    )
+}
+
+/// A container the poll refused: audited and named to the caller, so `mail poll`
+/// reports why rather than answering "0 filed" (review N13, L9). What the refusal
+/// does to the hub's custody is decided by the caller, not here.
+fn refuse_container(node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
+    refuse_named("container", node_name, msgid, word, detail, refused);
+}
+
+/// A plaintext envelope the poll refused: the same audit and report as a
+/// container, under its own event name.
+fn refuse_envelope(node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
+    refuse_named("envelope", node_name, msgid, word, detail, refused);
+}
+
+fn refuse_named(what: &str, node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
+    let detail = if detail.is_empty() { String::new() } else { format!(": {}", foreign_words(detail, LINE_MAX)) };
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        &format!("mail.poll.{what}-refused"),
+        "invalid",
+        &format!("{what} {} from `{node_name}` refused: {word}{detail}", foreign_words(msgid, LINE_MAX)),
+    );
+    refused.push(format!("{msgid}: {word}"));
+}
+
+/// A refusal as one line for a caller that reports text: what, why, and the fix.
+fn taught_text(refusal: &aoide_protocol::output::Refusal) -> String {
+    use aoide_protocol::output::Fix;
+    let fix = match &refusal.fix {
+        Fix::Run(c) | Fix::Set(c) | Fix::Wait(c) => c.as_str(),
+        Fix::None(s) => s,
+    };
+    format!("{}: {} — fix: {fix}", refusal.what, refusal.why)
+}
+
+/// Poll `node_name` once — the relay-first half of the model (MAIL.md §Wire,
+/// P-M3): a node with no inbound address asks its relay "anything waiting for
+/// me?" and receives every entry that relay spooled toward it. The relay is
+/// resolved first ([`poll_target`]): from this box's stored record, else from
+/// the charter in force. A poll with neither is `Err`, a taught refusal naming
+/// what is missing; it is never an empty answer.
+pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, String> {
+    let target = poll_target(node_name, named).map_err(|refusal| taught_text(&refusal))?;
+    poll_through(node_name, named, target)
+}
+
+/// [`poll_node`] once the node and mesh are resolved: the signed `aoide/mailPoll`
+/// and the hand-over that follows it. Split out so a test can drive the whole
+/// poll against a plain loopback door standing in for a charter's https front.
+fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Result<PollOutcome, String> {
+    let PollTarget { node, mesh, relay } = target;
     // **A node that mesh declares `down` is never polled, and nothing is filed.**
     // Not even the binding exchange below, which is a dial in its own right: its
     // own declaration says this box must not reach it (MAIL.md §Status). What is
     // spooled toward it stays spooled, and a later poll — or drain — acts on
-    // whatever the declaration says then.
-    if record_forbidden_by_declaration(&mesh, node) {
+    // whatever the declaration says then. A charter relay is never `down` here:
+    // [`charter_relay`] refused it already.
+    if !relay && record_forbidden_by_declaration(&mesh, &node) {
         return Ok(PollOutcome::default());
     }
     // **One poll of a node at a time**, taken before anything is read. Two
@@ -932,10 +1402,16 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     let Some(_poll_lock) = aoide_storage::outbox::try_take_poll_lock(node_name)? else {
         return Ok(PollOutcome { busy: true, ..PollOutcome::default() });
     };
-    // P-SEAL: publish our binding and learn theirs before taking anything
-    // over, so a node that has just published one never hands us plaintext
-    // it did not have to.
-    let _ = exchange_bindings(node, named);
+    if relay {
+        relay_proves_charter_key(&node, &mesh)?;
+    } else {
+        // P-SEAL: publish our binding and learn theirs before taking anything
+        // over, so a node that has just published one never hands us plaintext
+        // it did not have to. A charter relay gets none of this: its line's own
+        // binding is the one the sealing reads, and a relay with no record of us
+        // refuses a binding it cannot learn.
+        let _ = exchange_bindings(&node, named);
+    }
     // The calling node's own name in the mail protocol — the ADDRESS form
     // (`display::local_node_name`), the same one every envelope this box mints
     // stamps and the same one a peer's poll is answered against. A raw OS host
@@ -955,10 +1431,13 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         // here is offered again.
         "filed": acknowledged.clone(),
     });
-    let result = match post_signed(node, "aoide/mailPoll", params, Some(&mesh)) {
+    let result = match post_signed(&node, "aoide/mailPoll", params, Some(&mesh)) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
+        // A poll whose answer cannot be checked is a failed poll: it files
+        // nothing and clears nothing, so the filed list is carried to the next.
+        SignedCall::Unauthenticated(reason) => return Err(reason),
     };
     if result.get("status").and_then(Value::as_str) == Some("refused") {
         let detail = result
@@ -966,7 +1445,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
             .or_else(|| result.get("reason"))
             .and_then(Value::as_str)
             .unwrap_or("the node refused the poll");
-        return Ok(PollOutcome { node_refused: Some(detail.to_string()), ..PollOutcome::default() });
+        return Ok(PollOutcome { node_refused: Some(foreign_words(detail, LINE_MAX)), ..PollOutcome::default() });
     }
     let mut filed = 0usize;
     // The acknowledgements the hub has just been told are cleared, by the list
@@ -988,6 +1467,9 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         let Ok(container) = serde_json::from_value::<aoide_storage::seal::Container>(container.clone()) else {
             continue;
         };
+        // The far end's `msgid`, as every audit line below names it: a refused
+        // container proved nothing about its own, and a log is read by a person.
+        let msgid = foreign_words(&container.msgid, LINE_MAX);
         // The poll's own mesh: the request was SIGNED with it (above), and the
         // container is verified against it here — `deposit_container` compares
         // the container's SIGNED `originMesh` with this, so a letter minted for
@@ -995,45 +1477,71 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         // The polled node must be the chain's LAST hop: the hand-over this pull
         // is taking is the one that node signed for. Anything else is refused
         // like any other bad chain (the refusal is reported and audited below).
-        if aoide_storage::seal::chain_deposited_by(&container, node_name).is_err() {
-            refused.push(format!("{}: {}", container.msgid, aoide_storage::seal::BROKEN_CHAIN));
+        if let Err(refusal) = aoide_storage::seal::chain_deposited_by(&container, node_name) {
+            refuse_container(node_name, &container.msgid, &refusal.reason, &refusal.detail, &mut refused);
+            if !refusal_clears_on_retry(&refusal.reason) {
+                let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+            }
             continue;
         }
         let outcome = match aoide_storage::seal::deposit_container(&container, &mesh) {
             Ok(outcome) => outcome,
-            Err(_) => continue,
+            Err(e) => {
+                refuse_container(node_name, &container.msgid, aoide_storage::charter::LOCAL_IO, &e, &mut refused);
+                continue;
+            }
         };
         match outcome {
             aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
-                let Ok(filed_outcome) = aoide_storage::mail::deposit((*envelope).clone(), node_name) else {
-                    continue;
+                let filed_outcome = match aoide_storage::mail::deposit((*envelope).clone(), node_name) {
+                    Ok(outcome) => outcome,
+                    Err(e) => {
+                        refuse_container(node_name, &container.msgid, aoide_storage::charter::LOCAL_IO, &e, &mut refused);
+                        continue;
+                    }
                 };
+                // Every outcome that files nothing is named. The closed set is
+                // classified here with no catch-all, so a new variant has to be
+                // decided on. The four refusals are facts about the bytes.
+                let refusal = match &filed_outcome {
+                    aoide_storage::mail::DepositOutcome::Filed { .. }
+                    | aoide_storage::mail::DepositOutcome::Duplicate { .. } => None,
+                    aoide_storage::mail::DepositOutcome::BadMsgid
+                    | aoide_storage::mail::DepositOutcome::MalformedAck => Some("bad-msgid"),
+                    aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Some("unverified-origin"),
+                    aoide_storage::mail::DepositOutcome::NotCorrespondence => {
+                        Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
+                    }
+                };
+                if let Some(word) = refusal {
+                    settle_deposit(&envelope, &filed_outcome);
+                    refuse_container(node_name, &container.msgid, word, "", &mut refused);
+                    // These bytes are refused for good, so the hub's custody ends
+                    // here rather than re-offering them forever (`refusal_clears_on_retry`).
+                    let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                    continue;
+                }
                 if matches!(filed_outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
                     filed += 1;
                 }
                 // M1: recorded only once it is filed — see the door's own arm.
                 // L17: and a failed write is audited rather than dropped.
-                if matches!(
-                    filed_outcome,
-                    aoide_storage::mail::DepositOutcome::Filed { .. }
-                        | aoide_storage::mail::DepositOutcome::Duplicate { .. }
-                ) {
-                    if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
-                        let _ = aoide_protocol::audit::audit(
-                            &aoide_protocol::audit::default_audit_log(),
-                            aoide_protocol::audit::Door::Cli,
-                            aoide_protocol::audit::EventClass::Audit,
-                            "mail.poll.dedup-record-failed",
-                            "invalid",
-                            &format!("{}: {e}", container.msgid),
-                        );
-                    }
+                if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
+                    let _ = aoide_protocol::audit::audit(
+                        &aoide_protocol::audit::default_audit_log(),
+                        aoide_protocol::audit::Door::Cli,
+                        aoide_protocol::audit::EventClass::Audit,
+                        "mail.poll.dedup-record-failed",
+                        "invalid",
+                        &format!("{msgid}: {e}"),
+                    );
                 }
                 settle_deposit(&envelope, &filed_outcome);
                 // The hub's custody of the CONTAINER ends when it is told this
                 // box has it: the next poll of that node carries this msgid
                 // (`outbox::record_filed`), and until then the entry is offered
-                // again — a lost response must not lose the letter.
+                // again — a lost response must not lose the letter. Said only once
+                // the container is on this disk.
                 let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
             }
             aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
@@ -1065,7 +1573,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
                         aoide_protocol::audit::EventClass::Audit,
                         "mail.poll.dedup-record-failed",
                         "invalid",
-                        &format!("{}: {e}", container.msgid),
+                        &format!("{msgid}: {e}"),
                     );
                 }
                 let _ = aoide_protocol::audit::audit(
@@ -1107,10 +1615,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
                         aoide_protocol::audit::EventClass::Audit,
                         "mail.poll.transit-not-filed",
                         "invalid",
-                        &format!(
-                            "container {} from `{node_name}` could not be filed as transit at {at}: {e}",
-                            hop.container.msgid
-                        ),
+                        &format!("container {msgid} from `{node_name}` could not be filed as transit at {at}: {e}"),
                     );
                     refused.push(format!("{}: transit: {e}", hop.container.msgid));
                     continue;
@@ -1122,8 +1627,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
                     "mail.poll.transit",
                     "ok",
                     &format!(
-                        "container {} from `{node_name}` carried on to `{}` in mesh `{}`{}",
-                        hop.container.msgid,
+                        "container {msgid} from `{node_name}` carried on to `{}` in mesh `{}`{}",
                         hop.next,
                         hop.mesh,
                         if hop.held { ", held for its own poll" } else { "" }
@@ -1139,28 +1643,13 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
                 let _ = aoide_storage::outbox::record_filed(node_name, &hop.container.msgid);
             }
             aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
-                // L9 (the branch review): a polled container that refuses used
-                // to vanish — no audit, no report — while the origin's `hold`
-                // entry stayed in its spool and was re-offered on every poll
-                // forever. The design's "parks AND IS REPORTED" needs a
-                // carrier on the pull path, and this is it: the destination
-                // writes the taught word it refused with. Best-effort, like
-                // every other audit call here — a log write must never take
-                // the poll down.
-                let _ = aoide_protocol::audit::audit(
-                    &aoide_protocol::audit::default_audit_log(),
-                    aoide_protocol::audit::Door::Cli,
-                    aoide_protocol::audit::EventClass::Audit,
-                    "mail.poll.container-refused",
-                    "invalid",
-                    &format!(
-                        "container {} from `{node_name}` refused: {reason}: {detail}",
-                        container.msgid
-                    ),
-                );
-                // …and NAMED to the caller, so `mail poll` reports it (review
-                // N13) rather than answering "0 filed" with no reason.
-                refused.push(format!("{}: {reason}", container.msgid));
+                // L9 (the branch review): a refused container is audited and
+                // named, never silently dropped (`refuse_container`). What it
+                // does to the hub's custody depends on the refusal alone.
+                refuse_container(node_name, &container.msgid, &reason, &detail, &mut refused);
+                if !refusal_clears_on_retry(&reason) {
+                    let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                }
             }
         }
     }
@@ -1169,8 +1658,26 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         let Ok(envelope) = serde_json::from_value::<Envelope>(envelope.clone()) else { continue };
         let outcome = match aoide_storage::mail::deposit(envelope.clone(), node_name) {
             Ok(outcome) => outcome,
-            Err(_) => continue,
+            Err(e) => {
+                refuse_envelope(node_name, &envelope.msgid, aoide_storage::charter::LOCAL_IO, &e, &mut refused);
+                continue;
+            }
         };
+        let refusal = match &outcome {
+            aoide_storage::mail::DepositOutcome::Filed { .. }
+            | aoide_storage::mail::DepositOutcome::Duplicate { .. } => None,
+            aoide_storage::mail::DepositOutcome::BadMsgid
+            | aoide_storage::mail::DepositOutcome::MalformedAck => Some("bad-msgid"),
+            aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Some("unverified-origin"),
+            aoide_storage::mail::DepositOutcome::NotCorrespondence => {
+                Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
+            }
+        };
+        if let Some(word) = refusal {
+            // A plaintext letter is not the hub's custody (it retires by ack, not
+            // by `filed`), so there is nothing to release here: it is named only.
+            refuse_envelope(node_name, &envelope.msgid, word, "", &mut refused);
+        }
         if matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
             filed += 1;
         }
@@ -1183,13 +1690,19 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     // same way the refused containers are, so `mail poll` renders both.
     let mut withheld: Vec<String> = Vec::new();
     for entry in result.get("withheld").and_then(Value::as_array).into_iter().flatten() {
-        let msgid = entry.get("msgid").and_then(Value::as_str).unwrap_or("(no msgid)");
-        let reason = entry.get("reason").and_then(Value::as_str).unwrap_or("withheld");
+        let word = |key: &str, otherwise: &str| {
+            foreign_words(entry.get(key).and_then(Value::as_str).unwrap_or(otherwise), LINE_MAX)
+        };
+        let msgid = word("msgid", "(no msgid)");
+        let reason = word("reason", "withheld");
         let detail = entry.get("detail").and_then(Value::as_str);
-        withheld.push(match detail {
-            Some(detail) => format!("{msgid}: {reason} — {detail}"),
-            None => format!("{msgid}: {reason}"),
-        });
+        withheld.push(foreign_words(
+            &match detail {
+                Some(detail) => format!("{msgid}: {reason} — {detail}"),
+                None => format!("{msgid}: {reason}"),
+            },
+            LINE_MAX,
+        ));
         // The audit line `mail poll` never had: a withheld entry is a
         // deliberate refusal by the listener, and the operator's own box
         // records it on its side of the wire.
@@ -1202,6 +1715,9 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
             &format!("{msgid} from `{node_name}` withheld: {reason}"),
         );
     }
+    // The container ids and the words in `refused` are the far end's, and a
+    // container that failed its check proved nothing about its own `msgid`.
+    let refused = refused.iter().map(|line| foreign_words(line, LINE_MAX)).collect();
     Ok(PollOutcome { filed, refused, withheld, node_refused: None, busy: false })
 }
 
@@ -1218,15 +1734,17 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
 pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_storage::seal::Binding, String> {
     let mine = aoide_storage::seal::publish_binding()?;
     let params = json!({ "binding": mine });
+    // An unverified answer teaches nothing: it returns before `learn_binding`.
     let result = match post_signed(node, "aoide/binding", params, named_mesh) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
+        SignedCall::Unauthenticated(reason) => return Err(reason),
     };
     let theirs: aoide_storage::seal::Binding = serde_json::from_value(
         result.get("binding").cloned().unwrap_or(Value::Null),
     )
-    .map_err(|e| format!("binding: {e}"))?;
+    .map_err(|e| format!("binding: {}", foreign_words(&e.to_string(), LINE_MAX)))?;
     // A refused learn is not an error here: `stale-binding` means we already
     // hold a newer one, which is the state we want. Only a binding we cannot
     // verify is worth reporting, and it costs the caller nothing but the
@@ -1323,8 +1841,45 @@ pub fn pollable_nodes() -> Vec<String> {
         })
         .map(|node| node.name)
         .collect();
+    out.extend(charter_relays());
     out.sort();
+    out.dedup();
     out
+}
+
+/// The relays a charter-only poll reaches, across every charter mesh this box is
+/// on: the sweep asks them the way it asks a paired node, so a relay with no
+/// record is not left out of `aoide mail poll`. A relay that is this box's own
+/// line in its mesh is skipped (a relay does not ask itself), and a name with a
+/// record of any kind is the record's to answer for ([`poll_target`]).
+fn charter_relays() -> Vec<String> {
+    let Ok(set) = aoide_storage::routing::declarations() else {
+        return Vec::new();
+    };
+    let Ok((kp, _)) = aoide_storage::identity::load_or_mint() else {
+        return Vec::new();
+    };
+    let own = kp.info().pubkey_hex;
+    let records = aoide_storage::node_store::load_nodes();
+    let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for loaded in &set {
+        let Ok(declaration) = &loaded.declaration else {
+            continue;
+        };
+        if !declaration.is_charter() {
+            continue;
+        }
+        let me = aoide_storage::routing::own_name_in(&set, &loaded.mesh, &own);
+        for relay in declaration.relays() {
+            if me.as_deref() == Some(relay.as_str()) || records.iter().any(|n| n.name == *relay) {
+                continue;
+            }
+            if poll_target(relay, Some(&loaded.mesh)).is_ok() {
+                out.insert(relay.clone());
+            }
+        }
+    }
+    out.into_iter().collect()
 }
 
 /// Drain `node_name`'s outbox once: every spooled, non-refused, non-`hold`/// entry, oldest first, attempted in order — stopping at the first TRANSPORT
@@ -1348,11 +1903,12 @@ pub fn pollable_nodes() -> Vec<String> {
 ///
 /// `Ok(())` covers every ordinary non-error outcome: nothing registered
 /// under `node_name`, the link already held off, `.bsy` already held by a
-/// concurrent drain (ruling 3 — skipped, never queued), an empty spool, a
-/// node its mesh declares `down` (never dialled, and its entries kept), or
-/// a completed pass regardless of how many entries it delivered/refused/
-/// backed off on. `Err` is reserved for a genuine local I/O failure
-/// (`.bsy`'s own lock file, or an outbox read/write) — never for "the
+/// concurrent drain (ruling 3 — skipped, never queued), a spool with nothing to
+/// attempt (empty, or only parked and held entries: not even the binding
+/// exchange is dialled), a node its mesh declares `down` (never dialled, and
+/// its entries kept), or a completed pass regardless of how many entries it
+/// delivered/refused/backed off on. `Err` is reserved for a genuine local I/O
+/// failure (`.bsy`'s own lock file, or an outbox read/write) — never for "the
 /// remote node was unreachable," which is an ordinary, expected drain
 /// outcome recorded in the entry/link state instead of surfaced as an
 /// error to this function's own caller.
@@ -1390,6 +1946,26 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     };
     let _tunnel_teardown = TunnelTeardownGuard(node_name.to_string());
 
+    // A link held off is not dialled at all, so the back-off is read before the
+    // binding exchange. The exchange is a dial and, against a door that answers
+    // unsigned, an audit line; the daemon drains every few seconds, so a
+    // held-off link that still exchanged would pay both on every tick.
+    let now_epoch = unix_now();
+    if let Some(link) = aoide_storage::outbox::read_link_state(node_name)? {
+        if aoide_storage::outbox::is_held_off(&link, now_epoch) {
+            return Ok(());
+        }
+    }
+
+    // A pass with nothing to deposit dials nothing: the binding exchange is a
+    // dial in its own right, and against a door that answers unsigned, an audit
+    // line. The daemon drains every node that ever had mail every few seconds,
+    // so an empty spool, or one holding only parked and held entries, must end
+    // here, before the exchange.
+    if dialable_entries(node_name)?.is_empty() {
+        return Ok(());
+    }
+
     // P-SEAL: the binding exchange rides the drain's own session, before
     // the first deposit — one contact, both directions, and every entry in
     // this pass is sealed to whatever binding that round trip left in
@@ -1420,26 +1996,10 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
         let _ = exchange_bindings(&node, Some(&mesh));
     }
 
-    let now_epoch = unix_now();
-    if let Some(link) = aoide_storage::outbox::read_link_state(node_name)? {
-        if aoide_storage::outbox::is_held_off(&link, now_epoch) {
-            return Ok(());
-        }
-    }
-
-    // Parked entries are filtered BEFORE the cap, never skipped inside the
-    // loop: they sort oldest-first, so a cap counted over spool positions
-    // would spend a whole batch on entries this pass can never dial and
-    // starve every fresh letter behind them. Held entries are filtered the
-    // same way, for the same reason: they are permanent to a DRAIN (only the
-    // far end's poll moves them), so counting them would starve the spool
-    // identically.
+    // Read again, after the exchange: it can take seconds, and an entry a
+    // concurrent ack retired meanwhile must not be attempted from a stale list.
     let mut contacted = false;
-    for entry in aoide_storage::outbox::list_entries(node_name)?
-        .into_iter()
-        .filter(|entry| !entry.refused && !entry.is_held())
-        .take(DRAIN_BATCH_CAP)
-    {
+    for entry in dialable_entries(node_name)? {
         // H1 (the branch review): the binding exchange above may have just
         // taught this node the destination's binding, and an entry spooled
         // before that must not go out in the clear in the very same pass
@@ -1455,15 +2015,19 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
         use aoide_storage::outbox::Reseal;
         let entry = match aoide_storage::outbox::reseal_entry(node_name, &entry, &aoide_storage::time::now_iso_utc()) {
             Ok(Reseal::NoBinding) | Ok(Reseal::Sealed(None)) => entry,
+            // Every write here is `update_entry`: the entry was read before the
+            // dials above, and a receipt that landed during one may have retired
+            // it since. A gone entry is skipped, never written back.
             Ok(Reseal::Sealed(Some(upgraded))) | Ok(Reseal::FreshlySealed(upgraded)) => {
-                if let Err(e) = aoide_storage::outbox::write_entry(node_name, &upgraded) {
-                    return Err(format!("state/outbox: {e}"));
+                match aoide_storage::outbox::update_entry(node_name, &upgraded) {
+                    Ok(true) => *upgraded,
+                    Ok(false) => continue,
+                    Err(e) => return Err(format!("state/outbox: {e}")),
                 }
-                *upgraded
             }
             Ok(Reseal::NotUsable(parked)) => {
                 if let Some(parked) = parked {
-                    aoide_storage::outbox::write_entry(node_name, &parked)?;
+                    aoide_storage::outbox::update_entry(node_name, &parked)?;
                 }
                 continue;
             }
@@ -1472,6 +2036,12 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
             // again. Sending it in the clear is the one wrong answer.
             Err(_) => continue,
         };
+        // Attempted only while still spooled. The check follows the reseal on
+        // purpose: a reseal write that re-spooled a retired entry would pass a
+        // check placed before it. An unreadable spool is not attempted either.
+        if !aoide_storage::outbox::still_spooled(node_name, &entry.envelope.msgid).unwrap_or(false) {
+            continue;
+        }
         match attempt_deposit(&node, &entry) {
             DepositAttempt::TransportFailed(reason) => {
                 // Record the attempt on the entry that actually hit the
@@ -1486,6 +2056,14 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
                 // leaving the link un-backed-off and re-dialed on every
                 // following tick, exactly when the box is already sick.
                 record_failed_attempt(node_name, entry, now_epoch, "transport", &reason)?;
+                break;
+            }
+            DepositAttempt::Unauthenticated(reason) => {
+                // An answer this box cannot check is believed about nothing: the
+                // entry is not settled and not parked, it is recorded as a failed
+                // attempt, and the link backs off. `contacted` stays false, so the
+                // poll-on-contact below does not follow an answer that was not read.
+                record_failed_attempt(node_name, entry, now_epoch, "unauthenticated", &reason)?;
                 break;
             }
             DepositAttempt::LinkRefused(reason) => {
@@ -1508,7 +2086,7 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
                 updated.last_try_at = aoide_storage::time::now_iso_utc();
                 updated.last_outcome = format!("refused: {reason}");
                 updated.refused = true;
-                aoide_storage::outbox::write_entry(node_name, &updated)?;
+                aoide_storage::outbox::update_entry(node_name, &updated)?;
             }
             DepositAttempt::Delivered { status } => {
                 contacted = true;
@@ -1525,6 +2103,23 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
         let _ = poll_node(node_name, None);
     }
     Ok(())
+}
+
+/// The entries one pass of [`drain_node`] may attempt: spooled, oldest first,
+/// not parked and not held, at most [`DRAIN_BATCH_CAP`].
+///
+/// Parked entries are filtered BEFORE the cap, never skipped inside the loop:
+/// they sort oldest-first, so a cap counted over spool positions would spend a
+/// whole batch on entries this pass can never dial and starve every fresh
+/// letter behind them. Held entries are filtered the same way, for the same
+/// reason: they are permanent to a DRAIN (only the far end's poll moves them),
+/// so counting them would starve the spool identically.
+fn dialable_entries(node_name: &str) -> Result<Vec<aoide_storage::outbox::OutboxEntry>, String> {
+    Ok(aoide_storage::outbox::list_entries(node_name)?
+        .into_iter()
+        .filter(|entry| !entry.refused && !entry.is_held())
+        .take(DRAIN_BATCH_CAP)
+        .collect())
 }
 
 /// Record one FAILED attempt on the entry that hit it, then back the LINK off —
@@ -1545,7 +2140,7 @@ fn record_failed_attempt(
     updated.tries += 1;
     updated.last_try_at = aoide_storage::time::now_iso_utc();
     updated.last_outcome = format!("{word}: {reason}");
-    let recorded = aoide_storage::outbox::write_entry(node_name, &updated);
+    let recorded = aoide_storage::outbox::update_entry(node_name, &updated).map(|_| ());
     // The LINK's own record of the same attempt carries the same word, so a
     // reader that has only the link (an entry whose bookkeeping write failed)
     // can still tell a far end that ANSWERED from a dial that never connected.
@@ -1573,6 +2168,11 @@ fn record_failed_attempt(
 ///
 /// `status` is the far end's own word, recorded verbatim as `last_outcome` —
 /// the same string [`DepositAttempt::Delivered`] carries, never re-derived.
+///
+/// Reachable only from a VERIFIED answer: `Delivered` comes only from a
+/// [`SignedCall::Result`], which [`post_signed`] returns only after the answer's
+/// signature checked under the key on file. A relay's acknowledgement therefore
+/// retires its receipt, charter and transit entries, and nothing unproven does.
 fn settle_delivered(
     node_name: &str,
     entry: aoide_storage::outbox::OutboxEntry,
@@ -1591,7 +2191,7 @@ fn settle_delivered(
         updated.tries += 1;
         updated.last_try_at = aoide_storage::time::now_iso_utc();
         updated.last_outcome = status.to_string();
-        aoide_storage::outbox::write_entry(node_name, &updated)?;
+        aoide_storage::outbox::update_entry(node_name, &updated)?;
     }
     Ok(())
 }
@@ -1650,7 +2250,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"down","detail":"node `elsewhere` is declared `down`"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "waiting").unwrap();
@@ -1676,7 +2276,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -1705,7 +2305,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"config-invalid","detail":"config-invalid: config-unreadable"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "waiting").unwrap();
@@ -1723,7 +2323,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -1755,7 +2355,7 @@ mod tests {
             "[pairing]\nhomeMesh = \"home\"\n\n[mesh.home.status]\nnobody = \"down\"\n",
         )
         .unwrap();
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -1788,7 +2388,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"down","detail":"node `elsewhere` is declared `down`"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -1814,16 +2414,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn unpaired_node(name: &str) -> Node {
+    /// This test process's own identity key. Every stand-in signs its answers
+    /// with it, and [`keyed_node`] holds it on file as the key those answers
+    /// verify under, so a genuine stand-in is one this box can check.
+    fn own_key() -> aoide_storage::identity::Keypair {
+        aoide_storage::identity::load_or_mint().unwrap().0
+    }
+
+    /// A VERIFIED record for `name` under [`own_key`]: a node this box can dial
+    /// and check. The URL is nothing, so a test points it at its own stand-in.
+    fn keyed_node(name: &str) -> Node {
         Node {
             name: name.to_string(),
             url: "http://127.0.0.1:1".to_string(), // nothing listens here
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
-            pubkey: None,
-            verified: false,
+            pubkey: Some(own_key().info().pubkey_hex),
+            verified: true,
             grants: aoide_storage::node_store::Grants::new(),
             narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
@@ -1831,12 +2439,151 @@ mod tests {
         }
     }
 
+    /// One request's head as a stand-in reads it: bytes up to the blank line
+    /// that ends the headers, never the body. Empty on a closed socket.
+    fn read_request_head(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !bytes.windows(4).any(|w| w == b"\r\n\r\n") && bytes.len() < 16 * 1024 {
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+            }
+        }
+        String::from_utf8_lossy(&bytes).to_string()
+    }
+
+    /// The full HTTP answer a door sends to `request`, signed the way a verified
+    /// door signs it: `key` signs the status and the exact body, bound to the
+    /// request's own signature and nonce, with the production signer.
+    fn signed_reply(request: &str, key: &aoide_storage::identity::Keypair, status: u16, body: &str) -> String {
+        use aoide_storage::wire_auth::{sign_answer, HEADER_ANSWER_SIGNATURE, HEADER_NONCE, HEADER_SIGNATURE};
+        let request_signature = aoide_test_support::raw_header(request, HEADER_SIGNATURE).expect("the request is signed");
+        let request_nonce = aoide_test_support::raw_header(request, HEADER_NONCE).expect("the request is signed");
+        let signature = sign_answer(key, &request_signature, &request_nonce, status, body.as_bytes());
+        format!(
+            "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{HEADER_ANSWER_SIGNATURE}: {signature}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// The answer a deposit gets when the far end takes the letter.
+    const ACCEPTED: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#;
+    /// The admission refusal a far end gives a call it will not take (MAIL.md
+    /// §Wire): a JSON-RPC `error`, which is not a verdict on the letter.
+    const LACKS_MESSAGE: &str = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32010,"message":"lacks message"}}"#;
+    /// What a door says to a method it does not have.
+    const NO_SUCH_METHOD: &str = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#;
+
+    /// One whole request as a stand-in reads it: the head, then exactly as many
+    /// body bytes as its `Content-Length` names. Empty on a closed socket.
+    fn read_full_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        let mut buf: Vec<u8> = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = stream.read(&mut chunk).unwrap_or(0);
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf).to_string();
+            let Some(head) = text.find("\r\n\r\n") else {
+                if n == 0 { break } else { continue }
+            };
+            let len: usize = text[..head]
+                .lines()
+                .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse().ok()))
+                .unwrap_or(0);
+            if n == 0 || buf.len() >= head + 4 + len {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&buf).to_string()
+    }
+
+    /// A whole 200 answer carrying `body` and one `X-Aoide-Answer-Signature`
+    /// header per entry of `signatures`: none for an unsigned answer, two for an
+    /// ambiguous one.
+    fn reply_with(body: &str, signatures: &[&str]) -> String {
+        use aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE;
+        let headers: String = signatures.iter().map(|s| format!("{HEADER_ANSWER_SIGNATURE}: {s}\r\n")).collect();
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{headers}Connection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// A door that reads each request whole and answers it with `reply`, so a
+    /// test can sign, leave unsigned, forge or replay each answer in turn.
+    /// Returns its port.
+    fn scripted_door(reply: impl Fn(&str) -> String + Send + 'static) -> u16 {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let request = read_full_request(&mut stream);
+                let _ = stream.write_all(reply(&request).as_bytes());
+            }
+        });
+        port
+    }
+
+    /// A charter relay's door for the binding tests. `aoide/binding` is answered
+    /// genuinely, signed by `relay`; with `replay`, every binding after the first
+    /// is that first answer again. `aoide/mailPoll` is signed by `poll`, or left
+    /// unsigned when that is `None`.
+    fn replaying_relay(
+        binding: serde_json::Value,
+        relay: aoide_storage::identity::Keypair,
+        poll: Option<aoide_storage::identity::Keypair>,
+        replay: bool,
+    ) -> u16 {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let first_binding = std::sync::Mutex::new(None::<String>);
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let request = read_full_request(&mut stream);
+                let answered = if request.contains("aoide/binding") {
+                    let mut first = first_binding.lock().unwrap();
+                    match first.clone() {
+                        Some(earlier) if replay => earlier,
+                        _ => {
+                            let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "binding": binding } }).to_string();
+                            let genuine = signed_reply(&request, &relay, 200, &body);
+                            *first = Some(genuine.clone());
+                            genuine
+                        }
+                    }
+                } else {
+                    let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "envelopes": [], "containers": [], "withheld": [] } }).to_string();
+                    match &poll {
+                        Some(key) => signed_reply(&request, key, 200, &body),
+                        None => reply_with(&body, &[]),
+                    }
+                };
+                let _ = stream.write_all(answered.as_bytes());
+            }
+        });
+        port
+    }
+
+    /// Spool one letter for `name`, whose record points at a door on `port`.
+    fn spool_letter_to(name: &str, port: u16) {
+        let mut node = keyed_node(name);
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", name, "bob", "hi").unwrap();
+        aoide_storage::outbox::write_entry(name, &OutboxEntry::fresh(envelope)).unwrap();
+    }
+
     #[test]
     fn a_dead_node_leaves_its_entry_waiting_and_drains_on_return() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("drain-dead-node");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(env)).unwrap();
@@ -1873,7 +2620,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("backoff-despite-write-failure");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         let msgid = env.msgid.clone();
@@ -1907,7 +2654,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("transport-failure-records-entry");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(env)).unwrap();
@@ -1936,7 +2683,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -1970,24 +2717,19 @@ mod tests {
     /// `commands::spawn_fake_card_server`'s exact shape (that copy is
     /// private to `commands.rs`'s own test module, so this is a second,
     /// module-local instance rather than a cross-module reach).
-    fn fake_deposit_server(body: &'static str) -> (std::net::TcpListener, u16) {        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    fn fake_deposit_server(body: &'static str) -> (std::net::TcpListener, u16) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let accepter = listener.try_clone().unwrap();
         std::thread::spawn(move || {
-            use std::io::{Read, Write};
+            use std::io::Write;
             loop {
                 let Ok((mut stream, _)) = accepter.accept() else { break };
-                let mut buf = [0u8; 1024];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                if n == 0 {
+                let request = read_request_head(&mut stream);
+                if request.is_empty() {
                     continue;
                 }
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(signed_reply(&request, &own_key(), 200, body).as_bytes());
             }
         });
         (listener, port)
@@ -2008,7 +2750,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"addressing-mismatch","detail":"container is addressed to `chiyo`, not this node"}}"#,
         );
-        let mut node = unpaired_node("sakaki");
+        let mut node = keyed_node("sakaki");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2068,7 +2810,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2119,7 +2861,7 @@ mod tests {
         let (listener, port) = fake_deposit_server(
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"bad-msgid","detail":"envelope msgid does not match the recomputed value"}}"#,
         );
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2165,7 +2907,7 @@ mod tests {
         let (_env, dir) = root("missing-status-parks");
 
         let (listener, port) = fake_deposit_server(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
-        let mut node = unpaired_node("elsewhere");
+        let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -2197,7 +2939,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("drain-no-forward");
 
-        aoide_storage::node_store::save_nodes(&[unpaired_node("elsewhere")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("elsewhere")]).unwrap();
 
         let env = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
         aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(env)).unwrap();
@@ -2230,12 +2972,20 @@ mod tests {
         deposit_body: &str,
         poll_body: String,
     ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let deposit = deposit_body.to_string();
+        answering_door(move |body| if body.contains("aoide/mailPoll") { poll_body.clone() } else { deposit.clone() })
+    }
+
+    /// [`recording_door`] whose answer is computed per request body, so a stand-in
+    /// can run the far end's own logic (file, mint, drain back) on its own thread.
+    fn answering_door(
+        answer: impl Fn(&str) -> String + Send + 'static,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let log = seen.clone();
-        let deposit = deposit_body.to_string();
         let accepter = listener.try_clone().unwrap();
         std::thread::spawn(move || loop {
             let Ok((mut stream, _)) = accepter.accept() else { break };
@@ -2262,13 +3012,7 @@ mod tests {
             let text = String::from_utf8_lossy(&buf).to_string();
             let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
             log.lock().unwrap().push(body.clone());
-            let answer = if body.contains("aoide/mailPoll") { poll_body.clone() } else { deposit.clone() };
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                answer.len(),
-                answer
-            );
-            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(signed_reply(&text, &own_key(), 200, &answer(&body)).as_bytes());
         });
         (listener, port, seen)
     }
@@ -2295,7 +3039,7 @@ mod tests {
     fn register_local_origin() -> String {
         let me = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
-        let mut node = unpaired_node(&me);
+        let mut node = keyed_node(&me);
         node.pubkey = Some(kp.info().pubkey_hex.clone());
         node.verified = true;
         node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
@@ -2306,7 +3050,7 @@ mod tests {
     }
 
     fn register_relay(url: String) -> Node {
-        let relay = unpaired_node("relay");
+        let relay = keyed_node("relay");
         let relay = Node { url, ..relay };
         let mut nodes = aoide_storage::node_store::load_nodes();
         aoide_storage::node_store::insert_node(&mut nodes, relay.clone());
@@ -2352,7 +3096,6 @@ mod tests {
         let mut twin = aoide_storage::node_store::Node {
             name: "twomesh".to_string(),
             url: "http://127.0.0.1:1/".to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -2379,6 +3122,220 @@ mod tests {
 
         // (The sealed lane's half of the rule — the container's own mesh — is
         // pinned in `seal.rs`, where it belongs.)
+    }
+
+    /// Mint `name`'s identity under `root` and read back what a charter line and a
+    /// relay's own answer carry: the node line, the identity key, and the signed
+    /// binding. This box's own root and node name are restored afterwards.
+    /// The identity key of the box whose state lives under `root`, loaded with
+    /// `AOIDE_ROOT` pointed there, as [`mint_box`] does. A stand-in that plays
+    /// that box signs with it.
+    fn box_keypair(root: &std::path::Path) -> aoide_storage::identity::Keypair {
+        let own_root = std::env::var("AOIDE_ROOT").unwrap();
+        std::env::set_var("AOIDE_ROOT", root);
+        let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+        std::env::set_var("AOIDE_ROOT", own_root);
+        kp
+    }
+
+    fn mint_box(root: &std::path::Path, name: &str) -> (String, String, serde_json::Value) {
+        let own_root = std::env::var("AOIDE_ROOT").unwrap();
+        let own_name = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::fs::create_dir_all(root).unwrap();
+        std::env::set_var("AOIDE_ROOT", root);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", name);
+        let line = aoide_storage::charter::node_line().unwrap();
+        let key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+        let binding = serde_json::to_value(aoide_storage::seal::publish_binding().unwrap()).unwrap();
+        std::env::set_var("AOIDE_ROOT", own_root);
+        match own_name {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        (line, key, binding)
+    }
+
+    /// A relay's node line placed at `address` (the charter reads a line with no
+    /// address as `poll`).
+    fn line_at(line: &str, address: &str) -> String {
+        line.replacen(" }", &format!(", address = \"{address}\" }}"), 1)
+    }
+
+    /// This box (`opbox`) takes a `home` charter in which `relay_line` is the one
+    /// relay, and nothing else but this box and that relay is declared.
+    fn charter_with_relay(relay_line: &str) {
+        aoide_storage::charter::init("home").unwrap();
+        let own_line = aoide_storage::charter::node_line().unwrap();
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\nrelays = [\"relay\"]\n\n[nodes]\n{own_line}\n{relay_line}\n"),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+    }
+
+    /// A loopback stand-in for a relay's door: answers `aoide/binding` with
+    /// `binding` and `aoide/mailPoll` with an empty hand-over, and keeps the raw
+    /// request of every call it was sent.
+    fn relay_stand_in(
+        binding: serde_json::Value,
+        signer: aoide_storage::identity::Keypair,
+    ) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let mut buf: Vec<u8> = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = stream.read(&mut chunk).unwrap_or(0);
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    let Some(head) = text.find("\r\n\r\n") else {
+                        if n == 0 { break } else { continue }
+                    };
+                    let len: usize = text[..head]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse().ok()))
+                        .unwrap_or(0);
+                    if n == 0 || buf.len() >= head + 4 + len {
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&buf).to_string();
+                log.lock().unwrap().push(text.clone());
+                let answer = if text.contains("aoide/binding") {
+                    serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": { "binding": binding } })
+                } else {
+                    serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": { "envelopes": [], "containers": [], "withheld": [] } })
+                }
+                .to_string();
+                let _ = stream.write_all(signed_reply(&text, &signer, 200, &answer).as_bytes());
+            }
+        });
+        (port, seen)
+    }
+
+    /// A relay that has no pair record here is polled through its charter line:
+    /// its key is the charter's, its address the charter's https one, and the
+    /// sweep asks it too.
+    #[test]
+    fn a_charter_relay_with_no_record_is_resolved_from_the_charter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-resolved");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, relay_key, _) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let target = poll_target("relay", None).expect("the charter names the relay");
+        assert!(target.relay, "no pair record: the relay comes from the charter");
+        assert_eq!(target.mesh, "home");
+        assert_eq!(target.node.url, "https://relay.example.net/");
+        assert_eq!(target.node.pubkey.as_deref(), Some(relay_key.as_str()), "dialled with the charter's key");
+        assert!(target.node.via.is_none(), "an https relay, with no tunnel");
+        assert!(pollable_nodes().contains(&"relay".to_string()), "the sweep asks a charter relay too");
+    }
+
+    /// No pair record and no charter line for the name: a taught refusal before
+    /// any dial, never an empty answer.
+    #[test]
+    fn a_poll_with_no_record_and_no_charter_line_is_refused_taught() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-undeclared");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, _) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let refusal = poll_target("ghost", None).expect_err("no charter names `ghost`");
+        assert_eq!(refusal.fix, aoide_protocol::output::Fix::Run("aoide pair ghost".to_string()));
+        assert!(refusal.why.contains("charter"), "{refusal:?}");
+        let err = poll_node("ghost", None).expect_err("a poll with no way to its relay is a refusal, never Ok(empty)");
+        assert!(err.contains("pair") && err.contains("charter"), "{err}");
+    }
+
+    /// The charter gives the relay a line the box cannot poll: `poll` has no
+    /// address to ask, and `ssh://` needs a pair record for its tunnel. Either
+    /// one is refused, with its reason, before any dial.
+    fn refusal_why_for(tag: &str, address: Option<&str>) -> String {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root(tag);
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, _) = mint_box(&dir.join("relay-box"), "relay");
+        let line = match address {
+            Some(address) => line_at(&relay_line, address),
+            None => relay_line,
+        };
+        charter_with_relay(&line);
+        poll_target("relay", None).expect_err("a charter relay that is not https is refused").why
+    }
+
+    #[test]
+    fn a_charter_relay_declared_poll_is_refused_taught() {
+        let why = refusal_why_for("charter-relay-poll-address", None);
+        assert!(why.contains("declared `poll`"), "{why}");
+    }
+
+    #[test]
+    fn a_charter_relay_declared_ssh_is_refused_taught() {
+        let why = refusal_why_for("charter-relay-ssh-address", Some("ssh://khoa@relay"));
+        assert!(why.contains("ssh://"), "{why}");
+    }
+
+    /// A relay whose charter key is not the key that answers at its address is
+    /// refused before a letter moves: the binding it proves itself with is signed
+    /// by another identity, so the poll is never sent.
+    #[test]
+    fn a_relay_answering_as_another_key_is_refused_before_any_letter_moves() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-impostor");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, _) = mint_box(&dir.join("relay-box"), "relay");
+        let (_, _, impostor_binding) = mint_box(&dir.join("impostor-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let mut target = poll_target("relay", None).unwrap();
+        let (port, seen) = relay_stand_in(impostor_binding, box_keypair(&dir.join("impostor-box")));
+        target.node.url = format!("http://127.0.0.1:{port}/");
+        let err = poll_through("relay", None, target).expect_err("a key the charter does not give is refused");
+        assert!(err.contains("does not give it") && err.contains("does not verify as signed by the key on file"), "{err}");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "the identity check alone was sent: no poll, no letter");
+        assert!(seen[0].contains("aoide/binding"), "{}", seen[0]);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.key-mismatch"), "the answer is audited: {log}");
+        assert!(log.contains("mail.poll.relay-key-mismatch"), "the relay is audited under its documented word: {log}");
+    }
+
+    /// The relay proves its charter key, and the poll then goes out signed. This
+    /// box sends no binding of its own on the way (the identity check's body is
+    /// empty), so the relay is never asked to learn a record it has no room for.
+    #[test]
+    fn a_charter_relay_is_polled_after_it_proves_its_key_and_no_binding_is_sent() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-polled");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, relay_binding) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+
+        let mut target = poll_target("relay", None).unwrap();
+        let (port, seen) = relay_stand_in(relay_binding, box_keypair(&dir.join("relay-box")));
+        target.node.url = format!("http://127.0.0.1:{port}/");
+        let outcome = poll_through("relay", None, target).expect("the relay proves its key and answers the poll");
+        assert_eq!(outcome.filed, 0, "an empty spool files nothing, and says so as an answer");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "the identity check, then the poll: {seen:?}");
+        assert!(seen[0].contains("aoide/binding") && seen[0].contains("\"params\":{}"), "{}", seen[0]);
+        assert!(seen[1].contains("aoide/mailPoll"), "{}", seen[1]);
+        let signature = aoide_storage::wire_auth::HEADER_SIGNATURE.to_ascii_lowercase();
+        assert!(seen[1].to_ascii_lowercase().contains(&signature), "the poll is signed: {}", seen[1]);
     }
 
     #[test]
@@ -2476,7 +3433,9 @@ mod tests {
     /// A door that keeps each request it is sent, whole, and answers a
     /// deposit as accepted: what a test needs to read the signature headers
     /// off the wire.
-    fn head_door() -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    fn head_door(
+        signer: aoide_storage::identity::Keypair,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -2502,15 +3461,10 @@ mod tests {
                         break;
                     }
                 }
-                log.lock().unwrap().push(String::from_utf8_lossy(&buf).to_string());
+                let request = String::from_utf8_lossy(&buf).to_string();
+                log.lock().unwrap().push(request.clone());
                 let answer = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#;
-                let _ = stream.write_all(
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
-                        answer.len()
-                    )
-                    .as_bytes(),
-                );
+                let _ = stream.write_all(signed_reply(&request, &signer, 200, answer).as_bytes());
             }
         });
         (listener, port, seen)
@@ -2555,7 +3509,7 @@ mod tests {
         let (mut hop, dial_only) = dial_node("relay", Some("home")).expect("the charter's line is a dial target");
         assert!(dial_only, "this box holds no record for the relay");
         assert_eq!(hop.url, "https://relay.example.net/");
-        let (listener, port, seen) = head_door();
+        let (listener, port, seen) = head_door(box_keypair(&relay_root));
         hop.url = format!("http://127.0.0.1:{port}/");
 
         let envelope = aoide_storage::mail::mint_outbound_letter_in_mesh("alice", "relay", "bob", "hi", "home").unwrap();
@@ -2595,32 +3549,840 @@ mod tests {
     /// **A declaration with no key signs nothing.** A pair mesh's address for a
     /// node this box holds no record of names where to dial and vouches for no
     /// key, so the dialled record is unverified and the deposit goes out bare.
+    /// **A node with no key on file is never dialled.** A declaration that names
+    /// no key leaves nothing to check its answers under, so the deposit is refused
+    /// before a bearer is resolved or a socket is opened: the door sees nothing,
+    /// and the refusal is audited.
     #[test]
-    fn a_hop_declared_without_a_key_goes_out_unsigned() {
+    fn a_node_with_no_key_on_file_is_never_dialled() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("declared-no-key");
-        std::fs::write(
-            aoide_storage::config::source().path,
-            "[mesh.friends.nodes]\nghost = \"ssh://khoa@192.168.1.5\"\n",
-        )
-        .unwrap();
-
-        let (mut hop, dial_only) = dial_node("ghost", Some("friends")).expect("the declared address is a dial target");
-        assert!(dial_only, "this box holds no record for it");
+        let (listener, port, seen) = head_door(own_key());
+        let hop = Node::declared("ghost", &format!("http://127.0.0.1:{port}/"), None, None);
         assert!(!hop.verified && hop.pubkey.is_none(), "no key was declared, so none is trusted");
-        assert!(!Node::declared("ghost", "https://ghost.example.net/", None, None).verified);
 
-        let (listener, port, seen) = head_door();
-        hop.url = format!("http://127.0.0.1:{port}/");
-        hop.via = None;
-        let envelope = aoide_storage::mail::mint_outbound_letter_in_mesh("alice", "ghost", "bob", "hi", "friends").unwrap();
-        attempt_deposit(&hop, &OutboxEntry::fresh(envelope));
-
-        let request = seen.lock().unwrap().first().cloned().expect("the door saw the deposit");
-        let head = request.split_once("\r\n\r\n").unwrap().0.to_ascii_lowercase();
-        assert!(!head.contains("x-aoide-"), "no mesh, node or signature header goes out:\n{head}");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "ghost", "bob", "hi").unwrap();
+        match attempt_deposit(&hop, &OutboxEntry::fresh(envelope)) {
+            DepositAttempt::Unauthenticated(reason) => {
+                assert!(reason.contains("no identity key is on file for `ghost`"), "{reason}");
+                assert!(reason.contains("aoide pair ghost"), "and it says how to fix it: {reason}");
+            }
+            other => panic!("a node with no key is refused before it is dialled, got {other:?}"),
+        }
+        assert!(seen.lock().unwrap().is_empty(), "the door saw nothing: the request never left this box");
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.no-key"), "the refusal is audited: {log}");
 
         drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An unsigned accepted answer is not believed.** A far end that says
+    /// `accepted` with no signature has said nothing this box can check: the
+    /// letter stays spooled and unrefused, the attempt is recorded as
+    /// unauthenticated, and the link backs off.
+    #[test]
+    fn an_unsigned_accepted_answer_is_not_acted_on_and_the_entry_stays_live() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-accepted");
+        spool_letter_to("elsewhere", scripted_door(|_| reply_with(ACCEPTED, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(!entries[0].refused, "an answer that cannot be checked parks nothing");
+        assert!(entries[0].last_outcome.starts_with("unauthenticated:"), "{}", entries[0].last_outcome);
+        assert_eq!(entries[0].tries, 1);
+        let link = aoide_storage::outbox::read_link_state("elsewhere").unwrap().expect("the link backs off");
+        assert!(aoide_storage::outbox::is_held_off(&link, unix_now()), "and it is held off");
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.unsigned"), "the unsigned answer is audited: {log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A held-off node is neither dialled nor audited.** The first pass meets a
+    /// door that answers unsigned and backs the link off. Every later pass while
+    /// the back-off stands, which the daemon makes every few seconds, sends no
+    /// request (the binding exchange included) and writes no audit line.
+    #[test]
+    fn a_held_off_node_is_neither_dialled_nor_audited() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("held-off-undialled");
+        let asked = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = asked.clone();
+        spool_letter_to(
+            "elsewhere",
+            scripted_door(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                reply_with(ACCEPTED, &[])
+            }),
+        );
+        let audit_lines = || std::fs::read_to_string(dir.join("log")).unwrap_or_default().lines().count();
+
+        drain_node("elsewhere").unwrap();
+        let link = aoide_storage::outbox::read_link_state("elsewhere").unwrap().expect("the unsigned answer backs the link off");
+        assert!(aoide_storage::outbox::is_held_off(&link, unix_now()));
+        let (requests, lines) = (asked.load(Ordering::SeqCst), audit_lines());
+        assert!(requests > 0 && lines > 0, "the first pass dialled and audited: {requests} requests, {lines} lines");
+
+        for _ in 0..3 {
+            drain_node("elsewhere").unwrap();
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), requests, "a held-off node is not dialled, not even for its binding");
+        assert_eq!(audit_lines(), lines, "and nothing is audited");
+        assert_eq!(aoide_storage::outbox::list_entries("elsewhere").unwrap()[0].tries, 1, "no attempt is recorded");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A forged acknowledgement retires nothing.** A relay that says `accepted`
+    /// under a key that is not the one on file is not believed. The three entries
+    /// a VERIFIED ack retires (a receipt, a charter and a transit container) all
+    /// stay spooled, and each mismatch is audited.
+    #[test]
+    fn a_forged_accepted_ack_never_retires_a_receipt_charter_or_transit_entry() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("forged-ack");
+        let now = aoide_storage::time::now_iso_utc();
+        let transit = {
+            let envelope = aoide_storage::mail::mint_outbound_letter("alice", "ft", "bob", "through the hub").unwrap();
+            let live = aoide_storage::seal::publish_binding().unwrap();
+            OutboxEntry::transit(aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "ft", "ft", &now).unwrap())
+        };
+        let receipt = aoide_storage::mail::mint_ack(
+            "alice",
+            aoide_storage::mail::Address { node: "fr".to_string(), name: "bob".to_string() },
+            "forged-receipt",
+        )
+        .unwrap();
+        let charter = aoide_storage::mail::mint_charter_letter("fc", "charter home v1", "home").unwrap();
+        let spooled = [
+            ("fr", OutboxEntry::fresh(receipt)),
+            ("fc", OutboxEntry::fresh(charter)),
+            ("ft", transit),
+        ];
+
+        let mut nodes = Vec::new();
+        for (name, entry) in &spooled {
+            let port = scripted_door(|request| {
+                signed_reply(request, &aoide_storage::identity::mint_ephemeral().unwrap(), 200, ACCEPTED)
+            });
+            let mut node = keyed_node(name);
+            node.url = format!("http://127.0.0.1:{port}/");
+            nodes.push(node);
+            aoide_storage::outbox::write_entry(name, entry).unwrap();
+        }
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        for (name, _) in &spooled {
+            drain_node(name).unwrap();
+            let left = aoide_storage::outbox::list_entries(name).unwrap();
+            assert_eq!(left.len(), 1, "`{name}`: a forged ack retires nothing");
+            assert!(left[0].last_outcome.starts_with("unauthenticated:"), "`{name}`: {}", left[0].last_outcome);
+        }
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.key-mismatch"), "each forgery is audited: {log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A replayed answer settles nothing twice.** The far end answers the first
+    /// deposit genuinely and every deposit after it with that same answer again.
+    /// The first charter lands and retires; the second is not believed, because
+    /// the signature inside the replayed answer was made for the first request.
+    #[test]
+    fn a_replayed_answer_does_not_settle_a_second_deposit() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("replayed-answer");
+        let key = own_key();
+        let first_answer = std::sync::Mutex::new(None::<String>);
+        let port = scripted_door(move |request| {
+            if !request.contains("aoide/mailDeposit") {
+                return signed_reply(request, &key, 200, NO_SUCH_METHOD);
+            }
+            let mut first = first_answer.lock().unwrap();
+            match first.clone() {
+                Some(earlier) => earlier,
+                None => {
+                    let genuine = signed_reply(request, &key, 200, ACCEPTED);
+                    *first = Some(genuine.clone());
+                    genuine
+                }
+            }
+        });
+        let mut node = keyed_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        for text in ["charter home v1", "charter home v2"] {
+            let charter = aoide_storage::mail::mint_charter_letter("elsewhere", text, "home").unwrap();
+            aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(charter)).unwrap();
+        }
+
+        drain_node("elsewhere").unwrap();
+
+        let left = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(left.len(), 1, "the first charter landed and retired; the replay settled nothing else");
+        assert!(left[0].last_outcome.starts_with("unauthenticated:"), "{}", left[0].last_outcome);
+        assert!(!left[0].refused);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An answer cut short is a transport failure, not a forged one.** A door
+    /// that promises the whole signed body and closes halfway leaves curl with a
+    /// 200 and a fragment. Checked as an answer, that fragment would fail its
+    /// signature and blame the key; it is the link that failed, so the entry is
+    /// recorded `transport:` and no key mismatch is audited.
+    #[test]
+    fn an_answer_cut_short_is_a_transport_failure_not_a_key_mismatch() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("answer-cut-short");
+        let key = own_key();
+        spool_letter_to(
+            "elsewhere",
+            scripted_door(move |request| {
+                let whole = signed_reply(request, &key, 200, ACCEPTED);
+                whole[..whole.len() - ACCEPTED.len() / 2].to_string()
+            }),
+        );
+
+        drain_node("elsewhere").unwrap();
+
+        let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
+        assert!(!entry.refused, "{entry:?}");
+        assert!(entry.last_outcome.starts_with("transport:"), "{}", entry.last_outcome);
+        assert!(entry.last_outcome.contains("cut short"), "{}", entry.last_outcome);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(!log.contains("mail.answer.key-mismatch"), "a cut transfer blames no key: {log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An answer bound to another request is refused.** The signature covers
+    /// the request's own signature and nonce, so a genuine key signing over a
+    /// different request's bytes has not answered this request.
+    #[test]
+    fn an_answer_signed_for_another_request_is_refused() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("answer-other-request");
+        let key = own_key();
+        let port = scripted_door(move |request| {
+            let nonce = aoide_test_support::raw_header(request, aoide_storage::wire_auth::HEADER_NONCE)
+                .expect("the request is signed");
+            let other_request = "00".repeat(64);
+            let signature = aoide_storage::wire_auth::sign_answer(&key, &other_request, &nonce, 200, ACCEPTED.as_bytes());
+            reply_with(ACCEPTED, &[&signature])
+        });
+        spool_letter_to("elsewhere", port);
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(entries[0].last_outcome.starts_with("unauthenticated:"), "{}", entries[0].last_outcome);
+        assert!(!entries[0].refused);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.key-mismatch"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Two answer signatures are refused, even when both are genuine.** An
+    /// answer carries one signature, so no reader can pick the one that suits it.
+    /// The same genuine signature sent twice is still two.
+    #[test]
+    fn an_answer_with_two_signatures_is_refused_even_when_both_are_genuine() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("two-signatures");
+        let key = own_key();
+        let port = scripted_door(move |request| {
+            let request_signature = aoide_test_support::raw_header(request, aoide_storage::wire_auth::HEADER_SIGNATURE)
+                .expect("the request is signed");
+            let nonce = aoide_test_support::raw_header(request, aoide_storage::wire_auth::HEADER_NONCE)
+                .expect("the request is signed");
+            let signature = aoide_storage::wire_auth::sign_answer(&key, &request_signature, &nonce, 200, ACCEPTED.as_bytes());
+            reply_with(ACCEPTED, &[&signature, &signature])
+        });
+        spool_letter_to("elsewhere", port);
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(!entries[0].refused);
+        assert!(
+            entries[0].last_outcome.starts_with("unauthenticated:") && entries[0].last_outcome.contains("2 answer signatures"),
+            "{}",
+            entries[0].last_outcome
+        );
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        assert!(log.contains("mail.answer.unsigned"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An unsigned error is not a refusal.** A JSON-RPC `error` nobody signed
+    /// could be anyone's word, so it must not park the letter. What it says is
+    /// shown to the operator and never acted on.
+    #[test]
+    fn an_unsigned_jsonrpc_error_never_parks_an_entry() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-error");
+        spool_letter_to("elsewhere", scripted_door(|_| reply_with(LACKS_MESSAGE, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "the letter stays spooled");
+        assert!(!entries[0].refused, "an error nobody signed parks nothing");
+        assert!(entries[0].last_outcome.starts_with("unauthenticated:"), "{}", entries[0].last_outcome);
+        assert!(entries[0].last_outcome.contains("lacks message"), "{}", entries[0].last_outcome);
+        assert!(
+            entries[0].last_outcome.contains("upgrade aoide on `elsewhere`"),
+            "any other unsigned answer reads as an older aoide: {}",
+            entries[0].last_outcome
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **What an unsigned answer said is kept inert.** Its words reach the
+    /// entry's `last_outcome` and the link record, which `mail outbox` prints,
+    /// so a carriage return, an escape sequence and a bidi override are gone,
+    /// and a 10 KB message is clipped to [`SAID_MAX`] characters.
+    #[test]
+    fn an_unsigned_answers_words_are_cleaned_and_clipped_before_they_are_kept() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-words-inert");
+        let words = format!("over\rwritten \u{1b}[2J\u{1b}]0;title\u{7}cleared \u{202e}desrever {}", "x".repeat(10_000));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": words } }).to_string();
+        spool_letter_to("elsewhere", scripted_door(move |_| reply_with(&body, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
+        let link = aoide_storage::outbox::read_link_state("elsewhere").unwrap().expect("the link backs off");
+        for kept in [&entry.last_outcome, &link.last_outcome] {
+            assert!(kept.starts_with("unauthenticated:"), "{kept}");
+            assert!(!kept.chars().any(aoide_protocol::untrusted::is_unsafe), "no control, escape or bidi character is kept: {kept:?}");
+            let said = kept.split_once("(it said: ").and_then(|(_, rest)| rest.strip_suffix("; not acted on)")).expect("labelled");
+            assert!(said.starts_with("overwritten [2J]0;titlecleared desrever x"), "{said:?}");
+            assert_eq!(said.chars().count(), SAID_MAX, "clipped: {said:?}");
+            assert!(said.ends_with('…'));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A config-invalid answer says so.** The far end's own word for a config
+    /// it cannot load is a refused result, not a JSON-RPC error. Unsigned, it is
+    /// still not acted on, but the operator sees the word, so a broken config is
+    /// not read as an old aoide.
+    #[test]
+    fn an_unsigned_config_invalid_answer_shows_the_far_ends_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-config-invalid");
+        let body = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"config-invalid","detail":"this host's declaration will not load"}}"#;
+        spool_letter_to("elsewhere", scripted_door(move |_| reply_with(body, &[])));
+
+        drain_node("elsewhere").unwrap();
+
+        let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
+        assert!(!entry.refused, "{entry:?}");
+        assert!(entry.last_outcome.starts_with("unauthenticated:"), "{}", entry.last_outcome);
+        assert!(entry.last_outcome.ends_with("(it said: config-invalid; not acted on)"), "{}", entry.last_outcome);
+        assert!(
+            entry.last_outcome.contains("its own config is invalid") && entry.last_outcome.contains("fix the config on `elsewhere`"),
+            "the lead names the far end's config, not its version: {}",
+            entry.last_outcome
+        );
+        assert!(!entry.last_outcome.contains("upgrade aoide"), "an upgrade would not help: {}", entry.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A disguised `config-invalid` is not the word.** An unsigned answer can
+    /// spell the word with a zero-width character or with fullwidth letters, and
+    /// each reads as `config-invalid` once cleaned or on a screen. The lead that
+    /// says "fix the config, not the version" is the client's own judgement of the
+    /// word the far end used, so it is made on the raw string: a disguised one
+    /// reads as any other unsigned answer, and the entry stays live, never parked.
+    #[test]
+    fn a_disguised_unsigned_config_invalid_is_not_read_as_the_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-config-invalid-disguised");
+        let result = |reason: &str| {
+            json!({ "jsonrpc": "2.0", "id": 1, "result": { "status": "refused", "reason": reason, "detail": "d" } }).to_string()
+        };
+        let error = |message: &str| json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": message } }).to_string();
+        let cases = [
+            ("a zero-width space", result("config\u{200b}-invalid"), false),
+            ("a soft hyphen", result("config-\u{ad}invalid"), false),
+            ("fullwidth letters", result("ｃｏｎｆｉｇ-ｉｎｖａｌｉｄ"), false),
+            ("a disguised error message", error("config\u{200b}-invalid"), false),
+            ("the word itself", result("config-invalid"), true),
+        ];
+        for (i, (how, body, genuine)) in cases.into_iter().enumerate() {
+            let name = format!("far-{i}");
+            spool_letter_to(&name, scripted_door(move |_| reply_with(&body, &[])));
+
+            drain_node(&name).unwrap();
+
+            let entry = aoide_storage::outbox::list_entries(&name).unwrap().remove(0);
+            assert!(!entry.refused, "{how}: an unsigned answer parks nothing: {entry:?}");
+            assert!(entry.last_outcome.starts_with("unauthenticated:"), "{how}: {}", entry.last_outcome);
+            let says_config = entry.last_outcome.contains("its own config is invalid");
+            assert_eq!(says_config, genuine, "{how}: only the word itself reads as a broken config: {}", entry.last_outcome);
+            assert_eq!(entry.last_outcome.contains("upgrade aoide on"), !genuine, "{how}: {}", entry.last_outcome);
+            assert!(aoide_storage::outbox::read_link_state(&name).unwrap().is_some(), "{how}: the link backs off");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A signed error parks the letter.** The same error, signed by the key on
+    /// file, is the far end's own refusal and parks the letter at its sender, as
+    /// any verified refusal does.
+    #[test]
+    fn a_signed_jsonrpc_error_parks_it() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("signed-error");
+        let key = own_key();
+        spool_letter_to("elsewhere", scripted_door(move |request| signed_reply(request, &key, 200, LACKS_MESSAGE)));
+
+        drain_node("elsewhere").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(entries.len(), 1, "a refused entry stays in the spool");
+        assert!(entries[0].refused, "a verified refusal parks it");
+        assert!(entries[0].last_outcome.starts_with("refused:") && entries[0].last_outcome.contains("lacks message"), "{}", entries[0].last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A far end's words as a hostile one plants them: a carriage return that
+    /// overwrites the line, a screen clear, a window-title escape with its bell,
+    /// a bidi override, and then 10 KB.
+    fn hostile_words() -> String {
+        format!("over\rwritten \u{1b}[2J\u{1b}]0;title\u{7}cleared \u{202e}desrever {}", "x".repeat(10_000))
+    }
+
+    /// `kept` is text this box may print as it stands: nothing a terminal obeys,
+    /// and no longer than `max` characters.
+    fn assert_inert(kept: &str, max: usize) {
+        assert!(!kept.chars().any(aoide_protocol::untrusted::is_unsafe), "no control, escape or bidi character is kept: {kept:?}");
+        assert!(kept.chars().count() <= max, "clipped to {max}, got {}: {kept:?}", kept.chars().count());
+    }
+
+    /// **A signed answer's words are kept inert too.** A signature proves who
+    /// spoke, not that the words are safe for a terminal: a relay or a
+    /// destination holding its own key can plant a carriage return, an escape
+    /// sequence, a bell, a bidi override and 10 KB in any word it answers with.
+    /// Each reaches the entry's `last_outcome` (and, for a word about the link,
+    /// the link record) cleaned and clipped to [`LINE_MAX`], which is what
+    /// `mail outbox` prints.
+    #[test]
+    fn a_signed_refusals_words_are_cleaned_and_clipped_before_they_are_kept() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("signed-words-inert");
+        let hostile = hostile_words();
+        let refused = |reason: &str, detail: &str| {
+            json!({ "jsonrpc": "2.0", "id": 1, "result": { "status": "refused", "reason": reason, "detail": detail } }).to_string()
+        };
+        // (where the words sit, the signed answer, whether it is a word about the link)
+        let cases = [
+            (
+                "error.message",
+                json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": hostile } }).to_string(),
+                false,
+            ),
+            ("result.detail of a verdict on the letter", refused("zone-violation", &hostile), false),
+            ("result.reason of a verdict on the letter", refused(&hostile, "d"), false),
+            ("result.detail of `down`", refused("down", &hostile), true),
+            ("result.detail of `config-invalid`", refused("config-invalid", &hostile), true),
+        ];
+        for (i, (where_, body, link)) in cases.into_iter().enumerate() {
+            let name = format!("far-{i}");
+            let key = own_key();
+            spool_letter_to(&name, scripted_door(move |request| signed_reply(request, &key, 200, &body)));
+
+            drain_node(&name).unwrap();
+
+            let entry = aoide_storage::outbox::list_entries(&name).unwrap().remove(0);
+            let max = "refused: ".len() + LINE_MAX;
+            assert!(entry.last_outcome.starts_with("refused: "), "{where_}: {}", entry.last_outcome);
+            assert_inert(&entry.last_outcome, max);
+            assert!(
+                entry.last_outcome.contains("overwritten [2J]0;titlecleared desrever x") && entry.last_outcome.ends_with('…'),
+                "{where_}: the words are kept, cleaned and clipped: {}",
+                entry.last_outcome
+            );
+            assert_eq!(entry.refused, !link, "{where_}: a word about the link parks nothing, a verdict on the letter parks it");
+            let kept_link = aoide_storage::outbox::read_link_state(&name).unwrap();
+            match (link, kept_link) {
+                (true, Some(state)) => {
+                    assert!(state.last_outcome.starts_with("refused: "), "{where_}: {}", state.last_outcome);
+                    assert_inert(&state.last_outcome, max);
+                }
+                (false, None) => {}
+                (link, state) => panic!("{where_}: link word {link} but link record {state:?}"),
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A word is judged before it is cleaned.** `down` with a format
+    /// character inside is not the word `down`: stripping the character to
+    /// display it must not turn a verdict on the letter into a word about the
+    /// link, which would leave a refused letter live and retried for ever.
+    #[test]
+    fn a_refusal_is_classified_on_the_raw_word_not_the_cleaned_one() {
+        let word = |reason: &str| classify_deposit_response(&json!({ "status": "refused", "reason": reason, "detail": "d" }));
+        assert!(matches!(word("down"), DepositAttempt::LinkRefused(_)));
+        assert!(matches!(word("config-invalid"), DepositAttempt::LinkRefused(_)));
+        for disguised in ["do\u{200b}wn", "down\u{202e}", "config\u{ad}-invalid"] {
+            match word(disguised) {
+                DepositAttempt::Refused(msg) => assert_inert(&msg, LINE_MAX),
+                other => panic!("{disguised:?} is not the word it reads as once cleaned, got {other:?}"),
+            }
+        }
+    }
+
+    /// **A signed poll answer's words are kept inert.** The poll's own refusal
+    /// (`node_refused`), a `withheld` entry's `msgid`, `reason` and `detail`, a
+    /// container refused with a `msgid` nobody verified, and a JSON-RPC `error`
+    /// all reach the caller cleaned and clipped to [`LINE_MAX`], so every printer
+    /// of a [`PollOutcome`] or of the poll's `Err` is safe as it stands.
+    #[test]
+    fn a_signed_polls_words_are_cleaned_and_clipped_before_they_are_returned() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("signed-poll-words-inert");
+        let hostile = hostile_words();
+        let answered = |result: Value| json!({ "jsonrpc": "2.0", "id": 1, "result": result }).to_string();
+        let poll_with = |body: String| {
+            let key = own_key();
+            let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+            let mut relay = keyed_node("relay");
+            relay.url = format!("http://127.0.0.1:{port}/");
+            aoide_storage::node_store::save_nodes(&[relay]).unwrap();
+            poll_node("relay", None)
+        };
+
+        let refused = poll_with(answered(json!({ "status": "refused", "reason": "down", "detail": hostile }))).unwrap();
+        assert_inert(refused.node_refused.as_deref().expect("the poll's own refusal is carried"), LINE_MAX);
+        let refused = poll_with(answered(json!({ "status": "refused", "reason": hostile }))).unwrap();
+        assert_inert(refused.node_refused.as_deref().expect("the reason stands in for a missing detail"), LINE_MAX);
+
+        let withheld = poll_with(answered(json!({
+            "withheld": [
+                { "msgid": hostile, "reason": hostile, "detail": hostile },
+                { "msgid": hostile, "reason": "sealed-required" },
+            ]
+        })))
+        .unwrap();
+        assert_eq!(withheld.withheld.len(), 2, "{withheld:?}");
+        for line in &withheld.withheld {
+            assert_inert(line, LINE_MAX);
+            assert!(line.starts_with("overwritten [2J]0;titlecleared desrever x"), "the words are kept, cleaned: {line}");
+        }
+
+        // A container that fails the chain check is refused by its claimed
+        // `msgid`, which nothing has verified at that point.
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "held for chiyo").unwrap();
+        let live = aoide_storage::seal::publish_binding().unwrap();
+        let container =
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &aoide_storage::time::now_iso_utc())
+                .unwrap();
+        let mut wire = serde_json::to_value(&container).unwrap();
+        wire["msgid"] = json!(hostile);
+        let refused = poll_with(answered(json!({ "containers": [wire] }))).unwrap();
+        assert_eq!(refused.refused.len(), 1, "{refused:?}");
+        assert_inert(&refused.refused[0], LINE_MAX);
+        assert!(refused.refused[0].starts_with("overwritten [2J]0;titlecleared desrever x"), "{}", refused.refused[0]);
+
+        let err = poll_with(json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": hostile } }).to_string())
+            .expect_err("a signed error fails the poll");
+        assert_inert(&err, LINE_MAX);
+        assert!(err.starts_with("overwritten [2J]0;titlecleared desrever x"), "{err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A far end's word laced with what a person's terminal obeys and a JSON line
+    /// lets through: an escape sequence, a C1 control, a bidi override, a braille
+    /// blank and DEL. Cleaned, it reads `<word>[31mend`.
+    fn laced(word: &str) -> String {
+        format!("{word}\u{1b}[31m\u{9b}\u{202e}\u{2800}\u{7f}end")
+    }
+
+    /// **A polled container's words are inert in the audit log.** A container
+    /// the destination refuses is logged with its own `msgid` and the refusal's
+    /// `detail`, which quotes its `suite`. JSON escapes only what sits below
+    /// U+0020, so a bidi override, a braille blank, DEL and a C1 control would
+    /// reach whoever reads the log with `cat`. The poll's own `refused` line was
+    /// already clean; the log line must be too, and bounded.
+    #[test]
+    fn a_polled_containers_words_are_inert_in_the_audit_log() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("polled-container-audit-inert");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "held for chiyo").unwrap();
+        let live = aoide_storage::seal::publish_binding().unwrap();
+        let container =
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &aoide_storage::time::now_iso_utc())
+                .unwrap();
+        let mut wire = serde_json::to_value(&container).unwrap();
+        // The polled node signed the chain's last hop, so the chain check passes
+        // and the destination's own refusal is what gets logged.
+        wire["transit"][0]["node"] = json!("relay");
+        wire["msgid"] = json!(laced("msgid"));
+        wire["suite"] = json!(format!("{}{}", laced("suite"), "x".repeat(10_000)));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [wire] } }).to_string();
+        let key = own_key();
+        let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[relay]).unwrap();
+
+        let polled = poll_node("relay", None).unwrap();
+
+        assert_eq!(polled.refused.len(), 1, "{polled:?}");
+        assert_inert(&polled.refused[0], LINE_MAX);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap();
+        let lines: Vec<Value> = log.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let refused = lines
+            .iter()
+            .find(|line| line["command"] == "mail.poll.container-refused")
+            .unwrap_or_else(|| panic!("the refusal is audited: {log}"));
+        let message = refused["message"].as_str().unwrap();
+        assert!(message.starts_with("container msgid[31mend from `relay` refused: unsupported-suite: "), "{message}");
+        assert!(message.contains("suite `suite[31mend"), "the words are kept, cleaned: {message}");
+        for line in &lines {
+            assert_inert(line["message"].as_str().unwrap(), 500);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A charter relay's unreadable binding is reported inert and bounded.**
+    /// The parse error of a binding quotes the signed value it choked on, so a
+    /// relay holding its own key can put 10 KB, and a braille blank that serde's
+    /// own escaping lets through, into the poll's `Err`.
+    #[test]
+    fn a_charter_relays_unreadable_binding_is_reported_inert_and_bounded() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-unreadable-binding");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, relay_binding) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+        let hostile = format!("{}{}", laced("hostile"), "x".repeat(10_000));
+
+        for field in ["v", "generation"] {
+            let mut binding = relay_binding.clone();
+            binding[field] = json!(hostile);
+            let relay_key = || box_keypair(&dir.join("relay-box"));
+            let port = replaying_relay(binding, relay_key(), Some(relay_key()), false);
+            let mut target = poll_target("relay", None).unwrap();
+            target.node.url = format!("http://127.0.0.1:{port}/");
+
+            let err = poll_through("relay", None, target).expect_err("a binding that does not parse proves nothing");
+
+            let lead = "relay `relay` answered no readable binding: ";
+            assert!(err.starts_with(lead), "{field}: {err}");
+            assert!(err.contains("hostile"), "{field}: the error is kept, cleaned: {err}");
+            assert_inert(&err, lead.len() + LINE_MAX);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same for the exchange a poll or a drain makes with a record's peer:
+    /// its callers discard the `Err`, but it is returned, and a caller that
+    /// prints it must not be handed the peer's quoted value.
+    #[test]
+    fn a_peers_unreadable_binding_is_reported_inert_and_bounded() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peer-unreadable-binding");
+        let hostile = format!("{}{}", laced("hostile"), "x".repeat(10_000));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "binding": { "v": hostile } } }).to_string();
+        let key = own_key();
+        let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+        let mut peer = keyed_node("elsewhere");
+        peer.url = format!("http://127.0.0.1:{port}/");
+        peer.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+
+        let err = exchange_bindings(&peer, Some("home")).expect_err("a binding that does not parse is not learned");
+
+        assert!(err.starts_with("binding: ") && err.contains("hostile"), "{err}");
+        assert_inert(&err, "binding: ".len() + LINE_MAX);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stored outcome with nothing printable left is no outcome at all, and one
+    /// an older build stored raw reads clean.
+    #[test]
+    fn a_stored_outcome_is_read_clean_or_not_at_all() {
+        assert_eq!(outcome_line(""), None);
+        assert_eq!(outcome_line("\u{1b}\u{202e}\u{2800} "), None, "only unsafe characters are left");
+        assert_eq!(outcome_line("accepted").as_deref(), Some("accepted"));
+        let kept = outcome_line(&format!("refused: {}", hostile_words())).expect("the words that are left are printed");
+        assert_inert(&kept, LINE_MAX);
+        assert!(kept.starts_with("refused: overwritten [2J]0;titlecleared desrever x"), "{kept}");
+    }
+
+    /// **A pass with nothing to deposit dials nothing.** The daemon drains every
+    /// node that ever had mail every few seconds, and a node's directory is never
+    /// removed. An empty spool, or one holding only a parked entry, must send no
+    /// request, not even the binding exchange, and so against a door that answers
+    /// unsigned (the normal state while peers are upgraded) write no audit line
+    /// per tick. A live entry still dials.
+    #[test]
+    fn a_pass_with_nothing_to_deposit_dials_nothing_and_audits_nothing() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("drain-nothing-to-dial");
+        let asked = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = asked.clone();
+        let port = scripted_door(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            reply_with(ACCEPTED, &[])
+        });
+        let mut node = keyed_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        let audit_lines = || std::fs::read_to_string(dir.join("log")).unwrap_or_default().lines().count();
+        let letter = |text: &str| aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", text).unwrap();
+        let passes = || {
+            for _ in 0..3 {
+                drain_node("elsewhere").unwrap();
+            }
+        };
+
+        // Empty: its one letter was acknowledged and retired, and the directory stays.
+        let gone = letter("retired long ago");
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(gone.clone())).unwrap();
+        assert!(aoide_storage::outbox::remove_entry("elsewhere", &gone.msgid).unwrap());
+        assert!(
+            aoide_storage::outbox::nodes_with_outbox().unwrap().contains(&"elsewhere".to_string()),
+            "the emptied node is still one the daemon visits"
+        );
+        passes();
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "an empty spool is not dialled, not even for its binding");
+        assert_eq!(audit_lines(), 0, "and nothing is audited");
+
+        // Parked only: an entry the far end refused is permanent to a drain.
+        let mut parked = OutboxEntry::fresh(letter("refused for good"));
+        parked.refused = true;
+        aoide_storage::outbox::write_entry("elsewhere", &parked).unwrap();
+        passes();
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "a spool of only parked entries is not dialled either");
+        assert_eq!(audit_lines(), 0);
+        assert_eq!(aoide_storage::outbox::list_entries("elsewhere").unwrap()[0].tries, 0, "no attempt is recorded");
+
+        // One live entry beside it: that is a pass with something to deposit.
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(letter("still waiting"))).unwrap();
+        drain_node("elsewhere").unwrap();
+        assert!(asked.load(Ordering::SeqCst) > 0, "a live entry dials");
+        assert!(audit_lines() > 0, "and the unsigned answer it met is audited");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A poll of a held-off node still files and retires.** The back-off
+    /// belongs to the drain, which sends; a poll is the node asking for its own
+    /// mail and never reads the link record. The letter it is handed is filed,
+    /// the receipt it is handed retires the entry it confirms, and what the last
+    /// poll filed is cleared, with the link still held off afterwards.
+    #[test]
+    fn a_poll_of_a_held_off_node_still_files_and_retires() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-held-off");
+        let me = register_local_origin();
+        let waiting = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "waiting for its receipt").unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(waiting.clone())).unwrap();
+        let receipt = aoide_storage::mail::mint_ack(
+            "bob",
+            aoide_storage::mail::Address { node: me.clone(), name: "alice".to_string() },
+            &waiting.msgid,
+        )
+        .unwrap();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "handed over").unwrap();
+        let (listener, port, _log) = recording_door(ACCEPTED, poll_answer(&[receipt, letter.clone()]));
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::outbox::record_filed("relay", "seeded-msgid").unwrap();
+        aoide_storage::outbox::back_off("relay", unix_now(), "transport: HTTP 0").unwrap();
+        let link = aoide_storage::outbox::read_link_state("relay").unwrap().expect("the link is held off");
+        assert!(aoide_storage::outbox::is_held_off(&link, unix_now()));
+
+        let polled = poll_node("relay", None).unwrap();
+
+        assert_eq!(polled.filed, 2, "{polled:?}");
+        assert!(aoide_storage::mail::read_base().unwrap().iter().any(|e| e.envelope.msgid == letter.msgid), "the letter is filed");
+        assert!(
+            aoide_storage::outbox::list_entries("relay").unwrap().iter().all(|e| e.envelope.msgid != waiting.msgid),
+            "the receipt retired the entry it confirms"
+        );
+        assert!(aoide_storage::outbox::filed_pending("relay").unwrap().is_empty(), "and the earlier acknowledgement is cleared");
+        let link = aoide_storage::outbox::read_link_state("relay").unwrap().expect("the poll left the back-off as it was");
+        assert!(aoide_storage::outbox::is_held_off(&link, unix_now()));
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A replayed binding does not prove a charter relay.** The relay's identity
+    /// check is its signed binding answer, bound to the request it answered. A
+    /// genuine answer sent again for a later poll proves nothing, and neither does
+    /// a poll answer that is unsigned or signed by a key the charter does not give.
+    /// Each failed poll files and clears nothing, so the filed list it carried
+    /// survives to the next one.
+    #[test]
+    fn a_replayed_binding_does_not_prove_a_charter_relay() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-replayed-binding");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, relay_binding) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+        let relay_at = |port: u16| {
+            let mut target = poll_target("relay", None).unwrap();
+            target.node.url = format!("http://127.0.0.1:{port}/");
+            target
+        };
+
+        // The first poll is genuine, so its binding is the one a replay sends again.
+        let port = replaying_relay(
+            relay_binding.clone(),
+            box_keypair(&dir.join("relay-box")),
+            Some(box_keypair(&dir.join("relay-box"))),
+            true,
+        );
+        poll_through("relay", None, relay_at(port)).expect("the first poll proves its key");
+
+        aoide_storage::outbox::record_filed("relay", "seeded-msgid").unwrap();
+        let carried = aoide_storage::outbox::filed_pending("relay").unwrap();
+        assert_eq!(carried, vec!["seeded-msgid".to_string()]);
+        let err = poll_through("relay", None, relay_at(port)).expect_err("a replayed binding proves nothing");
+        assert!(err.contains("does not give it"), "{err}");
+        assert_eq!(aoide_storage::outbox::filed_pending("relay").unwrap(), carried, "a failed poll clears nothing");
+
+        // A fresh binding, then a poll answer that is unsigned, or signed by a key
+        // the charter does not give.
+        for (poll, why) in [
+            (None, "with no answer signature"),
+            (Some(aoide_storage::identity::mint_ephemeral().unwrap()), "does not verify as signed by the key on file"),
+        ] {
+            let port = replaying_relay(relay_binding.clone(), box_keypair(&dir.join("relay-box")), poll, false);
+            let err = poll_through("relay", None, relay_at(port)).expect_err("the poll's own answer is not proven");
+            assert!(err.contains(why), "{err}");
+            assert_eq!(aoide_storage::outbox::filed_pending("relay").unwrap(), carried, "and it files and clears nothing");
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2686,7 +4448,7 @@ mod tests {
 
         let laptop = Node {
             url: aoide_storage::charter::DEFAULT_ADDRESS.to_string(),
-            ..unpaired_node("laptop")
+            ..keyed_node("laptop")
         };
         let laptop = Node { pubkey: Some("cc33".to_string()), verified: true, ..laptop };
         let laptop = Node { grants: aoide_storage::node_store::grants_in("home", &["message"]), ..laptop };
@@ -2833,6 +4595,577 @@ mod tests {
         assert_eq!(receipts.len(), 1, "exactly one receipt for the letter: {receipts:?}");
 
         drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The receipt a far end mints for `acked` and drains straight back to `me`:
+    /// signed as `far` under this process's own key, which `far`'s record holds.
+    fn far_receipt(far: &str, me: &str, mesh: &str, acked: &str) -> Envelope {
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", far);
+        let to = aoide_storage::mail::Address { node: me.to_string(), name: "alice".to_string() };
+        let ack = aoide_storage::mail::mint_ack_in_mesh("bob", to, acked, mesh).unwrap();
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        ack
+    }
+
+    fn receipts_filed_here() -> usize {
+        aoide_storage::mail::read_base().unwrap().iter().filter(|e| e.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT).count()
+    }
+
+    /// **A letter its destination files is retired once, and stays retired.**
+    /// The far end files the letter, mints its receipt and drains that receipt
+    /// straight back to this box before it answers the deposit — so the ack lands
+    /// INSIDE this box's own drain of the letter. The drain then writes the
+    /// deposit's answer back onto the entry it read before the ack. That write
+    /// used to re-spool a letter the ack had just retired: the next drain
+    /// re-offered it, the far end answered `duplicate` and minted one more
+    /// receipt, which retired it again and was written back again. One receipt per
+    /// drain, for ever — the 24k-acks-for-29-letters loop on a live box.
+    #[test]
+    fn a_letter_acked_inside_its_own_drain_is_retired_and_stays_retired() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("ack-inside-drain");
+
+        let me = register_local_origin();
+        let far = "relay";
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", far, "bob", "once").unwrap();
+        let msgid = letter.msgid.clone();
+        let mesh = letter.header.origin_mesh.clone();
+        let deposits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = deposits.clone();
+        let (listener, port, _log) = answering_door(move |body| {
+            if body.contains("aoide/mailPoll") {
+                return r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string();
+            }
+            if !body.contains("aoide/mailDeposit") {
+                return r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#.to_string();
+            }
+            let first = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+            let ack = far_receipt(far, &me, &mesh, &msgid);
+            let outcome = aoide_storage::mail::deposit(ack.clone(), far).unwrap();
+            settle_deposit(&ack, &outcome);
+            if first {
+                format!(r#"{{"jsonrpc":"2.0","id":1,"result":{{"status":"accepted","msgid":"{msgid}"}}}}"#)
+            } else {
+                r#"{"jsonrpc":"2.0","id":1,"result":{"status":"duplicate"}}"#.to_string()
+            }
+        });
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::outbox::write_entry(far, &OutboxEntry::fresh(letter)).unwrap();
+
+        drain_node(far).unwrap();
+        let left: Vec<String> = aoide_storage::outbox::list_entries(far)
+            .unwrap()
+            .iter()
+            .map(|e| format!("{} tries={} outcome={}", e.envelope.msgid, e.tries, e.last_outcome))
+            .collect();
+        assert!(left.is_empty(), "the first receipt retires the letter, and the drain does not write it back: {left:?}");
+        assert_eq!(receipts_filed_here(), 1, "one receipt for the letter");
+
+        // Distinct mint seconds, so a re-ack would be a new msgid and a new line.
+        for _ in 0..2 {
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+            drain_node(far).unwrap();
+        }
+        assert!(aoide_storage::outbox::list_entries(far).unwrap().is_empty(), "a retired letter is never re-offered");
+        assert_eq!(deposits.load(std::sync::atomic::Ordering::SeqCst), 1, "the far end is asked once");
+        assert_eq!(receipts_filed_here(), 1, "and files one receipt, however many drains run");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A door that runs `during` on each deposit and then answers HTTP 500, a
+    /// transport failure at the dialer. Anything that is not a deposit is refused
+    /// without running `during`, so a binding exchange cannot consume the moment.
+    fn failing_deposit_door(during: impl Fn() + Send + 'static) -> (std::net::TcpListener, u16) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepter = listener.try_clone().unwrap();
+        std::thread::spawn(move || loop {
+            let Ok((mut stream, _)) = accepter.accept() else { break };
+            let request = read_full_request(&mut stream);
+            if request.contains("aoide/mailDeposit") {
+                during();
+            }
+            let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        });
+        (listener, port)
+    }
+
+    /// A receipt from `relay` for `acked`, filed and retired the way the far end's
+    /// own drain delivers it: the deposit, then the settlement a drain makes.
+    fn land_receipt_from_relay(me: &str, mesh: &str, acked: &str) {
+        let ack = far_receipt("relay", me, mesh, acked);
+        let outcome = aoide_storage::mail::deposit(ack.clone(), "relay").unwrap();
+        settle_deposit(&ack, &outcome);
+    }
+
+    /// The body of every deposit the door was handed, in order.
+    fn deposit_bodies(log: &std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> Vec<String> {
+        log.lock()
+            .unwrap()
+            .iter()
+            .filter(|body| body.contains("aoide/mailDeposit"))
+            .map(|body| body.clone())
+            .collect()
+    }
+
+    /// The `msgid` every deposit body names, for the assertions below: a
+    /// container or a plaintext envelope both carry it in the clear.
+    fn mentions(bodies: &[String], msgid: &str) -> usize {
+        bodies.iter().filter(|body| body.contains(msgid)).count()
+    }
+
+    /// A door for a drain whose far end answers each deposit with `answer` and
+    /// runs `during` first, on the deposit that carries `first`. Binding and poll
+    /// asks get a method-not-found and an empty answer.
+    fn drain_door(
+        first: String,
+        during: impl Fn() + Send + 'static,
+        answer: impl Fn(&str) -> String + Send + 'static,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let ran = std::sync::atomic::AtomicBool::new(false);
+        answering_door(move |body| {
+            if body.contains("aoide/mailPoll") {
+                return r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string();
+            }
+            if !body.contains("aoide/mailDeposit") {
+                return r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#.to_string();
+            }
+            if body.contains(&first) && !ran.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                during();
+            }
+            answer(body)
+        })
+    }
+
+    /// **A letter a receipt retires during an earlier dial of the same pass is
+    /// never attempted, and never re-spooled, when its own turn comes.** Two
+    /// letters to one relay whose binding is already usable, so the first is
+    /// sealed and the second reaches the reseal arm while still plaintext. The
+    /// receipt for the second lands during the first dial.
+    #[test]
+    fn a_receipt_landing_in_an_earlier_dial_keeps_a_later_letter_retired_sealed() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-pass-sealed");
+
+        let me = register_local_origin();
+        let a = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "first").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let b = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "second").unwrap();
+        let (a_msgid, b_msgid, mesh) = (a.msgid.clone(), b.msgid.clone(), a.header.origin_mesh.clone());
+
+        let (me2, mesh2, b2) = (me.clone(), mesh.clone(), b_msgid.clone());
+        let (_listener, port, log) = drain_door(
+            a_msgid.clone(),
+            move || land_receipt_from_relay(&me2, &mesh2, &b2),
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::seal::learn_binding("relay", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(a)).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(b)).unwrap();
+
+        drain_node("relay").unwrap();
+        let bodies = deposit_bodies(&log);
+        assert_eq!(mentions(&bodies, &a_msgid), 1, "the first letter is dialled once: {bodies:?}");
+        assert_eq!(mentions(&bodies, &b_msgid), 0, "the retired letter is never dialled");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&b_msgid), "and it stays retired, not re-spooled: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A letter a receipt retires during an earlier dial is not attempted at all,
+    /// even where the reseal writes nothing.** With no binding the second letter's
+    /// reseal is a no-op, so only the check before the attempt stands between a
+    /// retired letter and one more dial.
+    #[test]
+    fn a_receipt_landing_in_an_earlier_dial_keeps_a_later_plain_letter_unattempted() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-pass-plain");
+
+        let me = register_local_origin();
+        let a = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "first").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let b = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "second").unwrap();
+        let (a_msgid, b_msgid, mesh) = (a.msgid.clone(), b.msgid.clone(), a.header.origin_mesh.clone());
+
+        let (me2, mesh2, b2) = (me.clone(), mesh.clone(), b_msgid.clone());
+        let (_listener, port, log) = drain_door(
+            a_msgid.clone(),
+            move || land_receipt_from_relay(&me2, &mesh2, &b2),
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(a)).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(b)).unwrap();
+
+        drain_node("relay").unwrap();
+        let bodies = deposit_bodies(&log);
+        assert_eq!(mentions(&bodies, &a_msgid), 1, "the first letter is dialled once: {bodies:?}");
+        assert_eq!(mentions(&bodies, &b_msgid), 0, "the retired letter is never dialled: {bodies:?}");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&b_msgid), "and it stays retired: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same mid-pass retirement, when the second letter's turn finds the
+    /// binding no longer usable: its reseal would park it, and the park must not
+    /// write back a letter the receipt has retired. The first dial outlives the
+    /// binding's window, so the second reseal sees it expired.
+    #[test]
+    fn a_receipt_landing_in_an_earlier_dial_keeps_a_later_letter_retired_not_usable() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-pass-parked");
+
+        let me = register_local_origin();
+        let now = aoide_storage::time::now_iso_utc();
+        let age = aoide_storage::seal::publish_binding().unwrap().age_pubkey;
+        let closes = aoide_storage::time::shift_iso_utc(&now, 2);
+        let window = aoide_storage::seal::mint_binding(&own_key(), &age, 1, &aoide_storage::time::shift_iso_utc(&now, -60), &closes).unwrap();
+        let a = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "first").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let b = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "second").unwrap();
+        let (a_msgid, b_msgid, mesh) = (a.msgid.clone(), b.msgid.clone(), a.header.origin_mesh.clone());
+
+        let (me2, mesh2, b2) = (me.clone(), mesh.clone(), b_msgid.clone());
+        let (_listener, port, log) = drain_door(
+            a_msgid.clone(),
+            move || {
+                land_receipt_from_relay(&me2, &mesh2, &b2);
+                // Outlive the window: the second letter's reseal runs after it.
+                std::thread::sleep(std::time::Duration::from_millis(3000));
+            },
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+        aoide_storage::seal::learn_binding("relay", &window).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(a)).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(b)).unwrap();
+
+        drain_node("relay").unwrap();
+        let bodies = deposit_bodies(&log);
+        assert_eq!(mentions(&bodies, &a_msgid), 1, "the first letter is sealed and dialled: {bodies:?}");
+        assert_eq!(mentions(&bodies, &b_msgid), 0, "the retired letter is never dialled: {bodies:?}");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&b_msgid), "and it is not re-spooled parked: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The far end refuses the letter it is dialled with, and a receipt for that
+    /// same letter lands during the dial. The refusal's own write-back must not
+    /// re-spool the letter the receipt retired.
+    #[test]
+    fn a_letter_retired_during_its_own_dial_stays_retired_when_the_far_end_refuses() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-dial-refused");
+
+        let me = register_local_origin();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "refused").unwrap();
+        let (msgid, mesh) = (letter.msgid.clone(), letter.header.origin_mesh.clone());
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(letter)).unwrap();
+
+        let (me2, mesh2, m2) = (me.clone(), mesh.clone(), msgid.clone());
+        let (_listener, port, _log) = drain_door(
+            msgid.clone(),
+            move || land_receipt_from_relay(&me2, &mesh2, &m2),
+            |_| r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"bad-msgid","detail":"no"}}"#.to_string(),
+        );
+        register_relay(format!("http://127.0.0.1:{port}/"));
+
+        drain_node("relay").unwrap();
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&msgid), "the receipt retired it and the refusal does not re-spool it: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The far end's answer never arrives intact, and a receipt for the letter
+    /// lands during that dial. The transport failure's write-back must not
+    /// re-spool the letter the receipt retired.
+    #[test]
+    fn a_letter_retired_during_its_own_dial_stays_retired_when_the_transport_fails() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("retired-mid-dial-transport");
+
+        let me = register_local_origin();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "transport").unwrap();
+        let (msgid, mesh) = (letter.msgid.clone(), letter.header.origin_mesh.clone());
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(letter)).unwrap();
+
+        let (me2, mesh2, m2) = (me.clone(), mesh.clone(), msgid.clone());
+        let (_listener, port) = failing_deposit_door(move || land_receipt_from_relay(&me2, &mesh2, &m2));
+        register_relay(format!("http://127.0.0.1:{port}/"));
+
+        drain_node("relay").unwrap();
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert!(!left.contains(&msgid), "the receipt retired it and the failed dial does not re-spool it: {left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A hub's custody ends for a container this box filed or refused for
+    /// good, and for nothing else.** A poll hands over a container addressed
+    /// here, sealed by a known relay, whose receipt names no msgid: this box
+    /// opens it and refuses it as a bad msgid. That refusal repeats on every
+    /// re-offer, so the hub is told custody has ended, and the refusal is named
+    /// to the caller. The origin keeps its own retry copy.
+    #[test]
+    fn a_polled_container_this_box_refuses_is_named_and_released() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-refused-not-acked");
+
+        let me = register_local_origin();
+        // The relay's own receipt, signed by this process's key that the relay's
+        // record holds, and naming no msgid at all.
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let receipt = aoide_storage::mail::mint_ack_in_mesh(
+            "bob",
+            aoide_storage::mail::Address { node: me.clone(), name: "alice".to_string() },
+            "not a msgid",
+            "home",
+        )
+        .unwrap();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &receipt,
+            &binding,
+            "home",
+            "home",
+            &me,
+            &me,
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let msgid = container.msgid.clone();
+
+        let answer = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [container], "envelopes": [] } }).to_string();
+        let (_listener, port, _seen) =
+            recording_door(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#, answer);
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        relay.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.retain(|n| n.name != "relay");
+        nodes.push(relay);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed: {outcome:?}");
+        assert!(aoide_storage::mail::show(&msgid).unwrap().is_none(), "and nothing is on this disk");
+        assert_eq!(outcome.refused.len(), 1, "the refusal is named: {:?}", outcome.refused);
+        assert!(
+            aoide_storage::outbox::filed_pending("relay").unwrap().contains(&msgid),
+            "a refusal that repeats on every re-offer releases the hub's custody"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Every poll outcome that files nothing is named, not only the containers.**
+    /// A plaintext receipt that names no msgid is refused `bad-msgid`; the poll
+    /// reports it, where a bare "0 filed" would hide it.
+    #[test]
+    fn a_plaintext_envelope_the_poll_refuses_is_named_not_dropped() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-envelope-refused");
+
+        let me = register_local_origin();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let receipt = aoide_storage::mail::mint_ack_in_mesh(
+            "bob",
+            aoide_storage::mail::Address { node: me.clone(), name: "alice".to_string() },
+            "not a msgid",
+            "home",
+        );
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let receipt = receipt.unwrap();
+        let msgid = receipt.msgid.clone();
+
+        let (_listener, port, _seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
+            poll_answer(&[receipt]),
+        );
+        register_polled_relay(port);
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed: {outcome:?}");
+        assert!(
+            outcome.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("bad-msgid")),
+            "the refusal is named to the caller: {:?}",
+            outcome.refused
+        );
+        assert!(aoide_storage::mail::show(&msgid).unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The hub's own side of a pull, for a test that runs both ends in one
+    /// process: it retires what the poller says it took (its transit entries in
+    /// the spool it keeps for that poller), then offers what is still pollable,
+    /// as the server's `mail_poll` does.
+    fn hub_answer(hub: &str, body: &str) -> String {
+        let request: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+        let params = request.get("params").unwrap_or(&request);
+        for msgid in params.get("filed").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+            let _ = aoide_storage::outbox::retire_acknowledged(hub, msgid);
+        }
+        let (mut containers, mut envelopes) = (Vec::new(), Vec::new());
+        for (container, envelope) in aoide_storage::outbox::poll_payloads(hub).unwrap() {
+            match container {
+                Some(container) => containers.push(serde_json::to_value(container).unwrap()),
+                None => envelopes.push(serde_json::to_value(envelope).unwrap()),
+            }
+        }
+        json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": containers, "envelopes": envelopes } }).to_string()
+    }
+
+    /// A relay record whose door answers from `port`, granted `message`, so a poll
+    /// of it is admitted.
+    fn register_polled_relay(port: u16) {
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        relay.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.retain(|n| n.name != "relay");
+        nodes.push(relay);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    }
+
+    /// **A permanent refusal never starves a valid letter behind it.** The hub
+    /// holds 51 containers whose chain does not end at the poller, so each is
+    /// refused at once (`broken-chain`, a fact about the bytes). The first poll
+    /// is offered the 50 oldest; their custody is released, so the second poll's
+    /// hub retires them and offers the 51st and the valid letter, which files.
+    /// Without the release, every poll offers the same 50 and the letter never
+    /// arrives.
+    #[test]
+    fn fifty_one_refused_held_containers_never_starve_a_valid_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("refused-custody-cap");
+
+        register_local_origin();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        for i in 0..51 {
+            let letter =
+                aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", &format!("refused {i}")).unwrap();
+            let container = aoide_storage::seal::seal_envelope(
+                &letter,
+                &binding,
+                &letter.header.origin_mesh,
+                &letter.header.origin_mesh,
+                "relay",
+                "relay",
+                &now,
+            )
+            .unwrap();
+            let mut entry = OutboxEntry::transit_held(container);
+            // Oldest first, so the refused containers sort ahead of the letter.
+            entry.envelope.header.minted_at = format!("2020-01-01T00:{:02}:{:02}Z", i / 60, i % 60);
+            aoide_storage::outbox::write_entry("relay", &entry).unwrap();
+        }
+        let valid = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "the valid one").unwrap();
+        let valid_msgid = valid.msgid.clone();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::held(valid)).unwrap();
+        assert_eq!(aoide_storage::outbox::list_entries("relay").unwrap().len(), 52);
+
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+
+        let first = poll_node("relay", None).unwrap();
+        assert_eq!(first.refused.len(), 50, "the first poll is offered the 50 oldest: {:?}", first.refused);
+        assert!(aoide_storage::mail::show(&valid_msgid).unwrap().is_none(), "and the letter behind them is not yet offered");
+
+        let second = poll_node("relay", None).unwrap();
+        assert_eq!(second.filed, 1, "the second poll offers the valid letter and it files: {second:?}");
+        assert!(aoide_storage::mail::show(&valid_msgid).unwrap().is_some());
+        // The custody ends are carried to the hub by the NEXT poll's `filed` list.
+        let third = poll_node("relay", None).unwrap();
+        assert_eq!(third.filed, 0, "nothing new to file");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec![valid_msgid.clone()], "every refused container's custody ended; the letter waits for its own ack");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A refusal of this box's own state keeps the hub's custody.** The
+    /// container is valid and opens, but this box cannot write its own base, so
+    /// the deposit fails for a local reason. The hub is not told, and offers the
+    /// container again; once the disk is sound, the next poll files it.
+    #[test]
+    fn a_local_fault_refusing_a_held_container_keeps_the_hubs_custody() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("local-fault-custody");
+
+        let me = register_local_origin();
+        // A letter from `relay` to this box, minted under that name, so the
+        // container's chain ends at the poller and the container opens here.
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "held by a local fault");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let msgid = letter.msgid.clone();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let now = aoide_storage::time::now_iso_utc();
+        let container =
+            aoide_storage::seal::seal_envelope(&letter, &binding, &mesh, &mesh, &me, &me, &now).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container)).unwrap();
+
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+        // A base this box cannot write: its seen set is a directory, so the
+        // deposit fails for a reason of its own state, not of the container.
+        let seen = aoide_storage::mail::seen_path();
+        std::fs::create_dir_all(&seen).unwrap();
+
+        let first = poll_node("relay", None).unwrap();
+        assert_eq!(first.filed, 0, "nothing is filed while the disk is unsound");
+        assert!(
+            first.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("local-io")),
+            "the refusal is named as a local fault: {:?}",
+            first.refused
+        );
+        assert!(
+            !aoide_storage::outbox::filed_pending("relay").unwrap().contains(&msgid),
+            "the hub is not told custody ended"
+        );
+        assert_eq!(aoide_storage::outbox::list_entries("relay").unwrap().len(), 1, "the hub still holds it");
+
+        std::fs::remove_dir_all(&seen).unwrap();
+        let second = poll_node("relay", None).unwrap();
+        assert_eq!(second.filed, 1, "the next poll offers it again and it files: {second:?}");
+        assert!(aoide_storage::mail::show(&msgid).unwrap().is_some());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3102,7 +5435,7 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}"#,
             r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
         );
-        let mut node = unpaired_node("relay");
+        let mut node = keyed_node("relay");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -3159,18 +5492,13 @@ mod tests {
                     ack_recorded_rx.recv().unwrap();
                 }
                 let body = r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#;
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(signed_reply(&request, &own_key(), 200, body).as_bytes());
                 if is_poll {
                     return;
                 }
             }
         });
-        let mut node = unpaired_node("relay");
+        let mut node = keyed_node("relay");
         node.url = format!("http://127.0.0.1:{port}/");
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
@@ -3222,7 +5550,6 @@ mod tests {
         let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

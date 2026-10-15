@@ -39,7 +39,7 @@
 //! neither duplicates nor replaces them.
 
 use aoide_protocol::Invocation;
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, SettingsFormat};
 use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use serde_json::{json, Value};
@@ -742,6 +742,27 @@ fn hooks_install(inv: &Invocation) -> Outcome {
             return Outcome::error(cmd, e).with_data(json!({ "reason": "no-settings-path" }))
         }
     };
+    // The capture wrap tees into `$AOIDE_ROOT/state`, so that directory is made
+    // (and `state/` locked owner-only) before the wrap is written: a `state/`
+    // that cannot be locked refuses the install and nothing is written.
+    // Resolved here via `state_dir()` (the installing host's OWN
+    // `$AOIDE_ROOT`/`$AOIDE_STATE_DIR`) purely so the directory pre-exists;
+    // the wrap baked into the settings file itself re-derives the same
+    // default at hook-fire time in its own shell (see `door_command`), so a
+    // later host with a different `$AOIDE_ROOT` still resolves correctly.
+    if capture {
+        let state = aoide_storage::fs::state_dir();
+        if let Err(e) = aoide_storage::fs::ensure_write_dir(&state) {
+            return Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                format!("`--capture` cannot log into {}", state.display()),
+                e.to_string(),
+                Fix::None("nothing was installed; the line above names the fix"),
+            )
+            .with_fields(json!({ "reason": "state-unlockable", "state": state.to_string_lossy() }));
+        }
+    }
     let result = match profile.hook_settings.format {
         SettingsFormat::Toml => install_toml(&path, profile, capture),
         SettingsFormat::Json => install_json(&path, profile, capture),
@@ -755,15 +776,6 @@ fn hooks_install(inv: &Invocation) -> Outcome {
             )
         }
     };
-    // The capture wrap tees into `$AOIDE_ROOT/state` — make sure it exists.
-    // Resolved here via `state_dir()` (the installing host's OWN
-    // `$AOIDE_ROOT`/`$AOIDE_STATE_DIR`) purely so the directory pre-exists;
-    // the wrap baked into the settings file itself re-derives the same
-    // default at hook-fire time in its own shell (see `door_command`), so a
-    // later host with a different `$AOIDE_ROOT` still resolves correctly.
-    if capture {
-        let _ = std::fs::create_dir_all(aoide_storage::fs::state_dir());
-    }
     // The skill links, after the settings merge (a skill refusal must not
     // block the hook wiring, and the report below carries both outcomes).
     let skills = match link_skills(profile) {
@@ -1181,12 +1193,62 @@ mod tests {
         std::env::set_var("KIMI_CODE_HOME", home.join("kimi"));
         std::env::set_var("HOME", &home);
         std::env::set_var("AOIDE_ROOT", &aoide_root);
+        // A `state/` a raw creator left wide: the capture dir is made through
+        // `ensure_write_dir`, which locks it first.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::create_dir_all(aoide_root.join("state")).unwrap();
+            std::fs::set_permissions(aoide_root.join("state"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
 
         hooks_install(&install_inv("kimi", true));
 
         assert!(aoide_root.join("state").is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(aoide_root.join("state")).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "the capture install left state/ at {mode:o}");
+        }
         assert!(!home.join("Aoide/state").exists());
         assert!(!home.join(".aoide/state").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A `--capture` install whose `state/` cannot be locked owner-only is
+    /// refused, and writes no settings file: the wrap would tee into a tree it
+    /// could not make private. The `state/` here is a symlink, which the lock
+    /// refuses at the open; its target keeps its mode.
+    #[cfg(unix)]
+    #[test]
+    fn capture_install_refuses_a_state_it_cannot_lock_and_writes_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvSaver::capture(&["KIMI_CODE_HOME", "HOME", "AOIDE_ROOT", "AOIDE_STATE_DIR"]);
+        std::env::remove_var("AOIDE_STATE_DIR");
+        let root = unique_tmp("hooks-kimi-cap-refused");
+        let aoide_root = root.join("configured-root");
+        let target = root.join("elsewhere");
+        std::fs::create_dir_all(&aoide_root).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&target, aoide_root.join("state")).unwrap();
+        std::env::set_var("KIMI_CODE_HOME", root.join("kimi"));
+        std::env::set_var("HOME", root.join("home"));
+        std::env::set_var("AOIDE_ROOT", &aoide_root);
+
+        let out = hooks_install(&install_inv("kimi", true));
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "msg: {}", out.message);
+        let data = out.data.expect("a refusal carries data");
+        assert_eq!(data["reason"], "state-unlockable");
+        let why = data["refusal"]["why"].as_str().unwrap_or_default();
+        assert!(why.contains("symlink"), "the refusal must say why: {why}");
+        assert!(!root.join("kimi/config.toml").exists(), "a refused capture install wrote its settings");
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755, "the link's target was chmodded");
 
         let _ = std::fs::remove_dir_all(&root);
     }

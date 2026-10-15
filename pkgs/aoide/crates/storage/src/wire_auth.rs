@@ -95,6 +95,16 @@ pub const HEADER_SIGNATURE: &str = "X-Aoide-Signature";
 /// string from what arrived. So a stripped header is a refused request, and
 /// there is no downgrade path.
 pub const HEADER_MESH: &str = "X-Aoide-Mesh";
+/// The response header carrying a door's answer signature (relay-proof): the
+/// door's identity-key signature over [`answer_string`], hex-encoded. An
+/// answer without it, or whose signature fails [`verify_answer`], is never
+/// acted on by the client.
+pub const HEADER_ANSWER_SIGNATURE: &str = "X-Aoide-Answer-Signature";
+/// The method field of an answer's canonical string. Requests sign their own
+/// HTTP method (`POST`), and an answer's status sits where a request's ISO
+/// timestamp sits, so an answer never verifies as a request nor a request as
+/// an answer.
+pub const ANSWER_TAG: &str = "ANSWER";
 
 /// Env override for the replay-guard's timestamp window, in seconds
 /// (PAIRING.md: "±120s default, env knob"). Same tolerant-fallback shape
@@ -234,6 +244,27 @@ pub fn verify_signature_hex(pubkey_hex: &str, msg: &[u8], signature_hex: &str) -
         return false;
     };
     Keypair::verify(&pubkey_arr, msg, &Signature::from_bytes(&sig_arr))
+}
+
+/// The canonical string an answer's signature covers: the request signature
+/// and nonce it answers, the HTTP status, and the exact body bytes. Both ends
+/// build it from values they hold (the door from the request it just
+/// verified, the client from the request it just sent), never from a
+/// wire-carried string. Freshness is inherited: the request signature already
+/// covers the request's timestamp, and its nonce is single-use.
+pub fn answer_string(request_signature: &str, request_nonce: &str, status: u16, body: &[u8]) -> String {
+    canonical_string(ANSWER_TAG, request_signature, &status.to_string(), request_nonce, body, None)
+}
+
+/// Sign an answer to the request identified by `request_signature` and
+/// `request_nonce`, returning the [`HEADER_ANSWER_SIGNATURE`] value (hex).
+pub fn sign_answer(keypair: &Keypair, request_signature: &str, request_nonce: &str, status: u16, body: &[u8]) -> String {
+    sign_hex(keypair, answer_string(request_signature, request_nonce, status, body).as_bytes())
+}
+
+/// Verify an answer signature against the request it claims to answer.
+pub fn verify_answer(pubkey_hex: &str, request_signature: &str, request_nonce: &str, status: u16, body: &[u8], answer_signature: &str) -> bool {
+    verify_signature_hex(pubkey_hex, answer_string(request_signature, request_nonce, status, body).as_bytes(), answer_signature)
 }
 
 /// Is `ts_epoch` within `window_secs` of `now_epoch`, either direction?
@@ -415,6 +446,65 @@ mod tests {
         assert!(!verify_signature_hex("not-hex!", b"msg", "also-not-hex"));
         assert!(!verify_signature_hex("aa", b"msg", "bb"), "well-formed but wrong-length hex must not panic or verify");
         assert!(!verify_signature_hex("", b"msg", ""));
+    }
+
+    // ── answer_string / sign_answer / verify_answer ─────────────────────
+
+    /// Pinned stability vector for the answer form, computed from the exact
+    /// transcript (method `answer`, the request signature, the status, the
+    /// request nonce, then `sha256(body)`), so the layout cannot drift in
+    /// silence: CONTRACTS.md §6 "Signed answers" quotes these same bytes.
+    #[test]
+    fn answer_string_stability_vector_never_drifts() {
+        let req_sig = "ab".repeat(64);
+        assert_eq!(
+            answer_string(&req_sig, "abcd1234", 200, b"{}"),
+            format!("answer\u{0}{req_sig}\u{0}200\u{0}abcd1234\u{0}44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\u{0}")
+        );
+    }
+
+    #[test]
+    fn an_answer_verifies_only_for_its_own_request_status_and_body() {
+        let door = identity::mint_ephemeral().unwrap();
+        let door_hex = door.info().pubkey_hex;
+        let other = identity::mint_ephemeral().unwrap();
+        let other_hex = other.info().pubkey_hex;
+        let req_sig = "ab".repeat(64);
+        let body = br#"{"jsonrpc":"2.0","id":1,"result":{}}"#;
+        let sig = sign_answer(&door, &req_sig, "abcd1234", 200, body);
+
+        assert!(verify_answer(&door_hex, &req_sig, "abcd1234", 200, body, &sig), "the door's own answer must verify");
+        assert!(!verify_answer(&other_hex, &req_sig, "abcd1234", 200, body, &sig), "another key must not verify it");
+        assert!(!verify_answer(&door_hex, &"cd".repeat(64), "abcd1234", 200, body, &sig), "a different request signature must not verify it");
+        assert!(!verify_answer(&door_hex, &req_sig, "abcd9999", 200, body, &sig), "a different request nonce must not verify it");
+        assert!(!verify_answer(&door_hex, &req_sig, "abcd1234", 500, body, &sig), "a different status must not verify it");
+        let mut tampered = body.to_vec();
+        tampered[2] ^= 1;
+        assert!(!verify_answer(&door_hex, &req_sig, "abcd1234", 200, &tampered, &sig), "one changed body byte must not verify it");
+    }
+
+    #[test]
+    fn a_request_signature_never_verifies_as_an_answer_and_back() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let pubkey_hex = kp.info().pubkey_hex;
+        let body = b"{}";
+        let req = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", body, Some("home"));
+        let req_sig = sign_hex(&kp, req.as_bytes());
+
+        assert!(
+            !verify_answer(&pubkey_hex, &req_sig, "abcd1234", 200, body, &req_sig),
+            "a request signature must not verify as the answer to itself"
+        );
+        assert!(
+            !verify_signature_hex(&pubkey_hex, answer_string(&req_sig, "abcd1234", 200, body).as_bytes(), &req_sig),
+            "a request signature must not verify over an answer's bytes"
+        );
+
+        let answer_sig = sign_answer(&kp, &req_sig, "abcd1234", 200, body);
+        assert!(
+            !verify_signature_hex(&pubkey_hex, req.as_bytes(), &answer_sig),
+            "an answer signature must not verify over the request's bytes"
+        );
     }
 
     // ── signature_skew_secs ─────────────────────────────────────────────

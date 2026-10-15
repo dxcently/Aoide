@@ -406,7 +406,6 @@ mod tests {
                     cwd: Some("/w".into()),
                     idle: true,
                     argv: None,
-                    typed: None,
                 }),
                 ..session("captured-sess", "/w", "working", "1", None)
             }],

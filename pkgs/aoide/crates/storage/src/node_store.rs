@@ -12,7 +12,7 @@
 //! and `aoide-client`'s `node` commands (outbound, the pull/fold side) both
 //! depend on this crate — neither may depend on the other (`server` must
 //! never depend on `client`) — so the shared `Node`/registry/cache shapes and
-//! the autogate-address match live here, the one crate both already sit atop.
+//! the address match live here, the one crate both already sit atop.
 //!
 //! **Grants are per mesh (P-CHARTER).** Each record carries
 //! [`Node::grants`], a map from mesh name to capability set, and the door
@@ -70,38 +70,12 @@ pub const NODE_CACHE_TTL_SECS: u64 = 5 * 60;
 pub struct Node {
     pub name: String,
     pub url: String,
-    /// The cross-device analogue of `graph send`'s "sender is the target's
-    /// own parent" autogate rule (`conduct/graph/send.rs`): a node marked
-    /// `true` here whose record the door's unsigned rail resolves (by `url`
-    /// address, or by its own `token_file`) skips the non-loopback pending
-    /// queue on INBOUND `message/send` (CONTRACTS.md §6 amendment). Defaults
-    /// false — an unmarked/unknown sender is never autogated.
-    ///
-    /// **The flag is what opens the rail; it is not the whole trust.** The
-    /// rail is unsigned, so it names no mesh: the door judges the matched
-    /// record by its HOME mesh's rules
-    /// (`aoide-server::a2a::rail_admits`) — where a charter governs home, the
-    /// record's key must be on that charter's line with `message` (and the
-    /// record verified), and where home is charter-shaped with an undecidable
-    /// operator key the send is held PENDING whatever this flag says. Only in
-    /// a PAIR mesh is this flag the whole rule, exactly as it always was.
-    ///
-    /// **For a SIGNATURE-resolved caller the flag is likewise only the
-    /// opener**: the door also reads `message` in the mesh that request signed
-    /// for (`aoide-server::a2a`'s `sig_autogate` = this flag AND
-    /// `may_message(&caller_grant(..))`, P-CHARTER), so the same flag on the
-    /// same record delivers in a mesh the caller holds `message` in and pends
-    /// in one it does not.
-    #[serde(default)]
-    pub autogate: bool,
     /// Path to a file (on THIS instance) holding the shared secret this node
     /// presents as `Authorization: Bearer <token>` on an inbound
-    /// `message/send` — how the door tells WHICH registered node is calling
-    /// once IP alone can't (CONTRACTS.md §6 amendment, 2026-08-18: behind any
-    /// reverse proxy/tunnel every caller is `127.0.0.1`, so the
-    /// [`autogated_node_addr`] IP match is permanently dead there). Absent
-    /// by default — an unmarked node authenticates by address only, exactly
-    /// as before this field existed.
+    /// `message/send`. It is how the door tells WHICH registered node is
+    /// calling when the address cannot: behind a reverse proxy or tunnel every
+    /// caller is `127.0.0.1`. Absent by default; a node without one has no
+    /// bearer identity and is admitted only by its signature.
     #[serde(rename = "tokenFile", default, skip_serializing_if = "Option::is_none")]
     pub token_file: Option<String>,
     /// The name of a secret, resolved through the LOCAL secrets broker at
@@ -147,10 +121,12 @@ pub struct Node {
     /// shape `hub` set the precedent for: an old `nodes.json` deserializes
     /// `verified: false` on every entry, and an unverified entry omits the
     /// key entirely rather than writing `"verified":false` everywhere.
-    /// `verified` alone grants nothing; combined with a `"spawn"`-carrying
-    /// `allows` (below) AND a TOKEN-rung resolution ([`resolve_node`]'s
-    /// stronger rung, never the address one), it is what the A2A door's
-    /// spawn arm requires (P-P3, decision 6, `a2a.rs::spawn_admitted`).
+    /// `verified` alone grants nothing. Behind a door token, the A2A door
+    /// admits an inject on the Token rung only for a verified node
+    /// (`a2a.rs::message_send`'s `node_proved`). Its spawn arm admits on a
+    /// verified signature (the Signature rung of [`resolve_node`]) and a
+    /// `"spawn"` grant in the mesh the request names
+    /// (`a2a.rs::spawn_admitted`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub verified: bool,
     /// This node's capability grants, KEYED BY THE MESH each holds in
@@ -265,7 +241,6 @@ impl Node {
         Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -423,35 +398,56 @@ pub fn nodes_path() -> std::path::PathBuf {
     state_dir().join("nodes.json")
 }
 
-/// Read the registry, tolerating a missing/corrupt/wrong-shape file as an
-/// empty list — an absent file is simply "no nodes registered", never an
-/// error. Pre-charter records are folded into per-mesh grants here
-/// ([`migrate_grants`]); nothing outside this function sees the old shape.
+/// Read the registry, tolerating a missing, corrupt or wrong-shape file as an
+/// empty list. [`read_nodes`] is the same read with a corrupt file named as an
+/// error, for a caller that must say so. Pre-charter records are folded into
+/// per-mesh grants by [`migrate_grants`]; nothing outside the read sees the old
+/// shape.
 pub fn load_nodes() -> Vec<Node> {
-    match std::fs::read_to_string(nodes_path()) {
-        Ok(raw) => {
-            // P-CHARTER (review finding 7): the migration targets the home
-            // mesh the CONFIG names. A config that will not parse has no
-            // answer to give, and guessing the built-in default would fold
-            // every record into a mesh the operator never named — so the
-            // fold is skipped entirely, grants read as empty (fail closed,
-            // no gate can be satisfied by a guess) and the skip is reported.
-            // `allows` on disk is left exactly as it is; the next successful
-            // load migrates it.
-            let home = crate::config::home_mesh_fallible().ok();
-            let migration = match home.as_deref() {
-                Some(home) => migrate_grants(&raw, home),
-                None => Migration {
-                    registry: parse_registry(&raw).unwrap_or_default(),
-                    skipped: vec!["the config does not load, so pre-charter grants were NOT migrated — \
-                                   fix `config.toml`; every record reads as grantless until it does"
-                        .to_string()],
-                },
-            };
-            report_skips(&migration.skipped);
-            migration.registry.nodes
+    read_nodes().unwrap_or_default()
+}
+
+/// [`load_nodes`] with the corrupt case named: `Err` when `nodes.json` exists
+/// but is not a registry, or cannot be read. An absent file is `Ok` and empty.
+pub fn read_nodes() -> Result<Vec<Node>, String> {
+    let path = nodes_path();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    // P-CHARTER (review finding 7): the migration targets the home
+    // mesh the CONFIG names. A config that will not parse has no
+    // answer to give, and guessing the built-in default would fold
+    // every record into a mesh the operator never named — so the
+    // fold is skipped entirely, grants read as empty (fail closed,
+    // no gate can be satisfied by a guess) and the skip is reported.
+    // `allows` on disk is left exactly as it is; the next successful
+    // load migrates it.
+    let home = crate::config::home_mesh_fallible().ok();
+    let migration = match home.as_deref() {
+        Some(home) => migrate_grants(&raw, home),
+        None => {
+            let registry = parse_registry(&raw);
+            let mut skipped = vec![
+                "the config does not load, so pre-charter grants were NOT migrated — \
+                 fix `config.toml`; every record reads as grantless until it does"
+                    .to_string(),
+            ];
+            if registry.is_none() {
+                skipped.push("state/nodes.json is not a registry".to_string());
+            }
+            Migration {
+                unreadable: registry.is_none().then(|| "state/nodes.json is not a registry".to_string()),
+                registry: registry.unwrap_or_default(),
+                skipped,
+            }
         }
-        Err(_) => Vec::new(),
+    };
+    report_skips(&migration.skipped);
+    match migration.unreadable {
+        Some(why) => Err(why),
+        None => Ok(migration.registry.nodes),
     }
 }
 
@@ -465,6 +461,9 @@ pub struct Migration {
     pub registry: NodeRegistry,
     /// One line per thing skipped, each naming the record it was about.
     pub skipped: Vec<String>,
+    /// Set when the text is not a registry at all, so [`read_nodes`] names it
+    /// as an error rather than reading an empty list.
+    pub unreadable: Option<String>,
 }
 
 /// Read `nodes.json`'s text into a registry, folding every record's
@@ -497,7 +496,8 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
     let mut skipped: Vec<String> = Vec::new();
     let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
         skipped.push("state/nodes.json is not readable JSON — read as an empty registry".to_string());
-        return Migration { registry: NodeRegistry::default(), skipped };
+        let unreadable = Some("state/nodes.json is not readable JSON".to_string());
+        return Migration { registry: NodeRegistry::default(), skipped, unreadable };
     };
     // A pre-rename registry still says `peers` (the serde alias on
     // `NodeRegistry::nodes`); this raw-JSON pass must honour it too.
@@ -508,7 +508,8 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
     }
     let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) else {
         skipped.push("state/nodes.json has no `nodes` array — read as an empty registry".to_string());
-        return Migration { registry: NodeRegistry::default(), skipped };
+        let unreadable = Some("state/nodes.json has no `nodes` array".to_string());
+        return Migration { registry: NodeRegistry::default(), skipped, unreadable };
     };
     for (i, node) in nodes.iter_mut().enumerate() {
         let Some(obj) = node.as_object_mut() else {
@@ -545,7 +546,7 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
         }
         // `grants` itself: a value this build cannot read empties THIS
         // record's grants and nothing else (finding 3). The record keeps
-        // every other field — `autogate`, `tokenFile`, `bearerSecret`, `hub`,
+        // every other field — `tokenFile`, `bearerSecret`, `hub`,
         // `via` — which is the whole point: a bad grant must not take the
         // roster with it.
         match obj.get("grants") {
@@ -581,10 +582,11 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
         }
     }
     match parse_registry(&serde_json::to_string(&value).unwrap_or_default()) {
-        Some(registry) => Migration { registry, skipped },
+        Some(registry) => Migration { registry, skipped, unreadable: None },
         None => {
             skipped.push("state/nodes.json could not be read as a registry — read as empty".to_string());
-            Migration { registry: NodeRegistry::default(), skipped }
+            let unreadable = Some("state/nodes.json could not be read as a registry".to_string());
+            Migration { registry: NodeRegistry::default(), skipped, unreadable }
         }
     }
 }
@@ -651,12 +653,12 @@ pub fn remove_node(nodes: &mut Vec<Node>, name: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PairChange {
     /// No node named `name` existed — a fresh entry was inserted, unpaired
-    /// fields (`autogate`/`token_file`/`bearer_secret`/`hub`) at their
+    /// fields (`token_file`/`bearer_secret`/`hub`) at their
     /// defaults.
     Inserted,
     /// A node named `name` already existed (re-pairing) — its `pubkey`/
-    /// `verified`/`url` were REPLACED; every other field (`autogate`,
-    /// `token_file`, `bearer_secret`, `hub`) is left exactly as it was.
+    /// `verified`/`url` were REPLACED; every other field (`token_file`,
+    /// `bearer_secret`, `hub`) is left exactly as it was.
     Updated,
 }
 
@@ -665,7 +667,7 @@ pub enum PairChange {
 /// writing the approver's record on the callback) — the ONE place either
 /// side of the ceremony writes a node's `pubkey`/`verified`/`allows`.
 /// A fresh insert takes every unpaired field's ordinary default
-/// (`autogate: false`, no token/bearer, not the hub) PLUS `grant` —
+/// (no token/bearer, not the hub) PLUS `grant` —
 /// completing the ceremony for the first time IS "becoming verified," so
 /// the stamp belongs here, not a second call site.
 ///
@@ -685,7 +687,7 @@ pub enum PairChange {
 /// always, but `grants` ONLY when the node was NOT already verified before
 /// this call — a key rotation on an ALREADY-paired node must never silently
 /// re-grant a capability an operator revoked via `node allow ... off`
-/// (P-P3), so `grants` (like `autogate`/`token_file`/`bearer_secret`/`hub`)
+/// (P-P3), so `grants` (like `token_file`/`bearer_secret`/`hub`)
 /// is left exactly as it was once a node has been verified at least once.
 ///
 /// **`mesh` is the mesh this pairing names** (P-CHARTER): the grant lands as
@@ -709,7 +711,6 @@ pub fn upsert_paired_node(nodes: &mut Vec<Node>, name: &str, url: &str, pubkey_h
     nodes.push(Node {
         name: name.to_string(),
         url: url.to_string(),
-        autogate: false,
         token_file: None,
         bearer_secret: None,
         hub: false,
@@ -939,9 +940,8 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh:
 /// TCP-source-IP-vs-`url` match — spoofable by anyone who can reach the
 /// door from that address, or who merely sits behind the same NAT/proxy as
 /// the real node. `Token` is possession of that node's own `token_file`
-/// secret — it survives any reverse proxy/NAT, the same reason
-/// [`autogated_node_token`] is preferred over the address check for
-/// autogate, but it is still a bare shared secret: not bound to any one
+/// secret — it survives any reverse proxy/NAT, which is why it is tried before
+/// the address, but it is still a bare shared secret: not bound to any one
 /// request, replayable, and identical across every request the true node
 /// or an impersonator ever sends. `Signature` (P-P4,
 /// `docs/architecture/PAIRING.md`'s "Wire authentication" section) is an
@@ -957,12 +957,9 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh:
 /// verification flow (`aoide-server::a2a::verify_signed_request`) once a
 /// signature checks out, then fed to [`Node`]-consuming code the exact same
 /// way a `resolve_node` result would be. All three rungs are fine for
-/// ATTRIBUTION (Inject's `from` field, origin-stamping) and for autogate's
-/// existing "skip the pending queue" question; the A2A door's spawn arm is
-/// the one consumer narrow enough to require `Signature` specifically
-/// (`a2a.rs::spawn_admitted` — Token admitted spawn from 2026-08-25 to
-/// P-P4's landing, when the requirement moved to `Signature` alone; `Addr`
-/// never admitted spawn at any point).
+/// ATTRIBUTION (Inject's `from` field). The A2A door's spawn arm is the one
+/// consumer narrow enough to require `Signature` specifically
+/// (`a2a.rs::spawn_admitted`); `Addr` never admits anything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeRung {
     Token,
@@ -975,18 +972,13 @@ pub enum NodeRung {
 
 /// Resolve the CALLING node's identity (P-P3, PAIRING.md decision 6) — the
 /// specific registered [`Node`] a caller's presented credential names, PLUS
-/// which [`NodeRung`] matched, independent of that node's own `autogate`
-/// flag. Unlike [`autogated_node_token`]/[`autogated_node_addr`]
-/// (which fold ONLY over `autogate`-marked nodes, for the unrelated "skip
-/// the pending queue" question), this looks at EVERY registered node — a
-/// gate that needs to know WHICH node is calling (not merely "does some
-/// autogate-marked node match") goes through this instead.
+/// which [`NodeRung`] matched. It looks at EVERY registered node: a gate that
+/// needs to know WHICH node is calling goes through this.
 ///
 /// Ladder, first match wins, first REGISTRY-ORDER match within a rung: a
 /// presented bearer token that matches a node's OWN `token_file`
-/// ([`token_bytes_eq`], the mechanism that survives a reverse proxy — same
-/// precedence [`autogated_node_token`]'s own doc gives it) is tried
-/// FIRST (`NodeRung::Token` on a hit); failing that, an `addr` whose host
+/// ([`token_bytes_eq`], the mechanism that survives a reverse proxy) is
+/// tried FIRST (`NodeRung::Token` on a hit); failing that, an `addr` whose host
 /// resolves against a node's registered `url` ([`node_url_matches_addr`])
 /// is tried second (`NodeRung::Addr` on a hit). `None` for an unmatched
 /// token, a missing/unmatched address, or both — a caller presenting only
@@ -1127,7 +1119,7 @@ pub fn valid_node_name(name: &str) -> bool {
 
 /// The `scheme://host[:port]` authority of a URL (drops any path/query),
 /// bare (no trailing slash) — pure. Lives here (not `aoide-client`) since
-/// the SERVER side's inbound autogate match needs it too, and `server`
+/// the SERVER side's inbound door needs it too, and `server`
 /// must never depend on `client`.
 pub fn url_host(url: &str) -> Option<String> {
     let (_, rest) = url.trim().split_once("://")?;
@@ -1185,46 +1177,12 @@ fn node_url_matches_addr(url: &str, addr: IpAddr) -> bool {
         .unwrap_or(false)
 }
 
-/// The record an inbound connection's ADDRESS resolves to on the unsigned
-/// autogate rail: the first registered record (registry order — the tie-break
-/// [`resolve_node`]'s ladder already holds) that is marked `autogate` AND
-/// whose `url` host resolves to `addr`. `None` when no record does.
-///
-/// **A match is not a delivery.** This rail carries no signature, so it has no
-/// mesh of its own to read a grant in; the door therefore judges the matched
-/// RECORD by its HOME mesh's rules (`aoide-server::a2a::rail_admits`: the
-/// charter line for its key where a charter governs home, nothing where home
-/// is charter-shaped or its config will not load, and the record's own
-/// `autogate` flag where home is a pair mesh). What this function answers is
-/// only WHICH record the connection resolved to, and it is what lets the door
-/// ask that second question at all — the trust decision is the door's, and
-/// always was. The door's own "did the rail match anything" is
-/// `.is_some()` on this result, so the fold has no second name to drift
-/// against (review F7: the `is_autogated_node_*` predicates it used to carry
-/// were dead API).
-///
-/// `nodes`' own registry order is the whole tie-break, which is why a host
-/// that resolves to TWO records (one on the charter's line, one not) delivers
-/// on whichever of them comes first. Accepted: the rung is an address match,
-/// and `node_url_matches_addr` asks the live resolver for a hostname `url`, so
-/// the admitted address set is whatever DNS says at that moment
-/// ([`NodeRung::Addr`]'s own doc carries the full statement).
-pub fn autogated_node_addr(nodes: &[Node], addr: IpAddr) -> Option<&Node> {
-    nodes.iter().find(|p| p.autogate && node_url_matches_addr(&p.url, addr))
-}
-
-// ── Per-node token identification (CONTRACTS.md §6 amendment, 2026-08-18) ───
+// ── Per-node token identification ────────────────────────────────────────────
 //
-// [`autogated_node_addr`] above is the address-based match this crate
-// shipped with (§6, 2026-08-14) — still here, still checked first, still the
-// ONLY check when no node has ever set `token_file` (so a registry with no
-// tokens configured resolves identically to before this amendment). But
-// behind any reverse proxy or tunnel, `peer_addr()` on the SERVER's end is
-// the proxy's own loopback address for every caller, so IP can no longer
-// tell two nodes apart. A per-node token is the identity signal that
-// survives a proxy: [`autogated_node_token`] below is the same autogate
-// fold as [`autogated_node_addr`], keyed on a presented bearer token
-// instead of a source address.
+// Behind any reverse proxy or tunnel, `peer_addr()` on the SERVER's end is the
+// proxy's own loopback address for every caller, so IP cannot tell two nodes
+// apart. A per-node bearer survives the proxy: [`resolve_node`] matches a
+// presented token against each registered node's own `token_file`.
 
 /// Length-independent byte compare for a secret: unlike `==`/`eq`, the
 /// comparison loop always runs to `max(expected.len(), presented.len())`
@@ -1243,32 +1201,6 @@ pub fn token_bytes_eq(expected: &str, presented: &str) -> bool {
         diff |= e.get(i).copied().unwrap_or(0) ^ p.get(i).copied().unwrap_or(0);
     }
     diff == 0
-}
-
-/// The record a presented bearer token resolves to on the unsigned autogate
-/// rail: the first registered autogate-marked record (registry order, the same
-/// tie-break [`autogated_node_addr`] holds) whose OWN `token_file` holds
-/// `presented`. Mirrors [`autogated_node_addr`]'s fold exactly, keyed on token
-/// identity instead of address — which is what survives a reverse proxy or
-/// tunnel, where every caller's source address is the front's own. A node with
-/// no `token_file` set never matches (tolerant — same "absent means
-/// uninvolved" stance as an unmatched address), and a node whose file is
-/// missing/unreadable at match time never matches either (fails safe, never a
-/// panic/error).
-///
-/// **A match is not a delivery**: the door judges the matched record by its
-/// HOME mesh's rules ([`autogated_node_addr`] has the full statement — the
-/// charter's line where a charter governs home, nothing where home is
-/// charter-shaped, the record's own `autogate` flag where home is a pair mesh).
-pub fn autogated_node_token<'a>(nodes: &'a [Node], presented: &str) -> Option<&'a Node> {
-    nodes.iter().find(|p| {
-        p.autogate
-            && p.token_file
-                .as_deref()
-                .and_then(|path| std::fs::read_to_string(path).ok())
-                .map(|raw| token_bytes_eq(raw.trim(), presented))
-                .unwrap_or(false)
-    })
 }
 
 // ── Node cache: the last-pulled `aoide/graphSummary` response ───────────────
@@ -1313,11 +1245,23 @@ pub fn node_cache_path(name: &str) -> std::path::PathBuf {
     node_cache_dir().join(format!("{name}.json"))
 }
 
-/// Read one node's cache entry, tolerating a missing/corrupt file as `None`
-/// (never pulled / unreadable — the caller treats both as "no data yet").
+/// Read one node's cache entry, tolerating a missing or unparsable file as
+/// `None` (never pulled, or unreadable: the caller treats both as "no data
+/// yet"). [`read_node_cache`] names the unparsable case instead.
 pub fn load_node_cache(name: &str) -> Option<NodeCacheEntry> {
-    let raw = std::fs::read_to_string(node_cache_path(name)).ok()?;
-    serde_json::from_str(&raw).ok()
+    read_node_cache(name).ok().flatten()
+}
+
+/// One node's cache entry: `Ok(None)` when it was never written, `Err` when the
+/// file is there and does not parse, or cannot be read.
+pub fn read_node_cache(name: &str) -> Result<Option<NodeCacheEntry>, String> {
+    let path = node_cache_path(name);
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    serde_json::from_str(&raw).map(Some).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Atomic-write one node's cache entry.
@@ -1350,11 +1294,10 @@ pub fn is_cache_fresh(entry: &NodeCacheEntry, now_epoch: i64) -> bool {
 mod tests {
     use super::*;
 
-    fn fixture_node(name: &str, url: &str, autogate: bool) -> Node {
+    fn fixture_node(name: &str, url: &str) -> Node {
         Node {
             name: name.to_string(),
             url: url.to_string(),
-            autogate,
             token_file: None,
             bearer_secret: None,
             hub: false,
@@ -1372,18 +1315,18 @@ mod tests {
     #[test]
     fn insert_node_rejects_a_duplicate_name_rather_than_replacing() {
         let mut nodes: Vec<Node> = Vec::new();
-        assert!(insert_node(&mut nodes, fixture_node("alpha", "http://a/", false)));
+        assert!(insert_node(&mut nodes, fixture_node("alpha", "http://a/")));
         assert_eq!(nodes.len(), 1);
         // Re-adding the same name is rejected outright — `node add` never
         // silently overwrites.
-        assert!(!insert_node(&mut nodes, fixture_node("alpha", "http://a-new/", true)));
+        assert!(!insert_node(&mut nodes, fixture_node("alpha", "http://a-new/")));
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].url, "http://a/", "the original entry is untouched");
     }
 
     #[test]
     fn remove_node_reports_whether_it_removed_anything() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
         assert!(remove_node(&mut nodes, "alpha"));
         assert!(nodes.is_empty());
         assert!(!remove_node(&mut nodes, "alpha"), "already gone — reports false, doesn't panic");
@@ -1401,7 +1344,7 @@ mod tests {
 
         assert!(load_nodes().is_empty(), "missing file tolerates as empty");
 
-        let nodes = vec![fixture_node("alpha", "http://a/", false), fixture_node("beta", "http://b/", true)];
+        let nodes = vec![fixture_node("alpha", "http://a/"), fixture_node("beta", "http://b/")];
         save_nodes(&nodes).unwrap();
         assert_eq!(load_nodes(), nodes);
 
@@ -1421,7 +1364,7 @@ mod tests {
 
     #[test]
     fn bearer_secret_round_trips_as_camel_case_and_omits_when_absent() {
-        let mut with_secret = fixture_node("alpha", "http://a/", false);
+        let mut with_secret = fixture_node("alpha", "http://a/");
         with_secret.bearer_secret = Some("melete-door-token".to_string());
         let v = serde_json::to_value(&with_secret).unwrap();
         assert_eq!(v["bearerSecret"], "melete-door-token");
@@ -1430,11 +1373,11 @@ mod tests {
 
         // Absent by default: the key is omitted outright (skip_serializing_if),
         // and an OLD nodes.json predating this field loads cleanly as `None`.
-        let without = fixture_node("beta", "http://b/", false);
+        let without = fixture_node("beta", "http://b/");
         let v2 = serde_json::to_value(&without).unwrap();
         assert!(v2.get("bearerSecret").is_none(), "absent bearer_secret is omitted, not null");
         let old_shape = serde_json::json!({
-            "name": "gamma", "url": "http://c/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z"
+            "name": "gamma", "url": "http://c/", "addedAt": "2026-08-14T00:00:00Z"
         });
         let back2: Node = serde_json::from_value(old_shape).unwrap();
         assert_eq!(back2.bearer_secret, None);
@@ -1448,16 +1391,16 @@ mod tests {
         // predating this field — must deserialize `false`, the same
         // additive discipline `SessionRecord.headless` established.
         let old_shape = serde_json::json!({
-            "name": "gamma", "url": "http://c/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z"
+            "name": "gamma", "url": "http://c/", "addedAt": "2026-08-14T00:00:00Z"
         });
         let back: Node = serde_json::from_value(old_shape).unwrap();
         assert!(!back.hub, "absent hub deserializes false");
 
-        let not_hub = fixture_node("alpha", "http://a/", false);
+        let not_hub = fixture_node("alpha", "http://a/");
         let v = serde_json::to_value(&not_hub).unwrap();
         assert!(v.get("hub").is_none(), "false hub is omitted, not written as `\"hub\":false`");
 
-        let mut is_hub = fixture_node("beta", "http://b/", false);
+        let mut is_hub = fixture_node("beta", "http://b/");
         is_hub.hub = true;
         let v2 = serde_json::to_value(&is_hub).unwrap();
         assert_eq!(v2["hub"], true);
@@ -1468,8 +1411,8 @@ mod tests {
     #[test]
     fn set_hub_is_idempotent_and_moves_the_previous_holder_in_one_write() {
         let mut nodes = vec![
-            fixture_node("alpha", "http://a/", false),
-            fixture_node("beta", "http://b/", false),
+            fixture_node("alpha", "http://a/"),
+            fixture_node("beta", "http://b/"),
         ];
 
         // No hub yet — setting alpha is a fresh `Set`.
@@ -1493,7 +1436,7 @@ mod tests {
 
     #[test]
     fn set_hub_rejects_an_unknown_node_name() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
         let err = set_hub(&mut nodes, "ghost").unwrap_err();
         assert!(err.contains("ghost"));
         assert!(!nodes[0].hub, "the registry is untouched on an unknown-name error");
@@ -1502,8 +1445,8 @@ mod tests {
     #[test]
     fn clear_hub_is_idempotent_and_a_no_op_when_no_node_holds_it() {
         let mut nodes = vec![
-            fixture_node("alpha", "http://a/", false),
-            fixture_node("beta", "http://b/", false),
+            fixture_node("alpha", "http://a/"),
+            fixture_node("beta", "http://b/"),
         ];
 
         // Clearing on a fully hub-less registry is a no-op — the
@@ -1525,7 +1468,7 @@ mod tests {
 
     #[test]
     fn clear_hub_rejects_an_unknown_node_name() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
         assert!(clear_hub(&mut nodes, "ghost").is_err());
     }
 
@@ -1545,7 +1488,7 @@ mod tests {
         assert!(!valid_node_name("under_score"));
     }
 
-    // ── URL host parsing + autogate address matching (pure — no real DNS) ────
+    // ── URL host and path parsing (pure — no real DNS) ───────────────────────
 
     #[test]
     fn url_host_extracts_the_bare_authority() {
@@ -1561,29 +1504,6 @@ mod tests {
         assert_eq!(url_path("https://box.example.com/aoide/"), "/aoide/");
         assert_eq!(url_path("http://box:8710/aoide?x=1#frag"), "/aoide", "query/fragment are dropped");
         assert_eq!(url_path("not-a-url"), "/", "unparseable input defaults to /, never panics");
-    }
-
-    #[test]
-    fn autogate_address_match_is_ip_literal_and_needs_no_dns() {
-        let nodes = vec![
-            fixture_node("trusted", "http://10.0.0.5:8710/", true),
-            fixture_node("untrusted", "http://10.0.0.6:8710/", false),
-        ];
-        let trusted_ip: IpAddr = "10.0.0.5".parse().unwrap();
-        let untrusted_ip: IpAddr = "10.0.0.6".parse().unwrap();
-        let stranger_ip: IpAddr = "10.0.0.9".parse().unwrap();
-
-        assert_eq!(
-            autogated_node_addr(&nodes, trusted_ip).map(|p| p.name.as_str()),
-            Some("trusted"),
-            "the autogate-marked node's own address matches, and the RECORD is what comes back"
-        );
-        assert!(
-            autogated_node_addr(&nodes, untrusted_ip).is_none(),
-            "a registered but NOT autogate-marked node never matches"
-        );
-        assert!(autogated_node_addr(&nodes, stranger_ip).is_none(), "an unregistered address never matches");
-        assert!(autogated_node_addr(&[], trusted_ip).is_none(), "an empty registry matches nothing");
     }
 
     // ── Node cache round-trip + staleness ────────────────────────────────────
@@ -1674,53 +1594,49 @@ mod tests {
     }
 
     #[test]
-    fn autogated_node_token_matches_only_an_autogated_nodes_own_token_file() {
+    fn a_record_written_with_the_retired_autogate_key_still_loads() {
+        // The `autogate` flag is gone. A `nodes.json` that still carries the
+        // key must load every record intact, and the key is not written back.
+        let raw = r#"{
+          "schemaVersion": "0",
+          "nodes": [
+            { "name": "sakaki", "url": "http://s/", "autogate": true, "verified": true, "pubkey": "aa", "allows": ["read"] }
+          ]
+        }"#;
+        let m = migrate_grants(raw, "home");
+        assert!(m.skipped.is_empty(), "a retired key is not a skip: {:?}", m.skipped);
+        assert_eq!(m.registry.nodes.len(), 1, "the record is kept");
+        assert_eq!(m.registry.nodes[0].name, "sakaki");
+        assert!(m.registry.nodes[0].verified, "its pairing survives");
+        assert_eq!(m.registry.nodes[0].grant("home"), ["read".to_string()], "its grant survives");
+        let saved = serde_json::to_value(&m.registry.nodes[0]).unwrap();
+        assert!(saved.get("autogate").is_none(), "the retired key is not written back: {saved}");
+
+        // The same through the file itself: load the old file, save the
+        // registry, and the key is gone from what lands on disk.
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("aoide-node-token-{}", std::process::id()));
+        let saved_dir = std::env::var("AOIDE_STATE_DIR").ok();
+        let dir = std::env::temp_dir().join(format!("aoide-node-autogate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let trusted_file = dir.join("trusted.token");
-        std::fs::write(&trusted_file, "trusted-secret\n").unwrap();
-        let untrusted_file = dir.join("untrusted.token");
-        std::fs::write(&untrusted_file, "untrusted-secret\n").unwrap();
-
-        let mut trusted = fixture_node("trusted", "http://10.0.0.5:8710/", true);
-        trusted.token_file = Some(trusted_file.to_string_lossy().into_owned());
-        // Registered, autogate-marked, but WITHOUT a token file at all — must
-        // never match any presented token (absent means uninvolved).
-        let no_token_autogate = fixture_node("no-token", "http://10.0.0.7:8710/", true);
-        // Autogate-marked but its token file points nowhere real — a missing
-        // file fails safe (never matches), never panics.
-        let mut broken = fixture_node("broken", "http://10.0.0.8:8710/", true);
-        broken.token_file = Some(dir.join("does-not-exist.token").to_string_lossy().into_owned());
-        // Has the SAME secret as `trusted` but is NOT autogate-marked — must
-        // never match, since only autogate-marked nodes are consulted.
-        let mut untrusted = fixture_node("untrusted", "http://10.0.0.6:8710/", false);
-        untrusted.token_file = Some(untrusted_file.to_string_lossy().into_owned());
-
-        let nodes = vec![trusted, no_token_autogate, broken, untrusted];
-
-        assert_eq!(
-            autogated_node_token(&nodes, "trusted-secret").map(|p| p.name.as_str()),
-            Some("trusted"),
-            "matches the autogate-marked node's own token, and the RECORD is what comes back"
-        );
-        assert!(
-            autogated_node_token(&nodes, "untrusted-secret").is_none(),
-            "an autogate-marked node's token never matches a NON-autogated node's secret"
-        );
-        assert!(autogated_node_token(&nodes, "wrong").is_none(), "an unrecognised token matches nothing");
-        assert!(autogated_node_token(&[], "trusted-secret").is_none(), "an empty registry matches nothing");
-
+        std::env::set_var("AOIDE_STATE_DIR", &dir);
+        std::fs::create_dir_all(nodes_path().parent().unwrap()).unwrap();
+        std::fs::write(nodes_path(), raw).unwrap();
+        let loaded = load_nodes();
+        assert_eq!(loaded.len(), 1, "the record loads from the file");
+        save_nodes(&loaded).unwrap();
+        let on_disk = std::fs::read_to_string(nodes_path()).unwrap();
+        assert!(!on_disk.contains("autogate"), "the retired key is not written back: {on_disk}");
+        assert!(on_disk.contains("sakaki"), "the record itself is: {on_disk}");
         let _ = std::fs::remove_dir_all(&dir);
+        match saved_dir {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
-
-    // ── `pubkey`/`verified` — P-P2 additive fields ───────────────────────────
 
     #[test]
     fn pubkey_and_verified_round_trip_and_omit_when_absent_or_false() {
-        let mut unpaired = fixture_node("alpha", "http://a/", false);
+        let mut unpaired = fixture_node("alpha", "http://a/");
         let v = serde_json::to_value(&unpaired).unwrap();
         assert!(v.get("pubkey").is_none(), "absent pubkey is omitted, not null");
         assert!(v.get("verified").is_none(), "false verified is omitted, not written");
@@ -1738,7 +1654,7 @@ mod tests {
     #[test]
     fn a_legacy_nodes_json_predating_pairing_loads_pubkey_none_and_verified_false() {
         let old_shape = serde_json::json!({
-            "name": "gamma", "url": "http://c/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z"
+            "name": "gamma", "url": "http://c/", "addedAt": "2026-08-14T00:00:00Z"
         });
         let back: Node = serde_json::from_value(old_shape).unwrap();
         assert_eq!(back.pubkey, None);
@@ -1760,7 +1676,6 @@ mod tests {
         assert!(nodes[0].verified);
         assert_eq!(nodes[0].grant("home"), ["read".to_string()], "a fresh pairing stamps EXACTLY the grant the caller resolved, never a literal of its own");
         assert!(nodes[0].grant("away").is_empty(), "the grant lands in the mesh the pairing named and NOWHERE else");
-        assert!(!nodes[0].autogate, "a fresh paired node is never autogated by construction");
         assert!(nodes[0].token_file.is_none());
         assert!(nodes[0].bearer_secret.is_none());
         assert!(!nodes[0].hub);
@@ -1768,7 +1683,7 @@ mod tests {
 
     #[test]
     fn upsert_paired_node_on_a_never_before_verified_name_replaces_pubkey_verified_url_and_stamps_the_grant() {
-        let mut existing = fixture_node("box-b", "http://old-b/", true);
+        let mut existing = fixture_node("box-b", "http://old-b/");
         existing.token_file = Some("/tmp/tok".to_string());
         existing.bearer_secret = Some("secret-name".to_string());
         // `existing.verified` is false (fixture default) and `grants` is
@@ -1782,7 +1697,6 @@ mod tests {
         assert_eq!(nodes[0].pubkey.as_deref(), Some("cafef00d"));
         assert!(nodes[0].verified);
         assert_eq!(nodes[0].grant("away"), ["read".to_string(), "spawn".to_string()], "first-time verification stamps the caller's grant same as a fresh insert — here a widened one, in the named mesh");
-        assert!(nodes[0].autogate, "autogate is untouched by re-pairing");
         assert_eq!(nodes[0].token_file.as_deref(), Some("/tmp/tok"), "token_file untouched");
         assert_eq!(nodes[0].bearer_secret.as_deref(), Some("secret-name"), "bearer_secret untouched");
     }
@@ -1804,7 +1718,7 @@ mod tests {
         // off`; re-pairing must never silently re-grant it — not even when
         // THIS commit's own grant is the wider one (an `--allow read,spawn`
         // typed at the re-pair, or a `defaultGrant` widened since).
-        let mut existing = fixture_node("box-b", "http://old-b/", false);
+        let mut existing = fixture_node("box-b", "http://old-b/");
         existing.verified = true;
         existing.pubkey = Some("oldkey".to_string());
         existing.grants = grants_in("home", &["read"]); // spawn already revoked.
@@ -1822,7 +1736,7 @@ mod tests {
 
     #[test]
     fn grants_round_trip_per_mesh_and_omit_when_empty() {
-        let mut node = fixture_node("alpha", "http://a/", false);
+        let mut node = fixture_node("alpha", "http://a/");
         let v = serde_json::to_value(&node).unwrap();
         assert!(v.get("grants").is_none(), "an empty grant map is omitted, not written as `{{}}`");
 
@@ -1868,8 +1782,7 @@ mod tests {
         let raw = r#"{
           "schemaVersion": "0",
           "peers": [
-            { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false,
-              "pubkey": "2706", "verified": true, "allows": ["read", "spawn"],
+            { "name": "yomi-strix", "url": "http://yomi-strix:8710/",               "pubkey": "2706", "verified": true, "allows": ["read", "spawn"],
               "addedAt": "2026-08-28T05:22:50Z" },
             { "name": "sakaki", "url": "http://sakaki:8710/", "verified": true, "pubkey": "9316" }
           ]
@@ -1891,7 +1804,7 @@ mod tests {
           "schemaVersion": "0",
           "nodes": [
             { "name": "sakaki", "url": "http://s/", "verified": true, "pubkey": "aa", "allows": ["read"] },
-            { "name": "broken", "url": "http://b/", "verified": true, "pubkey": "bb", "autogate": true, "grants": [] },
+            { "name": "broken", "url": "http://b/", "verified": true, "pubkey": "bb", "grants": [] },
             { "name": "other", "url": "http://o/", "verified": true, "pubkey": "cc", "grants": { "home": ["message"] } }
           ]
         }"#;
@@ -1899,7 +1812,7 @@ mod tests {
         assert_eq!(m.registry.nodes.len(), 3, "every record is kept: a bad grant is not a bad roster");
         assert_eq!(m.registry.nodes[0].grant("home"), ["read".to_string()], "the legacy record still migrated");
         assert!(m.registry.nodes[1].grants.is_empty(), "the broken record fails CLOSED — it holds nothing");
-        assert!(m.registry.nodes[1].autogate, "and keeps every other field: autogate, via, token/bearer, hub");
+        assert_eq!(m.registry.nodes[1].name, "broken", "and keeps every other field");
         assert_eq!(m.registry.nodes[2].grant("home"), ["message".to_string()], "the good record is untouched");
         assert_eq!(m.skipped.len(), 1, "the skip is reported: {:?}", m.skipped);
         assert!(m.skipped[0].contains("broken"), "{}", m.skipped[0]);
@@ -2042,7 +1955,7 @@ mod tests {
 
     #[test]
     fn set_node_allow_enables_and_disables_idempotently() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
 
         assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", true, "home"), Ok(AllowChange::Enabled));
         assert_eq!(nodes[0].grant("home"), ["spawn".to_string()]);
@@ -2059,7 +1972,7 @@ mod tests {
 
     #[test]
     fn set_node_allow_touches_one_mesh_and_leaves_every_other_alone() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
         set_node_allow(&mut nodes, "alpha", "read", true, "home").unwrap();
         set_node_allow(&mut nodes, "alpha", "spawn", true, "away").unwrap();
 
@@ -2070,7 +1983,7 @@ mod tests {
 
     #[test]
     fn set_node_allow_refuses_an_unknown_node_or_an_unknown_capability() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
         assert_eq!(set_node_allow(&mut nodes, "ghost", "spawn", true, "home"), Err(AllowError::UnknownNode));
         assert_eq!(set_node_allow(&mut nodes, "alpha", "write", true, "home"), Err(AllowError::UnknownCapability));
         // An unknown capability is refused even against an unknown node —
@@ -2162,7 +2075,7 @@ mod tests {
 
     #[test]
     fn granted_meshes_are_exactly_the_grant_maps_keys() {
-        let mut node = fixture_node("alpha", "http://a/", false);
+        let mut node = fixture_node("alpha", "http://a/");
         assert!(granted_meshes(&node).is_empty());
         node.grants = BTreeMap::from([
             ("away".to_string(), vec!["read".to_string()]),
@@ -2174,17 +2087,15 @@ mod tests {
     // ── `resolve_node` (P-P3 decision 6's identity ladder) ────────────────────
 
     #[test]
-    fn resolve_node_matches_a_presented_token_against_any_registered_nodes_own_token_file_regardless_of_autogate() {
+    fn resolve_node_matches_a_presented_token_against_any_registered_nodes_own_token_file() {
         let dir = std::env::temp_dir().join(format!("aoide-node-resolve-token-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let token_path = dir.join("box-b.token");
         std::fs::write(&token_path, "secret-b\n").unwrap();
 
-        // NOT autogate-marked — resolve_node must still find it by token,
-        // unlike `autogated_node_token`, whose fold is over `autogate`-marked
-        // records only, and which would refuse it.
-        let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        // A node with its own token_file is found by that token alone.
+        let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/");
         paired.verified = true;
         paired.token_file = Some(token_path.to_string_lossy().into_owned());
         let nodes = vec![paired];
@@ -2199,7 +2110,7 @@ mod tests {
 
     #[test]
     fn resolve_node_falls_back_to_address_when_no_token_matches() {
-        let node = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        let node = fixture_node("box-b", "http://10.0.0.5:8710/");
         let nodes = vec![node];
         let ip: IpAddr = "10.0.0.5".parse().unwrap();
 
@@ -2233,9 +2144,9 @@ mod tests {
         let token_path = dir.join("shared.token");
         std::fs::write(&token_path, "shared-secret\n").unwrap();
 
-        let mut first = fixture_node("first-registered", "http://10.0.0.5:8710/", false);
+        let mut first = fixture_node("first-registered", "http://10.0.0.5:8710/");
         first.token_file = Some(token_path.to_string_lossy().into_owned());
-        let mut second = fixture_node("second-registered", "http://10.0.0.5:8710/", false);
+        let mut second = fixture_node("second-registered", "http://10.0.0.5:8710/");
         second.token_file = Some(token_path.to_string_lossy().into_owned());
         let nodes = vec![first, second];
 
@@ -2274,16 +2185,16 @@ mod tests {
         // this field (today's every real file) — must deserialize `None`,
         // the same additive discipline `pubkey`/`bearerSecret` established.
         let old_shape = serde_json::json!({
-            "name": "gamma", "url": "http://c/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z"
+            "name": "gamma", "url": "http://c/", "addedAt": "2026-08-14T00:00:00Z"
         });
         let back: Node = serde_json::from_value(old_shape).unwrap();
         assert_eq!(back.via, None, "absent via deserializes None");
 
-        let without = fixture_node("alpha", "http://a/", false);
+        let without = fixture_node("alpha", "http://a/");
         let v = serde_json::to_value(&without).unwrap();
         assert!(v.get("via").is_none(), "absent via is omitted, not written as `\"via\":null`");
 
-        let mut with_via = fixture_node("beta", "http://b/", false);
+        let mut with_via = fixture_node("beta", "http://b/");
         with_via.via = Some("ssh://khoa@sakaki".to_string());
         let v2 = serde_json::to_value(&with_via).unwrap();
         assert_eq!(v2["via"], "ssh://khoa@sakaki");
@@ -2300,12 +2211,12 @@ mod tests {
 
     #[test]
     fn set_node_via_sets_and_clears_without_touching_any_other_field() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
-        nodes[0].autogate = true;
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
+        nodes[0].hub = true;
 
         assert!(set_node_via(&mut nodes, "alpha", Some("ssh://khoa@sakaki")).is_ok());
         assert_eq!(nodes[0].via.as_deref(), Some("ssh://khoa@sakaki"));
-        assert!(nodes[0].autogate, "unrelated fields are untouched");
+        assert!(nodes[0].hub, "unrelated fields are untouched");
 
         assert!(set_node_via(&mut nodes, "alpha", None).is_ok());
         assert_eq!(nodes[0].via, None, "None clears a previously-set via");
@@ -2313,7 +2224,7 @@ mod tests {
 
     #[test]
     fn set_node_via_rejects_an_unknown_node_name() {
-        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        let mut nodes = vec![fixture_node("alpha", "http://a/")];
         let err = set_node_via(&mut nodes, "ghost", Some("ssh://sakaki")).unwrap_err();
         assert!(err.contains("ghost"));
     }
@@ -2337,7 +2248,7 @@ mod tests {
 
     #[test]
     fn set_node_via_refuses_the_https_pair_and_leaves_the_record_untouched() {
-        let mut https_node = fixture_node("alpha", "https://aoide.necoconeco.net/", false);
+        let mut https_node = fixture_node("alpha", "https://aoide.necoconeco.net/");
         https_node.via = None;
         let mut nodes = vec![https_node];
 
@@ -2350,5 +2261,38 @@ mod tests {
         nodes[0].via = Some("ssh://khoa@sakaki".to_string());
         assert!(set_node_via(&mut nodes, "alpha", None).is_ok());
         assert_eq!(nodes[0].via, None);
+    }
+
+    #[test]
+    fn a_corrupt_registry_or_cache_is_named_and_an_absent_one_is_empty() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_cfg = std::env::var(crate::config::ENV_CONFIG).ok();
+        let root = aoide_test_support::unique_tmp("nodes-corrupt");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::remove_var(crate::config::ENV_CONFIG);
+        let _ = std::fs::create_dir_all(crate::fs::state_dir());
+        let _ = std::fs::create_dir_all(node_cache_dir());
+
+        assert_eq!(read_nodes().map(|n| n.len()), Ok(0), "an absent registry is empty, not an error");
+        assert_eq!(read_node_cache("sakaki").map(|e| e.is_none()), Ok(true), "an absent cache is None");
+
+        std::fs::write(nodes_path(), "not json").unwrap();
+        assert!(read_nodes().is_err(), "a corrupt registry is named, not read as empty");
+        assert!(load_nodes().is_empty(), "load_nodes still reads it as empty");
+
+        std::fs::write(node_cache_path("sakaki"), "{").unwrap();
+        assert!(read_node_cache("sakaki").is_err(), "an unparsable cache is named");
+        assert!(load_node_cache("sakaki").is_none(), "load_node_cache still reads it as none");
+
+        match saved_cfg {
+            Some(v) => std::env::set_var(crate::config::ENV_CONFIG, v),
+            None => std::env::remove_var(crate::config::ENV_CONFIG),
+        }
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

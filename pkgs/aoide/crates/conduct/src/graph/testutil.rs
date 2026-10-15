@@ -43,8 +43,10 @@ pub(crate) fn session(
         cwd: cwd.into(),
         state: state.into(),
         // Every fixture here is a harness-shaped record unless a test says
-        // otherwise; `stamp_shell`/`program_is_a_shell` tests set it directly.
+        // otherwise: a claude wrap whose resolved program is `claude`.
+        // `stamp_wrap`/`program_is_a_shell` tests set both fields directly.
         shell: false,
+        wrapped_program: Some("claude".into()),
         started_at: started.into(),
         parent_session_id: parent.map(str::to_string),
         remote_parent: None,
@@ -62,6 +64,7 @@ pub(crate) fn session(
         context_tokens: None,
         context_ceiling: None,
         needs_sudo: None,
+        question: None,
         log_path: None,
         petname: None,
         task: None,
@@ -81,6 +84,8 @@ pub(crate) fn session(
         origin: None,
         seal: None,
         sealed_issued_at: None,
+        sealed_pid_starttime: None,
+        sealed_boot_id: None,
         ever_sealed: None,
         attested_spawner: None,
         restore: None,
@@ -420,8 +425,20 @@ pub(crate) fn stamp_shell_capture(id: &str) {
     rec.restore = Some(aoide_storage::records::RestoreSnapshot::default());
     write_stage(&sessions_path(), &file).unwrap();
 }
+/// Stamp the wrap's resolved program, as conduct's registration does from its
+/// argv (`wrapped_program`): a spawn-shape wrap of `agent` is `Some(agent)`.
+pub(crate) fn stamp_wrapped_program(id: &str, program: Option<&str>) {
+    let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+    let rec = file
+        .sessions
+        .iter_mut()
+        .find(|s| s.session_id == id)
+        .unwrap_or_else(|| panic!("no stage record for `{id}`"));
+    rec.wrapped_program = program.map(str::to_string);
+    write_stage(&sessions_path(), &file).unwrap();
+}
 /// Stamp the DURABLE half instead: `shell = true` with no capture at all —
-/// what `conduct`'s own registration writes (via `stamp_shell`) and what a
+/// what `conduct`'s own registration writes (via `stamp_wrap`) and what a
 /// record looks like before its first tick. Separate helper, because the two
 /// reads are deliberately independent arms of `wrapped_program_is_a_shell`.
 pub(crate) fn stamp_shell_field(id: &str) {
@@ -501,6 +518,21 @@ pub(in crate::graph) fn ended_code(child: &mut crate::graph::pty::PtyChild) -> O
 /// points `AOIDE_DAEMON_SOCKET` at the returned path.
 #[cfg(unix)]
 pub(crate) fn fake_seal_daemon(pubkey_hex: &str) -> PathBuf {
+    serve_seal_daemon(pubkey_hex, false)
+}
+
+/// [`fake_seal_daemon`] that answers ONE connection and then unlinks its
+/// socket. For a test whose subject launches a child that inherits
+/// `AOIDE_DAEMON_SOCKET`: the child must find no daemon, as it would not find
+/// one it never asked, rather than a stand-in that answers every request with
+/// a `ping`.
+#[cfg(unix)]
+pub(crate) fn fake_seal_daemon_once(pubkey_hex: &str) -> PathBuf {
+    serve_seal_daemon(pubkey_hex, true)
+}
+
+#[cfg(unix)]
+fn serve_seal_daemon(pubkey_hex: &str, once: bool) -> PathBuf {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -512,14 +544,32 @@ pub(crate) fn fake_seal_daemon(pubkey_hex: &str) -> PathBuf {
         "{}\n",
         serde_json::json!({ "ok": true, "daemon": "aoide", "sealPubkeyHex": pubkey_hex })
     );
+    let socket = path.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut line = String::new();
             let _ = BufReader::new(stream.try_clone().unwrap()).read_line(&mut line);
             let _ = (&stream).write_all(reply.as_bytes());
+            if once {
+                let _ = std::fs::remove_file(&socket);
+                break;
+            }
         }
     });
     path
+}
+
+/// The pid of a child that was spawned and reaped: no live process holds it.
+pub(crate) fn reaped_pid() -> u32 {
+    let mut child = if cfg!(windows) {
+        std::process::Command::new("cmd").args(["/C", "exit 0"]).spawn()
+    } else {
+        std::process::Command::new("true").spawn()
+    }
+    .expect("spawn a child to reap");
+    let pid = child.id();
+    child.wait().expect("reap the child");
+    pid
 }
 
 /// Put the daemon's seal over a roster record's CURRENT pid, as the daemon's
@@ -529,15 +579,18 @@ pub(crate) fn seal_record(id: &str, kp: &aoide_storage::identity::Keypair) {
     let rec = file.sessions.iter_mut().find(|r| r.session_id == id).unwrap();
     let pid = rec.pid.unwrap() as i32;
     let issued_at = 1_700_000_000;
+    let pid_starttime = super::window::pid_starttime(pid).expect("a live pid");
     let identity = aoide_storage::sealed_id::SealedIdentity {
         session_id: id.to_string(),
         pid,
-        pid_starttime: super::window::pid_starttime(pid).expect("a live pid"),
+        pid_starttime,
         origin_class: String::new(),
         issued_at,
     };
     rec.seal = Some(aoide_storage::sealed_id::mint_seal(kp, &identity));
     rec.sealed_issued_at = Some(issued_at);
+    rec.sealed_pid_starttime = Some(pid_starttime);
+    rec.sealed_boot_id = aoide_storage::attest::boot_id();
     rec.ever_sealed = Some(true);
     write_stage(&sessions_path(), &file).unwrap();
 }

@@ -800,7 +800,7 @@ mod tests {
         let r = c.check("aoide", &mut i).unwrap_err();
         let fix = match r.fix { Fix::Run(s) => s, _ => String::new() };
         assert!(!fix.contains('…') && !fix.contains("..."), "{fix}");
-        assert!(fix == "aoide box read --all" || fix == "aoide box read --for a", "{fix}");
+        assert!(fix == "aoide box read --all" || fix == "aoide box read --for=a", "{fix}");
     }
 
     #[test]

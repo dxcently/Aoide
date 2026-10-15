@@ -259,6 +259,14 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
         return false;
     }
 
+    // A held spawn's approval confirm is modal for the same reason: nothing but
+    // its own keys may act while a command waits on a second key, so a global
+    // key (a panel switch, quit) cannot slip past it.
+    if app.spawn_confirm.is_some() {
+        app.handle_key(key);
+        return false;
+    }
+
     // The help overlay swallows keys until dismissed (pi-style modal overlay).
     if app.help_open {
         match key.code {
@@ -571,7 +579,7 @@ fn handle_mouse(app: &mut App, area: ratatui::layout::Rect, mouse: MouseEvent) {
     // events, and the established dismissal (a right button down) closes them.
     // Without this a click could switch panels or open a context menu under a
     // popup that is still painting its own copy of a code.
-    if app.help_open || app.tail.is_some() || app.pair_ceremony.is_some() {
+    if app.help_open || app.tail.is_some() || app.pair_ceremony.is_some() || app.spawn_confirm.is_some() {
         if mouse.kind == MouseEventKind::Down(MouseButton::Right)
             || (app.pair_ceremony.is_some()
                 && mouse.kind == MouseEventKind::Down(MouseButton::Left))
@@ -579,6 +587,7 @@ fn handle_mouse(app: &mut App, area: ratatui::layout::Rect, mouse: MouseEvent) {
             app.help_open = false;
             app.close_tail();
             app.dismiss_pair_ceremony();
+            app.spawn_confirm = None;
         }
         return;
     }
@@ -1717,6 +1726,68 @@ mod tests {
         assert!(app.context_menu.is_none(), "no menu opens under a popup");
     }
 
+    /// The held-spawn confirm is modal for the keyboard and the pointer: with it
+    /// open, a panel switch, `q` and a click do nothing but their own job, and
+    /// only its own keys close it.
+    #[test]
+    fn the_held_spawn_confirm_is_modal_for_the_global_keys_and_the_mouse() {
+        let mut app = App::for_test(vec![], vec![], vec![]);
+        app.panel = Panel::Pending;
+        let open = |app: &mut App| {
+            app.spawn_confirm = Some(app::SpawnConfirm {
+                id: "0".to_string(),
+                session_id: "held".to_string(),
+                text: "aoide spawn -- true".to_string(),
+                from: Some("mcp".to_string()),
+                kind: "spawn".to_string(),
+                plan: Vec::new(),
+                fingerprint: "fp".to_string(),
+                scroll: 0,
+                max_scroll: std::cell::Cell::new(0),
+            });
+        };
+        open(&mut app);
+
+        for key in [KeyCode::Tab, KeyCode::Char('q'), KeyCode::Char('1'), KeyCode::Char('?')] {
+            assert!(!handle_key(&mut app, KeyEvent::from(key)), "{key:?} must not quit");
+            assert_eq!(app.panel, Panel::Pending, "{key:?} must not switch the panel");
+            assert!(app.spawn_confirm.is_some(), "{key:?} must not close the confirm");
+            assert!(!app.help_open);
+        }
+
+        let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+        let nav = board::nav_regions(board::page_geometry(area, &app).nav);
+        let (rect, _, _) = nav[0];
+        handle_mouse(
+            &mut app,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: rect.x + 1,
+                row: rect.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(app.panel, Panel::Pending, "a click under the confirm switches nothing");
+        assert!(app.spawn_confirm.is_some(), "and does not approve or close it");
+
+        handle_mouse(
+            &mut app,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: area.width / 2,
+                row: area.height / 2,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(app.spawn_confirm.is_none(), "a right click cancels");
+
+        open(&mut app);
+        assert!(!handle_key(&mut app, KeyEvent::from(KeyCode::Esc)));
+        assert!(app.spawn_confirm.is_none(), "Esc cancels");
+    }
+
     #[test]
     fn composer_captures_global_shortcuts_and_tabs_without_quitting() {
         let mut app = App::for_test(vec![], vec![], vec![]);
@@ -1794,6 +1865,7 @@ mod tests {
             cwd: "/tmp".into(),
             state: "running".into(),
             shell: false,
+            wrapped_program: None,
             started_at: "s1".into(),
             parent_session_id: None,
             remote_parent: None,
@@ -1810,6 +1882,7 @@ mod tests {
             model: None,
             context_tokens: None,
             needs_sudo: None,
+            question: None,
             context_ceiling: None,
             log_path: Some(path.to_string_lossy().into_owned()),
             sources: None,
@@ -1832,6 +1905,8 @@ mod tests {
             origin: None,
             seal: None,
             sealed_issued_at: None,
+            sealed_pid_starttime: None,
+            sealed_boot_id: None,
             ever_sealed: None,
             attested_spawner: None,
             restore: None,

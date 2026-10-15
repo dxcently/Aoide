@@ -1904,7 +1904,6 @@ mod tests {
         aoide_storage::node_store::Node {
             name: "yomi".to_string(),
             url: "http://127.0.0.1:9/".to_string(),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

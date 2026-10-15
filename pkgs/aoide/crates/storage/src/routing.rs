@@ -1017,7 +1017,6 @@ mod tests {
         node_store::Node {
             name: name.to_string(),
             url: format!("https://{name}.example/"),
-            autogate: false,
             token_file: None,
             bearer_secret: None,
             hub: false,

@@ -56,22 +56,15 @@ an error.
 {
   "schemaVersion": "0",
   "nodes": [
-    { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z",
-      "pubkey": "<hex>", "verified": true, "allows": ["read", "spawn"] }
+    { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "addedAt": "2026-08-14T00:00:00Z",
+      "pubkey": "<hex>", "verified": true, "grants": { "home": ["read", "spawn"] } }
   ]
 }
 ```
 
-`pubkey`/`verified`/`allows` land when the [[Pairing-Ceremony]] commits the
+`pubkey`/`verified`/`grants` land when the [[Pairing-Ceremony]] commits the
 record; a never-paired (legacy-registered) node carries none of them and
 never enters the signature rung's trial set.
-
-`autogate` (default `false`) is the cross-device analogue of `send`'s
-local "sender is the target's own parent" autogate rule: a node marked
-`true` has its inbound `message/send` auto-deliver without the pending
-queue even though the connection is non-loopback — see
-[[#Security — pairing is the verification path]] below. An
-unmarked/unknown sender is never autogated.
 
 `tokenFile` (`node add --token-file <path>`, optional) names a file on THIS
 instance holding the shared secret that node presents as `Authorization:
@@ -192,7 +185,7 @@ session id they could match.
 
 ## CLI surface
 
-`aoide node add <name> <url> [--autogate] [--no-verify] [--via ssh://…]
+`aoide node add <name> <url> [--no-verify] [--via ssh://…]
 [--token-file <path>] [--bearer-secret <name>]` / `remove <name>` /
 `pull [<name>]` / `status` / `hub <name> [--clear]` (the single-hub
 designation, a last-resort address-resolution preference) — plus the pairing
@@ -220,10 +213,10 @@ ceremony over every declared node with no verified record; see
 through the same tiered address grammar bare `session` uses; a `node/<query>`
 form is its remote tier. It resolves `<query>` against a registered node's
 CACHED graph (the same `state/node-cache/<name>.json` the fold above reads)
-and, on a match, delivers the message over A2A `message/send` instead of
-queuing a local pending send. The call is always attempted: the receiving
-node gates its own delivery through its own [[A2A-Door]] security model, so
-a remote send never sits in the sender's local pending queue. `--to` and
+and, on a match, sends the message over A2A `message/send` instead of
+queuing a local pending send. The call is always made: a remote send never
+sits in the sender's local pending queue, and the receiving node parks it in
+its own pending queue for an approver there ([[A2A-Door]]). `--to` and
 `--id` are mutually exclusive on `send`.
 
 ## Security — pairing is the verification path
@@ -260,8 +253,8 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
   mismatch is audited as attribution drift, and the RESOLVED name wins
   everywhere downstream — the grant lookup in the mesh the request signed
   for, the `node:<name>` origin
-  stamp, the autogate question — so renaming a node locally never breaks
-  its inbound signed requests. No verifying key is one `-32007`
+  stamp, and the pending-queue attribution — so renaming a node locally
+  never breaks its inbound signed requests. No verifying key is one `-32007`
   "signature verification failed" whether the key is unknown, the node
   unverified/keyless, or the signature bad — never an existence oracle
   over the registry. When several verified records share the verifying
@@ -276,46 +269,40 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
   per-`a2a serve`-process nonce cache keyed on `(pubkey, nonce)`, capped
   at 4096 entries (`-32009`); the cache clears on restart, which is why
   both checks run independently. The ONLY rung Spawn accepts:
-  `spawn_admitted` requires a verified node, resolved by signature, whose
-  `allows` contains `"spawn"`.
+  `spawn_admitted` requires a request resolved by signature, whose grant in
+  the mesh the request names holds `"spawn"`.
 - **Token** — a node's own `tokenFile` presented as a bearer. A legacy
-  escape for an unpaired caller: it authenticates the read arms
-  (`tasks/get`, the AgentCard GET, `aoide/graphSummary`) and answers
-  Inject's autogate question, and never reaches Spawn.
+  escape for an unpaired caller: it resolves the node, and a `verified`
+  node's Inject is never answered with the uniform response. It authenticates
+  no read and never reaches Spawn.
 - **Addr** (`NodeRung::Addr`) — a bare TCP-source-IP-vs-registered-`url`
   match. Resolves a node identity for ATTRIBUTION only (Inject's `from`
-  field, the autogate question): it carries no possession proof and is
-  never sufficient for Spawn.
+  field): it carries no possession proof, admits nothing once a door-wide
+  token is configured, and is never sufficient for Spawn.
 - **Door-wide bearer** (`aoide.a2a.tokenFile`/`aoide.a2a.bearerSecret`) —
-  the second legacy escape; it authenticates the read arms without ever
-  resolving a node identity.
+  the second legacy escape; it authenticates the read arms and admits a
+  `contextId` Inject past the uniform answer, and it never resolves a node
+  identity.
 
-Inject delivery still classifies the caller's address first
-(`a2a::classify_origin` → `ConnOrigin`: `Loopback` / `Remote(IpAddr)` /
-`Unknown`). A `Remote` caller falls back to the same interactive
-pending-approval queue `send` uses, auto-delivering only on an autogate
-match — the OR of the address check, the per-node `tokenFile` check, and
-the signature-rung `autogate` flag on the resolved node's own record
-(`autogate_match` = `ip_autogate || token_autogate || sig_autogate`) — the
-flag opening that rail, and `message` in the mesh the request SIGNED for
-being what it delivers on ([[A2A-Door]], P-CHARTER). An
-`Unknown` origin never auto-delivers. A verified signature outranks
-loopback for this question: an ssh `-L` forward delivers a tunneled
-node's packets from its own end's sshd, so `origin_for_inject` strips
-`ConnOrigin::Loopback`'s free pass from any request
-`verify_signed_request` already verified — a signed node's delivery
-timing is decided by its `autogate` flag AND the caller's grant in the mesh
-that request signed for, never by which address it
-arrived from ([[Node-Transport]]). `Loopback` keeps its unconditional
-trust only while no server-wide inbound bearer gate is configured
-([[A2A-Door#Security and governance]]): `aoide.a2a.bearerSecret` (a
-secret NAME resolved fresh on every request through the local
-[[Secrets-Broker]], consumer `a2a-door`, failing closed on a resolve
-failure) takes precedence over `aoide.a2a.tokenFile` (a path read once at
-`a2a serve` launch); once either is set, a caller — loopback included —
-that does not present the valid token is coerced to `Unknown` before this
-classification is even consulted, since behind a reverse proxy or tunnel
-every caller's connection looks loopback to the server.
+Inject classifies the caller's address first (`a2a::classify_origin` →
+`ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`), and no address proves
+an identity. Every admitted inject from the network door parks in the same
+pending-approval queue `send` uses. Nothing is delivered from this door. Which
+callers reach that queue is the admission rule of [[A2A-Door]]: with no
+door-wide token configured, every inject does. Once one is configured, a
+`contextId` send from a caller holding neither that token nor a node identity (a
+`verified` node on the Token rung, or a signature holding `message` in its mesh)
+gets the uniform answer and queues nothing. The queue holds at most 32 entries
+per source; past that a proven node is refused `-32000` and any other caller
+gets the uniform answer. `aoide.a2a.bearerSecret` (a secret NAME resolved fresh
+on every request through the local [[Secrets-Broker]], consumer `a2a-door`,
+failing closed on a resolve failure) takes precedence over `aoide.a2a.tokenFile`
+(a path read once at `a2a serve` launch).
+
+A verified signature identifies its node by key, whatever address the request
+arrived from. An ssh `-L` forward makes a tunneled node's packets arrive from
+its own end's sshd, so an address proves nothing and the key does
+([[Node-Transport]]).
 
 Every inject/spawn/error, loopback or not, writes to the single audit log
 as `Door::A2a`, and a resolved node's name is stamped on audit lines,

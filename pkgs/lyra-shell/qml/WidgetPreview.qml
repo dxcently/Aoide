@@ -273,10 +273,10 @@ ShellRoot {
         // The menu's draft gesture — only logs, like sendCommand: the real one is
         // fire-and-forget and its outcome is a daemon toast. The logged line is
         // the one ShellBridge.riceDraft would send: a name only for a non-empty
-        // string on `enter`.
+        // string on `enter` or `drop`.
         function riceDraft(action, name) {
             var wanted = { action: "" + action }
-            if (action === "enter" && typeof name === "string" && name.length > 0)
+            if ((action === "enter" || action === "drop") && typeof name === "string" && name.length > 0)
                 wanted.name = name
             canvas.log("bridge.riceDraft " + JSON.stringify(wanted))
         }
@@ -776,7 +776,7 @@ ShellRoot {
             canvas.log("createObject NULL " + canvas.widgetUrlText)
             return
         }
-        // A window-rooted slot (dock/powermenu/launcher/herald) MAPS A REAL
+        // A window-rooted slot (dock/powermenu/launcher/herald/switcher) MAPS A REAL
         // wlr-layer-shell surface on the live compositor the moment it is
         // created, and the handle cannot be held in `widgetItem` (QObject* to
         // QQuickItem*), so nothing could ever take it down again. Destroyed

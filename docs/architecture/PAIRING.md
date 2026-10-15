@@ -47,16 +47,16 @@ there is no "this node may spawn, that one may not."
    its own side. Two humans, two out-of-band comparisons, one ceremony.
    CLI-first: every step must be drivable from a plain terminal on both
    ends; the popup is sugar.
-5. **Per-node permissions: a closed `allows` set.** Capabilities
+5. **Per-node permissions: a closed capability set per mesh (`grants`).**
+   Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
    `"read"` (graph/who summaries over A2A; `read` also admits output reads
    (the watch frame) of any session on this node), and `"message"` (deposit a
    mail envelope via `aoide/mailDeposit` — data a reader pulls, never
    an instruction; it grants nothing on the spawn or conduct arms).
    Commands:
-   `aoide node allow <name> <cap> on|off` — idempotent, reports
+   `aoide node allow <name> <cap> on|off [--mesh <m>]` — idempotent, reports
    exactly what changed. Unknown capability strings are refused.
-   `autogate` stays its own field (landed semantics, not churned).
    Default for a PAIRED (verified) node: `config.toml`'s `[pairing]
    defaultGrant`, itself `["read"]` — `spawn` is an explicit widening,
    either standing (`aoide config set pairing.defaultGrant read,spawn`) or
@@ -71,11 +71,11 @@ there is no "this node may spawn, that one may not."
    are a named, unbuilt remainder — CONTRACTS.md's identity-lane
    accounting.
 6. **The spawn gate flips hard.** Spawning requires an identified
-   (paired) node whose `allows` contains `"spawn"`. The door-wide
+   (paired) node whose grant in the mesh its request signed contains
+   `"spawn"`. The door-wide
    bearer alone no longer reaches the spawn arm; the refusal is a
-   taught error naming the pairing ceremony. (Inject keeps its
-   existing gate — the pending queue + autogate; one gate per
-   question.)
+   taught error naming the pairing ceremony. (Inject parks in
+   the pending queue for a human; one gate per question.)
 7. **Audit identity everywhere the call touches.** The resolved node
    name is stamped on audit lines, pending-queue entries, and the
    spawned session's record (`origin: "node:<name>"`, additive),
@@ -85,7 +85,7 @@ there is no "this node may spawn, that one may not."
    on any future bridge/relay design: every hop carries the true
    origin end-to-end — traced, auditable, never laundered through
    the bridge's own credential.
-9. **Everything gates off the one identity.** `allows`, the spawn
+9. **Everything gates off the one identity.** `grants`, the spawn
    arm, audit provenance now; secrets remote-exposure (the `remote`
    flag) and V5 broker-to-broker replication ride the same pairing
    later — pairing is V5's substrate, not a parallel mechanism.
@@ -142,7 +142,8 @@ B's operator TYPES the code as read off A's screen (out-of-band — a
   counts a persisted try; the 3rd cumulative mismatch AUTO-DENIES (same
   clean removal as reject, nothing committed).
   On a match, B's own node record commits HERE — pubkey, verified=true,
-  allows=the resolved grant (defaultGrant, or this commit's --allow),
+  grants[<the ceremony's mesh>]=the resolved grant (defaultGrant, or
+  this commit's --allow),
   A's name bound, and (task #131) url/via set
   from A's parked selfVia claim if one rode the request — see below;
   B's own parked entry is marked approved and left PARKED — no
@@ -372,41 +373,36 @@ nodes:
   direction: a `< 0.0.26` binary writes the whole registry from a model with
   no `grants`/`narrowed`, so its first write erases per-mesh grants
   (CONTRACTS.md §4's rollback-scope paragraph, §7's `grants` record).
+- **Answers are signed too.** A door signs its JSON-RPC answer to a request
+  whose signature it verified, with its own identity key, over the request's
+  signature and nonce, the HTTP status and the body digest (CONTRACTS.md §6
+  "Signed answers"). The signature rides the response header
+  `X-Aoide-Answer-Signature`. Unverified, replayed and refused requests get no
+  door signature, so the key never signs bytes a sender chose. The signed
+  answer is what a client checks against the key on file for the node it
+  dialled.
 - Unpaired callers keep today's door-wide bearer path (read arms
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where
   secrets are still compared).
-- **A verified signature outranks loopback for the Inject delivery
-  gate.** A loopback-terminating transport hop — an ssh `-L` forward
-  is the case that motivates this — delivers a remote node's request
-  from ITS OWN end's loopback, so the connection's observed origin
-  classifies as loopback exactly like a genuinely local caller. A
-  request whose signature this door already verified is, by
-  construction, never a local caller, so it is treated as remote for
-  the auto-deliver-vs-pending question regardless of which address it
-  arrived from: `state/nodes.json`'s per-node `autogate` flag AND the
-  caller's grant in the mesh its own request SIGNED for (P-CHARTER: the flag
-  opens the rail, and `message` on the charter's line — or on the paired
-  record, where no charter is shaped — is what the flag then delivers on;
-  CONTRACTS.md §6's rail table), or the remote-parent rule below, decides
-  whether a signed node's send still auto-delivers — never the connection
-  origin. An unsigned request's loopback trust is unaffected —
-  this narrowing only ever removes a free pass a signature was never
-  entitled to in the first place.
-- **A remote parent steers the child it spawned, and the tunnel is its
-  production shape.** The Inject arm matches the `metadata["aoide/from"]`
-  claim against the target record's `remoteParent`: the caller must have
-  signed with a paired node's key this door verified, that key must equal the
-  record's stored `remoteParent.key`, and the claim must equal its stored
-  `remoteParent.sessionId`. A match delivers WITHOUT pending
-  (`autogate-remote-parent`) on both rails the signature-rung `autogate` flag
-  rides — the exemption from `origin_for_inject`'s downgrade, which is what
-  carries the loopback/`ssh -L` shape above, and the fold into
-  `autogate_match`, which is what carries a directly-addressed
-  `ConnOrigin::Remote` caller. Both are load-bearing; the node's own
-  `autogate` flag need not be set, the door-wide bearer is still checked
-  first, and there is no off switch (unpairing the node or the child ending
-  are the levers — `node allow <n> spawn off` stops only new children).
+- **Loopback earns nothing by its address, and no signature delivers.** A
+  loopback-terminating transport hop (an ssh `-L` forward is the case that
+  motivates this) forwards a remote node's request in from ITS OWN end's
+  loopback, so the observed origin classifies as loopback exactly like a
+  genuinely local caller. The door therefore parks every Inject in
+  `state/stage/pending.json` whatever the origin, and whether or not the
+  request is signed (CONTRACTS.md §6). A verified signature holding `message`
+  in its mesh admits a request to the queue and names its sender; it never
+  delivers.
+- **A remote parent's steer waits for a human, and the tunnel is its
+  production shape.** An Inject from a remote parent parks in `pending.json`
+  for the approver, tunneled or not, and no `aoide/from` claim changes that.
+  The claim is honoured only on the signature rung: a spawn stamps the
+  verified caller's session as the child's `remoteParent`, with `node` and
+  `key` from the verified signature and `sessionId` from the claim. The
+  ping-back history gate then reads that key. A signed node holding `read`
+  may read the child's history only when its key equals the stored
+  `remoteParent.key`.
 - **Identity IS the key; the name is a label (#63 P-ID5).**
   `X-Aoide-Node` carries the caller's own self name
   (`aoide_storage::display::local_host_name()`), the same value the
@@ -446,8 +442,8 @@ the full count-site checklist (git show 9c2d05c).
   legacy fields untouched. Tests: full ceremony against a test door,
   SAS stability vectors, expiry, re-pair confirmation, unapproved =
   no record change.
-- **P-P3 — allows + the spawn gate flip + audit identity (M).**
-  `allows` set + `node allow` commands (golden +1), spawn arm requires
+- **P-P3 — grants + the spawn gate flip + audit identity (M).**
+  capability set + `node allow` commands (golden +1), spawn arm requires
   paired+spawn (taught error otherwise), audit/pending/session-record
   stamping (`origin: node:<name>`, projected into the ledger).
   Tests: gate table (paired+allowed / paired+denied / unpaired /
@@ -766,24 +762,13 @@ forward is a pipe, not a party to the protocol.
   control socket. Nothing about a tunnel is ever allowed to become a
   resident daemon. A bare shell with no conducted session gets a
   process-scoped tunnel instead — per-command rather than persistent.
-- **The door's own loopback trust narrows so a tunneled request cannot
-  silently auto-deliver.** Every tunneled connection reaches the far door's
-  socket as loopback — that is what a forward IS. The door treats an
-  UNSIGNED loopback connection as implicitly trusted for Inject delivery (a
-  sound stance behind a bind that only a genuinely local caller could ever
-  reach); a tunnel is a way to reach that same socket from somewhere else,
-  so a request carrying a verified per-request signature never rides that
-  trust — it is a remote node by construction, and `a2a.rs::origin_for_
-  inject` strips loopback's free pass from it before the delivery decision
-  runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
-  auto-delivery for a node the operator already marked that way — the flag
-  AND the caller's grant in the mesh its request SIGNED for (P-CHARTER: the
-  flag opens the rail, `message` is what it delivers on) — exactly
-  the like-for-like an operator's existing grant expects, and a matched
-  remote-parent claim does the same for the node that spawned this very
-  session — the tunneled parent is the shape that rule exists to serve.
-  `via`/`--via` are
-  safe to use against a real node.
+- **The door grants a tunneled request no delivery standing.** Every
+  tunneled connection reaches the far door's socket as loopback, because that
+  is what a forward is, so the observed address says nothing about the
+  sender. The door parks every Inject in `pending.json`, tunneled or not and
+  signed or not; no signature or remote-parent claim changes that
+  (CONTRACTS.md §6). `via`/`--via` are safe to use against a real node for
+  that reason: what arrives is queued for a human, never typed.
 
 ## Mesh declaration
 
@@ -911,7 +896,7 @@ owners.
 
 `mesh.<name>.grant` IS live: it is the capability set a converge stamps at a
 first verification, riding the ceremony exactly as a typed `--allow` does,
-so an already-verified node's `allows` survives a re-pair untouched and
+so an already-verified node's `grants` survive a re-pair untouched and
 `node allow` remains the only way to change a live grant.
 
 Each node's result is one of four words — `completed`, `parked` (resumable
@@ -929,11 +914,11 @@ already calls a legitimate simultaneous mutual pairing and leaves alone.
 - No hand-rolled cryptography — primitives come from the vetted dep,
   full stop (User ruling).
 - No daemon-door or A2A allowlist tables — the per-command door policy
-  and the `allows` set are the only gates (AOIDED L2 discipline).
+  and the per-mesh `grants` are the only gates (AOIDED L2 discipline).
 - No transitive relay of trust, codes, or pairing state, no mesh-level
   object — the mesh stays the closure of pairwise records. Mail
   TRANSIT through declared hubs is `MAIL.md`'s one named carve-out: a
   hub relays letters, never trust.
-- No per-capability serde bool scatter — `allows` is one field.
+- No per-capability serde bool scatter — `grants` is one field.
 - The identity private key never crosses any socket, any Outcome,
   any log — including the broker's.

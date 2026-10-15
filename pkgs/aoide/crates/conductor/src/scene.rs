@@ -24,7 +24,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// A card's rectangle in world cells. Signed so clipping arithmetic stays
 /// honest once the camera puts a card left of or above the viewport.
@@ -93,11 +93,16 @@ impl Camera {
     /// World rect → scaled rect, absolute (the pan is not applied yet).
     /// Both edges scale before the width is taken, so adjacent cards stay
     /// adjacent and no card loses or gains a cell to rounding.
+    ///
+    /// Widened to i64 for the product, and clamped back to i32 at the edge: a
+    /// far root can sit tens of millions of cells out, and `x * 150` alone
+    /// overflows an i32 past about 14 million.
     pub fn scale_rect(&self, r: WorldRect) -> WorldRect {
-        let s = self.scale();
-        let x = r.x * s / 100;
-        let y = r.y * s / 100;
-        WorldRect::new(x, y, r.right() * s / 100 - x, r.bottom() * s / 100 - y)
+        let s = i64::from(self.scale());
+        let edge = |v: i64| i32::try_from(v * s / 100).unwrap_or(if v < 0 { i32::MIN } else { i32::MAX });
+        let (x, y) = (edge(i64::from(r.x)), edge(i64::from(r.y)));
+        let (right, bottom) = (edge(i64::from(r.x) + i64::from(r.w)), edge(i64::from(r.y) + i64::from(r.h)));
+        WorldRect::new(x, y, right.saturating_sub(x), bottom.saturating_sub(y))
     }
 
     /// World rect → viewport-relative rect, given the resolved origin.
@@ -161,6 +166,49 @@ pub struct Positions {
     generation: u64,
 }
 
+/// One rank of the canvas: the `x` of every card fixed on it so far, and the
+/// lanes already known to be blocked, each mapped to a later `x` it leads to.
+#[derive(Default)]
+struct Rank {
+    fixed: BTreeSet<i32>,
+    onward: HashMap<i32, i32>,
+}
+
+impl Rank {
+    /// The first `x` at or after `from`, in whole `lane` steps, where a card
+    /// `width` wide overlaps no fixed card. A fixed card only ever joins the
+    /// rank, so a lane found blocked stays blocked and its `onward` entry
+    /// stays true.
+    fn clear_of_fixed(&mut self, from: i32, width: i32, lane: i32) -> i32 {
+        let mut x = from;
+        let mut walked = Vec::new();
+        loop {
+            if let Some(&next) = self.onward.get(&x) {
+                walked.push(x);
+                x = next;
+            } else if self.overlaps(x, width) {
+                walked.push(x);
+                x = x.saturating_add(lane);
+            } else {
+                break;
+            }
+        }
+        for lane_x in walked {
+            self.onward.insert(lane_x, x);
+        }
+        x
+    }
+
+    fn overlaps(&self, x: i32, width: i32) -> bool {
+        width > 0
+            && self
+                .fixed
+                .range(x.saturating_sub(width - 1)..=x.saturating_add(width - 1))
+                .next()
+                .is_some()
+    }
+}
+
 impl Positions {
     /// Resolve a freshly laid-out forest against the retained store, in
     /// `fresh` order. Pure: the caller decides whether the result becomes the
@@ -171,29 +219,31 @@ impl Positions {
     /// until it overlaps nothing already fixed — so an arrival never lands on
     /// top of a card that was already on the canvas. Siblings share a rank
     /// (the same `y`) and spread across it, so the nudge walks `x`.
+    ///
+    /// The cost is linear in the cards up to a logarithm, however many share
+    /// a rank: each rank keeps its fixed `x`s in order, so an overlap probe is
+    /// one range lookup, and a nudge remembers where the lanes it walked
+    /// ended so the next card starting in the same run jumps over it.
     pub fn place(&self, fresh: &[(String, Placed)], card: (i32, i32), lane: i32) -> Vec<Placed> {
         let retained: Vec<Option<Placed>> = fresh
             .iter()
             .map(|(id, f)| self.cells.get(id).copied().filter(|p| p.depth == f.depth))
             .collect();
-        let mut taken: Vec<Placed> = retained.iter().flatten().copied().collect();
+        let mut ranks: HashMap<i32, Rank> = HashMap::new();
+        for kept in retained.iter().flatten() {
+            ranks.entry(kept.y).or_default().fixed.insert(kept.x);
+        }
         let mut out = Vec::with_capacity(fresh.len());
         for ((_, f), kept) in fresh.iter().zip(&retained) {
             let placed = kept.unwrap_or_else(|| {
-                let mut x = f.x;
-                while taken
-                    .iter()
-                    .any(|t| t.y == f.y && x < t.x + card.0 && t.x < x + card.0)
-                {
-                    x += lane.max(1);
-                }
-                let p = Placed {
+                let rank = ranks.entry(f.y).or_default();
+                let x = rank.clear_of_fixed(f.x, card.0, lane.max(1));
+                rank.fixed.insert(x);
+                Placed {
                     x,
                     y: f.y,
                     depth: f.depth,
-                };
-                taken.push(p);
-                p
+                }
             });
             out.push(placed);
         }
@@ -294,6 +344,7 @@ pub struct SceneState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     const CARD: (i32, i32) = (32, 7);
     const LANE: i32 = 11;
@@ -413,6 +464,120 @@ mod tests {
             (84, 1),
             "the re-parented node moves to its new column"
         );
+    }
+
+    /// The rule `place` states, spelled as the plain loop it was: a new card
+    /// steps one lane at a time past every card already fixed on its rank.
+    fn stepped_place(
+        store: &Positions,
+        fresh: &[(String, Placed)],
+        card: (i32, i32),
+        lane: i32,
+    ) -> Vec<Placed> {
+        let kept: Vec<Option<Placed>> = fresh
+            .iter()
+            .map(|(id, f)| store.get(id).filter(|p| p.depth == f.depth))
+            .collect();
+        let mut taken: Vec<Placed> = kept.iter().flatten().copied().collect();
+        let mut out = Vec::new();
+        for ((_, f), kept) in fresh.iter().zip(&kept) {
+            let placed = kept.unwrap_or_else(|| {
+                let mut x = f.x;
+                while taken
+                    .iter()
+                    .any(|t| t.y == f.y && x < t.x + card.0 && t.x < x + card.0)
+                {
+                    x += lane.max(1);
+                }
+                let p = Placed { x, y: f.y, depth: f.depth };
+                taken.push(p);
+                p
+            });
+            out.push(placed);
+        }
+        out
+    }
+
+    #[test]
+    fn the_placement_is_what_stepping_one_lane_at_a_time_gives() {
+        // Crowded ranks on purpose: few distinct rows, `x` drawn from a span
+        // narrow enough that most arrivals collide with a retained card or
+        // with an earlier arrival, and a lane that does not divide the card.
+        let seed = std::cell::Cell::new(0x2545_f491_4f6c_dd1du64);
+        let next = |below: u64| {
+            let mut s = seed.get();
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            seed.set(s);
+            (s % below) as i32
+        };
+        for round in 0..200 {
+            let mut store = Positions::default();
+            let ids: Vec<String> = (0..60).map(|i| format!("n{i}")).collect();
+            let retained: Vec<(String, Placed)> = ids
+                .iter()
+                .filter(|_| next(3) == 0)
+                .map(|id| {
+                    let depth = next(3) as usize;
+                    (id.clone(), Placed { x: next(200), y: depth as i32 * 9, depth })
+                })
+                .collect();
+            let placed: Vec<Placed> = retained.iter().map(|(_, p)| *p).collect();
+            store.commit(retained.iter().map(|(id, _)| id.clone()), &placed);
+            let fresh: Vec<(String, Placed)> = ids
+                .iter()
+                .map(|id| {
+                    let depth = next(3) as usize;
+                    (id.clone(), Placed { x: next(120), y: depth as i32 * 9, depth })
+                })
+                .collect();
+            let lane = 1 + next(15);
+            assert_eq!(
+                store.place(&fresh, CARD, lane),
+                stepped_place(&store, &fresh, CARD, lane),
+                "round {round}, lane {lane}"
+            );
+        }
+    }
+
+    #[test]
+    fn scale_rect_past_the_i32_range_clamps_instead_of_wrapping() {
+        // 1e9 cells at 150% is 1.5e9: fits. 2e9 would wrap in i32 and must not.
+        let cam = Camera { pan: None, zoom: 2 };
+        let near = cam.scale_rect(WorldRect::new(1_000_000_000, 0, 24, 6));
+        assert_eq!((near.x, near.w), (1_500_000_000, 36));
+        let far = cam.scale_rect(WorldRect::new(2_000_000_000, 0, 24, 6));
+        assert_eq!(far.x, i32::MAX, "clamped, not wrapped negative");
+        assert!(far.w >= 0);
+    }
+
+    #[test]
+    fn a_rank_of_thousands_of_cards_is_placed_in_linear_time() {
+        // Every card wants the same slot on the same rank, so each one walks
+        // past all the cards before it: stepping lane by lane costs the square
+        // of the rank, and a quarter-million cards would never finish.
+        fn crowd(n: usize) -> impl FnOnce() -> Vec<Placed> + Send + 'static {
+            move || {
+                let fresh: Vec<(String, Placed)> = (0..n)
+                    .map(|i| (format!("n{i}"), Placed { x: 16, y: 40, depth: 1 }))
+                    .collect();
+                Positions::default().place(&fresh, CARD, LANE)
+            }
+        }
+        // An absolute ceiling, not a linearity proof: a ratio against a
+        // baseline that runs in milliseconds is just the ceiling again.
+        let limit = Duration::from_secs(10);
+        let (big, placed) = aoide_test_support::finishes_within(limit, crowd(16_000))
+            .unwrap_or_else(|| panic!("16k cards took over {limit:?}: the nudge is too slow"));
+        assert_eq!(placed.len(), 16_000);
+        let mut xs: Vec<i32> = placed.iter().map(|p| p.x).collect();
+        xs.sort_unstable();
+        assert!(
+            xs.windows(2).all(|w| w[1] - w[0] >= CARD.0),
+            "no two cards on a rank overlap"
+        );
+        println!("place: 16k cards {big:?}");
     }
 
     #[test]

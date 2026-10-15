@@ -18,7 +18,7 @@ never) is what the far door verifies, resolving the caller by the key that
 signed, not by the `X-Aoide-Node` name it carries ([[Node-Federation]]'s
 Signature rung) — the exact same request it always verified. Spec:
 `docs/architecture/PAIRING.md`'s Transport section; wire shape in
-`CONTRACTS.md` §6 (signature-outranks-loopback) and §7 (`Node.via`).
+`CONTRACTS.md` §6 (the door's wire rules) and §7 (`Node.via`).
 
 ## Why it exists
 
@@ -93,25 +93,16 @@ rewritten one.
 
 ## Security posture — a tunneled request is remote
 
-Every request that arrives through the forward reaches the far door's
-socket as `ConnOrigin::Loopback` — that is what a forward IS, and the door
-extends Loopback's unconditional Inject-delivery free pass to an
-*unsigned* connection, tunnel or not. The narrower rule: a request carrying a verified
-per-request signature (`aoide-server::a2a::verify_signed_request`) is, by
-construction, never a local caller, so `origin_for_inject` strips Loopback's
-free pass from it before the delivery decision runs, regardless of which
-address it arrived from. A signed, non-autogate node's send lands in the
-far end's pending queue with node attribution, same as any other signed
-node reaching the door any other way — with one exception, and it is the
-pairing's own shape: a node that is the PARENT of the session it writes into
-(a child's spawner is `signed non-autogate`, exactly this shape) delivers its
-steer without pending on a matched remote-parent claim (CONTRACTS.md §6),
-riding the exemption `origin_for_inject` makes for that match — without it the
-loopback-classified tunnel would coerce to `Unknown`, which delivers nothing.
-For every OTHER signed node, `state/nodes.json`'s per-node `autogate` flag —
-not connection origin — is what restores auto-delivery. The spawn arm needs no
-separate carve-out here: it already accepts only the
-Signature rung, tunneled or not, so a spawn refusal reads exactly as taught
+Every request that arrives through the forward reaches the far door's socket
+as `ConnOrigin::Loopback` — that is what a forward IS. Loopback earns nothing
+at the A2A door, so a tunneled request meets the same admission rule as any
+other ([[A2A-Door]]). What the tunnel cannot do is lend an identity. A request
+carrying a verified per-request signature resolves its node by the key that
+signed (the Signature rung of [[Node-Federation]]), whatever address it arrived
+from, and its send parks with `node:<name>` attribution. The `aoide/from`
+remote-parent claim is honoured only on that same rung and decides nothing
+about parking. The spawn arm needs no separate carve-out here: it accepts only
+the Signature rung, tunneled or not, so a spawn refusal reads exactly as taught
 whichever way the request traveled. `via`/`--via` are safe to use against a
 real node for this reason — the tunnel changes reachability, never trust.
 
@@ -166,14 +157,15 @@ allowed to become a resident daemon:
   approve.
 - One `ssh` child is opened and reused per session per node — a second
   action under the same session never spawns a second forward.
-- A signed send from a non-autogate node lands in the far end's pending
-  queue, carrying node attribution — unless that node is the session's own
-  remote parent, whose steer delivers without pending
-  (`autogate-remote-parent`, CONTRACTS.md §6). A target conducting a shell
-  is the exception to both: its line is held pending whoever asks, because
-  a submitted line in a shell RUNS (N1).
-- Spawn is refused with `-32006` the moment `allows` drops `spawn`, with a
-  taught error — the same instant either side of a live tunnel.
+- A signed send from a paired node parks in the far end's pending queue,
+  carrying node attribution. A signed send from the node that spawned a
+  session parks the same way: the remote-parent claim decides nothing about
+  parking. Nothing at the far door types into a session, shell targets
+  included: a submitted line in a shell RUNS (N1), so every such send waits
+  for an approver.
+- Spawn is refused with `-32006` the moment the caller's `spawn` grant is
+  withdrawn in the mesh its request names, with a taught error — the same
+  instant either side of a live tunnel.
 - A settled, roster-less tunnel record is collected by the resident
   reaper.
 
@@ -193,16 +185,15 @@ allowed to become a resident daemon:
 ## Related
 
 - [[A2A-Door]] — the loopback-bound door this transport reaches, and the
-  signature-outranks-loopback amendment this lane exercises against a real
-  proxy hop.
+  signed-request admission rule, exercised against a real proxy hop.
 - [[Node-Federation]] — the node registry `Node.via` lives on, and the
   federation door the tunnel carries requests to.
 - [[Pairing-Ceremony]] — the ceremony that records the `via` marker on the
   resulting node at approve (`aoide pair <name>`'s hostname arm derives it,
   the requester's `selfVia` claim sets it on the approver's commit; `--via`
   sets it explicitly).
-- [[Conductor-Channel]] — `send`'s remote delivery, gated the same way
-  whether or not the call happened to travel through a tunnel.
+- [[Conductor-Channel]] — `send`'s remote path, parked at the far door the
+  same way whether or not the call happened to travel through a tunnel.
 - [[Session-Graph]] — the liveness reaping a tunnel's own backstop sweep
   rides.
 - `docs/architecture/PAIRING.md` — the design authority for both the

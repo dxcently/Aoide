@@ -5,12 +5,40 @@ listeners, sessions, snapshots, the audit sink. Untrusted input stops here —
 the inbound half of the two-door contract (the outbound half is
 `aoide-client`).
 
+The A2A door (`a2a.rs`) never approves a gated send, and it never delivers
+one. Every inbound inject the door admits is held in `pending.json` for a
+human, whoever the caller is. Admission is decided by identity, never by
+address: with a door-wide token configured, a caller that presents neither that
+token nor a node identity (a verified node's own bearer, or a verified
+signature holding `message` in its mesh) gets the uniform answer and nothing
+queues. The queue holds a bounded number of entries per source: past it, a
+proven node is refused `-32000` and any other caller gets the uniform answer. A
+prompt over the per-entry byte cap is refused `-32602` for every caller, since
+its size is the caller's own text. A spawn's opening turn is held the same way, verdict `held-pending`, or
+`queue-full` at the cap. The gate that decides this is `aoide_conduct::graph::
+Door::can_approve`; CONTRACTS.md's pending-queue section has the table.
+
+The MCP door (`mcp.rs`) never approves either, but it is attested like the CLI.
+`serve_stdio` dispatches in its own process, so the sealed session found by
+walking that process's ancestry is the caller's identity: a send from a server
+launched under a sealed session earns that session's parent and sibling rules
+and delivers, and every other MCP send parks. A server with no sealed ancestor
+(the tier-3 network façade in `modules/nucleus/aoided.nix`, a bare terminal)
+parks them all. Attestation sees who launched the server, not who writes to its
+stdin, so a network bridge someone runs inside a conducted terminal lends that
+terminal's rights to its remote callers.
+
 ## Named seams (what it exposes)
 
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`
-  execs: bind the control socket
+  execs: lock `state/` owner-only first (`tighten_state_tree`, refusing to
+  start when it cannot; CONTRACTS.md §4), then take the socket lock
+  `<socket>.lock` (`daemon::acquire_daemon_lock`) and the state lock
+  `aoided.lock` in the state dir (`daemon::acquire_state_lock`), both
+  non-blocking `flock`s held for the process's life, so a held lock
+  refuses the start before anything is bound. Then bind the control socket
   (`$AOIDE_DAEMON_SOCKET`, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`,
   `daemon::socket_path`), spawn a thread-per-connection accept loop
   (fallible `Builder::spawn`, accept-error backoff — the secrets broker's
@@ -129,16 +157,18 @@ the inbound half of the two-door contract (the outbound half is
   `daemon::mint_seal(session_id, pid, origin_class)` builds a
   `SealedIdentity` (reading `pid_starttime` via `aoide_conduct::
   graph::pid_starttime`, no second `/proc` parse) and signs it under that
-  key (`aoide_storage::sealed_id::mint_seal`). `handle_conn`'s `dispatch`
-  op calls `daemon::seal_freshly_registered_session` right after a
-  successful `session start` dispatch: if the just-written record already
-  carries a `pid` (today, only `session_conduct`'s own direct
-  registration does — the bare wire path does not), it mints a seal and
-  stamps it via `aoide_conduct::graph::stamp_seal`. **This is honest
-  scaffolding, not a security boundary**: the pid sealed over is
+  key (`aoide_storage::sealed_id::mint_seal`), and returns the starttime it
+  signed over as well. `handle_conn`'s `dispatch` op calls
+  `daemon::seal_freshly_registered_session` right after a successful
+  `session start` dispatch: if the just-written record already carries a
+  `pid` (today, only `session_conduct`'s own direct registration does — the
+  bare wire path does not), it mints a seal and stamps it, with that
+  starttime as `sealedPidStarttime`, via `aoide_conduct::graph::stamp_seal`.
+  The start door (`aoide_conduct::graph::session_start`) decides a start on a
+  protected wrap, and it never reads the signature. **This
+  is honest scaffolding, not a security boundary**: the pid sealed over is
   whatever the record already carries, not yet a peercred-verified
-  CONNECTING pid, and nothing anywhere reads `seal` back to gate a
-  decision. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
+  CONNECTING pid. See CONTRACTS.md §4's `seal` paragraph and `aoide-storage`'s
   own README for the full mechanism.
 - **The dispatch socket's own accept gets a cross-uid floor, and two
   attribution leaks close (LANE IDENTITY P-ID3).** `daemon::accept_loop`
@@ -172,7 +202,8 @@ the inbound half of the two-door contract (the outbound half is
   verbatim or narrated otherwise. `poll_once` is the bounded, non-blocking
   core a test drives directly; `tail` is the thin `SIGINT`-handling wrapper
   around it, mirroring `aoide_secrets::watch`'s own tail-loop shape.
-- `mcp` — `serve_stdio`, the MCP stdio server. `initialize` answers
+- `mcp` — `serve_stdio`, the MCP stdio server, which dispatches in-process:
+  the process attestation walks is this one. `initialize` answers
   unconditionally with `capabilities.experimental["claude/channel"]` and
   `instructions` (P-M5c-2, `docs/architecture/CLAUDE-CHANNEL-PROOF.md`,
   CONTRACTS.md §3's "MCP door" subsection). When `AOIDE_SESSION_ID` is set
@@ -187,431 +218,356 @@ the inbound half of the two-door contract (the outbound half is
   Stdout is one `Arc<Mutex<_>>` writer shared between the request loop and
   the listener thread, so a pushed notification and a `tools/call` reply
   can never interleave on the wire.
-- `a2a` — the serve half of A2A (JSON-RPC/HTTP/SSE); the client half stays
-  in `aoide-client`. Two `message/send` arms, two different relationships to
-  the mailbase (messaging plan P-M1, `state/mail/base.jsonl`): `do_inject`
-  (Inject, an EXISTING session) delivers through
-  `aoide_conduct::graph::session_send` — the same door `send` uses —
-  which is where a delivered message gets filed as a receipt
-  (`mail::file_receipt`); `do_inject` itself files no entry of its own,
-  since its Invocation can only ever reach `session_send`'s LOCAL branch
-  (see `do_inject`'s doc comment). `do_spawn` (Spawn, a BRAND-NEW session)
-  types the opening turn via `spawn_inject_prompt`, which writes it with the
-  tree's one pty-injection shape (`write_delivery`: the text, a flush, the
-  submit-keystroke gap, then the target harness's own `submit_key` resolved
-  through `profile_for_agent` as a SEPARATE write — never a keystroke spelled
-  at that call site) and files ITS OWN receipt right after a write that
-  actually went out — a spawned session has no `SessionRecord`
-  yet at that moment, so it cannot reach `session_send` at all (see
-  `spawn_inject_prompt`'s doc comment for the race that rules it out). That
-  write waits first: readiness is a per-harness fact (`Readiness`), and the
-  wait runs on a WORKER, one per spawn, never on the connection handler — 20s
-  of budget plus the socket retry against `MAX_CONN` would hand every other
-  RPC a `503 server busy`. The worker's verdict lands on the record
-  (`stamp_opening_turn`: `pending` is stamped by the ack path and again as the
-  worker's own first write — the same thread that stamps the verdict
-  immediately after, so nothing can clobber a verdict back — then `delivered`
-  / `delivered-unverified` / `not-ready` / `busy` /
-  `no-worker` / `skipped-shell` / `skipped-empty` / `no-socket` /
-  `write-failed`, or `unknown` when a boot pass reconciles a verdict lost with
-  the process that owed it — the complete list and its meaning live on the
-  field's own doc, `storage/src/records.rs`), and `tasks/get` reports it as the
+- `a2a` — the serve half of A2A (JSON-RPC/HTTP/SSE); the client half stays in
+  `aoide-client`. Both `message/send` arms park what they are given and deliver
+  nothing, so neither files into the mailbase (messaging plan P-M1,
+  `state/mail/base.jsonl`). `do_inject` (Inject, an EXISTING session) reuses
+  `aoide_conduct::graph::session_send` with `Door::A2a`, which parks the send in
+  `pending.json` under the source the door derived (`inject_source`:
+  `node:<name>` for a caller that proved the node, `addr:<address>` for every
+  other). Nothing reaches the session's socket,
+  so no receipt is filed. `do_spawn` (Spawn, a BRAND-NEW session) queues its
+  opening turn the same way: `opening_turn_worker` stamps `pending`, then
+  `hold_pending` queues the prompt attributed `node:<name>` and the verdict is
+  `held-pending` (`queue-full` when that node already holds the queue's
+  per-source cap); an EMPTY opening turn records `skipped-empty` and queues
+  nothing. The verdict lands on the record (`stamp_opening_turn`: one verdict
+  from the list in `CONTRACTS.md`, or `unknown` when a boot pass reconciles a
+  verdict lost with the process that owed it), and `tasks/get` reports it as the
   task's `status.message` — an A2A `Message` object, never a bare string — so a
   peer whose opening turn never ran is told so instead of reading a bare
   `submitted`. `aoide node spawn` prints that same line, so the operator does
-  not have to reach for `tasks/get` to see it. The pool is bounded
-  (`OPENING_TURN_WORKERS_MAX` waits in flight, the handler's own slot being
-  released too early to be a bound): past it the opening turn is stamped
-  `busy`, never silently dropped.
-  These were the only two mailbase-filing call sites until P-M2 added a
-  third, unrelated to either: `mail_deposit`'s own call into
-  `aoide_storage::mail::deposit` (below), which files a letter or receipt
-  arriving over the wire from a peer node — never a locally-typed or
-  locally-delivered message, so it shares no code path with `do_inject`/
-  `do_spawn` above.
-  **`do_spawn`'s bounded liveness check (task #103)** gives the just-
-  launched wrapper process (`aoide conduct`) a short window (400ms) to
-  prove it's still alive via `Child::try_wait()` before acking `submitted`
-  — a wrapper whose own exec of the configured agent fails (a missing
-  `spawnAgent` binary on this unit's PATH) exits inside that window and
-  gets a taught JSON-RPC error instead, closing the gap where a caller was
-  handed a session id for a spawn that had already failed.
-  **The spawned child's environment and cwd are sanitized, never trusted
+  not have to reach for `tasks/get` to see it. The worker pool is bounded
+  (`OPENING_TURN_WORKERS_MAX`, 8 waits in flight, the handler's own slot being
+  released too early to be a bound): past it the opening turn is stamped `busy`,
+  never silently dropped. The one mailbase-filing path that touches this crate
+  is `mail_deposit`'s own call into `aoide_storage::mail::deposit` (below),
+  which files a letter or receipt arriving over the wire from a peer node, so it
+  shares no code path with the two A2A send arms. **`do_spawn`'s bounded
+  liveness check (task #103)** gives the just-launched wrapper process (`aoide
+  conduct`) a short window (400ms) to prove it's still alive via
+  `Child::try_wait()` before acking `submitted` — a wrapper whose own exec of
+  the configured agent fails (a missing `spawnAgent` binary on this unit's PATH)
+  exits inside that window and gets a taught JSON-RPC error instead, closing the
+  gap where a caller was handed a session id for a spawn that had already
+  failed. **The spawned child's environment and cwd are sanitized, never trusted
   from the daemon's own ambient env.** `spawn_child_command` explicitly
   `.env_remove()`s both `AOIDE_SESSION_ORIGIN` (P-ID0/G16/G5 — an
-  unauthenticated origin claim) and `AOIDE_SESSION_ID`: the `aoide-a2a`
-  unit's own environment can carry the OPERATOR's live terminal session id,
-  inherited from whatever shell the unit itself descends from, and without
-  this removal a freshly-spawned child would adopt it as its
-  `parentSessionId` via `window.rs`'s ambient-parent fallback — a spawned
-  agent parented under an unrelated human terminal. A real `aoide conduct`
-  launched from an agent's own shell is untouched by this: it inherits
-  whatever ITS OWN wrap exported, the ordinary local-inheritance path;
-  only this door's spawn clears the ambient value first. The child's
-  working directory follows the same distrust: `resolve_spawn_cwd` reads
-  `--spawn-cwd` then `AOIDE_A2A_SPAWN_CWD` (mirroring
-  `resolve_spawn_agent`'s own precedence, resolved once at `a2a serve`
-  launch), but `do_spawn` only ever calls `current_dir` on a value
-  `resolve_bounded_spawn_cwd` has matched byte-identically against a
-  REGISTERED project root (`Project::roots()`, loaded off
-  `aoide_storage::stage::projects_path()` the same way session state is
-  loaded off its own stage file) that still exists as a directory on disk.
-  Anything else — unregistered, relative, a root that no longer exists —
-  is ignored, the spawn inherits the daemon's own cwd exactly as before,
-  and the reject is audited exactly once (`Door::A2a`, `EventClass::Audit`,
-  `"a2a.message/send"`, `"skipped"`) so a misconfigured value degrades
-  quietly instead of ever placing a spawn in an arbitrary directory.
-  **Inbound bearer verification (task #84)** resolves the door's expected
-  `Authorization: Bearer` token through `aoide-secrets`'s broker rather
-  than only reading a static token file: `--bearer-secret <name>` (or
-  `AOIDE_A2A_BEARER_SECRET`) names a secret, resolved FRESH on every
-  connection via `aoide_secrets::client::resolve_bounded` as consumer
-  `a2a-door`, with a short (~2s) timeout so a misconfigured `requireTotp`
-  secret refuses immediately instead of parking the door open. Unset
-  stays the pre-existing token-file behavior exactly; set takes
-  precedence over `--token-file`. A broker-unreachable or denied resolve
-  fails CLOSED — the connection is refused the same way a wrong bearer
-  is, never held open and never treated as "unconfigured." A secret that
-  resolves EMPTY (or only whitespace) counts as a resolve failure, and so does
-  a configured `--token-file` that is missing or empty (`launch_token`): an
-  empty expected token would read as "no token configured" and restore the
-  loopback free pass. The resolved
-  value is never cached, logged, or placed in any audit line — see
-  `CONTRACTS.md`'s "Secrets wire"/§6 sections for the wire contract and
-  the resolve-consumer honesty note.
-  The bearer gates UNSIGNED callers only (it strips the loopback free pass
-  a tunnel or proxy confers): the read arms go through `read_admitted`, which
-  also admits a verified signed caller whose grant in the request's mesh
-  holds `read`, so a paired peer's `node pull` works on a bearer-gated door.
-  **The pairing ceremony's three methods (P-P2, Design A/task #119,
-  CONTRACTS.md §6's "Pairing wire" subsection)** — `pair_request`
-  (`aoide/pairRequest`), `pair_reveal` (`aoide/pairReveal`), and `pair_poll`
-  (`aoide/pairPoll` — REPLACES the old `aoide/pairApprove` reverse
-  callback) — join this same JSON-RPC dispatch table. `pair_request`/
-  `pair_reveal` stay deliberately UNGATED by `read_ok`/bearer verification:
-  the ceremony's whole point is establishing a credential where none
-  exists yet, so gating either on one would be circular. `pair_poll` is
-  self-authenticating instead (below) — neither door-gated nor fully open.
-  None grants anything beyond a `pubkey`/`verified` node record, and that
-  record commits only on BOTH ends' own separate human confirmation — the
-  grant set is stamped by `aoide_storage::node_store::upsert_paired_node`
-  itself, the moment a node first becomes verified (P-P3, PAIRING.md
-  decision 5) — INTO THE MESH THAT PAIRING NAMES, and read per request
-  through `aoide_server::a2a::grant_in_mesh(mesh, caller_key)` (P-CHARTER:
-  a grant is given in one mesh and holds only there) — from the grant the CLI half resolved (`[pairing] defaultGrant`
-  or `--allow`) — never by these methods directly, and never off the wire. `pair_request`
-  validates every field (64-hex pubkey, 64-hex commitment, a
-  `valid_node_name` name, a non-empty `://`-bearing url) before calling
-  `aoide_storage::pairing::park_inbound` — malformed input never reaches
-  the parked-state file, and a park past the configured cap is refused
-  with a distinct `-32000`. It also reads the OPTIONAL `selfVia` param
-  (task #131 — the requester's own self-asserted reach-back hop claim,
-  for the case where the requester's own door is loopback-only and this
-  request is arriving over ITS tunnel, so nothing about the connection
-  itself can answer "how do I dial the requester back") with no
-  validation of its own: absent, wrong type, or empty all collapse to
-  `None` alike, since the field is never load-bearing enough to refuse a
-  pairing request over — only to enrich the eventual `aoide pair`
-  commit when present. `pair_reveal` is the ceremony's
-  third message: it checks a POSTed nonce against the parked entry's
-  earlier commitment (`aoide_storage::pairing::reveal_inbound`) — a match
-  stores the nonce so a SAS becomes derivable; a mismatch DROPS the parked
-  entry outright and answers the distinct `-32002` (a bad reveal is exactly
-  the shape a MITM's forced retry would take, so it is not treated as a
-  recoverable hiccup — the reveal is unauthenticated, so a third party
-  who obtains a live pending id can destroy that one ceremony attempt
-  with a bogus reveal: an accepted denial-of-one-attempt, never an
-  impersonation, and the operators simply re-run the ceremony).
-  `pair_poll` is the REQUESTER's own follow-up, POSTed to the APPROVER's
-  door over the SAME forward dial `pair_request`/`pair_reveal` already
-  used — it carries a SELF-CONTAINED signature (`{id, timestampIso,
+  unauthenticated origin claim) and `AOIDE_SESSION_ID`: the `aoide-a2a` unit's
+  own environment can carry the OPERATOR's live terminal session id, inherited
+  from whatever shell the unit itself descends from, and without this removal a
+  freshly-spawned child would adopt it as its `parentSessionId` via
+  `window.rs`'s ambient-parent fallback — a spawned agent parented under an
+  unrelated human terminal. A real `aoide conduct` launched from an agent's own
+  shell is untouched by this: it inherits whatever ITS OWN wrap exported, the
+  ordinary local-inheritance path; only this door's spawn clears the ambient
+  value first. The child's working directory follows the same distrust:
+  `resolve_spawn_cwd` reads `--spawn-cwd` then `AOIDE_A2A_SPAWN_CWD` (mirroring
+  `resolve_spawn_agent`'s own precedence, resolved once at `a2a serve` launch),
+  but `do_spawn` only ever calls `current_dir` on a value
+  `resolve_bounded_spawn_cwd` has matched byte-identically against a REGISTERED
+  project root (`Project::roots()`, loaded off
+  `aoide_storage::stage::projects_path()` the same way session state is loaded
+  off its own stage file) that still exists as a directory on disk. Anything
+  else — unregistered, relative, a root that no longer exists — is ignored, the
+  spawn inherits the daemon's own cwd exactly as before, and the reject is
+  audited exactly once (`Door::A2a`, `EventClass::Audit`, `"a2a.message/send"`,
+  `"skipped"`) so a misconfigured value degrades quietly instead of ever placing
+  a spawn in an arbitrary directory. **Inbound bearer verification (task #84)**
+  resolves the door's expected `Authorization: Bearer` token through
+  `aoide-secrets`'s broker rather than only reading a static token file:
+  `--bearer-secret <name>` (or `AOIDE_A2A_BEARER_SECRET`) names a secret,
+  resolved FRESH on every connection via
+  `aoide_secrets::client::resolve_bounded` as consumer `a2a-door`, with a short
+  (~2s) timeout so a misconfigured `requireTotp` secret refuses immediately
+  instead of parking the door open. Unset stays the pre-existing token-file
+  behavior exactly; set takes precedence over `--token-file`. A
+  broker-unreachable or denied resolve fails CLOSED — the connection is refused
+  the same way a wrong bearer is, never held open and never treated as
+  "unconfigured." A secret that resolves EMPTY (or only whitespace) counts as a
+  resolve failure, and so does a configured `--token-file` that is missing or
+  empty (`launch_token`): an empty expected token would read as "no token
+  configured" and restore the loopback standing. The resolved value is never
+  cached, logged, or placed in any audit line — see `CONTRACTS.md`'s "Secrets
+  wire"/§6 sections for the wire contract and the resolve-consumer honesty note.
+  The bearer gates UNSIGNED callers only (it strips the loopback standing a
+  tunnel or proxy confers): the read arms go through `read_admitted`, which also
+  admits a verified signed caller whose grant in the request's mesh holds
+  `read`, so a paired peer's `node pull` works on a bearer-gated door. **The
+  pairing ceremony's three methods (P-P2, Design A/task #119, CONTRACTS.md §6's
+  "Pairing wire" subsection)** — `pair_request` (`aoide/pairRequest`),
+  `pair_reveal` (`aoide/pairReveal`), and `pair_poll` (`aoide/pairPoll` —
+  REPLACES the old `aoide/pairApprove` reverse callback) — join this same
+  JSON-RPC dispatch table. `pair_request`/`pair_reveal` stay deliberately
+  UNGATED by `read_ok`/bearer verification: the ceremony's whole point is
+  establishing a credential where none exists yet, so gating either on one would
+  be circular. `pair_poll` is self-authenticating instead (below) — neither
+  door-gated nor fully open. None grants anything beyond a `pubkey`/`verified`
+  node record, and that record commits only on BOTH ends' own separate human
+  confirmation — the grant set is stamped by
+  `aoide_storage::node_store::upsert_paired_node` itself, the moment a node
+  first becomes verified (P-P3, PAIRING.md decision 5) — INTO THE MESH THAT
+  PAIRING NAMES, and read per request through
+  `aoide_server::a2a::grant_in_mesh(mesh, caller_key)` (P-CHARTER: a grant is
+  given in one mesh and holds only there) — from the grant the CLI half resolved
+  (`[pairing] defaultGrant` or `--allow`) — never by these methods directly, and
+  never off the wire. `pair_request` validates every field (64-hex pubkey,
+  64-hex commitment, a `valid_node_name` name, a non-empty `://`-bearing url)
+  before calling `aoide_storage::pairing::park_inbound` — malformed input never
+  reaches the parked-state file, and a park past the configured cap is refused
+  with a distinct `-32000`. It also reads the OPTIONAL `selfVia` param (task
+  #131 — the requester's own self-asserted reach-back hop claim, for the case
+  where the requester's own door is loopback-only and this request is arriving
+  over ITS tunnel, so nothing about the connection itself can answer "how do I
+  dial the requester back") with no validation of its own: absent, wrong type,
+  or empty all collapse to `None` alike, since the field is never load-bearing
+  enough to refuse a pairing request over — only to enrich the eventual `aoide
+  pair` commit when present. `pair_reveal` is the ceremony's third message: it
+  checks a POSTed nonce against the parked entry's earlier commitment
+  (`aoide_storage::pairing::reveal_inbound`) — a match stores the nonce so a SAS
+  becomes derivable; a mismatch DROPS the parked entry outright and answers the
+  distinct `-32002` (a bad reveal is exactly the shape a MITM's forced retry
+  would take, so it is not treated as a recoverable hiccup — the reveal is
+  unauthenticated, so a third party who obtains a live pending id can destroy
+  that one ceremony attempt with a bogus reveal: an accepted
+  denial-of-one-attempt, never an impersonation, and the operators simply re-run
+  the ceremony). `pair_poll` is the REQUESTER's own follow-up, POSTed to the
+  APPROVER's door over the SAME forward dial `pair_request`/`pair_reveal`
+  already used — it carries a SELF-CONTAINED signature (`{id, timestampIso,
   nonceHex, signatureHex}`, verified inline against the parked entry's own
   `pubkey_hex` via `aoide_storage::wire_auth::verify_signature_hex`, never
-  through P-P4's `verify_signed_request` — no `Node` record exists yet for
-  that to key off) and NEVER writes a node record. It only READS
+  through P-P4's `verify_signed_request` — no `Node` record exists yet for that
+  to key off) and NEVER writes a node record. It only READS
   `InboundPairingRequest::approved` (set PURELY LOCALLY, from
   `aoide-client::commands::approve_inbound`, never from a wire handler) and
-  returns `{"status":"pending"}` uniformly for an unknown id, a
-  wrongly-signed poll, or a genuinely-not-yet-approved one — never a
-  distinct code that would let an outsider learn which case they hit
-  (the existing-oracle discipline, mirroring `message/send`'s own
-  `contextId` amendment above). Only a verified, approved poll gets
-  `{"status":"approved","pubkeyHex":"<B's own pubkey>"}`. The requester's
-  own node record commits later, entirely inside `aoide-client`, once that
-  instance's own operator polls and confirms the SAS. All three audit
+  returns `{"status":"pending"}` uniformly for an unknown id, a wrongly-signed
+  poll, or a genuinely-not-yet-approved one — never a distinct code that would
+  let an outsider learn which case they hit (the existing-oracle discipline,
+  mirroring `message/send`'s own `contextId` amendment above). Only a verified,
+  approved poll gets `{"status":"approved","pubkeyHex":"<B's own pubkey>"}`. The
+  requester's own node record commits later, entirely inside `aoide-client`,
+  once that instance's own operator polls and confirms the SAS. All three audit
   via the existing `Door::A2a` audit sink (`a2a.pairRequest`/
-  `a2a.pairReveal`/`a2a.pairPoll`), same as every other A2A method —
-  `pair_poll` audits only its successful release, never a routine
-  "still pending" poll.
+  `a2a.pairReveal`/`a2a.pairPoll`), same as every other A2A method — `pair_poll`
+  audits only its successful release, never a routine "still pending" poll.
   **The pairing events feed (P-P5, CONTRACTS.md §6's "Pairing events feed"
   subsection)** — `emit_pairing_event`, called from the Ok arms of
   `pair_request` (`pair-parked`) and `pair_reveal` (`pair-revealed`) only;
   `pair_poll` never calls it (Design A retired the third kind,
-  `pair-awaiting-confirm` — that section's own doc has the reasoning),
-  never from a mismatch or unknown-id arm either. `a2a serve` is a separate
-  process from `aoided`, so
-  it opens its OWN `aoide_protocol::feed::FeedWriter` onto the SAME
-  `crate::daemon::events_path`/`EVENTS_CAP_BYTES`-capped feed file `aoided`
-  already writes through — two independent writers sharing one
-  truncate-in-place file, so a cap-truncate race at the 1 MiB boundary can
-  lose a line; accepted, because this feed is ephemeral cues and the audit
-  log above (already written at all three call sites) is the durable
-  record. Every emitted record is `class: "gate"`, `source: "a2a-door"`,
-  and a `payload` carrying `id`/`name`/`originAddr`/`url`/`direction` BY
-  NAME ONLY — never a SAS, pubkey, nonce, or commitment; a watcher
-  re-derives the SAS locally from `aoide_storage::pairing::list_inbound`/
-  `list_outbound`, so this line is only ever a trigger, never trusted
-  data. Best-effort throughout (`FeedWriter::append`'s own posture) — an
-  unwritable events path never fails the ceremony.
-  **The Spawn arm's gate (P-P3, narrowed again by P-P4, PAIRING.md
-  decision 6 + the wire-authentication section)** —
-  `message_send`'s `SendAction::Spawn` arm no longer consults
-  `token_authorized` (the door-wide bearer, 2026-08-19's own amendment) at
-  all: it requires `spawn_admitted`, which accepts ONLY a
-  `NodeRung::Signature` resolution to a node that is BOTH `verified` and
-  carries `"spawn"` in its grant IN THE MESH THE REQUEST NAMES (`may_spawn`,
-  pure and directly
-  unit-tested against `Grant` fixtures — no test in this file drives
-  `do_spawn`'s real OS-level process spawn, same house rule every other
-  Spawn-arm test already follows). That resolution comes from
+  `pair-awaiting-confirm` — that section's own doc has the reasoning), never
+  from a mismatch or unknown-id arm either. `a2a serve` is a separate process
+  from `aoided`, so it opens its OWN `aoide_protocol::feed::FeedWriter` onto the
+  SAME `crate::daemon::events_path`/`EVENTS_CAP_BYTES`-capped feed file `aoided`
+  already writes through — two independent writers sharing one truncate-in-place
+  file, so a cap-truncate race at the 1 MiB boundary can lose a line; accepted,
+  because this feed is ephemeral cues and the audit log above (already written
+  at all three call sites) is the durable record. Every emitted record is
+  `class: "gate"`, `source: "a2a-door"`, and a `payload` carrying
+  `id`/`name`/`originAddr`/`url`/`direction` BY NAME ONLY — never a SAS, pubkey,
+  nonce, or commitment; a watcher re-derives the SAS locally from
+  `aoide_storage::pairing::list_inbound`/`list_outbound`, so this line is only
+  ever a trigger, never trusted data. Best-effort throughout
+  (`FeedWriter::append`'s own posture) — an unwritable events path never fails
+  the ceremony. **The Spawn arm's gate (P-P3, narrowed again by P-P4, PAIRING.md
+  decision 6 + the wire-authentication section)** — `message_send`'s
+  `SendAction::Spawn` arm no longer consults `token_authorized` (the door-wide
+  bearer, 2026-08-19's own amendment) at all: it requires `spawn_admitted`,
+  which accepts ONLY a `NodeRung::Signature` resolution to a node that is BOTH
+  `verified` and carries `"spawn"` in its grant IN THE MESH THE REQUEST NAMES
+  (`may_spawn`, pure and directly unit-tested against `Grant` fixtures — no test
+  in this file drives `do_spawn`'s real OS-level process spawn, same house rule
+  every other Spawn-arm test already follows). That resolution comes from
   `verify_signed_request` (P-P4) — called once per connection in
-  `handle_connection`, before any dispatch — which resolves the caller BY
-  KEY (#63 P-ID5): the request's `X-Aoide-Timestamp`/`X-Aoide-Nonce`/
-  `X-Aoide-Signature` headers are verified by trying the signature against
-  every verified node's stored public key, and the record whose key
-  verifies IS the caller; `X-Aoide-Node` is attribution only — a
-  claimed-vs-resolved mismatch audits as attribution drift, and its one
-  identity-adjacent role is the exact-name tiebreak among verified records
-  sharing the verifying pubkey (CONTRACTS.md §6's P-P4 amendment has the
-  full canonical-string/header shape, check order, collision semantics,
-  and pinned vectors). The KEY-RESOLVED identity threads down as
-  `signed_caller: Option<SignedCaller>` — the resolved record's `name` AND
-  the stored `key` that verified the signature, so no consumer has to
-  re-find the record by name to reach its key (LOW-1: a second lookup
-  could pair this request's name with a key that never verified anything);
-  when present, `message_send` resolves EXCLUSIVELY
-  against it, never falling back to `aoide_storage::node_store::
-  resolve_node`'s own two-rung ladder (a node's own `token_file` —
-  `NodeRung::Token` — else the TCP origin against a node's `url` —
-  `NodeRung::Addr`, the SAME identification the door's
-  `autogated_node_addr`/`autogated_node_token` already fold, just
-  unfiltered by `autogate` and narrowed to one named node) even on a
-  registry-lookup miss. Neither the `Addr` nor the (now-insufficient)
-  `Token` resolution reaches Spawn any more — a bare TCP-source-IP-vs-`url`
-  match carries no possession proof, and a bare shared-secret token is
-  replayable and identical across every request the true node or an
-  impersonator ever sends; both rungs still resolve a node identity for
-  attribution/origin-stamping purposes below, just never for Spawn. A
-  caller resolved via `Token` to a genuinely paired node gets a taught
-  `-32006` telling it plainly to sign requests (its aoide is too old, or
-  is failing to sign); a `Signature`-resolved node missing the `spawn`
-  capability gets the exact `node allow` fix; every other shape gets the
-  original "pair first, then allow" message. The resolved node's name also
-  threads two ways past the gate: `do_spawn` calls `stamp_spawn_provenance`
-  (LANE IDENTITY P-ID0, G16/G5, review round 1) to stamp
-  `SessionRecord.origin = "node:<name>"` DIRECTLY on the just-spawned record
-  once it registers — this door is the ONLY place a `node:*` value may
-  originate, not the child's own env, since any same-uid process can set an
-  env var on itself before invoking `aoide conduct` directly
-  (`aoide-conduct`'s `session_conduct` refuses exactly that shape from its
-  env read, and a third path, `graph/resurrect.rs::origin_to_carry`,
-  refuses it again when reading a revived session's own ledger entry back —
+  `handle_connection`, before any dispatch — which resolves the caller BY KEY
+  (#63 P-ID5): the request's `X-Aoide-Timestamp`/`X-Aoide-Nonce`/
+  `X-Aoide-Signature` headers are verified by trying the signature against every
+  verified node's stored public key, and the record whose key verifies IS the
+  caller; `X-Aoide-Node` is attribution only — a claimed-vs-resolved mismatch
+  audits as attribution drift, and its one identity-adjacent role is the
+  exact-name tiebreak among verified records sharing the verifying pubkey
+  (CONTRACTS.md §6's P-P4 amendment has the full canonical-string/header shape,
+  check order, collision semantics, and pinned vectors). The KEY-RESOLVED
+  identity threads down as `signed_caller: Option<SignedCaller>` — the resolved
+  record's `name` AND the stored `key` that verified the signature, so no
+  consumer has to re-find the record by name to reach its key (LOW-1: a second
+  lookup could pair this request's name with a key that never verified
+  anything); when present, `message_send` resolves EXCLUSIVELY against it, never
+  falling back to `aoide_storage::node_store::resolve_node`'s own two-rung
+  ladder (a node's own `token_file` — `NodeRung::Token` — else the TCP origin
+  against a node's `url` — `NodeRung::Addr`), even on a registry-lookup miss.
+  Neither the `Addr` nor the `Token` resolution reaches Spawn — a bare
+  TCP-source-IP-vs-`url` match carries no possession proof, and a bare
+  shared-secret token is replayable and identical across every request the true
+  node or an impersonator ever sends; both rungs still resolve a node identity
+  for attribution below, just never for Spawn. A caller resolved via `Token` to
+  a genuinely paired node gets a taught
+  `-32006` telling it plainly to sign requests (its aoide is too old, or is
+  failing to sign); a `Signature`-resolved node missing the `spawn` capability
+  gets the exact `node allow` fix; every other shape gets the original "pair
+  first, then allow" message. The resolved node's name also threads two ways
+  past the gate: `do_spawn` calls `stamp_spawn_provenance` (LANE IDENTITY P-ID0,
+  G16/G5, review round 1) to stamp `SessionRecord.origin = "node:<name>"`
+  DIRECTLY on the just-spawned record once it registers — this door is the ONLY
+  place a `node:*` value may originate, not the child's own env, since any
+  same-uid process can set an env var on itself before invoking `aoide conduct`
+  directly (`aoide-conduct`'s `session_conduct` refuses exactly that shape from
+  its env read, and a third path, `graph/resurrect.rs::origin_to_carry`, refuses
+  it again when reading a revived session's own ledger entry back —
   `state/session-ledger.jsonl` is unsealed, so a same-uid process could
   otherwise forge the shape there too). The same stamp carries the caller's
-  `remoteParent` when it presented a valid `metadata["aoide/from"]` claim
-  (P-RSA S3) — one registration wait, two change-once stamps, and the value is
-  built from the VERIFIED caller `verify_signed_request` handed down
-  (the resolved record's `name` and the stored `key` that verified THIS
-  request), never from a header or body string (`claimable_caller` in `a2a.rs`
-  holds the rung rule, `claimed_remote_parent` the value and the `-32602`,
-  which the caller applies on the spawn side only). `stamp_spawn_provenance` polls for the
-  record's registration on the same best-effort budget
-  `spawn_inject_prompt` uses (~3s); a disclosed behavior change from the
-  pre-P-ID0 synchronous env write — a child that registers slower than that
-  window now loses its stamp, logged by name (`eprintln`) rather than
-  silently, and the poll never retries unboundedly past it. Neither of
-  these closes the FILE: a hand-crafted `sessions.json`/ledger line is
-  still a readable, unflagged string on disk — sealing that is P-ID1/P-ID2,
-  still open. The Inject arm's own `resolved_node` (a SEPARATE lookup from
-  Spawn's) now answers TWO questions, not one: its Signature-rung
-  `claimed_identity` is what AUTHORIZES the remote-parent deliver-now (S5,
-  CONTRACTS.md §6) — an identity proof used as a gate — while its `from`
-  attribution rides `do_inject`'s existing `--from` flag onto a QUEUED
-  `pending.json` entry only (an immediately-delivered payload's bytes stay
-  untouched, so an already-autogated node's delivery is byte-identical to
-  before this phase). That same arm holds any inject PENDING whose TARGET is
-  conducting a shell (`session_wrapped_is_a_shell`, N1): every other rung of
-  the decision is about the caller, this one is about the target — a
-  submitted line in a shell's input RUNS, whatever the caller proved — so a
-  shell target is never auto-delivered to by the loopback rung or the
-  remote-parent rung either, and the hold is audited
-  `a2a.message/send`/`status:"shell-wrapped"` with no bytes on the wire.
-  **The two UNSIGNED autogate rails answer to the charter too (A3 review
-  finding 4).** `message_send`'s Inject arm carries three auto-delivery rails;
-  the two with no request signature behind them — a source ADDRESS resolving
-  to an `autogate` record's `url`, or a presented bearer matching that record's
-  own `tokenFile` — name no mesh, so `rail_admits` judges the MATCHED record by
-  its HOME mesh (`home_mesh_fallible`: the same name an unnamed request resolves
-  to, but READ rather than guessed): a charter governing home requires the record
-  `verified` and its key on the line with `message` (minus
-  `Node::narrowed[home]`); a charter-shaped home whose operator key is
-  undecidable delivers nothing; a `config.toml` that will not LOAD delivers
-  nothing either (review F6 — `home_mesh()` answers the built-in default there,
-  which would judge the send by the wrong mesh); a pair-mesh home keeps
-  the record's own `autogate` flag as the whole rule. **The grant lookup
-  answers an unreadable config the same way**: `effective_mesh` is fallible, an
+  `remoteParent` when it presented a valid `metadata["aoide/from"]` claim (P-RSA
+  S3) — one registration wait, two change-once stamps, and the value is built
+  from the VERIFIED caller `verify_signed_request` handed down (the resolved
+  record's `name` and the stored `key` that verified THIS request), never from a
+  header or body string (`claimable_caller` in `a2a.rs` holds the rung rule,
+  `claimed_remote_parent` the value and the `-32602`, which the caller applies
+  on the spawn side only). `stamp_spawn_provenance` polls for the record's
+  registration on a best-effort budget of about 3s (300 polls, 10ms apart); a
+  disclosed behavior change from the pre-P-ID0 synchronous env write — a child
+  that registers slower than that window now loses its stamp, logged by name
+  (`eprintln`) rather than silently, and the poll never retries unboundedly past
+  it. Neither of these closes the FILE: a hand-crafted `sessions.json`/ledger
+  line is still a readable, unflagged string on disk — sealing that is
+  P-ID1/P-ID2, still open. The Inject arm's own `resolved_node` (a SEPARATE
+  lookup from Spawn's) answers one question: its `from` attribution rides
+  `do_inject`'s `--from` flag onto the `pending.json` entry that every inject
+  writes. Attribution is not a gate, and no `aoide/from` claim changes whether
+  an Inject parks. A shell target needs no check of its own at this door,
+  because nothing here types into a session; the shell refusal that guards the
+  local ping-back and doorbell is conduct's `auto_type_refusal`. **The grant
+  lookup refuses an unreadable config**: `effective_mesh` is fallible, an
   unnamed request's grant is `Grant::none()` when the config will not load, and
   `spawn`/`mailDeposit`/`mailPoll`/`binding` refuse with `-32010` naming the
   file (`mesh_or_refusal`) rather than naming a guessed mesh. A request that
-  NAMED its mesh never reads the config, and a caller that consults no grant
-  (an unsigned loopback inject, an ordinary `tasks/get`) is untouched. The
-  match and the
-  delivery are deliberately two booleans — `autogate_match` still exempts the
-  caller from the #50 uniform guard, `deliver_match` is what
-  `should_deliver_now` reads — so a record the charter does not answer for is
-  held PENDING (queued, attributed `node:<name>`), never answered with the
-  guard's synthetic `submitted` Task and never refused. `verified` is asked
-  only of a record that claims a charter LINE, since `aoide node add
-  --autogate` writes `verified: false` and requiring it in a pair mesh would
-  delete the rail rather than harden it.
-  **`tasks/get` reads a session's watch frame (P-RSA S6, CONTRACTS.md §6).**
-  `params.metadata["aoide/frame"]` asks for the frame the local
-  `session watch` renders; it rides as one `data` artifact, and is answered
-  only for a caller that resolved through the SIGNATURE rung to a `verified`
-  node whose grant in the request's mesh includes `read` (`output_read_admitted`,
-  with `may_message`/`may_spawn`'s shape one capability over). Unsigned,
-  bearer and address rungs are refused with the SAME text whether the session
-  exists or not — the gate is no existence oracle — while the remote-parent
-  KEY match is deliberately not required to READ (steering without pending and
-  the ping-back history still need it). `watch_frame` is conduct's existing
-  `gather` with `raw = false`; the frame leaves through `Frame::for_wire`
-  (this box's paths and the suggested command struck) and the door clamps the
-  tail to 200 lines, each letter's body to 40 lines and the frame to 256 KiB,
-  shedding the oldest letter then the oldest output line and setting
-  `truncated`. A frame read audits under its own label, `a2a.tasks/get.frame`.
-  The refusal code is this arm's own, `-32011` — minted like Spawn's `-32006`
-  and `mailDeposit`'s `-32010` — so a refused read and a refused signature
-  (`verify_signed_request`'s `-32007`, always decided before this arm runs)
-  are told apart by the code alone, never by matching prose. The refusal
-  TEXT is unchanged: one sentence for every refused read, the same whether
-  the named session exists or not.
-  **`tasks/get` also serves a session's ping-back history (P-RSA S8,
-  CONTRACTS.md §6).** `params.metadata["aoide/linesAfter"]` — the `seq` the
-  caller has already seen — answers with the same status read plus the child's
-  ring after that cursor, as one `data` message under `Task.history`
-  (`messageId: "pingback"`, `{events, gap, last}` under the part's `data`).
-  This one read is gated by `output_read_admitted` AND the key match: the
-  child's record's own `remoteParent.key` must equal the key the caller's
-  signature verified against (`history_admitted`), because those events belong
-  to that parent and the 2026-09-25 ruling widens the FRAME, never this. The
-  refusal reuses `-32011` (the lane brief names no code of its own for this
-  arm) with its own text naming the missing key. A request carrying BOTH
-  output keys is judged by the stricter one: the frame alone is still admitted
-  for a `read`-granted caller whose key is foreign, and a request that also
-  asks for history is refused as a history read rather than answered with a
-  frame around a silently missing ring. A history read audits under its own
-  label, `a2a.tasks/get.history`.
-  **`aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`, CONTRACTS.md
-  §6's new subsection) is the SECOND capability-gated method, after
-  Spawn, and the first one not gated on `spawn`.** `mail_deposit` resolves
-  the caller the identical KEY-RESOLVED way Spawn does (`ctx.
-  signed_caller` against the registry), then requires
-  `deposit_admitted` — `may_message` (`"message"` in the caller's grant for
-  the mesh the request names, `grant_in_mesh`), mirroring `may_spawn` one capability
-  over, with no historical Addr/Token rung to migrate off since `message`
-  was introduced signature-only from the start. A refusal is `-32010` — a
-  NEW code, distinct from both `-32006` (Spawn's own) and `-32007`
-  (`verify_signed_request`'s own incomplete-headers/signature-mismatch
-  code) — in one of THREE shapes, the P-CHARTER one preempting the other two: the mesh is
-   charter-shaped with an undecidable operator key (told that, told the reason
-   word, pointed at `aoide mesh charter show`; the operator keys themselves stay
-   in the host's audit line), paired-but-not-allowed (told the exact
-  `node allow <name> message on` fix) or anything else (told to pair, then
-  allow). Past the gate, the envelope's own content is entirely
-  `aoide_storage::mail::deposit`'s job — recomputing `msgid`, verifying the
-  ORIGIN signature (the two-lookup identity model: hop via
-  `signed_caller`, origin via the one key on record for
+  NAMED its mesh never reads the config, and a caller that consults no grant (an
+  unsigned loopback inject, an ordinary `tasks/get`) is untouched. **`tasks/get`
+  reads a session's watch frame (P-RSA S6, CONTRACTS.md §6).**
+  `params.metadata["aoide/frame"]` asks for the frame the local `session watch`
+  renders; it rides as one `data` artifact, and is answered only for a caller
+  that resolved through the SIGNATURE rung to a `verified` node whose grant in
+  the request's mesh includes `read` (`output_read_admitted`, with
+  `may_message`/`may_spawn`'s shape one capability over). Unsigned, bearer and
+  address rungs are refused with the SAME text whether the session exists or not
+  — the gate is no existence oracle. A frame needs no `remoteParent` key; only
+  the ping-back history below does.
+  `watch_frame` is conduct's existing `gather` with `raw = false`; the frame
+  leaves through `Frame::for_wire` (this box's paths and the suggested command
+  struck) and the door clamps the tail to 200 lines, each letter's body to 40
+  lines and the frame to 256 KiB, shedding the oldest letter then the oldest
+  output line and setting `truncated`. A frame read audits under its own label,
+  `a2a.tasks/get.frame`. The refusal code is this arm's own, `-32011` — minted
+  like Spawn's `-32006` and `mailDeposit`'s `-32010` — so a refused read and a
+  refused signature (`verify_signed_request`'s `-32007`, always decided before
+  this arm runs) are told apart by the code alone, never by matching prose. The
+  refusal TEXT is unchanged: one sentence for every refused read, the same
+  whether the named session exists or not. **`tasks/get` also serves a session's
+  ping-back history (P-RSA S8, CONTRACTS.md §6).**
+  `params.metadata["aoide/linesAfter"]` — the `seq` the caller has already seen
+  — answers with the same status read plus the child's ring after that cursor,
+  as one `data` message under `Task.history` (`messageId: "pingback"`, `{events,
+  gap, last}` under the part's `data`). This one read is gated by
+  `output_read_admitted` AND the key match: the child's record's own
+  `remoteParent.key` must equal the key the caller's signature verified against
+  (`history_admitted`), because those events belong to that parent and the
+  2026-09-25 ruling widens the FRAME, never this. The refusal reuses `-32011`
+  (the lane brief names no code of its own for this arm) with its own text
+  naming the missing key. A request carrying BOTH output keys is judged by the
+  stricter one: the frame alone is still admitted for a `read`-granted caller
+  whose key is foreign, and a request that also asks for history is refused as a
+  history read rather than answered with a frame around a silently missing ring.
+  A history read audits under its own label, `a2a.tasks/get.history`.
+  **`aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`, CONTRACTS.md §6's
+  new subsection) is the SECOND capability-gated method, after Spawn, and the
+  first one not gated on `spawn`.** `mail_deposit` resolves the caller the
+  identical KEY-RESOLVED way Spawn does (`ctx. signed_caller` against the
+  registry), then requires `deposit_admitted` — `may_message` (`"message"` in
+  the caller's grant for the mesh the request names, `grant_in_mesh`), mirroring
+  `may_spawn` one capability over, with no historical Addr/Token rung to migrate
+  off since `message` was introduced signature-only from the start. A refusal is
+  `-32010` — a NEW code, distinct from both `-32006` (Spawn's own) and `-32007`
+  (`verify_signed_request`'s own incomplete-headers/signature-mismatch code) —
+  in one of THREE shapes, the P-CHARTER one preempting the other two: the mesh
+  is charter-shaped with an undecidable operator key (told that, told the reason
+  word, pointed at `aoide mesh charter show`; the operator keys themselves stay
+  in the host's audit line), paired-but-not-allowed (told the exact `node allow
+  <name> message on` fix) or anything else (told to pair, then allow). Past the
+  gate, the envelope's own content is entirely `aoide_storage::mail::deposit`'s
+  job — recomputing `msgid`, verifying the ORIGIN signature (the two-lookup
+  identity model: hop via `signed_caller`, origin via the one key on record for
   `header.from.node`), deduping, and filing. `mail_deposit` self-audits
-  UNCONDITIONALLY under `a2a.aoide/mailDeposit`, at both the admission
-  refusal and the deposit outcome — mirroring `pair_request`'s "audit
-  every call" shape rather than `message_send`'s narrower one, since a
-  deposit never passes through `cli/src/dispatch.rs`'s own per-command
-  audit and this is the only place a flood becomes visible. A filed
-  **letter** mints an ack back to the origin, spools it, and best-effort
-  drains that node once through the SAME `aoide_conduct::mail_bridge::
-  drain_node` the daemon's own periodic tick uses — one drain
-  implementation; `aoide-server` never dials out on its own account. **A
-  container addressed to another node is not this receiver's to open**
+  UNCONDITIONALLY under `a2a.aoide/mailDeposit`, at both the admission refusal
+  and the deposit outcome — mirroring `pair_request`'s "audit every call" shape
+  rather than `message_send`'s narrower one, since a deposit never passes
+  through `cli/src/dispatch.rs`'s own per-command audit and this is the only
+  place a flood becomes visible. A filed **letter** mints an ack back to the
+  origin, spools it, and best-effort drains that node once through the SAME
+  `aoide_conduct::mail_bridge:: drain_node` the daemon's own periodic tick uses
+  — one drain implementation; `aoide-server` never dials out on its own account.
+  **A container addressed to another node is not this receiver's to open**
   (`deposit_sealed`'s `Hopped` arm): the door files it as a `transit` entry,
   spools it toward the node the four steps pick, best-effort drains that hop
-  (never one the route said is HELD), and answers `accepted` with the hop
-  named — nothing filed as correspondence, no reader armed and NO ack, because
-  the letter is not here. The audit stamp and the chain agree on the caller's
-  name through the charter line (`declared_caller_name` →
-  `routing::declared_name`), never the `nodes.json` nickname. It
-  never rings the doorbell itself (P-M5a-2c: the resident daemon is the
-  policy and audit boundary for every ring, so this door files and acks
-  and stops there) — a remotely-deposited letter arms its readers
-  exactly like a locally-filed one, but is rung only by the next
-  daemon-side trigger for that name (a reader's Stop hook, a local
-  filing, `mail ring` by hand), until a later slice (P-M5b-2) gives this
-  door its own forward path to the daemon. A filed
-  **receipt** never rings — it is not arming mail (`aoide_storage::mail`'s
-  own `arms` predicate) — and instead retires the local outbox entry it
-  confirms via `aoide_storage::outbox::retire_by_ack` (spec item 7 — a pure
-  lookup keyed on the receipt's own verified origin and acked msgid, so a
-  forged or stale ack simply retires nothing). A **duplicate** re-sends the ack only
-  when the original filing was a letter, and is a silent no-op otherwise,
-  so an ack is never itself acked — but `aoide_client::mail_wire::
-  settle_deposit` (through `aoide_conduct::mail_bridge`) spools that
-  resend through `aoide_storage::outbox::write_ack_if_absent`, not a bare
-  write (mail register §26 outbox fix): a redelivery is skipped only while
-  an ack for the same msgid is still sitting undelivered in the origin's
-  outbox, so a permanently-dead link that keeps redelivering the same
-  duplicate spools exactly one ack, not one per redelivery, while a
-  genuine loss (the earlier ack's own entry has since retired) still
-  correctly respools — see that function's own doc for why this is not a
-  permanent ledger, and `storage`'s own `outbox::has_pending_ack_unlocked`
-  doc for why the pending check is a single marker-file stat, never a
-  directory scan, against a spool that can hold tens of thousands of
-  entries. Every `outbox` call here runs strictly
-  AFTER `mail::deposit` has already released its own lock — `mail` and
-  `outbox` share the identical non-reentrant stage-lock primitive, so
-  nesting one inside the other would deadlock a process against itself.
-  **`aoide/mailPoll` (P-M3, `docs/architecture/MAIL.md`, CONTRACTS.md
-  §6) is the relay-first half of the same model: a member with no inbound
-  address asks a node it reaches for everything that node spooled toward
-  it.** `mail_poll` demands `{node}` — a missing/empty one is `-32602`,
-  refused before any lookup, the same shape-before-existence precedence
-  `pair_poll` holds — resolves the caller the identical KEY-RESOLVED way
-  `mail_deposit` does, and then requires `poll_admitted`: `may_message`
-  AND `params.node == the caller's own resolved name`, because MAIL.md
-  §Wire's rule is "the caller's verified identity must BE `node` (no
-  polling on another's behalf)". A refusal is the SAME `-32010` the
-  deposit arm mints, in three shapes (claiming a node this request is not
-  signed as; paired but `message` not in its grant FOR THE REQUEST'S MESH,
-  told the exact `node
-  allow … message on --mesh <m>` fix; no verified signature resolution at all). The
-  answer is exactly `{envelopes: […]}` — the sealed envelopes, oldest
-  first, from `aoide_storage::outbox::poll_payloads`: every `hold` entry
-  toward that node plus every `now` entry whose own attempts have been
-  failing. **A poll writes NOTHING** — no `tries`, no bookmark, no new
-  state file anywhere: hand-over leaves the entry exactly where it was, and
-  it retires only the two ways it always did (a valid ack, `mail outbox
-  rm`), which is what makes a re-poll before the ack hand the same
-  envelopes over again by construction. It self-audits UNCONDITIONALLY
-  under its own `a2a.aoide/mailPoll` label, carrying the caller and the
-  handed-over COUNT — the pull direction's flood signal, visible at the
-  node that spooled the letters. The answer is BOUNDED at
-  `aoide_storage::outbox::POLL_BATCH_CAP` (50), oldest first: the poller
-  acks what it files, so the next poll advances, and an unbounded batch
-  would be a body the client's own `MAX_RESPONSE_BYTES` refuses. **`down`
-  is the door's now**: the two mail methods read the declaration set once
-  per request and refuse a caller their mesh declares `down` with that word
-  as a RESULT (audited), beside the `message` half — the per-request
-  quarantine `aoide node allow <node> message off` (MAIL.md §Status). An
-  UNLOADABLE set refuses both methods with `config-invalid` and keeps
-  serving everything else: no zone checks means no mail, never mail with
+  (never one the route said is HELD), and answers `accepted` with the hop named
+  — nothing filed as correspondence, no reader armed and NO ack, because the
+  letter is not here. The audit stamp and the chain agree on the caller's name
+  through the charter line (`declared_caller_name` → `routing::declared_name`),
+  never the `nodes.json` nickname. It never rings the doorbell itself (P-M5a-2c:
+  the resident daemon is the policy and audit boundary for every ring, so this
+  door files and acks and stops there) — a remotely-deposited letter arms its
+  readers exactly like a locally-filed one, but is rung only by the next
+  daemon-side trigger for that name (a reader's Stop hook, a local filing, `mail
+  ring` by hand), until a later slice (P-M5b-2) gives this door its own forward
+  path to the daemon. A filed **receipt** never rings — it is not arming mail
+  (`aoide_storage::mail`'s own `arms` predicate) — and instead retires the local
+  outbox entry it confirms via `aoide_storage::outbox::retire_by_ack` (spec item
+  7 — a pure lookup keyed on the receipt's own verified origin and acked msgid,
+  so a forged or stale ack simply retires nothing). A **duplicate** re-sends the
+  ack only when the original filing was a letter, and is a silent no-op
+  otherwise, so an ack is never itself acked — but `aoide_client::mail_wire::
+  settle_deposit` (through `aoide_conduct::mail_bridge`) spools that resend
+  through `aoide_storage::outbox::write_ack_if_absent`, not a bare write (mail
+  register §26 outbox fix): a redelivery is skipped only while an ack for the
+  same msgid is still sitting undelivered in the origin's outbox, so a
+  permanently-dead link that keeps redelivering the same duplicate spools
+  exactly one ack, not one per redelivery, while a genuine loss (the earlier
+  ack's own entry has since retired) still correctly respools — see that
+  function's own doc for why this is not a permanent ledger, and `storage`'s own
+  `outbox::has_pending_ack_unlocked` doc for why the pending check is a single
+  marker-file stat, never a directory scan, against a spool that can hold tens
+  of thousands of entries. Every `outbox` call here runs strictly AFTER
+  `mail::deposit` has already released its own lock — `mail` and `outbox` share
+  the identical non-reentrant stage-lock primitive, so nesting one inside the
+  other would deadlock a process against itself. **`aoide/mailPoll` (P-M3,
+  `docs/architecture/MAIL.md`, CONTRACTS.md §6) is the relay-first half of the
+  same model: a member with no inbound address asks a node it reaches for
+  everything that node spooled toward it.** `mail_poll` demands `{node}` — a
+  missing/empty one is `-32602`, refused before any lookup, the same
+  shape-before-existence precedence `pair_poll` holds — resolves the caller the
+  identical KEY-RESOLVED way `mail_deposit` does, and then requires
+  `poll_admitted`: `may_message` AND `params.node == the caller's own resolved
+  name`, because MAIL.md §Wire's rule is "the caller's verified identity must BE
+  `node` (no polling on another's behalf)". A refusal is the SAME `-32010` the
+  deposit arm mints, in three shapes (claiming a node this request is not signed
+  as; paired but `message` not in its grant FOR THE REQUEST'S MESH, told the
+  exact `node allow … message on --mesh <m>` fix; no verified signature
+  resolution at all). The answer is exactly `{envelopes: […]}` — the sealed
+  envelopes, oldest first, from `aoide_storage::outbox::poll_payloads`: every
+  `hold` entry toward that node plus every `now` entry whose own attempts have
+  been failing. **A poll writes NOTHING** — no `tries`, no bookmark, no new
+  state file anywhere: hand-over leaves the entry exactly where it was, and it
+  retires only the two ways it always did (a valid ack, `mail outbox rm`), which
+  is what makes a re-poll before the ack hand the same envelopes over again by
+  construction. It self-audits UNCONDITIONALLY under its own
+  `a2a.aoide/mailPoll` label, carrying the caller and the handed-over COUNT —
+  the pull direction's flood signal, visible at the node that spooled the
+  letters. The answer is BOUNDED at `aoide_storage::outbox::POLL_BATCH_CAP`
+  (50), oldest first: the poller acks what it files, so the next poll advances,
+  and an unbounded batch would be a body the client's own `MAX_RESPONSE_BYTES`
+  refuses. **`down` is the door's now**: the two mail methods read the
+  declaration set once per request and refuse a caller their mesh declares
+  `down` with that word as a RESULT (audited), beside the `message` half — the
+  per-request quarantine `aoide node allow <node> message off` (MAIL.md
+  §Status). An UNLOADABLE set refuses both methods with `config-invalid` and
+  keeps serving everything else: no zone checks means no mail, never mail with
   the walls down. **An unloadable set is answered BEFORE caller resolution, to
   every caller**: where the request's signature verifies
   against the key its own `X-Aoide-Node` holds on the charter in force, the door
@@ -620,6 +576,26 @@ the inbound half of the two-door contract (the outbound half is
   replayed into the method once the config returns. A request whose signature
   does not verify, or naming a node that charter does not carry, still reads
   `-32007`.
+- **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
+  verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
+  `wire_auth::answer_string` over the request's own signature and nonce, the
+  status and the exact body bytes (`answer_headers`). A signed request is a
+  POST and nothing else: any other method is refused `-32007` before its
+  signature is checked. Everything else is unsigned, and each write site says
+  why in a comment there: an unparsed or unsigned request, every GET (the card
+  included), every refusal (`-32007`, `-32008`, and the replay `-32009`), the
+  `config-invalid` answer above, the busy 503s, and the SSE stream. That
+  answer is checked only against the raw charter in force: the charter a node
+  governs is read through the same config that failed to load
+  (`charter::governing`), so there is none to sign under. The door's key
+  signs nothing an unverified sender chose. A key that is not on disk, or will
+  not load, leaves the answer unsigned and audited (`a2a.answer-unsigned`),
+  and the answer path never mints one (`identity::load_existing`). The client
+  refuses an unsigned answer.
+- **Nonces are single-use in any letter case.** `nonce_is_replay` keys both the
+  pubkey and the nonce trimmed and lowercased, the form `canonical_string`
+  signs. A captured request whose nonce header is upper-cased is therefore a
+  replay, not a fresh nonce.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

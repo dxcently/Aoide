@@ -400,7 +400,7 @@ secret refuses immediately rather than parking the door) with no caching.
 A broker resolve failure fails closed, and so does a secret that resolves
 empty (or only whitespace): every bearer check on that connection is denied,
 because an empty expected token would read as "no token configured" and
-restore the loopback free pass. The same holds for a configured `tokenFile`
+turn the bearer check off. The same holds for a configured `tokenFile`
 that is missing or empty. See [[Doors-and-Nodes]] for the two flags'
 per-command detail.
 

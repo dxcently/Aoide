@@ -38,6 +38,9 @@ mod doorbell;
 // `sync_eidolon_sessions` (re-exported below) is called from the reaper tick
 // (`reap.rs`) beside `sync_codex_app_threads`.
 mod eidolon;
+// SESSION-FIND: the query core and the handler of `aoide session find`.
+mod find;
+pub use self::find::session_find;
 // LANE IDENTITY P-ID3: `pub(crate)`, not private — `shellbridge.rs` (a
 // SIBLING of this module, not a descendant) reuses `peer_cred`/`PeerCred`
 // for its own cross-uid accept floor rather than hand-rolling a second
@@ -66,6 +69,11 @@ mod remote;
 // per-child at-most-once cursor in `state/stage/pingback.json`.
 mod pingback;
 mod permit;
+// The screen source of `awaiting` (`prompt.rs`'s module doc): the conducted pty's
+// last line against one closed table, once the output has gone quiet. `conduct.rs`
+// drives it from the multiplexer's tick and the ping-back's third source reads the
+// question it publishes.
+mod prompt;
 mod resurrect;
 mod send;
 mod session_store;
@@ -112,15 +120,19 @@ pub use self::conduct::conduct_socket_path;
 // the socket the doorbell will eventually write a nudge line onto — the
 // same way `conduct_socket_path` already crosses this boundary above.
 pub use self::conduct::channel_socket_path;
-// N1 (house rule 4): `aoide-server`'s A2A door reads the target record's own
-// WRAPPED-program shape before an inject — the same read the ping-back and
-// doorbell lanes make, re-exported for the same reason
-// `conduct_socket_path` above is. One predicate, three lanes, no copy.
-pub use self::conduct::wrapped_program_is_a_shell;
 // The same predicate, for the doors that hold an ARGV rather than a record:
 // `aoide-server`'s spawn arm refuses a `spawnAgent` that is a shell, and that
 // decision happens before any record exists.
 pub use self::conduct::program_is_a_shell;
+// The positive half of the same walk: the registered harness an argv runs, for
+// the door that spawns one and must prove what it spawned. Same walk, no copy.
+pub use self::conduct::wrapped_harness;
+// The one refusal every automatic reader makes (the ping-back, the doorbell's PTY
+// arm, the A2A door's inject), so the three cannot drift.
+pub use self::conduct::{auto_type_refusal, AutoTypeRefusal};
+// The screen episode's one clearing write (`question` and the `sudo` lock badge
+// together), shared by the session end, the reaper and the refresh writer.
+pub(crate) use self::model::clear_screen_ask;
 pub use self::doc::{build_graph, render, resolve_graph_document};
 // `mail ring` (P-M5a-2, MAIL.md "Delivery and the doorbell"): the ring
 // itself, callable in-process by any door that has this crate (the daemon
@@ -131,6 +143,8 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
 pub(crate) use self::pingback::{pingback, pingback_pull};
+#[cfg(test)]
+pub(crate) use self::pingback::pingback_path;
 // The project ladder (`core-seams` §B): `project_for` (a session's own claim:
 // explicit > its workspace's default > cwd anchor) and `effective_project_for`
 // (what it RENDERS under: explicit > owner > workspace default > cwd anchor),
@@ -138,9 +152,10 @@ pub(crate) use self::pingback::{pingback, pingback_pull};
 // `workspaceProject` birth default are written through, called by all three
 // compositor stamp sites (`window.rs`) so a future adapter calls it too rather
 // than writing the field itself.
+pub(crate) use self::model::harness_pid;
 pub use self::model::{
     anchor_for, effective_project_for, lead_over, leads_project, observe_workspace, project_for,
-    canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
+    canonical_state, merged_sessions, HookDeath, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
 };
 pub use self::pending::{pending_approve, pending_deny, pending_list};
@@ -165,16 +180,22 @@ pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::DAEMON_PEER_PID_FLAG;
 // `session_hook`/`session_send`/`pending_path`: the hook door and the injection
 // door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
-// registry, `aoide-server`'s dispatch).
-pub use self::send::{pending_path, session_hook, session_send};
+// registry, `aoide-server`'s dispatch). `PENDING_FULL` is the reason a send
+// refused at the queue's per-source cap carries, which the network door turns
+// into its own answer; `PENDING_FILE_FULL` and `PENDING_TOO_LARGE` are the
+// file-bound and per-entry refusals the same door answers by their own codes.
+pub use self::send::{
+    hold_pending, pending_path, session_hook, session_send, HoldRefused, DOOR_CANNOT_APPROVE,
+    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_FILE_FULL, PENDING_FULL,
+    PENDING_TOO_LARGE,
+};
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile
 // resolver that picks that key (`profile_for_agent`, claude's fallback for an
 // unregistered name) and the gap itself (`SUBMIT_KEYSTROKE_DELAY`). `pub` for
-// the third caller, in another crate: `aoide-server`'s
-// `a2a::spawn_inject_prompt` used to hand-roll `{prompt}\n` at a spawned
-// session's socket, which is a keystroke spelling of its own — and the wrong
-// one for every harness whose `submit_key` is `\r`.
+// the test-support rig in another crate. A hand-rolled `{prompt}\n` at a
+// session's socket is a keystroke spelling of its own, and the wrong one for
+// every harness whose `submit_key` is `\r`.
 pub use self::send::{write_delivery, SUBMIT_KEYSTROKE_DELAY};
 pub use self::permit::profile_for_agent;
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};
@@ -224,9 +245,9 @@ pub use self::spawn::build_conduct_args;
 pub use self::spawn::{live_run_for, live_run_refusal};
 // `wait_ready`/`READY_BUDGET` — WHEN a just-launched target may be typed at,
 // and for how long the tree waits for it (the per-harness fact is
-// `AgentProfile::readiness`). `pub` for the third first-turn caller outside
-// this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
-// would otherwise be the one injection path with no readiness gate at all.
+// `AgentProfile::readiness`). `pub` for first-turn callers outside this crate.
+// The A2A door holds its opening turns for a human and never waits, so none
+// exists today.
 pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
 // `harness_session_started` — the hook arm's readiness PREDICATE itself
 // (`wait_ready`'s `Readiness::Hook` clause), `pub` for the door-policy
@@ -242,6 +263,12 @@ pub use self::spawn::command_basename;
 // bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
 // refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
 pub use self::common::clean_line;
+// `strip_ansi`: the one escape stripper, shared with `aoide-conductor`'s log tail
+// (`conductor/src/logtail.rs`) and the screen source's own line reader.
+pub use self::common::strip_ansi;
+// `visible`: the one escaper for text a human is about to approve, shared with
+// `aoide-conductor`'s pending views so no surface renders an entry another way.
+pub use self::common::{visible, visible_held};
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a
@@ -302,11 +329,12 @@ pub use self::session_store::now_iso_utc;
 // `use crate::graph::{...}`" section) — never reached from root, so they stay
 // `pub(crate)`.
 pub(crate) use self::common::stage_error;
-pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session_exit, prune_done};
+pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session_exit, prune_done_sparing};
+pub(crate) use self::pingback::held_deaths;
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
-    lineage_of, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
+    lineage_of, owned_by_live_wraps, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };
 pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;

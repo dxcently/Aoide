@@ -27,13 +27,13 @@ Each profile's `hook_event_map` collapses its harness's event NAMES onto shared 
 
 | event | state |
 |---|---|
-| `SessionStart` | registers the session, `idle`. A resume folds a `stopped` record back to `idle` (resumed, not yet active) but never resets a live `working`/`awaiting` turn |
+| `SessionStart` | registers the session, `idle`. A resume folds a `stopped` record back to `idle` (resumed, not yet active) but never resets a live `working`/`awaiting` turn. For an id already registered it is a no-op (`harness-anchored` in the audited outcome, naming the session and its harness) unless it runs under the record's live harness, that harness has exited, or the session has ended: a live harness anchors its record, so no hook from outside re-homes its chain or parent (a per-turn hook from outside still sets the phase, and may bind a window the record lacks) |
 | `UserPromptSubmit` | `working` (and, set-once, NAMES the session from the prompt) |
 | `PreToolUse` / `PostToolUse` | `working`, setting the owner's `activity` to the tool |
 | `Stop` | `stopped` (turn over, human's move — alive at the prompt, and recently so) |
 | `Notification`, `permission_prompt` / message contains "permission" | `awaiting` (mid-turn, agent NEEDS a human) |
 | `Notification`, `idle_prompt` / message contains "waiting for your input" | `awaiting` only if currently `working` (an unseen mid-turn question); no-op otherwise |
-| `SessionEnd` | `done` |
+| `SessionEnd` | `done`, when it runs under the record's harness, when the record has no harness, or when the harness has exited. From outside a live harness it is refused and writes nothing |
 
 `stopped` and `done` are different things and never collapse: `Stop` ends a TURN,
 `SessionEnd` ends the SESSION. The one transition no event delivers is `stopped` →
@@ -79,6 +79,9 @@ aoide session start --id "$ID" --agent gemini --cwd "$PWD" [--parent "$PARENT_ID
 aoide session phase --id "$ID" --phase awaiting
 aoide session end   --id "$ID"
 ```
+
+Re-registering a protected live wrap is covered in CONTRACTS.md's identity
+section, which states the rule for the hook's own SessionStart too.
 
 Canonical state vocabulary and how the desktop renders it:
 
@@ -201,6 +204,14 @@ Everything the bridge knows about a specific agent harness lives on an
   inherited `CLAUDE_CODE_CHILD_SESSION` is what makes a child claude turn
   transcript saving off and silently disable the project `.mcp.json` doorbell
   channel (`TASK-REGISTER.md` §3).
+- `session_end_continues` — the `reason` values of a `SessionEnd` payload after
+  which the harness PROCESS lives on under another session id (claude: `clear`,
+  `resume`; its `logout`, `prompt_input_exit` and `other` are the process going
+  away). The reason is matched against the raw field, never normalised, so an
+  absent field, an unlisted value and a disguised `clear` all read as the
+  process ending; a harness that documents no such field lists none. A session
+  that ends this way closes `done` and records no "ended mid-turn" fact for its
+  spawner (`CONTRACTS.md`, `state/stage/sessions.json`).
 
 Every agent-aware consumer dispatches through the profile rather than
 hardcoding a harness: the hook door (`--agent` → `map_hook` and the

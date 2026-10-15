@@ -30,6 +30,13 @@
   `upsert_session` is the one writer that applies it; a new writer of
   `SessionRecord.pid` from caller-supplied input must call it too. The seal
   binds the pid, so a movable pid is a forgeable seal.
+- **A hook record's death fact is erased only by a live phase.**
+  `session::upsert_hook` leaves a `done` record that carries a `death` untouched
+  when asked for `done` again (a repeated `session end`, a duplicate
+  `SessionEnd`, a reap), because the fact is the unclaimed evidence the
+  ping-back is waiting to say. Any other phase supersedes it: a session that
+  runs again under the same id has not died. `record_death` writes the phase and
+  the fact together and assumes an open phase; its callers check that first.
 - **`runtime_dir::socket_dir` is a PURE resolution.** It answers a path and
   creates nothing — `tunnel::list_records`' own tests depend on "the `aoide/`
   subdirectory does not exist until a writer makes it", and a resolver that
@@ -39,6 +46,7 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
+- **An ack's `from.node` is this box's name in the letter's mesh, never its hostname.** `mint_ack_from` takes the name; `mint_ack_in_mesh` is the hostname form, for callers with no charter to read. The origin verifies the ack against the key it holds for that name, so a hostname-signed ack is refused and its letter never retires.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -241,7 +249,14 @@
   at the top of their own `main()` instead (`crates/cli/src/bin/{aoide,
   aoided}.rs`, `crates/lyra/src/bin/lyra.rs`) — a test may call it directly
   too (it is a plain idempotent function, no `Once`/env-isolation dance
-  needed, unlike `migrate_conducting_stage`'s own test suite).
+  needed, unlike `migrate_conducting_stage`'s own test suite). A move that
+  fails is narrated and leaves the old tree in place. Its one `Err` is a
+  `state/` that exists and cannot be locked owner-only, on EVERY run: it
+  locks `state_dir()` first, before any move, and the tree a move lands in
+  is locked again. All three binaries exit on it rather than read a tree
+  they could not make private. A `state/` that is absent is not created
+  there, and one whose parent is not a directory counts as absent, so the
+  narrated failure stays the failure.
 - **A checkout-relative source path is named ONCE, here — `fs::LYRA_SHELL_SRC`
   (`"pkgs/lyra-shell"`) is the pattern, not an exception.** The lyra shell's
   QML/icons/preview tree is read by `aoide-lyra`'s `commands::preview` (which
@@ -281,19 +296,15 @@
   this box writes there is the REFUSAL (`narrowed`) — never copy the charter
   into `grants` at accept time, which would make every later charter version
   silently re-grant what an operator turned off.
-- **`autogated_node_addr`/`autogated_node_token` return the MATCHED record,
-  and a match is never a trust decision.** They answer only "which `autogate`
-  record does this address/bearer resolve to" (registry order, the same
-  tie-break `resolve_node` uses), so the door can ask its second question —
-  whether that record earns auto-delivery under its HOME mesh's rules
-  (`aoide-server::a2a::rail_admits`, which reads the charter and
-  `Node::narrowed` the door already reads). **Don't fold a grant, a charter or
-  a `verified` check into these folds:** the door's #50 guard exemption asks
-  "did the rail match" as `.is_some()` on the record, and narrowing the MATCH
-  would answer a charter-unlisted caller with the guard's synthetic
-  `submitted` Task (no delivery, no queue entry) instead of the PENDING entry
-  the rail's ruling asks for. `Node.autogate`'s own field doc carries the same
-  statement.
+- **`resolve_node` returns the MATCHED record, and a match is never a trust
+  decision.** It answers only "which registered node does this bearer or
+  address resolve to": the `Token` rung first (a presented bearer against a
+  node's own `tokenFile`), then the `Addr` rung, registry order within each.
+  The door decides what the match admits: an address match admits nothing once
+  a door-wide token is configured, and only the `Signature` rung may spawn
+  (`aoide-server::a2a`). **Don't fold a grant, a charter or a `verified` check
+  into `resolve_node`:** it is a lookup, and every admission question is asked
+  of its result by the door.
 - **`config::SCHEMA` is the ONE place a config key is described — walk it,
   never restate it in a match arm.** The table carries each key's name,
   `ValueKind` vocabulary, summary, and a `read` fn projecting it off a typed
@@ -426,9 +437,9 @@
   `aoide-conduct`), and the secrets broker's per-secret `allowRemoteOrigin`
   origin gate (P-ID4, in `aoide-secrets`) — that policy logic never moves
   here.
-- **`wire_auth::canonical_string`'s five-field order, NUL-separator, and
-  lowercased/trimmed style are the wire contract, not an implementation
-  detail (P-P4) — pinned by
+- **`wire_auth::canonical_string`'s field order (five, plus the mesh as a
+  sixth when named), NUL-separator, and lowercased/trimmed style are the wire
+  contract, not an implementation detail (P-P4) — pinned by
   `tests::canonical_string_stability_vectors_never_drift`, mirroring
   `pairing::derive_sas`'s own pinning discipline.** A change to the field
   order, the separator, the case-folding, or the digest algorithm breaks
@@ -443,6 +454,16 @@
   adding a nonce store here — that would duplicate state across a
   crate boundary for no benefit, the same anti-pattern the "no cross-crate
   copying" cross-crate rule already forbids.
+- **`wire_auth::answer_string` is a second wire contract, and its method
+  tag (`ANSWER`) must stay distinct from every request method.** The door
+  signs answers with its identity key, so the answer form is the one place a
+  door's key produces bytes a client reads. Its method tag and its
+  status-in-the-timestamp position are what keep an answer from verifying as
+  a request (and back),
+  pinned by `answer_string_stability_vector_never_drifts` and
+  `a_request_signature_never_verifies_as_an_answer_and_back`. Any new
+  signed answer form needs its own tag and vector, never a reuse of
+  `answer_string`'s.
 - **`fs::pid_is_alive` is the shared liveness probe in core** — a POSIX
   `kill(pid, 0)` where `ESRCH` alone is absent and every other errno (including
   `EPERM`) reads live, so an unanswerable probe never reaps or unlinks. `0` and
@@ -489,26 +510,46 @@
   reason: `aoide-conduct` probes with it instead of a second `flock`. Each of
   these has a native test on both hosts, or states its limit.
 - **`fs::atomic_write_private` is the ONE way a sensitive file gets written
-  in this crate** (`identity.rs`'s `ed25519.key` is its first caller) — the
-  TEMP file is created ALREADY at `0600` (`OpenOptions::mode`, not
-  `File::create`-then-`chmod`), so a `rename(2)` onto the live path never
-  passes through a wider-mode window, mirroring `aoide-secrets/src/
-  store.rs`'s `save_policies`/`save_totp_secret` (secure the temp BEFORE
-  the rename, never the final path after it). Never write a sensitive
-  file as a `File::create` + post-rename `set_permissions` pair — the
-  temp inherits the umask-derived default mode and the live path sits
-  world/group-readable until the `chmod` lands; that window is exactly
-  what this function exists to close, and
-  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`
-  pins the invariant directly against the temp, not just the end state.
+  in this crate** (`identity.rs`'s `ed25519.key` is its first caller). The
+  TEMP is created ALREADY at `0600` (`OpenOptions::mode`, never
+  `File::create`-then-`chmod`), so the `rename(2)` onto the live path never
+  passes a wider-mode window, mirroring `aoide-secrets/src/store.rs`'s
+  `save_policies`/`save_totp_secret` (secure the temp BEFORE the rename,
+  never the final path after it). A leftover temp of the same name is
+  removed first and the create is exclusive (`O_EXCL`): `O_TRUNC` would keep
+  the leftover's wider mode, and `O_EXCL` refuses a link planted at that
+  name. Never write a sensitive file as a `File::create` + post-rename
+  `set_permissions` pair. The temp's mode is pinned directly, not just the
+  end state, by
+  `fs::tests::the_private_temp_is_created_already_0600_before_any_rename`,
+  and a leftover at the temp's name is pinned by
+  `fs::tests::a_private_write_never_publishes_a_leftover_temps_wider_mode`.
 - **`fs::secure_private_dir` locks the DIRECTORY a sensitive file lives
   in, not only the file** (`identity.rs`'s `mint()` calls it on
-  `identity_dir()` before writing anything into it) — a `0600` file inside
-  a `create_dir_all`-default (`0755`) directory still leaves that
-  directory's entries world-listable. A future sensitive file that lives
-  in its OWN new subdirectory (not an existing already-secured one) calls
-  this on that subdirectory the same way, before the first
-  `atomic_write_private` into it.
+  `identity_dir()` before writing anything into it). A `0600` file in a
+  `0755` directory still leaves that directory's entries world-listable.
+  The directory is created through `ensure_write_dir`, so one under
+  `state/` locks `state/` first. On Unix the chmod acts on a descriptor
+  opened `O_NOFOLLOW`, never on the name: a directory that is a symlink is
+  refused and its target keeps its mode, and a `dir` with a `..` in it is
+  refused before anything is created, since the directory it climbs to is
+  not one this call was asked to own. A future sensitive file in its OWN
+  new subdirectory calls this on that subdirectory the same way, before the
+  first `atomic_write_private` into it.
+- **`state/` is the privacy boundary for the state tree** (CONTRACTS.md §4
+  states what the lock checks and what it does not cover). Every storage
+  creator whose directory lies under `state/` goes through
+  `fs::ensure_write_dir`, which locks `state/` before it creates anything.
+  Accepted gap: a raw creator outside this crate can make a fresh `state/`
+  wide until the next storage write or the next `aoide`, `aoided` or `lyra`
+  start. Two are known.
+  `aoide-conduct`'s `graph/spawn.rs` makes `state/sessions/` with
+  `create_dir_all`, and in that spawn path the very next call,
+  `create_new_private`, locks it. `aoide-lyra`'s preview fixture
+  (`commands/preview.rs`'s `stage_fixture`) makes `<root>/state/stage` with
+  `create_dir_all`; its default root is a preview runtime dir, not
+  `state_dir()`, so only an explicit `--root` at the live root reaches
+  `state/`.
 - **`ledger` is append-only and never a lookup key for live state (P-D8).**
   `append_ledger_entry` only ever opens `state/session-ledger.jsonl` in
   append mode — nothing in this crate truncates, rewrites, or prunes it;
@@ -521,7 +562,7 @@
   embedded on both `SessionRecord.restore` (additive, the outer
   `Option<RestoreSnapshot>` DOES skip when `None`) and
   `LedgerEntry.restore` (always present, possibly `null`) — but once a
-  snapshot is `Some`, its own `cwd`/`idle`/`argv`/`typed` fields always
+  snapshot is `Some`, its own `cwd`/`idle`/`argv` fields always
   serialize in both places, so a populated `restore` reads the identical
   complete shape whichever file it came from. Adding `skip_serializing_if`
   to one of `RestoreSnapshot`'s own fields would make the two homes diverge
@@ -530,7 +571,7 @@
   `Node.verified` (P-P2).** `node add` never sets either field; a caller
   wanting to record a verified key relationship goes through this function,
   which touches only `pubkey`/`verified`/`url` on an existing entry and
-  leaves `autogate`/`tokenFile`/`bearerSecret`/`hub` untouched — don't widen
+  leaves `tokenFile`/`bearerSecret`/`hub` untouched — don't widen
   it to a general-purpose node editor, and don't set those two fields via a
   raw `Node { .. }` literal anywhere outside `node_store.rs` itself.
   **Its `grant` parameter is the caller's, and this module never resolves
@@ -554,7 +595,7 @@
   all when the ceremony resolved an actual via; a re-pair that named none
   leaves a previously-recorded `via` (e.g. one `aoide pair`'s hostname arm set) exactly
   as it was, the same untouched-unless-named stance `upsert_paired_node`
-  itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`grants`.
+  itself holds for `tokenFile`/`bearerSecret`/`hub`/`grants`.
 - **`node_store::set_node_address` is the ONE write site for `Node.url` after
   registration, and writes `via` with it** (the two are one address). It is never
   called from a ceremony. `Node::declared` is never saved: a declaration's key
@@ -887,6 +928,31 @@
   origin's readers like a letter; an ordinary `receipt` never does) is a
   one-line change in one function, never a grep-and-fix across every
   caller.
+- **`mail::peek_base`/`peek_cursors` are the lock-free mailbase reads, and
+  they change nothing (SESSION-FIND B2).** A peek never calls `with_lock`, so
+  it never runs `migrate_if_needed`/`migrate_cursors_if_needed`: a legacy flat
+  `cursors.json` reads as `None` (unknown), never migrated and never as an
+  empty map. `peek_base` counts bytes up to the last newline only, the same
+  line `truncate_torn_tail` keeps, so a peek never reports a line the next
+  write would remove. `peek_cursors` drops the pseudo-reader key and omits a
+  name left with no reader. Don't route a peek through `read_base`'s locked
+  path: find takes no lock, and a peek that waits on a writer stalls the page.
+- **`git::common_dir` is the one `git.rs` function that runs no process
+  (SESSION-FIND B2).** It canonicalizes its input, walks up to the nearest
+  `.git`, and follows a file's `gitdir:` (relative to the file's own
+  directory) and that gitdir's `commondir`. It judges the `.git` entry's kind
+  with `symlink_metadata`: a symlink, FIFO or socket answers as no repo. A git
+  file is opened with `O_NOFOLLOW | O_NONBLOCK` (the open refuses a symlink
+  and cannot block on a FIFO), its kind is judged on the open descriptor, and
+  it is read to at most 4 KiB. Its no-git-on-`PATH` test re-runs itself in a
+  child with an empty `PATH`, because the parent's `PATH` is shared by every
+  test thread. Don't give it a `Command`.
+- **`node_store`'s loaders come in two forms.** `load_nodes` and
+  `load_node_cache` read a corrupt file as empty or `None`, for the callers
+  that only need the data. `read_nodes` and `read_node_cache` return `Err`
+  for a file that is there and does not parse; a caller that shows the
+  operator a node's state (`session find`) uses those, so it can say
+  "registry unreadable" or "cache unreadable" rather than an empty roster.
 - **`outbox`'s two locks are never conflated (P-M2).** The crate-wide
   stage lock (`with_lock`, wrapping `fs::try_stage_lock`) guards file
   mutations only and is held for microseconds; `.bsy`
@@ -902,6 +968,9 @@
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
+  Its `text` must be exactly one msgid (`mail::is_msgid`) before anything
+  is looked up: the text becomes a path, so a non-msgid retires nothing and
+  builds no path.
   A
   `refused: bool` entry (a JSON-RPC admission refusal, distinct from an
   ordinary transport failure) stops a drain from retrying it but still
@@ -939,6 +1008,18 @@
   unbounded answer is a single JSON array of whole envelopes and walks
   straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
   can clear.
+- **A receipt is filed only against a spooled letter, and by a bounded
+  check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
+  it with the receipt's `to.node`; that read is lock-free because the caller
+  holds the stage lock, which the outbox lock shares and does not nest. Do not
+  replace it with a base scan, and do not move the `to` check after the
+  index: an unknown msgid must not reach a write.
+- **`update_entry` is the only write-back a drain makes to an entry it has
+  already read.** It writes only when the entry is still spooled. The drain
+  reads an entry, dials, and writes the answer back; a receipt that lands
+  during the dial retires the entry first, and a plain `write_entry` would
+  re-spool it. Every post-dial bookkeeping write in `mail_wire` goes through
+  it; `write_entry` stays for entries the caller just created.
 - **`write_ack_if_absent` gates on PENDING state, never a permanent
   ledger (mail register §26 outbox fix).** A duplicate letter redelivery
   mints a fresh ack via `mail::mint_ack` on every call — the gate lives
