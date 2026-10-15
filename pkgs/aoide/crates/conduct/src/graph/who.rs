@@ -550,10 +550,13 @@ pub(super) fn probe_nodes(nodes: &[Node], pull: PullFn) -> Vec<(Node, Result<Val
 ///
 /// Every fold and link here is a far node's choice, so the cost is bounded by
 /// the document and not by what it arranges: each fold is indexed once, and
-/// each of its sessions is drawn under the FIRST link that reaches it. A link
-/// aimed at a session another link already drew keeps its own row and has no
-/// rows under it, so the rows of a fold never outnumber its sessions however
-/// many links point into it.
+/// within one linking node each of its sessions is drawn under the FIRST of
+/// that node's links that reaches it. A link aimed at a session an earlier
+/// link of the same node already drew keeps its own row and has no rows under
+/// it, so a node's rows under a fold never outnumber the fold's sessions.
+/// Claims are scoped to the linking node, so one far node's links cannot
+/// blank another's subtree. A far node's link into this box's own fold draws
+/// no rows at all: a far document is never allowed to re-home a local session.
 pub(super) fn attach_subtrees(nodes: &mut [NodeView]) {
     let joins = {
         let mut by_name: HashMap<&str, usize> = HashMap::new();
@@ -568,9 +571,20 @@ pub(super) fn attach_subtrees(nodes: &mut [NodeView]) {
                     let (fold, rows) = match by_name.get(child.node.as_str()) {
                         Some(&fi) => {
                             let far = &nodes[fi];
-                            let index = indexes.entry(fi).or_insert_with(|| FoldIndex::new(&far.sessions));
-                            let fold = if far.stale { Fold::Stale } else { Fold::Fresh };
-                            (fold, index.rows_under(&child.session_id))
+                            let fold = match far.presence {
+                                "never-pulled" => Fold::Absent,
+                                _ if far.stale => Fold::Stale,
+                                _ => Fold::Fresh,
+                            };
+                            // A far node's link never draws this box's own
+                            // sessions: a far document may not re-home them.
+                            let reaches_local = far.is_local && !nodes[ni].is_local;
+                            if reaches_local {
+                                (fold, Vec::new())
+                            } else {
+                                let index = indexes.entry(fi).or_insert_with(|| FoldIndex::new(&far.sessions));
+                                (fold, index.rows_under(ni, &child.session_id))
+                            }
                         }
                         None => (Fold::Absent, Vec::new()),
                     };
@@ -588,13 +602,13 @@ pub(super) fn attach_subtrees(nodes: &mut [NodeView]) {
 }
 
 /// One node's fold, indexed for the join: who each session spawned (by that
-/// fold's own `spawned` edges, `SessionView.parent`), and which sessions a
-/// link has already drawn. Built once per fold, so a walk is one probe per
-/// session however many links reach in.
+/// fold's own `spawned` edges, `SessionView.parent`), and which sessions each
+/// linking node's links have already drawn. Built once per fold, so a walk is
+/// one probe per session however many links reach in.
 struct FoldIndex<'a> {
     sessions: &'a [SessionView],
     kids: HashMap<&'a str, Vec<usize>>,
-    drawn: HashSet<&'a str>,
+    drawn: HashSet<(usize, &'a str)>,
 }
 
 impl<'a> FoldIndex<'a> {
@@ -608,14 +622,15 @@ impl<'a> FoldIndex<'a> {
         FoldIndex { sessions, kids, drawn: HashSet::new() }
     }
 
-    /// The rows under one session id, in preorder, by that fold's own
-    /// parentage — an explicit stack, because a far child's own child has a
-    /// child and a hostile fold chains them as deep as it likes. `drawn`
-    /// bounds the walk: a fold whose parentage loops (`graph link` mints a
-    /// parent id unchecked) must cost a wrong row, never a hung render.
-    fn rows_under(&mut self, id: &'a str) -> Vec<SubtreeRow> {
+    /// The rows under one session id for the link of node `linker`, in
+    /// preorder, by that fold's own parentage — an explicit stack, because a
+    /// far child's own child has a child and a hostile fold chains them as
+    /// deep as it likes. `drawn` bounds the walk: a fold whose parentage loops
+    /// (`graph link` mints a parent id unchecked) must cost a wrong row, never
+    /// a hung render.
+    fn rows_under(&mut self, linker: usize, id: &'a str) -> Vec<SubtreeRow> {
         let mut rows: Vec<SubtreeRow> = Vec::new();
-        if !self.drawn.insert(id) {
+        if !self.drawn.insert((linker, id)) {
             return rows;
         }
         let sessions = self.sessions;
@@ -630,7 +645,7 @@ impl<'a> FoldIndex<'a> {
             };
             *next += 1;
             let s = &sessions[i];
-            if !drawn.insert(s.session_id.as_str()) {
+            if !drawn.insert((linker, s.session_id.as_str())) {
                 continue;
             }
             rows.push(SubtreeRow { session_id: s.session_id.clone(), depth: stack.len() - 1 });
@@ -1017,8 +1032,9 @@ pub(super) fn project_bucket(cwd: &str, projects: &[Project]) -> Option<String> 
 }
 
 /// The longest directory path the manifest walk is started from: `PATH_MAX`
-/// less room for the manifest's own `.aoide/project.json`.
-const WALK_PATH_MAX: usize = 4096 - 32;
+/// less its NUL, less the `/.aoide/project.json` a manifest adds beneath it.
+/// A directory this long still holds one; a longer one cannot.
+const WALK_PATH_MAX: usize = 4095 - "/.aoide/project.json".len();
 
 /// `cwd`, or its deepest ancestor short enough to hold a manifest. A pulled
 /// cwd is a far node's string and may be any length, while `walk_up` copies the
@@ -2546,6 +2562,58 @@ mod tests {
     }
 
     #[test]
+    fn one_far_nodes_link_does_not_blank_another_nodes_rows_in_the_same_fold() {
+        // nodea and nodec both link to nodeb's X. nodea is first, so its link
+        // is the first to reach X; nodec's link keeps X's subtree all the same.
+        let fold_b = far_doc(&tree(&[("X", None), ("Y", Some("X"))]), &[]);
+        let mut nodes = vec![
+            build_mesh_node(&node("nodea"), Ok(far_doc(&tree(&[("P", None)]), &[link("P", "nodeb", "X")])), None),
+            build_mesh_node(&node("nodeb"), Ok(fold_b), None),
+            build_mesh_node(&node("nodec"), Ok(far_doc(&tree(&[("Q", None)]), &[link("Q", "nodeb", "X")])), None),
+        ];
+        attach_subtrees(&mut nodes);
+        let rows = |n: usize| -> Vec<(&str, usize)> {
+            nodes[n].sessions[0].remote_children[0].subtree.iter().map(|r| (r.session_id.as_str(), r.depth)).collect()
+        };
+        assert_eq!(rows(0), vec![("Y", 0)], "the first node's link draws X's subtree");
+        assert_eq!(rows(2), vec![("Y", 0)], "the second node's link keeps its own rows");
+    }
+
+    #[test]
+    fn a_far_link_into_this_box_draws_none_of_its_sessions() {
+        // L2 was spawned here by L1. A far document claiming L1 as its own
+        // remote child keeps the row and draws nothing of this box's own.
+        let _env = Env::set_up("far-link-into-local");
+        let local = build_local_node(
+            &[session("L1", "/x", "idle", "1", None), session("L2", "/x", "idle", "2", Some("L1"))],
+            &[],
+            &[],
+            &[],
+            "yomi",
+        );
+        let far = build_mesh_node(&node("nodea"), Ok(far_doc(&tree(&[("P", None)]), &[link("P", "yomi", "L1")])), None);
+        let mut nodes = vec![local, far];
+        attach_subtrees(&mut nodes);
+        let link = &nodes[1].sessions[0].remote_children[0];
+        assert_eq!(link.fold, Some(Fold::Fresh), "the fold is this box's own, and it answers");
+        assert!(link.subtree.is_empty(), "L2 is this box's own session, and a far document cannot draw it");
+    }
+
+    #[test]
+    fn a_link_into_a_registered_node_never_pulled_is_not_pulled() {
+        // nodeb is registered, its probe failed and it has no cache: the link
+        // has no fold behind it, so it is shown as not pulled, not as fresh.
+        let mut nodes = vec![
+            build_mesh_node(&node("nodea"), Ok(far_doc(&tree(&[("P", None)]), &[link("P", "nodeb", "C")])), None),
+            build_mesh_node(&node("nodeb"), Err("HTTP 000".into()), None),
+        ];
+        attach_subtrees(&mut nodes);
+        let link = &nodes[0].sessions[0].remote_children[0];
+        assert_eq!(link.fold, Some(Fold::Absent));
+        assert!(render_nodes(&nodes).contains("nodeb/C (not pulled)"), "{}", render_nodes(&nodes));
+    }
+
+    #[test]
     fn a_fold_whose_parentage_loops_costs_a_wrong_row_never_a_hang() {
         // a ↔ b spawned each other; c is a's. A link into the loop draws each
         // member once and stops.
@@ -2604,11 +2672,31 @@ mod tests {
                 render_nodes(&nodes).len() + node_json(&nodes[0]).to_string().len()
             }
         }
-        let (small, _) = aoide_test_support::finishes_within(Duration::from_secs(120), cost(4_000)).expect("4k sessions");
-        let limit = (small * 20).max(Duration::from_secs(10));
+        // An absolute ceiling, not a linearity proof: a ratio against a
+        // baseline that runs in milliseconds is just the ceiling again.
+        let limit = Duration::from_secs(10);
         let (big, _) = aoide_test_support::finishes_within(limit, cost(32_000))
-            .unwrap_or_else(|| panic!("32k sessions took over {limit:?}, 4k took {small:?}: the far join is super-linear"));
-        println!("far join: 4k sessions {small:?}, 32k sessions {big:?}");
+            .unwrap_or_else(|| panic!("32k sessions took over {limit:?}: the far join is too slow"));
+        println!("far join: 32k sessions {big:?}");
+    }
+
+    /// Both renderings of a far document through `pull`, on a small stack and
+    /// timed. The env lock is taken on THIS thread: a render that outlives
+    /// `limit` is left running, but the lock is released when this returns, so
+    /// one slow test fails alone instead of holding every env-locked test.
+    /// The lock is not observed by a test: 526 call sites share it, and a
+    /// check of it races the legitimate holders, so this is structural.
+    fn render_far_within(limit: Duration, pull: PullFn) -> Option<(Duration, (Outcome, Outcome))> {
+        let _env = Env::set_up("far-render");
+        aoide_storage::node_store::save_nodes(&[node("far")]).unwrap();
+        let second = pull.clone();
+        aoide_test_support::finishes_within(limit, move || {
+            aoide_test_support::on_small_stack(move || {
+                let bare = session_roster_with(&project_invocation(), pull);
+                let hosts = session_roster_with(&hosts_invocation(&[], &[]), second);
+                (bare, hosts)
+            })
+        })
     }
 
     #[test]
@@ -2619,16 +2707,7 @@ mod tests {
         const N: usize = 200_000;
         let doc = Arc::new(far_chain(N, &[link("s0", "far", "s1")]));
         let serve = |doc: Arc<Value>| -> PullFn { Arc::new(move |_: &Node| Ok((*doc).clone())) };
-        let render = move || {
-            aoide_test_support::on_small_stack(move || {
-                let _env = Env::set_up("far-deep-chain");
-                aoide_storage::node_store::save_nodes(&[node("far")]).unwrap();
-                let bare = session_roster_with(&project_invocation(), serve(doc.clone()));
-                let hosts = session_roster_with(&hosts_invocation(&[], &[]), serve(doc));
-                (bare, hosts)
-            })
-        };
-        let (_, (bare, hosts)) = aoide_test_support::finishes_within(Duration::from_secs(180), render)
+        let (_, (bare, hosts)) = render_far_within(Duration::from_secs(180), serve(doc))
             .expect("a chain two hundred thousand deep renders in seconds, not in the square of its depth");
         for out in [&bare, &hosts] {
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
@@ -2661,9 +2740,53 @@ mod tests {
     }
 
     #[test]
+    fn within_path_max_starts_at_the_deepest_ancestor_that_can_hold_a_manifest() {
+        // Without the cut the result is the whole cwd, past what any manifest
+        // path can reach. With it, the result is the longest prefix on a
+        // component boundary that still fits, so the next component would not.
+        let cwd = format!("/{}", "a/".repeat(2_100));
+        let cut = within_path_max(&cwd);
+        assert!(cut.len() <= WALK_PATH_MAX, "{} bytes is past the bound", cut.len());
+        assert_eq!(cwd.as_bytes()[cut.len()], b'/', "the cut lands on a component boundary");
+        assert!(cut.len() + 2 > WALK_PATH_MAX, "the next component would still have fit");
+        assert_eq!(within_path_max("/short/cwd"), "/short/cwd", "a cwd that fits is walked whole");
+    }
+
+    #[test]
+    fn a_manifest_in_a_directory_just_inside_the_bound_is_found() {
+        // The manifest path of a 4070-byte directory is 4090 bytes, which a
+        // real stat accepts. A bound that stopped at 4064 would walk past it.
+        let base = std::env::temp_dir().join(format!("aoide-who-bound-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let target_len = 4070;
+        let mut dir = base.clone();
+        let mut left = target_len - base.as_os_str().len();
+        while left > 0 {
+            // Each component costs its name plus one '/'; never leave a lone '/'.
+            let cost = match left {
+                202 => 200,
+                203.. => 201,
+                _ => left,
+            };
+            dir.push("d".repeat(cost - 1));
+            left -= cost;
+        }
+        std::fs::create_dir_all(dir.join(".aoide")).unwrap();
+        let manifest = serde_json::to_string(&aoide_storage::manifest::Manifest::default()).unwrap();
+        std::fs::write(aoide_storage::manifest::manifest_path(&dir), manifest).unwrap();
+        assert_eq!(dir.as_os_str().len(), target_len);
+        let cwd = format!("{}/{}", dir.to_str().unwrap(), "z".repeat(10));
+        assert!(cwd.len() > WALK_PATH_MAX);
+        assert_eq!(project_bucket(&cwd, &[]), Some("d".repeat(dir.file_name().unwrap().len())));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn a_cwd_past_path_max_still_finds_the_manifest_above_it() {
-        // The ancestors short enough to be real are what the walk answers
-        // from, so the bound moves where it starts and not what it finds.
+        // A regression guard, not the bound's proof: the ancestors past the
+        // cut could not hold a manifest, so the answer is the same with or
+        // without it. `within_path_max_starts_at_the_deepest_ancestor...` and
+        // `a_manifest_in_a_directory_just_inside_the_bound...` prove the cut.
         let root = std::env::temp_dir().join(format!("aoide-who-long-cwd-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();

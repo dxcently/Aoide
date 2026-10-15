@@ -364,11 +364,11 @@ mod tests {
         // Eight times the sessions, about eight times the time; a scan of
         // every edge per session costs sixty-four.
         let cost = |n: usize| move || node_cached_sessions(&chain_document(n)).len();
-        let (small, _) = aoide_test_support::finishes_within(Duration::from_secs(120), cost(8_000)).expect("8k sessions");
-        let limit = (small * 20).max(Duration::from_secs(10));
+        // An absolute ceiling, not a linearity proof (see who.rs's far join).
+        let limit = Duration::from_secs(10);
         let (big, _) = aoide_test_support::finishes_within(limit, cost(64_000))
-            .unwrap_or_else(|| panic!("64k sessions took over {limit:?}, 8k took {small:?}: the extraction is super-linear"));
-        println!("node_cached_sessions: 8k sessions {small:?}, 64k sessions {big:?}");
+            .unwrap_or_else(|| panic!("64k sessions took over {limit:?}: the extraction is too slow"));
+        println!("node_cached_sessions: 64k sessions {big:?}");
     }
 
     #[test]
@@ -383,11 +383,10 @@ mod tests {
                 unresolved_remote("send", "far", "twin", &sess, Resolution::Ambiguous(ids)).message.len()
             }
         };
-        let (small, len) = aoide_test_support::finishes_within(Duration::from_secs(120), cost(8_000)).expect("8k candidates");
-        assert!(len > 8_000 * 10, "the refusal still labels every candidate");
-        let limit = (small * 20).max(Duration::from_secs(10));
-        let (big, _) = aoide_test_support::finishes_within(limit, cost(128_000))
-            .unwrap_or_else(|| panic!("128k candidates took over {limit:?}, 8k took {small:?}: the refusal is super-linear"));
-        println!("unresolved_remote: 8k candidates {small:?}, 128k candidates {big:?}");
+        let limit = Duration::from_secs(10);
+        let (big, len) = aoide_test_support::finishes_within(limit, cost(128_000))
+            .unwrap_or_else(|| panic!("128k candidates took over {limit:?}: the refusal is too slow"));
+        assert!(len > 128_000 * 10, "the refusal still labels every candidate");
+        println!("unresolved_remote: 128k candidates {big:?}");
     }
 }

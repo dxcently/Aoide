@@ -93,11 +93,16 @@ impl Camera {
     /// World rect → scaled rect, absolute (the pan is not applied yet).
     /// Both edges scale before the width is taken, so adjacent cards stay
     /// adjacent and no card loses or gains a cell to rounding.
+    ///
+    /// Widened to i64 for the product, and clamped back to i32 at the edge: a
+    /// far root can sit tens of millions of cells out, and `x * 150` alone
+    /// overflows an i32 past about 14 million.
     pub fn scale_rect(&self, r: WorldRect) -> WorldRect {
-        let s = self.scale();
-        let x = r.x * s / 100;
-        let y = r.y * s / 100;
-        WorldRect::new(x, y, r.right() * s / 100 - x, r.bottom() * s / 100 - y)
+        let s = i64::from(self.scale());
+        let edge = |v: i64| i32::try_from(v * s / 100).unwrap_or(if v < 0 { i32::MIN } else { i32::MAX });
+        let (x, y) = (edge(i64::from(r.x)), edge(i64::from(r.y)));
+        let (right, bottom) = (edge(i64::from(r.x) + i64::from(r.w)), edge(i64::from(r.y) + i64::from(r.h)));
+        WorldRect::new(x, y, right.saturating_sub(x), bottom.saturating_sub(y))
     }
 
     /// World rect → viewport-relative rect, given the resolved origin.
@@ -537,6 +542,17 @@ mod tests {
     }
 
     #[test]
+    fn scale_rect_past_the_i32_range_clamps_instead_of_wrapping() {
+        // 1e9 cells at 150% is 1.5e9: fits. 2e9 would wrap in i32 and must not.
+        let cam = Camera { pan: None, zoom: 2 };
+        let near = cam.scale_rect(WorldRect::new(1_000_000_000, 0, 24, 6));
+        assert_eq!((near.x, near.w), (1_500_000_000, 36));
+        let far = cam.scale_rect(WorldRect::new(2_000_000_000, 0, 24, 6));
+        assert_eq!(far.x, i32::MAX, "clamped, not wrapped negative");
+        assert!(far.w >= 0);
+    }
+
+    #[test]
     fn a_rank_of_thousands_of_cards_is_placed_in_linear_time() {
         // Every card wants the same slot on the same rank, so each one walks
         // past all the cards before it: stepping lane by lane costs the square
@@ -549,19 +565,19 @@ mod tests {
                 Positions::default().place(&fresh, CARD, LANE)
             }
         }
-        let (small, placed) = aoide_test_support::finishes_within(Duration::from_secs(30), crowd(2_000))
-            .expect("2k cards");
-        assert_eq!(placed.len(), 2_000);
-        let limit = (small * 20).max(Duration::from_secs(10));
+        // An absolute ceiling, not a linearity proof: a ratio against a
+        // baseline that runs in milliseconds is just the ceiling again.
+        let limit = Duration::from_secs(10);
         let (big, placed) = aoide_test_support::finishes_within(limit, crowd(16_000))
-            .unwrap_or_else(|| panic!("16k cards took over {limit:?}, 2k took {small:?}: the nudge is super-linear"));
+            .unwrap_or_else(|| panic!("16k cards took over {limit:?}: the nudge is too slow"));
+        assert_eq!(placed.len(), 16_000);
         let mut xs: Vec<i32> = placed.iter().map(|p| p.x).collect();
         xs.sort_unstable();
         assert!(
             xs.windows(2).all(|w| w[1] - w[0] >= CARD.0),
             "no two cards on a rank overlap"
         );
-        println!("place: 2k cards {small:?}, 16k cards {big:?}");
+        println!("place: 16k cards {big:?}");
     }
 
     #[test]

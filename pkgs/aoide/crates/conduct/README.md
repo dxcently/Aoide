@@ -1439,15 +1439,19 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   is probed and before any rendering or filter, joins each `remoteChildren` row
   to the probed fold by `(node name, sessionId)` and marks it `Fold::Fresh`,
   `Fold::Stale` (the fold's own `NodeView.stale`, i.e. a cache past
-  `node_store::NODE_CACHE_TTL_SECS`) or `Fold::Absent` (no fold at all). Both
+  `node_store::NODE_CACHE_TTL_SECS`) or `Fold::Absent` (no fold at all: the
+  node is not registered, or it is registered and never pulled). Both
   renderings then draw the far chain indented under the parent's own row —
   `par1`, `nodeb/C`, then C's far descendants from that fold's own `spawned`
   edges — and `session_view_json` carries the same join as `fold` + `subtree` on
   the entry, so the view and `--json` cannot disagree; a row the fold cannot
   back is shown `(not pulled)`, never hidden. The far document is the far
   node's to arrange, so the join is bounded by its size and not by its shape:
-  each fold is indexed once (parent to children), each far session is drawn
-  under the FIRST link that reaches it, and a link's `subtree` is a flat
+  each fold is indexed once (parent to children), and within one linking node
+  each far session is drawn under the first of that node's links that reaches
+  it, so another node's link to the same session keeps its own rows. A link
+  from a far node into this box's own fold draws no rows: a far document may
+  not re-home a local session. A link's `subtree` is a flat
   preorder list of `{sessionId, depth}` rows walked on an explicit stack. A
   chain a hundred thousand levels deep therefore costs its length, never the
   stack. Indentation is drawn to 32 levels and then `…` (every row keeps its

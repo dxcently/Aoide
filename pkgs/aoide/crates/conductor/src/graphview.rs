@@ -842,8 +842,10 @@ fn walk(
 /// The order a parent's children land in is the order a scan of the document
 /// would reach them with the parent already placed: those after the parent
 /// first, in document order, then those before it. A root's children, and a
-/// broken-out loop member's, are all "after". One pass over the sessions and
-/// one over their links: nothing here searches.
+/// broken-out loop member's, are all "after". A repeated id expands once, at
+/// its first popped occurrence, so its children follow that place (see
+/// `conductor/AGENTS.md`). One pass over the sessions and one over their
+/// links: nothing here searches.
 fn rank_far(
     sessions: &[crate::app::RosterSession],
     far: &impl Fn(&str) -> String,
@@ -3556,20 +3558,22 @@ mod tests {
                 m.nodes.len()
             }
         }
-        let (small, nodes) = aoide_test_support::finishes_within(Duration::from_secs(120), build(4_000)).expect("4k sessions");
-        assert_eq!(nodes, 4_001);
-        let limit = (small * 20).max(Duration::from_secs(10));
+        // An absolute ceiling, not a linearity proof: a ratio against a
+        // baseline that runs in milliseconds is just the ceiling again.
+        let limit = Duration::from_secs(10);
         let (big, nodes) = aoide_test_support::finishes_within(limit, build(32_000))
-            .unwrap_or_else(|| panic!("32k sessions took over {limit:?}, 4k took {small:?}: the far layout is super-linear"));
+            .unwrap_or_else(|| panic!("32k sessions took over {limit:?}: the far layout is too slow"));
         assert_eq!(nodes, 32_001);
-        println!("far model: 4k sessions {small:?}, 32k sessions {big:?}");
+        println!("far model: 32k sessions {big:?}");
     }
 
     #[test]
     fn far_sessions_hang_under_their_spawner_in_the_order_the_document_reads() {
-        // Document order is the order, with one rotation: a spawner that is
-        // itself listed after some of its children shows the ones listed
-        // after it first. A loop with no root is broken out at its first row.
+        // Document order is the order, with one rotation for a hung spawner:
+        // one placed under another, and itself listed after some of its
+        // children, shows the ones listed after it first. Roots and a loop's
+        // breakout keep document order: p is a root, so c1 precedes p's
+        // children c2 and q, and the loop is broken out at its first row.
         let doc = [
             ("c1", Some("p")),
             ("p", None),

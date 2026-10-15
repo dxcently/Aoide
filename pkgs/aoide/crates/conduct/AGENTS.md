@@ -2042,16 +2042,28 @@ in the message.
   `Debug` and `PartialEq` do not recurse either. (2) Index once and probe:
   `spawned_into` for the `spawned` edges, `FoldIndex` for parent to children;
   never `iter().find`/`any`/`contains` over a far list inside a loop over a
-  far list. (3) Visit a node once: `FoldIndex::drawn` is shared across a
-  fold's links, so a fold's rows never outnumber its sessions however many
-  links point in. (4) Bound what is drawn, never what is kept: indentation
-  clips at `INDENT_LEVELS` and the JSON nests to the same depth, but no
-  session is dropped. A far string that reaches the filesystem is bounded
-  too: `project_bucket` starts `walk_up` at the deepest ancestor of a cwd that
-  fits `PATH_MAX` (`within_path_max`). The proofs are `a_200k_deep_far_chain_*`
-  on a 256 KiB stack (`aoide_test_support::on_small_stack`) and the ratio
-  tests beside each site (`aoide_test_support::finishes_within`); a new walk
-  over a far document gets both.
+  far list. (3) Claim per linking node: `FoldIndex::drawn` is keyed by
+  (linking node, session), so one node's links draw each of a fold's sessions
+  at most once however many of them point in, and another node's link to the
+  same session keeps its rows. A far node's link never draws this box's own
+  sessions: `attach_subtrees` leaves its rows empty. (4) Bound what is drawn,
+  never what is kept: indentation clips at `INDENT_LEVELS` and the JSON nests
+  to the same depth, but no session is dropped. A far string that reaches the
+  filesystem is bounded too: `project_bucket` starts `walk_up` at the deepest
+  ancestor of a cwd that fits `WALK_PATH_MAX` (`within_path_max`), a
+  directory whose manifest still stats. The proofs are `a_200k_deep_far_chain_*`
+  on a 256 KiB stack (`aoide_test_support::on_small_stack`), run with the env
+  lock taken on the test thread, and an absolute `finishes_within` ceiling
+  beside each site. A ceiling is not a linearity proof: its baseline runs in
+  milliseconds, so a ratio never governs and none is claimed. A new walk over
+  a far document gets both.
+- **Residual: a cached far document nests inside the local one.** A fresh far
+  node's cached graph is copied verbatim into the local document (`doc.rs`),
+  and `graphSummary` serves that copy, so each relay hop adds a few levels of
+  nesting. A document already near the 128-level parse limit fails the next
+  hop's parse (`unparseable response`), which marks that node unreachable for
+  its downstream peers. It is a refusal, never a stack overflow. Capping the
+  embed is the fix if it comes to matter.
 - **A ledger row's doom belongs to the caller that lands the roster.** The
   retain is `doc.rs::drop_remote_child_rows`, called by BOTH roster-exit paths
   (`reap_inner`, `session prune`) AFTER their `sessions.json` write succeeds —
