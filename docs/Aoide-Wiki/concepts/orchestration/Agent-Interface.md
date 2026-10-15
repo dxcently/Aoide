@@ -38,6 +38,11 @@ The MCP layer is deliberately optional and agent-added:
 | Per-session | agents spawn `aoide mcp serve --stdio` |
 | Network MCP | user-only; never agent-enabled |
 
+Over MCP the session read commands (roster, `session find`, `graph`) answer
+only for the caller's own attested subtree: its session and every session under
+it by attested spawn edges. An unattested caller sees nothing. `mail` read is
+not opened to MCP, so the caller cannot read a mailbox it does not own.
+
 An MCP caller is attested the way a CLI caller is, and never approves. The stdio
 server dispatches in its own process, so the gate walks that process's ancestry
 to the sealed session it runs under. A send from a server launched under a

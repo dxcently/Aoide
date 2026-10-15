@@ -653,6 +653,9 @@ Contract guarantees:
   runs, and so is a flag that is present through a door its `doors` exclude.
   The MCP tool list and the A2A AgentCard list only the commands that declare
   `mcp` and `a2a`, and hide the flags a door does not open.
+  Over MCP, the session read commands (`session` roster, `session find`,
+  `graph`) answer only for the caller's own attested subtree; they are
+  clipped to it, not closed. `mail` read stays closed to MCP.
 - Declared validation (all **additive**, same discipline: each key is omitted
   from `schema --json` at its default, so a command that declares none
   serializes byte-identical to before). On a flag: `value` (the `<placeholder>`

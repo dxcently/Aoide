@@ -12,6 +12,7 @@
 use super::common::{clean_line, clip, load_inputs, strip_unsafe};
 use super::doorbell::conducted_ancestor;
 use super::model::{merged_sessions, HookRecord, Project, SessionRecord};
+use super::send::{in_read_scope, read_scope, real_attested_sender};
 use super::who::{build_local_node, cached_node, glyph, project_of, remote_project, session_presence, SessionView};
 use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::state::canonical_state;
@@ -1362,11 +1363,21 @@ pub(crate) fn build_index(input: Inputs) -> Loaded {
 /// Read this box's stage, every registered node's cache and the mailbase, and
 /// join them. Reads files only: no node is dialled, no lock is taken, and the
 /// mail is peeked (`peek_cursors`, `peek_base`), never read through a cursor.
-fn load_index(host: &str) -> Result<Loaded, Outcome> {
+fn load_index(
+    host: &str,
+    inv: &Invocation,
+    caller: impl Fn(&[SessionRecord]) -> Option<String>,
+) -> Result<Loaded, Outcome> {
     let (p, s, h) = load_inputs("session find")?;
-    let (nodes, registry_error) = match node_store::read_nodes() {
-        Ok(nodes) => (nodes, None),
-        Err(why) => (Vec::new(), Some(why)),
+    // An MCP read sees its own attested subtree and no node's cache: the
+    // rows of other nodes are not the caller's to see (`read_scope`).
+    let scope = read_scope(inv, &s.sessions, caller);
+    let sessions = s.sessions.into_iter().filter(|r| in_read_scope(&scope, &r.session_id)).collect();
+    let hooks = h.hooks.into_iter().filter(|k| in_read_scope(&scope, &k.session_id)).collect();
+    let (nodes, registry_error) = match (&scope, node_store::read_nodes()) {
+        (Some(_), _) => (Vec::new(), None),
+        (None, Ok(nodes)) => (nodes, None),
+        (None, Err(why)) => (Vec::new(), Some(why)),
     };
     let caches = nodes.iter().map(|n| node_store::read_node_cache(&n.name)).collect();
     let mail = match (mail::peek_cursors(), mail::peek_base()) {
@@ -1379,8 +1390,8 @@ fn load_index(host: &str) -> Result<Loaded, Outcome> {
         nodes,
         registry_error,
         projects: p.projects,
-        sessions: s.sessions,
-        hooks: h.hooks,
+        sessions,
+        hooks,
         caches,
         mail,
         now_epoch,
@@ -1394,12 +1405,18 @@ pub fn session_find(inv: &Invocation) -> Outcome {
 
 /// [`session_find`] with this box's name passed in, so a test never reads it.
 pub(crate) fn session_find_with(inv: &Invocation, host: &str) -> Outcome {
+    session_find_as(inv, host, real_attested_sender)
+}
+
+/// [`session_find_with`] with the caller's attested session injected, so a test
+/// names the caller instead of walking a live process ancestry.
+pub(crate) fn session_find_as(inv: &Invocation, host: &str, caller: impl Fn(&[SessionRecord]) -> Option<String>) -> Outcome {
     let cmd = "session find";
     let query = match words(inv).and_then(|words| parse(&words)) {
         Ok(q) => q,
         Err(e) => return refused(cmd, Kind::Usage, e),
     };
-    let loaded = match load_index(host) {
+    let loaded = match load_index(host, inv, caller) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
@@ -2692,6 +2709,7 @@ mod tests {
     use aoide_protocol::output::Status;
     use aoide_storage::node_store::{node_cache_dir, node_cache_path, nodes_path, save_nodes};
     use aoide_storage::stage::sessions_path;
+    use std::collections::BTreeSet;
 
     /// A fresh state, stage and runtime directory. The caller holds the env lock.
     fn isolated(tag: &str) -> (std::path::PathBuf, EnvVars) {
@@ -3393,6 +3411,42 @@ mod tests {
     }
 
     #[test]
+    fn an_mcp_caller_sees_its_own_attested_subtree_and_no_sibling_or_forged_child() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("find-subtree");
+        let cwd = root.to_string_lossy().to_string();
+        let me = session("me-id", &cwd, "working", "2026-10-12T09:00:00Z", None);
+        let mut kid = session("kid-id", &cwd, "idle", "2026-10-12T09:01:00Z", Some("me-id"));
+        kid.attested_spawner = Some("me-id".into());
+        let sibling = session("sib-id", &cwd, "idle", "2026-10-12T09:02:00Z", None);
+        let forged = session("forged-id", &cwd, "idle", "2026-10-12T09:03:00Z", Some("me-id"));
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![me, kid, sibling, forged], ..Default::default() }).unwrap();
+
+        let mcp = Invocation { door: Door::Mcp, ..invocation(&["session", "find"], &[]) };
+        let out = session_find_as(&mcp, "osaka", |_| Some("me-id".to_string()));
+        let ids: BTreeSet<String> = out.data.as_ref().expect("data")["sessions"]
+            .as_array()
+            .expect("sessions ride on mcp")
+            .iter()
+            .map(|s| s["sessionId"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, BTreeSet::from(["me-id".to_string(), "kid-id".to_string()]), "{out:?}");
+    }
+
+    #[test]
+    fn an_unattested_mcp_caller_sees_no_session_at_all() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("find-unattested");
+        let brave = session("brave-id", &root.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![brave], ..Default::default() }).unwrap();
+
+        let mcp = Invocation { door: Door::Mcp, ..invocation(&["session", "find"], &[]) };
+        let out = session_find_as(&mcp, "osaka", |_| None);
+        assert_eq!(out.status, Status::Ok, "{out:?}");
+        assert_eq!(out.data.as_ref().expect("data")["sessions"], json!([]));
+    }
+
+    #[test]
     fn an_mcp_caller_gets_row_json_without_the_flag_and_the_cli_does_not() {
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _env) = isolated("find-e-door");
@@ -3402,13 +3456,13 @@ mod tests {
         let cli = session_find_with(&invocation(&["session", "find"], &[]), "osaka");
         assert!(cli.data.as_ref().expect("the answer carries its data").get("sessions").is_none());
         let mcp = Invocation { door: Door::Mcp, ..invocation(&["session", "find"], &[]) };
-        let out = session_find_with(&mcp, "osaka");
+        let out = session_find_as(&mcp, "osaka", |_| Some("brave-id".to_string()));
         assert_eq!(out.status, Status::Ok, "{out:?}");
         let data = out.data.as_ref().expect("the answer carries its data");
         assert_eq!(data["sessions"][0]["sessionId"], "brave-id");
         assert!(data["sessions"][0].get("matched").is_some(), "a machine reader gets each row's matched terms");
         let related = Invocation { door: Door::Mcp, ..flag_invocation(&["session", "find"], &[("related", "brave-id")]) };
-        let data = session_find_with(&related, "osaka").data.expect("the answer carries its data");
+        let data = session_find_as(&related, "osaka", |_| Some("brave-id".to_string())).data.expect("the answer carries its data");
         assert_eq!(data["sessions"][0]["sessionId"], "brave-id");
         assert_eq!(data["related"], json!([]));
     }
@@ -3996,7 +4050,7 @@ mod tests {
         write_stage(&sessions_path(), &SessionsFile { sessions: rows, ..Default::default() }).unwrap();
 
         let mcp = Invocation { door: Door::Mcp, ..invocation(&["session", "find"], &["agent:claude state:working"]) };
-        let out = session_find_with(&mcp, "osaka");
+        let out = session_find_as(&mcp, "osaka", |_| Some("brave-id".to_string()));
         assert_eq!(out.status, Status::Ok, "{out:?}");
         let data = out.data.as_ref().expect("the answer carries its data");
         let ids: Vec<&Value> = data["sessions"].as_array().expect("sessions ride on mcp").iter().map(|s| &s["sessionId"]).collect();
@@ -4035,9 +4089,8 @@ mod tests {
         assert_eq!(line, r#"cc:"pr 41""#);
 
         let mut mcp = Invocation { door: Door::Mcp, ..invocation(&["session", "find"], &[line]) };
-        let refused = find_cmd.check("aoide", &mut mcp).expect_err("session find is closed to mcp until its own-scope read lands");
-        assert_eq!(refused.kind, Kind::Usage);
-        let out = session_find_with(&mcp, "osaka");
+        find_cmd.check("aoide", &mut mcp).expect("the declared arguments accept the example");
+        let out = session_find_as(&mcp, "osaka", |_| Some("qa-id".to_string()));
         assert_eq!(out.status, Status::Ok, "{out:?}");
         let data = out.data.as_ref().expect("the answer carries its data");
         let ids: Vec<&Value> = data["sessions"].as_array().expect("sessions ride on mcp").iter().map(|s| &s["sessionId"]).collect();

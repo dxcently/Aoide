@@ -7,7 +7,7 @@ use super::session_store::{anchored_refusal, live_harness_anchoring};
 use super::doc::{build_graph, drop_remote_child_rows, prune_done_sparing, render, restage_graph, would_cycle};
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
-    write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, STAGE_GRAPH_VERSION,
+    write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, SessionRecord, STAGE_GRAPH_VERSION,
 };
 use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::Outcome;
@@ -39,10 +39,28 @@ pub(in crate::graph) fn local_daemon(inv: &Invocation) -> Option<Outcome> {
 
 /// Bare `graph` — render the DAG (tree in text, graph document in `--json`).
 pub fn view(inv: &Invocation) -> Outcome {
-    let (p, s, h) = match load_inputs("graph") {
+    view_as(inv, super::send::real_attested_sender)
+}
+
+/// [`view`] with the caller's attested session injected, so a test names the
+/// caller. An MCP read draws only its scope's sessions and hooks, and a
+/// project's lead is blanked when that lead lies outside the scope.
+pub(crate) fn view_as(inv: &Invocation, caller: impl Fn(&[SessionRecord]) -> Option<String>) -> Outcome {
+    let (mut p, mut s, mut h) = match load_inputs("graph") {
         Ok(v) => v,
         Err(e) => return e,
     };
+    let scope = super::send::read_scope(inv, &s.sessions, caller);
+    if scope.is_some() {
+        use super::send::in_read_scope;
+        s.sessions.retain(|r| in_read_scope(&scope, &r.session_id));
+        h.hooks.retain(|k| in_read_scope(&scope, &k.session_id));
+        for project in &mut p.projects {
+            if project.lead.as_deref().is_some_and(|lead| !in_read_scope(&scope, lead)) {
+                project.lead = None;
+            }
+        }
+    }
     let focus = inv.flags.get("focus").map(String::as_str);
     let doc = build_graph(&p.projects, &s.sessions, &h.hooks);
     let tree = render(&p.projects, &s.sessions, &h.hooks, focus);
@@ -2087,6 +2105,33 @@ mod tests {
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn an_mcp_graph_draws_the_callers_subtree_and_blanks_an_outside_lead() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = unique_stage("graph-mcp");
+        let state = unique_stage("graph-mcp-state");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        let cwd = stage.to_string_lossy().to_string();
+        let me = session("me-id", &cwd, "working", "2026-10-12T09:00:00Z", None);
+        let mut kid = session("kid-id", &cwd, "idle", "2026-10-12T09:01:00Z", Some("me-id"));
+        kid.attested_spawner = Some("me-id".into());
+        let sibling = session("sib-id", &cwd, "idle", "2026-10-12T09:02:00Z", None);
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![me, kid, sibling], ..Default::default() }).unwrap();
+        let mut projects = fixture_projects();
+        projects[0].lead = Some("sib-id".into());
+        write_stage(&projects_path(), &ProjectsFile { projects, ..Default::default() }).unwrap();
+
+        let mcp = Invocation { path: vec!["graph".into()], args: vec![], flags: Default::default(), door: Door::Mcp };
+        let out = view_as(&mcp, |_| Some("me-id".to_string()));
+        let text = out.data.as_ref().expect("data").to_string();
+        assert!(text.contains("kid-id") && text.contains("me-id"), "{text}");
+        assert!(!text.contains("sib-id"), "a sibling and its lead are not the caller's: {text}");
+        let unattested = view_as(&mcp, |_| None);
+        assert!(!unattested.data.as_ref().expect("data").to_string().contains("kid-id"), "unattested sees nothing");
     }
 
     // ── P-14 M1: host membership (`--host <node>` on add/edit/remove) ──

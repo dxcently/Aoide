@@ -45,6 +45,7 @@ pub fn register(r: &mut Registry) {
             "graph",
             "graph --focus session:<id>",
         ],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["project", "add"],
@@ -393,6 +394,7 @@ pub fn register(r: &mut Registry) {
             "session --hosts",
             "session --hosts --all",
         ],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     // ── session grant: the GRANT family (session-surface redesign,
     // command-defrag lane X) — a POSITIONAL <kind> grammar (`secrets
@@ -493,6 +495,7 @@ pub fn register(r: &mut Registry) {
             "session find parent:warm-birch",
             "session find --related brave-otter",
         ],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 

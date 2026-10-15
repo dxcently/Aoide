@@ -142,6 +142,19 @@ in the message.
   `the_a2a_door_parks_for_the_parent_a_resolver_would_name_and_the_cli_delivers`
   and, through the real resolver,
   `the_real_resolver_attests_an_mcp_send_by_the_callers_sealed_ancestor`.
+- **An MCP read is clipped to the caller's own subtree.** `read_scope`
+  (`graph/send.rs`) gives the set the caller may see: its attested session
+  (`real_attested_sender`, never a claimed id) and every session under it by
+  `attested_parent_of` edges. `in_read_scope` tests membership. `session find`
+  (`load_index`), the roster (`collect_roster`) and the graph (`view_as`) take
+  the set; an unattested caller gets the empty set and sees nothing. Off MCP
+  the scope is `None` and nothing is clipped. A forged `parent` without the
+  spawn stamp adds nothing. Mail read stays closed to MCP: mailbox ownership
+  rests on cursors and wrap (`mail_facts`), which is not yet a per-session
+  rule. Pinned by `an_mcp_caller_sees_its_own_attested_subtree_and_no_sibling_or_forged_child`,
+  `an_unattested_mcp_caller_sees_no_session_at_all`,
+  `an_mcp_roster_shows_the_callers_subtree_and_probes_no_node` and
+  `an_mcp_graph_draws_the_callers_subtree_and_blanks_an_outside_lead`.
 - **A door that cannot approve never moves a parent edge and never launches
   a command of its own choosing.** The attested rules read the unsealed
   `parentSessionId`, so rewriting it IS approving. Every path that sets it is

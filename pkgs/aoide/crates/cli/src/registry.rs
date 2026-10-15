@@ -552,7 +552,7 @@ mod tests {
         let tools = aoide_server::mcp::tool_list(&r);
         let mut names: Vec<String> = tools["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
         names.sort();
-        let mut expected = vec!["guide", "schema", "send", "session.watch", "soundcheck", "spawn"];
+        let mut expected = vec!["graph", "guide", "schema", "send", "session", "session.find", "session.watch", "soundcheck", "spawn"];
         expected.sort();
         assert_eq!(names, expected);
     }
@@ -578,7 +578,7 @@ mod tests {
             door: aoide_protocol::audit::Door::Cli,
         };
         let outcome = crate::dispatch::dispatch(&inv);
-        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 6, "{outcome:?}");
+        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 9, "{outcome:?}");
     }
 
     /// Golden snapshot: the commands an MCP caller may list and call. Every
@@ -588,7 +588,7 @@ mod tests {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().filter(|c| c.opens(aoide_protocol::audit::Door::Mcp)).map(|c| c.dotted()).collect();
         got.sort();
-        let mut expected = vec!["guide", "schema", "send", "session.watch", "soundcheck", "spawn"];
+        let mut expected = vec!["graph", "guide", "schema", "send", "session", "session.find", "session.watch", "soundcheck", "spawn"];
         expected.sort();
         assert_eq!(got, expected, "MCP-open set drifted from the golden snapshot");
     }
