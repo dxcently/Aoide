@@ -722,14 +722,18 @@ by decision — no embedded database yet
   order this module's own tier-5 `node/<rest>` grammar went through).
 - `mail` — the addressed, signed, append-only mailbase (messaging plan P-M1,
   `docs/architecture/MAIL.md`, CONTRACTS.md §4's `state/mail/` subsection):
-  `base.jsonl`/`cursors.json`/`seen.jsonl` under `state/mail/`, one entry per
-  envelope (header, text, ed25519 `sig`, sha256 `msgid` over the signed bytes —
-  MAIL.md's "The envelope" is the formula). Every write funnels through one
-  `with_lock` choke point — under `fs::try_stage_lock`, migrate a legacy
+  `base.jsonl`/`cursors.json`/`seen.jsonl`/`seq` under `state/mail/`, one entry
+  per envelope (header, text, ed25519 `sig`, sha256 `msgid` over the signed
+  bytes — MAIL.md's "The envelope" is the formula). Every write funnels through
+  one `with_lock` choke point — under `fs::try_stage_lock`, migrate a legacy
   `inbox.json` if not yet done (skipping any row whose `msgid` is already in
   `seen.jsonl`, so a retry after a crash mid-migration never re-files one),
-  truncate any torn tail, append, fsync, then append `seen.jsonl` — so a crash
-  between the two appends is re-accepted next time, never lost.
+  issue the next `seq` from the `seq` counter (written durably first), append
+  through `aoide_protocol::feed::append_line` (which cuts a torn tail and
+  fsyncs), then append `seen.jsonl`. A crash between the last two leaves a base
+  line whose `msgid` is unseen, and a re-offer files it again: at-least-once,
+  never lost. Reads go through `feed::read_lines`, which works on bytes, so a
+  torn multi-byte tail cannot wedge them.
   `mail::file_receipt` is the shared seam `conduct`'s `deliver_local` files a
   delivered message through; `mail::file_letter` is `mail send`'s own engine.
   Keep-all: `mail rm --older-than` is the only pruning, and it never touches

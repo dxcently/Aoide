@@ -933,7 +933,7 @@
   it never runs `migrate_if_needed`/`migrate_cursors_if_needed`: a legacy flat
   `cursors.json` reads as `None` (unknown), never migrated and never as an
   empty map. `peek_base` counts bytes up to the last newline only, the same
-  line `truncate_torn_tail` keeps, so a peek never reports a line the next
+  line `feed::append_line` keeps, so a peek never reports a line the next
   write would remove. `peek_cursors` drops the pseudo-reader key and omits a
   name left with no reader. Don't route a peek through `read_base`'s locked
   path: find takes no lock, and a peek that waits on a writer stalls the page.

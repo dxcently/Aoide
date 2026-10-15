@@ -264,6 +264,8 @@ base.jsonl      append-only, one entry per line, immutable once written
 cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
 seen.jsonl      one `{"msgid","receivedAt"}` per line, append-only; dedup
                 memory that outlives pruning, loaded once per process
+seq             the last sequence number issued, ASCII decimal, written
+                before the line it numbers
 receipts.seen   one `[signer, originMesh, ackedMsgid]` per line, append-only:
                 one line per receipt filed, so its read grows with the
                 letters this box has sent, never with the base
@@ -278,7 +280,9 @@ An entry is an envelope plus local facts:
 ```
 
 - `seq` is local to the node, like an NNTP article number — never crosses
-  a link. It is `last line's seq + 1`, read under the lock.
+  a link. It is the next number in the `seq` counter, issued under the lock:
+  the counter is never reset by a prune, and a line an older binary appended
+  is counted too.
 - Three processes write this store: the `aoided` timer, the `aoide a2a
   serve` door (a separate unit, `modules/nucleus/aoided.nix`), and the
   CLI (`mail send`, `mail read`). **Every mutation of the mailbase or an
@@ -290,13 +294,14 @@ An entry is an envelope plus local facts:
   unlocked. P-M1 adds it beside the existing helper, which keeps its
   fail-open shape for the callers that chose it. Three sessions on one
   box cannot make two append at once.
-- Write order is what makes a crash safe: under the lock, truncate a torn
-  tail of `base.jsonl` to the last complete line, append the entry,
-  fsync, THEN append to `seen.jsonl`. A `seen` line whose `msgid` is
-  absent from the base is a crash between those two writes, and that
-  `msgid` is accepted again. The reverse order would lose mail. Only
-  the write path truncates; a reader skips a torn tail and writes
-  nothing, like every other JSONL reader here.
+- Write order is what makes a crash safe: under the lock, write the new
+  `seq`, append the entry to `base.jsonl` and fsync (a torn tail is cut
+  first), THEN append to `seen.jsonl`. A base line whose `msgid` is absent
+  from `seen` is a crash between those two writes, and a re-offer of that
+  `msgid` files it again: at-least-once, never lost. The reverse order
+  would lose mail. Only the write path cuts a torn tail; a reader drops a
+  final line with no newline, skips any line that does not parse, and
+  writes nothing.
 - All three files resolve through the same `state_dir()`; the timer, the
   door unit, and the CLI must see one directory. P-M1's live gate checks
   the unit environments agree, not just the code.

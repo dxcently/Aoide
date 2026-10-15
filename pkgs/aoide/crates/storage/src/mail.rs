@@ -48,26 +48,28 @@
 //!
 //! ## The store
 //!
-//! Three files under `state_dir()/mail/` (MAIL.md "Store"):
+//! Files under `state_dir()/mail/` (MAIL.md "Store"):
 //!
 //! ```text
 //! base.jsonl      append-only, one Entry per line, immutable once written
 //! cursors.json    { "<name>": { "<reader>": { "seq": n } } }
 //! seen.jsonl      one {"msgid","receivedAt"} per line, append-only
+//! seq             the last sequence number issued, ASCII decimal
 //! ```
 //!
-//! **Write order, under the lock, no other:** [`truncate_torn_tail`] →
-//! append the entry → `fsync` → append to `seen.jsonl` ([`append_base_line`]
-//! then [`append_seen_line`], both inside [`file_entry`]). A `seen` line
-//! whose `msgid` is absent from the base is a crash between the two writes,
-//! and that `msgid` is accepted again — the reverse order would lose mail.
-//! Only the write path truncates a torn tail (ruling 9); every reader here
-//! ([`read_entries_unlocked`]) tolerates and skips a malformed trailing
-//! line and writes nothing, exactly as [`crate::ledger::read_ledger`]
-//! already does — `crate::ledger`'s `append_ledger_entry`/`read_ledger`
-//! pair is this crate's existing append-only-JSONL precedent; this module
-//! adds the fsync-before-seen ordering and the torn-tail truncation that
-//! precedent doesn't need.
+//! **Write order, under the lock, no other:** the counter ([`next_seq`]) is
+//! written first → the line is appended and fsynced by
+//! [`feed::append_line`], which cuts a torn tail before it writes → the `seen`
+//! line is appended ([`file_entry`]). A crash after the base fsync and before
+//! the `seen` line leaves a base line whose `msgid` is not in `seen`, and a
+//! re-offer of that `msgid` files it again (at-least-once). The reverse order
+//! would lose mail: a crash would leave `seen` claiming a letter the base never
+//! received, and the re-offer would be refused as a duplicate. Readers
+//! ([`read_entries_unlocked`]) read bytes, drop a final segment with no
+//! newline, and skip any line that does not parse; they write nothing.
+//! `crate::ledger`'s `append_ledger_entry`/`read_ledger` pair is this crate's
+//! existing append-only-JSONL precedent; this module adds the counter and
+//! the fsync-before-seen ordering that precedent doesn't need.
 //!
 //! **Every mutation AND every read funnels through [`with_lock`]**, one
 //! process-wide [`crate::fs::try_stage_lock`] acquisition — the SAME
@@ -111,7 +113,8 @@
 //! spool flavor a send may carry rather than a command of its own.
 
 use crate::display;
-use crate::fs::{atomic_write, state_dir};
+use aoide_protocol::feed;
+use crate::fs::{atomic_write, atomic_write_private, state_dir};
 use crate::identity;
 use crate::stage::{load_stage, write_stage};
 use crate::time::{now_iso_utc, parse_iso_utc};
@@ -649,12 +652,8 @@ fn migrate_cursors_if_needed() -> Result<(), String> {
 /// seq walk skipped would hand the next writer a number already in use.
 fn read_lines_unlocked() -> Result<Vec<BaseLine>, String> {
     let path = base_path();
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    Ok(raw.lines().filter_map(|l| serde_json::from_str::<BaseLine>(l).ok()).collect())
+    let lines = feed::read_lines(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(lines.iter().filter_map(|l| serde_json::from_slice::<BaseLine>(l).ok()).collect())
 }
 
 /// One `base.jsonl` line, as the store holds it.
@@ -747,64 +746,55 @@ fn read_seen_msgids_unlocked() -> Result<HashSet<String>, String> {
     Ok(raw.lines().filter_map(|l| serde_json::from_str::<SeenEntry>(l).ok()).map(|s| s.msgid).collect())
 }
 
-/// `last line's seq + 1`, read under the lock (MAIL.md "Store"). Counts BOTH
-/// line shapes — a `transit` line holds a sequence number like any other, and a
-/// writer that reused one would collide with it. Raw — assumes the caller
-/// already holds the lock and has already truncated any torn tail (every caller
-/// here is [`file_entry`]/[`file_transit`]/[`migrate_if_needed`], all reached
-/// only through [`with_lock`]).
-fn next_seq() -> Result<u64, String> {
-    Ok(read_lines_unlocked()?
-        .last()
-        .map(|line| match line {
-            BaseLine::Entry(entry) => entry.seq + 1,
-            BaseLine::Transit(entry) => entry.seq + 1,
-        })
-        .unwrap_or(1))
+/// The seq a line carries, whichever shape it has.
+fn line_seq(line: &BaseLine) -> u64 {
+    match line {
+        BaseLine::Entry(entry) => entry.seq,
+        BaseLine::Transit(entry) => entry.seq,
+    }
 }
 
-/// Truncate `base.jsonl` back to its last complete (`\n`-terminated) line —
-/// the write path's half of "a crash safe log" (MAIL.md "Store"). A
-/// `serde_json`-written line never contains a raw `0x0A` byte inside itself
-/// (a newline in a JSON string is always the two-byte escape `\n`), so a
-/// literal newline byte in this file only ever marks a line we ourselves
-/// terminated — "does the file end in `\n`" is therefore a sound torn-tail
-/// signal, not a heuristic. A missing file is not torn, it is simply empty.
-fn truncate_torn_tail(path: &std::path::Path) -> Result<(), String> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+/// The next global sequence number, issued under the lock (P4). The counter
+/// file is the source of truth, and it is never reset by a prune: a line an
+/// older binary appended is counted too (`max` with the base's tail), so no
+/// number is ever issued twice. A missing counter starts from the highest seq
+/// any line or mark names. The new value is written durably before the caller
+/// appends the line it numbers, so a crash leaves a gap and never a reuse.
+/// Raw — assumes the caller already holds the lock.
+fn next_seq() -> Result<u64, String> {
+    let path = seq_path();
+    let counter = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| format!("{}: not a sequence number", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let tail = read_lines_unlocked()?.iter().map(line_seq).max().unwrap_or(0);
+            let marks = load_cursors()?.values().flat_map(|c| c.values()).map(|m| m.seq.max(m.rung)).max().unwrap_or(0);
+            tail.max(marks)
+        }
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    if bytes.is_empty() || bytes.ends_with(b"\n") {
-        return Ok(());
-    }
-    let cut = bytes.iter().rposition(|&b| b == b'\n').map(|i| i + 1).unwrap_or(0);
+    let tail = read_lines_unlocked()?.iter().map(line_seq).max().unwrap_or(0);
+    let seq = counter.max(tail) + 1;
     ensure_mail_dir()?;
-    let f = std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    f.set_len(cut as u64).map_err(|e| format!("{}: {e}", path.display()))
+    atomic_write_private(&path, format!("{seq}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(seq)
 }
 
-/// Append one line to `base.jsonl`: truncate any torn tail, append,
-/// `fsync`. Raw — assumes the caller already holds the lock. One shape for both
-/// line kinds (`mail::Entry`, `mail::TransitEntry`), so the two never drift on
-/// how a line is written.
+fn seq_path() -> PathBuf {
+    mail_dir().join("seq")
+}
+
+/// Append one line to `base.jsonl` through the capped-log primitive, which cuts
+/// any torn tail itself, then fsyncs. Raw — assumes the caller already holds
+/// the lock. One shape for both line kinds (`mail::Entry`,
+/// `mail::TransitEntry`), so the two never drift on how a line is written.
 fn append_base_line<T: Serialize>(entry: &T) -> Result<(), String> {
     let path = base_path();
-    truncate_torn_tail(&path)?;
     let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
     ensure_mail_dir()?;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    f.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-    f.write_all(b"\n").map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())
+    feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Append one line to `seen.jsonl` — no `fsync` (only the base write needs
@@ -1791,8 +1781,8 @@ mod tests {
 
         widen();
         std::fs::write(base_path(), "{\"v\":0}\n{\"v\":").unwrap();
-        truncate_torn_tail(&base_path()).unwrap();
-        assert_eq!(mode(), 0o700, "truncate_torn_tail left state/ wide");
+        append_base_line(&serde_json::json!({ "v": 1 })).unwrap();
+        assert_eq!(mode(), 0o700, "a torn-tail cut left state/ wide");
 
         widen();
         append_seen_line("m1", "2026-10-12T00:00:00Z").unwrap();
@@ -2323,6 +2313,65 @@ mod tests {
         let all = read_base().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].envelope.msgid, msgid);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_torn_mid_utf8_tail_wedges_neither_reads_nor_the_next_write() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("torn-utf8");
+        let good = file_letter("alice", "bob", "good").unwrap();
+        {
+            // Half of a three-byte character after the last complete line.
+            let mut f = std::fs::OpenOptions::new().append(true).open(base_path()).unwrap();
+            f.write_all(&[0xE2, 0x82]).unwrap();
+        }
+        assert_eq!(read_base().unwrap().len(), 1, "a read skips the torn tail instead of erroring");
+
+        let next = file_letter("alice", "bob", "after the crash").unwrap();
+        assert_eq!(next.seq, good.seq + 1);
+        assert_eq!(read_base().unwrap().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seq_never_restarts_after_a_prune_empties_the_store() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("seq-after-prune");
+        file_letter("alice", "bob", "one").unwrap();
+        file_letter("alice", "bob", "two").unwrap();
+        file_letter("alice", "bob", "three").unwrap();
+        assert_eq!(read_for("bob", false, None).unwrap().len(), 3, "bob has read all three");
+
+        // A prune that drops every line, rewritten the way rm_older_than writes it.
+        atomic_write(&base_path(), "").unwrap();
+
+        let fresh = file_letter("alice", "bob", "four").unwrap();
+        assert!(fresh.seq > 3, "the counter survives the prune, got seq {}", fresh.seq);
+        let (_, unread) = unread_for("bob", None).unwrap();
+        assert_eq!(unread.len(), 1, "bob's mark at 3 must not hide the new letter");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn next_seq_follows_a_line_an_older_writer_appended() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("older-writer");
+        file_letter("alice", "bob", "one").unwrap();
+
+        // An older binary appends a line this binary's counter never issued.
+        let h = header("alice", "bob", ENTRY_TYPE_LETTER, &now_iso_utc());
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let (sig, msgid) = seal(&h, "from the old writer", &kp);
+        let envelope = Envelope { header: h, text: "from the old writer".to_string(), sig, msgid };
+        let old = Entry { seq: 9, received_at: now_iso_utc(), kind: ENTRY_TYPE_LETTER.to_string(), via: "self".to_string(), envelope };
+        append_base_line(&old).unwrap();
+
+        let next = file_letter("alice", "bob", "two").unwrap();
+        assert_eq!(next.seq, 10, "a number the older writer used is never reissued");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

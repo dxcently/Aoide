@@ -4870,7 +4870,8 @@ arrived UNNAMED, which rides that letter's own `originMesh` back — not a
 third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a link;
-it is `last line's seq + 1`, read under the lock. `type=letter` is `mail send`'s
+it is the next number of the `state/mail/seq` counter, issued under the lock
+and never reset by a prune. `type=letter` is `mail send`'s
 own filing; `type=transit` is a HOP this node made for a sealed container
 (`mail::file_transit`, MAIL.md §Transit): one line holding the routing metadata
 — the depositing hop, the `next` node, the mesh it rides there, whether that
@@ -4901,11 +4902,11 @@ the lock is not held: `try_stage_lock` (`storage/src/fs.rs`) blocks for
 the same `LOCK_EX` `with_stage_lock` already uses, and returns `Err` only
 when the lock file itself cannot be opened or created — a writer waits
 behind another, never runs unlocked. Write order is what makes a crash
-safe: under the lock, truncate a torn tail of `base.jsonl` to its last
-complete line, append the entry, fsync, THEN append to `seen.jsonl`. A
-`seen` line whose `msgid` is absent from the base is a crash between
-those two writes, and that `msgid` is accepted again — the reverse order
-would lose mail.
+safe: under the lock, write the new `seq`, append the entry to `base.jsonl`
+and fsync (a torn tail is cut first), THEN append to `seen.jsonl`. A base
+line whose `msgid` is absent from `seen` is a crash between those two writes,
+and a re-offer of that `msgid` files it again — at-least-once; the reverse
+order would lose mail.
 
 Read/resolved by `aoide mail`/`mail send`/`mail read`/`mail show`/`mail
 mark`/`mail rm` (the outbox's own `mail outbox`/`mail outbox rm` are a

@@ -4837,3 +4837,16 @@ rebuild.
 
 Pages touched: pkgs/aoide/crates/song/AGENTS.md,
 pkgs/aoide/crates/song/README.md, CONTRACTS.md
+
+## [2026-10-15] change | the mailbase reads bytes and takes its sequence numbers from a counter
+
+Mail's base reader and writer now go through the capped-log primitive in
+`aoide_protocol::feed` (`append_line`, `read_lines`, `rotate_at`). A torn
+multi-byte tail no longer wedges every read and write, and `seq` is a
+persisted counter (`state/mail/seq`), so a prune cannot restart it. Lines an
+older binary appended are still counted.
+
+Pages touched: pkgs/aoide/crates/protocol/src/feed.rs,
+pkgs/aoide/crates/storage/src/mail.rs, pkgs/aoide/crates/protocol/README.md,
+pkgs/aoide/crates/protocol/AGENTS.md, pkgs/aoide/crates/storage/README.md,
+pkgs/aoide/crates/storage/AGENTS.md, docs/architecture/MAIL.md, CONTRACTS.md

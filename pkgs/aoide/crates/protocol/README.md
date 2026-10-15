@@ -105,7 +105,11 @@ other crate in this workspace sits above.
   one JSON object per line, capped and truncated-in-place rather than
   rotated) and `Follower` (tail one file from EOF, delta-reads only,
   transparently reopening across both an in-place truncation and a
-  delete-and-recreate). Extracted from `aoide-secrets`' broker/watch
+  delete-and-recreate). Beside them, the capped-log functions the mailbase
+  is built on: `append_line` (one `\n`-terminated record, owner-only on
+  create, cutting a torn tail first), `read_lines` (complete records as raw
+  bytes) and `rotate_at` (one generation kept at `<path>.1`). Those three
+  hold no lock and no policy; the caller owns both. Extracted from `aoide-secrets`' broker/watch
   modules (`docs/architecture/AOIDED.md`'s "L1 — the event bus" section) so
   `aoided`'s own event bus and any future producer/consumer pair can share
   it — `aoide-secrets` consumes it via `pub use` at its old

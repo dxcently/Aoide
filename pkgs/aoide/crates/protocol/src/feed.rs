@@ -48,9 +48,7 @@
 
 use serde_json::Value;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-#[cfg(unix)]
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -215,6 +213,98 @@ impl FeedWriter {
                 eprintln!("[aoide/feed] could not write the feed file: {e}");
             }
         }
+    }
+}
+
+// ── the capped log (P1) ──────────────────────────────────────────────────
+
+/// Appends one `\n`-terminated record to a log the caller owns. No lock and no
+/// policy here: the caller holds whatever serializes its writers and decides
+/// what a full log means. A torn tail (bytes after the last `\n`, left by a
+/// crash mid-write) is cut back before the record goes on, so a record is
+/// never glued to half of another. A new file is created owner-only (0600 on
+/// Unix, the owner-only DACL on Windows), never widened afterwards.
+pub fn append_line(path: &Path, line: &[u8]) -> std::io::Result<()> {
+    let mut file = open_log(path)?;
+    cut_torn_tail(&mut file)?;
+    let mut record = Vec::with_capacity(line.len() + 1);
+    record.extend_from_slice(line);
+    record.push(b'\n');
+    file.write_all(&record)?;
+    file.sync_all()
+}
+
+fn open_log(path: &Path) -> std::io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().create(true).read(true).append(true).mode(0o600).open(path)
+    }
+    #[cfg(windows)]
+    {
+        match crate::owner_only::create_new(path) {
+            Ok(file) => drop(file),
+            Err(crate::owner_only::CreateError::Exists) => {}
+            Err(crate::owner_only::CreateError::Failed(e)) => return Err(e),
+        }
+        std::fs::OpenOptions::new().read(true).append(true).open(path)
+    }
+}
+
+/// Truncates back to just past the last `\n`, scanning backward in 64 KiB
+/// chunks, so a long torn record costs bounded memory. A file with no `\n` at
+/// all is emptied.
+fn cut_torn_tail(file: &mut File) -> std::io::Result<()> {
+    let len = file.metadata()?.len();
+    if len == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    if last[0] == b'\n' {
+        return Ok(());
+    }
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut end = len;
+    while end > 0 {
+        let start = end.saturating_sub(buf.len() as u64);
+        let n = (end - start) as usize;
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(&mut buf[..n])?;
+        if let Some(i) = buf[..n].iter().rposition(|&b| b == b'\n') {
+            return file.set_len(start + i as u64 + 1);
+        }
+        end = start;
+    }
+    file.set_len(0)
+}
+
+/// Every complete record, as raw bytes, in file order. A final segment with no
+/// `\n` is a torn write and is dropped. Bytes, not text: a torn multi-byte
+/// character cannot make the whole log unreadable, and the caller parses each
+/// record and skips the ones that do not parse. A missing file is empty.
+pub fn read_lines(path: &Path) -> std::io::Result<Vec<Vec<u8>>> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut lines: Vec<Vec<u8>> = bytes.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect();
+    lines.pop();
+    Ok(lines)
+}
+
+/// Rotates a log at or past `cap` bytes to `<path>.1`, replacing the previous
+/// generation, so at most two generations ever exist. Runs before an append,
+/// never reads the contents, and a missing file or one under the cap is left
+/// alone.
+pub fn rotate_at(path: &Path, cap: u64) -> std::io::Result<()> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.len() >= cap => std::fs::rename(path, format!("{}.1", path.display())),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -507,6 +597,55 @@ mod tests {
             contents.len()
         );
         std::fs::remove_file(&path).ok();
+    }
+
+    // ── the capped log (P1) ───────────────────────────────────────────
+
+    #[test]
+    fn read_lines_drops_a_torn_multibyte_tail() {
+        let path = tmp_path("torn-utf8");
+        std::fs::write(&path, b"x\n\xE2\x82").unwrap();
+        assert_eq!(read_lines(&path).unwrap(), vec![b"x".to_vec()]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn append_line_cuts_only_the_torn_record() {
+        let path = tmp_path("cut-torn");
+        std::fs::write(&path, b"{\"a\":1}\n{\"b\":").unwrap();
+        append_line(&path, b"{\"c\":3}").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"a\":1}\n{\"c\":3}\n");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn append_line_creates_owner_only() {
+        let path = tmp_path("owner-only");
+        append_line(&path, b"x").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "a capped log is created owner-only, got {mode:o}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rotate_at_replaces_the_previous_generation() {
+        let path = tmp_path("rotate");
+        let rotated = PathBuf::from(format!("{}.1", path.display()));
+        append_line(&path, b"first").unwrap();
+        rotate_at(&path, 1).unwrap();
+        assert!(!path.exists(), "a log at the cap is renamed away");
+        assert_eq!(std::fs::read(&rotated).unwrap(), b"first\n");
+
+        append_line(&path, b"second").unwrap();
+        rotate_at(&path, 1).unwrap();
+        assert_eq!(std::fs::read(&rotated).unwrap(), b"second\n", "the older generation is replaced");
+
+        append_line(&path, b"third").unwrap();
+        rotate_at(&path, 1 << 20).unwrap();
+        assert!(path.exists(), "a log under the cap is not rotated");
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&rotated).ok();
     }
 
     #[test]

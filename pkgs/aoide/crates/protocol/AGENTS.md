@@ -167,6 +167,12 @@
   branch is what makes a truncate-in-place transparent to a live tail —
   don't add rotation without re-deriving whether that branch still covers
   it.
+- **The capped-log functions own no lock and no policy.** `append_line`
+  creates owner-only, cuts only a torn tail (bytes after the last `\n`), and
+  fsyncs; `read_lines` reads bytes and drops a final segment with no newline,
+  so a torn multi-byte character never makes a whole log unreadable; the caller
+  parses each record and skips the ones that do not parse. A caller that needs
+  mutual exclusion or a full-log policy supplies it itself.
 - **Both halves stay pure I/O with no policy about WHAT a line means.**
   `feed` doesn't parse, validate, or interpret payload shape — it only
   frames one JSON value per line. A record shape (like `aoide-secrets`'
