@@ -1189,7 +1189,15 @@ forwarded call runs as Daemon. A command that declares `[cli]` alone refuses
 that hop (`secrets add`, `a2a serve`), with a usage refusal before its handler
 runs; a command closed to a door is refused there, never answered with
 metadata. This module introduces no daemon-specific permission table, and none
-is planned. Untrusted input stops at the parse/
+is planned.
+
+**What the doors bound.** The doors bound the protocol callers: MCP and A2A
+clients, which reach the registry only through the declared set. A same-uid
+process that writes to the aoided socket is the Daemon door, not a new one,
+and it reaches every command the default set holds. A same-uid shell is the
+CLI door. Neither is bounded by `doors`, and the registry does not claim to
+bound either. A socket credential or a per-door token would be the boundary
+for the Daemon door, and it is a separate lane. Untrusted input stops at the parse/
 validate boundary: a malformed line gets one error reply and the connection
 survives; a request line over the 1 MiB cap is dropped mid-stream (checked
 incrementally, not only after a `\n` finally arrives) with one error reply

@@ -31,6 +31,10 @@ other crate in this workspace sits above.
   check-then-handler, the entry every `dispatch()` uses. A door the command
   does not declare, or a flag closed to the door it came through, is refused
   as usage before the handler runs.
+  The doors bound the protocol callers: MCP and A2A. A same-uid process that
+  opens the aoided socket is the Daemon door, and a same-uid shell is the CLI
+  door. The registry does not bound either of those; the uid boundary is
+  outside it.
 - `style` — terminal manners, decided in one place: `Style` (the role
   vocabulary — `heading`, `name`, `args`, `required`, `error`, `usage`, `why`,
   `fix`, `suggest`, `stub` — over the ANSI 16 base colors, or plain), `Color`
