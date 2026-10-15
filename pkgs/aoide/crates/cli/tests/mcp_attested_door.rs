@@ -157,6 +157,10 @@ impl World {
             conductable: Some(true),
             socket: Some(socket.to_string_lossy().into_owned()),
             parent_session_id: parent.map(str::to_string),
+            // A child a spawn registered under an attested parent carries that
+            // parent's spawn stamp; the autogate honours only a stamped edge
+            // (`attested_parent_of`). A bare `parent` is a forgeable edge.
+            attested_spawner: parent.map(str::to_string),
             ..Default::default()
         };
         (record, listener)
