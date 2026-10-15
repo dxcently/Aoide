@@ -300,11 +300,14 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   with a `death` fact on the child's hook record, written by
   `session_store::record_hook_deaths`) is said once, with its status; one the
   tick infers carries none. A session that ends itself with its turn open
-  (`session end`, or its `SessionEnd` hook) records the fact `end`, said once
-  as `ended mid-turn`. The fact names its
-  spawner (`hook::recipient_of`), so a child no tick saw before its wrap ended
-  is still told. The recipient is the child's SPAWNER, resolved
-  through the wrap that hosts it and only over an edge the kernel attested
+  (`session end` run by its own harness or under it, or its `SessionEnd` hook)
+  records the fact `end`, said once as `ended mid-turn`; anyone else's `session
+  end` closes the phase and says nothing. The fact names its spawner
+  (`hook::recipient_of`), so a child no tick saw before its wrap ended is still
+  told. At most three death lines per wrap and spawner go out in a pass, then
+  one `and N more ended or died mid-turn`. The recipient is the child's SPAWNER,
+  resolved through the wrap that hosts it and only over an edge the kernel
+  attested
   (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can no
   longer route is judged from the route its entry kept (`hook::gone`). Its
   rules, orphan included, are stated once in `CONTRACTS.md` under

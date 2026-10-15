@@ -312,21 +312,25 @@ SIGINT forwards it to its harness, records the fact, and then exits by that
 signal, so the death carries its signal. When the wrap is SIGKILLed before it
 writes (SIGKILL is never caught), the tick infers the death instead, once the
 wrap is gone and the child's route still stands; that inferred line carries no
-status. The reaper leaves an open child to its running wrap, so a harness that
-dies under a wrap that outlives it (a shell host) reads `working` until the wrap
-ends. The tick says each fact once, then clears it, and a recorded death is
+status. The reaper leaves an open child to its running wrap when it has a
+spawner to tell, so a harness that dies under a wrap that outlives it (a shell
+host) reads `working` until the wrap ends; a child with no spawner is reaped as
+ever. The tick says each fact once, then clears it, and a recorded death is
 held against every prune until it is said. A session that ends itself (its
-`SessionEnd` hook, or `aoide session end`) while its turn is still open records
-the same fact with no status, and its spawner hears
-`[claude <petname>] ended mid-turn · last: <tool>` once; its wrap then finds the
-phase closed and adds nothing. A `done` phase with no fact (a session that ended
-by its own hook once its turn closed) says nothing. A silence before a death
-does not hide it. The first look at a child is a baseline and says nothing,
-except a recorded death under a day old; a child found already stopped says
-nothing, and a turn that begins and ends between two ticks is not heard. A child
-the tick can no longer route is judged from the route its entry kept, by the
-rules in `CONTRACTS.md` (`state/stage/pingback.json`), where the orphan rule is
-stated once. A hook child's own `parentSessionId` is the wrap that hosts it,
+`SessionEnd` hook, or `aoide session end` run by its own harness or under it)
+while its turn is still open records the same fact with no status, and its
+spawner hears `[claude <petname>] ended mid-turn · last: <tool>` once; its wrap
+then finds the phase closed and adds nothing. Anyone else's `aoide session end`
+only closes the phase, since a spawner is told only what the session itself
+did. A `done` phase with no fact (a session that ended by its own hook once its
+turn closed) says nothing. A spawner hears at most three such lines from one
+wrap's end, then one `and N more ended or died mid-turn`. A silence before a
+death does not hide it. The first look at a child is a baseline and says
+nothing, except a recorded death under a day old; a child found already stopped
+says nothing, and a turn that begins and ends between two ticks is not heard. A
+child the tick can no longer route is judged from the route its entry kept, by
+the rules in `CONTRACTS.md` (`state/stage/pingback.json`), where the orphan rule
+is stated once. A hook child's own `parentSessionId` is the wrap that hosts it,
 never the session that spawned it, so this source does not write to that edge:
 it climbs to the wrap's own `parentSessionId` and speaks only when
 `attestedSpawner` — the parent the registering `aoide conduct` process saw in

@@ -1756,8 +1756,7 @@ fn reap_inner(
         }
     }
     // A child whose death the tick has not claimed keeps its hook record as it
-    // is: `upsert_hook` would clear the death fact, and the tick would then say
-    // the death without its status.
+    // is, fact and all: it is the fact's only home.
     for id in reaped.iter().filter(|id| !held.contains(*id)) {
         upsert_hook(&mut h_file.hooks, id, "done", &now);
     }
@@ -4446,6 +4445,82 @@ mod tests {
         let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
         let held = hooks.hooks.iter().find(|h| h.session_id == "held").expect("the held record stays");
         assert_eq!(held.death.as_ref().and_then(|d| d.signal), Some(9), "its fact is intact");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The wiring of the reaper's hand-off: a pass leaves an open hook child to
+    /// its running wrap only when someone would hear of its death. Two children
+    /// with a dead harness and an open turn sit under live conducted wraps; the
+    /// one whose wrap has a spawner is left as it is, and the one whose wrap
+    /// was started in an ordinary terminal (no spawner) is reaped like any other.
+    #[test]
+    fn reap_leaves_a_live_wraps_open_child_only_when_a_spawner_would_hear_of_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-live-wrap-owns");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-live-wrap-owns-xdg");
+
+        let now = now_iso_utc();
+        let me = std::process::id();
+        let wrap = |id: &str, win: &str, spawner: Option<&str>| {
+            let mut w = agent(id, win, &now);
+            w.kind = Some("agent".into());
+            w.conductable = Some(true);
+            w.pid = Some(me);
+            w.exempt = true;
+            w.parent_session_id = spawner.map(str::to_string);
+            w.attested_spawner = spawner.map(str::to_string);
+            w
+        };
+        let kid = |id: &str, win: &str, host: &str| {
+            let mut k = agent(id, win, &now);
+            k.kind = Some("agent".into());
+            k.pid = Some(i32::MAX as u32);
+            k.parent_session_id = Some(host.into());
+            k.hook_ancestry = vec![i32::MAX, me as i32];
+            k
+        };
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![
+                    wrap("spawner", "0xS", None),
+                    wrap("told-wrap", "0xT", Some("spawner")),
+                    wrap("lone-wrap", "0xL", None),
+                    kid("told", "0xK1", "told-wrap"),
+                    kid("lone", "0xK2", "lone-wrap"),
+                ],
+            },
+        )
+        .unwrap();
+        let mut hooks = Vec::new();
+        for id in ["told", "lone"] {
+            upsert_hook(&mut hooks, id, "working", &now);
+        }
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let state = |id: &str| sessions.sessions.iter().find(|s| s.session_id == id).map(|s| s.state.clone());
+        assert_eq!(state("told").as_deref(), Some("working"), "its wrap and spawner are up: the wrap will record the death");
+        assert!(
+            state("lone").is_none_or(|s| s == "done"),
+            "no spawner would hear of it, so the reaper takes it: {:?}",
+            state("lone")
+        );
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let phase = |id: &str| hooks.hooks.iter().find(|h| h.session_id == id).map(|h| h.phase.clone());
+        assert_eq!(phase("told").as_deref(), Some("working"), "the open turn is left for the wrap to record");
+        assert!(phase("lone").is_none_or(|p| p == "done"), "{:?}", phase("lone"));
 
         let _ = std::fs::remove_dir_all(&stage);
     }

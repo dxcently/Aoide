@@ -2293,7 +2293,7 @@ fn hook_for_profile_gated(
             do_subagent_end(&sub_id);
             Outcome::ok("session.hook", format!("subagent end {sub_id}"))
         }
-        HookAction::End { id } => do_session_end(&id),
+        HookAction::End { id } => do_session_end(&id, hook_pid),
     };
     // Publish a harness-reported context-window ceiling onto the record
     // IMMEDIATELY (every hook carries it — pi's extension reads the active
@@ -2450,6 +2450,14 @@ const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
 /// the one of the three that is not ordinary same-uid input.
 pub const DAEMON_PEER_PID_FLAG: &str = "__daemon-peer-pid";
 
+/// The door's own peer pid on a daemon-run invocation ([`DAEMON_PEER_PID_FLAG`]),
+/// or `None` when the door stamped none. Read only where the invocation is known
+/// to be the daemon's own (`Door::Daemon`, built literally by the daemon), so a
+/// flag typed on any other door never passes for a kernel fact.
+pub(in crate::graph) fn door_pid(inv: &Invocation) -> Option<i32> {
+    inv.flags.get(DAEMON_PEER_PID_FLAG).and_then(|s| s.parse::<i32>().ok()).filter(|p| *p > 0)
+}
+
 /// Internal-only flag key carrying the HOOK PROCESS's own `AOIDE_SESSION_ID`
 /// across the same daemon hop the payload rides — never set by a real
 /// CLI/MCP/A2A caller, never registered in `commands/graph.rs`'s `flags:`
@@ -2520,11 +2528,7 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
         // and stamps no ancestry, never falling back to this process's own —
         // that would be `aoided`'s ancestry, the false fact this door exists to
         // stop recording.
-        let door_pid = inv
-            .flags
-            .get(DAEMON_PEER_PID_FLAG)
-            .and_then(|s| s.parse::<i32>().ok())
-            .filter(|p| *p > 0);
+        let door_pid = door_pid(inv);
         // The claim comes off the wire or not at all — deliberately no env
         // fallback here (`own_parent_claim`'s own doc). It is CHECKED against
         // `door_pid`'s ancestry before it is used.
@@ -4200,7 +4204,7 @@ mod tests {
         );
         // The shared parent ends — its on-disk sessions.json record flips to
         // `done` (sib-a/sib-b are not `kind: subagent`, so they survive intact).
-        do_session_end("orch");
+        do_session_end("orch", None);
 
         let out = deliver_local_with(
             &send_invocation(&["nope"], &[("id", target)]),

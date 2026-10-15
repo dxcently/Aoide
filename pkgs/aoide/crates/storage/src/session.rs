@@ -217,8 +217,16 @@ pub fn upsert_session(
 ///
 /// `merged_sessions` keys the live phase by (latest `updatedAt`), so a single
 /// rolling record per session is all it needs — no unbounded append.
+///
+/// A `done` record that still carries its death fact is the fact's whole
+/// evidence, so a second `done` (a repeated `session end`, a duplicate
+/// `SessionEnd`, a reap) leaves it exactly as it is. Any live phase supersedes
+/// the fact: a session that runs again has not died.
 pub fn upsert_hook(hooks: &mut Vec<HookRecord>, id: &str, phase: &str, now: &str) {
     if let Some(h) = hooks.iter_mut().find(|h| h.session_id == id) {
+        if phase == "done" && h.phase == "done" && h.death.is_some() {
+            return;
+        }
         h.phase = phase.to_string();
         h.updated_at = now.to_string();
         // A death fact describes the phase it was written with; any new phase
@@ -471,6 +479,28 @@ mod death_tests {
 
         upsert_hook(&mut hooks, "k", "working", "2026-10-07T10:02:00Z");
         assert_eq!(hooks[0].death, None, "a restarted turn carries no old death");
+    }
+
+    /// The fact lives on the `done` record, so a second `done` must not wipe it
+    /// or restamp the record; a plain `done` is still restamped, and a live phase
+    /// still supersedes the fact (a resumed session has not died).
+    #[test]
+    fn a_second_done_leaves_a_record_that_carries_its_fact_untouched() {
+        let mut hooks = Vec::new();
+        upsert_hook(&mut hooks, "k", "working", "2026-10-07T10:00:00Z");
+        let fact = HookDeath { last_tool: Some("Bash".into()), outcome: Some("end".into()), ..Default::default() };
+        record_death(&mut hooks, "k", fact.clone(), "2026-10-07T10:01:00Z");
+        let recorded = hooks.clone();
+
+        upsert_hook(&mut hooks, "k", "done", "2026-10-07T10:05:00Z");
+        assert_eq!(hooks, recorded, "a repeated done keeps the fact and the stamp");
+
+        upsert_hook(&mut hooks, "plain", "done", "2026-10-07T10:02:00Z");
+        upsert_hook(&mut hooks, "plain", "done", "2026-10-07T10:06:00Z");
+        assert_eq!(hooks[1].updated_at, "2026-10-07T10:06:00Z", "a done with no fact is restamped as ever");
+
+        upsert_hook(&mut hooks, "k", "idle", "2026-10-07T10:07:00Z");
+        assert_eq!((hooks[0].phase.as_str(), hooks[0].death.as_ref()), ("idle", None), "a live phase supersedes it");
     }
 
     #[test]

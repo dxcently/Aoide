@@ -2156,10 +2156,15 @@ lock, each only while the child's phase reads `working` or `awaiting`; a closed
 phase is left alone. The wrap writes it when its harness is seen to end, naming
 the end as an exit code (`exit`), a signal number (`signal`), or the wrap's own
 deadline (`timeout`); `outcome` is absent when the wrap cannot name it. A
-`session end` of the child itself, by `aoide session end` or its harness's
-`SessionEnd` hook, writes it with `outcome: "end"` and no status, when the edge
-names a spawner; with none it only closes the phase. The wrap, finding that
-phase closed when its harness then exits, writes nothing more.
+`session end` of the child by the child itself, by `aoide session end` or its
+harness's `SessionEnd` hook, writes it with `outcome: "end"` and no status, when
+the edge names a spawner; with none it only closes the phase. The child ends
+itself when the caller the door attests is its harness or runs under it, the
+harness pid being in that caller's `/proc` ancestry. The attested caller is the
+hook process, the daemon's `SO_PEERCRED` pid for a forwarded call, or else the
+calling process itself; a door that attests none ends nobody. A `session end`
+from any other caller only closes the phase. The wrap, finding that phase
+closed when its harness then exits, writes nothing more.
 `lastTool` is the tool in flight, when there was one. `spawner` is the session
 the death is said to, resolved while the wrap still runs by the same climb a
 route takes (§ `pingback.json`) over the roster as it stands, with no seal
@@ -2179,21 +2184,27 @@ the session-start eviction, the superseded-tombstone pass, the orphan sweep and
 `session prune` spare the record (see *Held* under `pingback.json`).
 
 Before the death is written, the wrap owns it. The reaper leaves a hook child
-alone while the conducted wrap that hosts it runs (its pid alive) and the
-child's phase reads `working` or `awaiting`, even when the child's harness is
-dead: the wrap records the death when its own child ends, and a reap would close
-the phase first and leave nothing to record. The cost is the card: a harness
-that dies under a wrap that outlives it (a shell host, whose own child is the
-shell) leaves the child reading `working` until that wrap ends.
+alone while three things hold: the conducted wrap that hosts it runs (its pid
+alive, and the wrap is not itself reaped in that pass), the child's phase reads
+`working` or `awaiting`, and the child has a spawner to be told of its death.
+It does so even when the child's harness is dead: the wrap records the death
+when its own child ends, and a reap would close the phase first and leave
+nothing to record. A child with no spawner, such as one whose wrap was started
+in an ordinary terminal, is reaped like any other, since no line would follow.
+What the wait costs is a stale reading: a harness that dies under a wrap that
+outlives it (a shell host, whose own child is the shell) leaves the child
+reading `working` until that wrap ends.
 
 The child's session record in `sessions.json` is set to `done`: the process is
 dead, and presence reads it so. `done`, not `idle`: `done` says the process is
 over, and the claim, not the state, decides when the record may go. No other
 path writes `death`. `aoide session phase` folds the phase it is given to its
 canonical rest and writes no fact, so no caller can make a spawner hear a
-death; `aoide session end` writes only the `end` it performs, to the spawner the
-child's own edge names. A later hook event replaces the phase and drops
-`death`, so the fact is heard only while it is still the phase.
+death; `aoide session end` writes only the `end` a session performs on itself,
+to the spawner its own edge names. A later live phase replaces the phase and
+drops `death`, so the fact is heard only while it is still the phase. A second
+`done`, from a repeated `session end` or a duplicate `SessionEnd`, leaves the
+record and its fact exactly as they are.
 
 **`shell` and `wrappedProgram` — what a conducted wrap runs.** A session
 record MAY carry two fields, both written by the conducting process at
@@ -3668,7 +3679,8 @@ is absent when the harness was not alive.
 `hooks.json` record, and a route that verifies now):
 
 - its recorded death — a `done` record with `death`, stamped under 24 hours
-  ago — is said whatever phase the cursor last saw, and no latch gates it. The
+  ago and no more than a minute ahead of the clock — is said whatever phase the
+  cursor last saw, and no latch gates it. The
   line carries the fact's status (`(exit N)`, `(signal N)` or `(timeout)`) when
   it names one, and the fact's tool (else the session's last `activity`,
   `working` when none). A fact whose `outcome` is `end` is said as
@@ -3694,14 +3706,15 @@ Lines are delivered after the lock is released. Because a said fact is cleared
 from its record, deleting `pingback.json` after a death went out cannot repeat
 it.
 
-**Held.** A recorded death under 24 hours old is held while it has someone to
-be said to: its fact names a `spawner`, or the cursor caches a route for it. A
-held record is spared by the reaper, the superseded-tombstone pass, the orphan
-sweep, `session prune`, and the session-start eviction (which skips it, rather
-than rewrite its record). A record with neither has no line to wait for, and is
-not held. Neither is checked against a seal here, since every caller holds the
-stage lock and no daemon key: a death whose recipient never verifies is held
-until its stamp is 24 hours old, and is then pruned unsaid.
+**Held.** A recorded death under 24 hours old (and no more than a minute dated
+ahead of the clock) is held while it has someone to be said to: its fact names a
+`spawner`, or the cursor caches a route for it. A held record is spared by the
+reaper, the superseded-tombstone pass, the orphan sweep, `session prune`, and
+the session-start eviction (which skips it, rather than rewrite its record). A
+record with neither has no line to wait for, and is not held. Neither is checked
+against a seal here, since every caller holds the stage lock and no daemon key:
+a death whose recipient never verifies is held until its stamp is 24 hours old,
+and is then pruned unsaid.
 
 **The gone path.** An entry whose child the tick did not gather this pass, and
 a recorded death no entry holds yet (its wrap ended before any tick saw the
@@ -3714,9 +3727,9 @@ roster, `hooks.json`, the seals), in this order:
 - no `hooks.json` record: dropped silently. An absent record cannot show an
   open turn, so a clean end, or a record pruned under a live harness, is not a
   death;
-- the stamp is a day old or more, or there is no fact and the entry is latched
-  `died`, or its cursor phase or its record's phase is not `working` or
-  `awaiting`: dropped silently;
+- the stamp is a day old or more, or dated more than a minute ahead of the
+  clock, or there is no fact and the entry is latched `died`, or its cursor
+  phase or its record's phase is not `working` or `awaiting`: dropped silently;
 - no cached route: a recorded death is said over the `spawner` its fact names
   instead, with the child's own record giving the host wrap and the tag; with
   no spawner, or no record, dropped silently;
@@ -3731,11 +3744,16 @@ roster, `hooks.json`, the seals), in this order:
   its host wrap must be gone (absent, or its pid dead) or still verify. Then the
   child is said of as `died mid-turn` over `route`, with the fact's status and
   tool when a fact is recorded (`ended mid-turn`, with no status, for an `end`
-  fact), and with no status when it is inferred. A host
-  that is still up but no longer verifies keeps a recorded death's entry
-  instead.
+  fact), and with no status when it is inferred. A host that is still up but no
+  longer verifies keeps a recorded death's entry instead.
 
 A `done` host whose pid still runs is judged by its seal, like any live host.
+
+**A burst of deaths.** One pass puts at most three death lines (`died mid-turn`
+or `ended mid-turn`) to one spawner from the children of one host wrap. The rest
+are counted into a single line, `and <n> more ended or died mid-turn`, and every
+fact is still cleared as said. A wrap that hosted many children, ghosts minted
+through the hook door included, cannot flood its spawner with one line each.
 
 The line goes to the child's SPAWNER, never to its `parentSessionId` (a hook
 child's own host wrap). Over a live edge the host wrap must be a conducted
@@ -3769,10 +3787,12 @@ route, tag, tool and harness back as facts, so a same-uid writer can:
   "done"` with a `death` fact: it is said as a death on the child's route, or
   to the `spawner` the fact names once that session verifies, the same reach as
   a fabricated cursor entry. `aoide session phase` cannot write a fact, and
-  `aoide session end` writes only an `end` fact, for a session it really ends,
-  to the spawner the child's own edge names (§ `sessions.json`), so only a file
-  edit can fabricate one. This is the same class as editing the `hooks.json`
-  phase itself;
+  `aoide session end` writes an `end` fact only when its attested caller is
+  the child's own harness or runs under it (§ `sessions.json`), and only to the
+  spawner the child's own edge names. So besides a file edit, only a process the
+  child's harness itself runs can produce one, and that process can equally end
+  the child's turn. This is the same class as editing the `hooks.json` phase
+  itself;
 - **redirect** a live child's lines. On the live path the recipient is read
   through the host's `parentSessionId` and `attestedSpawner`, which live in
   `sessions.json` and are not under the seal (the seal covers the wrap's own

@@ -1032,7 +1032,7 @@ in the message.
   is given and never writes `death`. A closed phase is never written. The tick
   says the fact when the wrap wrote it, and infers a death only when none was
   written (SIGKILL), so each death is said once.
-  **A session that ends itself mid-turn writes its own fact.**
+  **A session that ends itself mid-turn writes its own fact, and only itself.**
   `do_session_end_inner`, the one core of `aoide session end` and the hook
   door's `SessionEnd`, finds the child's hook phase still `working` or
   `awaiting` and `hook::recipient_of` naming a spawner, and writes the fact
@@ -1041,7 +1041,17 @@ in the message.
   latched and cleared like any recorded death. The wrap's later
   `record_hook_deaths` finds the phase closed and writes nothing, so one end
   is one line. `recipient_of` answers only for a child `hook::tracked` names,
-  so an eidolon's death, which its trace says, is never told twice.
+  so an eidolon's death, which its trace says, is never told twice. A line to
+  a spawner, an orchestrator agent, is an injection if a stranger can cause it,
+  so the fact needs the caller's word, and the caller is the kernel's:
+  `do_session_end` takes the attested pid (the hook door's `hook_pid`, the
+  daemon's `__daemon-peer-pid` stamp read by `send::door_pid` on `Door::Daemon`
+  only, else this process; the wrap's own end passes none), and
+  `runs_under_harness` writes the fact only when the child's harness pid is in
+  that pid's `/proc` ancestry. Any other caller closes the phase plain. A
+  second `done` on a record that carries a fact is a no-op in
+  `aoide_storage::session::upsert_hook`, so a repeated end or a duplicate
+  `SessionEnd` cannot erase it; a live phase still supersedes the fact.
 
   **The wrap's own signals.** `WrapSignals::install` (`graph/pty.rs`) runs first
   in `session_conduct` and catches SIGTERM, SIGHUP and SIGINT with `SA_SIGINFO`
@@ -1067,17 +1077,30 @@ in the message.
   record and hook entry are both pruned before any tick sees them is never said
   of. The inference reads that record, and an absent record drops the entry.
   **A live wrap owns its open child's end.** `reap_inner` takes out of its
-  reaped set every hook child whose conducted host wrap still runs with the
-  child's turn open (`session_store::owned_by_live_wraps`, which shares
-  `hosted_by` with `record_hook_deaths`), because a reap would close the phase
-  before the wrap writes the death and the wrap would then find nothing to
-  record. Keep the hosting test one (`hosted_by`): a child the reaper spares
-  must be one the wrap's exit can record. The cost is stated in `CONTRACTS.md`
-  (`death`): a harness that dies under a wrap that outlives it reads `working`
-  until the wrap ends. Shortening that wait belongs to the wrap (watching its
-  own harness), never to the reaper. The hook source emits no `PingEvent` and
-  never spools: a child that belongs on a ring is `remoteParent`-stamped and so
-  is not its child.
+  reaped set every hook child whose conducted host wrap still runs (and is not
+  itself in the reaped set) with the child's turn open and a spawner to be told
+  (`session_store::owned_by_live_wraps`, which shares `hosted_by` with
+  `record_hook_deaths` and asks `hook::recipient_of` the same question), because
+  a reap would close the phase before the wrap writes the death and the wrap
+  would then find nothing to record. A child nobody would hear of is reaped as
+  ever: the wait buys it nothing. Keep the hosting test one (`hosted_by`): a
+  child the reaper spares must be one the wrap's exit can record. The cost is
+  stated in `CONTRACTS.md` (`death`): a harness that dies under a wrap that
+  outlives it reads `working` until the wrap ends. Shortening that wait belongs
+  to the wrap (watching its own harness), never to the reaper. The hand-off is
+  proved at two levels: `owned_by_live_wraps` as a table, and `reap` itself over
+  a roster (`reap.rs`'s tests), since the `retain` that applies it is a separate
+  line. The hook source emits no `PingEvent` and never spools: a child that
+  belongs on a ring is `remoteParent`-stamped and so is not its child.
+  **Two bounds on what the hook source says about deaths.** A stamp counts as
+  recent only inside `[-SKEW_MS, STALE_MS)` of the clock (`hook::is_recent`, the
+  one test `unclaimed_in`, `decide` and `gone` share), so a fact stamped in the
+  future is neither said nor held, however far ahead. And `hook::claim` sends
+  at most `DEATH_LINES_MAX` death lines per (host wrap, spawner) in a pass, then
+  one `and N more ended or died mid-turn` line (`within_cap`), because the hook
+  door lets an agent mint many ghost children in its own live wrap, and each
+  would otherwise give its spawner a line at the wrap's end. Every fact is still
+  named said, so it is cleared.
   **The screen source is the third, as a child module
   (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
   harness has neither profile (`prompt::tracked`: `agent_profile` is none, and

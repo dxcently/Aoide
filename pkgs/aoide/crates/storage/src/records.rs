@@ -799,9 +799,10 @@ pub struct HookRecord {
 
 /// The fact a hook child's turn ended with: the tool in flight and how its
 /// harness exited. The wrap that hosted the harness writes it when its own child
-/// exits while the hook phase is still open, and a `session end` that finds the
-/// phase open writes it with the outcome `end`. The end fields are the conducted
-/// record's own (`outcome`, `exitCode`), except that a signal is its number.
+/// exits while the hook phase is still open, and a session that ends itself
+/// while the phase is open (`session end` run by its own harness or under it)
+/// writes it with the outcome `end`. The end fields are the conducted record's
+/// own (`outcome`, `exitCode`), except that a signal is its number.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct HookDeath {
     #[serde(rename = "lastTool", default, skip_serializing_if = "Option::is_none")]

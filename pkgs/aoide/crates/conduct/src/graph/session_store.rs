@@ -20,6 +20,7 @@ use super::model::{
     canonical_state, clear_screen_ask, harness_pid, hooks_path, load_stage, sessions_path,
     write_stage, HookDeath, HookRecord, HooksFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
+use super::window::pid_ancestry;
 use aoide_protocol::agents::AgentProfile;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
@@ -322,8 +323,8 @@ fn do_session_start_inner(
     };
     if !evicted.is_empty() {
         let mut h_file: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
-        // A held death is a wrap's fact the tick has not said yet. `upsert_hook`
-        // clears a record's fact, so an eviction skips it, held before any write.
+        // A held death is a wrap's fact the tick has not said yet. An eviction
+        // skips it, held before any write, so its record stays whole.
         let held = crate::graph::pingback::held_deaths(&h_file.hooks);
         let evicted: Vec<String> = evicted.into_iter().filter(|eid| !held.contains(eid)).collect();
         let done_at = now_iso_utc();
@@ -1702,11 +1703,14 @@ fn turn_open(phase: &str) -> bool {
 }
 
 /// Of `ids`, the hook children a running wrap still owns: a child whose host is a
-/// conducted wrap with a live pid (and not itself in `ids`), and whose turn is
-/// open. That wrap records the child's death when its own child exits
+/// conducted wrap with a live pid (and not itself in `ids`), whose turn is open,
+/// and that has a spawner to be told ([`recipient_of`](super::pingback::recipient_of)).
+/// That wrap records the child's death when its own child exits
 /// ([`record_hook_deaths`]); a pass that closed the phase first would leave it
-/// nothing to record. The cost: a harness that dies under a wrap that outlives it
-/// (a shell host) leaves its child reading `working` until the wrap ends.
+/// nothing to record. A child nobody would hear of is not worth the wait, so the
+/// pass reaps it as it always did. The cost: a harness that dies under a wrap
+/// that outlives it (a shell host) leaves its child reading `working` until the
+/// wrap ends.
 pub(crate) fn owned_by_live_wraps(sessions: &[SessionRecord], hooks: &[HookRecord], ids: &[String]) -> HashSet<String> {
     let owned = |s: &SessionRecord| {
         let host = s.parent_session_id.as_deref().filter(|h| !ids.iter().any(|id| id == h));
@@ -1714,7 +1718,8 @@ pub(crate) fn owned_by_live_wraps(sessions: &[SessionRecord], hooks: &[HookRecor
         let live = wrap.is_some_and(|w| {
             w.conductable == Some(true) && w.pid.is_some_and(|pid| pid_is_alive(pid) && hosted_by(s, &w.session_id, pid))
         });
-        live && hooks.iter().any(|h| h.session_id == s.session_id && turn_open(&h.phase))
+        let told = || super::pingback::recipient_of(s, sessions).is_some();
+        live && told() && hooks.iter().any(|h| h.session_id == s.session_id && turn_open(&h.phase))
     };
     sessions
         .iter()
@@ -1803,11 +1808,15 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 
 /// Core of `session end`: mark the session `done` (and its hook phase
 /// `done`), re-stage. An unknown id is an ok no-op (matching `project remove`).
-/// A hook child that ends itself with its turn open (`working`/`awaiting`) and a
+/// A hook child that ends ITSELF with its turn open (`working`/`awaiting`) and a
 /// spawner to tell ([`recipient_of`](super::pingback::recipient_of)) gets the
 /// death fact `end` instead, carrying the tool it was in and that spawner, so
 /// the ping-back says it ended mid-turn; its wrap then finds the phase closed
-/// and records nothing more.
+/// and records nothing more. `caller` is the kernel's word for who is asking, the
+/// hook door's pid or the daemon's peer credentials ([`session_end_caller`]); the
+/// session ends itself only when that pid is, or runs under, the child's own
+/// harness ([`runs_under_harness`]). Any other caller, or none, ends it plain: a
+/// spawner is told only what the session itself did.
 ///
 /// Also closes every ssh tunnel this session opened
 /// (`aoide_client::tunnel::close_all_for_session`, ssh-transport lane P-S5) —
@@ -1823,8 +1832,8 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 /// tunnel that fails to close here is still caught by the reaper, so its
 /// error is never allowed to turn a successful `session end` into a
 /// reported failure.
-pub(in crate::graph) fn do_session_end(id: &str) -> Outcome {
-    let outcome = with_stage_lock(|| do_session_end_inner(id));
+pub(in crate::graph) fn do_session_end(id: &str, caller: Option<i32>) -> Outcome {
+    let outcome = with_stage_lock(|| do_session_end_inner(id, caller));
     let _ = aoide_client::tunnel::close_all_for_session(id);
     // The check lane's own baseline for this session (task #139 review
     // finding: nothing ever deleted `state/checklane/<id>.json` — an effect
@@ -1833,7 +1842,16 @@ pub(in crate::graph) fn do_session_end(id: &str) -> Outcome {
     aoide_upkeep::checklane::forget_baseline(id);
     outcome
 }
-fn do_session_end_inner(id: &str) -> Outcome {
+
+/// Is `caller` the harness of `s`, or a process running under it: the harness
+/// pid is in the caller's `/proc` ancestry (self first). The one proof that a
+/// session is ending itself and not being ended by someone else.
+fn runs_under_harness(s: &SessionRecord, caller: Option<i32>) -> bool {
+    let harness = harness_pid(s).and_then(|pid| i32::try_from(pid).ok());
+    harness.zip(caller).is_some_and(|(harness, pid)| pid_ancestry(pid).contains(&harness))
+}
+
+fn do_session_end_inner(id: &str, caller: Option<i32>) -> Outcome {
     let cmd = "session.end";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
@@ -1850,15 +1868,20 @@ fn do_session_end_inner(id: &str) -> Outcome {
         return out;
     }
     let now = now_iso_utc();
-    let ended_mid_turn = s_file.sessions.iter().find(|s| s.session_id == id).and_then(|s| {
-        let spawner = super::pingback::recipient_of(s, &s_file.sessions)?;
-        Some(HookDeath {
-            last_tool: s.activity.clone().filter(|a| !a.is_empty()),
-            outcome: Some("end".to_string()),
-            spawner: Some(spawner),
-            ..HookDeath::default()
-        })
-    });
+    let ended_mid_turn = s_file
+        .sessions
+        .iter()
+        .find(|s| s.session_id == id)
+        .filter(|s| runs_under_harness(s, caller))
+        .and_then(|s| {
+            let spawner = super::pingback::recipient_of(s, &s_file.sessions)?;
+            Some(HookDeath {
+                last_tool: s.activity.clone().filter(|a| !a.is_empty()),
+                outcome: Some("end".to_string()),
+                spawner: Some(spawner),
+                ..HookDeath::default()
+            })
+        });
     for s in s_file.sessions.iter_mut() {
         if s.session_id == id {
             // The ledger write (P-D8), gated on an ACTUAL transition: unlike
@@ -1998,7 +2021,18 @@ pub fn session_end(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
-    do_session_end(&id)
+    do_session_end(&id, session_end_caller(inv))
+}
+
+/// Who is asking for a `session end`, by the kernel's word and nobody's
+/// argument: the daemon's `SO_PEERCRED` stamp when the daemon runs it for a
+/// forwarded call (none when it stamped none), else this process, which IS the
+/// caller on every other door.
+fn session_end_caller(inv: &Invocation) -> Option<i32> {
+    match inv.door {
+        aoide_protocol::Door::Daemon => super::send::door_pid(inv),
+        _ => Some(std::process::id() as i32),
+    }
 }
 
 #[cfg(test)]
@@ -3994,15 +4028,16 @@ mod hosted_death_tests {
     use super::*;
 
     /// Which reaped ids a running wrap still owns: a hosted child with its turn
-    /// open, under a conducted wrap whose pid is alive and that is not itself
-    /// being reaped. Every other id stays the reaper's.
+    /// open and a spawner to tell, under a conducted wrap whose pid is alive and
+    /// that is not itself being reaped. Every other id stays the reaper's.
     #[test]
-    fn a_live_wrap_owns_only_its_hosted_children_with_an_open_turn() {
+    fn a_live_wrap_owns_only_its_hosted_children_with_an_open_turn_and_a_spawner() {
         let me = std::process::id();
-        let wrap = |id: &str, pid: u32| {
-            let mut w = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", None);
+        let wrap = |id: &str, pid: u32, spawner: Option<&str>| {
+            let mut w = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", spawner);
             w.conductable = Some(true);
             w.pid = Some(pid);
+            w.attested_spawner = spawner.map(str::to_string);
             w
         };
         let child = |id: &str, parent: &str, host_pid: u32| {
@@ -4010,12 +4045,16 @@ mod hosted_death_tests {
             s.hook_ancestry = vec![999_999, host_pid as i32];
             s
         };
-        let mut bare = wrap("bare", me);
+        let mut spawner = crate::graph::testutil::session("P", "/p", "working", "2026-10-07T10:00:00Z", None);
+        spawner.conductable = Some(true);
+        let mut bare = wrap("bare", me, Some("P"));
         bare.conductable = None;
         let sessions = vec![
-            wrap("live", me),
-            wrap("dead", 999_998),
-            wrap("dying", me),
+            spawner,
+            wrap("live", me, Some("P")),
+            wrap("dead", 999_998, Some("P")),
+            wrap("dying", me, Some("P")),
+            wrap("lone", me, None),
             bare,
             child("open", "live", me),
             child("awaits", "live", me),
@@ -4024,6 +4063,7 @@ mod hosted_death_tests {
             child("under-dying", "dying", me),
             child("under-bare", "bare", me),
             child("unhosted", "live", 7),
+            child("unspawned", "lone", me),
         ];
         let hook = |id: &str, phase: &str| HookRecord {
             session_id: id.into(),
@@ -4031,16 +4071,16 @@ mod hosted_death_tests {
             updated_at: "2026-10-07T10:00:00Z".into(),
             ..Default::default()
         };
-        let mut hooks: Vec<HookRecord> = ["open", "under-dead", "under-dying", "under-bare", "unhosted"]
+        let mut hooks: Vec<HookRecord> = ["open", "under-dead", "under-dying", "under-bare", "unhosted", "unspawned"]
             .iter()
             .map(|id| hook(id, "working"))
             .collect();
         hooks.push(hook("awaits", "awaiting"));
         hooks.push(hook("closed", "stopped"));
-        let reaped: Vec<String> = sessions.iter().skip(4).map(|s| s.session_id.clone()).chain(["dying".to_string()]).collect();
+        let reaped: Vec<String> = sessions.iter().skip(6).map(|s| s.session_id.clone()).chain(["dying".to_string()]).collect();
         let mut owned: Vec<String> = owned_by_live_wraps(&sessions, &hooks, &reaped).into_iter().collect();
         owned.sort();
-        assert_eq!(owned, ["awaits", "open"]);
+        assert_eq!(owned, ["awaits", "open"], "`unspawned` has nobody to be told, so the reaper takes it");
     }
 
     /// Which hook children a wrap's own exit records as died: the hosted ones
@@ -4109,8 +4149,9 @@ mod hosted_death_tests {
     }
 
     /// A hook child ended by `end` with its turn in `phase`, under a wrap whose
-    /// spawner edge is attested or not: the hook record it is left with.
-    fn ended_child(tag: &str, phase: &str, attested: bool, end: impl FnOnce()) -> HookRecord {
+    /// spawner edge is attested or not, and whose harness is the process
+    /// `harness`: the hook record it is left with.
+    fn ended_child(tag: &str, phase: &str, attested: bool, harness: i32, end: impl FnOnce()) -> HookRecord {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let stage = crate::graph::testutil::unique_stage(tag);
@@ -4123,7 +4164,7 @@ mod hosted_death_tests {
         wrap.pid = Some(4242);
         wrap.attested_spawner = attested.then(|| "P".to_string());
         let mut kid = crate::graph::testutil::session("kid", "/w", "working", at, Some("wrap"));
-        kid.hook_ancestry = vec![999_999, 4242];
+        kid.hook_ancestry = vec![harness, 4242];
         kid.activity = Some("Bash".into());
         let sessions = SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: vec![spawner, wrap, kid] };
         write_stage(&sessions_path(), &sessions).unwrap();
@@ -4135,35 +4176,128 @@ mod hosted_death_tests {
         hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap()
     }
 
-    /// A session end that finds the turn open records the fact `end`, with the
-    /// tool in flight and the spawner, by the CLI door and the hook door alike. A
-    /// closed turn, or one with no spawner to tell, is only marked `done`.
-    #[test]
-    fn a_session_end_with_the_turn_open_records_that_it_ended_mid_turn() {
-        let ended = Some(HookDeath {
+    /// The doors a `session end` for `kid` comes through: the CLI, the hook door's
+    /// `SessionEnd`, and the daemon's forwarded call with `peer` as the pid it
+    /// stamped (none when it stamped none).
+    fn cli_end() {
+        session_end(&crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]));
+    }
+    fn hook_end() {
+        super::super::send::hook_from_str(r#"{ "session_id": "kid", "hook_event_name": "SessionEnd" }"#);
+    }
+    fn daemon_end(peer: Option<i32>) {
+        let mut inv = crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]);
+        inv.door = aoide_protocol::Door::Daemon;
+        if let Some(pid) = peer {
+            inv.flags.insert(crate::graph::DAEMON_PEER_PID_FLAG.to_string(), pid.to_string());
+        }
+        session_end(&inv);
+    }
+
+    /// A live process of its own that is no ancestor of this test, killed on drop.
+    struct Bystander(std::process::Child);
+    impl Bystander {
+        fn start() -> Self {
+            Self(std::process::Command::new("sleep").arg("60").spawn().expect("sleep starts"))
+        }
+        fn pid(&self) -> i32 {
+            self.0.id() as i32
+        }
+    }
+    impl Drop for Bystander {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn ended_fact() -> Option<HookDeath> {
+        Some(HookDeath {
             last_tool: Some("Bash".into()),
             outcome: Some("end".into()),
             spawner: Some("P".into()),
             ..Default::default()
-        });
-        let cli = || {
-            session_end(&crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]));
-        };
-        let hook = || {
-            super::super::send::hook_from_str(r#"{ "session_id": "kid", "hook_event_name": "SessionEnd" }"#);
-        };
+        })
+    }
+
+    /// A session end that finds the turn open records the fact `end`, with the
+    /// tool in flight and the spawner, by the CLI door, the hook door and the
+    /// daemon's forwarded call alike, when the caller is the child's own harness
+    /// or runs under it. A closed turn, or one with no spawner to tell, is only
+    /// marked `done`.
+    #[test]
+    fn a_session_end_with_the_turn_open_records_that_it_ended_mid_turn() {
+        let me = std::process::id() as i32;
+        let under_me = Bystander::start();
         for phase in ["working", "awaiting"] {
-            for (door, rec) in [("cli", ended_child("end-cli", phase, true, cli)), ("hook", ended_child("end-hook", phase, true, hook))] {
-                assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended), "{door} door, {phase}");
+            for (name, end) in [("cli", cli_end as fn()), ("hook", hook_end as fn())] {
+                let rec = ended_child(&format!("end-{name}"), phase, true, me, end);
+                assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()), "{name} door, {phase}");
             }
+            let own = ended_child("end-daemon-self", phase, true, me, || daemon_end(Some(me)));
+            assert_eq!((own.phase.as_str(), &own.death), ("done", &ended_fact()), "daemon door, the harness itself, {phase}");
+            let below = ended_child("end-daemon-below", phase, true, me, || daemon_end(Some(under_me.pid())));
+            assert_eq!((below.phase.as_str(), &below.death), ("done", &ended_fact()), "daemon door, under the harness, {phase}");
         }
         for (case, rec) in [
-            ("closed", ended_child("end-closed", "stopped", true, cli)),
-            ("closed by hook", ended_child("end-closed-hook", "idle", true, hook)),
-            ("no spawner", ended_child("end-unattested", "working", false, cli)),
+            ("closed", ended_child("end-closed", "stopped", true, me, cli_end)),
+            ("closed by hook", ended_child("end-closed-hook", "idle", true, me, hook_end)),
+            ("no spawner", ended_child("end-unattested", "working", false, me, cli_end)),
         ] {
             assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{case}");
         }
+    }
+
+    /// A false "ended mid-turn" is an injection into the spawner, so only the
+    /// session ending itself can write one. Someone else's `session end` for an
+    /// open turn, whose harness is alive and is no ancestor of the caller, only
+    /// closes the phase, whichever door it comes through: the CLI, the hook door
+    /// with a forged SessionEnd payload, or the daemon's forwarded call whose
+    /// stamped peer is not under the harness or is absent. A peer-pid flag typed
+    /// on a door other than the daemon's is not a kernel fact and is not read.
+    #[test]
+    fn a_session_end_by_someone_else_records_no_fact() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let me = std::process::id() as i32;
+        let mut forged = crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]);
+        forged.flags.insert(crate::graph::DAEMON_PEER_PID_FLAG.to_string(), h.to_string());
+        let forged_cli = move || {
+            session_end(&forged);
+        };
+        let cases: [(&str, Box<dyn FnOnce()>); 5] = [
+            ("cli", Box::new(cli_end)),
+            ("hook", Box::new(hook_end)),
+            ("daemon, a peer outside the harness", Box::new(move || daemon_end(Some(me)))),
+            ("daemon, no peer stamped", Box::new(|| daemon_end(None))),
+            ("cli, a forged peer flag", Box::new(forged_cli)),
+        ];
+        for (case, end) in cases {
+            let rec = ended_child("end-other", "working", true, h, end);
+            assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{case}");
+        }
+    }
+
+    /// The fact is the unclaimed state, and a second end must not erase it: a
+    /// repeated `session end`, and a duplicate `SessionEnd` hook, both find the
+    /// phase already closed and leave the record exactly as the first end made it.
+    #[test]
+    fn a_second_session_end_and_a_duplicate_session_end_hook_keep_the_fact() {
+        let record = || {
+            let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+            hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap()
+        };
+        let first = std::cell::RefCell::new(None);
+        let ends = || {
+            cli_end();
+            *first.borrow_mut() = Some(record());
+            cli_end();
+            hook_end();
+            hook_end();
+        };
+        let rec = ended_child("end-again", "working", true, std::process::id() as i32, ends);
+        assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()));
+        assert_eq!(Some(rec), first.into_inner(), "the later ends left the record exactly as the first made it");
     }
 
     /// One harness is one death: a `/clear` gives the same process a second hook

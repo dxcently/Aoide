@@ -30,6 +30,13 @@
   `upsert_session` is the one writer that applies it; a new writer of
   `SessionRecord.pid` from caller-supplied input must call it too. The seal
   binds the pid, so a movable pid is a forgeable seal.
+- **A hook record's death fact is erased only by a live phase.**
+  `session::upsert_hook` leaves a `done` record that carries a `death` untouched
+  when asked for `done` again (a repeated `session end`, a duplicate
+  `SessionEnd`, a reap), because the fact is the unclaimed evidence the
+  ping-back is waiting to say. Any other phase supersedes it: a session that
+  runs again under the same id has not died. `record_death` writes the phase and
+  the fact together and assumes an open phase; its callers check that first.
 - **`runtime_dir::socket_dir` is a PURE resolution.** It answers a path and
   creates nothing — `tunnel::list_records`' own tests depend on "the `aoide/`
   subdirectory does not exist until a writer makes it", and a resolver that
