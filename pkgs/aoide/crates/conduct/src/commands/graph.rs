@@ -240,7 +240,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],
-        summary: "Enumerate held `send` / A2A entries in state/stage/pending.json (id is the entry's position — re-list after any approve/deny, positions shift). A malformed entry (a stale hand-edited line) is listed with state `malformed` rather than failing the whole read.",
+        summary: "Enumerate held `send` / A2A entries in state/stage/pending.json (id is the entry's position — re-list after any approve/deny, positions shift). A malformed entry (a stale hand-edited line) is listed with state `malformed` rather than failing the whole read. The human line spells every control, bidi and invisible character as a visible escape (`\\n`, `\\x1b`, `\\u{202e}`) and shows a held spawn as its whole command; `data.pending[].text` keeps the bytes as they replay.",
         args: [],
         flags: [],
         gated: false,
@@ -288,7 +288,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "pending", "approve"],
-        summary: "Approve one held pending entry: re-drive it through the one gated injection door (`send`, in-process, --yes) and remove it from the queue. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
+        summary: "Approve one held pending entry: re-drive it through the one gated injection door (`send`, in-process, --yes) and remove it from the queue. A held spawn whose `--id` has since gone live is refused and stays queued. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
         args: [arg!("id", "string", true, "Pending entry id — its position from `session pending list`.")],
         flags: [],
         gated: false,

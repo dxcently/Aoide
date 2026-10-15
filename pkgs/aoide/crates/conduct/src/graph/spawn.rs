@@ -45,7 +45,10 @@ use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, uni
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::common::stage_error;
 use super::pending::audit_pending;
-use super::send::{deliver_local_with, hold_spawn, real_attested_sender, HoldRefused, PendingSpawn, PENDING_CAP_PER_SOURCE};
+use super::send::{
+    deliver_local_with, hold_spawn, real_attested_sender, HoldRefused, PendingSpawn, AUDIT_REFUSED_TEXT_MAX,
+    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_TOO_LARGE,
+};
 use super::session_store::now_iso_utc;
 use super::undying::nothing_to_restore_warning;
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
@@ -798,6 +801,27 @@ fn hold_whole_spawn(inv: &Invocation) -> Outcome {
             )
             .with_fields(json!({ "reason": super::send::PENDING_FULL, "sessionId": id }));
             audit_pending(inv, cmd, "refused", &out.message, &line);
+            out
+        }
+        Err(HoldRefused::TooLarge(bytes)) => {
+            let out = Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                format!(
+                    "spawn of `{id}` not queued: the entry is {bytes} bytes, over the {PENDING_ENTRY_MAX_BYTES} a held entry may be"
+                ),
+                "a human reads every held entry, and the queue file is rewritten whole on each change, \
+                 so one entry is bounded in size",
+                Fix::None("give the command less text"),
+            )
+            .with_fields(json!({
+                "reason": PENDING_TOO_LARGE,
+                "sessionId": id,
+                "bytes": bytes,
+                "maxBytes": PENDING_ENTRY_MAX_BYTES,
+            }));
+            let head: String = line.chars().take(AUDIT_REFUSED_TEXT_MAX).collect();
+            audit_pending(inv, cmd, "refused", &out.message, &head);
             out
         }
     }
@@ -1846,6 +1870,106 @@ mod tests {
         let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", longest.as_str())]), |_| None);
         assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
         assert_eq!(held_spawns().len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The id was free when the spawn was held; approving it later binds that
+    /// id's socket, which unlinks whatever is there. A session that has taken the
+    /// id since keeps it: the approve is refused (taught, audited), the entry
+    /// stays queued for a deny, and nothing launches. A bare socket with no record
+    /// counts too. Once the id is free again the same entry approves and launches.
+    #[cfg(unix)]
+    #[test]
+    fn approving_a_held_spawn_whose_id_has_gone_live_is_refused_and_it_stays_queued() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-approve-live-id");
+        let marker = root.join("launched");
+        let touch = format!("touch {}; sleep 1", marker.display());
+        let approve = || {
+            crate::graph::pending::pending_approve(&Invocation {
+                path: vec!["session".into(), "pending".into(), "approve".into()],
+                args: vec!["0".into()],
+                flags: BTreeMap::new(),
+                door: Door::Cli,
+            })
+        };
+
+        let held = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "late")]), |_| None);
+        assert_eq!(held.data.as_ref().unwrap()["state"], "pending", "{}", held.message);
+        let roster = |state: &str| {
+            write_stage(
+                &sessions_path(),
+                &SessionsFile {
+                    schema_version: String::new(),
+                    sessions: vec![session("late", "/w", state, "2026-09-26T00:00:00Z", None)],
+                },
+            )
+            .unwrap();
+        };
+        roster("idle");
+
+        let out = approve();
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "id-in-use");
+        assert_eq!(held_spawns().len(), 1, "the entry stays queued");
+        let roster_now: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(roster_now.sessions.len(), 1);
+        assert_eq!(roster_now.sessions[0].state, "idle", "the live record is untouched");
+        let log = std::fs::read_to_string(root.join("log")).unwrap_or_default();
+        assert!(log.contains("approve [0] spawn late: id in use"), "the refusal is audited: {log}");
+
+        roster("done");
+        let ghost = conduct_socket_path("late");
+        std::fs::create_dir_all(ghost.parent().unwrap()).unwrap();
+        let bound = std::os::unix::net::UnixListener::bind(&ghost).unwrap();
+        let out = approve();
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "id-in-use", "a socket alone is enough: {}", out.message);
+        assert_eq!(held_spawns().len(), 1);
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!marker.exists(), "nothing launched while the id was taken");
+
+        drop(bound);
+        let _ = std::fs::remove_file(&ghost);
+        let out = approve();
+        assert_eq!(out.status, Status::Ok, "free again, it launches: {}", out.message);
+        let deadline = Instant::now() + Duration::from_millis(4000);
+        while Instant::now() < deadline && !marker.exists() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(marker.exists(), "the approved spawn launched");
+        assert!(held_spawns().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A held spawn is one queue entry like a held send, and as bounded: a command
+    /// whose entry serializes past the byte cap is refused with its taught
+    /// refusal, audited by head only, and neither queued nor launched.
+    #[cfg(unix)]
+    #[test]
+    fn an_oversize_held_spawn_is_refused_audited_and_never_queued() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-mcp-bytes");
+        let marker = root.join("launched");
+        let big = format!("touch {}; : {}", marker.display(), "x".repeat(PENDING_ENTRY_MAX_BYTES));
+        let out = session_spawn_with(&mcp_spawn(&["sh", "-c", big.as_str()], &[("id", "huge")]), |_| None);
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], PENDING_TOO_LARGE);
+        assert_eq!(data["maxBytes"], PENDING_ENTRY_MAX_BYTES);
+        assert!(data["refusal"]["why"].is_string() && data["refusal"]["fix"]["none"].is_string(), "{data}");
+        assert!(held_spawns().is_empty(), "nothing was queued");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!marker.exists(), "nothing launched");
+        let log = std::fs::read_to_string(root.join("log")).unwrap_or_default();
+        let refused: Vec<serde_json::Value> = log
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|r| r["status"] == "refused")
+            .collect();
+        assert_eq!(refused.len(), 1, "{log}");
+        assert!(refused[0]["untrusted_data"].as_str().unwrap().chars().count() <= AUDIT_REFUSED_TEXT_MAX);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -2612,7 +2612,8 @@ others:
 - `skipped-empty`: there was nothing to queue.
 - `queue-full`: the node already holds the queue's per-source cap (§3,
   `pending.json`). Nothing is queued.
-- `hold-failed`: the queue write failed.
+- `hold-failed`: the queue write failed, or the prompt was over the queue's
+  per-entry byte cap (§3, `pending.json`). Nothing is queued.
 - `busy`: the opening-turn worker pool was full. Nothing is queued; ask again.
 - `no-worker`: no worker thread could start. Nothing is queued.
 
@@ -3660,7 +3661,13 @@ memoized at queue time. `list`'s HUMAN line renders both the target and `from`
 through the canonical display grammar (petnames plan P3 —
 `<host>/<role>/<petname> (…<tail4>)`, terse petname+tail for `from`); the JSON
 fields `data.pending[].sessionId`/`.from` stay the entry's raw canonical ids,
-verbatim, always; `.claimed` is the stored label, cleaned once more.
+verbatim, always; `.claimed` is the stored label, cleaned once more. What a
+human reads is what replays: the HUMAN line, and every other view of an entry
+(the conductor's PENDING rows included), spells each character a terminal would
+act on as a visible escape (`\n`, `\x1b`, `\u{202e}`), never stripping one and
+never printing one, and doubles a backslash so a spelled escape cannot be taken
+for text. `.text` stays as it replays and, for a held spawn, is its whole
+command line.
 
 The queue holds at most `PENDING_CAP_PER_SOURCE` (32) entries per source, where
 the source is the entry's `from`, a held spawn counting against the `mcp` bucket
@@ -3672,8 +3679,12 @@ append run under one stage lock, so two senders racing for the last slot cannot
 both take it. A send past the cap is refused with `reason: "pending-full"`,
 `from` and `cap` in its data, and audited as `refused`. Nothing already queued
 is touched, and every other source still queues. The cap holds on every door,
-the CLI's included. The A2A door's own answer to a full source is in §6 ("This
-door parks every send").
+the CLI's included. One entry is bounded too: `record_pending` refuses an entry
+that serializes past `PENDING_ENTRY_MAX_BYTES` (64 KiB), a spawn's argv and
+flags counting with a send's text, with `reason: "pending-too-large"`, `bytes`
+and `maxBytes` in its data, audited as `refused` by the head of its text alone.
+The A2A door's own answer to a full source is in §6 ("This door parks every
+send").
 
 ```json
 {
@@ -6671,7 +6682,8 @@ opening turn is held, not typed. `opening_turn_worker` records the verdict
 `held-pending` and queues the prompt in `pending.json` for a human, attributed
 `node:<name>`. An empty opening turn is recorded as `skipped-empty` and queues
 nothing. A worker whose node already holds the queue's per-source cap records
-`queue-full`, and one whose queue write fails records `hold-failed`. The ack
+`queue-full`, and one whose queue write fails, or whose prompt is over the
+per-entry byte cap, records `hold-failed`. The ack
 path records `busy` when the opening-turn pool is saturated, and `no-worker`
 when no thread can start. In both cases nothing is queued, so `busy` means ask
 again and `no-worker` means the turn will not be held. While the worker runs,

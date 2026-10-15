@@ -742,7 +742,12 @@ aoide session pending list [--json]
 - **Notes:** read-only. The queue `send` parks a held injection in when no
   delivering rule clears it: every A2A send, an MCP send with no attested
   rule behind it, and a whole `spawn` from an unattested MCP caller, which
-  `list` shows as the command that approving it would run.
+  `list` shows as the command that approving it would run. The human line
+  spells every character a terminal would act on as a visible escape (`\n`,
+  `\x1b`, `\u{202e}`, a backslash doubled), never stripping or printing one,
+  and a send's preview is its whole text, so the lines after a newline are not
+  hidden; `data.pending[].text` keeps the bytes as they replay. One entry may
+  serialize to at most 64 KiB (`reason: "pending-too-large"`, audited).
 
 ### aoide session pending approve
 
@@ -757,7 +762,9 @@ aoide session pending approve <id> [--json]
   permit`'s verdict-typing already goes through — then removes the entry from
   `pending.json` under the stage lock. An entry that is a held spawn is
   launched instead, as the approver's door, with the argv and flags it was
-  held with. Resolution is the audit line, not a
+  held with, and refused (`reason: "id-in-use"`, the entry kept) when its `--id`
+  has since gone live or has a control socket, since launching binds that
+  socket. Resolution is the audit line, not a
   persisted archive: the resolution record under `session.pending.approve`
   (the injected text as `untrusted_data`), the re-driven `send`'s own outcome
   record, and the dispatcher's per-command record — three lines, the first

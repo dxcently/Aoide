@@ -79,7 +79,12 @@ label, never as the source, and a `--from` that spells a source only a door
 derives (`node:`, `addr:`, `mcp`) is refused with `reason` `reserved-from`. A
 held send past the cap is refused with `reason` `PENDING_FULL` and audited, and
 `hold_pending` answers `HoldRefused::Full`, so the network door can answer its
-own caller (`aoide-server`'s `do_inject` and opening turn).
+own caller (`aoide-server`'s `do_inject` and opening turn). One entry is bounded
+too: past `PENDING_ENTRY_MAX_BYTES` it is refused the same way
+(`PENDING_TOO_LARGE`, `HoldRefused::TooLarge`). What an approver reads is what
+replays: `pending list` and the conductor spell every unsafe character of an
+entry as a visible escape (`visible`: `\n`, `\x1b`, `\u{202e}`), never
+stripping one, and a held spawn shows as its whole command.
 
 ## Named seams (what it exposes)
 

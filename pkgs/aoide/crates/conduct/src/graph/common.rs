@@ -138,6 +138,53 @@ pub(in crate::graph) fn strip_unsafe(s: &str) -> String {
     s.chars().filter(|c| !is_unsafe(*c)).collect()
 }
 
+/// One character as a human reads it: itself when it is safe to print, else a
+/// visible escape. A backslash is doubled, so an escape in the output is never
+/// mistaken for text that spelled one (`printf '\x1b'` and a real ESC read
+/// differently).
+fn visible_char(c: char) -> String {
+    match c {
+        '\\' => "\\\\".to_string(),
+        '\n' => "\\n".to_string(),
+        '\r' => "\\r".to_string(),
+        '\t' => "\\t".to_string(),
+        c if c.is_ascii() && c.is_control() => format!("\\x{:02x}", c as u32),
+        c if is_unsafe(c) || (c.is_whitespace() && c != ' ') => format!("\\u{{{:x}}}", c as u32),
+        c => c.to_string(),
+    }
+}
+
+/// Text someone else wrote, shown to a human who is about to act on it: every
+/// character [`is_unsafe`] says a terminal must not be handed, and every
+/// whitespace but a plain space (a no-break space reads as one and is not),
+/// spelled as a visible escape (`\n`, `\x1b`, `\u{202e}`) instead of being
+/// stripped or printed. What replays is what is shown, never a cleaner
+/// version of it. `pub` so the conductor's approval views reach the one rule.
+pub fn visible(s: &str) -> String {
+    s.chars().map(visible_char).collect()
+}
+
+/// [`visible`] cut to `max` output characters with an ellipsis, never inside
+/// an escape.
+pub(in crate::graph) fn visible_clip(s: &str, max: usize) -> String {
+    let pieces: Vec<String> = s.chars().map(visible_char).collect();
+    if pieces.iter().map(|p| p.chars().count()).sum::<usize>() <= max {
+        return pieces.concat();
+    }
+    let mut out = String::new();
+    let mut width = 0;
+    for piece in &pieces {
+        let w = piece.chars().count();
+        if width + w > max.saturating_sub(1) {
+            break;
+        }
+        out.push_str(piece);
+        width += w;
+    }
+    out.push('…');
+    out
+}
+
 /// Terminal escape sequences and control bytes removed from text the pty
 /// wrote, leaving printable text plus `\n`, `\r` and `\t`.
 ///
@@ -311,6 +358,31 @@ pub(in crate::graph) fn clip_flat(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `visible` spells what `clean_line` would drop, so an approver sees
+    /// every byte that will replay: controls, the bidi override, a no-break
+    /// space. A backslash is doubled so a literal `\x1b` and a real ESC differ.
+    #[test]
+    fn visible_spells_every_unsafe_character_and_never_drops_one() {
+        assert_eq!(visible("a\nb\r\tc"), "a\\nb\\r\\tc");
+        assert_eq!(visible("\u{1b}[31m\u{7}"), "\\x1b[31m\\x07");
+        assert_eq!(visible("evil\u{202e}txt\u{200b}"), "evil\\u{202e}txt\\u{200b}");
+        assert_eq!(visible("a\u{a0}b\u{2028}c\u{85}"), "a\\u{a0}b\\u{2028}c\\u{85}");
+        assert_eq!(visible("printf '\\x1b'"), "printf '\\\\x1b'");
+        assert_ne!(visible("\\x1b"), visible("\u{1b}"), "a spelled escape is not an ESC");
+        assert_eq!(visible("plain text é 日本 — ok"), "plain text é 日本 — ok");
+        assert!(visible("a\nb\u{1b}\u{202e}").chars().all(|c| !is_unsafe(c)));
+    }
+
+    /// The clip counts escaped characters and stops before an escape, never
+    /// inside one, and marks that it cut.
+    #[test]
+    fn visible_clip_cuts_between_escapes_and_marks_it() {
+        assert_eq!(visible_clip("short\n", 10), "short\\n");
+        assert_eq!(visible_clip("ab\ncd", 4), "ab…", "the \\n that would straddle the cut is dropped whole");
+        assert_eq!(visible_clip("abcdef", 4), "abc…");
+        assert_eq!(visible_clip("a\u{1b}", 3), "a…");
+    }
 
     #[test]
     fn clean_line_strips_colour_and_keeps_its_literal_text() {

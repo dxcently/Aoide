@@ -816,12 +816,12 @@ fn opening_turn_worker(
 /// for a human exactly like a send that did not clear the gate. Nothing is
 /// typed into the new session, and the verdict says so: `queue-full` when the
 /// node already holds the queue's per-source cap, `hold-failed` when the write
-/// itself failed.
+/// itself failed or the prompt is over the queue's per-entry byte cap.
 fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>) -> &'static str {
     match hold_pending(id, prompt, true, from) {
         Ok(()) => "held-pending",
         Err(HoldRefused::Full) => "queue-full",
-        Err(HoldRefused::Stage(_)) => "hold-failed",
+        Err(HoldRefused::Stage(_) | HoldRefused::TooLarge(_)) => "hold-failed",
     }
 }
 
@@ -10881,6 +10881,49 @@ mod tests {
         assert_eq!(word.as_deref(), Some("queue-full"), "the verdict names the cap");
         let after = std::fs::read_to_string(root.join("stage").join("pending.json")).unwrap();
         assert_eq!(after, before, "nothing queued, nothing moved");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// A prompt past the queue's per-entry byte cap is never queued: the
+    /// worker stamps `hold-failed`, the one word for "held nothing", and the
+    /// queue is exactly as it was.
+    #[test]
+    fn an_oversize_opening_turn_is_hold_failed_and_queues_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-too-large-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let id = "too-large";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+
+        opening_turn_worker(
+            id.to_string(),
+            "x".repeat(aoide_conduct::graph::PENDING_ENTRY_MAX_BYTES),
+            root.join("log"),
+            OpeningTurnSlot::acquire().expect("a slot"),
+            Some("node:chatty".to_string()),
+        );
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone());
+        assert_eq!(word.as_deref(), Some("hold-failed"), "an oversize prompt holds nothing");
+        assert!(!root.join("stage").join("pending.json").exists(), "and queues nothing");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {

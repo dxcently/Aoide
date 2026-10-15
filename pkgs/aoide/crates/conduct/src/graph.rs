@@ -179,7 +179,7 @@ pub use self::send::DAEMON_PEER_PID_FLAG;
 // into its own answer.
 pub use self::send::{
     hold_pending, pending_path, session_hook, session_send, HoldRefused, DOOR_CANNOT_APPROVE,
-    PENDING_CAP_PER_SOURCE, PENDING_FULL,
+    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_FULL,
 };
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile
@@ -258,6 +258,9 @@ pub use self::common::clean_line;
 // `strip_ansi`: the one escape stripper, shared with `aoide-conductor`'s log tail
 // (`conductor/src/logtail.rs`) and the screen source's own line reader.
 pub use self::common::strip_ansi;
+// `visible`: the one escaper for text a human is about to approve, shared with
+// `aoide-conductor`'s pending views so no surface renders an entry another way.
+pub use self::common::visible;
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a

@@ -476,6 +476,20 @@ pub const PENDING_CAP_PER_SOURCE: usize = 32;
 /// it from any other failure.
 pub const PENDING_FULL: &str = "pending-full";
 
+/// The most bytes one queued entry may serialize to, a send's text and a
+/// spawn's argv alike. The count cap bounds how many entries a sender holds;
+/// this bounds how big each is, so neither a human's screen nor
+/// `pending.json`, rewritten whole on every change, can be swollen by a single
+/// caller.
+pub const PENDING_ENTRY_MAX_BYTES: usize = 64 * 1024;
+
+/// The `reason` an entry refused at [`PENDING_ENTRY_MAX_BYTES`] carries.
+pub const PENDING_TOO_LARGE: &str = "pending-too-large";
+
+/// How much of a refused entry's text the audit line keeps: the head, enough
+/// to tell what was tried, never the whole oversize body.
+pub(super) const AUDIT_REFUSED_TEXT_MAX: usize = 256;
+
 /// The `reason` a send refused for a `--from` that spells a source only a door
 /// derives carries ([`is_door_source`]).
 const RESERVED_FROM: &str = "reserved-from";
@@ -485,6 +499,8 @@ const RESERVED_FROM: &str = "reserved-from";
 pub enum HoldRefused {
     /// Its source already holds [`PENDING_CAP_PER_SOURCE`] entries.
     Full,
+    /// The entry serializes to this many bytes, over [`PENDING_ENTRY_MAX_BYTES`].
+    TooLarge(usize),
     /// The stage could not be read or written.
     Stage(String),
 }
@@ -575,8 +591,7 @@ fn record_pending(
         if file.pending.iter().filter(|p| p.from == origin.from).count() >= PENDING_CAP_PER_SOURCE {
             return Err(HoldRefused::Full);
         }
-        file.schema_version = STAGE_GRAPH_VERSION.to_string();
-        file.pending.push(PendingSend {
+        let entry = PendingSend {
             session_id: id.to_string(),
             text: text.to_string(),
             submit,
@@ -584,7 +599,13 @@ fn record_pending(
             from: origin.from.clone(),
             claimed: origin.claimed.clone(),
             spawn,
-        });
+        };
+        let bytes = serde_json::to_vec(&entry).map_or(0, |v| v.len());
+        if bytes > PENDING_ENTRY_MAX_BYTES {
+            return Err(HoldRefused::TooLarge(bytes));
+        }
+        file.schema_version = STAGE_GRAPH_VERSION.to_string();
+        file.pending.push(entry);
         write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)
     })
 }
@@ -1167,6 +1188,26 @@ pub(in crate::graph) fn deliver_local_with(
                     "cap": PENDING_CAP_PER_SOURCE,
                 }));
                 audit_send_noted(inv, "refused", &out.message, &text, origin.note());
+                return out;
+            }
+            Err(HoldRefused::TooLarge(bytes)) => {
+                let out = Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    format!("send to `{id}` not queued: the entry is {bytes} bytes, over the {PENDING_ENTRY_MAX_BYTES} a held entry may be"),
+                    "a human reads every held entry, and the queue file is rewritten whole on each change, \
+                     so one entry is bounded in size",
+                    Fix::None("send less text at a time"),
+                )
+                .with_fields(json!({
+                    "reason": PENDING_TOO_LARGE,
+                    "id": id,
+                    "from": origin.from,
+                    "bytes": bytes,
+                    "maxBytes": PENDING_ENTRY_MAX_BYTES,
+                }));
+                let head: String = text.chars().take(AUDIT_REFUSED_TEXT_MAX).collect();
+                audit_send_noted(inv, "refused", &out.message, &head, origin.note());
                 return out;
             }
         }
@@ -4277,6 +4318,47 @@ mod tests {
         let out = send_from("someone-else", "still welcome");
         assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
         assert_eq!(queued_from("someone-else"), ["still welcome"]);
+        assert!(nothing_connected(&listener), "a door that cannot approve delivers nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One entry is bounded in size as well as in number: a send whose entry
+    /// serializes past `PENDING_ENTRY_MAX_BYTES` is refused with a taught
+    /// refusal and audited with only the head of its text, the queue is
+    /// untouched, and one just under the cap still queues. The A2A door's seam
+    /// (`hold_pending`) answers `TooLarge` too, so it can tell its caller.
+    #[test]
+    fn an_entry_over_the_byte_cap_is_refused_audited_and_leaves_the_queue_alone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(DOOR_ENV);
+        let (root, id, listener) = door_fixture("pending-bytes", None);
+        let near = "a".repeat(PENDING_ENTRY_MAX_BYTES - 1024);
+        let out = session_send(&send_on(Door::Mcp, &[near.as_str()], &[("id", &id)]));
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "under the cap queues: {}", out.message);
+        assert_eq!(queued().len(), 1);
+
+        let big = format!("head-of-it {}", "b".repeat(PENDING_ENTRY_MAX_BYTES));
+        for door in [Door::Mcp, Door::Cli, Door::A2a] {
+            let out = session_send(&send_on(door, &[big.as_str()], &[("id", &id), ("from", "flooder")]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{door:?}: {}", out.message);
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["reason"], PENDING_TOO_LARGE, "{door:?}: {data}");
+            assert_eq!(data["maxBytes"], PENDING_ENTRY_MAX_BYTES);
+            assert!(data["bytes"].as_u64().unwrap() as usize > PENDING_ENTRY_MAX_BYTES);
+            assert!(data["refusal"]["why"].is_string() && data["refusal"]["fix"]["none"].is_string(), "taught: {data}");
+        }
+        assert_eq!(queued().len(), 1, "nothing of an oversize send was queued");
+        let refused: Vec<Value> = audit_lines(&root).into_iter().filter(|r| r["status"] == "refused").collect();
+        assert_eq!(refused.len(), 3, "each refusal is audited: {refused:?}");
+        for r in &refused {
+            let kept = r["untrusted_data"].as_str().unwrap();
+            assert!(kept.starts_with("head-of-it"), "the audit keeps the head: {r}");
+            assert!(kept.chars().count() <= AUDIT_REFUSED_TEXT_MAX, "and only the head: {}", kept.len());
+        }
+
+        let held = hold_pending(&id, &big, true, Some("node:big"));
+        assert!(matches!(held, Err(HoldRefused::TooLarge(n)) if n > PENDING_ENTRY_MAX_BYTES), "{held:?}");
+        assert_eq!(queued().len(), 1);
         assert!(nothing_connected(&listener), "a door that cannot approve delivers nothing");
         let _ = std::fs::remove_dir_all(&root);
     }

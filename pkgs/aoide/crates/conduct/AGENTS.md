@@ -181,15 +181,36 @@ in the message.
   `a_spawn_entry_that_does_not_parse_is_malformed_and_never_typed_as_a_send`,
   `an_attested_mcp_callers_restore_is_held_pending_though_its_send_would_deliver`
   and `a_restore_over_an_mcp_door_is_held_pending_and_never_typed`.
-- **`pending.json` has one writer, and it holds the per-source cap.**
-  `record_pending` (`graph/send.rs`) counts the entries carrying the new
-  entry's `from` and appends under ONE stage lock, refusing at
-  `PENDING_CAP_PER_SOURCE` without touching what is queued. Every held send
-  and `hold_pending` go through it, on every door. A new writer of the queue
-  goes through it too, never around it, or one sender can fill a human's
-  approval queue. A refused send carries `reason: PENDING_FULL` and is
-  audited. Pinned by
-  `a_full_source_is_refused_and_audited_and_another_source_still_queues`.
+- **`pending.json` has one writer, and it holds the per-source cap and the
+  per-entry size.** `record_pending` (`graph/send.rs`) counts the entries
+  carrying the new entry's `from` and appends under ONE stage lock, refusing
+  at `PENDING_CAP_PER_SOURCE` without touching what is queued, and refusing an
+  entry that serializes past `PENDING_ENTRY_MAX_BYTES` (a send's text and a
+  spawn's argv alike) with `HoldRefused::TooLarge`. Every held send and
+  `hold_pending` go through it, on every door. A new writer of the queue goes
+  through it too, never around it, or one sender can fill a human's approval
+  queue. A refused send carries `reason: PENDING_FULL` or `PENDING_TOO_LARGE`
+  and is audited (an oversize one by the head of its text only). Pinned by
+  `a_full_source_is_refused_and_audited_and_another_source_still_queues`,
+  `an_entry_over_the_byte_cap_is_refused_audited_and_leaves_the_queue_alone`
+  and `an_oversize_held_spawn_is_refused_audited_and_never_queued`.
+- **An approver is shown what replays, in escapes, never stripped.** Every
+  human view of a queued entry (`pending list`'s line, the answers of `approve`
+  and `deny`, and across the crate boundary the conductor's PENDING rows) spells
+  each character `is_unsafe` names, and any whitespace but a plain space, as
+  an escape through `visible` (`graph/common.rs`): `\n`, `\x1b`, `\u{202e}`,
+  a backslash doubled. A send's preview is the whole text escaped and then
+  clipped between escapes, so the lines after a newline are not hidden; a held
+  spawn's line is its whole command. The JSON `text` is the bytes as they
+  replay. A new view of an entry calls `visible` and does not clean, strip or
+  clip the text itself. Pinned by
+  `list_spells_unsafe_characters_in_every_field_a_human_reads`,
+  `a_held_spawn_lists_as_its_whole_command_and_deny_launches_nothing` and
+  `visible_spells_every_unsafe_character_and_never_drops_one`. A held spawn's
+  `--id` is judged twice: at hold time (plain, at most 128 characters, naming
+  nothing live) and again in `pending_approve` before the entry leaves the
+  queue, since launching binds that id's socket; pinned by
+  `approving_a_held_spawn_whose_id_has_gone_live_is_refused_and_it_stays_queued`.
 - **A parked send's source is derived by its door, never read off the caller.**
   `pending_origin` (`graph/send.rs`) is the one place an entry's `from` is
   chosen: the A2A door's own `--from` (`node:<name>` or `addr:<address>`, set

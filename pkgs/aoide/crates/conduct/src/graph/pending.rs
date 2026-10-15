@@ -44,7 +44,7 @@
 //! fail cleanly (a structured error, never a panic) without touching it —
 //! the entry stays exactly where it was for a human to inspect by hand.
 
-use super::common::{clean_line, refuse_unapproving_door, require_args, stage_error, strip_unsafe};
+use super::common::{clean_line, refuse_unapproving_door, require_args, stage_error, visible, visible_clip};
 use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
@@ -77,20 +77,13 @@ fn spawn_of(v: &Value) -> Option<PendingSpawn> {
     serde_json::from_value(v.get("spawn")?.clone()).ok()
 }
 
-/// A one-line, length-bounded preview of a pending entry's text — mirrors
-/// [`super::send::one_line_title`]'s shape (not reused directly: that helper
-/// is private to `send.rs` and this is a display-only concern, not the
-/// auto-rename logic it exists for).
+/// A one-line, length-bounded preview of a pending entry's text, every
+/// unsafe character spelled as a visible escape ([`visible_clip`]): a newline
+/// shows as `\n` and the lines after it are not hidden, because everything
+/// the text holds is typed on approval.
 fn preview(text: &str) -> String {
-    let first = text.lines().next().unwrap_or("").trim();
     const MAX: usize = 60;
-    if first.chars().count() > MAX {
-        let mut t: String = first.chars().take(MAX - 1).collect();
-        t.push('…');
-        t
-    } else {
-        first.to_string()
-    }
+    visible_clip(text, MAX)
 }
 
 /// Read `pending.json`'s `pending` array as raw JSON — not the strict
@@ -197,9 +190,9 @@ fn entry_view(
         .filter(|s| !s.is_empty());
     let spawn = spawn_of(v);
     // A held spawn is shown from what approving it replays, whole: an approver
-    // who saw a clipped command line would be approving the rest blind. Only
-    // what a terminal would act on is stripped from it.
-    let text = spawn.as_ref().map(|s| strip_unsafe(&s.command_line())).unwrap_or(text);
+    // who saw a clipped command line would be approving the rest blind. The
+    // data carries it as it replays; only the line a human reads escapes it.
+    let text = spawn.as_ref().map(PendingSpawn::command_line).unwrap_or(text);
     let mut json = json!({
         "id": index.to_string(),
         "sessionId": session_id,
@@ -214,16 +207,17 @@ fn entry_view(
         json["spawn"] = json!(spawn);
     }
     let what = match spawn {
-        Some(_) => format!("spawn {session_id} ← {text}"),
-        None => format!("{} ← {}", grammar_label(&session_id, by_id, ids, host), preview(&text)),
+        Some(_) => format!("spawn {} ← {}", visible(&session_id), visible(&text)),
+        None => format!("{} ← {}", visible(&grammar_label(&session_id, by_id, ids, host)), preview(&text)),
     };
     let line = format!(
-        "[{index}] {what}{}{}{} ({queued_at})",
+        "[{index}] {what}{}{}{} ({})",
         if submit { " [submit]" } else { "" },
         from.as_deref()
-            .map(|f| format!(" (from {})", from_label(f, by_id)))
+            .map(|f| format!(" (from {})", visible(&from_label(f, by_id))))
             .unwrap_or_default(),
         claimed.as_deref().map(|c| format!(" (claims {c:?})")).unwrap_or_default(),
+        visible(&queued_at),
     );
     (json, line)
 }
@@ -370,17 +364,32 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
     // and `session_send` refuses a target with no socket: taking the entry first
     // would lose it. The entry stays put for a later approve, or a deny. A held
     // spawn has no target yet: approving it is what creates one.
-    let target = load_pending_array()
-        .ok()
-        .and_then(|a| a.get(index).cloned())
-        .filter(|v| !is_malformed(v) && spawn_of(v).is_none())
+    let entry = load_pending_array().ok().and_then(|a| a.get(index).cloned()).filter(|v| !is_malformed(v));
+    if let Some(id) = entry.as_ref().and_then(spawn_of).and_then(|s| s.flags.get("id").cloned()) {
+        // The id was free when the spawn was held. Launching binds its socket,
+        // which unlinks what is there, so a session that has taken the id since
+        // keeps it and the entry stays queued for the approver to deny.
+        if super::spawn::spawn_id_in_use(&id) {
+            audit_pending(inv, cmd, "refused", &format!("approve [{index}] spawn {id}: id in use"), "");
+            return Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                format!("`{}` names a session that is live", visible(&id)),
+                "launching would take over that session's record and control socket",
+                Fix::Run(format!("aoide session pending deny {index}")),
+            )
+            .with_fields(json!({ "reason": "id-in-use", "id": index.to_string(), "sessionId": id }));
+        }
+    }
+    let target = entry
+        .filter(|v| spawn_of(v).is_none())
         .and_then(|v| v.get("sessionId").and_then(Value::as_str).map(str::to_string));
     if let Some(sid) = target.filter(|sid| !target_is_live(sid)) {
         audit_pending(inv, cmd, "refused", &format!("approve [{index}] {sid}: target not live"), "");
         return Outcome::refuse(
             cmd,
             Kind::Refused,
-            format!("`{sid}` is not live yet"),
+            format!("`{}` is not live yet", visible(&sid)),
             "the session is not live yet; approve again once it registers",
             Fix::Run(format!("aoide session pending approve {index}")),
         )
@@ -450,7 +459,8 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         return Outcome::error(
             cmd,
             format!(
-                "pending entry {index} left the queue but delivery to `{session_id}` failed: {}",
+                "pending entry {index} left the queue but delivery to `{}` failed: {}",
+                visible(&session_id),
                 inner.message
             ),
         )
@@ -462,7 +472,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             "sendOutcome": inner.data,
         }));
     }
-    Outcome::ok(cmd, format!("pending entry {index} approved → delivered to `{session_id}`"))
+    Outcome::ok(cmd, format!("pending entry {index} approved → delivered to `{}`", visible(&session_id)))
         .changed(vec![format!("pending[{index}] for {session_id}: approved and injected")])
         .with_data(json!({
             "id": index.to_string(),
@@ -490,7 +500,11 @@ fn approve_spawn(inv: &Invocation, index: usize, session_id: &str, spawn: Pendin
     if !launched {
         return Outcome::error(
             cmd,
-            format!("pending spawn {index} left the queue but the launch of `{session_id}` failed: {}", inner.message),
+            format!(
+                "pending spawn {index} left the queue but the launch of `{}` failed: {}",
+                visible(session_id),
+                inner.message
+            ),
         )
         .with_data(json!({
             "id": index.to_string(),
@@ -500,7 +514,7 @@ fn approve_spawn(inv: &Invocation, index: usize, session_id: &str, spawn: Pendin
             "spawnOutcome": inner.data,
         }));
     }
-    Outcome::ok(cmd, format!("pending entry {index} approved → spawned `{session_id}`"))
+    Outcome::ok(cmd, format!("pending entry {index} approved → spawned `{}`", visible(session_id)))
         .changed(vec![format!("pending[{index}] for {session_id}: approved and launched")])
         .with_data(json!({
             "id": index.to_string(),
@@ -548,7 +562,7 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
     let text = o.get("text").and_then(Value::as_str).unwrap_or("").to_string();
 
     audit_pending(inv, cmd, "denied", &format!("deny [{index}] {session_id}"), &text);
-    Outcome::ok(cmd, format!("pending entry {index} for `{session_id}` denied — nothing injected"))
+    Outcome::ok(cmd, format!("pending entry {index} for `{}` denied — nothing injected", visible(&session_id)))
         .changed(vec![format!("pending[{index}] for {session_id}: denied")])
         .with_data(json!({ "id": index.to_string(), "sessionId": session_id, "injected": false }))
 }
@@ -1217,10 +1231,82 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// What an approver reads is what replays. Every field of an entry a human
+    /// sees (target, text, sender, time, a held spawn's id and command) shows an
+    /// unsafe character as a visible escape: a newline stays a `\n` and the
+    /// line after it is not hidden, a bidi override is `\u{202e}`, a literal
+    /// backslash is doubled so it reads differently from an ESC, and the data
+    /// keeps the bytes. The approve and deny answers spell the id the same way.
+    #[test]
+    fn list_spells_unsafe_characters_in_every_field_a_human_reads() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-visible");
+
+        let send_text = "ok\nrm -rf ~\u{202e}txt\r\u{1b}[2J printf '\\x1b'";
+        write_stage(
+            &pending_path(),
+            &json!({
+                "schemaVersion": "0",
+                "pending": [
+                    {
+                        "sessionId": "tgt\u{1b}[2J",
+                        "text": send_text,
+                        "submit": true,
+                        "queuedAt": "2026\u{7}",
+                        "from": "mcp:evil\u{202e}",
+                    },
+                    {
+                        "sessionId": "held\u{1b}[8m",
+                        "text": "ignored for a spawn",
+                        "queuedAt": "2026-10-15T00:00:00Z",
+                        "from": "mcp",
+                        "spawn": { "args": ["sh", "-c", "echo hi\nreboot\u{202e}"], "flags": {} },
+                    },
+                ],
+            }),
+        )
+        .unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        let unsafe_in = |text: &str| text.lines().any(|l| l.chars().any(crate::graph::common::is_unsafe));
+        assert!(!unsafe_in(&out.message), "nothing a terminal would act on reaches the line: {:?}", out.message);
+
+        let lines: Vec<&str> = out.message.lines().skip(1).collect();
+        assert_eq!(lines.len(), 2, "one line per entry, none split by a newline in the text: {lines:?}");
+        assert!(
+            lines[0].contains("tgt\\x1b[2J"),
+            "the target's id is spelled: {}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("ok\\nrm -rf ~\\u{202e}txt\\r\\x1b[2J printf '\\\\x1b'"),
+            "the text after its first newline is shown, escapes spelled, a backslash doubled: {}",
+            lines[0]
+        );
+        assert!(lines[0].contains("(from mcp:evil\\u{202e})"), "{}", lines[0]);
+        assert!(lines[0].ends_with("(2026\\x07)"), "{}", lines[0]);
+        assert!(lines[1].starts_with("[1] spawn held\\x1b[8m"), "{}", lines[1]);
+        assert!(lines[1].contains("echo hi\\nreboot\\u{202e}"), "{}", lines[1]);
+
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["pending"][0]["text"], send_text, "the data keeps what replays");
+        assert_eq!(data["pending"][0]["sessionId"], "tgt\u{1b}[2J");
+        assert!(data["pending"][1]["text"].as_str().unwrap().contains("hi\nreboot\u{202e}"));
+
+        let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(denied.status, Status::Ok, "{}", denied.message);
+        assert!(denied.message.contains("tgt\\x1b[2J"), "{}", denied.message);
+        assert!(!unsafe_in(&denied.message), "{:?}", denied.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A held spawn is listed as the command that approving it would run, whole
-    /// and on one line, and its JSON carries the argv and flags to replay.
-    /// A terminal sequence in an argument is stripped from what is shown, not
-    /// from what is replayed. Denying it launches nothing.
+    /// and on one line, and its JSON carries the argv and flags to replay. A
+    /// terminal sequence in an argument is spelled out in the line a human
+    /// reads (never stripped, never raw) and left as it replays in the data.
+    /// Denying it launches nothing.
     #[test]
     fn a_held_spawn_lists_as_its_whole_command_and_deny_launches_nothing() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1243,11 +1329,19 @@ mod tests {
         assert_eq!(entry["from"], "mcp");
         assert_eq!(entry["spawn"]["args"][0], "sh");
         assert_eq!(entry["spawn"]["flags"]["agent"], "claude");
-        let shown = entry["text"].as_str().unwrap();
+        let replayed = entry["text"].as_str().unwrap();
+        assert_eq!(replayed, spawn.command_line(), "the data is the command as it replays");
+        assert!(replayed.contains('\u{1b}'));
+        let shown = visible(replayed);
         assert!(shown.starts_with("aoide spawn --agent claude --windowed -- sh -c "), "{shown}");
         assert!(shown.ends_with(&format!("{tail}'")), "the command is shown to its last character: {shown}");
-        assert!(!shown.contains('\u{1b}'), "no terminal sequence reaches the approver");
-        assert!(out.message.contains(shown), "the human line carries the same whole command: {}", out.message);
+        assert!(shown.contains("\\x1b[2J"), "the escape is spelled out, not dropped: {shown}");
+        assert!(out.message.contains(&shown), "the human line carries the same whole command: {}", out.message);
+        assert!(
+            out.message.lines().all(|l| l.chars().all(|c| !crate::graph::common::is_unsafe(c))),
+            "no terminal sequence reaches the approver: {}",
+            out.message
+        );
         assert!(out.message.contains("(from mcp)"), "{}", out.message);
 
         let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
