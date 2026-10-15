@@ -7323,6 +7323,17 @@ governs nothing to sign under. A door whose identity key is not on disk, or
 will not load, answers unsigned and audits `a2a.answer-unsigned`, and never
 mints a key to answer. A client refuses an unsigned answer.
 
+**A signature does not make an answer's words safe to print.** A relay or a
+destination can be hostile and hold its own key, so the client strips every
+control and invisible character from any word of an answer that reaches the
+operator or a stored outcome, and clips it: to 200 characters when the answer
+verified, and to 120 (labelled `it said: …; not acted on`) when it did not. The
+cleaning happens where the word is read out of the answer, so the entry's
+`lastOutcome`, the link record, a poll's error, its own refusal and its
+`refused` and `withheld` lines are inert for every printer. A word the client
+acts on (`down`, `config-invalid`) is judged on the raw string before it is
+cleaned.
+
 **Identity IS the key; the name is a label (#63 P-ID5).** The resolved
 `Node` is the one whose stored `pubkey` verifies the signature — the
 signature proves possession of a key, and the record is found BY that key,
@@ -8438,7 +8449,10 @@ an ordinary body. A client that checks answers treats the two alike:
   what it holds and the record of what this box filed survives to the next
   poll. A binding exchange learns nothing. `aoide mail outbox` reads
   `retrying` with the `unauthenticated:` reason, and `aoide mail poll <node>`
-  reports the node unreachable with the same reason.
+  reports the node unreachable with the same reason. When the far end's own
+  word is `config-invalid`, which a door in that state never signs, the reason
+  says its config is invalid (`fix the config on <node>`), not that it needs
+  an upgrade.
 - **Old client to a door with the header: works.** The header is one more
   response line, and an older client never reads it.
 

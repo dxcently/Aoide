@@ -547,10 +547,12 @@ door's audit name whitelist gains both names so they never log as bare
   attempt is recorded, and the link backs off. Its `accepted` retires nothing,
   and its JSON-RPC `error` parks nothing. What it said (that error's message,
   or a refused result's `reason`) is shown to the operator, stripped of
-  control and invisible characters and clipped, and never acted on. A node
-  with no key on file is never dialled. A verified `accepted` or `duplicate`
-  retires a receipt, a `charter` letter or a `transit` container; a letter
-  waits for its receipt.
+  control and invisible characters and clipped, and never acted on. A
+  verified answer's words get the same stripping and a longer clip: a
+  signature proves who spoke, not that a stranger's text is safe for a
+  terminal. A node with no key on file is never dialled. A verified
+  `accepted` or `duplicate` retires a receipt, a `charter` letter or a
+  `transit` container; a letter waits for its receipt.
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
   destination. Routed like any letter, never themselves acked. **An

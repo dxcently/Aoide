@@ -10253,6 +10253,95 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A far end's words as a hostile one plants them: a carriage return that
+    /// overwrites the line, a screen clear, a window-title escape with its bell,
+    /// a bidi override, and then 10 KB.
+    fn hostile_words() -> String {
+        format!("over\rwritten \u{1b}[2J\u{1b}]0;title\u{7}cleared \u{202e}desrever {}", "x".repeat(10_000))
+    }
+
+    /// `text` is safe to print as it stands: apart from its own line breaks,
+    /// nothing a terminal obeys, and nowhere near the 10 KB a far end sent.
+    fn assert_printable(text: &str) {
+        let flat = text.replace('\n', " ");
+        assert!(!flat.chars().any(aoide_protocol::untrusted::is_unsafe), "a control, escape or bidi character reached the operator: {flat:?}");
+        assert!(text.chars().count() < 1_500, "clipped, not 10 KB: {} characters", text.chars().count());
+    }
+
+    /// **`mail outbox` prints a signed refusal's words inert.** A relay that
+    /// holds its own key can sign any words, and the entry's `last_outcome` and
+    /// the link record it answered with are what `mail outbox` prints. The text
+    /// and the JSON both carry them cleaned and clipped.
+    #[test]
+    fn mail_outbox_prints_a_signed_refusals_words_inert() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-hostile-words");
+        let body = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": { "status": "refused", "reason": "down", "detail": hostile_words() }
+        })
+        .to_string();
+        let (_listener, port, _hits) = spawn_fixed_answer_door(body);
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "relay", "bob", "hi").unwrap();
+        aoide_storage::outbox::write_entry("relay", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
+
+        crate::mail_wire::drain_node("relay").unwrap();
+
+        let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &["relay"]));
+        let text = said(&out);
+        assert!(text.contains("reason refused: down: overwritten [2J]0;titlecleared desrever x"), "the reason is shown, cleaned: {text}");
+        assert_printable(&text);
+        let row = &out.data.as_ref().unwrap()["entries"][0];
+        assert_printable(row["lastOutcome"].as_str().unwrap());
+        assert_printable(row["delivery"]["reason"].as_str().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **`mail poll` prints a signed answer's words inert.** The relay's own
+    /// refusal of the poll (the refusal's `what` and the node's row), a
+    /// `withheld` entry, and a JSON-RPC error that leaves the node unreachable
+    /// (the line F2 added to the text) are all a far end's words, signed or not.
+    #[test]
+    fn mail_poll_prints_a_signed_answers_words_inert() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-hostile-words");
+        let hostile = hostile_words();
+        let poll = |body: String| {
+            let (listener, port, _hits) = spawn_fixed_answer_door(body);
+            aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+            (handle_mail_poll(&mail_inv(&["mail", "poll"], &["relay"])), listener)
+        };
+        let result = |result: Value| json!({ "jsonrpc": "2.0", "id": 1, "result": result }).to_string();
+
+        // The relay refuses the poll itself.
+        let (out, _door) = poll(result(json!({ "status": "refused", "reason": "down", "detail": hostile })));
+        assert_eq!(status_of(&out), aoide_protocol::output::Status::Error, "{out:?}");
+        assert!(out.message.starts_with("overwritten [2J]0;titlecleared desrever x"), "{}", out.message);
+        assert_printable(&out.message);
+        assert_printable(&said(&out));
+        assert_printable(out.data.as_ref().unwrap()["nodes"][0]["reason"].as_str().unwrap());
+
+        // It withholds an entry.
+        let (out, _door) = poll(result(json!({ "withheld": [{ "msgid": hostile, "reason": hostile, "detail": hostile }] })));
+        assert_eq!(status_of(&out), aoide_protocol::output::Status::Ok, "{out:?}");
+        assert_printable(&said(&out));
+        let line = out.data.as_ref().unwrap()["nodes"][0]["withheld"][0].as_str().unwrap().to_string();
+        assert!(line.starts_with("overwritten [2J]0;titlecleared desrever x"), "{line}");
+        assert_printable(&line);
+
+        // It answers with a JSON-RPC error, which leaves it unreachable.
+        let (out, _door) = poll(json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": hostile } }).to_string());
+        let text = said(&out);
+        assert!(text.contains("relay: unreachable — overwritten [2J]0;titlecleared desrever x"), "{text}");
+        assert_printable(&text);
+        assert_printable(out.data.as_ref().unwrap()["nodes"][0]["reason"].as_str().unwrap());
+        for line in out.data.as_ref().unwrap()["results"].as_array().unwrap() {
+            assert_printable(line.as_str().unwrap());
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_mistyped_node_is_named_with_the_close_one_or_the_list() {
         with_node_state("typo-node", || {

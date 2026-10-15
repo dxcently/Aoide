@@ -704,14 +704,25 @@
 - **Every mail answer is verified before it is read.** `post_signed` is the one
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a
-  response directly. What an unsigned answer said reaches the refusal, the
-  entry and the link record only through `unsigned_said`, which cleans it
-  with `aoide_protocol::untrusted` and clips it to `SAID_MAX`; never format
-  the raw body's words into a stored outcome.
-- **`drain_node` reads the link's back-off before the binding exchange.** The
-  exchange is a dial, and an unsigned answer to it is an audit line; above the
-  back-off it would cost both on every daemon tick for as long as the link is
-  held off. Keep every dial of a drain below that check.
+  response directly.
+- **A far end's words are cleaned where they are read out of its answer,
+  signed or not.** A signature says who spoke, never that the words are safe
+  for a terminal: a relay or a destination can be hostile and hold its own
+  key. `foreign_words` (the strip and clip of `aoide_protocol::untrusted`, in
+  one helper) is the only way a word of an answer reaches a stored outcome
+  (`last_outcome`, the link record), a poll's `Err` or a `PollOutcome` line:
+  clipped to `LINE_MAX` (200) for a verified answer, and to `SAID_MAX` (120)
+  for an unsigned one, which is also labelled. Clean there and never at a
+  printer, so every printer is safe at once; never format a raw body word,
+  signed or not, into anything a person will read. A word that is classified
+  (`down`, `config-invalid`) is judged on the raw string BEFORE it is cleaned,
+  because stripping a format character can turn one word into another.
+- **`drain_node` decides it has nothing to dial before the binding exchange.**
+  The exchange is a dial, and an unsigned answer to it is an audit line. The
+  daemon drains every node that ever had mail (its directory is never removed)
+  every few seconds, so above either check it would cost both on every tick:
+  the link's back-off, and `dialable_entries` (spooled, not parked, not held)
+  being empty. Keep every dial of a drain below both.
 - **`charter`'s handlers render; `aoide_storage::charter` acts (P-CHARTER).**
   The document, its validation, the five accept steps, the operator key, the
   trust record, the high-water mark and the spool all live in storage —

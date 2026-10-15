@@ -478,8 +478,17 @@ never the inbound/serve half (that's `aoide-server`).
   said, for the operator: its `error.message`, else its result's `reason`
   (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
   and clipped to 120 characters before it reaches the entry, the link record
-  or the refusal, and labelled `(it said: …; not acted on)`. `drain_node`'s
-  loop walks up
+  or the refusal, and labelled `(it said: …; not acted on)`. For the word
+  `config-invalid` the lead says the far end's own config is invalid rather
+  than that it needs an upgrade, since a door in that state never signs its
+  answer. A signed answer's words get the same cleaning where they are read
+  (`foreign_words`), clipped to 200 characters: a refusal's `reason` and
+  `detail`, a JSON-RPC `error`, a poll's own refusal, a `withheld` entry, and
+  a refused container's `msgid`. So the entry's `last_outcome`, the link
+  record, a poll's `Err` and a `PollOutcome` are safe to print as they stand,
+  and a signature does not make a stranger's text safe for a terminal. The
+  `down`/`config-invalid` classification is judged on the raw word first.
+  `drain_node`'s loop walks up
   to `DRAIN_BATCH_CAP` (50) non-refused entries oldest first — a per-call
   bound so one tick's cost never scales with an unbounded backlog (mail
   register §26 outbox fix; a stuck link that had piled up 16k+ undelivered
@@ -578,13 +587,16 @@ never the inbound/serve half (that's `aoide-server`).
   lock across the POST itself (spec item 9: network I/O never happens
   under the stage lock). `Ok(())` covers every ordinary non-error path —
   nothing registered under `node_name`, `.bsy` already held by a
-  concurrent drain (ruling 3: skipped, never queued), a held-off link, an
-  empty spool, or a completed pass regardless of outcome mix; `Err` is
+  concurrent drain (ruling 3: skipped, never queued), a held-off link, a
+  spool with nothing to attempt (empty, or only parked and held entries), or
+  a completed pass regardless of outcome mix; `Err` is
   reserved for a genuine local I/O failure, never for "the remote node was
   unreachable," which is an ordinary outcome recorded in entry/link state
   instead of surfaced as an error to the caller. A held-off link is read
   before the binding exchange, so a drain of it sends nothing at all and
-  writes no audit line, however often the daemon ticks. **A drain tears its own
+  writes no audit line, however often the daemon ticks; so is a spool with
+  nothing to attempt (`dialable_entries` empty), because a node's directory is
+  never removed and the daemon visits every one. **A drain tears its own
   tunnel down before returning, unconditionally, on every path (ruling
   10)** — `TunnelTeardownGuard` is a Drop guard mirroring
   `commands::ScratchBodyFile`'s pattern; see the `tunnel` bullet above for
