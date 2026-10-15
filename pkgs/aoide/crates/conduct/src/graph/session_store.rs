@@ -277,14 +277,20 @@ pub(in crate::graph) fn protected_wrap(id: &str) -> Option<SessionRecord> {
         .find(|s| s.session_id == id && super::identity::is_protected_live_wrap(s))
 }
 
+/// Whether `id` is in the reserved `sub:` namespace. The one place the prefix
+/// is spelled: the refusal below, and the reconcilers that skip such an id.
+pub(in crate::graph) fn is_reserved_id(id: &str) -> bool {
+    id.starts_with("sub:")
+}
+
 /// The refusal of an id in the reserved `sub:` namespace, `None` for any other.
 /// A `sub:` record is a Task sub-agent's leaf and `do_subagent_spawn` is its
 /// only creator. A record any other door registered under that prefix would
 /// answer to the sub-agent hooks, which end, re-key and re-kind a `sub:` record
-/// on a harness's word alone, so `conduct`, the start door and the hook's
-/// SessionStart refuse the id.
+/// on a harness's word alone, so `conduct`, `spawn`, the start door and the
+/// hook's SessionStart refuse the id.
 pub(in crate::graph) fn reserved_id_refusal(cmd: &str, id: &str) -> Option<Outcome> {
-    id.starts_with("sub:").then(|| {
+    is_reserved_id(id).then(|| {
         Outcome::refuse(
             cmd,
             Kind::Usage,
@@ -573,8 +579,15 @@ fn set_session_state(id: &str, state: &str) -> Result<bool, String> {
 /// `state`/`activity` actually change, and this file is what the widgets'
 /// FileView watches — an unconditional rewrite here churns the UI on every
 /// single hook, not just the ones that moved anything.
+///
+/// A protected live wrap (`identity::is_protected_live_wrap`) is never an
+/// owner: a payload field a same-uid agent can forge names the `sub:` owner, so
+/// a wrap that holds such an id gets neither a phase nor an activity.
 pub(in crate::graph) fn set_owner_activity(owner: &str, state: &str, activity: Option<&str>) {
     with_stage_lock(|| {
+        if protected_wrap(owner).is_some() {
+            return;
+        }
         let canon = canonical_state(state);
         let mut h: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
         upsert_hook(&mut h.hooks, owner, canon, &now_iso_utc());
@@ -1544,6 +1557,12 @@ pub(crate) fn refresh_subagent_says(
 /// `sub:<agent_id>`; so that fallback passes `false` (enrich-only): it confirms
 /// the node once the re-key has landed and is a harmless no-op before then,
 /// never a duplicate.
+///
+/// A protected live wrap holding `sub_id` is left alone, as in
+/// [`do_subagent_end`] and [`do_subagent_rekey`]: these three act on a
+/// harness's word, which a same-uid agent can forge, and a wrap registered
+/// under the prefix before it was reserved must not be re-kinded, dropped or
+/// renamed by it.
 pub(in crate::graph) fn do_subagent_spawn(
     sub_id: &str,
     owner: &str,
@@ -1552,6 +1571,9 @@ pub(in crate::graph) fn do_subagent_spawn(
     allow_create: bool,
 ) {
     with_stage_lock(|| {
+        if protected_wrap(sub_id).is_some() {
+            return;
+        }
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return,
@@ -1606,6 +1628,9 @@ pub(in crate::graph) fn do_subagent_spawn(
 /// the tree stays clean. Idempotent; re-stages only when it removed one.
 pub(in crate::graph) fn do_subagent_end(sub_id: &str) {
     with_stage_lock(|| {
+        if protected_wrap(sub_id).is_some() {
+            return;
+        }
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return,
@@ -1627,7 +1652,8 @@ pub(in crate::graph) fn do_subagent_end(sub_id: &str) {
 /// `tool_response.agentId`), so it renames the record there from
 /// `sub:<tool_use_id>` to `sub:<agent_id>` — keeping every other field (parent,
 /// kind, state, title, startedAt) untouched — and reparents any child that
-/// pointed at the old id, except a protected live wrap. Because each dispatch
+/// pointed at the old id, except a protected live wrap, which is also never the
+/// node renamed (a source id that names one is a no-op). Because each dispatch
 /// re-keys using the id pair from its OWN PostToolUse, two Agent calls in one
 /// turn never cross-attribute.
 ///
@@ -1639,6 +1665,9 @@ pub(in crate::graph) fn do_subagent_rekey(from_sub_id: &str, to_sub_id: &str) {
         return;
     }
     with_stage_lock(|| {
+        if protected_wrap(from_sub_id).is_some() {
+            return;
+        }
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return,

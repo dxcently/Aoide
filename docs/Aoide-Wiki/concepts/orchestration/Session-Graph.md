@@ -541,10 +541,12 @@ children exactly as cleanly as an orderly exit does.
 
 The `sub:` id prefix belongs to these nodes. Only the hook door's sub-agent
 arms create, re-key or close one, each on a harness's word, so `conduct`,
-`session start` and a hook's SessionStart refuse an id under the prefix: a
-wrap registered there would answer to a forged sub-agent hook. For the same
-reason a `sub:` node is never a spawner, and its ending or re-keying leaves no
-spawn stamp orphaned (CONTRACTS, rule 3).
+`spawn`, `session start` and a hook's SessionStart refuse an id under the
+prefix, and the eidolon and Codex-app reconcilers enrol none: a wrap
+registered there would answer to a forged sub-agent hook. A wrap that already
+holds such an id is left alone by those arms. For the same reason a `sub:`
+node is never a spawner, and its ending or re-keying leaves no spawn stamp
+orphaned (CONTRACTS, rule 3).
 
 The same pass also retires **same-window agent duplicates**. A window hosts
 any number of agents: one desktop app window runs several headless claudes,

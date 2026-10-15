@@ -1356,9 +1356,11 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   keeps a protected survivor's edge and drops its spawn stamp when the record
   the edge names leaves the roster, and `do_subagent_rekey` keeps the edge too.
   A sub-agent record leaving the roster needs no such rule: the `sub:` prefix
-  is reserved (`session_store::reserved_id_refusal`, asked by `conduct`, the
-  start door and the hook's SessionStart), so a `sub:` record is never a
-  spawner. The autogate reads a parent edge
+  is reserved (`session_store::reserved_id_refusal`, asked by `conduct`,
+  `spawn`, the start door and the hook's SessionStart, and `is_reserved_id`,
+  which the eidolon and Codex-app reconcilers skip), so a `sub:` record is
+  never a spawner. The sub-agent writers that act on an id a hook payload
+  names skip a protected live wrap holding it. The autogate reads a parent edge
   only through `send.rs`'s `attested_parent_of`, which needs `attestedSpawner`
   to name the same id. Only `conduct` registration writes that stamp, and
   `SessionRecord::set_parent_session` drops it whenever the edge moves. The

@@ -1215,22 +1215,39 @@ in the message.
   wrap and never the payload). SessionStart stays distinct on purpose: its arm
   judges the four identity fields against the same record, answers `ok` for a
   start that changes none and refuses one that does, and a same-fields start is
-  not audited. Never add a per-arm protected check (the `SessionEnd` arm lost
-  its own when the guard landed), and never move a stamp, a window or chain
-  write, a phase write or a `spawn_summons` call ahead of the guard. A new arm
-  is covered by being below it. Tests that forge a hook at a protected wrap
-  set `AOIDE_AUDIT_LOG`, since the guard appends to it.
+  not audited. Never add a per-arm protected check (the guard covers the
+  `SessionEnd` arm too), and never move a stamp, a window or chain write, a
+  phase write or a `spawn_summons` call ahead of the guard. A new arm is
+  covered by being below it. Tests that forge a hook at a protected wrap set
+  `AOIDE_AUDIT_LOG`, since the guard appends to it.
+- **A payload field that names a `sub:` node is guarded where it is written.**
+  The guard above reads `session_id` and nothing else, while `tool_use_id`,
+  `parent_tool_use_id` and `agent_id` build the `sub:` ids that
+  `do_subagent_spawn`, `do_subagent_end`, `do_subagent_rekey` (its source id)
+  and `set_owner_activity` write under. Each of the four asks `protected_wrap`
+  for that id inside the stage lock and returns when it names a protected live
+  wrap, so a wrap registered under the prefix before it was reserved is not
+  re-kinded, renamed, dropped or given a phase or an activity by a forged
+  payload. A new writer keyed by an id a payload names asks the same reader.
 - **The `sub:` id prefix belongs to the sub-agent hooks.** `do_subagent_spawn`
   creates a `sub:<id>` node, `do_subagent_rekey` renames it and
   `do_subagent_end` removes it, each on a harness's word alone, so a wrap or
   session registered under that prefix would answer to a forged hook.
   `session_store::reserved_id_refusal` (a taught `Kind::Usage` refusal, reason
-  `reserved-id`) is asked by `session_conduct` before the child is spawned, by
-  `session_start` and by `do_hook_session_start`: the doors that take an id from
-  the caller. A new door that registers a caller's id asks it too. It is why a
-  `sub:` record is never a spawner (`window::spawner_is_attested` needs the
-  parent's pid in the ancestry, or its hook chain), so no stamp is ever left
-  naming a sub-agent node that ends, is re-keyed or is cascaded away.
+  `reserved-id`) is asked by the four doors that take an id from their caller:
+  `session_conduct`, before the child is spawned; `session_spawn`, before any
+  mailbox enrolment, sidecar or launch (its child would refuse the id only
+  after all three); `session_start`; and a hook's SessionStart, as the Start
+  arm's first act, ahead of `clear_stale_parent` and every other write, and
+  again in `do_hook_session_start` for the first hook of an unknown id. The
+  A2A door mints its own id (`spawn_session_id`) and takes none from its
+  caller. A new door that registers a caller's id asks it too. The eidolon and
+  Codex-app reconcilers read the id off disk instead, so they skip an id for
+  which `is_reserved_id` holds: they enrol none and retire one enrolled under
+  it. Together these make the sub-agent hooks the only makers of a `sub:` node.
+  It is why a `sub:` record is never a spawner (`window::spawner_is_attested`
+  needs the parent's pid in the ancestry, or its hook chain), so no stamp is
+  ever left naming a sub-agent node that ends, is re-keyed or is cascaded away.
 - **A session's exit — a clean `session end` OR a `reap` sweep — MUST
   append exactly one line to the durable session ledger, through the SAME
   shared call (P-D8, `docs/architecture/AOIDED.md`'s "L5").**

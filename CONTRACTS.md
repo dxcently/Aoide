@@ -2470,12 +2470,12 @@ conductor tree, its own child record with its own harness-native-subagent
 classifier, parented to the harness session from the hook payload, closed on
 its own stop event and swept if its parent ends; its id is `sub:<tool_use_id>`
 or `sub:<agent_id>`, and the `sub:` prefix is reserved to the hook door's
-sub-agent arms: `conduct`, `session start` and a hook's SessionStart, the doors
-that take an id from the caller, refuse one under it with reason
-`reserved-id`), `a2a` (§6 — an external
-A2A agent folded into the session DAG), or `app` (a task inside an app aoide
-does not conduct — e.g. a desktop Codex/ChatGPT thread, keyed by the app's
-own native thread id, `agent:"codex"`, `state:"idle"` at enrolment and
+sub-agent arms: `conduct`, `spawn`, `session start` and a hook's SessionStart
+refuse an id under it with reason `reserved-id`, and the eidolon and Codex-app
+reconcilers, which read their ids off disk, enrol none under it), `a2a` (§6 —
+an external A2A agent folded into the session DAG), or `app` (a task inside an
+app aoide does not conduct — e.g. a desktop Codex/ChatGPT thread, keyed by the
+app's own native thread id, `agent:"codex"`, `state:"idle"` at enrolment and
 thereafter `working`/`idle` read off its own rollout's turn bracket by the
 capture merge (`codex_app.rs::apply_codex_capture`), never `awaiting`; no
 `agent` profile, hook, `conductable`, or `socket` exists for it). `app` is explicitly
@@ -2870,6 +2870,14 @@ Three rules hold, each on the doors named:
    writes nothing either way, as above. A harness child's hooks name the child,
    so they are unaffected, and so is the readiness that reads the child.
 
+   That guard reads `session_id` alone. A sub-agent event also names a
+   `sub:<id>` through `tool_use_id`, `parent_tool_use_id` or `agent_id`, and a
+   wrap registered under the prefix before it was reserved is still a protected
+   wrap. The four writers those fields reach (a sub-agent spawn, end and
+   re-key, and an owner's phase and activity) each skip an id that names one,
+   so a forged payload cannot re-kind, rename, drop or write to it. A re-key is
+   judged on its source id.
+
    The hook chain (`hookAncestry`) is not one of the four fields, and on a
    conducted wrap it routes nothing: the ping-back's hook source never tracks a
    conducted record (`pingback/hook.rs`, `tracked`), whatever chain it carries.
@@ -2888,7 +2896,8 @@ Three rules hold, each on the doors named:
 
    A sub-agent record leaving the roster (a sub-agent end, a re-key, or the
    cascade of its owner's end) leaves no stamp to drop. A `sub:` record is never
-   a spawner: the doors that take an id refuse the prefix (the `kind` field
+   a spawner: `conduct`, `spawn`, `session start` and a hook's SessionStart
+   refuse the prefix and the native-id reconcilers skip it (the `kind` field
    above), so a sub-agent node is made only by the sub-agent hooks, and
    `spawner_is_attested` stamps a parent only when its pid stands in the
    registering process's ancestry or its hook chain covers it, which a

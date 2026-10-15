@@ -47,7 +47,7 @@ use super::model::{
 use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
     audit_ignored_wrap_hook, clear_stale_parent, do_hook_session_start, do_session_end,
-    do_session_phase, protected_wrap,
+    do_session_phase, protected_wrap, reserved_id_refusal,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
     do_subagent_spawn, ensure_session_ceiling, now_iso_utc, refresh_subagent_says,
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
@@ -2044,6 +2044,12 @@ fn hook_for_profile_gated(
     let mut claim_note: Option<String> = None;
     let inner = match action {
         HookAction::Start { id, cwd } => {
+            // First, ahead of `clear_stale_parent` and every other write below:
+            // a start under the reserved `sub:` prefix is refused before it can
+            // touch the sub-agent node that holds the id.
+            if let Some(refusal) = reserved_id_refusal("session.start", &id) {
+                return fold_hook_outcome(cmd, refusal, None, claim_note);
+            }
             // A claude launched INSIDE a conducted session inherits its parent's
             // `AOIDE_SESSION_ID` in the HOOK PROCESS's env — thread it as the
             // parent so a claude-conducting-claude (or a claude-in-a-shell) nests
@@ -7792,9 +7798,13 @@ mod tests {
     /// A protected live wrap registered as this process, with its `hooks.json`
     /// phase `stopped`, for the hook start tests below.
     fn protected_wrap_for_hook_start(kp: &aoide_storage::identity::Keypair) {
+        protected_wrap_named("wrap", kp);
+    }
+
+    fn protected_wrap_named(id: &str, kp: &aoide_storage::identity::Keypair) {
         let me = std::process::id() as i32;
         do_session_start(
-            "wrap",
+            id,
             Some("claude"),
             Some("/w"),
             None,
@@ -7804,9 +7814,9 @@ mod tests {
             None,
             Some(me as u32),
         );
-        seal_test_session("wrap", me, "", kp);
+        seal_test_session(id, me, "", kp);
         let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
-        crate::graph::upsert_hook(&mut hooks.hooks, "wrap", "stopped", &now_iso_utc());
+        crate::graph::upsert_hook(&mut hooks.hooks, id, "stopped", &now_iso_utc());
         write_stage(&hooks_path(), &hooks).unwrap();
     }
 
@@ -7860,12 +7870,19 @@ mod tests {
     /// The world a hook naming a protected wrap runs in: the wrap, an audit log
     /// of its own, and no compositor. The caller holds `env_lock`.
     fn forged_hook_world(tag: &str) -> (EnvVars, aoide_test_support::EnvSaver, PathBuf) {
+        forged_hook_world_for(tag, "wrap")
+    }
+
+    fn forged_hook_world_for(
+        tag: &str,
+        wrap_id: &str,
+    ) -> (EnvVars, aoide_test_support::EnvSaver, PathBuf) {
         let env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let (root_env, root) = aoide_test_support::isolated_mail_root(tag);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
         let kp = aoide_storage::identity::mint_ephemeral().unwrap();
-        protected_wrap_for_hook_start(&kp);
+        protected_wrap_named(wrap_id, &kp);
         (env, root_env, root)
     }
 
@@ -8126,6 +8143,113 @@ mod tests {
         assert_eq!(node.kind.as_deref(), Some("subagent"));
         assert_eq!(node.parent_session_id.as_deref(), Some("owner"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A forged SessionStart under the id of a live `sub:` node is refused
+    /// before anything is written, `clear_stale_parent` included: with no wrap
+    /// and no claim it would otherwise clear the node's `parentSessionId`.
+    #[test]
+    fn a_forged_hook_start_under_a_live_sub_node_leaves_its_parent_alone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_AUDIT_LOG"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, root) = aoide_test_support::isolated_mail_root("hook-start-live-sub");
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("audit.log"));
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let hook = |payload: &str| hook_for_profile_gated(Door::Cli, claude, payload, false, Some(me), None);
+        hook(r#"{ "session_id": "owner", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+        hook(
+            r#"{ "session_id": "owner", "hook_event_name": "PreToolUse", "cwd": "/w", "tool_name": "Task",
+                 "tool_use_id": "tuT", "tool_input": { "description": "look", "subagent_type": "Explore" } }"#,
+        );
+        let node = serde_json::to_value(stored("sub:tuT").expect("control: the Task node exists")).unwrap();
+        assert_eq!(node["parentSessionId"], "owner", "control: it hangs under its owner");
+
+        let out = hook(r#"{ "session_id": "sub:tuT", "hook_event_name": "SessionStart", "cwd": "/w" }"#);
+
+        assert_eq!(out.data.as_ref().unwrap()["innerStatus"], "Usage", "{}", out.message);
+        assert_eq!(serde_json::to_value(stored("sub:tuT")).unwrap(), node, "the node is untouched");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A protected live wrap holding a `sub:` id from before the prefix was
+    /// reserved, and forged payloads that name it through a field other than
+    /// `session_id` (so the hook door's own guard never sees it). They arrive
+    /// under an ordinary session's id, and each must leave the wrap's record
+    /// and its phase as they were.
+    fn assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(tag: &str, fragments: &[&str]) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root_env, root) = forged_hook_world_for(tag, "sub:x");
+        let me = std::process::id() as i32;
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let hook = |fragment: &str| {
+            let payload = format!(r#"{{ "session_id": "plain", "cwd": "/w", {fragment} }}"#);
+            hook_for_profile_gated(Door::Cli, claude, &payload, false, Some(me), None)
+        };
+        hook(r#""hook_event_name": "UserPromptSubmit", "user_prompt": "go""#);
+        let wrap = || (serde_json::to_value(stored("sub:x")).unwrap(), hook_phase("sub:x"));
+        let before = wrap();
+        assert_eq!(before.0["sessionId"], "sub:x", "control: the wrap is on the roster");
+        assert_eq!(before.1.as_deref(), Some("stopped"));
+
+        for fragment in fragments {
+            let out = hook(fragment);
+            assert_eq!(out.data.as_ref().unwrap()["action"], "applied", "{fragment}: {}", out.message);
+            assert_eq!(wrap(), before, "the wrap survives {fragment}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The Task call and both SubagentStart shapes create or enrich `sub:<id>`;
+    /// on a wrap that holds the id they would re-kind it.
+    #[test]
+    fn a_forged_subagent_spawn_naming_a_protected_sub_prefixed_wrap_leaves_it_alone() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-spawn",
+            &[
+                r#""hook_event_name": "PreToolUse", "tool_name": "Task", "tool_use_id": "x""#,
+                r#""hook_event_name": "SubagentStart", "parent_tool_use_id": "x", "agent_type": "Explore""#,
+                r#""hook_event_name": "SubagentStart", "agent_id": "x", "agent_type": "Explore""#,
+            ],
+        );
+    }
+
+    /// A returning Task and both SubagentStop shapes remove `sub:<id>`.
+    #[test]
+    fn a_forged_subagent_end_naming_a_protected_sub_prefixed_wrap_leaves_it_alone() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-end",
+            &[
+                r#""hook_event_name": "PostToolUse", "tool_name": "Task", "tool_use_id": "x""#,
+                r#""hook_event_name": "SubagentStop", "parent_tool_use_id": "x""#,
+                r#""hook_event_name": "SubagentStop", "agent_id": "x""#,
+            ],
+        );
+    }
+
+    /// An async dispatch's PostToolUse renames `sub:<tool_use_id>`.
+    #[test]
+    fn a_forged_subagent_rekey_naming_a_protected_sub_prefixed_wrap_leaves_it_alone() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-rekey",
+            &[
+                r#""hook_event_name": "PostToolUse", "tool_name": "Task", "tool_use_id": "x",
+                   "tool_response": { "isAsync": true, "agentId": "y" }"#,
+            ],
+        );
+    }
+
+    /// A tool run "inside" `sub:<id>` writes that owner's phase and activity.
+    #[test]
+    fn a_forged_owner_naming_a_protected_sub_prefixed_wrap_writes_no_phase_or_activity() {
+        assert_forged_payloads_leave_a_sub_prefixed_wrap_alone(
+            "forged-sub-owner",
+            &[
+                r#""hook_event_name": "PreToolUse", "tool_name": "Bash", "parent_tool_use_id": "x""#,
+                r#""hook_event_name": "PostToolUse", "tool_name": "Bash", "parent_tool_use_id": "x""#,
+            ],
+        );
     }
 
     /// Spawn readiness reads the harness child's own record, never the wrap's,

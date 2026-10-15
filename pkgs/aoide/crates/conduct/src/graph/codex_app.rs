@@ -81,6 +81,7 @@ use super::doc::{restage_graph, would_cycle};
 use super::model::{
     load_stage, sessions_path, write_stage, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
+use super::session_store::is_reserved_id;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -209,10 +210,11 @@ pub(crate) fn reconcile_codex_app_threads(
         .collect();
 
     // The `"app"` roster we WANT: one entry per live thread, keyed by its
-    // native id, skipping any id a tracked record already owns.
+    // native id, skipping any id a tracked record already owns and any `sub:`
+    // id, which only the sub-agent hooks make (`reserved_id_refusal`).
     let mut desired: HashMap<&str, &CodexThread> = HashMap::new();
     for t in threads {
-        if claimed.contains(t.id.as_str()) {
+        if claimed.contains(t.id.as_str()) || is_reserved_id(&t.id) {
             continue;
         }
         desired.insert(t.id.as_str(), t);
@@ -1095,6 +1097,25 @@ mod tests {
         assert_eq!(r.conductable, None);
         assert_eq!(r.socket, None);
         assert_eq!(r.parent_session_id, None);
+    }
+
+    /// The `sub:` prefix is a Task sub-agent's, made by the sub-agent hooks
+    /// alone: a thread whose lock file is named under it enrols nothing and
+    /// retires an app record made under it, while an ordinary thread enrols.
+    #[test]
+    fn a_thread_under_a_sub_prefixed_id_enrols_nothing() {
+        let mut old = session("sub:foo", "/w", "idle", "t", None);
+        old.kind = Some("app".to_string());
+        let (out, changed) = reconcile_codex_app_threads(
+            vec![old],
+            &ThreadScan::Observed(vec![
+                thread("sub:foo", "/home/khoa/Aoide", 2598256),
+                thread("01a07d89-ordinary", "/home/khoa/Aoide", 2598256),
+            ]),
+        );
+        assert!(changed);
+        let ids: Vec<&str> = out.iter().map(|r| r.session_id.as_str()).collect();
+        assert_eq!(ids, ["01a07d89-ordinary"]);
     }
 
     #[test]
