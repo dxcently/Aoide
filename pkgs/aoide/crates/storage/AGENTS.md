@@ -979,6 +979,12 @@
   unbounded answer is a single JSON array of whole envelopes and walks
   straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
   can clear.
+- **A receipt is filed only against a spooled letter, and by a bounded
+  check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
+  it with the receipt's `to.node`; that read is lock-free because the caller
+  holds the stage lock, which the outbox lock shares and does not nest. Do not
+  replace it with a base scan, and do not move the `to` check after the
+  index: an unknown msgid must not reach a write.
 - **`update_entry` is the only write-back a drain makes to an entry it has
   already read.** It writes only when the entry is still spooled. The drain
   reads an entry, dials, and writes the answer back; a receipt that lands

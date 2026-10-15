@@ -264,6 +264,9 @@ base.jsonl      append-only, one entry per line, immutable once written
 cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
 seen.jsonl      one `{"msgid","receivedAt"}` per line, append-only; dedup
                 memory that outlives pruning, loaded once per process
+receipts.seen   one `[signer, originMesh, ackedMsgid]` per line, append-only:
+                one line per receipt filed, so its read grows with the
+                letters this box has sent, never with the base
 ```
 
 An entry is an envelope plus local facts:
@@ -573,9 +576,21 @@ door's audit name whitelist gains both names so they never log as bare
   A receipt's `text` is exactly one msgid — 64 lowercase hex digits and
   nothing around them. Any other text is refused `bad-msgid` and files
   nothing, because the text names a letter and nothing else.
-  A signer acknowledges a letter once: a second receipt from the same
-  signer for the same msgid is answered `duplicate` and files nothing,
-  however many times the destination re-acks it.
+  **A receipt files only for a letter this box still holds in its spool**,
+  and only when it is addressed to the name that letter went out as. Any
+  other receipt is answered `duplicate` and files nothing: nothing is filed
+  and nothing is owed, so the sender retires its copy rather than parking it.
+  A signer acknowledges a letter once per mesh: a second receipt from the same
+  signer, in the same mesh, for the same acked letter files nothing, however
+  many times the destination re-acks it (`receipts.seen`). A receipt in
+  another mesh is a different acknowledgement and is filed.
+  **What is bounded, and what is not.** The base gains at most one receipt
+  per letter this box sent, per signer and mesh; a flood of receipts for
+  letters it never sent is refused before anything is written. A letter this
+  box sent and has already retired is not spooled any longer, so a late
+  re-ack of it is refused the same way. No record of retired letters is kept
+  beyond the receipt index, so this box cannot tell a late re-ack of its own
+  letter from a receipt for a letter it never sent.
   **An outbox entry retires when its delivery is confirmed, and what
   counts as confirmation depends on what the entry is.** For a `letter`:
   a receipt arrives whose verified signer is the entry's `to.node` and

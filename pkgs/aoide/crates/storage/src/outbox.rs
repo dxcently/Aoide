@@ -539,6 +539,34 @@ pub fn update_entry(node: &str, entry: &OutboxEntry) -> Result<bool, String> {
     })
 }
 
+/// The name a letter this box still holds was sent under, if one is spooled
+/// under `msgid`. This is the receipt filing rule's record: a receipt is filed
+/// only when it is addressed to the name its letter went out as.
+///
+/// Read WITHOUT the outbox lock, on purpose. The caller (`mail::deposit`) holds
+/// the stage lock, which the outbox lock is the same file as, and that lock is
+/// not re-entrant. Entries are written by atomic rename, so an unlocked read
+/// sees each entry whole or not at all. Transit entries never count: a hub's
+/// custody of someone else's container is not a letter this box sent.
+pub fn spooled_letter_sender(msgid: &str) -> Result<Option<String>, String> {
+    let dir = outbox_dir();
+    let read_dir = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    };
+    for node_dir in read_dir.flatten() {
+        let Some(node) = node_dir.file_name().to_str().map(str::to_string) else { continue };
+        let Ok(raw) = std::fs::read_to_string(entry_path(&node, msgid)) else { continue };
+        if let Ok(entry) = serde_json::from_str::<OutboxEntry>(&raw) {
+            if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
+                return Ok(Some(entry.envelope.header.from.node));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Is `msgid` still spooled toward `node`? Read under the outbox lock, so a
 /// drain can skip an entry that a receipt retired after its batch was listed.
 pub fn still_spooled(node: &str, msgid: &str) -> Result<bool, String> {
