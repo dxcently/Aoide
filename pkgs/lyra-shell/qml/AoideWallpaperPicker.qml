@@ -5,9 +5,14 @@
 // OVERLAY layer with an EXCLUSIVE keyboard grab, shows a GridView of cover
 // thumbnails, and on pick switches the LIVE wallpaper. Trigger is a Hyprland
 // GLOBAL shortcut (aoide:wallpaper) registered in-process — the compositor
-// binds a combo to it (see modules/dendrites/hyprland.nix:
+// binds a combo to it (modules/dendrites/compositor/hyprland/behaviour.nix:
 // `bind = SUPER, W, global, aoide:wallpaper`). Escape / a scrim click / a pick
 // dismisses it.
+//
+// The song's picker comes first: shell.qml hands in the launcher slot's live
+// item, and when that body exposes `openPictures()` (a launcher with its own
+// Desktop Pictures window) the shortcut calls it and this pane stays hidden.
+// A launcher without one leaves this plain picker as the floor.
 //
 // ── The write seam ──────────────────────────────────────────────────────────
 // QML has no file-write primitive and the shellbridge socket only speaks
@@ -46,6 +51,7 @@ PanelWindow {
 
     // ── Note dependency (injected by shell.qml) ────────────────────────────
     required property var livery
+    property var launcher: null
 
     // ── Visibility gate (mirrors AoideLauncher) ────────────────────────────
     property bool shown: false
@@ -53,6 +59,12 @@ PanelWindow {
     function show()   { root.selIndex = 0; root.shown = true; lister.reload() }
     function hide()   { root.shown = false }
     function toggle() { if (root.shown) root.hide(); else root.show() }
+    function summon() {
+        if (root.launcher && typeof root.launcher.openPictures === "function")
+            root.launcher.openPictures()
+        else
+            root.toggle()
+    }
 
     // ── Layer-shell surface (Overlay, full-screen, transparent) ────────────
     anchors { top: true; bottom: true; left: true; right: true }
@@ -69,7 +81,7 @@ PanelWindow {
         appid: "aoide"
         name: "wallpaper"
         description: "Summon the Aoide wallpaper switcher"
-        onPressed: root.toggle()
+        onPressed: root.summon()
     }
 
     // ── Cover enumeration ───────────────────────────────────────────────────

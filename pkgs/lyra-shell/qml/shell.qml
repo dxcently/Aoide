@@ -260,7 +260,10 @@ ShellRoot {
     //                              song/songbook/sonata/widgets/launcher.qml
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
     //                              song/songbook/sonata/widgets/powermenu.qml
-    //   - AoideWallpaperPicker   : SUPER+W wallpaper switcher (global-shortcut)
+    //   - AoideWallpaperPicker   : aoide:wallpaper — the launcher's openPictures(),
+    //                              else the plain cover picker (global-shortcut)
+    //   - switcher (SurfaceSlot) : aoide:switcher window switcher, the song's
+    //                              widgets/switcher.qml or the plain AoideSwitcher
     //   - herald (SurfaceSlot)   : the notification popup,
     //                              song/songbook/sonata/widgets/herald.qml
     // (No AoideNotifications anymore — dunst owns org.freedesktop.Notifications
@@ -314,5 +317,29 @@ ShellRoot {
         bridge: bridge
         stagingEngine: stagingEngine
     }
-    AoideWallpaperPicker { livery: livery }
+    // aoide:wallpaper: the launcher's own Desktop Pictures when its body has
+    // `openPictures()`, else the plain picker (AoideWallpaperPicker.qml).
+    AoideWallpaperPicker { livery: livery; launcher: launcherSlot.item }
+
+    // aoide:switcher: the one registration; it toggles whichever body the
+    // `switcher` slot holds — the active song's widgets/switcher.qml, else
+    // sonata's, else the plain AoideSwitcher below (the floor). Not bound
+    // here: the venue binds a combo to it.
+    SurfaceSlot {
+        id: switcherSlot
+        slot: "switcher"
+        livery: livery
+        bridge: bridge
+        stagingEngine: stagingEngine
+        fallback: Component { AoideSwitcher {} }
+    }
+    GlobalShortcut {
+        appid: "aoide"
+        name: "switcher"
+        description: "Summon the Aoide window switcher"
+        onPressed: {
+            var item = switcherSlot.item
+            if (item && item.toggle) item.toggle()
+        }
+    }
 }

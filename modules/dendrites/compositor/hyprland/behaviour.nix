@@ -204,12 +204,18 @@ in
           # Hyprland's dispatcher for it.
           bind = SUPER, SPACE, global, aoide:launcher
 
-          # Wallpaper switcher (Hyprland global shortcut → AoideWallpaperPicker.
-          # GlobalShortcut toggle). Registers `aoide:wallpaper` in-process, same
-          # global-shortcuts-v1 seam as the launcher — one press summons the cover
-          # grid over song/covers/, a pick shells `aoide cover set <path>` which
-          # hot-swaps the live wallpaper. No CLI toggle command, no inbound socket.
+          # Wallpaper picker (Hyprland global shortcut → AoideWallpaperPicker's
+          # GlobalShortcut). Registers `aoide:wallpaper` in-process, same
+          # global-shortcuts-v1 seam as the launcher. A press opens the launcher
+          # body's own Desktop Pictures (`openPictures()`) when the song's
+          # launcher has one, else the plain cover grid over song/covers/; a pick
+          # shells `lyra cover set <path>`, which hot-swaps the live wallpaper.
+          # No CLI toggle command, no inbound socket.
           bind = SUPER, W, global, aoide:wallpaper
+
+          # `aoide:switcher` (the window switcher: a song's widgets/switcher.qml,
+          # else the plain AoideSwitcher) is registered by shell.qml but not bound
+          # here: the venue binds its combo.
 
           # Lock screen (hyprlock directly — no lock command exists in either
           # binary; the shellbridge powermenu's PowerAction::Lock shells the
