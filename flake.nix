@@ -411,6 +411,8 @@
               statix
               # The two-mesh harness makes its test CA with openssl
               openssl
+              # The https tests front their charter addresses with socat
+              socat
             ];
           };
 
