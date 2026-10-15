@@ -949,10 +949,12 @@ in the message.
   delivered line as `untrusted_data`.
   **At-most-once, claimed before the delivery.** The per-child cursor is
   `state/stage/pingback.json` (`<child id> → {seen, silentAt?}` for a trace,
-  `{hook: {phase, at, silent?}}` for a hook phase): a short
-  `with_stage_lock` critical section reads it, decides, and writes the
-  advanced cursor (temp-then-rename) — the socket write happens AFTER, with
-  no lock held, bounded by `connect_for_ring`'s own write timeout. A crash
+  `{hook: {phase, at, silent?, died?, route?}}` for a hook phase): a short
+  `with_stage_lock` critical section reads it, decides, writes the advanced
+  cursor (temp-then-rename), then clears from `hooks.json` the death facts it
+  said; a failed cursor write or clear delivers nothing. The socket write
+  happens AFTER, with no lock held, bounded by `connect_for_ring`'s own write
+  timeout. A crash
   between the two loses a line, which is the safe direction (a duplicate is
   noise in a parent's composer); a child whose `agent:"eidolon"` record is
   gone drops out of the file on the same pass. Do NOT move the delivery
@@ -962,12 +964,13 @@ in the message.
   harness that is not an `eidolon` (`hook::tracked`: no `remoteParent`, not a
   shell, sub-agent node, app thread or conducted wrap) is read off its
   `hooks.json` phase and stamp, never a trace, and its lines (`awaiting`,
-  `silent 12 min · last: …`, `settled`) join the SAME `claims.lines` the
-  eidolon source fills, so `deliver` and its skips are one implementation.
-  Its claim runs inside the
+  `silent 12 min · last: …`, `settled`, `died mid-turn · last: …`,
+  `ended mid-turn · last: …`) join the SAME `claims.lines` the eidolon source
+  fills, so `deliver` and its skips are one implementation. Its claim runs
+  inside the
   SAME `with_stage_lock` section over the cursor `claim_locked` just built
   (`hook::claim`), reading the roster and `hooks.json` inside that lock and
-  writing the entry's `hook` half — `{phase, at, silent?}` — so the two
+  writing the entry's `hook` half — `{phase, at, silent?, died?, route?}` — so the two
   sources never read each other's half and one file write covers both; the
   hook children's ids join the tracked set, which is what keeps their entries
   from being pruned by the eidolon pass.
@@ -998,16 +1001,167 @@ in the message.
   edge, an explicit `--parent` the kernel did not back, and a wrap registered
   by `aoide wrap` have no recipient: do NOT accept a `parentSessionId` on its
   word, and do not widen this to a recipient the evidence does not name.
-  Hold: the first examination of a child is a baseline and announces nothing;
-  `awaiting` is claimed on ENTERING the phase, not on every restamp, and
-  carries no reason (`hooks.json` has none, and `set_session_state` clears
-  `activity` on any non-`working` state, so a tool can never be named there);
-  `settled` needs the cursor to have seen the child `working`/`awaiting`
-  (the hour-later `stopped`→`idle` decay says nothing); `silent` is `>=` 12
-  minutes and under 24 hours of `updatedAt` age on a `working` phase, latched
-  per stamp (a day-old `working` is a crashed record). The hook source emits
-  no `PingEvent` and never spools: a child that belongs on a ring is
-  `remoteParent`-stamped and so is not its child.
+  Hold: a recorded death is said whatever phase the cursor last saw, and no
+  latch gates it: `death` on a `done` record under 24 hours old is the unclaimed
+  state, and `hook::claim` returns the child ids it said so the caller clears
+  each fact (`hook::clear_said`) after the cursor is durable. The first
+  examination of a child is a baseline and announces nothing, except a recorded
+  death under a day old. `awaiting` is claimed on ENTERING the phase, not on
+  every restamp, and carries no reason (`hooks.json` has none, and
+  `set_session_state` clears `activity` on any non-`working` state, so a tool can
+  never be named there); `settled` needs the cursor to have seen the child
+  `working`/`awaiting`; `silent` is `>=` 12 minutes and under 24 hours of
+  `updatedAt` age on a `working` phase, latched per stamp. There is NO inferred
+  death on the gathered path: a dead harness under a sealed, live host is not a
+  death, because the live host is the one that records it. The gone path
+  (`hook::gone`) infers a death only once the host is gone (its record absent or
+  its pid dead), whatever its seal says, with no status. Its rules, and the held
+  rules that spare a recorded death from every prune (`held_deaths`,
+  `unclaimed_deaths`), are stated once in `CONTRACTS.md` under
+  `state/stage/pingback.json`: change that section and the code in `hook.rs` in
+  one commit. The seal key is fetched whenever a hook
+  candidate exists, a tracked record or a hook entry the cursor still holds, so a
+  child pruned in the same pass as its wrap is still judged. Every value read
+  back from the cursor is cleaned again where it is rendered, and the whole line
+  passes `wire_line` at delivery, as every ping-back line does.
+  **The wrap writes its own child's death.** `session_store::record_hook_deaths`
+  runs from `session_conduct` (`graph/conduct.rs`) once the wrap's child has
+  ended, immediately before the wrap ends its own record. Under the stage lock
+  it writes the death of each hook child the wrap hosts: a child whose
+  `parentSessionId` is the wrap, whose `hookAncestry` holds the wrap's pid,
+  whose harness is dead, and whose hook phase still reads `working` or
+  `awaiting`. Per harness, the newest hook id gets `phase: "done"` with the fact
+  (`record_death`: the tool in flight as `lastTool`, the wrap's exit fact,
+  `exit`, `signal`, or `timeout`, and the `spawner` the line goes to) in one
+  upsert; the older ids of the same process are closed as `done` with no fact.
+  The spawner is resolved here, while the wrap's own record still stands to
+  climb through (`hook::recipient_of`: the route climb with no seal check, since
+  the wrap holds no daemon key; the claim verifies it), so a child no tick saw
+  before its wrap ended is still told. Each child's session is set to `done`
+  (presence reads the process as over, and the held rules spare the record
+  until the death is claimed). `aoide session phase` folds the phase it
+  is given and never writes `death`. A closed phase is never written. The tick
+  says the fact when the wrap wrote it, and infers a death only when none was
+  written (SIGKILL), so each death is said once.
+  **A session that ends itself mid-turn writes its own fact, and only itself.**
+  `do_session_end_inner`, the one core of `aoide session end` and the hook
+  door's `SessionEnd`, finds the child's hook phase still `working` or
+  `awaiting` and `hook::recipient_of` naming a spawner, and writes the fact
+  with `outcome: "end"` (no status), the tool in flight and that spawner in
+  place of the plain `done`. The tick says it as `ended mid-turn · last: …`,
+  latched and cleared like any recorded death. The wrap's later
+  `record_hook_deaths` finds the phase closed and writes nothing, so one end
+  is one line. `recipient_of` answers only for a child `hook::tracked` names,
+  so an eidolon's death, which its trace says, is never told twice. A line to
+  a spawner, an orchestrator agent, is an injection if a stranger can cause it,
+  so the fact needs the caller's word, and the caller is the kernel's:
+  `do_session_end` takes the attested pid (the hook door's `hook_pid`, the
+  daemon's `__daemon-peer-pid` stamp read by `send::door_pid`, else this
+  process; the wrap's own end passes its own pid, which its record names), and
+  `runs_under_harness` writes the fact only when the child's harness pid is in
+  that pid's `/proc` ancestry. A caller outside a live harness does not end its
+  session at all (below). A `SessionEnd` whose `reason` the profile lists in
+  `session_end_continues` (claude: `clear` and `resume`) ends the session with
+  `attests_death` false, since the harness process lives on under another
+  session id and nothing ended mid-turn: `map_hook` sets `continues` on
+  `HookAction::End` and the door passes `!continues`. The reason is the raw
+  payload field, matched exactly and never normalised, so `logout`,
+  `prompt_input_exit`, `other`, a disguised `clear`, an unknown value and an
+  absent field all write the fact; a harness whose profile lists none never
+  skips on the field. A second `done` on a record that carries a fact is a no-op
+  in `aoide_storage::session::upsert_hook`, so a repeated end or a duplicate
+  `SessionEnd` cannot erase it; a live phase still supersedes the fact.
+
+  **A live harness anchors its record.** The caller test above holds only if a
+  stranger cannot first re-home the record onto its own chain, or end it so that
+  `prune` drops it and a fresh registration takes its place.
+  `session_store::live_harness_outside` (the record's session has not ended, and
+  its `harness_pid` is alive and outside the caller's chain) is the one test
+  behind both, and `session_store::live_harness_anchoring` is its read of the
+  store for a caller's pid. `ancestry_may_move` refuses a chain move while it
+  holds, whichever path asks; the hook door turns a `SessionStart` from outside
+  the harness away whole, with `harness-anchored` as its reason and the session
+  and harness pid in its message, and skips a per-turn hook's attested-parent
+  re-stamp. A per-turn hook from outside is not refused: it still sets the
+  phase. It binds a window the record lacks only where no live harness outside
+  its chain anchors the record (`ensure_session_window`, under
+  `live_harness_outside`); the bind moves no chain, parent or fact.
+  `session start` with a `--window` or `--parent` that would change the stored
+  value, and `graph link` that would re-parent the record, are refused by
+  `anchored_start_refusal` and `manage::link` with `harness-anchored`, unless
+  the caller runs under the harness. A route needs the host wrap's pid in the
+  child's own chain (`host_wrap`), so a re-parent alone draws no line.
+  `do_session_end` asks the same question of the caller. When it holds, the end
+  is refused by `anchored_refusal`: nothing is written (no `hooks.json` phase,
+  no `sessions.json` state, no ledger exit, subagent cascade, tunnel close or
+  check-lane baseline forget). The outcome begins `refused:` and carries
+  `reason: harness-anchored`. `session_phase` sends a `done` phase to
+  `do_session_end`, so the phase door is no way round the caller test. The reaper spares a record whose stored chain names a live harness (`reap::harness_alive`): the window signal, the orphan arm and the staleness bands skip it, and only the pid signal of the record's own pid still judges it. A pid-only record is not spared, since its window signal is the SUPER+Q case. A
+  session that has ended (`state` `done`: its own `SessionEnd`, `/clear` and
+  resume included), a dead harness, or a hook that runs under the harness
+  releases the anchor, which is what lets `claude --resume` in another terminal
+  adopt the id. That release is also the done-id squat, and the other same-uid
+  residuals of this block (a descendant of the harness counting as it, the pid
+  fill on a chainless record, the namespace-local probe, the wrap-end ordering)
+  are listed under the trust model in `CONTRACTS.md`, not restated here. `hookAncestry` stores no start time, so a pid recycled by an
+  unrelated live process holds the anchor until it exits; the refusal is the
+  safe side. A new writer of `hookAncestry`, `parentSessionId` or a record's
+  `state` on a hook-registered record goes through that test. The caller's
+  ancestry is read when the end is served, so a harness that exited before its
+  `SessionEnd` hook was served has left the hook re-parented: that end closes
+  plain and its line is lost, never forged. Reading the ancestry at door entry
+  would need `aoided` to stamp it at accept (a new wire stamp across the server
+  crate) and would still only narrow the race, since the hook is already running
+  when its harness dies, so the loss is accepted.
+
+  **The wrap's own signals.** `WrapSignals::install` (`graph/pty.rs`) runs first
+  in `session_conduct` and catches SIGTERM, SIGHUP and SIGINT with `SA_SIGINFO`
+  and `SA_RESTART`. A signal that was SIG_IGN on entry is not caught (so an
+  ignored HUP stays ignored, and the harness inherits it). The handlers are
+  depth-counted: the last `WrapSignals` dropped restores every disposition it
+  replaced. Only a signal whose `si_code` is `SI_USER` (sent by `kill(2)` to the
+  wrap's own pid) is taken: `conduct_multiplex` forwards it to the harness once,
+  SIGKILLs the harness after `WRAP_SIGNAL_GRACE` (5 s) if it has not exited,
+  records the death with that signal as its outcome, and then ends with
+  `die_by_signal` (the signal's default action, re-raised), so the parent sees
+  the wrap die by that signal. Any other signal, such as one the kernel raises
+  for the terminal, is re-raised with `SIG_DFL` and kills the wrap with no fact.
+  Ctrl-C through the pty arrives as bytes on a raw console and never reaches this
+  path (not tested directly). `poll(2)` returns `EINTR` whatever the flag says,
+  and the stage lock's `flock(2)` retries on `EINTR`, so a signal landing mid-wait
+  never leaves a stage write unlocked. SIGKILL is never caught: that death is
+  inferred, and only the inference records it.
+
+  **Trust model:** stated once, in `CONTRACTS.md` under
+  `state/stage/pingback.json`. This cursor is unsealed data.
+  Open gap, not checked here: a wrap that is SIGKILLed (no fact) whose child's
+  record and hook entry are both pruned before any tick sees them is never said
+  of. The inference reads that record, and an absent record drops the entry.
+  **A live wrap owns its open child's end.** `reap_inner` takes out of its
+  reaped set every hook child whose conducted host wrap still runs (and is not
+  itself in the reaped set) with the child's turn open and a spawner to be told
+  (`session_store::owned_by_live_wraps`, which shares `hosted_by` with
+  `record_hook_deaths` and asks `hook::recipient_of` the same question), because
+  a reap would close the phase before the wrap writes the death and the wrap
+  would then find nothing to record. A child nobody would hear of is reaped as
+  ever: the wait buys it nothing. Keep the hosting test one (`hosted_by`): a
+  child the reaper spares must be one the wrap's exit can record. The cost is
+  stated in `CONTRACTS.md` (`death`): a harness that dies under a wrap that
+  outlives it reads `working` until the wrap ends. Shortening that wait belongs
+  to the wrap (watching its own harness), never to the reaper. The hand-off is
+  proved at two levels: `owned_by_live_wraps` as a table, and `reap` itself over
+  a roster (`reap.rs`'s tests), since the `retain` that applies it is a separate
+  line. The hook source emits no `PingEvent` and never spools: a child that
+  belongs on a ring is `remoteParent`-stamped and so is not its child.
+  **Two bounds on what the hook source says about deaths.** A stamp counts as
+  recent only inside `[-SKEW_MS, STALE_MS)` of the clock (`hook::is_recent`, the
+  one test `unclaimed_in`, `decide` and `gone` share), so a fact stamped in the
+  future is neither said nor held, however far ahead. And `hook::claim` sends
+  at most `DEATH_LINES_MAX` death lines per (host wrap, spawner) in a pass, then
+  one `and N more ended or died mid-turn` line (`within_cap`), because the hook
+  door lets an agent mint many ghost children in its own live wrap, and each
+  would otherwise give its spawner a line at the wrap's end. Every fact is still
+  named said, so it is cleared.
   **The screen source is the third, as a child module
   (`graph/pingback/prompt.rs`).** A local-parented conducted wrap whose
   harness has neither profile (`prompt::tracked`: `agent_profile` is none, and
@@ -1695,13 +1849,15 @@ in the message.
   a per-turn heal (`ensure_session_window` again, through
   `session_store::chain_is_stale`). Registration is a SessionStart, or the first
   hook event of an unknown id, so a resumed harness that runs in a new process
-  gets a current chain. `ancestry_may_move` refuses only while the record's own
-  pid is alive outside the new chain: a pid-less record always takes the latest
-  chain, so two live processes under one session id resolve to the latest one.
-  The pid is the only anchor, because a chain-wide liveness test would hold a
-  stale chain for as long as any process of it lives (a shell outlives its
-  harness). It is the hook door's kernel fact, never a payload claim, and
-  attestation never reads it (`attested_record` reads only sealed pids).
+  gets a current chain. `ancestry_may_move` refuses only while the record's
+  session is live and its own pid or its harness (`harness_pid`: the first
+  stored pid, else the pid) is alive outside the new chain, on the registration
+  and the window bind alike, so two live processes under one session id do not
+  trade the chain: the holder keeps it until it exits. Those two processes are
+  the only anchors, because a chain-wide liveness test would hold a stale chain
+  for as long as any process of it lives (a shell outlives its harness). The
+  chain is the hook door's kernel fact, never a payload claim, and attestation
+  never reads it (`attested_record` reads only sealed pids).
   The heal (`chain_is_stale`) is stricter than registration. It fires only on a
   dead→live transition: the record has a stored chain and no pid of its own (its
   pid or a stored chain pid) is alive outside the hook's chain (`lives_apart`), and
@@ -1864,16 +2020,17 @@ in the message.
   duplicate the local-stage-load + node-probe sequence for a future
   grouping — extend the branch, not the collection.
 - **`project_bucket` reuses whichever project attribution the codebase
-  already computes — never a third one.** A registered `projects.json`
-  name via `anchor_for` (pure string matching — works identically for a
-  node session's cwd under the fleet's shared-path convention) wins; else a
-  `.aoide/project.json` manifest found by walking up FROM THE SESSION'S OWN
-  CWD on this host's own filesystem (`aoide_storage::manifest::walk_up`)
-  renders by that directory's basename. Don't walk up from the CURRENT
-  process's cwd instead (that's `grant.rs`'s "current project" concept, a
-  different thing) — `project_bucket` must attribute EVERY session by its
-  OWN cwd, local or node, or a multi-session listing would silently
-  misattribute every session but the first.
+  already computes — never a third one, and only for a LOCAL session.** A
+  registered `projects.json` name via `anchor_for` (pure string matching)
+  wins; else a `.aoide/project.json` manifest found by walking up FROM THE
+  SESSION'S OWN CWD on this host's own filesystem
+  (`aoide_storage::manifest::walk_up`) renders by that directory's basename.
+  Don't walk up from the CURRENT process's cwd instead (that's `grant.rs`'s
+  "current project" concept, a different thing) — `project_bucket` must
+  attribute EVERY local session by its OWN cwd, or a multi-session listing
+  would silently misattribute every session but the first. A session from
+  another node never reaches it: `who.rs::remote_project` is its whole rule
+  (the next entry).
 - **A project is a set of anchor roots — `anchor_for` is longest-root-wins
   across EVERY root of EVERY project, not just each project's first.**
   `cwd_under` itself stays single-root (unchanged) and is simply called
@@ -1986,14 +2143,14 @@ in the message.
   presence value. A LIVE host's own sessions (the `Ok(graph)` arm) never
   pass through this gate — their presence is `session_presence`'s ordinary
   online-host classification, verbatim.
-- **`SessionView`'s `title`/`model`/`kind`/`parent` are additive and
+- **`SessionView`'s `title`/`model`/`kind`/`parent`/`task` are additive and
   independently absent — never defaulted, inferred, or resolved across a
   host boundary.** `build_local_node` fills them from `SessionRecord`'s own
-  `title`/`model`/`kind` plus `resolved_parent` (bare session id, matching
-  `session_id`, never node-scoped); `sessions_from_graph` fills them from a
-  remote node's own graph document — `title`/`model`/`role` (published back
-  under this struct's `kind` name) and the `spawned` edge whose `to` is
-  this session, `from` stripped of its `session:` prefix. A node that
+  `title`/`model`/`kind`/`task` plus `resolved_parent` (bare session id,
+  matching `session_id`, never node-scoped); `sessions_from_graph` fills them
+  from a remote node's own graph document — `title`/`model`/`role` (published
+  back under this struct's `kind` name)/`task`, and the `spawned` edge whose
+  `to` is this session, `from` stripped of its `session:` prefix. A node that
   didn't publish a given key leaves the matching field `None`; nothing
   here fills a gap from another field, another session, or another host.
   `effective_project` stays out of this list on purpose — remote rows
@@ -2013,6 +2170,100 @@ in the message.
   `resolved_parent` never sees a remote field: that separation is the whole
   point of the second field (the autogate grant and sibling rule in
   `send.rs` read `parentSessionId`), so do not "unify" them.
+- **`graph::find` answers from its index alone (SESSION-FIND B3-B5).** The
+  matcher reads `Row`s and nothing else: no file, no lock, no node dialled,
+  and nothing written. It never infers a session from a name. A `parent:`
+  reference resolves through `storage::addr::resolve` with the `send --to`
+  rule, case-sensitive, and an ambiguous one is a refusal listing its
+  candidates, never the first match; a far session's name typed without its
+  node is refused with the `node/name` form (`held_elsewhere`). Only a local
+  row's own `remote_parent` names a parent: a far row's is its node's
+  unvouched claim, so it never makes a local session its parent
+  (`parent_match`), and a far node's claim about a row on another node never
+  makes a `--related` reason (`reasons_between`). `mailbox:` and `cc:` read a
+  row only when it is local (`mailbox:` by `key_fields`, `cc:` by a `None`
+  `cc` on a cached row), so a far node's unpublished mail facts never match.
+  Terms filter and only bare words rank; the four sort keys are the order,
+  and nothing else reorders a result. `related` ranks by its strongest
+  reason, then by how many reasons it has, then by `tiebreak`. `mail_facts`
+  takes the peeked cursors and entries as arguments and never reads them
+  itself; a cached row gets no mail facts at all, so its mail reasons never
+  hold. `load_index` is the only reader, and it reads files only: the stage,
+  each node's cache and a mailbase peek, never a lock or a migration.
+  `session_find` calls no probe and no pull. Its box name arrives as an
+  argument (`session_find_with`), so a test never reads it, and its no-dial
+  and no-write proofs are the find tests
+  `find_reads_the_stage_and_the_caches_and_writes_nothing_and_dials_no_node`.
+- **`graph::find` stays linear in a hostile far node's rows and a paired node's
+  letters, and an answer never grows past its rows times a constant.** A far
+  node chooses its rows, ids, cwds and edges, one cache may hold 20 MiB, and a
+  paired node can deposit letters into local mail, with a subject, a sender,
+  recipients and a mailbox name of any length. So no step may cost rows times
+  rows, mailboxes times mailboxes, letters times mailboxes or letters times
+  every row, and no allocation may grow with a field's length times the query's
+  word count. Every string such a node or letter wrote is clipped where it is
+  read (`clip`: `LINE_MAX` characters, reading only the field's head):
+  `remote_row` for a far row's text, `local_row` for a local row's text, `filed`
+  for a letter's subject, sender, recipients and thread, `mail_facts` for a
+  mailbox's name; a task stays whole because `remote_task` already bounds it. A
+  far session's ids are never clipped (a clip folds two ids into one): `legal_claims`
+  refuses a session whose id, parent or remote link is not a
+  `valid_claimed_session_id`, and the scope names the node `ids refused`. A
+  `matched` value is clipped the same way, whichever row or letter it came
+  from, and names its term by its index in `words`. A query takes at most
+  `WORDS_MAX` (64) words and `ALTERNATIVES_MAX` (256) alternatives, refused as
+  soon as `split_line` passes the word cap. The resolver's candidates are
+  gathered once per answer (`Refs`), and each distinct `parent:` value is
+  resolved once. `--related` checks each row against a `Target` built once,
+  whose remote children and mailboxes are sets. A row's bare fields are read
+  only when the query has a bare word, and the cwd is folded once, its
+  components slices of that fold, never a string each. `find` returns rows and
+  never a `matched`: `Found::explain` builds one, and only the machine block of
+  `list_view` calls it, so a human answer has no flag to get wrong. In
+  `mail_facts`, unread counts search each mailbox's sorted marks, a letter is
+  decoded once however many rows read its mailbox (`filed`), a row visits only
+  the letters filed to the mailboxes it reads (an index by mailbox, merged back
+  into the base's order), and a row's threads dedupe through a set;
+  `reasons_between` pairs threads and mailboxes and dedupes its reasons through
+  sets as well. A letter is held once (`Rc`) and each reader's row holds a
+  pointer to it. Every list in a row holds at most `LIST_MAX` (20) beside its
+  full count: edges, `reads`, `leads`, `cc`, `threads`, a letter's `to`, a
+  related row's `reasons`, and the candidates a refusal names (with `and N
+  more`). A machine list row lists `ROW_LIST_MAX` (8) of its mailboxes and
+  leads, and carries `cc` and `threads` as counts only. `matched` holds one
+  entry per query word, and a machine row lists `MATCHED_MAX` (8) of them beside
+  `matchedCount`; ranking reads every match. A machine answer lists at most
+  `ROWS_MAX` (100) rows in its message and its data alike, plus one `and N
+  more` line, beside `total` and `more`; the human form lists them all. The
+  serialized machine answer is bounded by 1 MiB, stated in SESSION-FIND.md
+  Decision 13 and measured by
+  `the_worst_machine_answer_serializes_under_its_stated_bound`. A new list in a
+  row takes a cap and a count, and a new string a node or letter wrote takes a
+  `clip` where it is read. The letter visit test counts work through `VISITS`,
+  not time. The other wall-clock bounds in `find.rs` are an order of magnitude
+  above their idle runs, so a loaded builder passes them, and a quadratic mutant
+  still fails them. Keep both properties when touching these paths.
+- **A remote row's project is the one its node published.**
+  `who.rs::remote_project` is the one rule: the stored `project`, clipped to a
+  line, and none when the node published none. Bare `session`'s
+  `group_by_project` calls it for every row of a non-local node and
+  `find`'s `remote_row` for every cached row; neither calls `project_of` or
+  `project_bucket` with a far cwd. A far cwd is a path the node chose:
+  bucketing it would stat this box's disk up the whole path and match this
+  box's `projects.json` roots, so a node could steer reads here and put its
+  rows under a local project. A local row still buckets through `project_of`.
+  A node that published no project is under no project in both commands.
+- **Row JSON is for a machine reader only.** `sessions` and `related`, with each
+  row's `matched`, are built when `--json` is passed or the door is not the CLI
+  (`teach::quiet`'s rule in aoide-client), so an MCP caller gets them without
+  the flag and a human answer builds none. MCP and A2A carry the registry's one
+  `query` argument as one string, so a lone argument there is a query line and
+  `words` splits it with `split_line`; a CLI argument and a daemon array
+  element are words already and are never split. Every human line
+  passes through `fit` (clipped to `ROW_MAX`, 240 characters) after each field's
+  `clean_line`, and a fix that names text a far node wrote passes it through
+  `plain_word`, which hands the operator a placeholder for anything but one
+  plain word. A new human line or a new fix goes through them.
 - **Every string `who.rs` prints off a pulled document goes through
   `common::clean_line`** (`shown`/`endpoint` — control characters and the bidi
   formatting marks stripped, flattened, clipped to `common::LINE_MAX`), in the

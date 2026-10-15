@@ -229,6 +229,19 @@ pub fn merged_sessions(sessions: &[SessionRecord], hooks: &[HookRecord]) -> Vec<
     merged
 }
 
+/// The process a hook child's liveness is read off: the harness its hook door
+/// walked to (the first `hookAncestry` pid), or the record's own `pid` where it
+/// stamps none. The hook source reads a death off it, and the wrap that hosted
+/// the harness asks the same question about its own child, so both probe one
+/// process.
+pub(crate) fn harness_pid(rec: &SessionRecord) -> Option<u32> {
+    rec.hook_ancestry
+        .first()
+        .and_then(|pid| u32::try_from(*pid).ok())
+        .filter(|pid| *pid > 0)
+        .or(rec.pid)
+}
+
 /// The canonical session-state vocabulary the desktop renders VERBATIM — no
 /// widget-side regex derivation (that split-brain is what this replaces). Every
 /// producer (hooks, `conduct`, the reaper) writes one of these onto

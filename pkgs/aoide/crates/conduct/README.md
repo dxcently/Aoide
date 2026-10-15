@@ -290,17 +290,35 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   forever; a timed-out write is an ordinary `write-failed` skip, latch
   untouched, same as any other write failure.
 - **`graph::pingback::hook`** is the ping-back's second source, for every
-  other registered harness whose hooks write `hooks.json` (claude, kimi, pi):
-  a local-parented child's canonical hook phase and `updatedAt` become
-  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …` and `…
-  settled`, claimed in the SAME stage-lock section as the trace source into
-  the entry's `hook` field of `pingback.json`, and delivered by the same
-  `deliver` — it adds a cursor half and three lines, never a second transport.
-  The recipient is the child's SPAWNER, resolved through the wrap that hosts
-  it and only over an edge the kernel attested (`hook::recipient`; the climb
-  is in `AGENTS.md`). An eidolon, a remote-parented child, a shell, a
-  sub-agent node and a conducted wrap are not its children, so a chain
-  stamped on a wrap routes nothing.
+  other registered harness whose hooks write `hooks.json` (claude, kimi, pi): a
+  local-parented child's canonical hook phase and `updatedAt` become
+  `[<agent> <petname>] awaiting`, `… silent 12 min · last: …`, `… settled`,
+  `… died mid-turn · last: …` and `… ended mid-turn · last: …`, claimed in the
+  SAME stage-lock section as the trace source into the entry's `hook` field of
+  `pingback.json`, and delivered by the same `deliver`: it adds a cursor half
+  and five lines, never a second transport. A death the wrap records (`done`
+  with a `death` fact on the child's hook record, written by
+  `session_store::record_hook_deaths`) is said once, with its status; one the
+  tick infers carries none. A session that ends itself with its turn open
+  (`session end` run by its own harness or under it, or its `SessionEnd`
+  hook) records the fact `end`, said once as `ended mid-turn`. Anyone else's
+  `session end` of a session whose harness lives is refused and writes
+  nothing, so nothing is said. A `SessionEnd` whose `reason` is `clear` or
+  `resume` ends the session and says nothing either, since the harness process
+  lives on under another session id. A live harness anchors its record: no
+  hook from outside it re-homes its chain or parent, no `session start` or
+  `graph link` from outside moves its window or parent, and no end from outside
+  makes it prunable before the end. The fact names its spawner
+  (`hook::recipient_of`), so a child no tick saw before its wrap ended is still
+  told. At most three death lines per wrap and spawner go out in a pass, then
+  one `and N more ended or died mid-turn`. The recipient is the child's SPAWNER,
+  resolved through the wrap that hosts it and only over an edge the kernel
+  attested (`hook::route_of`; the climb is in `AGENTS.md`). A child the tick can
+  no longer route is judged from the route its entry kept (`hook::gone`). Its
+  rules, orphan included, are stated once in `CONTRACTS.md` under
+  `state/stage/pingback.json`. An eidolon, a remote-parented child, a shell, a
+  sub-agent node and a conducted wrap are not its children, so a chain stamped
+  on a wrap routes nothing.
 - **`graph::prompt`** is the screen source of `awaiting`, for a conducted
   program that reports through neither hooks nor a trace (a `codex`, an
   `aider`, a REPL, an installer in a plain conducted shell). The wrap's
@@ -1474,8 +1492,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   against the owner chain in `build_local_node`; else `project_bucket`: a
   registered `projects.json` name via `anchor_for`, else a
   `.aoide/project.json` manifest directory's own basename via `walk_up`,
-  else a trailing `(no project)` bucket — a remote row has no
-  `effective_project` and keeps this same ladder verbatim);
+  else a trailing `(no project)` bucket; a remote row has no
+  `effective_project` and is filed by `remote_project` alone, the project its
+  node published, else `(no project)`, never by its cwd);
   `--hosts` groups by HOST instead (a `--json` session row carries
   `parentSessionId` when its spawner is a session on the same node, so a
   consumer can rank a far forest) — this host, then each node,
@@ -1514,9 +1533,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   that exact string), everything else folds to `last-seen` (the cache
   carries a `fetchedAt`) or `unknown` (it doesn't); a LIVE host's own
   sessions are never rewritten. `SessionView` additionally carries
-  `title`/`model`/`kind`/`parent` — local from the record's own fields
+  `title`/`model`/`kind`/`parent`/`task` — local from the record's own fields
   plus `resolved_parent`, remote from the node's graph document (`title`/
-  `model`/`role`→`kind`, and the `spawned` edge's `from` minus its
+  `model`/`role`→`kind`/`task`, and the `spawned` edge's `from` minus its
   `session:` prefix) — absent stays absent, nothing defaulted, inferred,
   or cross-host-resolved; `effectiveProject` stays absent on every remote
   row, unchanged. `node_list.rs::mesh_path` (beside `graph::pending_path`/
@@ -1533,6 +1552,41 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   document totals the same two counts across every row — the message line
   counts LIVE sessions only. A periodic refresh timer over this file is a
   later phase's concern, not this one's.
+- `graph/find.rs` (SESSION-FIND B3-B5) — the query core and the handler of
+  `aoide session find`. `split_line` and `parse` turn the conductor's line into
+  terms and bare words (at most 64 words and 256 alternatives), `find` ranks a
+  `FindIndex` of plain `Row`s, and `related` ranks the rows that share a reason
+  with one `Target`. `Refs` gathers the resolver's candidates once per answer,
+  and a far session's name typed without its node is refused with the
+  `node/name` form. `find` ranks rows and builds no `matched`: `Found::explain`
+  does, and the handler asks, and builds row JSON, only for a machine reader:
+  `--json`, or any door but the CLI, and a machine answer lists at most 200
+  rows beside `total` and `more`. MCP and A2A carry the query as one string,
+  which `words` splits with `split_line`. `remote_row` clips every text field a
+  far node wrote to one line, and a `matched` value, a letter's text and a
+  mailbox's name are clipped the same way.
+  `mail_facts` fills each local row's mail from the
+  `storage::mail::peek_cursors` and `peek_base` results it is given: a row
+  reads through its wrap, its unread count is the `unread_for` count, and a cc
+  is a letter filed to a mailbox the row reads whose Cc names that mailbox. It
+  decodes each letter once and visits only the letters filed to the mailboxes a
+  row reads. `carries` gives a row's mailboxes, cc, threads and edges, each list
+  at most 20 beside its count, and names in `unknown` the mail facts its node
+  does not publish. Reasons (lineage, remote lineage, sibling, same
+  role, mailbox, thread, project, repo) are kept strongest first, once per
+  phrase. `load_index` joins the stage (through
+  `who.rs`'s `build_local_node`), each node's cache (through
+  `who.rs::cached_node`) and the mailbase peek into the index, with the scope
+  line's facts. A local row buckets through `who.rs::project_of` and a
+  cached row through `who.rs::remote_project` (the project its node
+  published, or none), the two rules bare `session` groups by; a cached row's
+  cwd is a path the node chose and is never read against this box's disk or
+  projects. `session_find` renders the answer and reads files only: no node is
+  dialled and nothing is written. A human line is clipped by `fit` to 240
+  characters, a fix names far text only through `plain_word`, and a refusal
+  lists at most 20 candidates, then how many more. A `node/name` the cache does
+  not hold teaches `aoide node pull` when the node was never pulled or its cache
+  is stale.
 - `mail_bridge` (P-M2, architect's ruling 1: "spool in storage, wire lane
   in client, bridge through conduct") — a thin, three-function passthrough
   onto `aoide_client::mail_wire`'s outbox drain and receive path, with no

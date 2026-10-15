@@ -142,6 +142,12 @@ pub fn build_graph(
         if let Some(pn) = &s.petname {
             node["petname"] = json!(pn);
         }
+        // The managed run's slug (`SessionRecord.task`, the name its inbox is
+        // filed under). Rides only when a run carries a non-empty one, so an
+        // ordinary session stays byte-for-byte as before (SESSION-FIND B1).
+        if let Some(t) = s.task.as_deref().filter(|t| !t.is_empty()) {
+            node["task"] = json!(t);
+        }
         // The native harness's own thread-role label (root order seq 404) —
         // `subagent`/`guardian_review`/… verbatim off `SessionRecord.
         // native_role`, rides only when the native harness published one.
@@ -823,7 +829,9 @@ pub(in crate::graph) fn doomed_subagent_descendants(
 }
 
 /// The prune computation: drop `done` sessions (+ their hook records); clear
-/// `parentSessionId` on surviving children of removed sessions.
+/// `parentSessionId` on surviving children of removed sessions. The no-hold form,
+/// for tests: every live prune goes through [`prune_done_sparing`].
+#[cfg(test)]
 pub fn prune_done(
     sessions: Vec<SessionRecord>,
     hooks: Vec<HookRecord>,
@@ -834,6 +842,26 @@ pub fn prune_done(
     Vec<String>,
 ) {
     prune_done_scoped(sessions, hooks, false)
+}
+
+/// [`prune_done_scoped`] with the records in `held` spared: a `done` child whose
+/// wrap-written death the tick has not claimed yet keeps its session and hook
+/// record, so the fact can still be said. Spared records are neither doomed nor
+/// cascaded, and so are not in the removed set.
+pub(crate) fn prune_done_sparing(
+    sessions: Vec<SessionRecord>,
+    hooks: Vec<HookRecord>,
+    explicit: bool,
+    held: &HashSet<String>,
+) -> (Vec<SessionRecord>, Vec<HookRecord>, Vec<String>, Vec<String>) {
+    let (spared_s, rest_s): (Vec<SessionRecord>, Vec<SessionRecord>) =
+        sessions.into_iter().partition(|s| held.contains(&s.session_id));
+    let (spared_h, rest_h): (Vec<HookRecord>, Vec<HookRecord>) =
+        hooks.into_iter().partition(|h| held.contains(&h.session_id));
+    let (mut kept_s, mut kept_h, removed, cleared) = prune_done_scoped(rest_s, rest_h, explicit);
+    kept_s.extend(spared_s);
+    kept_h.extend(spared_h);
+    (kept_s, kept_h, removed, cleared)
 }
 
 /// [`prune_done`] with the retention scope made explicit.
@@ -1199,12 +1227,14 @@ mod tests {
                 session_id: "s1".into(),
                 phase: "working".into(),
                 updated_at: "2026-01-01T01:00:00Z".into(),
+                death: None,
                 extra: Map::new(),
             },
             HookRecord {
                 session_id: "s1".into(),
                 phase: "idle".into(),
                 updated_at: "2026-01-01T02:00:00Z".into(),
+                death: None,
                 extra: Map::new(),
             },
         ];
@@ -1384,12 +1414,14 @@ mod tests {
                 session_id: "p".into(),
                 phase: "Stop".into(),
                 updated_at: "1".into(),
+                death: None,
                 extra: Map::new(),
             },
             HookRecord {
                 session_id: "c1".into(),
                 phase: "PreToolUse".into(),
                 updated_at: "2".into(),
+                death: None,
                 extra: Map::new(),
             },
         ];
@@ -1712,6 +1744,29 @@ mod tests {
         assert_eq!(node_a["nativeRole"], json!("subagent"));
         assert_eq!(node_a["role"], json!("app"), "kind stays app, never reclassified");
         assert!(node_b.get("nativeRole").is_none());
+    }
+    #[test]
+    fn the_graph_session_node_carries_task_only_when_a_run_set_one() {
+        // SESSION-FIND B1: a managed run publishes its slug as `task`; an
+        // ordinary session and an empty slug publish no key at all, so an
+        // untasked node's document is what it was before this key existed.
+        let tasked = SessionRecord {
+            session_id: "a".into(),
+            task: Some("review-pr".into()),
+            ..Default::default()
+        };
+        let untasked = SessionRecord { session_id: "b".into(), ..Default::default() };
+        let empty = SessionRecord {
+            session_id: "c".into(),
+            task: Some(String::new()),
+            ..Default::default()
+        };
+        let doc = build_graph(&[], &[tasked, untasked, empty], &[]);
+        let nodes = doc["nodes"].as_array().unwrap();
+        let node = |id: &str| nodes.iter().find(|n| n["id"] == format!("session:{id}")).unwrap();
+        assert_eq!(node("a")["task"], json!("review-pr"));
+        assert!(node("b").get("task").is_none());
+        assert!(node("c").get("task").is_none());
     }
     #[test]
     fn graph_json_publishes_effective_project_on_a_child_outside_its_cwd_anchor() {

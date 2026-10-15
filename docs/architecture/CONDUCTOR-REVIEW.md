@@ -204,9 +204,21 @@ this ("rebuilds the whole-world grid three times per interaction").
 13. **Root spacing.** `graphview::place` advances a full extra slot after
     each root, so forests sit 76 cells apart; one slot of gap would do.
 
+### Ruled, designed, not built
+
+14. **Find (`/`) and related sessions** — the User's BUILD: find sessions
+    on every node by what they carry (primitives, task and lead, the
+    mailboxes they read, the letters they were cc'd on, their edges) and list
+    what relates to one, each with its reason.
+    [SESSION-FIND.md](SESSION-FIND.md) is the design: `aoide session find`
+    first, from disk and node caches with nothing fetched, and the
+    conductor's `/` page rendering it. It gives the conductor a related walk
+    the shell does badly; it does not make the conductor the place the User
+    conducts from, and that page says why.
+
 ### Open rulings (recorded, not implemented)
 
-14. **Typed edges, runs, goals, mail trails** — §22 phase 2 and §24, frozen
+15. **Typed edges, runs, goals, mail trails** — §22 phase 2 and §24, frozen
     until the six questions in `p-orch-graph-brief.md` are answered. This
     review adds no question; the recommended default for each stands as
     briefed.
@@ -216,4 +228,6 @@ this ("rebuilds the whole-world grid three times per interaction").
 `aoide send --id <id> -- text` is one line; the conductor's path is open,
 `8`, navigate, `e`, pick. The conductor earns its launch only where the
 shell has no picture: the cross-node spawn forest, the awaiting queue, and
-the roster with honest staleness. Items 1–12 are that picture.
+the roster with honest staleness. Items 1–12 are that picture. Item 14 adds a
+question to both doors rather than a picture to one: the shell answers it in
+one line, and the conductor's share is walking the answer.

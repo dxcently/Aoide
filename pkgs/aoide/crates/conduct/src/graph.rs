@@ -38,6 +38,9 @@ mod doorbell;
 // `sync_eidolon_sessions` (re-exported below) is called from the reaper tick
 // (`reap.rs`) beside `sync_codex_app_threads`.
 mod eidolon;
+// SESSION-FIND: the query core and the handler of `aoide session find`.
+mod find;
+pub use self::find::session_find;
 // LANE IDENTITY P-ID3: `pub(crate)`, not private — `shellbridge.rs` (a
 // SIBLING of this module, not a descendant) reuses `peer_cred`/`PeerCred`
 // for its own cross-uid accept floor rather than hand-rolling a second
@@ -140,6 +143,8 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
 pub(crate) use self::pingback::{pingback, pingback_pull};
+#[cfg(test)]
+pub(crate) use self::pingback::pingback_path;
 // The project ladder (`core-seams` §B): `project_for` (a session's own claim:
 // explicit > its workspace's default > cwd anchor) and `effective_project_for`
 // (what it RENDERS under: explicit > owner > workspace default > cwd anchor),
@@ -147,9 +152,10 @@ pub(crate) use self::pingback::{pingback, pingback_pull};
 // `workspaceProject` birth default are written through, called by all three
 // compositor stamp sites (`window.rs`) so a future adapter calls it too rather
 // than writing the field itself.
+pub(crate) use self::model::harness_pid;
 pub use self::model::{
     anchor_for, effective_project_for, lead_over, leads_project, observe_workspace, project_for,
-    canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
+    canonical_state, merged_sessions, HookDeath, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
 };
 pub use self::pending::{pending_approve, pending_deny, pending_list};
@@ -314,11 +320,12 @@ pub use self::session_store::now_iso_utc;
 // `use crate::graph::{...}`" section) — never reached from root, so they stay
 // `pub(crate)`.
 pub(crate) use self::common::stage_error;
-pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session_exit, prune_done};
+pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session_exit, prune_done_sparing};
+pub(crate) use self::pingback::held_deaths;
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
-    lineage_of, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
+    lineage_of, owned_by_live_wraps, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };
 pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;

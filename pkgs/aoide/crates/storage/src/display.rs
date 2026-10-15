@@ -102,11 +102,11 @@ pub fn os_hostname() -> Option<String> {
 /// grammar tacks on in parens. Char-based (not byte-sliced), so it is total
 /// even on a non-ASCII or under-4-char id: a short id comes back whole
 /// instead of panicking on a byte-index that doesn't land on a char
-/// boundary.
+/// boundary. It walks back from the end, so a megabyte id costs what a short
+/// one does.
 pub fn short_tail(id: &str) -> String {
-    let chars: Vec<char> = id.chars().collect();
-    let start = chars.len().saturating_sub(4);
-    chars[start..].iter().collect()
+    let start = id.char_indices().rev().nth(3).map_or(0, |(i, _)| i);
+    id[start..].to_string()
 }
 
 /// Render one session's identity for a human surface: `<host>/<role>/
@@ -185,6 +185,18 @@ mod tests {
         assert_eq!(short_tail(""), "");
         assert_eq!(short_tail("abcd"), "abcd");
         assert_eq!(short_tail("abcde"), "bcde");
+        assert_eq!(short_tail("héllo wörld→ß"), "ld→ß", "four chars, not four bytes");
+    }
+
+    #[test]
+    fn short_tail_of_a_four_mebibyte_id_reads_only_its_end() {
+        let long = format!("{}tail", "x".repeat(4 << 20));
+        let start = std::time::Instant::now();
+        for _ in 0..1000 {
+            assert_eq!(short_tail(&long), "tail");
+        }
+        let took = start.elapsed();
+        assert!(took < std::time::Duration::from_secs(1), "1000 tails of a 4 MiB id took {took:?}");
     }
 
     #[test]

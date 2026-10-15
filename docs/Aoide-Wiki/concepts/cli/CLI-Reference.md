@@ -72,7 +72,7 @@ start at [[aoide-cli]] and the group pages linked below.
   `workspace set/clear/list/root` (the compositor workspace ↔ project binding;
   `root` prints one bare path for a launcher),
   `session start/phase/end/hook/grant/permit/pending list/approve/deny/
-  prune/reap`, bare `session` (the roster — by project, or by host under
+  prune/reap/find`, bare `session` (the roster — by project, or by host under
   `--hosts`), bare `send`/`spawn`/
   `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
   manifest), `conduct`, and `mail`/`mail read`/`mail poll` (the receive half

@@ -67,9 +67,9 @@
 use aoide_protocol::Invocation;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use crate::graph::{
-    canonical_state, codex_home, drop_remote_child_rows, drop_sessions, hooks_path, hyprctl_clients,
+    canonical_state, codex_home, drop_remote_child_rows, drop_sessions, harness_pid, hooks_path, hyprctl_clients,
     ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
-    prune_done, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
+    prune_done_sparing, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
     stage_error, superseded_by, DroppedEidolon,
     sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
     SessionRecord,
@@ -205,6 +205,13 @@ pub fn is_session_dead(
     now_epoch: i64,
     last_seen: impl Fn(&SessionRecord) -> Option<i64>,
 ) -> bool {
+    let pid_signal = matches!(rec.pid, Some(p) if !proc_exists(p));
+    // A live harness anchors its record: it is positive proof of life, so the
+    // window signal, the orphan arm and the staleness bands never judge it
+    // (see `harness_alive`). A dead pid of the record's own still counts.
+    if harness_alive(rec, window_owners, &proc_exists) {
+        return pid_signal;
+    }
     let window_signal = match live_addresses {
         Some(live) => {
             !rec.window_address.is_empty()
@@ -212,7 +219,6 @@ pub fn is_session_dead(
         }
         None => false, // compositor not queried — window liveness is unknown.
     };
-    let pid_signal = matches!(rec.pid, Some(p) if !proc_exists(p));
     let state = canonical_state(&rec.state);
     let at_rest = matches!(state, "idle" | "stopped");
     let mid_turn = matches!(state, "working" | "awaiting");
@@ -227,12 +233,7 @@ pub fn is_session_dead(
     // the window's owner is the TERMINAL's, which outlives the agent, so it
     // cannot veto. No owner map (compositor unqueried) reads a live pid
     // conservatively as the agent's own.
-    let live_agent_pid = rec.pid.is_some_and(|p| {
-        proc_exists(p)
-            && !window_owners
-                .and_then(|m| m.get(&normalize_addr(&rec.window_address)).copied())
-                .is_some_and(|owner| owner == p)
-    });
+    let live_agent_pid = rec.pid.is_some_and(|p| agent_alive(rec, window_owners, &proc_exists, p));
     // WHO staleness may judge: a headless record (no window AND no pid — the
     // classic hook-only shape) or an AGENT record (the hardened arm — see the
     // doc above for why shells are excluded).
@@ -252,6 +253,37 @@ pub fn is_session_dead(
         && ((at_rest && stale_beyond(REAP_IDLE_STALE_SECS))
             || (mid_turn && stale_beyond(working_band)));
     window_signal || pid_signal || stale_abandoned
+}
+
+/// Is `pid` alive as the agent's own process, not as the terminal that owns the
+/// record's window (a terminal outlives its agent, so its pid never vouches)?
+/// No owner map reads a live pid as the agent's own.
+fn agent_alive(
+    rec: &SessionRecord,
+    window_owners: Option<&HashMap<String, u32>>,
+    proc_exists: &impl Fn(u32) -> bool,
+    pid: u32,
+) -> bool {
+    proc_exists(pid)
+        && !window_owners
+            .and_then(|m| m.get(&normalize_addr(&rec.window_address)).copied())
+            .is_some_and(|owner| owner == pid)
+}
+
+/// Is `rec`'s harness alive as an agent process? Only a stored hook chain
+/// names one: its first pid, the harness [`harness_pid`] reads. A record with
+/// no chain falls back to its own pid there, and that pid is the agent's own
+/// process, which the window signal has always judged (a window closed under
+/// a live pid is dead, SUPER+Q), so it is not spared here. Liveness alone
+/// decides it: a chain stores no start time, so a pid recycled by an unrelated
+/// live process holds the record until that process exits, the fail-safe side.
+fn harness_alive(
+    rec: &SessionRecord,
+    window_owners: Option<&HashMap<String, u32>>,
+    proc_exists: &impl Fn(u32) -> bool,
+) -> bool {
+    !rec.hook_ancestry.is_empty()
+        && harness_pid(rec).is_some_and(|h| agent_alive(rec, window_owners, proc_exists, h))
 }
 
 /// Gather the live windows from Hyprland's request socket (`j/clients`, the JSON
@@ -631,12 +663,14 @@ fn pre_boot_ghosts(
 fn orphaned_subagents(
     sessions: &[SessionRecord],
     is_recent: impl Fn(&SessionRecord) -> bool,
+    spared: impl Fn(&SessionRecord) -> bool,
 ) -> Vec<String> {
     let known: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
     sessions
         .iter()
         .filter(|s| s.state != "done")
         .filter(|s| !is_recent(s))
+        .filter(|s| !spared(s))
         .filter(|s| {
             let parent = s
                 .parent_session_id
@@ -1544,7 +1578,9 @@ fn reap_inner(
     // host terminal's record has left the same way (see `orphaned_subagents`).
     // Same settle grace as the dedup above, so an infant awaiting its own
     // parent link is never judged.
-    for id in orphaned_subagents(&s_file.sessions, is_recent) {
+    // A record whose live harness anchors it is spared (see `harness_alive`).
+    let spared = |s: &SessionRecord| harness_alive(s, window_owners.as_ref(), &proc_exists);
+    for id in orphaned_subagents(&s_file.sessions, is_recent, spared) {
         if !reaped.contains(&id) {
             reaped.push(id);
         }
@@ -1585,6 +1621,13 @@ fn reap_inner(
         reaped.retain(|id| !live_wraps.contains(id));
     }
 
+    // A hook child whose conducted wrap still runs, with its turn open, is that
+    // wrap's to end: the wrap records the death when its own child exits
+    // (`record_hook_deaths`), and a reap here would close the phase first and
+    // leave it nothing to record (see `owned_by_live_wraps`).
+    let owned = crate::graph::owned_by_live_wraps(&s_file.sessions, &h_file.hooks, &reaped);
+    reaped.retain(|id| !owned.contains(id));
+
     // The exempt idle spawned shells the waived arm just skipped — a human
     // gesture only (`spawned_shell_band.is_none()` iff `--now`); the
     // unattended pass reports nothing here (module doc's "Sweep
@@ -1603,7 +1646,13 @@ fn reap_inner(
     // records are already `done`, so there is nothing to reap, and folding them
     // in would trip the `prune_done` call below into sweeping every unrelated
     // `done` record on the desktop, which stays `session prune`'s job.
-    let superseded_done = superseded_done_siblings(&s_file.sessions);
+    // A wrap-written death the tick has not claimed is held: no pass below may
+    // take its record, the only place its fact lives (see `held_deaths`).
+    let held = crate::graph::held_deaths(&h_file.hooks);
+    let superseded_done: Vec<String> = superseded_done_siblings(&s_file.sessions)
+        .into_iter()
+        .filter(|id| !held.contains(id))
+        .collect();
 
     // Orphaned hook records: a `hooks.json` entry whose sessionId matches NO
     // session record anywhere in the roster. The hook door always writes the
@@ -1624,7 +1673,7 @@ fn reap_inner(
     let orphan_hooks: Vec<String> = h_file
         .hooks
         .iter()
-        .filter(|h| !live_ids.contains(h.session_id.as_str()))
+        .filter(|h| !live_ids.contains(h.session_id.as_str()) && !held.contains(&h.session_id))
         .map(|h| h.session_id.clone())
         .collect();
 
@@ -1750,7 +1799,9 @@ fn reap_inner(
             ledger_session_exit(s, &now);
         }
     }
-    for id in &reaped {
+    // A child whose death the tick has not claimed keeps its hook record as it
+    // is, fact and all: it is the fact's only home.
+    for id in reaped.iter().filter(|id| !held.contains(*id)) {
         upsert_hook(&mut h_file.hooks, id, "done", &now);
     }
 
@@ -1760,9 +1811,11 @@ fn reap_inner(
     let (removed, mut cleared) = if reaped.is_empty() {
         (Vec::new(), Vec::new())
     } else {
-        let (kept_s, kept_h, removed, cleared) = prune_done(
+        let (kept_s, kept_h, removed, cleared) = prune_done_sparing(
             std::mem::take(&mut s_file.sessions),
             std::mem::take(&mut h_file.hooks),
+            false,
+            &held,
         );
         s_file.sessions = kept_s;
         h_file.hooks = kept_h;
@@ -2076,6 +2129,62 @@ mod tests {
             pid: None,
             ..Default::default()
         }
+    }
+
+    /// A hook-only agent under a live harness, with every other signal against
+    /// it: its window is gone from the compositor, its last evidence of life is
+    /// a century old, and its parent left the roster. The harness is `555`.
+    fn anchored_by(harness_alive: bool) -> (SessionRecord, impl Fn(u32) -> bool) {
+        let mut rec = hook_only("anchored", "idle");
+        rec.window_address = "0xdead".into();
+        rec.hook_ancestry = vec![555, 700];
+        rec.parent_session_id = Some("ghost".into());
+        (rec, move |p| harness_alive && p == 555)
+    }
+
+    /// A live harness is positive proof of life: the window signal, the
+    /// staleness band and the orphan arm never judge its record, and the
+    /// same record with the harness gone is judged as ever.
+    #[test]
+    fn a_live_harness_spares_its_record_from_window_staleness_and_orphan_signals() {
+        let (rec, alive) = anchored_by(true);
+        let now = 4_000_000_000;
+        let ancient = |_: &SessionRecord| Some(0);
+        let no_live = HashSet::new();
+        assert!(!is_session_dead(&rec, Some(&no_live), None, &alive, now, ancient));
+        let (rec, dead) = anchored_by(false);
+        assert!(is_session_dead(&rec, Some(&no_live), None, &dead, now, ancient));
+        let spared = |s: &SessionRecord| harness_alive(s, None, &alive);
+        let mut hook_only_rec = rec.clone();
+        hook_only_rec.window_address.clear();
+        assert!(orphaned_subagents(std::slice::from_ref(&hook_only_rec), |_| false, spared).is_empty());
+        assert_eq!(
+            orphaned_subagents(std::slice::from_ref(&hook_only_rec), |_| false, |_| false),
+            vec!["anchored".to_string()],
+            "the orphan arm takes it once nothing spares it",
+        );
+    }
+
+    /// A dead pid of the record's own is still evidence: the harness veto
+    /// spares a live harness, not a record whose stored pid has gone.
+    #[test]
+    fn a_dead_pid_of_the_record_is_still_dead_under_a_live_harness() {
+        let (mut rec, alive) = anchored_by(true);
+        rec.pid = Some(42);
+        assert!(is_session_dead(&rec, None, None, &alive, 0, |_| None));
+    }
+
+    /// A terminal's pid is not the agent's harness: it owns the window and
+    /// outlives the agent, so it cannot veto the window signal (the same rule
+    /// the pid veto applies).
+    #[test]
+    fn a_terminal_that_owns_the_window_is_not_a_live_harness() {
+        let (mut rec, _) = anchored_by(true);
+        rec.hook_ancestry = vec![600];
+        let owners: HashMap<String, u32> = [(normalize_addr("0xdead"), 600)].into();
+        let alive = |p: u32| p == 600;
+        let no_live = HashSet::new();
+        assert!(is_session_dead(&rec, Some(&no_live), Some(&owners), &alive, 0, |_| None));
     }
 
     #[test]
@@ -3194,6 +3303,7 @@ mod tests {
             session_id: id.into(),
             phase: "stopped".into(),
             updated_at: at.into(),
+            death: None,
             extra: Default::default(),
         };
         let mut hooks = vec![
@@ -3203,6 +3313,7 @@ mod tests {
                 session_id: "busy".into(),
                 phase: "working".into(),
                 updated_at: "2026-07-30T09:00:00Z".into(), // old, but NOT stopped
+                death: None,
                 extra: Default::default(),
             },
         ];
@@ -3333,7 +3444,7 @@ mod tests {
             hook_only("not-a-subagent", "working"), // parentless, but not a sub
         ];
 
-        let mut got = orphaned_subagents(&sessions, |_| false);
+        let mut got = orphaned_subagents(&sessions, |_| false, |_| false);
         got.sort();
         assert_eq!(
             got,
@@ -3346,14 +3457,14 @@ mod tests {
 
         // The settle grace: an infant whose parent link is a moment away is
         // never judged.
-        assert!(orphaned_subagents(&sessions, |_| true).is_empty());
+        assert!(orphaned_subagents(&sessions, |_| true, |_| false).is_empty());
 
         // The `sub:` id prefix classifies too, for a record that published no
         // kind at all.
         let mut bare = hook_only("sub:t1", "working");
         bare.kind = None;
         assert_eq!(
-            orphaned_subagents(&[bare], |_| false),
+            orphaned_subagents(&[bare], |_| false, |_| false),
             vec!["sub:t1".to_string()],
         );
     }
@@ -3387,11 +3498,11 @@ mod tests {
             with_pid,
         ];
 
-        let got = orphaned_subagents(&sessions, |_| false);
+        let got = orphaned_subagents(&sessions, |_| false, |_| false);
         assert_eq!(got, vec!["orphan-host-gone".to_string()]);
 
         // The settle grace spares an infant here too.
-        assert!(orphaned_subagents(&sessions, |_| true).is_empty());
+        assert!(orphaned_subagents(&sessions, |_| true, |_| false).is_empty());
     }
 
     /// A SPAWNED conducted SHELL that HAS been ticked by `conduct`'s P-C5
@@ -4362,5 +4473,191 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&stage);
         let _ = std::fs::remove_dir_all(&runtime);
+    }
+
+    /// A cursor whose hook half caches the route a child's death is said over:
+    /// what keeps an unclaimed death held once its record has left the roster.
+    fn cache_route(id: &str) {
+        let body = format!(
+            r#"{{"{id}":{{"hook":{{"phase":"working","at":"2026-10-07T10:00:00Z","route":{{"host":"wrap","to":"spawner","tag":"[claude {id}]","last":"working"}}}}}}}}"#
+        );
+        std::fs::write(crate::graph::pingback_path(), body).unwrap();
+    }
+
+    /// The wrap recorded a death on `id`'s hook record, as `done` with its fact.
+    fn record_death(hooks: &mut [crate::graph::HookRecord], id: &str) {
+        let h = hooks.iter_mut().find(|h| h.session_id == id).unwrap();
+        h.phase = "done".into();
+        h.death = Some(crate::graph::HookDeath {
+            outcome: Some("signal".into()),
+            signal: Some(9),
+            ..Default::default()
+        });
+    }
+
+    /// A tombstone the superseded pass would drop is spared while its wrap's death
+    /// is unclaimed; the same tombstone without a death is dropped.
+    #[test]
+    fn reap_spares_a_superseded_tombstone_whose_death_the_tick_has_not_said() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-held-superseded");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-held-superseded-xdg");
+
+        let now = now_iso_utc();
+        let mk = |id: &str, state: &str| {
+            let mut r = agent(id, "0xW", &now);
+            r.kind = Some("agent".into());
+            r.state = state.into();
+            r.pid = None;
+            r.cwd = "/nonexistent/nowhere".into();
+            r
+        };
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![mk("held", "done"), mk("plain", "done"), mk("live", "working")],
+            },
+        )
+        .unwrap();
+        let mut hooks = Vec::new();
+        for id in ["held", "plain", "live"] {
+            upsert_hook(&mut hooks, id, "working", &now);
+        }
+        record_death(&mut hooks, "held");
+        upsert_hook(&mut hooks, "plain", "done", &now);
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+        cache_route("held");
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let ids: Vec<&str> = sessions.sessions.iter().map(|s| s.session_id.as_str()).collect();
+        assert!(ids.contains(&"held"), "the unclaimed death keeps its tombstone: {ids:?}");
+        assert!(!ids.contains(&"plain"), "a tombstone with no death is dropped: {ids:?}");
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let held = hooks.hooks.iter().find(|h| h.session_id == "held").expect("the held record stays");
+        assert_eq!(held.death.as_ref().and_then(|d| d.signal), Some(9), "its fact is intact");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The wiring of the reaper's hand-off: a pass leaves an open hook child to
+    /// its running wrap only when someone would hear of its death. Two children
+    /// with a dead harness and an open turn sit under live conducted wraps; the
+    /// one whose wrap has a spawner is left as it is, and the one whose wrap
+    /// was started in an ordinary terminal (no spawner) is reaped like any
+    /// other.
+    #[test]
+    fn reap_leaves_a_live_wraps_open_child_only_when_a_spawner_would_hear_of_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-live-wrap-owns");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-live-wrap-owns-xdg");
+
+        let now = now_iso_utc();
+        let me = std::process::id();
+        let wrap = |id: &str, win: &str, spawner: Option<&str>| {
+            let mut w = agent(id, win, &now);
+            w.kind = Some("agent".into());
+            w.conductable = Some(true);
+            w.pid = Some(me);
+            w.exempt = true;
+            w.parent_session_id = spawner.map(str::to_string);
+            w.attested_spawner = spawner.map(str::to_string);
+            w
+        };
+        let kid = |id: &str, win: &str, host: &str| {
+            let mut k = agent(id, win, &now);
+            k.kind = Some("agent".into());
+            k.pid = Some(i32::MAX as u32);
+            k.parent_session_id = Some(host.into());
+            k.hook_ancestry = vec![i32::MAX, me as i32];
+            k
+        };
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![
+                    wrap("spawner", "0xS", None),
+                    wrap("told-wrap", "0xT", Some("spawner")),
+                    wrap("lone-wrap", "0xL", None),
+                    kid("told", "0xK1", "told-wrap"),
+                    kid("lone", "0xK2", "lone-wrap"),
+                ],
+            },
+        )
+        .unwrap();
+        let mut hooks = Vec::new();
+        for id in ["told", "lone"] {
+            upsert_hook(&mut hooks, id, "working", &now);
+        }
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let state = |id: &str| sessions.sessions.iter().find(|s| s.session_id == id).map(|s| s.state.clone());
+        assert_eq!(state("told").as_deref(), Some("working"), "its wrap and spawner are up: the wrap will record the death");
+        assert!(
+            state("lone").is_none_or(|s| s == "done"),
+            "no spawner would hear of it, so the reaper takes it: {:?}",
+            state("lone")
+        );
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let phase = |id: &str| hooks.hooks.iter().find(|h| h.session_id == id).map(|h| h.phase.clone());
+        assert_eq!(phase("told").as_deref(), Some("working"), "the open turn is left for the wrap to record");
+        assert!(phase("lone").is_none_or(|p| p == "done"), "{:?}", phase("lone"));
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// An orphan hook record (no session left) whose wrap's death is unclaimed is
+    /// spared by the orphan sweep; an orphan without a death is still dropped.
+    #[test]
+    fn reap_spares_an_orphan_hook_whose_death_the_tick_has_not_said() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env =
+            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE", "XDG_RUNTIME_DIR"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-held-orphan");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-held-orphan-xdg");
+
+        let now = now_iso_utc();
+        let mut live = hook_only("live-1", "idle");
+        live.started_at = now.clone();
+        live.cwd = "/nonexistent/nowhere".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![live] }).unwrap();
+        let mut hooks = Vec::new();
+        upsert_hook(&mut hooks, "live-1", "idle", &now);
+        upsert_hook(&mut hooks, "ghost-held", "working", &now);
+        record_death(&mut hooks, "ghost-held");
+        upsert_hook(&mut hooks, "ghost-plain", "stopped", &now);
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+        cache_route("ghost-held");
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let ids: Vec<&str> = hooks.hooks.iter().map(|h| h.session_id.as_str()).collect();
+        assert!(ids.contains(&"ghost-held"), "the unclaimed death's record is spared: {ids:?}");
+        assert!(!ids.contains(&"ghost-plain"), "an orphan with no death is dropped: {ids:?}");
+
+        let _ = std::fs::remove_dir_all(&stage);
     }
 }

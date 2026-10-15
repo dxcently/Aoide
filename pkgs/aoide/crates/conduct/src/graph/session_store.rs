@@ -14,14 +14,13 @@
 
 use super::common::{require_flag, stage_error};
 use super::doc::{
-    doomed_subagent_descendants, ledger_session_exit, prune_done, restage_graph, would_cycle,
+    doomed_subagent_descendants, ledger_session_exit, prune_done_sparing, restage_graph, would_cycle,
 };
 use super::model::{
-    canonical_state, clear_screen_ask, hooks_path, load_stage, sessions_path, write_stage,
-    HooksFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
+    canonical_state, clear_screen_ask, harness_pid, hooks_path, load_stage, sessions_path,
+    write_stage, HookDeath, HookRecord, HooksFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
-#[cfg(test)]
-use super::model::HookRecord;
+use super::window::pid_ancestry;
 use aoide_protocol::agents::AgentProfile;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::{Fix, Kind, Outcome};
@@ -29,7 +28,7 @@ use aoide_storage::fs::{pid_is_alive, with_stage_lock};
 use serde_json::json;
 #[cfg(test)]
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// `now_iso_utc`/`iso_utc_from_epoch` (time) and `upsert_session`/
 /// `upsert_hook` (pure Vec<Record> mutators — verified DAG-free: neither
@@ -40,6 +39,7 @@ use std::collections::HashSet;
 /// (and this file's own `do_session_*`/`do_subagent_*` handlers below, which
 /// stay in root through Phase 3b) is untouched.
 pub use aoide_storage::session::{upsert_hook, upsert_session};
+use aoide_storage::session::record_death;
 pub use aoide_storage::time::now_iso_utc;
 #[cfg(test)]
 use aoide_storage::time::iso_utc_from_epoch;
@@ -145,24 +145,61 @@ pub(crate) fn superseded_by(
     }
 }
 
+/// Is `p` alive and outside `chain`: a process the caller does not run under.
+fn alive_outside(p: u32, chain: &[i32], alive: &impl Fn(u32) -> bool) -> bool {
+    alive(p) && !chain.iter().any(|&c| u32::try_from(c).ok() == Some(p))
+}
+
+/// `rec`'s harness ([`harness_pid`]) when the session has not ended, it is
+/// alive, and `chain`, the harness chain or process ancestry of whoever
+/// addresses the record, does not hold it: the live process that anchors the
+/// record against that caller. A `done` record holds no anchor, because the
+/// session it names is over and its harness may run on under another id (a
+/// `/clear`), so the next run adopts the id. No start time is stored with the
+/// chain, so a pid recycled by an unrelated live process holds the anchor until
+/// it exits; the refusal is the fail-safe side.
+pub(in crate::graph) fn live_harness_outside(
+    rec: &SessionRecord,
+    chain: &[i32],
+    alive: impl Fn(u32) -> bool,
+) -> Option<u32> {
+    harness_pid(rec).filter(|&harness| rec.state != "done" && alive_outside(harness, chain, &alive))
+}
+
+/// The live harness that anchors the registered session `id` against `caller`,
+/// when it has one: the record's harness ([`harness_pid`]) is alive and is not
+/// in `caller`'s own process ancestry, so `caller` is a stranger to it. A
+/// stranger may not re-home the record, by chain or parent, and may not end it:
+/// that is what lets `session end` believe whose process asks. A session that
+/// has ended, a harness that has exited, an unregistered id and a caller that
+/// runs under the harness all answer `None`, and a caller with no walkable pid
+/// is a stranger to every live harness.
+pub(in crate::graph) fn live_harness_anchoring(id: &str, caller: Option<i32>) -> Option<u32> {
+    let file = load_stage::<SessionsFile>(&sessions_path()).ok()?;
+    let rec = file.sessions.iter().find(|s| s.session_id == id)?;
+    let ancestry = caller.map(pid_ancestry).unwrap_or_default();
+    live_harness_outside(rec, &ancestry, pid_is_alive)
+}
+
 /// May `rec`'s stored `hookAncestry` be replaced by `chain`, the chain of a fresh
-/// SessionStart? Yes when nothing is stored, when the record has no pid, or when
-/// its pid is dead or still in the new chain. Refused only while the record's own
-/// pid is alive outside the new chain: that pid is the record's anchor. A pid-less
-/// record follows its latest SessionStart, so two live processes under one session
-/// id resolve to the latest one. Sits beside pid trust, not inside it: the chain is
-/// kernel truth and never a payload claim, and a sealed record's chain may still
-/// refresh (the seal binds `(pid, starttime)`, not the chain).
+/// SessionStart or of a hook that binds a window? Yes when the session has
+/// ended, or when neither of the record's own processes is alive outside the
+/// new chain: its pid and its harness ([`harness_pid`], which is the pid again
+/// where no chain is stored). A live harness outside the chain anchors the
+/// record, so a stranger's hook cannot re-home it, and one that has exited, or
+/// that the new chain holds, lets the next run adopt the id (`claude --resume`
+/// in a new terminal). A shell or terminal of the old chain that outlives its
+/// harness is no anchor. Sits beside pid trust, not inside it: the chain is
+/// kernel truth and never a payload claim, and a sealed record's chain may
+/// still refresh (the seal binds `(pid, starttime)`, not the chain).
 pub(in crate::graph) fn ancestry_may_move(
     rec: &SessionRecord,
     chain: &[i32],
     alive: impl Fn(u32) -> bool,
 ) -> bool {
-    rec.hook_ancestry.is_empty()
-        || match rec.pid {
-            None => true,
-            Some(p) => !alive(p) || chain.iter().any(|&c| u32::try_from(c).ok() == Some(p)),
-        }
+    rec.state == "done"
+        || !(rec.pid.is_some_and(|p| alive_outside(p, chain, &alive))
+            || live_harness_outside(rec, chain, &alive).is_some())
 }
 
 /// Is `rec`'s stored `hookAncestry` stale against `chain`, the harness chain of a live
@@ -478,6 +515,10 @@ fn do_session_start_inner(
     };
     if !evicted.is_empty() {
         let mut h_file: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        // A held death is a wrap's fact the tick has not said yet. An eviction
+        // skips it, held before any write, so its record stays whole.
+        let held = crate::graph::pingback::held_deaths(&h_file.hooks);
+        let evicted: Vec<String> = evicted.into_iter().filter(|eid| !held.contains(eid)).collect();
         let done_at = now_iso_utc();
         for eid in &evicted {
             upsert_hook(&mut h_file.hooks, eid, "done", &done_at);
@@ -488,7 +529,7 @@ fn do_session_start_inner(
             }
         }
         let (kept_s, kept_h, _removed, _cleared) =
-            prune_done(std::mem::take(&mut file.sessions), std::mem::take(&mut h_file.hooks));
+            prune_done_sparing(std::mem::take(&mut file.sessions), std::mem::take(&mut h_file.hooks), false, &held);
         file.sessions = kept_s;
         h_file.hooks = kept_h;
         if h_file.schema_version.is_empty() {
@@ -1754,6 +1795,7 @@ pub(in crate::graph) fn do_session_phase(id: &str, phase: &str) -> Outcome {
 }
 fn do_session_phase_inner(id: &str, phase: &str) -> Outcome {
     let cmd = "session.phase";
+    let phase = canonical_state(phase);
     let sessions: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
         Err(e) => return stage_error(cmd, e),
@@ -1851,6 +1893,7 @@ fn do_session_phase_if_inner(id: &str, phase: &str, expected: &str) -> Outcome {
             "expected": expected,
         }));
     }
+    let phase = canonical_state(phase);
     let now = now_iso_utc();
     upsert_hook(&mut file.hooks, id, phase, &now);
     if file.schema_version.is_empty() {
@@ -1879,8 +1922,150 @@ fn do_session_phase_if_inner(id: &str, phase: &str, expected: &str) -> Outcome {
         }))
 }
 
+/// A hook child a wrap hosts whose turn is open and whose harness is gone: the
+/// one the wrap's own child exit IS the death of.
+struct Doomed {
+    id: String,
+    last_tool: Option<String>,
+    spawner: Option<String>,
+    harness: u32,
+    at: String,
+}
+
+/// Does the conducted wrap `host`, running as `host_pid`, host the hook child
+/// `s`: its `parentSessionId` is the wrap, and its `hookAncestry` holds the wrap's
+/// pid, the same kernel edge the ping-back's route needs.
+fn hosted_by(s: &SessionRecord, host: &str, host_pid: u32) -> bool {
+    s.parent_session_id.as_deref() == Some(host)
+        && i32::try_from(host_pid).is_ok_and(|pid| s.hook_ancestry.contains(&pid))
+}
+
+fn turn_open(phase: &str) -> bool {
+    matches!(canonical_state(phase), "working" | "awaiting")
+}
+
+/// Of `ids`, the hook children a running wrap still owns: a child whose host is a
+/// conducted wrap with a live pid (and not itself in `ids`), whose turn is
+/// open, and that has a spawner to be told
+/// ([`recipient_of`](super::pingback::recipient_of)). That wrap records the
+/// child's death when its own child exits ([`record_hook_deaths`]); a pass that
+/// closed the phase first would leave it nothing to record. A child nobody
+/// would hear of is not worth the wait, so the pass reaps it as it always did.
+/// The cost: a harness that dies under a wrap that outlives it (a shell host)
+/// leaves its child reading `working` until the wrap ends.
+pub(crate) fn owned_by_live_wraps(sessions: &[SessionRecord], hooks: &[HookRecord], ids: &[String]) -> HashSet<String> {
+    let owned = |s: &SessionRecord| {
+        let host = s.parent_session_id.as_deref().filter(|h| !ids.iter().any(|id| id == h));
+        let wrap = host.and_then(|h| sessions.iter().find(|w| w.session_id == h));
+        let live = wrap.is_some_and(|w| {
+            w.conductable == Some(true) && w.pid.is_some_and(|pid| pid_is_alive(pid) && hosted_by(s, &w.session_id, pid))
+        });
+        let told = || super::pingback::recipient_of(s, sessions).is_some();
+        live && told() && hooks.iter().any(|h| h.session_id == s.session_id && turn_open(&h.phase))
+    };
+    sessions
+        .iter()
+        .filter(|s| ids.contains(&s.session_id) && owned(s))
+        .map(|s| s.session_id.clone())
+        .collect()
+}
+
+/// The hook children a wrap hosts ([`hosted_by`]) whose turn is still open and
+/// whose harness is gone. Pure over the roster and `hooks.json`, so the rule is
+/// table-testable. Its harness must be gone, so a harness still running under a
+/// descendant that outlived the wrap is not reported dead. The tool in flight is
+/// read here, before the session is marked done and its activity cleared, and
+/// so is the spawner the death is said to, while this wrap's record still stands
+/// to climb through.
+fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: &str, host_pid: u32) -> Vec<Doomed> {
+    sessions
+        .iter()
+        .filter(|s| hosted_by(s, host, host_pid))
+        .filter_map(|s| {
+            let harness = harness_pid(s).filter(|&pid| !pid_is_alive(pid))?;
+            let hook = hooks.iter().find(|h| h.session_id == s.session_id)?;
+            turn_open(&hook.phase).then(|| Doomed {
+                id: s.session_id.clone(),
+                last_tool: s.activity.clone().filter(|a| !a.is_empty()),
+                spawner: super::pingback::recipient_of(s, sessions),
+                harness,
+                at: hook.updated_at.clone(),
+            })
+        })
+        .collect()
+}
+
+/// The wrap's own exit, recorded before the wrap ends its own record
+/// (`session_conduct`). Each hosted child [`hosted_open_children`] names gets the
+/// wrap's own death fact, carrying the tool it was in and its spawner, and is marked
+/// `done` in `sessions.json`: it is dead, and presence must read it so. Written
+/// under the stage lock. One harness is one death: a `/clear` gives the same
+/// process a new hook id, so the newest id carries the fact and the older ids are
+/// closed as `done`. A closed phase is left exactly as it is, and when nothing is
+/// open the files are not touched at all.
+pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &HookDeath) {
+    with_stage_lock(|| {
+        let Ok(mut sessions) = load_stage::<SessionsFile>(&sessions_path()) else { return };
+        let Ok(mut hooks) = load_stage::<HooksFile>(&hooks_path()) else { return };
+        let doomed = hosted_open_children(&sessions.sessions, &hooks.hooks, host, host_pid);
+        if doomed.is_empty() {
+            return;
+        }
+        let now = now_iso_utc();
+        let mut by_harness: BTreeMap<u32, Vec<&Doomed>> = BTreeMap::new();
+        for d in &doomed {
+            by_harness.entry(d.harness).or_default().push(d);
+        }
+        for mut group in by_harness.into_values() {
+            group.sort_by(|a, b| (&a.at, &a.id).cmp(&(&b.at, &b.id)));
+            let Some((newest, older)) = group.split_last() else { continue };
+            for d in older {
+                upsert_hook(&mut hooks.hooks, &d.id, "done", &now);
+            }
+            let fact = HookDeath { last_tool: newest.last_tool.clone(), spawner: newest.spawner.clone(), ..end.clone() };
+            record_death(&mut hooks.hooks, &newest.id, fact, &now);
+        }
+        for s in sessions.sessions.iter_mut().filter(|s| doomed.iter().any(|d| d.id == s.session_id)) {
+            s.state = "done".to_string();
+            s.activity = None;
+            clear_screen_ask(s);
+            ledger_session_exit(s, &now);
+        }
+        if hooks.schema_version.is_empty() {
+            hooks.schema_version = STAGE_GRAPH_VERSION.to_string();
+        }
+        if let Err(e) = write_stage(&hooks_path(), &hooks) {
+            eprintln!("[aoide/conduct] hook death not recorded for `{host}`: {e}");
+            return;
+        }
+        if let Err(e) = write_stage(&sessions_path(), &sessions) {
+            eprintln!("[aoide/conduct] hosted child not marked done for `{host}`: {e}");
+            return;
+        }
+        if let Err(e) = restage_graph() {
+            eprintln!("[aoide/conduct] graph restage after hook death failed: {e}");
+        }
+    });
+}
+
 /// Core of `session end`: mark the session `done` (and its hook phase
 /// `done`), re-stage. An unknown id is an ok no-op (matching `project remove`).
+/// A hook child that ends ITSELF with its turn open (`working`/`awaiting`) and
+/// a spawner to tell ([`recipient_of`](super::pingback::recipient_of)) gets the
+/// death fact `end` instead, carrying the tool it was in and that spawner, so
+/// the ping-back says it ended mid-turn; its wrap then finds the phase closed
+/// and records nothing more. `caller` is the kernel's word for who is asking,
+/// the hook door's pid or the daemon's peer credentials
+/// ([`session_end_caller`]); the session ends itself only when that pid is, or
+/// runs under, the child's own harness ([`runs_under_harness`]).
+/// `attests_death` is false where the harness lives on past this id (a
+/// `/clear`, a resume) or the caller is the wrap that owns the record: the end
+/// is real and carries no fact.
+///
+/// Anyone else is refused, and writes nothing, while the session's harness is
+/// alive ([`live_harness_anchoring`]): the answer is [`anchored_refusal`], which
+/// names the harness and how to stop it. A harness that has exited, or none on
+/// record, is ended plain: a spawner is told only what the session itself did.
 ///
 /// Also closes every ssh tunnel this session opened
 /// (`aoide_client::tunnel::close_all_for_session`, ssh-transport lane P-S5) —
@@ -1895,9 +2080,16 @@ fn do_session_phase_if_inner(id: &str, phase: &str, expected: &str) -> Outcome {
 /// sessions/hooks stage files the lock actually guards. Best-effort — a
 /// tunnel that fails to close here is still caught by the reaper, so its
 /// error is never allowed to turn a successful `session end` into a
-/// reported failure.
-pub(in crate::graph) fn do_session_end(id: &str) -> Outcome {
-    let outcome = with_stage_lock(|| do_session_end_inner(id));
+/// reported failure. A refused end closes neither the tunnels nor the check
+/// lane's baseline: the session goes on using both.
+pub(in crate::graph) fn do_session_end(id: &str, caller: Option<i32>, attests_death: bool) -> Outcome {
+    let (outcome, anchor) = with_stage_lock(|| match live_harness_anchoring(id, caller) {
+        Some(harness) => (anchored_refusal("session.end", id, harness), Some(harness)),
+        None => (do_session_end_inner(id, caller, attests_death), None),
+    });
+    if anchor.is_some() {
+        return outcome;
+    }
     let _ = aoide_client::tunnel::close_all_for_session(id);
     // The check lane's own baseline for this session (task #139 review
     // finding: nothing ever deleted `state/checklane/<id>.json` — an effect
@@ -1906,7 +2098,36 @@ pub(in crate::graph) fn do_session_end(id: &str) -> Outcome {
     aoide_upkeep::checklane::forget_baseline(id);
     outcome
 }
-fn do_session_end_inner(id: &str) -> Outcome {
+
+/// Is `caller` the harness of `s`, or a process running under it: the harness
+/// pid is in the caller's `/proc` ancestry (self first). The one proof that a
+/// session is ending itself and not being ended by someone else.
+fn runs_under_harness(s: &SessionRecord, caller: Option<i32>) -> bool {
+    let harness = harness_pid(s).and_then(|pid| i32::try_from(pid).ok());
+    harness.zip(caller).is_some_and(|(harness, pid)| pid_ancestry(pid).contains(&harness))
+}
+
+/// The answer a stranger's move of a record its live harness anchors gets
+/// (`session end`, a phase that folds to `done`, a `session start` that would
+/// move its window or parent, a `graph link` that re-parents it). An ok no-op
+/// that writes nothing: the hook door never fails its harness, and the reason
+/// names what the caller ran into. `kill` reaches a conducted session only; a
+/// bare-terminal harness is out of its reach and ends with its own process.
+pub(in crate::graph) fn anchored_refusal(cmd: &str, id: &str, harness: u32) -> Outcome {
+    Outcome::ok(
+        cmd,
+        format!(
+            "refused: session `{id}` is anchored to its live harness (pid {harness}), \
+             which is not the caller; nothing was written. Fix: \
+             `aoide session kill --id {id}` ends a conducted session; a \
+             bare-terminal harness (no conducted wrap) ends when its own \
+             process exits."
+        ),
+    )
+    .with_data(json!({ "sessionId": id, "reason": "harness-anchored", "harness": harness }))
+}
+
+fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool) -> Outcome {
     let cmd = "session.end";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
@@ -1923,6 +2144,20 @@ fn do_session_end_inner(id: &str) -> Outcome {
         return out;
     }
     let now = now_iso_utc();
+    let ended_mid_turn = s_file
+        .sessions
+        .iter()
+        .find(|s| s.session_id == id)
+        .filter(|s| attests_death && runs_under_harness(s, caller))
+        .and_then(|s| {
+            let spawner = super::pingback::recipient_of(s, &s_file.sessions)?;
+            Some(HookDeath {
+                last_tool: s.activity.clone().filter(|a| !a.is_empty()),
+                outcome: Some("end".to_string()),
+                spawner: Some(spawner),
+                ..HookDeath::default()
+            })
+        });
     for s in s_file.sessions.iter_mut() {
         if s.session_id == id {
             // The ledger write (P-D8), gated on an ACTUAL transition: unlike
@@ -1979,7 +2214,11 @@ fn do_session_end_inner(id: &str) -> Outcome {
         Ok(f) => f,
         Err(e) => return stage_error(cmd, e),
     };
-    upsert_hook(&mut h_file.hooks, id, "done", &now);
+    let open = h_file.hooks.iter().any(|h| h.session_id == id && turn_open(&h.phase));
+    match ended_mid_turn.filter(|_| open) {
+        Some(fact) => record_death(&mut h_file.hooks, id, fact, &now),
+        None => upsert_hook(&mut h_file.hooks, id, "done", &now),
+    }
     if h_file.schema_version.is_empty() {
         h_file.schema_version = STAGE_GRAPH_VERSION.to_string();
     }
@@ -2029,6 +2268,7 @@ pub fn session_start(inv: &Invocation) -> Outcome {
     if let Some(refusal) = reserved_id_refusal("session.start", &id) {
         return refusal;
     }
+    // The refusal and the write share one lock, so no other writer lands between them.
     with_stage_lock(|| {
         if let Some((rec, changed)) = live_wrap_verdict(&id, agent, cwd, window, parent) {
             return if changed.is_empty() {
@@ -2037,11 +2277,34 @@ pub fn session_start(inv: &Invocation) -> Outcome {
                 live_wrap_refused(&id, &changed)
             };
         }
+        if let Some(refusal) = anchored_start_refusal(&id, asking_pid(inv), window, parent) {
+            return refusal;
+        }
         do_session_start_inner(&id, agent, cwd, window, parent, None, None, None, None, &[])
     })
 }
 
-/// `session phase --id <id> --phase <phase>` — UPSERT the live hook phase.
+/// The refusal for a `session start` that would move the window or the parent of
+/// a record its live harness anchors and whose harness the caller is not. Only a
+/// value that differs from the stored one is a move; the same value is a no-op.
+fn anchored_start_refusal(
+    id: &str,
+    caller: Option<i32>,
+    window: Option<&str>,
+    parent: Option<&str>,
+) -> Option<Outcome> {
+    let file = load_stage::<SessionsFile>(&sessions_path()).ok()?;
+    let rec = file.sessions.iter().find(|s| s.session_id == id)?;
+    let moves = window.is_some_and(|w| w != rec.window_address)
+        || parent.is_some_and(|p| rec.parent_session_id.as_deref() != Some(p));
+    if !moves {
+        return None;
+    }
+    live_harness_anchoring(id, caller).map(|harness| anchored_refusal("session.start", id, harness))
+}
+
+/// `session phase --id <id> --phase <phase>` — UPSERT the live hook phase. A
+/// phase that is `done` is `session end`.
 ///
 /// P-D6 routing (see [`session_start`]'s own doc for the full contract).
 pub fn session_phase(inv: &Invocation) -> Outcome {
@@ -2056,11 +2319,14 @@ pub fn session_phase(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
+    // A phase that folds to `done` is an end: it marks the roster record `done`,
+    // so it answers to the same caller check as `session end`.
     if canonical_state(&phase) == "done" {
         if let Some(message) = live_wrap_refusal_for(&id) {
             return Outcome::error("session.phase", message)
                 .with_data(json!({ "reason": "live-sealed-wrap", "id": id }));
         }
+        return do_session_end(&id, asking_pid(inv), true);
     }
     do_session_phase(&id, &phase)
 }
@@ -2080,7 +2346,18 @@ pub fn session_end(inv: &Invocation) -> Outcome {
         return Outcome::error("session.end", message)
             .with_data(json!({ "reason": "live-sealed-wrap", "id": id }));
     }
-    do_session_end(&id)
+    do_session_end(&id, asking_pid(inv), true)
+}
+
+/// Who is asking for a session command, by the kernel's word and nobody's
+/// argument: the daemon's `SO_PEERCRED` stamp when the daemon runs it for a
+/// forwarded call (none when it stamped none), else this process, which IS the
+/// caller on every other door.
+fn asking_pid(inv: &Invocation) -> Option<i32> {
+    match inv.door {
+        aoide_protocol::Door::Daemon => super::send::door_pid(inv),
+        _ => Some(std::process::id() as i32),
+    }
 }
 
 /// The refusal a door returns when `id` names a protected live wrap
@@ -2579,8 +2856,10 @@ mod tests {
     }
 
     #[test]
-    fn ancestry_refuses_only_while_its_own_pid_lives_outside_the_new_chain() {
-        // Pid-less: follows its latest SessionStart, even over a live stored process.
+    fn ancestry_refuses_only_while_its_own_pid_or_harness_lives_outside_the_new_chain() {
+        // Pid-less, and the harness (the first stored pid) is dead: a shell or
+        // a terminal of the old chain that outlives it is no anchor, so the
+        // record follows its latest SessionStart.
         let pidless = hosted("pidless", &[DEAD, 555, 700], None);
         assert!(ancestry_may_move(&pidless, &[800, 700], live(&[555, 700, 800])));
         // Anchored to a live pid of its own outside the new chain: held.
@@ -2591,6 +2870,38 @@ mod tests {
         assert!(ancestry_may_move(&anchored, &[800, 555], live(&[555, 700, 800])));
         let fresh = hosted("fresh", &[], None);
         assert!(ancestry_may_move(&fresh, &[800, 700], live(&[700, 800])));
+        // No chain is stored but a pid is: that pid is the harness, held the same.
+        let chainless = hosted("chainless", &[], Some(555));
+        assert!(!ancestry_may_move(&chainless, &[800, 700], live(&[555, 700, 800])));
+        assert!(ancestry_may_move(&chainless, &[800, 555], live(&[555, 700, 800])));
+        assert!(ancestry_may_move(&chainless, &[800, 700], live(&[700, 800])));
+        assert_eq!(live_harness_outside(&chainless, &[800, 700], live(&[555, 700, 800])), Some(555));
+        // An ended session holds nothing, whatever of its processes still lives.
+        for rec in [&anchored, &chainless] {
+            let mut done = rec.clone();
+            done.state = "done".into();
+            assert!(ancestry_may_move(&done, &[800, 700], live(&[555, 700, 800])));
+            assert_eq!(live_harness_outside(&done, &[800, 700], live(&[555, 700, 800])), None);
+        }
+    }
+
+    /// A pid-less record is anchored by its live harness: a SessionStart whose
+    /// chain does not hold it cannot take the chain, which is what stops a
+    /// stranger re-homing the record before ending it. The harness dead or in
+    /// the new chain lets the next run adopt the id, and a pid that is dead
+    /// does not hide a live harness.
+    #[test]
+    fn a_live_harness_outside_the_new_chain_holds_the_chain_of_a_pidless_record() {
+        let pidless = hosted("pidless-live", &[555, 600, 700], None);
+        assert!(!ancestry_may_move(&pidless, &[800, 700], live(&[555, 600, 700, 800])));
+        assert_eq!(live_harness_outside(&pidless, &[800, 700], live(&[555, 700, 800])), Some(555));
+        assert!(ancestry_may_move(&pidless, &[800, 700], live(&[600, 700, 800])), "the harness has exited");
+        assert!(ancestry_may_move(&pidless, &[555, 700], live(&[555, 700])), "the new chain holds the harness");
+        assert_eq!(live_harness_outside(&pidless, &[555, 700], live(&[555, 700])), None);
+        let dead_pid = hosted("dead-pid", &[555, 600, 700], Some(DEAD as u32));
+        assert!(!ancestry_may_move(&dead_pid, &[800, 700], live(&[555, 700, 800])));
+        let no_chain = hosted("no-chain", &[], Some(555));
+        assert_eq!(live_harness_outside(&no_chain, &[800], live(&[555, 800])), Some(555), "the pid is the fallback harness");
     }
 
     #[test]
@@ -2811,8 +3122,9 @@ mod tests {
     }
 
     /// The chain lands on registration. A pid-less record follows its latest
-    /// SessionStart; a record anchored to a live pid of its own keeps its chain
-    /// until that pid leaves the new chain.
+    /// SessionStart unless its live harness is outside the new chain; a record
+    /// anchored to a live pid of its own keeps its chain until that pid leaves
+    /// the new chain.
     #[test]
     fn a_hook_chain_lands_on_registration_and_only_a_live_anchor_holds_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2869,6 +3181,21 @@ mod tests {
             .hook_ancestry
             .clone();
         assert_eq!(anchored_chain, vec![DEAD, a[1], a[2]], "a live pid of its own holds the chain");
+
+        // Pid-less, and the stored chain starts at a live harness (a[1]): a
+        // registration whose chain does not hold it is a stranger's and is
+        // refused.
+        do_hook_session_start(aoide_protocol::Door::Cli, "harnessed", Some("claude"), Some("/w"), Some("0xH"), None, None, &[a[1], a[2]]);
+        do_hook_session_start(aoide_protocol::Door::Cli, "harnessed", Some("claude"), Some("/w"), Some("0xH"), None, None, &[DEAD + 8, DEAD + 9]);
+        let harnessed_chain = load_stage::<SessionsFile>(&sessions_path())
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|r| r.session_id == "harnessed")
+            .unwrap()
+            .hook_ancestry
+            .clone();
+        assert_eq!(harnessed_chain, vec![a[1], a[2]], "a live harness outside the new chain holds the chain");
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -4081,6 +4408,723 @@ mod enduring_binding_tests {
 }
 
 #[cfg(test)]
+mod hosted_death_tests {
+    use super::*;
+
+    /// Which reaped ids a running wrap still owns: a hosted child with its turn
+    /// open and a spawner to tell, under a conducted wrap whose pid is alive
+    /// and that is not itself being reaped. Every other id stays the reaper's.
+    #[test]
+    fn a_live_wrap_owns_only_its_hosted_children_with_an_open_turn_and_a_spawner() {
+        let me = std::process::id();
+        let wrap = |id: &str, pid: u32, spawner: Option<&str>| {
+            let mut w = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", spawner);
+            w.conductable = Some(true);
+            w.pid = Some(pid);
+            w.attested_spawner = spawner.map(str::to_string);
+            w
+        };
+        let child = |id: &str, parent: &str, host_pid: u32| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", Some(parent));
+            s.hook_ancestry = vec![999_999, host_pid as i32];
+            s
+        };
+        let mut spawner = crate::graph::testutil::session("P", "/p", "working", "2026-10-07T10:00:00Z", None);
+        spawner.conductable = Some(true);
+        let mut bare = wrap("bare", me, Some("P"));
+        bare.conductable = None;
+        let sessions = vec![
+            spawner,
+            wrap("live", me, Some("P")),
+            wrap("dead", 999_998, Some("P")),
+            wrap("dying", me, Some("P")),
+            wrap("lone", me, None),
+            bare,
+            child("open", "live", me),
+            child("awaits", "live", me),
+            child("closed", "live", me),
+            child("under-dead", "dead", 999_998),
+            child("under-dying", "dying", me),
+            child("under-bare", "bare", me),
+            child("unhosted", "live", 7),
+            child("unspawned", "lone", me),
+        ];
+        let hook = |id: &str, phase: &str| HookRecord {
+            session_id: id.into(),
+            phase: phase.into(),
+            updated_at: "2026-10-07T10:00:00Z".into(),
+            ..Default::default()
+        };
+        let mut hooks: Vec<HookRecord> = ["open", "under-dead", "under-dying", "under-bare", "unhosted", "unspawned"]
+            .iter()
+            .map(|id| hook(id, "working"))
+            .collect();
+        hooks.push(hook("awaits", "awaiting"));
+        hooks.push(hook("closed", "stopped"));
+        let reaped: Vec<String> = sessions.iter().skip(6).map(|s| s.session_id.clone()).chain(["dying".to_string()]).collect();
+        let mut owned: Vec<String> = owned_by_live_wraps(&sessions, &hooks, &reaped).into_iter().collect();
+        owned.sort();
+        assert_eq!(owned, ["awaits", "open"], "`unspawned` has nobody to be told, so the reaper takes it");
+    }
+
+    /// Which hook children a wrap's own exit records as died: the hosted ones
+    /// whose turn is open and whose harness is gone, each with the tool in flight.
+    #[test]
+    fn a_wrap_records_a_death_only_for_its_own_open_harnessless_children() {
+        let me = 4242u32;
+        let hosted = |id: &str, parent: &str, ancestry: Vec<i32>, activity: Option<&str>| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", Some(parent));
+            s.hook_ancestry = ancestry;
+            s.activity = activity.map(str::to_string);
+            s
+        };
+        let dead = 999_999; // a harness that is gone
+        let sessions = vec![
+            hosted("open", "wrap", vec![dead, me as i32], Some("Bash")),
+            hosted("awaits", "wrap", vec![dead, me as i32], None),
+            hosted("closed", "wrap", vec![dead, me as i32], None),
+            hosted("alive", "wrap", vec![std::process::id() as i32, me as i32], None),
+            hosted("elsewhere", "other", vec![dead, me as i32], None),
+            hosted("unhosted", "wrap", vec![dead, 7], None),
+        ];
+        let hook = |id: &str, phase: &str| HookRecord {
+            session_id: id.into(),
+            phase: phase.into(),
+            updated_at: "2026-10-07T10:00:00Z".into(),
+            ..Default::default()
+        };
+        let hooks = [
+            hook("open", "working"),
+            hook("awaits", "awaiting"),
+            hook("closed", "stopped"),
+            hook("alive", "working"),
+            hook("elsewhere", "working"),
+            hook("unhosted", "working"),
+        ];
+        let mut found: Vec<(String, Option<String>)> =
+            hosted_open_children(&sessions, &hooks, "wrap", me).into_iter().map(|d| (d.id, d.last_tool)).collect();
+        found.sort();
+        assert_eq!(found, vec![("awaits".to_string(), None), ("open".to_string(), Some("Bash".to_string()))]);
+        assert!(hosted_open_children(&sessions, &hooks, "wrap", 1).is_empty(), "a wrap whose pid the harness never saw");
+    }
+
+    /// A caller cannot record a death through the phase door: the phase folds to
+    /// its canonical rest, and a death is written only by `record_death`, as
+    /// `done` with its fact.
+    #[test]
+    fn a_death_cannot_be_recorded_through_the_session_phase_door() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("phase-door-died");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        session_start(&crate::graph::testutil::flag_invocation(
+            &["session", "start"],
+            &[("id", "kid"), ("agent", "claude"), ("cwd", "/w")],
+        ));
+
+        let out = session_phase(&crate::graph::testutil::flag_invocation(
+            &["session", "phase"],
+            &[("id", "kid"), ("phase", "died")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        assert_eq!(hooks.hooks.iter().find(|h| h.session_id == "kid").unwrap().phase, "idle");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A hook child ended by `end` with its turn in `phase`, under a wrap whose
+    /// spawner edge is attested or not, and whose harness is the process
+    /// `harness`: the hook record it is left with.
+    fn ended_child(tag: &str, phase: &str, attested: bool, harness: i32, end: impl FnOnce()) -> HookRecord {
+        ended_records(tag, phase, attested, harness, end).1
+    }
+
+    /// [`ended_child`], with the roster record `end` leaves it as well.
+    fn ended_records(tag: &str, phase: &str, attested: bool, harness: i32, end: impl FnOnce()) -> (SessionRecord, HookRecord) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SESSION_ID",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+        ]);
+        let stage = crate::graph::testutil::unique_stage(tag);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        // The ended end closes the session's ssh tunnels under `XDG_RUNTIME_DIR`:
+        // point it at the stage, never at the real registry of the box.
+        std::env::set_var("XDG_RUNTIME_DIR", &stage);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let at = "2026-10-07T10:00:00Z";
+        let mut spawner = crate::graph::testutil::session("P", "/p", "working", at, None);
+        spawner.conductable = Some(true);
+        let mut wrap = crate::graph::testutil::session("wrap", "/w", "working", at, Some("P"));
+        wrap.conductable = Some(true);
+        wrap.pid = Some(4242);
+        wrap.attested_spawner = attested.then(|| "P".to_string());
+        let mut kid = crate::graph::testutil::session("kid", "/w", "working", at, Some("wrap"));
+        kid.hook_ancestry = vec![harness, 4242];
+        kid.activity = Some("Bash".into());
+        let sessions = SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: vec![spawner, wrap, kid] };
+        write_stage(&sessions_path(), &sessions).unwrap();
+        let hook = HookRecord { session_id: "kid".into(), phase: phase.into(), updated_at: at.into(), ..Default::default() };
+        write_stage(&hooks_path(), &HooksFile { schema_version: STAGE_GRAPH_VERSION.into(), hooks: vec![hook] }).unwrap();
+        end();
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let _ = std::fs::remove_dir_all(&stage);
+        (
+            sessions.sessions.into_iter().find(|s| s.session_id == "kid").unwrap(),
+            hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap(),
+        )
+    }
+
+    /// This process's harness chain, read with no compositor in the way: from a
+    /// terminal, the window owner above a shell ends the walk with no harness.
+    fn my_chain() -> Vec<i32> {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        crate::graph::window::hook_chain(std::process::id() as i32).expect("the test process has a harness above it")
+    }
+
+    /// The doors a `session end` for `kid` comes through: the CLI, the hook
+    /// door's `SessionEnd`, and the daemon's forwarded call with `peer` as the
+    /// pid it stamped (none when it stamped none).
+    fn cli_end() {
+        session_end(&crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]));
+    }
+    fn hook_end() {
+        super::super::send::hook_from_str(r#"{ "session_id": "kid", "hook_event_name": "SessionEnd" }"#);
+    }
+    fn hook_end_for(reason: serde_json::Value) -> impl FnOnce() {
+        move || {
+            let payload = serde_json::json!({ "session_id": "kid", "hook_event_name": "SessionEnd", "reason": reason });
+            super::super::send::hook_from_str(&payload.to_string());
+        }
+    }
+    fn daemon_end(peer: Option<i32>) {
+        let mut inv = crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]);
+        inv.door = aoide_protocol::Door::Daemon;
+        if let Some(pid) = peer {
+            inv.flags.insert(crate::graph::DAEMON_PEER_PID_FLAG.to_string(), pid.to_string());
+        }
+        session_end(&inv);
+    }
+
+    /// A live process of its own that is no ancestor of this test, killed on
+    /// drop.
+    struct Bystander(std::process::Child);
+    impl Bystander {
+        fn start() -> Self {
+            Self(std::process::Command::new("sleep").arg("60").spawn().expect("sleep starts"))
+        }
+        fn pid(&self) -> i32 {
+            self.0.id() as i32
+        }
+    }
+    impl Drop for Bystander {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn ended_fact() -> Option<HookDeath> {
+        Some(HookDeath {
+            last_tool: Some("Bash".into()),
+            outcome: Some("end".into()),
+            spawner: Some("P".into()),
+            ..Default::default()
+        })
+    }
+
+    /// A session end that finds the turn open records the fact `end`, with the
+    /// tool in flight and the spawner, by the CLI door, the hook door and the
+    /// daemon's forwarded call alike, when the caller is the child's own
+    /// harness or runs under it. A closed turn, or one with no spawner to tell,
+    /// is only marked `done`.
+    #[test]
+    fn a_session_end_with_the_turn_open_records_that_it_ended_mid_turn() {
+        let me = std::process::id() as i32;
+        let under_me = Bystander::start();
+        for phase in ["working", "awaiting"] {
+            for (name, end) in [("cli", cli_end as fn()), ("hook", hook_end as fn())] {
+                let rec = ended_child(&format!("end-{name}"), phase, true, me, end);
+                assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()), "{name} door, {phase}");
+            }
+            let own = ended_child("end-daemon-self", phase, true, me, || daemon_end(Some(me)));
+            assert_eq!((own.phase.as_str(), &own.death), ("done", &ended_fact()), "daemon door, the harness itself, {phase}");
+            let below = ended_child("end-daemon-below", phase, true, me, || daemon_end(Some(under_me.pid())));
+            assert_eq!((below.phase.as_str(), &below.death), ("done", &ended_fact()), "daemon door, under the harness, {phase}");
+        }
+        for (case, rec) in [
+            ("closed", ended_child("end-closed", "stopped", true, me, cli_end)),
+            ("closed by hook", ended_child("end-closed-hook", "idle", true, me, hook_end)),
+            ("no spawner", ended_child("end-unattested", "working", false, me, cli_end)),
+        ] {
+            assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{case}");
+        }
+    }
+
+    /// A false "ended mid-turn" is an injection into the spawner, so only the
+    /// session ending itself can write one. Someone else's `session end` for an
+    /// open turn, whose harness is alive and is no ancestor of the caller, is
+    /// refused, whichever door it comes through: the CLI, the hook door with a
+    /// forged SessionEnd payload, or the daemon's forwarded call whose stamped
+    /// peer is not under the harness or is absent. A peer-pid flag typed on a
+    /// door other than the daemon's is not a kernel fact and is not read.
+    #[test]
+    fn a_session_end_by_someone_else_records_no_fact() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let me = std::process::id() as i32;
+        let mut forged = crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")]);
+        forged.flags.insert(crate::graph::DAEMON_PEER_PID_FLAG.to_string(), h.to_string());
+        let forged_cli = move || {
+            session_end(&forged);
+        };
+        let cases: [(&str, Box<dyn FnOnce()>); 5] = [
+            ("cli", Box::new(cli_end)),
+            ("hook", Box::new(hook_end)),
+            ("daemon, a peer outside the harness", Box::new(move || daemon_end(Some(me)))),
+            ("daemon, no peer stamped", Box::new(|| daemon_end(None))),
+            ("cli, a forged peer flag", Box::new(forged_cli)),
+        ];
+        for (case, end) in cases {
+            let (kid, rec) = ended_records("end-other", "working", true, h, end);
+            assert_eq!((rec.phase.as_str(), rec.death), ("working", None), "{case}");
+            assert_eq!(kid.state, "working", "{case}: the roster record is not done");
+        }
+    }
+
+    /// Someone else's `session end` for a session whose harness lives is
+    /// refused and writes nothing: the roster record and the hook phase are
+    /// exactly what they were (so the session is not `done`, not prunable and
+    /// not read as done), no fact is written, the check lane's baseline stays
+    /// for the session that goes on using it, and the outcome, which is what
+    /// the audit log keeps, names the session, the harness and the reason. A
+    /// SessionEnd forged with the reason `clear` is no better off.
+    #[test]
+    fn a_stranger_end_of_a_live_harness_is_refused_and_writes_nothing() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let before = std::cell::RefCell::new(None);
+        let said = std::cell::RefCell::new(None);
+        let (after, hook) = ended_records("end-stranger-exact", "working", true, h, || {
+            let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STATE_DIR"]);
+            let state = crate::graph::testutil::unique_stage("end-stranger-state");
+            std::env::set_var("AOIDE_STATE_DIR", &state);
+            let baseline = state.join("checklane").join("kid.json");
+            std::fs::create_dir_all(baseline.parent().unwrap()).unwrap();
+            std::fs::write(&baseline, "{}").unwrap();
+            *before.borrow_mut() = kid_now();
+            *said.borrow_mut() = Some(session_end(&crate::graph::testutil::flag_invocation(&["session", "end"], &[("id", "kid")])));
+            assert!(baseline.exists(), "the baseline of a session that lives on is kept");
+            let _ = std::fs::remove_dir_all(&state);
+        });
+        let json = |s: Option<SessionRecord>| serde_json::to_value(s).unwrap();
+        assert_eq!(json(Some(after)), json(before.into_inner()), "sessions.json is untouched");
+        let out = said.into_inner().unwrap();
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert!(out.message.starts_with("refused:"), "{}", out.message);
+        assert!(out.message.contains("`kid`") && out.message.contains(&h.to_string()), "{}", out.message);
+        assert!(out.message.contains("aoide session kill --id kid"), "{}", out.message);
+        assert!(out.changed.is_empty(), "{:?}", out.changed);
+        assert_eq!(out.data.as_ref().unwrap()["harness"], h);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "harness-anchored");
+        assert_eq!((hook.phase.as_str(), hook.death.as_ref()), ("working", None));
+        assert_eq!(hook.updated_at, "2026-10-07T10:00:00Z", "the hook phase was not written");
+
+        let (forged, _) = ended_records("end-stranger-clear", "working", true, h, hook_end_for(serde_json::json!("clear")));
+        assert_eq!(forged.state, "working", "a forged `clear` does not end the record either");
+    }
+
+    /// A `done` phase through the phase door is an end: it answers to the same
+    /// caller check, so it cannot mark a live harness's record done for a
+    /// stranger, and from the harness itself it is the session ending.
+    #[test]
+    fn the_phase_door_ends_a_session_only_for_its_own_harness() {
+        let harness = Bystander::start();
+        let phase_done = || {
+            session_phase(&crate::graph::testutil::flag_invocation(&["session", "phase"], &[("id", "kid"), ("phase", "done")]));
+        };
+        let (stranger, stranger_hook) = ended_records("phase-done-other", "working", true, harness.pid(), phase_done);
+        assert_eq!(stranger.state, "working");
+        assert_eq!(stranger_hook.phase, "working", "a refused phase close writes no phase");
+        let (own, rec) = ended_records("phase-done-own", "working", true, std::process::id() as i32, phase_done);
+        assert_eq!(own.state, "done");
+        assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()));
+    }
+
+    /// The wrap that owns a record ends it when its child exits: the record
+    /// names the wrap's own pid, so the wrap is no stranger to it, and its end
+    /// says nothing to a spawner. Anyone else's end of that record is a
+    /// stranger's.
+    #[test]
+    fn a_wrap_ends_its_own_record_and_a_stranger_cannot() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("wrap-own-end");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        let me = std::process::id();
+        let state = |id: &str| {
+            let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+            sessions.sessions.into_iter().find(|s| s.session_id == id).unwrap().state
+        };
+        let baseline = |id: &str| stage.join("state").join("checklane").join(format!("{id}.json"));
+        std::fs::create_dir_all(stage.join("state").join("checklane")).unwrap();
+        for id in ["mine", "theirs"] {
+            do_session_start(id, Some("claude"), Some("/w"), None, None, Some(true), None, None, Some(me));
+            std::fs::write(baseline(id), "{}").unwrap();
+        }
+        do_session_end("theirs", None, true);
+        assert_ne!(state("theirs"), "done", "no caller named, so a stranger to the wrap's pid");
+        assert!(baseline("theirs").exists(), "and it leaves the check lane's baseline to the session");
+        do_session_end("mine", i32::try_from(me).ok(), false);
+        assert_eq!(state("mine"), "done");
+        assert!(!baseline("mine").exists(), "the end that happened forgets it");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A victim hook child `kid` with its turn open, under the conducted wrap
+    /// `wrap` that `P` spawned, anchored on the process `harness`; and this
+    /// process as a stranger under `wrapa`, a wrap of its own (pid `wrapa_pid`,
+    /// an ancestor of this process) whose orchestrator is `A`. `attack` runs
+    /// with `AOIDE_SESSION_ID=wrapa`, as the stranger's own hook process would
+    /// have it. Returns the records `kid` is left with.
+    fn rehomed_child(tag: &str, harness: i32, wrapa_pid: u32, attack: impl FnOnce()) -> (SessionRecord, HookRecord) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SESSION_ID",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+        ]);
+        let stage = crate::graph::testutil::unique_stage(tag);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &stage);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let at = &now_iso_utc();
+        let orchestrator = |id: &str| {
+            let mut s = crate::graph::testutil::session(id, "/p", "working", at, None);
+            s.conductable = Some(true);
+            s
+        };
+        let wrap = |id: &str, pid: u32, parent: &str| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", at, Some(parent));
+            s.conductable = Some(true);
+            s.pid = Some(pid);
+            s.attested_spawner = Some(parent.to_string());
+            s
+        };
+        let mut kid = crate::graph::testutil::session("kid", "/w", "working", at, Some("wrap"));
+        kid.hook_ancestry = vec![harness, 4242];
+        kid.activity = Some("Bash".into());
+        let roster = vec![orchestrator("P"), orchestrator("A"), wrap("wrap", 4242, "P"), wrap("wrapa", wrapa_pid, "A"), kid];
+        write_stage(&sessions_path(), &SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: roster }).unwrap();
+        let hook = HookRecord { session_id: "kid".into(), phase: "working".into(), updated_at: at.into(), ..Default::default() };
+        write_stage(&hooks_path(), &HooksFile { schema_version: STAGE_GRAPH_VERSION.into(), hooks: vec![hook] }).unwrap();
+        std::env::set_var("AOIDE_SESSION_ID", "wrapa");
+        attack();
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let _ = std::fs::remove_dir_all(&stage);
+        (
+            sessions.sessions.into_iter().find(|s| s.session_id == "kid").unwrap(),
+            hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap(),
+        )
+    }
+
+    fn hook_event(event: &str) {
+        let payload = serde_json::json!({ "session_id": "kid", "hook_event_name": event, "cwd": "/p", "prompt": "go" });
+        super::super::send::hook_from_str(&payload.to_string());
+    }
+
+    fn phase_now() -> String {
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap().phase
+    }
+
+    fn kid_now() -> Option<SessionRecord> {
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        sessions.sessions.into_iter().find(|s| s.session_id == "kid")
+    }
+
+    fn prune_now() -> Outcome {
+        super::super::manage::prune(&crate::graph::testutil::flag_invocation(&["session", "prune"], &[]))
+    }
+
+    fn reap_now() -> Outcome {
+        crate::reap::reap(&crate::graph::testutil::flag_invocation(&["session", "reap"], &[]))
+    }
+
+    /// The live harness anchors the record, and a stranger cannot take the
+    /// anchor away. A stranger under a wrap of its own sends a SessionStart for
+    /// a victim's id, ends the victim, prunes, and tries again with a turn of
+    /// its own: its end closes the phase and leaves the roster record as it
+    /// was, so `prune` has nothing to drop, the second SessionStart is refused
+    /// like the first, and the victim keeps its state, chain and parent while
+    /// the last end names nobody.
+    #[test]
+    fn a_stranger_cannot_end_a_live_record_to_prune_it_and_re_home_it() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let mine = my_chain();
+        let (kid, hook) = rehomed_child("anchor-held", h, *mine.last().unwrap() as u32, || {
+            hook_event("SessionStart");
+            cli_end();
+            let pruned = prune_now();
+            assert_eq!(pruned.data.as_ref().unwrap()["removed"], serde_json::json!([]), "{}", pruned.message);
+            assert!(kid_now().is_some(), "prune left the record");
+            hook_event("SessionStart");
+            hook_event("UserPromptSubmit");
+            cli_end();
+        });
+        assert_ne!(kid.state, "done", "no end of a stranger marks the roster record done");
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"), "the parent is unchanged");
+        assert_eq!(kid.hook_ancestry, vec![h, 4242], "so is the chain");
+        assert_eq!((hook.phase.as_str(), hook.death), ("working", None), "the refused end names nobody");
+    }
+
+    /// The reaper keys on the roster's `state` as `prune` does, so a stranger's
+    /// end leaves the record to it too while the harness lives.
+    #[test]
+    fn the_reaper_leaves_a_record_a_stranger_ended_while_its_harness_lives() {
+        let harness = Bystander::start();
+        let (kid, _) = rehomed_child("anchor-reaped", harness.pid(), std::process::id(), || {
+            cli_end();
+            let out = reap_now();
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        });
+        assert_ne!(kid.state, "done");
+    }
+
+    /// A stranger's `session start` that would move the window or the parent of
+    /// a record its live harness anchors is refused, and writes neither. The
+    /// same values are a no-op, and the harness itself, whose pid is in the
+    /// caller's chain, may move both (asked directly, since this process is a
+    /// stranger to the harness it spawned).
+    #[test]
+    fn a_stranger_cannot_move_the_window_or_parent_of_an_anchored_record() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let (kid, _) = rehomed_child("start-anchored", h, std::process::id(), || {
+            let win = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("window", "0xbbb")]));
+            assert_eq!(win.data.as_ref().unwrap()["reason"], "harness-anchored", "{}", win.message);
+            let par = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("parent", "other")]));
+            assert_eq!(par.data.as_ref().unwrap()["reason"], "harness-anchored", "{}", par.message);
+            let same = session_start(&crate::graph::testutil::flag_invocation(&["session", "start"], &[("id", "kid"), ("parent", "wrap")]));
+            assert!(same.data.as_ref().map_or(true, |d| d["reason"] != "harness-anchored"), "{}", same.message);
+            assert!(anchored_start_refusal("kid", Some(h as i32), Some("0xbbb"), Some("other")).is_none(), "the harness may move its own record");
+        });
+        assert_eq!(kid.window_address, "0xkid", "the window is unchanged");
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"), "the parent is unchanged");
+        assert_eq!(kid.hook_ancestry, vec![h as i32, 4242], "and so is the chain");
+    }
+
+    /// `graph link` re-parents a record only where its live harness does not
+    /// anchor it: a stranger's link is refused, and the parent stays.
+    #[test]
+    fn graph_link_cannot_re_parent_an_anchored_record() {
+        let harness = Bystander::start();
+        let (kid, _) = rehomed_child("link-anchored", harness.pid(), std::process::id(), || {
+            let out = crate::graph::manage::link(&crate::graph::testutil::invocation(&["graph", "link"], &["kid", "other"]));
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "harness-anchored", "{}", out.message);
+        });
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrap"));
+    }
+
+    /// `/clear` ends the old session id and leaves its claude running, so the
+    /// id is free: a `claude --resume` of it from another terminal is adopted,
+    /// with the chain, the wrap and the start hello a launch path waits for.
+    #[test]
+    fn a_session_start_adopts_an_id_that_ended_though_its_harness_lives_on() {
+        let harness = Bystander::start();
+        let h = harness.pid();
+        let mine = my_chain();
+        let (kid, hook) = rehomed_child("anchor-cleared", h, std::process::id(), || {
+            do_session_end("kid", Some(h), false);
+            assert_eq!(kid_now().unwrap().state, "done", "the harness ended its own session id");
+            hook_event("SessionStart");
+        });
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrapa"), "the parent follows the new run");
+        assert_eq!(kid.hook_ancestry, mine, "and so does the chain");
+        assert!(kid.session_start_at.is_some(), "the hello a launch path waits for lands");
+        assert_eq!(hook.death, None);
+    }
+
+    /// Once the harness has exited the id is free: a new chain adopts it, as a
+    /// `claude --resume` in another terminal does, and the record follows the
+    /// wrap that hosts the new run.
+    #[test]
+    fn a_session_start_adopts_the_id_once_its_harness_has_exited() {
+        let mine = my_chain();
+        let (kid, _) = rehomed_child("anchor-free", 2_000_000_000, std::process::id(), || hook_event("SessionStart"));
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrapa"), "the parent follows the new run");
+        assert_eq!(kid.hook_ancestry, mine, "and so does the chain");
+    }
+
+    /// The harness's own hooks are never refused: a SessionStart from under it
+    /// follows its wrap, its later hooks move the phase, and its SessionEnd
+    /// with the turn open is said, to the spawner of the wrap it now runs
+    /// under.
+    #[test]
+    fn the_anchored_harness_own_hooks_still_land() {
+        let mine = my_chain();
+        let (kid, hook) = rehomed_child("anchor-own", mine[0], *mine.last().unwrap() as u32, || {
+            hook_event("SessionStart");
+            hook_event("Stop");
+            assert_eq!(phase_now(), "stopped");
+            hook_event("UserPromptSubmit");
+            assert_eq!(phase_now(), "working");
+            hook_end();
+        });
+        assert_eq!(kid.parent_session_id.as_deref(), Some("wrapa"), "a resume under a new wrap follows it");
+        assert_eq!(kid.hook_ancestry, mine);
+        let told = hook.death.as_ref().map(|d| (d.outcome.as_deref(), d.spawner.as_deref()));
+        assert_eq!((hook.phase.as_str(), told), ("done", Some((Some("end"), Some("A")))));
+    }
+
+    /// The loss the anchor accepts: a hook served after its harness has exited
+    /// has been re-parented, so it no longer runs under the harness it would
+    /// have to name, and its end closes the phase plain. No line is wrong, one
+    /// is missing.
+    #[test]
+    fn a_session_end_served_after_its_harness_has_exited_records_no_fact() {
+        let rec = ended_child("end-exited", "working", true, 2_000_000_000, hook_end);
+        assert_eq!((rec.phase.as_str(), rec.death), ("done", None));
+    }
+
+    /// `/clear` and a resume end the old session id and leave the claude
+    /// process running under another one, so the end is no death and no "ended
+    /// mid-turn" is true: the record closes as `done` with no fact for the
+    /// spawner to hear.
+    #[test]
+    fn a_session_end_after_which_the_harness_lives_on_records_no_fact() {
+        let me = std::process::id() as i32;
+        for reason in ["clear", "resume"] {
+            for phase in ["working", "awaiting"] {
+                let (kid, rec) = ended_records("end-lives-on", phase, true, me, hook_end_for(serde_json::json!(reason)));
+                assert_eq!((rec.phase.as_str(), rec.death), ("done", None), "{reason}, {phase}");
+                assert_eq!(kid.state, "done", "{reason}, {phase}: the id is over, so the next run may take it");
+            }
+        }
+    }
+
+    /// Every other reason, an absent one and a value the profile does not name
+    /// is the process going away, and tells the spawner: the raw field is
+    /// matched exactly, so a disguised `clear` (a zero-width character, another
+    /// case, padding) does not borrow the skip.
+    #[test]
+    fn a_session_end_for_any_other_reason_records_the_fact() {
+        use serde_json::json;
+        let me = std::process::id() as i32;
+        let reasons = [
+            json!("logout"),
+            json!("prompt_input_exit"),
+            json!("other"),
+            json!("bypass_permissions_disabled"),
+            json!("a-reason-from-a-newer-claude"),
+            json!(""),
+            json!("clear\u{200b}"),
+            json!("\u{200b}resume"),
+            json!("Clear"),
+            json!(" clear"),
+            json!("resume\n"),
+            json!(null),
+            json!(7),
+            json!(["clear"]),
+        ];
+        for reason in reasons {
+            let rec = ended_child("end-other-reason", "working", true, me, hook_end_for(reason.clone()));
+            assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()), "reason {reason}");
+        }
+        let absent = ended_child("end-no-reason", "working", true, me, hook_end);
+        assert_eq!((absent.phase.as_str(), &absent.death), ("done", &ended_fact()), "no reason field");
+    }
+
+    /// The fact is the unclaimed state, and a second end must not erase it: a
+    /// repeated `session end`, and a duplicate `SessionEnd` hook, both find the
+    /// phase already closed and leave the record exactly as the first end made
+    /// it.
+    #[test]
+    fn a_second_session_end_and_a_duplicate_session_end_hook_keep_the_fact() {
+        let record = || {
+            let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+            hooks.hooks.into_iter().find(|h| h.session_id == "kid").unwrap()
+        };
+        let first = std::cell::RefCell::new(None);
+        let ends = || {
+            cli_end();
+            *first.borrow_mut() = Some(record());
+            cli_end();
+            hook_end();
+            hook_end();
+        };
+        let rec = ended_child("end-again", "working", true, std::process::id() as i32, ends);
+        assert_eq!((rec.phase.as_str(), &rec.death), ("done", &ended_fact()));
+        assert_eq!(Some(rec), first.into_inner(), "the later ends left the record exactly as the first made it");
+    }
+
+    /// One harness is one death: a `/clear` gives the same process a second hook
+    /// id, so the newest id carries the fact and the older one is closed. Both
+    /// sessions end `done`, and presence reads a dead claude as done.
+    #[test]
+    fn two_hook_children_of_one_harness_record_one_death_and_read_done() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("wrap-death-one-harness");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let me = 4242u32;
+        let child = |id: &str| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", Some("wrap"));
+            s.hook_ancestry = vec![999_999, me as i32];
+            s.activity = Some("Bash".into());
+            s
+        };
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: vec![child("old"), child("new")] },
+        )
+        .unwrap();
+        let hook = |id: &str, at: &str| HookRecord {
+            session_id: id.into(),
+            phase: "working".into(),
+            updated_at: at.into(),
+            ..Default::default()
+        };
+        write_stage(
+            &hooks_path(),
+            &HooksFile {
+                schema_version: STAGE_GRAPH_VERSION.into(),
+                hooks: vec![hook("old", "2026-10-07T10:00:00Z"), hook("new", "2026-10-07T10:05:00Z")],
+            },
+        )
+        .unwrap();
+
+        record_hook_deaths("wrap", me, &HookDeath { outcome: Some("exit".into()), exit_code: Some(1), ..Default::default() });
+
+        let hooks: HooksFile = load_stage(&hooks_path()).unwrap();
+        let rec = |id: &str| hooks.hooks.iter().find(|h| h.session_id == id).unwrap().clone();
+        assert_eq!(rec("new").phase, "done");
+        assert_eq!(
+            rec("new").death,
+            Some(HookDeath { last_tool: Some("Bash".into()), outcome: Some("exit".into()), exit_code: Some(1), ..Default::default() }),
+        );
+        assert_eq!(rec("old").phase, "done");
+        assert_eq!(rec("old").death, None);
+        let sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        for s in &sessions.sessions {
+            assert_eq!(s.state, "done");
+            assert_eq!(crate::graph::who::session_presence(&s.state), "done");
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+}
+
+#[cfg(test)]
 mod live_sealed_wrap_guards {
     use super::*;
     use std::path::PathBuf;
@@ -4127,6 +5171,11 @@ mod live_sealed_wrap_guards {
     fn door(path: &[&str], id: &str) -> aoide_protocol::Invocation {
         let mut inv = flag_invocation(path, &[("id", id)]);
         inv.door = aoide_protocol::Door::Daemon;
+        // The daemon stamps the caller's peer pid; these tests are the caller.
+        inv.flags.insert(
+            crate::graph::DAEMON_PEER_PID_FLAG.to_string(),
+            std::process::id().to_string(),
+        );
         inv
     }
 
@@ -4224,7 +5273,7 @@ mod live_sealed_wrap_guards {
         let (_env, kp, stage) = seal_world("live-wrap-own-exit");
         sealed_live_wrap("wrap", &kp);
 
-        let _ = do_session_end("wrap");
+        let _ = do_session_end("wrap", Some(std::process::id() as i32), false);
 
         assert_eq!(record("wrap").unwrap().state, "done", "the wrap's own exit path is not refused");
         let _ = std::fs::remove_dir_all(&stage);

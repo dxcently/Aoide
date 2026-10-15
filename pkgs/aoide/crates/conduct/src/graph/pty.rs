@@ -1075,6 +1075,129 @@ fn install_winch_handler() {
     }
 }
 
+/// The end signal the wrap was asked to forward, set by [`on_wrap_signal`] and
+/// taken once by the multiplex loop.
+#[cfg(unix)]
+static WRAP_SIGNAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// A signal counts as an end request only when `kill(2)` sent it to this very
+/// process (`SI_USER`). One the terminal raised (`SI_KERNEL`) is not the wrap's
+/// to answer: its default action is restored and re-raised, as it was before
+/// the wrap listened at all, so Ctrl-C keeps its meaning.
+#[cfg(unix)]
+extern "C" fn on_wrap_signal(sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: *mut libc::c_void) {
+    if !info.is_null() && unsafe { (*info).si_code } == libc::SI_USER {
+        WRAP_SIGNAL.store(sig, std::sync::atomic::Ordering::SeqCst);
+        return;
+    }
+    unsafe {
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
+/// The end signals the wrap answers, in the order it installs them.
+#[cfg(unix)]
+const WRAP_SIGNALS: [libc::c_int; 3] = [libc::SIGTERM, libc::SIGHUP, libc::SIGINT];
+
+/// The dispositions the first live [`WrapSignals`] replaced, and how many live
+/// ones hold them. A count, not a flag: one process can hold the signals twice
+/// (a test that runs a wrap in-process beside another), and the last drop is
+/// the one that restores what was there before.
+#[cfg(unix)]
+static WRAP_HELD: std::sync::Mutex<(usize, Vec<(libc::c_int, libc::sigaction)>)> =
+    std::sync::Mutex::new((0, Vec::new()));
+
+/// The wrap's end signals (SIGTERM, SIGHUP, SIGINT), held for one multiplex run.
+/// A signal that was ignored when the wrap started stays ignored (`nohup`
+/// ignores HUP), and the harness it spawns inherits that, as it did before the
+/// wrap listened. Dropping the last holder restores what it replaced.
+///
+/// No `SA_RESTART` is needed for the loop's own wake-up: `poll(2)` returns
+/// `EINTR` whatever the flag says. The flag keeps the stage lock's `flock(2)`
+/// from failing on a signal that lands mid-wait.
+#[cfg(unix)]
+pub(super) struct WrapSignals;
+
+#[cfg(unix)]
+impl WrapSignals {
+    pub(super) fn install() -> Self {
+        let mut held = WRAP_HELD.lock().unwrap_or_else(|e| e.into_inner());
+        held.0 += 1;
+        if held.0 == 1 {
+            for sig in WRAP_SIGNALS {
+                // SAFETY: a null new action only reads the current disposition.
+                let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+                unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) };
+                if old.sa_sigaction == libc::SIG_IGN {
+                    continue;
+                }
+                let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
+                sa.sa_sigaction = on_wrap_signal as *const () as libc::sighandler_t;
+                sa.sa_flags = libc::SA_SIGINFO | libc::SA_RESTART;
+                unsafe {
+                    libc::sigemptyset(&mut sa.sa_mask);
+                    libc::sigaction(sig, &sa, std::ptr::null_mut());
+                }
+                held.1.push((sig, old));
+            }
+        }
+        Self
+    }
+}
+
+#[cfg(unix)]
+impl Drop for WrapSignals {
+    fn drop(&mut self) {
+        let mut held = WRAP_HELD.lock().unwrap_or_else(|e| e.into_inner());
+        held.0 = held.0.saturating_sub(1);
+        if held.0 == 0 {
+            for (sig, old) in held.1.drain(..) {
+                unsafe { libc::sigaction(sig, &old, std::ptr::null_mut()) };
+            }
+        }
+    }
+}
+
+/// The end signal sent to the wrap by `kill(2)`, once; `None` when there is none.
+#[cfg(unix)]
+pub(super) fn take_wrap_signal() -> Option<i32> {
+    match WRAP_SIGNAL.swap(0, std::sync::atomic::Ordering::SeqCst) {
+        0 => None,
+        sig => Some(sig),
+    }
+}
+
+/// Ends this process by `sig` with its default action, so the parent sees the
+/// wrap die by the signal it was sent rather than with a status of its own.
+#[cfg(unix)]
+pub(super) fn die_by_signal(sig: i32) {
+    unsafe {
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
+#[cfg(not(unix))]
+pub(super) fn die_by_signal(_sig: i32) {}
+
+/// Off Unix there are no end signals to forward: the wrap keeps the platform's
+/// own behaviour.
+#[cfg(not(unix))]
+pub(super) struct WrapSignals;
+
+#[cfg(not(unix))]
+impl WrapSignals {
+    pub(super) fn install() -> Self {
+        Self
+    }
+}
+
+#[cfg(not(unix))]
+pub(super) fn take_wrap_signal() -> Option<i32> {
+    None
+}
+
 /// The console this process is attached to, raw-moded.
 ///
 /// Raw mode here is `SetConsoleMode`, and each bit it clears is the same
@@ -2374,6 +2497,44 @@ mod tests {
         );
         assert_eq!(*block.last().unwrap(), 0, "the block ends with its own NUL");
         std::env::remove_var(marker);
+    }
+
+    /// The wrap holds TERM/HUP/INT only while it runs, keeps a HUP that was
+    /// ignored on entry ignored (the harness inherits it, as `nohup` relies on),
+    /// and gives every disposition it replaced back on the last drop.
+    #[cfg(unix)]
+    #[test]
+    fn the_wrap_keeps_an_ignored_hup_ignored_for_its_harness_and_restores_on_drop() {
+        use super::WrapSignals;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        fn current(sig: libc::c_int) -> libc::sigaction {
+            let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+            unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) };
+            old
+        }
+        /// Puts a disposition back when the test ends, a failed assert included,
+        /// so no later test in this process inherits what this one set.
+        struct Restore(libc::c_int, libc::sigaction);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe { libc::sigaction(self.0, &self.1, std::ptr::null_mut()) };
+            }
+        }
+        let _restore = [libc::SIGTERM, libc::SIGHUP, libc::SIGINT].map(|sig| Restore(sig, current(sig)));
+        let term_before = current(libc::SIGTERM).sa_sigaction;
+        unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN) };
+        let listener = super::on_wrap_signal as *const () as libc::sighandler_t;
+        {
+            let _signals = WrapSignals::install();
+            assert_eq!(current(libc::SIGHUP).sa_sigaction, libc::SIG_IGN, "an ignored HUP stays ignored");
+            assert_eq!(current(libc::SIGTERM).sa_sigaction, listener, "the wrap listens for TERM");
+            let out = std::process::Command::new("sh").args(["-c", "grep SigIgn /proc/$$/status"]).output().unwrap();
+            let line = String::from_utf8_lossy(&out.stdout).into_owned();
+            let mask = line.split_whitespace().nth(1).and_then(|hex| u64::from_str_radix(hex, 16).ok());
+            let bit = 1u64 << (libc::SIGHUP as u32 - 1);
+            assert!(mask.is_some_and(|m| m & bit != 0), "the harness inherits the ignored HUP: {line}");
+        }
+        assert_eq!(current(libc::SIGTERM).sa_sigaction, term_before, "TERM is restored by the last drop");
     }
 }
 

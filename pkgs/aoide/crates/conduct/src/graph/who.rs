@@ -75,20 +75,24 @@
 //!
 //! ## Project attribution (bare `session`'s own grouping)
 //!
-//! [`project_bucket`] reuses whichever attribution the codebase already
-//! computes — never a third one: a registered `projects.json` name
-//! ([`super::model::anchor_for`], longest-prefix, PURE string matching, so
-//! it resolves identically for a node session's cwd under the fleet's
-//! shared-path convention the same way `grant.rs`'s node-spec relativization
-//! already leans on) wins when present; else a `.aoide/project.json`
-//! manifest found by walking up from the cwd ON THIS HOST'S OWN FILESYSTEM
+//! A local session's bucket is [`project_of`]'s: its effective project, else
+//! its own, else [`project_bucket`], which reuses whichever attribution the
+//! codebase already computes — never a third one. A registered `projects.json`
+//! name ([`super::model::anchor_for`], longest-prefix, pure string matching)
+//! wins when present; else a `.aoide/project.json` manifest found by walking
+//! up from the cwd on this host's own filesystem
 //! (`aoide_storage::manifest::walk_up`) renders by that directory's own
-//! basename — a node's foreign cwd simply never resolves a manifest here
-//! (the walk is real `Path::is_file()` checks against THIS filesystem), so
-//! it falls through harmlessly rather than lying about a match. Neither
-//! resolving lands the session in the trailing [`NO_PROJECT`] bucket.
+//! basename. Neither resolving lands the session in the trailing
+//! [`NO_PROJECT`] bucket.
+//!
+//! A session from another node is bucketed by [`remote_project`] alone: the
+//! project its node published, clipped to a line, else [`NO_PROJECT`]. Its cwd
+//! is a path that node chose, so it is never matched against this box's
+//! projects and never walked up this box's disk. `session find` reads the same
+//! two rules, so the two commands file a row identically.
 
 use super::model::{resolved_parent, HookRecord, Project, SessionRecord};
+use super::spawn::TASK_MAX;
 use aoide_protocol::output::Outcome;
 use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
@@ -159,6 +163,11 @@ pub(super) struct SessionView {
     /// absent discipline as `title`/`model`; `kind` above is untouched by it
     /// either way (a nested app child still reads `kind:"app"`).
     pub(super) native_role: Option<String>,
+    /// The managed run's slug (`SessionRecord.task` / the node's own `task`
+    /// key, `doc.rs`). Same absent-stays-absent discipline as `title`: a
+    /// local row reads the record, a remote row reads the far document, and
+    /// neither fills it from a mailbox, a role or another session.
+    pub(super) task: Option<String>,
     /// The parent this session was spawned by on ANOTHER node
     /// (`SessionRecord.remote_parent`, CONTRACTS.md §4) — a local row reads the
     /// record, a remote row reads the node's own published `remoteParent`
@@ -264,7 +273,7 @@ pub(super) struct NodeView {
 }
 
 /// Session-level presence class (module doc's "Presence model").
-fn session_presence(state: &str) -> &'static str {
+pub(crate) fn session_presence(state: &str) -> &'static str {
     match state {
         "stopped" => "stale",
         "done" => "done",
@@ -327,6 +336,7 @@ pub(super) fn build_local_node(sessions: &[SessionRecord], hooks: &[HookRecord],
                 kind: s.kind.clone(),
                 parent,
                 native_role: s.native_role.clone(),
+                task: s.task.clone().filter(|t| !t.is_empty()),
                 remote_parent,
                 remote_children,
             }
@@ -404,6 +414,7 @@ pub(super) fn sessions_from_graph(graph: &Value, host: &str) -> Vec<SessionView>
                 kind: n["role"].as_str().map(String::from),
                 parent,
                 native_role: n["nativeRole"].as_str().map(String::from),
+                task: remote_task(&n["task"]),
                 // Both cross-machine fields are published by the far node's own
                 // projection (it resolved the names against ITS `nodes.json`),
                 // so they are read back verbatim — re-resolving here would mean
@@ -427,6 +438,16 @@ fn remote_link(v: &Value) -> Option<RemoteLink> {
     let session_id = v["sessionId"].as_str().filter(|s| !s.is_empty())?;
     let node = v["node"].as_str().filter(|s| !s.is_empty())?;
     Some(RemoteLink { node: node.to_string(), session_id: session_id.to_string() })
+}
+
+/// A far node's managed-run slug, kept only when it is a legal mailbox name
+/// of at most [`TASK_MAX`] characters. A foreign document is untrusted: a value
+/// that is not a slug is dropped, not clipped, since a clipped slug would name
+/// a different mailbox.
+fn remote_task(v: &Value) -> Option<String> {
+    let t = v.as_str()?;
+    let legal = aoide_storage::node_store::valid_node_name(t) && t.chars().count() <= TASK_MAX;
+    legal.then(|| t.to_string())
 }
 
 /// The same shape read as one of a session's own children — the link plus the
@@ -456,6 +477,17 @@ fn cached_presence(presence: &str, fetched_at: Option<&str>) -> &'static str {
     }
 }
 
+/// The cached half of a failed probe, pure over the entry and the clock: the
+/// node's sessions as its last successful pull left them (`last-seen`, or
+/// `done` alone), and whether that pull is past its TTL (`stale`).
+pub(super) fn cached_node(node: &str, entry: &NodeCacheEntry, now_epoch: i64) -> (Vec<SessionView>, bool) {
+    let mut sessions = entry.graph.as_ref().map(|g| sessions_from_graph(g, node)).unwrap_or_default();
+    for sv in &mut sessions {
+        sv.presence = cached_presence(sv.presence, entry.fetched_at.as_deref());
+    }
+    (sessions, !aoide_storage::node_store::is_cache_fresh(entry, now_epoch))
+}
+
 /// Pure: classify one node's [`NodeView`] from its live-probe OUTCOME and
 /// its already-loaded last cache entry (if any) — no I/O in here at all, so
 /// it is trivially unit-testable with synthetic data. The caller
@@ -476,14 +508,9 @@ pub(super) fn build_mesh_node(node: &Node, probe: Result<Value, String>, cache: 
         },
         Err(e) => match cache {
             Some(entry) => {
-                let mut sessions =
-                    entry.graph.as_ref().map(|g| sessions_from_graph(g, &node.name)).unwrap_or_default();
-                for sv in &mut sessions {
-                    sv.presence = cached_presence(sv.presence, entry.fetched_at.as_deref());
-                }
                 let now_epoch =
                     aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
-                let stale = !aoide_storage::node_store::is_cache_fresh(&entry, now_epoch);
+                let (sessions, stale) = cached_node(&node.name, &entry, now_epoch);
                 NodeView {
                     name: node.name.clone(),
                     is_local: false,
@@ -1005,10 +1032,28 @@ fn remote_tags(s: &SessionView) -> String {
     tags
 }
 
-/// The trailing catch-all bucket name for a session whose cwd resolves
-/// neither a registered project nor a manifest (module doc's "Project
-/// attribution") — always sorted last in [`group_by_project`]'s output.
+/// The trailing catch-all bucket name for a session with no project: a local
+/// one whose cwd resolves neither a registered project nor a manifest, a
+/// remote one whose node published none (module doc's "Project attribution")
+/// — always sorted last in [`group_by_project`]'s output.
 const NO_PROJECT: &str = "(no project)";
+
+/// The project a LOCAL session renders under: its effective project (the owner
+/// chain), else its own, else the anchor its cwd sits under. Bare `session`'s
+/// grouping and find's `project:` both read this one rule for a local row, and
+/// [`remote_project`] for every other.
+pub(super) fn project_of(sv: &SessionView, projects: &[Project]) -> Option<String> {
+    sv.effective_project.clone().or_else(|| sv.project.clone()).or_else(|| project_bucket(&sv.cwd, projects))
+}
+
+/// The project a session from another node renders under: the one its node
+/// published, clipped to a line, and none when it published none. Its cwd is a
+/// path that node chose, so it is never matched against this box's projects
+/// and never walked up this box's disk. Bare `session`'s grouping and find's
+/// `project:` both read this one rule for a remote row.
+pub(super) fn remote_project(sv: &SessionView) -> Option<String> {
+    sv.project.as_deref().map(super::common::clip)
+}
 
 /// Attribute one session's cwd to a project bucket for bare `session`'s
 /// PROJECT-grouped listing — see the module doc's "Project attribution".
@@ -1069,10 +1114,8 @@ fn group_by_project(nodes: Vec<NodeView>, projects: &[Project]) -> Vec<ProjectGr
     let mut buckets: std::collections::HashMap<String, Vec<SessionView>> = std::collections::HashMap::new();
     for node in nodes {
         for sv in node.sessions {
-            let name = sv.effective_project.clone()
-                .or_else(|| sv.project.clone())
-                .or_else(|| project_bucket(&sv.cwd, projects))
-                .unwrap_or_else(|| NO_PROJECT.to_string());
+            let project = if node.is_local { project_of(&sv, projects) } else { remote_project(&sv) };
+            let name = project.unwrap_or_else(|| NO_PROJECT.to_string());
             if !buckets.contains_key(&name) {
                 order.push(name.clone());
             }
@@ -1100,9 +1143,9 @@ fn group_by_project(nodes: Vec<NodeView>, projects: &[Project]) -> Vec<ProjectGr
 fn render_groups(groups: &[ProjectGroup]) -> String {
     let mut out: Vec<String> = Vec::new();
     for g in groups {
-        // The bucket name is a project's own name — or, for a cwd matching
-        // neither, that cwd's basename off a session record that may have come
-        // off a pulled document: cleaned like every other printed string.
+        // The bucket name is a project's own name — a manifest directory's
+        // basename, or a project a pulled node published: cleaned like every
+        // other printed string.
         out.push(format!("◆ {}", shown(&g.name)));
         for (i, s) in g.sessions.iter().enumerate() {
             let last = i + 1 == g.sessions.len();
@@ -1486,9 +1529,9 @@ mod tests {
         let sessions = sessions_from_graph(&graph, "yomi-strix");
         let row = &sessions[0];
         let rendered = render_nodes(&[build_mesh_node(&node("yomi-strix"), Ok(graph.clone()), None)]);
-        // The same cwd's basename becomes a project bucket name in the OTHER
-        // grouping — a string derived off the same pulled field, so it is
-        // cleaned at the render and in the JSON too.
+        // The OTHER grouping renders the same pulled fields under a bucket
+        // name, which is the project the node published (none here, so
+        // `(no project)`), and a document's text is cleaned there too.
         let grouped = render_groups(&group_by_project(
             vec![build_mesh_node(&node("yomi-strix"), Ok(graph.clone()), None)],
             &[],
@@ -1715,8 +1758,8 @@ mod tests {
             error: None,
             stale: false,
             sessions: vec![
-                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: true, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
-                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: true, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
             ],
         }];
         let rendered = render_nodes(&nodes);
@@ -1739,7 +1782,7 @@ mod tests {
                 cwd: "/x".into(), project: None,
                 effective_project: None,
                 exempt: true,
-                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
+                title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new(),
             }],
         }];
         let rendered = render_groups(&groups);
@@ -1775,7 +1818,7 @@ mod tests {
                 cwd: "/y".to_string(), project: None,
                 effective_project: None,
                 exempt: false,
-                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
+                title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new(),
             }],
         };
         (vec![local_node, mesh_node], locals)
@@ -1867,9 +1910,9 @@ mod tests {
             error: None,
             stale: false,
             sessions: vec![
-                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/z/nowhere".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
-                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/zeta/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
-                SessionView { session_id: "s3".into(), label: "l3".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/alpha/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/z/nowhere".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/zeta/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s3".into(), label: "l3".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/alpha/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new() },
             ],
         }];
         let projects = vec![project("zeta", "/proj/zeta"), project("alpha", "/proj/alpha")];
@@ -1879,37 +1922,75 @@ mod tests {
         assert_eq!(groups[2].sessions[0].session_id, "s1");
     }
 
+    /// One remote node's sessions, as its graph document publishes them.
+    fn far_node(sessions: Vec<Value>) -> NodeView {
+        let graph = json!({ "schemaVersion": "0", "nodes": sessions, "edges": [] });
+        build_mesh_node(&node("yomi-strix"), Ok(graph), None)
+    }
+
+    fn far_session(id: &str, cwd: &str) -> Value {
+        json!({ "id": format!("session:{id}"), "kind": "session", "state": "working", "agent": "claude", "cwd": cwd })
+    }
+
+    /// Where `group_by_project` filed each session, by id.
+    fn filed_under(groups: &[ProjectGroup]) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = groups
+            .iter()
+            .flat_map(|g| g.sessions.iter().map(|s| (s.session_id.clone(), g.name.clone())))
+            .collect();
+        out.sort();
+        out
+    }
+
     #[test]
-    fn group_by_project_attributes_a_remote_sessions_cwd_the_same_host_agnostic_way() {
-        // A node's session cwd matching a LOCALLY-registered project's path
-        // string (the fleet's shared-path convention, `grant.rs`'s own node
-        // relativization leans on the same thing) attributes purely by
-        // string match — no filesystem access, so it works identically for
-        // a foreign host's cwd.
-        let nodes = vec![NodeView {
-            name: "yomi-strix".to_string(),
-            is_local: false,
-            presence: "online",
-            fetched_at: None,
-            error: None,
-            stale: false,
-            sessions: vec![SessionView {
-                session_id: "r1".into(),
-                label: "yomi-strix/root/r1".into(),
-                petname: None,
-                agent: "claude".into(),
-                state: "working".into(),
-                presence: "online",
-                cwd: "/home/k/Aoide/pkgs/aoide".into(), project: None,
-                effective_project: None,
-                exempt: false,
-                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
-            }],
-        }];
+    fn group_by_project_files_a_remote_session_under_no_project_though_its_cwd_sits_under_a_registered_root() {
         let projects = vec![project("aoide", "/home/k/Aoide")];
-        let groups = group_by_project(nodes, &projects);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].name, "aoide");
+        let near = build_local_node(&[session("near", "/home/k/Aoide/pkgs/aoide", "working", "1", None)], &[], &projects, &[], "sakaki");
+        let far = far_node(vec![far_session("far", "/home/k/Aoide/pkgs/aoide")]);
+        let groups = group_by_project(vec![near, far], &projects);
+        assert_eq!(
+            filed_under(&groups),
+            [("far".to_string(), NO_PROJECT.to_string()), ("near".to_string(), "aoide".to_string())],
+            "a local row still anchors by its cwd; a far cwd is a path its node chose"
+        );
+    }
+
+    #[test]
+    fn group_by_project_never_walks_this_boxs_disk_for_a_remote_sessions_manifest() {
+        let root = std::env::temp_dir().join(format!("aoide-who-far-manifest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let nested = root.join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        aoide_storage::manifest::save_manifest(&root, &aoide_storage::manifest::Manifest::default()).unwrap();
+        let cwd = nested.to_string_lossy().into_owned();
+        let bucket = root.file_name().unwrap().to_string_lossy().into_owned();
+
+        let near = build_local_node(&[session("near", &cwd, "working", "1", None)], &[], &[], &[], "sakaki");
+        let far = far_node(vec![far_session("far", &cwd)]);
+        let groups = group_by_project(vec![near, far], &[]);
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(
+            filed_under(&groups),
+            [("far".to_string(), NO_PROJECT.to_string()), ("near".to_string(), bucket)],
+            "a local row still buckets by the manifest above its cwd; a far cwd is only text"
+        );
+    }
+
+    #[test]
+    fn group_by_project_files_a_remote_session_under_the_project_its_node_published_clipped_to_a_line() {
+        let projects = vec![project("aoide", "/home/k/Aoide")];
+        let mut stored = far_session("stored", "/home/k/Aoide/pkgs/aoide");
+        stored["project"] = json!("elsewhere");
+        let mut long = far_session("long", "/far");
+        long["project"] = json!("j".repeat(5 << 20));
+        let groups = group_by_project(vec![far_node(vec![stored, long])], &projects);
+
+        let filed = filed_under(&groups);
+        assert_eq!(filed[1], ("stored".to_string(), "elsewhere".to_string()), "the published project wins over the anchor");
+        let (id, bucket) = &filed[0];
+        assert_eq!(id, "long");
+        assert!(bucket.chars().count() <= crate::graph::common::LINE_MAX && bucket.ends_with('…'), "{} characters", bucket.chars().count());
     }
 
     #[test]
@@ -2034,6 +2115,36 @@ mod tests {
         let missing = child_json_of(&nodes);
         assert_eq!(missing["fold"], "not pulled");
         assert_eq!(missing["subtree"], json!([]), "no fold, no rows under it");
+    }
+
+    // ── task: a run's slug reaches SessionView from the record or the document ──
+
+    #[test]
+    fn task_reaches_a_local_row_and_a_cached_document_only_when_set() {
+        let _env = Env::set_up("task-view");
+        let run = SessionRecord { task: Some("review-pr".to_string()), ..session("s1", "/x", "idle", "1", None) };
+        let empty = SessionRecord { task: Some(String::new()), ..session("s2", "/x", "idle", "2", None) };
+        let bare = session("s3", "/x", "idle", "3", None);
+        let node = build_local_node(&[run, empty, bare], &[], &[], &[], "sakaki");
+        let local_task = |id: &str| node.sessions.iter().find(|s| s.session_id == id).unwrap().task.clone();
+        assert_eq!(local_task("s1").as_deref(), Some("review-pr"));
+        assert_eq!(local_task("s2"), None, "an empty slug is no task");
+        assert_eq!(local_task("s3"), None);
+
+        let graph = json!({
+            "schemaVersion": "0",
+            "nodes": [
+                { "id": "session:r1", "kind": "session", "state": "working", "cwd": "/x", "agent": "claude", "task": "review-pr" },
+                { "id": "session:r2", "kind": "session", "state": "idle", "cwd": "/x", "agent": "claude", "task": "" },
+                { "id": "session:r3", "kind": "session", "state": "idle", "cwd": "/x", "agent": "claude" },
+            ],
+            "edges": [],
+        });
+        let remote = sessions_from_graph(&graph, "yomi-strix");
+        let remote_task = |id: &str| remote.iter().find(|s| s.session_id == id).unwrap().task.clone();
+        assert_eq!(remote_task("r1").as_deref(), Some("review-pr"));
+        assert_eq!(remote_task("r2"), None);
+        assert_eq!(remote_task("r3"), None);
     }
 
     // ── session_roster_with: the full pipeline, injected pull, real local stage I/O ──
@@ -2264,7 +2375,7 @@ mod tests {
     }
 
     #[test]
-    fn bare_mode_attributes_a_remote_session_to_a_registered_project_by_cwd() {
+    fn bare_mode_files_a_remote_session_under_no_project_though_its_cwd_sits_under_a_registered_root() {
         let _env = Env::set_up("project-grouping-remote");
         let pf = super::super::model::ProjectsFile {
             schema_version: "0".to_string(),
@@ -2278,7 +2389,7 @@ mod tests {
         let data = out.data.unwrap();
         let projects = data["projects"].as_array().unwrap();
         assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0]["name"], "aoide");
+        assert_eq!(projects[0]["name"], NO_PROJECT, "a far cwd is a path its node chose, never matched here");
         assert_eq!(projects[0]["sessions"][0]["sessionId"], "r1");
     }
 
@@ -2795,5 +2906,41 @@ mod tests {
         assert!(cwd.len() > 4096);
         assert_eq!(project_bucket(&cwd, &[]), root.file_name().map(|n| n.to_string_lossy().into_owned()));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A far node's graph of one session with `task` published as given.
+    fn far_task(task: Value) -> Option<String> {
+        let graph = json!({ "nodes": [{ "kind": "session", "id": "session:a", "state": "idle", "task": task }], "edges": [] });
+        sessions_from_graph(&graph, "yomi")[0].task.clone()
+    }
+
+    #[test]
+    fn a_far_nodes_task_is_kept_only_as_a_legal_slug_within_the_cap() {
+        assert_eq!(far_task(json!("review-pr")), Some("review-pr".into()));
+        assert_eq!(far_task(json!("a".repeat(TASK_MAX))), Some("a".repeat(TASK_MAX)), "the cap itself is kept");
+        assert_eq!(far_task(json!("a".repeat(TASK_MAX + 1))), None, "over the cap is dropped, not clipped");
+        assert_eq!(far_task(json!("rm -rf ~; echo")), None, "a value that is no slug is dropped");
+        assert_eq!(far_task(json!("\u{1b}[2Jreview-pr")), None, "an escape sequence is no slug");
+        assert_eq!(far_task(json!("")), None);
+    }
+
+    #[test]
+    fn a_graph_of_twenty_thousand_sessions_reads_in_linear_time() {
+        let n = 20_000;
+        let nodes: Vec<Value> = (0..n)
+            .map(|i| json!({ "kind": "session", "id": format!("session:s{i}"), "state": "idle", "agent": "claude", "cwd": "/w" }))
+            .collect();
+        let edges: Vec<Value> = (1..n)
+            .map(|i| json!({ "kind": "spawned", "from": format!("session:s{}", i - 1), "to": format!("session:s{i}") }))
+            .collect();
+        let graph = json!({ "nodes": nodes, "edges": edges });
+
+        let start = std::time::Instant::now();
+        let views = sessions_from_graph(&graph, "yomi");
+        let took = start.elapsed();
+
+        assert_eq!(views.len(), n);
+        assert_eq!(views[n - 1].parent.as_deref(), Some("s19998"), "the last child still finds its spawned edge");
+        assert!(took < std::time::Duration::from_secs(2), "20k sessions took {took:?}");
     }
 }
