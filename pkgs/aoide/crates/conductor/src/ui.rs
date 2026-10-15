@@ -49,6 +49,9 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
     if app.tail.is_some() {
         draw_log_tail(f, area, app);
     }
+    if app.spawn_confirm.is_some() {
+        draw_spawn_confirm(f, area, app);
+    }
     // The dedicated human pairing ceremony, when one is open. This is the ONE
     // surface in the whole frontend that draws a pairing code — the code lives
     // in `App::pair_ceremony` (no `Debug`, cleared on dismissal) and nowhere
@@ -253,7 +256,7 @@ fn keymap_hint(panel: Panel) -> &'static str {
         Panel::Roster => {
             "j/k select · s compose · e actions · r refresh (auto ~15s while open) · Tab panel · ? help · q quit"
         }
-        Panel::Pending => "j/k select · a approve/resume · d deny/reject · r re-list · Tab panel · ? help · q quit",
+        Panel::Pending => "j/k select · a approve/resume (spawn: a, y) · d deny/reject · r re-list · ? help · q quit",
     }
 }
 
@@ -1090,12 +1093,15 @@ fn pending_row_item<'a>(row: &crate::app::PendingRow) -> ListItem<'a> {
     let from = row
         .from
         .as_deref()
-        .map(|f| format!(" (from {f})"))
+        .map(|f| format!(" (from {})", graph::visible(f)))
         .unwrap_or_default();
     let submit = if row.submit { " [submit]" } else { "" };
     let line = format!(
         "[{}] {marker}{} ← {}{submit}{from}  ({})",
-        row.id, row.session_id, row.text, row.queued_at
+        row.id,
+        graph::visible(&row.session_id),
+        graph::visible(&row.text),
+        graph::visible(&row.queued_at)
     );
     let style = if row.state == "malformed" {
         theme::dim()
@@ -1103,6 +1109,72 @@ fn pending_row_item<'a>(row: &crate::app::PendingRow) -> ListItem<'a> {
         Style::default()
     };
     ListItem::new(Line::from(Span::styled(line, style)))
+}
+
+// ── Held-spawn confirm ──────────────────────────────────────────────────────
+
+/// Break `text` into rows of at most `width` terminal cells, at the cell and
+/// never at a word, so every character of it is on some row and none is hidden
+/// by a clip.
+fn wrap_cells(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut rows = vec![String::new()];
+    let mut used = 0;
+    for c in text.chars() {
+        let w = crate::board::cells(c.encode_utf8(&mut [0u8; 4])) as usize;
+        if used + w > width && used > 0 {
+            rows.push(String::new());
+            used = 0;
+        }
+        rows.last_mut().expect("rows is never empty").push(c);
+        used += w;
+    }
+    rows
+}
+
+/// The full command of a held spawn, waiting on its second key. Escaped by the
+/// one `visible` rule (a newline is `\n`, an ESC `\x1b`, a backslash doubled),
+/// wrapped at the popup's width and scrollable, so what is approved is all on
+/// the screen and nothing in it can act on this terminal.
+fn draw_spawn_confirm(f: &mut Frame, area: Rect, app: &App) {
+    let Some(confirm) = &app.spawn_confirm else { return };
+
+    let w = (area.width as u32 * 9 / 10) as u16;
+    let h = (area.height as u32 * 9 / 10) as u16;
+    let rect = centered(w, h, area);
+    f.render_widget(Clear, rect);
+
+    let block = panel_block("approve this held spawn?", app);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+
+    let [head, body, foot] =
+        Layout::vertical([Constraint::Length(3), Constraint::Min(1), Constraint::Length(1)]).areas(inner);
+
+    let from = confirm.from.as_deref().map(graph::visible).unwrap_or_else(|| "(none)".to_string());
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(format!("id {} · from {from}", graph::visible(&confirm.session_id))),
+            Line::from("Every character is shown: \\n, \\x1b, \\u{..} are escapes, a backslash is doubled.")
+                .style(theme::dim()),
+            Line::from(""),
+        ]),
+        head,
+    );
+
+    let rows = wrap_cells(&graph::visible(&confirm.text), body.width as usize);
+    let page = body.height as usize;
+    let top = rows.len().saturating_sub(page);
+    confirm.max_scroll.set(top);
+    let start = confirm.scroll.min(top);
+    let shown: Vec<Line> = rows.iter().skip(start).take(page).map(|r| Line::from(r.as_str())).collect();
+    f.render_widget(Paragraph::new(shown), body);
+
+    let more = if top > 0 { format!(" · ↑/↓ PgUp/PgDn scroll (rows {}-{} of {})", start + 1, (start + page).min(rows.len()), rows.len()) } else { String::new() };
+    f.render_widget(
+        Paragraph::new(format!("y approve · n or Esc cancel{more}")).style(theme::dim()),
+        foot,
+    );
 }
 
 // ── Log-tail overlay ────────────────────────────────────────────────────────
@@ -2106,6 +2178,101 @@ mod tests {
             out.contains("[2] ⚠") && out.contains("<malformed entry>"),
             "a malformed entry renders its warning marker, not silently: {out}"
         );
+    }
+
+    /// A pending row is a human view of text someone else wrote: an ESC, a
+    /// newline and a bidi override show as visible escapes in it, never raw.
+    #[test]
+    fn a_pending_row_spells_unsafe_characters_instead_of_painting_them() {
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        a.panel = Panel::Pending;
+        a.pending = Some(
+            aoide_protocol::output::Outcome::ok("session.pending.list", "1 pending").with_data(serde_json::json!({
+                "pending": [{
+                    "id": "0", "sessionId": "t\u{1b}[2J", "text": "ok\nrm -rf ~\u{202e}",
+                    "submit": false, "queuedAt": "now", "from": "mcp", "state": "pending",
+                }],
+            })),
+        );
+        a.select_first_pending_row();
+        let backend = TestBackend::new(100, 20);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &a)).unwrap();
+        let out = dump(term.backend().buffer());
+        assert!(
+            out.contains("[0] t\\x1b[2J ← ok\\nrm -rf ~\\u{202e}"),
+            "escapes are spelled, the text after the newline is in the row: {out}"
+        );
+        assert!(!out.contains('\u{1b}') && !out.contains('\u{202e}'), "nothing raw reaches the buffer");
+    }
+
+    /// `a` on a held spawn opens the confirm: the FULL command, escaped by the
+    /// one rule and wrapped to the popup, so its last character is on screen
+    /// where the one-line row clipped it, and no terminal byte of it is painted.
+    #[test]
+    fn the_held_spawn_confirm_shows_the_whole_command_wrapped_and_escaped() {
+        let command = format!("aoide spawn --id held -- sh -c 'echo \u{1b}[2J\nreboot {} END-OF-COMMAND'", "x".repeat(300));
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        a.panel = Panel::Pending;
+        a.pending = Some(
+            aoide_protocol::output::Outcome::ok("session.pending.list", "1 pending").with_data(serde_json::json!({
+                "pending": [{
+                    "id": "0", "sessionId": "held", "text": command, "submit": false,
+                    "queuedAt": "now", "from": "mcp", "state": "pending",
+                    "spawn": { "path": ["spawn"], "args": [], "flags": {} },
+                }],
+            })),
+        );
+        a.select_first_pending_row();
+        a.handle_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('a')));
+        assert!(a.spawn_confirm.is_some());
+
+        let backend = TestBackend::new(80, 24);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &a)).unwrap();
+        let out = dump(term.backend().buffer());
+        assert!(out.contains("approve this held spawn?"), "{out}");
+        assert!(out.contains("y approve") && out.contains("Esc cancel"), "the two keys are named: {out}");
+        assert!(out.contains("\\x1b[2J\\nreboot"), "escapes are spelled: {out}");
+        assert!(out.contains("END-OF-COMMAND"), "the command is shown to its last character: {out}");
+        assert!(!out.contains('\u{1b}'), "no terminal byte reaches the buffer");
+        let wrapped = out.lines().filter(|l| l.contains("xxxxxxxxxx")).count();
+        assert!(wrapped >= 4, "300 characters wrap over several rows, not one clipped row: {out}");
+    }
+
+    /// A command taller than the popup is reached by scrolling, not clipped: the
+    /// draw records how far it can go and PageDown reaches the last row.
+    #[test]
+    fn a_held_spawn_taller_than_the_popup_scrolls_to_its_last_row() {
+        let command = format!("aoide spawn -- sh -c '{} LAST-WORD'", "y".repeat(2000));
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        a.panel = Panel::Pending;
+        a.pending = Some(
+            aoide_protocol::output::Outcome::ok("session.pending.list", "1 pending").with_data(serde_json::json!({
+                "pending": [{
+                    "id": "0", "sessionId": "held", "text": command, "submit": false,
+                    "queuedAt": "now", "from": "mcp", "state": "pending",
+                    "spawn": { "path": ["spawn"], "args": [], "flags": {} },
+                }],
+            })),
+        );
+        a.select_first_pending_row();
+        a.handle_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('a')));
+
+        let backend = TestBackend::new(60, 16);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &a)).unwrap();
+        // 60 columns: a 54-wide popup, 52 cells inside it. The command wraps at
+        // the cell, so the last row is whatever the wrap leaves, not a word.
+        let last_row = wrap_cells(&graph::visible(&command), 52).pop().unwrap();
+        assert!(!dump(term.backend().buffer()).contains(&last_row), "the end is below the first page");
+        assert!(a.spawn_confirm.as_ref().unwrap().max_scroll.get() > 0);
+
+        for _ in 0..20 {
+            a.handle_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::PageDown));
+        }
+        term.draw(|f| draw(f, &a)).unwrap();
+        assert!(dump(term.backend().buffer()).contains(&last_row), "paging down reaches the last row");
     }
 
     #[test]

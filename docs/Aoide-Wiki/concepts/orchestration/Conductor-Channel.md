@@ -219,7 +219,9 @@ through.
   failing the whole read), `approve <id>` re-drives the entry through this
   exact `send` door (`--yes`, in-process) and removes it, `deny <id>`
   removes it without injecting. Approval is a local act: see the approval
-  doors below. This is CLI-only today — the conductor
+  doors below. The list spells every control, bidi and invisible character of
+  an entry as a visible escape (`\n`, `\x1b`, `\u{202e}`), so a human reads
+  what replays. This is CLI-only today — the conductor
   TUI's own one-key approve/deny (below) is still Phase ③.
 - **Approval doors.** Only a door that can approve may approve a gated
   send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
@@ -231,7 +233,9 @@ through.
   sealed session its server process runs under, and that session's parent
   and sibling rules deliver; any other MCP send parks. The decision is one
   predicate, `Door::can_approve`, read from the door the invocation arrived
-  through; a caller's own claim about itself is never consulted. The full
+  through; a caller's own claim about itself is never consulted. `deny`
+  and anything that would rewrite a session's parent (the parent rule reads
+  that field) answer to the same predicate. The full
   table is in CONTRACTS.md (the pending-queue section). A local agent with a
   shell can still approve through the CLI until the local design lands.
 - **Autogate policy.** Four rules ship today, all still audited, in

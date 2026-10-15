@@ -144,6 +144,18 @@
 - Pending IDs are array positions. Relist after every approve/deny before
   using another selection; never recycle those indices as durable mail
   proposal identifiers.
+- A held spawn is approved on a second key, from the full command. `a` on a
+  spawn row (`PendingRow::spawn`) opens `App::spawn_confirm`; only `y` approves,
+  and only after a fresh `session pending list` still shows the same entry at
+  that position. The confirm is modal in `lib.rs` for keys and the pointer, so
+  no global key or click reaches around it. Every pending field a row or the
+  confirm paints goes through `aoide_conduct::graph::visible` (escaped, never
+  stripped, never raw); do not paint `PendingRow` text any other way. Send rows
+  keep their one key. Pinned by
+  `a_on_a_held_spawn_opens_a_confirm_and_only_a_second_explicit_key_approves`,
+  `y_approves_nothing_when_the_entry_changed_under_the_open_confirm`,
+  `the_held_spawn_confirm_is_modal_for_the_global_keys_and_the_mouse` and
+  `the_held_spawn_confirm_shows_the_whole_command_wrapped_and_escaped`.
 - A pairing code lives only in the dedicated ceremony popup
   (`app::PairCeremony`, no `Debug`). Take it from a pair outcome's own
   `sas`/`replySas` fields, never by scanning text; sanitise the outcome before
