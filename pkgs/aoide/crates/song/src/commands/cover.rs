@@ -1,19 +1,20 @@
 //! `cover set` — the live wallpaper write-path (song/covers/).
 
 use aoide_protocol::Invocation;
-use aoide_protocol::output::Outcome;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use serde_json::{json, Value};
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["cover", "set"],
-        summary: "Set the live wallpaper: stage stage/cover.json (hot-swap) from a cover path or a bare name in song/covers/ — a PICK, which survives re-staging the same song. `--clear` drops it and returns to the active song's own default. Refuses while `rice mode declarative` is locked, except for `--from-skwd`, which records what an external provider is already showing.",
+        summary: "Set the live wallpaper: stage stage/cover.json (hot-swap) from a cover path or a bare name in song/covers/ — a PICK, which survives re-staging the same song. A still is cropped to fill the screen, or tiled at 1:1 when its file name carries `_tile` or `--position tile` forces it. `--clear` drops it and returns to the active song's own default. Refuses while `rice mode declarative` is locked, except for `--from-skwd`, which records what an external provider is already showing.",
         args: [arg!("path", "string", false, "Absolute cover path, a bare filename resolved against song/covers/, or a `we:<id>` Wallpaper Engine scene token. Omitted with `--clear`.")],
         flags: [
             flag!("clear", "bool", "Drop the pick: return the active song to its own default (its derivable cover staged as a song default, else no stage/cover.json at all — the baked/palette fallback and the song's own live board)."),
             flag!("from-skwd", "bool", "RECORD ONLY: the skwd-wall provider reports what it now shows, and this writes it into stage/cover.json without applying anything back (the hook's own door). Ignored when the host's provider is not skwd-wall, and when the identity is the step-aside image."),
             flag!("kind", "string", "With `--from-skwd`: the provider's own `%type%` — static, video or we (a scene, whose identity is the workshop id)."),
+            flag!("position", "string", "How a still is laid on the screen: auto (the default: tiled at 1:1 when the file name carries `_tile`, else cropped to fill), tile, or fill. Not for a video or a `we:<id>` scene.", value: "position", values: &crate::cover::POSITIONS, conflicts: &["clear", "from-skwd"]),
         ],
         gated: false,
         implemented: true,
@@ -122,11 +123,15 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
     };
 
     let song = super::mode::current_staged_song();
+    let position = inv.flags.get("position").map(String::as_str);
 
     // A scene token names the provider's own library entry: there is no file to
     // stat, and the id is taken as it was given (`we:123` is the key the provider
     // applies) — validated only for the shape the token promises.
     if let Some(we_id) = crate::cover::parse_scene_token(&arg) {
+        if position.is_some() {
+            return position_refusal(&arg, "a Wallpaper Engine scene");
+        }
         return match crate::cover::stage_scene(we_id, song.as_deref()) {
             Ok(dst) => Outcome::ok(
                 "cover.set",
@@ -153,6 +158,10 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
 
     // Absolute path → literal; anything else → the shared covers/ library.
     let resolved = crate::cover::resolve_cover_arg(&arg);
+    let kind = crate::cover::kind_for_path(&resolved);
+    if position.is_some() && kind == crate::cover::KIND_VIDEO {
+        return position_refusal(&arg, "a video");
+    }
 
     if !resolved.is_file() {
         return Outcome::error(
@@ -166,7 +175,7 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
         }));
     }
 
-    let cover_dst = match crate::cover::stage_pick(&resolved, song.as_deref()) {
+    let cover_dst = match crate::cover::stage_pick(&resolved, song.as_deref(), position) {
         Ok(dst) => dst,
         Err(e) => {
             return Outcome::error("cover.set", format!("failed to stage cover.json: {e}"))
@@ -177,15 +186,17 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
         }
     };
 
+    let tile = crate::cover::pick_tiles(&resolved, position);
+    let laid = if tile { ", tiled at 1:1" } else { "" };
     Outcome::ok(
         "cover.set",
         match &song {
             Some(song) => format!(
-                "wallpaper set to {} for `{song}` — stage/cover.json live for hot-swap",
+                "wallpaper set to {}{laid} for `{song}` — stage/cover.json live for hot-swap",
                 resolved.display()
             ),
             None => format!(
-                "wallpaper set to {} — stage/cover.json live for hot-swap",
+                "wallpaper set to {}{laid} — stage/cover.json live for hot-swap",
                 resolved.display()
             ),
         },
@@ -194,12 +205,27 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
     .with_data(json!({
         "cover": resolved.to_string_lossy(),
         "coverJson": cover_dst.to_string_lossy(),
-        "kind": crate::cover::kind_for_path(&resolved),
+        "kind": kind,
+        "position": position.unwrap_or(crate::cover::POSITION_AUTO),
+        "tile": tile,
         "pick": true,
         "song": song,
         "wallpaper": crate::wallpaper_provider::sync(),
         "seam": "AoideWallpaper.qml FileView-watches stage/cover.json and hot-swaps live",
     }))
+}
+
+/// `--position` lays out a still. A video or a scene is played by whatever
+/// paints it, so the flag can never apply to one.
+fn position_refusal(arg: &str, what: &str) -> Outcome {
+    Outcome::refuse(
+        "cover.set",
+        Kind::Usage,
+        format!("`--position` lays out a still, and `{arg}` is {what}"),
+        "only a still picture is tiled or cropped to fill; a video or a scene is laid out by what plays it",
+        Fix::Run(format!("lyra cover set {arg}")),
+    )
+    .with_fields(json!({ "reason": "position-not-a-still" }))
 }
 
 /// `cover set --from-skwd --kind <static|video|we> <path|id>` — the RECORD
@@ -560,7 +586,7 @@ mod tests {
             r#"{"schemaVersion":"0","song":"moonlight"}"#,
         )
         .unwrap();
-        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), Some("moonlight"))
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), Some("moonlight"), None)
             .unwrap();
 
         let cleared = handle_cover_set(&clear_inv(&[]));
@@ -590,7 +616,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None, None).unwrap();
         let out = handle_cover_set(&clear_inv(&[]));
         assert_eq!(out.status, Status::Ok);
         assert_eq!(out.data.unwrap()["cleared"], true);
@@ -617,7 +643,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None, None).unwrap();
 
         let out = handle_cover_set_entry(&clear_inv(&[]));
         assert_eq!(out.status, Status::Error);
@@ -1006,6 +1032,120 @@ mod tests {
         let out = handle_cover_set(&inv(&["cover", "set"], &["we:7"]));
         assert_eq!(out.status, Status::Ok);
         assert_eq!(out.data.unwrap()["kind"], "we");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── cover set --position: how a still is laid out (CONTRACTS.md §4) ─────
+
+    /// `--position tile` forces a tile, `fill` forbids one, and with no
+    /// position a `_tile` file name tiles; the envelope says which.
+    #[test]
+    fn cover_set_position_forces_or_follows_the_file_name() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-position-set");
+        let stage = root.join("stage");
+        stage_livery(&stage, None);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let plain = root.join("plain.png");
+        let brick = root.join("Brick_Tile.png");
+        std::fs::write(&plain, b"\x89PNG stub").unwrap();
+        std::fs::write(&brick, b"\x89PNG stub").unwrap();
+        let staged = || -> Value {
+            serde_json::from_str(&std::fs::read_to_string(stage.join("cover.json")).unwrap()).unwrap()
+        };
+
+        let forced = handle_cover_set(&set_inv(&[plain.to_str().unwrap()], &[("position", "tile")]));
+        assert_eq!(forced.status, Status::Ok, "{:?}", forced.data);
+        let data = forced.data.unwrap();
+        assert_eq!((data["position"].as_str(), data["tile"].as_bool()), (Some("tile"), Some(true)));
+        assert_eq!((staged()["position"].as_str(), staged()["tile"].as_bool()), (Some("tile"), Some(true)));
+
+        let auto = handle_cover_set(&inv(&["cover", "set"], &[brick.to_str().unwrap()]));
+        assert_eq!(auto.status, Status::Ok, "{:?}", auto.data);
+        assert_eq!(auto.data.unwrap()["position"], "auto");
+        assert!(staged().get("position").is_none(), "auto writes no position: {}", staged());
+        assert_eq!(staged()["tile"], true, "a `_tile` name tiles");
+
+        let fill = handle_cover_set(&set_inv(&[brick.to_str().unwrap()], &[("position", "fill")]));
+        assert_eq!(fill.status, Status::Ok, "{:?}", fill.data);
+        assert_eq!(fill.data.unwrap()["tile"], false);
+        assert_eq!(staged()["position"], "fill");
+        assert!(staged().get("tile").is_none(), "a fill carries no tile: {}", staged());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A scene or a video is never laid out by `--position`: a usage refusal at
+    /// exit 2 that writes nothing, whether or not the file exists.
+    #[test]
+    fn cover_set_position_refuses_a_scene_and_a_video() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-position-refused");
+        let stage = root.join("stage");
+        stage_livery(&stage, None);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let clip = root.join("loop_tile.mp4");
+        std::fs::write(&clip, b"\x00\x00\x00\x18ftypmp42").unwrap();
+
+        for arg in ["we:123", clip.to_str().unwrap(), "/nowhere/clip.webm"] {
+            let out = handle_cover_set(&set_inv(&[arg], &[("position", "fill")]));
+            assert_eq!(out.status, Status::Usage, "{arg}: {:?}", out.data);
+            assert_eq!(out.render(false).1, aoide_protocol::output::exit::USAGE);
+            let data = out.data.unwrap();
+            assert_eq!(data["reason"], "position-not-a-still", "{arg}");
+            assert_eq!(data["refusal"]["fix"]["run"], format!("lyra cover set {arg}"), "{data}");
+            assert!(!stage.join("cover.json").exists(), "{arg}: nothing staged");
+        }
+
+        // Without the flag the same video is an ordinary pick, and never tiles.
+        let out = handle_cover_set(&inv(&["cover", "set"], &[clip.to_str().unwrap()]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(out.data.unwrap()["tile"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The registry refuses `--position` beside `--clear` or `--from-skwd`, and
+    /// any word but auto, tile or fill, before the handler writes anything.
+    #[test]
+    fn cover_set_position_is_declared_against_clear_from_skwd_and_other_words() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-position-declared");
+        let stage = root.join("stage");
+        stage_livery(&stage, None);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
+            mode: aoide_storage::mode::RiceMode::Staging,
+            ..Default::default()
+        })
+        .unwrap();
+        let img = root.join("plain.png");
+        std::fs::write(&img, b"\x89PNG stub").unwrap();
+        let mut r = Registry::new();
+        register(&mut r);
+        let set = r.get(&["cover".to_string(), "set".to_string()]).unwrap();
+        let path = img.to_str().unwrap();
+
+        for (args, flags) in [
+            (vec![], vec![("clear", "true"), ("position", "tile")]),
+            (vec![path], vec![("from-skwd", "true"), ("kind", "static"), ("position", "tile")]),
+            (vec![path], vec![("position", "center")]),
+        ] {
+            let out = set.invoke("lyra", &set_inv(&args, &flags));
+            assert_eq!(out.status, Status::Usage, "{flags:?}: {:?}", out.data);
+            assert!(!stage.join("cover.json").exists(), "{flags:?}: nothing staged");
+        }
+
+        // The argv the Desktop Pictures popup runs: `lyra cover set <path> --position <word>`.
+        let argv: Vec<String> = ["cover", "set", path, "--position", "tile"].iter().map(|w| w.to_string()).collect();
+        let (parsed, _) = aoide_protocol::door::parse(&argv, aoide_protocol::Door::Cli, "lyra", &r)
+            .unwrap_or_else(|o| panic!("{}", o.message));
+        assert_eq!((parsed.args.as_slice(), parsed.flags.get("position").map(String::as_str)), ([path.to_string()].as_slice(), Some("tile")));
+        let ok = set.invoke("lyra", &parsed);
+        assert_eq!(ok.status, Status::Ok, "{:?}", ok.data);
+        assert_eq!(ok.data.unwrap()["tile"], true);
         let _ = std::fs::remove_dir_all(&root);
     }
 
