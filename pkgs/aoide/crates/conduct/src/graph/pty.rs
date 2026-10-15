@@ -2416,7 +2416,7 @@ mod resolve_tests {
     #[test]
     fn resolve_uses_the_default_path_when_path_is_unset() {
         if !Path::new("/bin/sh").is_file() {
-            eprintln!("skipped: no /bin/sh to search for");
+            eprintln!("skipping: no /bin/sh to search for");
             return;
         }
         assert_eq!(resolve_in("sh", None), Some(PathBuf::from("/bin/sh")));
@@ -2427,7 +2427,7 @@ mod resolve_tests {
     #[test]
     fn resolve_reads_a_non_utf8_path_entry() {
         if !Path::new("/bin/sh").is_file() {
-            eprintln!("skipped: no /bin/sh to search for");
+            eprintln!("skipping: no /bin/sh to search for");
             return;
         }
         let mut bytes = b"/no/such/dir\xff".to_vec();

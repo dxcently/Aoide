@@ -442,19 +442,20 @@ shell's own `sudo` shows at once, off the process table (`sudo_awaiting`); under
 a wrapper (`sh -c`, `make`) the screen shows it after the 3-second quiet.
 
 A shell's screen counts by what the shell was given. An interactive shell (no
-`-c` string and no script: `bash`, `bash --norc -i`) is silenced at
-its bare prompt, so a question typed or echoed there is never `awaiting`, and a
-`read -p` it runs itself goes unseen. A shell given a command or a script
-(`bash -c "apt install x"`, `sh ./run.sh`) is a program like any other, and its
-questions are heard. A privilege program (`sudo bash`, `su`) is not silenced:
-its prompt is a password. `script` is a shell at its prompt unless `-c` or
-`--command` appears after it (any dashed token with a `c` counts, so the screen
-only ever hears more).
-A form the launcher walk refuses (`env -S`, `sudo -i`, an option its
+`-c` string and no script: `bash`, `bash --norc -i`) is silenced at its bare
+prompt, so a question typed or echoed there is never `awaiting`, and a `read -p`
+it runs itself goes unseen. A shell given a command or a script (`bash -c "apt
+install x"`, `sh ./run.sh`) is a program like any other, and its questions are
+heard. A privilege program (`sudo bash`, `su`) is never silenced and never idle:
+it asks for a password first, and nothing tells that prompt from the root
+shell's after it, so the password prompt is heard and nothing typed at either is
+recorded. `script` is a shell at its prompt unless `-c` or `--command` appears
+after it (any dashed token with a `c` counts, so the screen only ever hears
+more). A form the launcher walk refuses (`env -S`, `sudo -i`, an option its
 table does not list) is answered as a command runner, so its questions are heard
 too: where the walk cannot resolve a form, the over-match goes toward hearing,
-never toward silence. The argv decides which, read by the walk that classes a shell; no
-process is probed for it.
+never toward silence. The argv decides which, read by the walk that classes a
+shell; no process is probed for it.
 
 Precedence, highest first: **hook phase, trace, screen, presence.** A non-shell
 session whose harness is an agent with a profile (claude, kimi, pi, eidolon) is

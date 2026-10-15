@@ -830,19 +830,18 @@ count.
   `NAME=value` word (`A=1 sudo x`); a control, bidi or invisible character, a
   newline or U+FFFD in any word (a control byte, `\r` included, would act as
   Enter at the prompt); a line over 4096 bytes; a privilege program anywhere in
-  its launcher chain (a `PRIVILEGE_PROGRAMS` name, `busybox su` included);
-  a shell-form
-  argv such as `sh -c …`. The words are POSIX-quoted (`shell_join`), so the
-  typed line re-parses to the recorded argv for an argv that passes. Never
-  submitted, because an argv is attacker-choosable: a same-uid process can
-  rewrite its own `/proc` cmdline, and reading argv cannot prove that nothing
-  in it waits on a password prompt, so the human who reads the line presses
-  Enter. An idle session's clean unsubmitted `typed` line is typed the same way
-  (`--yes`, no `--submit`) and sits in the new prompt until a human presses
-  Enter; idle with no `typed` delivers nothing. Also the command core the
-  daemon's own boot-time
-  auto-resume trigger calls in-process — see `state/stage/projects.json`'s
-  `autoResume` paragraph below for that trigger's own contract. `identity`,
+  its launcher chain (a `PRIVILEGE_PROGRAMS` name, `busybox su` included); a
+  shell-form argv such as `sh -c …`. The words are POSIX-quoted (`shell_join`),
+  so the typed line re-parses to the recorded argv for an argv that passes.
+  Never submitted, because an argv is attacker-choosable: a same-uid process
+  can rewrite its own `/proc` cmdline, and reading argv cannot prove that
+  nothing in it waits on a password prompt, so the human who reads the line
+  presses Enter. An idle session's clean unsubmitted `typed` line is typed the
+  same way (`--yes`, no `--submit`) and sits in the new prompt until a human
+  presses Enter; idle with no `typed` delivers nothing. Also the command core
+  the daemon's own boot-time auto-resume trigger calls in-process — see
+  `state/stage/projects.json`'s `autoResume` paragraph below for that trigger's
+  own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
   lazily-minted ed25519 keypair (`aoide-storage`'s new `identity` module,
   `state/identity/`): prints the public key (hex), a short display
@@ -2197,14 +2196,13 @@ ran the command, an agent included, and nothing here inspects the content. The
 send gate's parent and sibling autogate delivers by its own rule (`send.rs`). The
 boot resurrect retypes a recorded command's shell-quoted words, never for `sudo`
 or a privilege program or a shell-form argv
-(`resurrect.rs::restore_argv_refusal`).
-The proof is that basename, and it is stated as one: a symlink named `claude`
-that points at `bash`, or a script named `claude`
-that execs a shell, passes it. It rejects the launchers the walk does not model
-and a label that does not match the wrap. It does not stop a same-uid process
-that names a shell after a harness; for that class the defence is inert content,
-since every line takes one pass as it is written (`wire_line`), and every shell
-metacharacter in it is made inert, with `!` and `"` among them.
+(`resurrect.rs::restore_argv_refusal`). The proof is that basename, and it is
+stated as one: a symlink named `claude` that points at `bash`, or a script named
+`claude` that execs a shell, passes it. It rejects the launchers the walk does
+not model and a label that does not match the wrap. It does not stop a same-uid
+process that names a shell after a harness; for that class the defence is inert
+content, since every line takes one pass as it is written (`wire_line`), and
+every shell metacharacter in it is made inert, with `!` and `"` among them.
 
 The refusals, in order, are `conduct.rs::auto_type_refusal`'s: a shell first
 (`agent` `""` or `shell`, a `restore` snapshot, or a `wrappedProgram` that is a
@@ -2362,32 +2360,44 @@ session with a hook phase or a trace never carries one: the hook phase, then the
 trace, then the screen decide its `state`, and the screen only for a wrap nothing
 else speaks for. A shell's `state` is its own snapshot (foreground command, then
 screen), whatever hook records it holds; the screen is silenced only for an
-interactive shell at its bare prompt. A command shell (`bash -c …`,
-`sh ./run.sh`) has no prompt, so its idle verdict is `shell_at_prompt`'s
-ordered reads, the first that answers ending it: a
-foreground command holds the terminal, working; an interactive shell at its
-bare prompt, idle by the process-group check alone; a live child (`sh -c 'make;
-true'`), working; the shell's executable is not the file its spawn started,
+interactive shell at its bare prompt. Readers tolerate its absence and
+round-trip fields they do not know.
+
+A conducted shell's idle verdict is `shell_at_prompt`'s ordered reads, the
+first that answers ending it: an argv that runs a privilege program, working
+before any process is read (below); a foreground command holds the terminal,
+working; an interactive shell at its bare prompt, idle by the process-group
+check alone. A command shell (`bash -c …`, `sh ./run.sh`) has no prompt, so the
+reads after those decide it: a live child (`sh -c 'make; true'`), working; with
+a baseline (below), the shell's executable is not the file its spawn started,
 working (`sh -c 'sleep 30'` exec-optimizes, whatever comm the command renames
-itself to); the shell's executable cannot be read at all, working, since a
-process that made itself non-dumpable (a setuid `sudo`, `doas` or `su`, or a
-program with `PR_SET_DUMPABLE 0`) reads that way; the shell's CPU time
-(`utime + stime`) rose since the previous tick, working (a builtin-only loop
-such as `while :; do :; done`); with no baseline (non-Linux hosts, `busybox`),
-comm names no shell, working; otherwise idle. `restore.idle` is the same
-verdict, computed once per tick, so the two never disagree.
+itself to), or it cannot be read at all, working, since a process that made
+itself non-dumpable (a setuid `sudo`, `doas` or `su`, or a program with
+`PR_SET_DUMPABLE 0`) reads that way; the shell's CPU time (`utime + stime`)
+rose since the previous tick, working (a builtin-only loop such as
+`while :; do :; done`); with no baseline, comm names no shell, working;
+otherwise idle. `restore.idle` is the same verdict, computed once per tick, so
+the two never disagree.
 
 The baseline is the wrap's own memory: the identity of the file the spawn
 started, resolved once (`PATH` searched as `execvp` searches it: an executable
 regular file, with the default path when `PATH` is unset; a `#!` script's
-baseline is its interpreter; a file the kernel will not start itself has none,
-and its name is spawned as before) and read from that path after the spawn. It
-is never read from `/proc`, where a shell that has already exec'd shows its
-command. The exe and CPU reads come from `/proc/<pid>` on Linux; elsewhere
-those reads are skipped and comm decides. A CPU sample that cannot be read is
-no evidence either way, so the reads after it still decide. Comm is consulted
-only with no baseline, so a setuid program's password prompt reads working
-through its unreadable exe, not through its name.
+baseline is its interpreter) and read from that path after the spawn. It is
+never read from `/proc`, where a shell that has already exec'd shows its
+command. The exe and CPU reads come from `/proc/<pid>` on Linux. A CPU sample
+that cannot be read is no evidence either way, so the reads after it still
+decide. Comm is consulted only with no baseline, so a setuid program's password
+prompt reads working through its unreadable exe, not through its name.
+
+There is no baseline on a non-Linux host, where the exe and CPU reads are
+skipped; for `busybox`, whose applets all run inside its one file, known by the
+name of the file the spawned path resolves to, so an `sh` that links to it has
+none; and for a file the kernel will not start itself, which is spawned by its
+name as before: a text file with no `#!`, which `execvp` runs through
+`/bin/sh`, and a file a `binfmt_misc` handler runs (`pty.rs::kernel_starts`
+knows only `#!` and ELF). For these comm decides, and comm is the process's own
+to set: a command that renames itself to a shell's name (`prctl(PR_SET_NAME)`)
+with no child and flat CPU reads idle.
 
 The accepted losses: a `&` background child under a command shell keeps it
 `working` for as long as that child lives; a command shell started under an
@@ -2402,14 +2412,23 @@ once it has a child or burns CPU, the same loss as the builtin `read` below; and
 a command shell blocked in a builtin `read` has no child and burns no CPU, so it
 reads idle, and the screen's prompt detection is what hears it.
 
-A privilege program (`sudo bash`, `doas bash`, `su`, `su -`) is never an
-interactive shell: its prompt is a password until its command or shell starts,
-so it reads working by the exe test and by its child, never idle. A password
-prompt is still `awaiting`: by sudo's own witness for `sudo`, and by the
-screen's password row for `doas` and `su`. The screen hears a `sudo bash`
-prompt, since a privilege program is not silenced as an interactive shell.
-Readers
-tolerate its absence and round-trip fields they do not know.
+A session whose argv runs a privilege program anywhere along its launcher
+chain (`runs_a_privilege_program`: `sudo bash`, `doas bash`, `su`, `su -`) is
+never idle, for its whole life: `shell_at_prompt` answers working before any
+process is read. Its first prompt asks for a password, and nothing read off the
+process table tells that prompt from the root shell's after it: a privilege
+program that is not setuid keeps its own executable there, with no child and
+flat CPU. So `restore.idle` stays false and no `typed` line is ever recorded
+for it, and a resurrect never retypes what was typed at its password prompt.
+It is never an interactive shell either, so its password prompt is heard and
+reads `awaiting`: by sudo's own witness for `sudo`, and by the screen's password
+row for `doas` and `su`. The accepted losses: a quiet root prompt under
+`sudo bash` reads `working · sudo bash`; while a root command runs there, the
+dock label shows `sudo bash`, not the command, since sudo's relay (`use_pty`,
+its default) holds the terminal; and resurrect refuses it, since its recorded
+argv is `sudo bash`, and restores the cwd only. Once `doas` or `su` hands the
+terminal to the shell it started, the label and the recorded argv are that
+shell's foreground process, as for any shell.
 
 **Additive in v0:** a session record MAY also carry an optional `tool` (string)
 — the agent's latest TOOL CALL as a one-line label (`"Bash: cargo test"`): the
@@ -3045,8 +3064,9 @@ tick (`conduct_refresh_shell`, ~1 Hz) alongside `cwd`/`activity`/`state`:
   unreadable).
 - `idle` — the shell's `shell_at_prompt` verdict: the pty's foreground process
   group is the bare shell (or none), and for a command shell nothing runs
-  under it (no live child, and its pid still a shell). The SAME predicate
-  `state` is derived from. Kept as its own field
+  under it (no live child, and its pid still a shell). Never true for a
+  session whose argv runs a privilege program, so its `typed` is never
+  recorded. The SAME predicate `state` is derived from. Kept as its own field
   rather than read back off `state` later: the reap sweep overwrites `state`
   to `"done"` BEFORE its ledger write (`reap.rs`'s own ordering, `session
   reap`), so idleness would otherwise be unrecoverable by the time the

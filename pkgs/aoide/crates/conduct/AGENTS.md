@@ -1314,13 +1314,20 @@ in the message.
   and the pgid check reads it at the prompt. An interactive shell is the pgid
   check alone; keep it that way. The reads and their order are CONTRACTS.md's
   shell-state paragraph.
+- **A privileged session is never idle, and nothing is read for it.**
+  `ShellWatch::privileged` is fixed at the spawn from
+  `runs_a_privilege_program(&inv.args)`, and `shell_at_prompt` answers working
+  on it before its first read. Keep that check first: a stand-in that is not
+  setuid passes every later read as idle at its password prompt, and an idle
+  verdict is what lets `restore.typed` record what was typed there.
 - **The executable baseline is the file the spawn started, read from its path
   (`resolve_program`, once; `PtyChild::image`; `shell_baseline`), never from
   `/proc`.** A `/proc/<pid>/exe` read can land after the shell has exec'd its
   command, and then the command is the baseline. The spawn starts that same
   path with the name as argv[0], so the baseline and the exec are one file. The
   CPU sample is taken on every tick. Don't move either read into
-  `shell_at_prompt`.
+  `shell_at_prompt`. `busybox` is known by the canonical name of that file,
+  never by argv[0], so an `sh` that links to it has no baseline.
 - **`proc_argv` and `proc_command` are deliberately two functions, never
   merged (P-C5).** `proc_command` is a DISPLAY label — it basename-
   collapses `argv[0]` and truncates at 48 chars — built for the roster's

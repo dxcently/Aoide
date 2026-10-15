@@ -65,7 +65,8 @@ const SHELL_BASENAMES: &[&str] = &[
 /// one list. `sudo` and `doas` also wrap a command, which the walk reads as a
 /// shell whatever it runs ([`walk`]); the rest ask for a password or a root
 /// shell on the pty. [`runs_a_privilege_program`] reads it for the restore
-/// refusals and [`program_is_an_interactive_shell`] for the screen. A basename
+/// refusals, for a wrap that is never idle ([`ShellWatch::privileged`]) and,
+/// through [`program_is_an_interactive_shell`], for the screen. A basename
 /// match, and `busybox <applet>` counts through its applet.
 pub(in crate::graph) const PRIVILEGE_PROGRAMS: &[&str] = &[
     "sudo", "doas", "su", "pkexec", "run0", "sudoedit", "runuser", "setpriv", "chroot", "sg",
@@ -446,8 +447,9 @@ pub fn program_is_a_shell(argv: &[String]) -> bool {
 /// string and no script operand (`bash`, `bash --norc -i`). A shell that runs a
 /// command or a script (`bash -c "apt install x"`, `sh ./run.sh`) is a program
 /// like any other, and its questions are heard. A privilege program is never one
-/// (`sudo bash`, `su`): until its command starts, its prompt is a password, so
-/// its exe and its children decide ([`shell_at_prompt`]).
+/// (`sudo bash`, `su`): it asks for a password first, and the wrap cannot tell
+/// that prompt from the root shell's after it, so the session is never idle
+/// ([`ShellWatch::privileged`]) and its questions are heard.
 ///
 /// Only the prompt case is silenced by the screen (`shell_snapshot`): a `bash
 /// -c` child shares the shell's process group, so the foreground pgid cannot
@@ -1328,10 +1330,16 @@ struct ExeId {
     ino: u64,
 }
 
-/// What a conducted shell's wrap remembers between ticks. The wrap records it
-/// itself, from the process table; the shell never reports it.
+/// What a conducted shell's wrap remembers between ticks: two facts fixed at
+/// the spawn, and the CPU sample each tick moves forward. The wrap records them
+/// itself, from the argv it spawned and the process table; the shell never
+/// reports them.
 #[derive(Debug)]
 struct ShellWatch {
+    /// The argv runs a privilege program ([`runs_a_privilege_program`]). Such a
+    /// session is never idle, so nothing typed at its password prompt is ever
+    /// recorded.
+    privileged: bool,
     /// The identity of the file the spawn started (see [`shell_baseline`]). A
     /// later identity that differs, or none at all, means the shell exec'd into
     /// its command or made its executable unreadable.
@@ -1342,8 +1350,8 @@ struct ShellWatch {
 }
 
 impl ShellWatch {
-    fn new(exe_at_spawn: Option<ExeId>) -> Self {
-        Self { exe_at_spawn, cpu_at_last_tick: None }
+    fn new(privileged: bool, exe_at_spawn: Option<ExeId>) -> Self {
+        Self { privileged, exe_at_spawn, cpu_at_last_tick: None }
     }
 }
 
@@ -1375,19 +1383,21 @@ fn first_exec_image(file: &std::path::Path) -> Option<std::path::PathBuf> {
 /// spawn started (`image`, from [`super::pty::PtyChild::image`]), read from that
 /// path and never from `/proc`, where a shell that has already exec'd shows its
 /// command. `busybox` has none: its applets all run inside one executable, so
-/// the comm check decides there.
+/// the comm check decides there. It is known by the name of the file the
+/// symlinks lead to, so an `sh` that links to it has none either.
 #[cfg(target_os = "linux")]
-fn shell_baseline(program: &str, image: Option<&std::path::Path>) -> Option<ExeId> {
-    if command_basename(program) == "busybox" {
+fn shell_baseline(image: Option<&std::path::Path>) -> Option<ExeId> {
+    let file = std::fs::canonicalize(first_exec_image(image?)?).ok()?;
+    if file.file_name().is_some_and(|name| name == "busybox") {
         return None;
     }
-    first_exec_image(image?).and_then(|file| identity_of(&file))
+    identity_of(&file)
 }
 
 /// Non-Linux hosts have no `/proc/<pid>/exe` to compare with, so there is no
 /// baseline and the comm check is the whole exec test.
 #[cfg(not(target_os = "linux"))]
-fn shell_baseline(_program: &str, _image: Option<&std::path::Path>) -> Option<ExeId> {
+fn shell_baseline(_image: Option<&std::path::Path>) -> Option<ExeId> {
     None
 }
 
@@ -1435,12 +1445,14 @@ fn comm_is_a_shell(comm: &str) -> bool {
 
 /// The one predicate `state` and `restore.idle` are both read off. It is
 /// evaluated once per tick in [`conduct_refresh_shell`] and passed to both
-/// snapshots, so the two can never disagree. The reads run in the order
-/// CONTRACTS.md's shell-state paragraph gives, and the first that answers ends
-/// it. An unreadable CPU sample is no evidence either way, so the reads after it
-/// still decide. An unreadable executable is an exec when there is a baseline
-/// ([`shell_baseline`]). The CPU sample is taken on every call, so a tick that
-/// returns early still moves the baseline forward.
+/// snapshots, so the two can never disagree. A privileged session
+/// ([`ShellWatch::privileged`]) is working before anything is read. Otherwise
+/// the reads run in the order CONTRACTS.md's shell-state paragraph gives, and
+/// the first that answers ends it. An unreadable CPU sample is no evidence
+/// either way, so the reads after it still decide. An unreadable executable is
+/// an exec when there is a baseline ([`shell_baseline`]). Past the privilege
+/// check, the CPU sample is taken first, so a tick that returns early still
+/// moves the baseline forward.
 #[allow(clippy::too_many_arguments)]
 fn shell_at_prompt(
     fg: i32,
@@ -1452,6 +1464,9 @@ fn shell_at_prompt(
     exe_of: impl Fn(i32) -> Option<ExeId>,
     cpu_of: impl Fn(i32) -> Option<u64>,
 ) -> bool {
+    if watch.privileged {
+        return false;
+    }
     let cpu = cpu_of(shell_pid);
     let cpu_rose = matches!((cpu, watch.cpu_at_last_tick), (Some(now), Some(then)) if now > then);
     if cpu.is_some() {
@@ -1473,7 +1488,7 @@ fn shell_at_prompt(
     if exec_changed || cpu_rose {
         return false;
     }
-    // With no baseline, comm is the exec test: `busybox` and non-Linux hosts.
+    // With no baseline (CONTRACTS.md names the shapes), comm is the exec test.
     watch.exe_at_spawn.is_some() || comm_of(shell_pid).is_none_or(|comm| comm_is_a_shell(&comm))
 }
 
@@ -1769,7 +1784,7 @@ fn conduct_multiplex(
     child: &mut PtyChild,
     id: &str,
     is_shell: bool,
-    shell_exe: Option<ExeId>,
+    mut shell_watch: ShellWatch,
     interactive: bool,
     watch_prompts: bool,
     read_stdin: bool,
@@ -1787,9 +1802,6 @@ fn conduct_multiplex(
     // wait gets a ~1s timeout and the tick fires on the elapsed clock. Agents
     // also wake to observe child exit when a descendant keeps the PTY open.
     let shell_pid = child.id();
-    // The shell's CPU memory, and the executable it was started as (see
-    // `shell_baseline`).
-    let mut shell_watch = ShellWatch::new(shell_exe);
     const WAIT_TIMEOUT_MS: i32 = 1000;
     let tick_period = std::time::Duration::from_millis(950);
     let mut last_tick = std::time::Instant::now();
@@ -2123,7 +2135,8 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(e) => return Outcome::error(cmd, format!("failed to conduct `{program}`: {e}")),
     };
-    let shell_exe = shell_baseline(&program, child.image());
+    let shell_watch =
+        ShellWatch::new(runs_a_privilege_program(&inv.args), shell_baseline(child.image()));
 
     // Bind the per-session injection socket (best-effort: a bind failure leaves
     // the session running but un-injectable — recorded as conductable=false).
@@ -2319,7 +2332,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         &mut child,
         &id,
         is_shell,
-        shell_exe,
+        shell_watch,
         program_is_an_interactive_shell(&inv.args),
         // The screen speaks for a shell, and for a wrap whose harness has no
         // hook or trace profile to speak for itself. A harness that reports
@@ -2930,14 +2943,14 @@ mod tests {
     fn shell_at_prompt_is_the_process_group_alone_for_an_interactive_shell() {
         // An interactive shell at its own prompt is idle whatever sits beneath
         // it: neither the child table nor the comm is consulted.
-        assert!(shell_at_prompt(100, 100, true, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
-        assert!(shell_at_prompt(0, 100, true, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, true, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(shell_at_prompt(0, 100, true, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_working_for_a_command_shell_that_has_a_child() {
         // `sh -c 'sleep 30; true'`: the shell stays alive with `sleep` as its
         // child.
-        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sh".to_string()), |pid| {
+        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sh".to_string()), |pid| {
                 assert_eq!(pid, 100);
                 Some(true)
             }, |_| None, |_| None));
@@ -2947,19 +2960,19 @@ mod tests {
         // `sh -c 'sleep 30'`: bash exec-optimizes, so pid 100 IS `sleep`, with
         // no
         // children. It is no longer a shell, so it is working.
-        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(!shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
     }
     #[test]
     fn shell_at_prompt_is_idle_for_a_command_shell_that_is_still_a_shell_with_no_child() {
-        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
         // A fact that cannot be read answers as an idle shell, as it always
         // has.
-        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| None, |_| None, |_| None, |_| None));
-        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(None), |_| Some("sh".to_string()), |_| None, |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| None, |_| None, |_| None, |_| None));
+        assert!(shell_at_prompt(100, 100, false, &mut ShellWatch::new(false, None), |_| Some("sh".to_string()), |_| None, |_| None, |_| None));
         // Native Windows: comm carries `.exe`, and a host with no foreground
         // group
         // answers 0, so the bare test is the pid's own process name.
-        assert!(shell_at_prompt(0, 100, false, &mut ShellWatch::new(None), |_| Some("bash.exe".to_string()), |_| Some(false), |_| None, |_| None));
+        assert!(shell_at_prompt(0, 100, false, &mut ShellWatch::new(false, None), |_| Some("bash.exe".to_string()), |_| Some(false), |_| None, |_| None));
     }
     /// R3 (F5): a command that runs only builtins has no child and never
     /// execs, so its CPU time is the only sign it is busy. A rise between
@@ -2967,7 +2980,7 @@ mod tests {
     /// sample.
     #[test]
     fn a_builtin_only_command_loop_reads_working_while_its_cpu_time_rises() {
-        let mut watch = ShellWatch::new(None);
+        let mut watch = ShellWatch::new(false, None);
         let cpu = |ticks: u64| move |_: i32| Some(ticks);
         let read = |watch: &mut ShellWatch, ticks: u64| {
             shell_at_prompt(100, 100, false, watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, cpu(ticks))
@@ -2981,7 +2994,7 @@ mod tests {
     /// readable tick compares against the last reading it actually had.
     #[test]
     fn an_unreadable_cpu_tick_keeps_the_last_sample() {
-        let mut watch = ShellWatch::new(None);
+        let mut watch = ShellWatch::new(false, None);
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| Some(5)));
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| None));
         assert!(!shell_at_prompt(100, 100, false, &mut watch, |_| Some("sh".to_string()), |_| Some(false), |_| None, |_| Some(9)));
@@ -2994,17 +3007,17 @@ mod tests {
     #[test]
     fn an_exec_is_read_by_the_executable_not_the_name() {
         let at_spawn = Some(ExeId { dev: 1, ino: 10 });
-        let mut watch = ShellWatch::new(at_spawn);
+        let mut watch = ShellWatch::new(false, at_spawn);
         assert!(
             !shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| Some(ExeId { dev: 1, ino: 11 }), |_| None),
             "an exec'd process renamed to bash is working"
         );
-        let mut watch = ShellWatch::new(at_spawn);
+        let mut watch = ShellWatch::new(false, at_spawn);
         assert!(
             shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| at_spawn, |_| None),
             "the shell itself, still its own executable, is idle"
         );
-        let mut watch = ShellWatch::new(None);
+        let mut watch = ShellWatch::new(false, None);
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None));
         assert!(!shell_at_prompt(100, 100, false, &mut watch, |_| Some("sleep".to_string()), |_| Some(false), |_| None, |_| None));
     }
@@ -3014,24 +3027,45 @@ mod tests {
     /// the name decides, as it always did.
     #[test]
     fn an_unreadable_exe_with_a_baseline_is_an_exec() {
-        let mut watch = ShellWatch::new(Some(ExeId { dev: 1, ino: 10 }));
+        let mut watch = ShellWatch::new(false, Some(ExeId { dev: 1, ino: 10 }));
         assert!(
             !shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None),
             "an unreadable executable with a baseline reads working"
         );
-        let mut watch = ShellWatch::new(None);
+        let mut watch = ShellWatch::new(false, None);
         assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| None, |_| None));
+    }
+    /// Never idle: a session whose argv runs a privilege program is working
+    /// before anything is read. A dumpable stand-in at its password prompt is
+    /// still its spawned executable, with no child, flat CPU and a shell's
+    /// comm, and those same facts read idle without the privilege.
+    #[test]
+    fn a_privileged_session_is_working_before_anything_is_read() {
+        let at_spawn = Some(ExeId { dev: 1, ino: 10 });
+        let mut watch = ShellWatch::new(true, at_spawn);
+        assert!(!shell_at_prompt(
+            100,
+            100,
+            false,
+            &mut watch,
+            |_| panic!("comm is not probed"),
+            |_| panic!("children are not probed"),
+            |_| panic!("the executable is not probed"),
+            |_| panic!("CPU is not probed"),
+        ));
+        let mut watch = ShellWatch::new(false, at_spawn);
+        assert!(shell_at_prompt(100, 100, false, &mut watch, |_| Some("bash".to_string()), |_| Some(false), |_| at_spawn, |_| Some(5)));
     }
 
     #[test]
     fn shell_at_prompt_is_working_while_a_foreground_command_holds_the_terminal() {
         // A foreground group that is not the shell: working, and neither fact
         // is probed.
-        assert!(!shell_at_prompt(200, 100, false, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
-        assert!(!shell_at_prompt(200, 100, true, &mut ShellWatch::new(None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(!shell_at_prompt(200, 100, false, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
+        assert!(!shell_at_prompt(200, 100, true, &mut ShellWatch::new(false, None), |_| panic!("comm is not probed"), |_| panic!("children are not probed"), |_| None, |_| None));
         // A host with no foreground group that still has a live child
         // (Windows).
-        assert!(!shell_at_prompt(0, 100, false, &mut ShellWatch::new(None), |_| Some("cmd.exe".to_string()), |_| Some(true), |_| None, |_| None));
+        assert!(!shell_at_prompt(0, 100, false, &mut ShellWatch::new(false, None), |_| Some("cmd.exe".to_string()), |_| Some(true), |_| None, |_| None));
     }
     #[test]
     fn shell_snapshot_a_working_command_shell_labels_its_own_command() {
@@ -5512,6 +5546,13 @@ mod tests {
     #[cfg(unix)]
     impl LiveSession {
         fn start(tag: &str, argv: &[&str]) -> Self {
+            Self::start_with(tag, argv, true, None)
+        }
+
+        /// `headless` false conducts with a stdin, a pipe this test writes
+        /// through [`LiveSession::type_stdin`]. `bin` goes first on the
+        /// session's `PATH`.
+        fn start_with(tag: &str, argv: &[&str], headless: bool, bin: Option<&std::path::Path>) -> Self {
             let lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
             let env = EnvVars::save(&[
                 "AOIDE_STAGE_DIR",
@@ -5529,15 +5570,25 @@ mod tests {
             std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
             std::env::set_var("XDG_RUNTIME_DIR", &root);
             std::env::remove_var("AOIDE_SESSION_ID");
-            let child = std::process::Command::new(built_aoide_bin())
-                .args(["conduct", "--headless", "--id", tag, "--agent", "worker", "--"])
+            let mut conduct = std::process::Command::new(built_aoide_bin());
+            conduct.arg("conduct");
+            if headless {
+                conduct.arg("--headless");
+            }
+            if let Some(bin) = bin {
+                let path = std::env::var_os("PATH").unwrap_or_default();
+                let dirs = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&path));
+                conduct.env("PATH", std::env::join_paths(dirs).expect("a PATH"));
+            }
+            let child = conduct
+                .args(["--id", tag, "--agent", "worker", "--"])
                 .args(argv)
                 .env("AOIDE_STAGE_DIR", &stage)
                 .env("AOIDE_STATE_DIR", &state)
                 .env("AOIDE_AUDIT_LOG", root.join("log"))
                 .env("XDG_RUNTIME_DIR", &root)
                 .env_remove("AOIDE_SESSION_ID")
-                .stdin(std::process::Stdio::null())
+                .stdin(if headless { std::process::Stdio::null() } else { std::process::Stdio::piped() })
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -5555,6 +5606,30 @@ mod tests {
             let mut door = std::os::unix::net::UnixStream::connect(conduct_socket_path(&self.tag))
                 .expect("the session's inbox is bound while it runs");
             door.write_all(bytes).unwrap();
+        }
+
+        /// Writes `bytes` to the session's own stdin, as the operator's keys.
+        fn type_stdin(&mut self, bytes: &[u8]) {
+            use std::io::Write as _;
+            let stdin = self.child.stdin.as_mut().expect("a session started with a stdin");
+            stdin.write_all(bytes).unwrap();
+            stdin.flush().unwrap();
+        }
+
+        /// The pid of the program the session conducts: the one child `aoide
+        /// conduct` spawns.
+        #[cfg(target_os = "linux")]
+        fn conducted_pid(&self, budget: std::time::Duration) -> Option<i32> {
+            let conduct = self.child.id();
+            let deadline = std::time::Instant::now() + budget;
+            while std::time::Instant::now() < deadline {
+                let children = std::fs::read_to_string(format!("/proc/{conduct}/task/{conduct}/children"));
+                if let Some(pid) = children.ok().and_then(|c| c.split_whitespace().next()?.parse().ok()) {
+                    return Some(pid);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            None
         }
 
         fn wait_exit(&mut self) -> std::process::ExitStatus {
@@ -5614,8 +5689,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_command_shell_whose_exec_renames_itself_bash_reads_working() {
-        if !python3_on_path() {
-            eprintln!("skipped: python3 is not on PATH, so nothing here can rename itself with prctl");
+        if python3_image().is_none() {
+            eprintln!("skipping: python3 is not on PATH, so nothing here can rename itself with prctl");
             return;
         }
         a_command_shell_reads_working_until_its_command_ends(
@@ -5626,42 +5701,139 @@ mod tests {
 
     /// The spoof a non-setuid process can run on itself: it renames itself `bash`
     /// and makes its own executable unreadable with `PR_SET_DUMPABLE 0`. The
-    /// executable is no longer the one the spawn started, so the shell reads
-    /// working. Skipped as root, which reads every executable, and where python3
-    /// is not on PATH.
-    #[cfg(unix)]
+    /// shell here IS python3, an `sh` on a private `PATH` that links to its ELF,
+    /// so nothing execs and the baseline is python3's own file. Once comm says
+    /// `bash` and the executable cannot be read, the verdict settles on working,
+    /// though there is no child and the CPU is flat: three seconds of ticks that
+    /// all read it. A tick from before the prctl may still be on the record, so
+    /// the test waits for the settled stretch rather than reading one record.
+    /// Skipped as root, which reads every executable, and where python3 is not
+    /// on PATH.
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_command_shell_renamed_to_bash_and_made_undumpable_reads_working() {
         if unsafe { libc::geteuid() } == 0 {
-            eprintln!("skipped: as root every executable stays readable");
+            eprintln!("skipping: as root every executable stays readable");
             return;
         }
-        if !python3_on_path() {
-            eprintln!("skipped: python3 is not on PATH, so nothing here can rename itself with prctl");
+        let Some(python3) = python3_image() else {
+            eprintln!("skipping: python3 is not on PATH, so nothing here can rename itself with prctl");
             return;
-        }
-        a_command_shell_reads_working_until_its_command_ends(
+        };
+        let bin = unique_stage("sb-undump-bin");
+        std::os::unix::fs::symlink(&python3, bin.join("sh")).expect("an sh that links to python3");
+        let session = LiveSession::start_with(
             "sb-undump",
-            &["sh", "-c", "exec python3 -c 'import ctypes,time; c=ctypes.CDLL(None); c.prctl(15, b\"bash\", 0, 0, 0); c.prctl(4, 0, 0, 0, 0); time.sleep(6)'"],
+            &["sh", "-c", "import ctypes,time; c=ctypes.CDLL(None); c.prctl(15, b'bash', 0, 0, 0); c.prctl(4, 0, 0, 0, 0); time.sleep(30)"],
+            true,
+            Some(&bin),
         );
+        let shell = session.conducted_pid(std::time::Duration::from_secs(10)).expect("the conducted shell starts");
+        let exe = format!("/proc/{shell}/exe");
+        let spoofed = || {
+            std::fs::read_to_string(format!("/proc/{shell}/comm")).is_ok_and(|c| c.trim_end() == "bash")
+                && std::fs::metadata(&exe).is_err()
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !spoofed() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(spoofed(), "the shell never renamed itself bash and made its executable unreadable");
+        let settle = std::time::Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut working_since: Option<std::time::Instant> = None;
+        let mut last = None;
+        while std::time::Instant::now() < deadline && working_since.is_none_or(|t| t.elapsed() < settle) {
+            last = session.wait_for(std::time::Duration::from_millis(500), |_| true);
+            let working = last.as_ref().is_some_and(|r| {
+                r.state == "working" && r.restore.as_ref().is_some_and(|x| !x.idle)
+            });
+            working_since = if working { working_since.or(Some(std::time::Instant::now())) } else { None };
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(
+            working_since.is_some_and(|t| t.elapsed() >= settle),
+            "an undumpable shell renamed to bash never settled on working: {last:?}"
+        );
+        drop(session);
+        let _ = std::fs::remove_dir_all(&bin);
     }
 
     /// The baseline is the image the spawn started, and a `#!` script's image is
-    /// its interpreter: the file `/proc/<pid>/exe` names after the exec. `busybox`
-    /// has no baseline, since its applets never change the executable.
+    /// its interpreter: the file `/proc/<pid>/exe` names after the exec. The
+    /// interpreter is a stand-in built here, so the host's own `/bin/sh` (busybox
+    /// in the nix sandbox) decides nothing.
     #[cfg(target_os = "linux")]
     #[test]
-    fn a_script_baseline_is_its_interpreter_and_busybox_has_none() {
-        let dir = std::env::temp_dir().join(format!("aoide-baseline-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("a scratch dir");
+    fn a_script_baseline_is_its_interpreter() {
+        let dir = unique_stage("baseline-script");
+        let interpreter = dir.join("standin-sh");
+        std::fs::write(&interpreter, b"\x7fELF").expect("the stand-in");
         let script = dir.join("probe.sh");
-        std::fs::write(&script, "#!/bin/sh\necho hi\n").expect("the script");
-        let sh = std::path::PathBuf::from("/bin/sh");
-        assert_eq!(first_exec_image(&script), Some(sh.clone()));
-        assert_eq!(first_exec_image(&sh), Some(sh.clone()));
-        assert_eq!(shell_baseline("sh", Some(&sh)), identity_of(&sh));
-        assert!(shell_baseline("busybox", Some(&sh)).is_none());
+        std::fs::write(&script, format!("#!{} -e\necho hi\n", interpreter.display())).expect("the script");
+        assert_eq!(first_exec_image(&script), Some(interpreter.clone()));
+        assert_eq!(first_exec_image(&interpreter), Some(interpreter.clone()));
+        assert!(identity_of(&interpreter).is_some());
+        assert_eq!(shell_baseline(Some(&script)), identity_of(&interpreter));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `busybox` has no baseline, since its applets never change the executable.
+    /// It is known by the file the spawned path resolves to, never by the name:
+    /// an `sh` that links to it has none, nor has a script it interprets, while a
+    /// link named `busybox` to another file has one. The stand-in is built here;
+    /// a nix busybox ships no applet links.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_shell_linked_to_busybox_has_no_baseline() {
+        let dir = unique_stage("baseline-busybox");
+        let busybox = dir.join("busybox");
+        std::fs::write(&busybox, b"\x7fELF").expect("the stand-in");
+        let sh = dir.join("sh");
+        std::os::unix::fs::symlink(&busybox, &sh).expect("an sh that links to busybox");
+        assert_eq!(shell_baseline(Some(&sh)), None, "an sh linked to busybox");
+        assert_eq!(shell_baseline(Some(&busybox)), None);
+        let script = dir.join("probe.sh");
+        std::fs::write(&script, format!("#!{} sh\n", sh.display())).expect("the script");
+        assert_eq!(shell_baseline(Some(&script)), None, "a script busybox interprets");
+        let other = dir.join("standin-sh");
+        std::fs::write(&other, b"\x7fELF").expect("another stand-in");
+        let named = dir.join("named");
+        std::fs::create_dir(&named).expect("a dir for the misnamed link");
+        std::os::unix::fs::symlink(&other, named.join("busybox")).expect("a link named busybox");
+        assert_eq!(shell_baseline(Some(&named.join("busybox"))), identity_of(&other));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Never idle, end to end: a dumpable `sudo` stand-in (a `#!` script on a
+    /// private `PATH`) sits at its password prompt with the same executable, no
+    /// child and flat CPU, which reads idle for any other program. Keys typed at
+    /// that prompt reach the session's stdin, yet no tick records them: the
+    /// screen still asks for the password, and `restore` stays not idle with no
+    /// `typed`.
+    #[cfg(unix)]
+    #[test]
+    fn a_privileged_session_records_nothing_typed_at_its_password_prompt() {
+        let bin = unique_stage("sb-sudo-bin");
+        let sudo = bin.join("sudo");
+        std::fs::write(&sudo, "#!/bin/sh\nprintf '[sudo] password for khoa: '\nread -r pw\n").expect("the stand-in");
+        std::fs::set_permissions(&sudo, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("its mode");
+        let mut session = LiveSession::start_with("sb-sudo", &["sudo", "bash"], false, Some(&bin));
+        let Some(asking) = session.wait_for(std::time::Duration::from_secs(30), |r| r.state == "awaiting" && r.question.is_some()) else {
+            panic!("the stand-in's password prompt was never heard");
+        };
+        assert_eq!(asking.question.as_deref(), Some("[sudo] password for khoa:"));
+        assert_eq!(asking.needs_sudo, Some(true));
+        session.type_stdin(b"hunter2");
+        let recorded = session.wait_for(std::time::Duration::from_secs(4), |r| {
+            r.restore.as_ref().is_none_or(|x| x.idle || x.typed.is_some())
+        });
+        assert!(recorded.is_none(), "a privileged session recorded what was typed at its prompt: {recorded:?}");
+        let rec = session.wait_for(std::time::Duration::from_secs(1), |_| true).expect("the record");
+        assert_eq!(rec.state, "awaiting");
+        assert_eq!(rec.question.as_deref(), Some("[sudo] password for khoa:"));
+        drop(session);
+        let _ = std::fs::remove_dir_all(&bin);
     }
 
     /// R3 (F5), end to end: a loop of builtins, with no child and no exec,
@@ -5676,12 +5848,17 @@ mod tests {
         );
     }
 
+    /// The ELF file `python3` on PATH runs, as python3 reads its own
+    /// `/proc/self/exe`: past any `#!` wrapper, so a link to it starts python3
+    /// itself. `None` where python3 or its ctypes is missing.
     #[cfg(unix)]
-    fn python3_on_path() -> bool {
-        std::process::Command::new("python3")
-            .args(["-c", "import ctypes"])
+    fn python3_image() -> Option<PathBuf> {
+        let out = std::process::Command::new("python3")
+            .args(["-c", "import ctypes, os; print(os.readlink('/proc/self/exe'))"])
             .output()
-            .is_ok_and(|o| o.status.success())
+            .ok()
+            .filter(|o| o.status.success())?;
+        Some(PathBuf::from(String::from_utf8(out.stdout).ok()?.trim_end()))
     }
 
     /// An interactive shell reads idle at its own prompt, and a command typed
