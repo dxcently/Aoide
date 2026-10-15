@@ -3150,6 +3150,7 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     );
     let audit_status = match &outcome {
         aoide_storage::mail::DepositOutcome::BadMsgid
+        | aoide_storage::mail::DepositOutcome::MalformedAck
         | aoide_storage::mail::DepositOutcome::UnverifiedOrigin
         | aoide_storage::mail::DepositOutcome::NotCorrespondence => "invalid",
         _ => "ok",
@@ -3171,6 +3172,11 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
             "status": "refused",
             "reason": "bad-msgid",
             "detail": "envelope msgid does not match the recomputed value",
+        })),
+        aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
+            "status": "refused",
+            "reason": "bad-msgid",
+            "detail": "receipt text is not exactly one msgid: it names no letter",
         })),
         aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
             "status": "refused",
@@ -3757,6 +3763,11 @@ fn deposit_sealed(
                     "status": "refused",
                     "reason": "bad-msgid",
                     "detail": "envelope msgid does not match the recomputed value",
+                })),
+                aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
+                    "status": "refused",
+                    "reason": "bad-msgid",
+                    "detail": "receipt text is not exactly one msgid: it names no letter",
                 })),
                 aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
                     "status": "refused",

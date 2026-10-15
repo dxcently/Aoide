@@ -156,10 +156,11 @@ lyra shellbridge [--run] [--json]
   a bare `lyra rice mode declarative` with `--json`, waits, then fires a
   detached `notify-send "Aoide" <message>` on success and failure; the audit
   line is `ricemode action <action>: <ok|failed>`, never a song), `ricedraft` (the draft picker's gesture, a
-  closed `enter|new|save` whitelist, fire-and-forget like `ricemode`: re-execs
-  `lyra rice mode draft <name>` / `lyra rice draft save` with `--json` — from
-  declarative, `enter` and `new` first run a bare `lyra rice mode stage` and
-  `save` is refused (unlock first) — and toasts the CLI's message,
+  closed `enter|new|save|drop` whitelist, fire-and-forget like `ricemode`:
+  re-execs `lyra rice mode draft <name>` / `lyra rice draft save` / `lyra rice
+  draft drop <name>` with `--json` — from declarative, `enter` and `new` first
+  run a bare `lyra rice mode stage` and `save` and `drop` are refused (unlock
+  first) — and toasts the CLI's message,
   `partial: `-prefixed when an earlier step had already succeeded; `enter` is
   enter-or-create, because the CLI forks the stage into a name that is not
   there yet; the audit line is `ricedraft action <action>: <ok|partial|

@@ -46,6 +46,7 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
+- **An ack's `from.node` is this box's name in the letter's mesh, never its hostname.** `mint_ack_from` takes the name; `mint_ack_in_mesh` is the hostname form, for callers with no charter to read. The origin verifies the ack against the key it holds for that name, so a hostname-signed ack is refused and its letter never retires.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -967,6 +968,9 @@
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
+  Its `text` must be exactly one msgid (`mail::is_msgid`) before anything
+  is looked up: the text becomes a path, so a non-msgid retires nothing and
+  builds no path.
   A
   `refused: bool` entry (a JSON-RPC admission refusal, distinct from an
   ordinary transport failure) stops a drain from retrying it but still
@@ -1004,6 +1008,18 @@
   unbounded answer is a single JSON array of whole envelopes and walks
   straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
   can clear.
+- **A receipt is filed only against a spooled letter, and by a bounded
+  check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
+  it with the receipt's `to.node`; that read is lock-free because the caller
+  holds the stage lock, which the outbox lock shares and does not nest. Do not
+  replace it with a base scan, and do not move the `to` check after the
+  index: an unknown msgid must not reach a write.
+- **`update_entry` is the only write-back a drain makes to an entry it has
+  already read.** It writes only when the entry is still spooled. The drain
+  reads an entry, dials, and writes the answer back; a receipt that lands
+  during the dial retires the entry first, and a plain `write_entry` would
+  re-spool it. Every post-dial bookkeeping write in `mail_wire` goes through
+  it; `write_entry` stays for entries the caller just created.
 - **`write_ack_if_absent` gates on PENDING state, never a permanent
   ledger (mail register §26 outbox fix).** A duplicate letter redelivery
   mints a fresh ack via `mail::mint_ack` on every call — the gate lives

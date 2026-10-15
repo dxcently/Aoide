@@ -489,6 +489,115 @@ fn a_host_whose_name_is_not_its_charter_name_still_hops_and_still_receives() {
     }
 }
 
+/// **An ack is signed as the name this box holds IN THE LETTER'S MESH, not as its
+/// hostname.** `chiyo` files a letter from `osaka` in `home`, where its key is
+/// `chiyo`'s line, while its OS name is `chiyo-host`. The receipt the filing
+/// spools must say `chiyo`, or `osaka` checks it against a key it holds for
+/// `chiyo-host` (none), refuses it, and never retires its letter. Before the
+/// fix the ack carried `chiyo-host` and `retire_by_ack` returned nothing.
+#[test]
+fn a_host_whose_name_is_not_its_charter_name_acks_as_the_charter_name() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("ack-host-vs-line");
+    fx.enter("osaka");
+    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "chiyo", "conductor", "ack me", HOME)
+        .unwrap();
+    let msgid = letter.msgid.clone();
+    aoide_storage::outbox::write_entry("sakaki", &aoide_storage::outbox::OutboxEntry::fresh(letter.clone())).unwrap();
+
+    fx.enter("chiyo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
+    let outcome = aoide_storage::mail::deposit(letter.clone(), "conductor").unwrap();
+    assert!(matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }), "{outcome:?}");
+    aoide_client::mail_wire::settle_deposit(&letter, &outcome);
+    // The spooled ack goes out sealed, so the wire carries its container and the
+    // outbox envelope is redacted. The origin opens the container, as the door does.
+    let entry = ["osaka", "sakaki", "chiyo"]
+        .iter()
+        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
+        .find(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
+        .expect("the filing spools an ack toward the origin");
+    assert_eq!(entry.envelope.header.from.node, "chiyo", "the ack is signed as the charter name, never the hostname");
+
+    fx.enter("osaka");
+    let ack = match entry.container.as_ref() {
+        Some(container) => match aoide_storage::seal::deposit_container(container, HOME).unwrap() {
+            aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => (*envelope).clone(),
+            other => panic!("the origin opens the ack's container: {other:?}"),
+        },
+        None => entry.envelope.clone(),
+    };
+    assert!(matches!(
+        aoide_storage::mail::deposit(ack.clone(), "conductor").unwrap(),
+        aoide_storage::mail::DepositOutcome::Filed { .. } | aoide_storage::mail::DepositOutcome::Duplicate { .. }
+    ));
+    assert_eq!(
+        aoide_storage::outbox::retire_by_ack(&ack).unwrap().as_deref(),
+        Some(msgid.as_str()),
+        "the origin verifies the ack against chiyo's key and retires its letter"
+    );
+}
+
+/// **A pair mesh names no charter, so its ack is signed as this box's own name
+/// there, which is the hostname.** The fallback `own_name_in` keeps for a mesh no
+/// charter governs; `family` has no declaration on this fixture.
+#[test]
+fn a_pair_mesh_ack_is_signed_as_the_boxs_own_name() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("ack-pair-mesh");
+    fx.enter("chiyo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
+    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "chiyo", "conductor", "pair", "family")
+        .unwrap();
+    // The filing is taken as given: `family` holds no key for `osaka`, so a real
+    // deposit would stop at the origin check. This test is about the ack only.
+    let filed = aoide_storage::mail::DepositOutcome::Filed {
+        msgid: letter.msgid.clone(),
+        kind: aoide_storage::mail::ENTRY_TYPE_LETTER.to_string(),
+    };
+    aoide_client::mail_wire::settle_deposit(&letter, &filed);
+    let acks: Vec<_> = ["osaka", "sakaki"]
+        .iter()
+        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
+        .map(|e| e.envelope)
+        .filter(|e| e.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
+        .collect();
+    assert_eq!(acks.len(), 1, "one ack spooled: {acks:?}");
+    assert_eq!(acks[0].header.from.node, "chiyo-host", "a pair mesh's ack carries this box's own name");
+    assert_eq!(acks[0].header.from.node, aoide_storage::display::local_node_name());
+}
+
+/// **A charter mesh whose lines do not carry this box's key mints no ack, and
+/// says why.** `evo` is a stranger in `home`; its hostname is set to `chiyo`, a
+/// member's name there, and the letter still gets no receipt. The refusal is
+/// written to the audit log, so an operator sees the stranger, not silence.
+#[test]
+fn a_charter_mesh_without_this_boxs_key_mints_no_ack_and_says_why() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("ack-stranger");
+    fx.enter("evo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo");
+    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "evo", "conductor", "stranger", HOME)
+        .unwrap();
+    // Taken as filed, as in the pair-mesh test: `evo` holds no key for `osaka`
+    // in `home`, so a real deposit would stop at the origin check.
+    let filed = aoide_storage::mail::DepositOutcome::Filed {
+        msgid: letter.msgid.clone(),
+        kind: aoide_storage::mail::ENTRY_TYPE_LETTER.to_string(),
+    };
+    aoide_client::mail_wire::settle_deposit(&letter, &filed);
+    let spooled: Vec<_> = ["osaka", "sakaki", "chiyo"]
+        .iter()
+        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
+        .collect();
+    assert!(
+        spooled.iter().all(|e| e.envelope.header.kind != aoide_storage::mail::ENTRY_TYPE_RECEIPT),
+        "no ack is minted: {spooled:?}"
+    );
+    let audit = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap_or_default();
+    assert!(audit.contains("mail.ack.withheld"), "the withheld ack is audited: {audit}");
+}
+
 /// **A learnt binding is only usable if it is the DECLARED key's.** A binding is
 /// stored per NAME, so a file left by an earlier pairing — or written by anything
 /// on this machine — would otherwise seal a letter to a key the mesh no longer

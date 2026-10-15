@@ -711,19 +711,20 @@ in the message.
   carries an argument value.
 - **The RICE menu's verbs hold no rice rule, and the planner is the one place
   a mode changes the plan.** `ricedraft` is `RiceDraftAction::from_wire` (the
-  ONE gate: `enter` needs a `safe_session_id`-shaped `name`, `new` and `save`
-  REFUSE one — an ignored field is a caller's mistake read as success — and a
+  ONE gate: `enter` and `drop` need a `safe_session_id`-shaped `name`, `new`
+  and `save` REFUSE one — an ignored field is a caller's mistake read as success — and a
   line that fails it is dropped with no reply) → `rice_draft_plan(mode,
-  action)` (pure; the unlock step and the Declarative-`save` refusal live there
-  and nowhere else) → `dispatch_rice_draft` (the sequencer; `new`'s entering
+  action)` (pure; the unlock step and the Declarative-`save`/`drop` refusals
+  live there and nowhere else) → `dispatch_rice_draft` (the sequencer; `new`'s entering
   step takes the `data.name` the save step answered). Never validate the
   draft-name regex here — `aoide-song` is lyra-only and conduct must not depend
   on it — and never pre-check that a draft exists: `rice mode draft` creates
-  one, so an `enter` is enter-or-create and a pre-check would only race it. The
+  one, so an `enter` is enter-or-create and a pre-check would only race it;
+  a `drop` of a missing draft or of the draft in force is the CLI's refusal. The
   unlock is a BARE `rice mode stage` (house rule 10), never a declared song. `drafts_song` and
   the plan agree on ONE song per mode: declarative lists `stagingSong` because
-  an unlock lands there, and refuses `save` because the stage there is the
-  declared song — change one and the other moves with it. `ricemenu` is a
+  an unlock lands there, and refuses `save` and `drop` because the stage there
+  is the declared song — change one and the other moves with it. `ricemenu` is a
   READ: it answers on its own connection with both children under the one
   `RICE_MENU_TIMEOUT` budget (below the client's 5 s reply timeout), the
   `rice list` data passes through verbatim, a child that did not answer is a

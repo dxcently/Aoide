@@ -51,13 +51,13 @@ QtObject {
     required property var stagingEngine
     required property string slot
     property var extraProps: ({})
+    property Component fallback: null
 
     // Same baseline-fallback resolution WidgetSlot uses (CONTRACTS.md §5):
-    // the active song if it authored `slot`, else sonata. No lane-side
-    // `fallback` Component here — unlike calendar/notifications, a
-    // window-owning slot has no shared PanelWindow left behind in the lane
-    // to fall back to; powermenu/launcher move as whole units, sonata IS
-    // the floor.
+    // the active song if it authored `slot`, else sonata, else the lane-side
+    // `fallback` Component when the host gives one, else nothing. Most
+    // window-owning slots give none (sonata IS their floor); `switcher` gives
+    // the plain AoideSwitcher, because no song ships one.
     readonly property string resolvedSong: stagingEngine.resolveSong(livery.songName, slot)
     readonly property bool songProvides: resolvedSong !== ""
     readonly property string resolvedSource:
@@ -134,6 +134,8 @@ QtObject {
         if (root.songProvides) {
             var comp = Qt.createComponent(root.resolvedSource)
             root._create(comp)
+        } else if (root.fallback) {
+            root._create(root.fallback)
         } else {
             console.warn("[aoide/surfaceslot] no song (active or baseline) provides slot", root.slot)
         }

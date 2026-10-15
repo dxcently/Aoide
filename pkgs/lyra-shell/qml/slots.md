@@ -26,11 +26,12 @@ Both anchor kinds resolve through the SAME baseline-fallback chain
 (`StagingEngine.resolveSong`, CONTRACTS.md §5): the active song's own file if
 it authored the slot, else **sonata's** (the shipped standard song — the
 baseline every song falls back to, a fixed constant independent of
-`aoide.song`'s own default, which is null), else — `WidgetSlot`
-only — the anchor's own lane-side `fallback` Component, else nothing.
-`SurfaceSlot` slots have no lane-side fallback: sonata's file IS the floor,
-since a window-owning slot moves as one whole unit with nothing left behind
-in the lane to fall back to.
+`aoide.song`'s own default, which is null), else the anchor's own lane-side
+`fallback` Component, else nothing. Most `SurfaceSlot` slots give no
+`fallback`: sonata's file IS their floor, since a window-owning slot moves as
+one whole unit. `switcher` is the one that gives one — the plain
+`AoideSwitcher.qml` — because no shipped song authors a switcher, and the
+shortcut must open something in every song.
 
 **`wallpaper` is the one exception: it has NO baseline floor.** Its anchor
 (`AoideWallpaper.qml`) does not use `resolveSong` at all — it gates on
@@ -118,7 +119,8 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | `power` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "power" }`) | none | none — sonata's own `widgets/power.qml` IS the baseline floor |
 | `herald-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no lane-side Component fallback is wired |
 | `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
-| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
+| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`; its live `.item` is also handed to `AoideWallpaperPicker`, whose `aoide:wallpaper` shortcut calls `.item.openPictures()` when the body has one (else the plain cover picker opens) | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
+| `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `AoideSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A song dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 | `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime songbook's songs, back to declarative, then the draft rows; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a song may dress it with its own body (cadenza and fugue do) |
 | `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface, over the staged cover image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active song>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the cover image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `cover set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
@@ -130,6 +132,7 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | `dock` | `aoide-dock` | Overlay |
 | `powermenu` | `aoide-powermenu` | Overlay |
 | `launcher` | `aoide-launcher` | Overlay |
+| `switcher` | `aoide-switcher` | Overlay |
 
 The compositor lane's glass layerrules (`modules/dendrites/compositor/hyprland/default.nix`)
 match on these namespaces (`layerrule blur` + hyprglass) — the namespace
@@ -140,7 +143,7 @@ A namespace in this table is a **mapped layer surface** — and a song declares
 which of those it expects to be persistently mapped, by namespace, in
 `aoide.arrangement.surfaces` (`CONTRACTS.md` §5, published as
 `run/qml/songs/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
-Surfaces summoned on demand — `powermenu`/`launcher` here, plus the OSD, lock
+Surfaces summoned on demand — `powermenu`/`launcher`/`switcher` here, plus the OSD, lock
 screen, greeter and `*Preview` surfaces — are deliberately **not** declared.
 
 A slot is added to this table **only once a real anchor (`WidgetSlot` or

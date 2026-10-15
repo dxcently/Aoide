@@ -104,11 +104,12 @@ declarative`, whose declared twin the CLI resolves. The outcome is a
 `notify-send` toast carrying the CLI's own message, on success and on failure;
 the audit line is `ricemode action <action>: <ok|failed>`, never a song.
 
-`{cmd:"ricedraft", action:"enter"|"new"|"save", name?}` is the gesture, and
-fire-and-forget like `ricemode`: the outcome is a `notify-send` toast carrying
-the CLI's own message, never a reply. `enter` needs a `name` that is one argv
-token and nothing more; `new` and `save` refuse a `name` outright, and an
-`enter` with none usable is refused the same way, so a mistaken caller is
+`{cmd:"ricedraft", action:"enter"|"new"|"save"|"drop", name?}` is the
+gesture, and fire-and-forget like `ricemode`: the outcome is a `notify-send`
+toast carrying the CLI's own message, never a reply. `enter` and `drop` need a
+`name` that is one argv token and nothing more; `new` and `save` refuse a
+`name` outright, and an `enter` or `drop` with none usable is refused the same
+way, so a mistaken caller is
 dropped instead of misread as success. Whether the name is a valid draft name
 is the CLI's call, and so is what happens to it: `rice mode draft <name>`
 ENTERS or CREATES, forking the current stage into a valid name that does not
@@ -118,21 +119,26 @@ apart: a stale menu row, or a draft dropped elsewhere since the last
 `enter` runs `rice mode draft <name>`; `new` runs `rice draft save` with no
 name, which mints the lowest free `draft-<n>` of the staged song, then enters
 the `data.name` it answered with; `save` runs `rice draft save` and never
-changes the mode.
+changes the mode; `drop` runs `rice draft drop <name>`, deleting a saved draft
+of the staged song, and never changes the mode either. A `drop` of a draft
+that does not exist, or of the draft in force, is the CLI's refusal, toasted
+as its own message.
 
 Entering a draft is refused while declarative is locked, so `enter` and `new`
 from there first run a BARE `rice mode stage` — which restores the remembered
-`stagingSong` (house rule 10), never the declared song. `save` has no such step: it is REFUSED while declarative is
-locked, with the toast `declarative mode is locked — unlock first, then save
-the draft`, because the lock re-pins the stage to the declared song and `rice
-draft save` nests under the song the stage names, while `ricemenu` lists
-`stagingSong`. A save there would land under a song the menu never shows. The
-refusal runs nothing, and is `failed`, not `partial`. Steps stop at the first
+`stagingSong` (house rule 10), never the declared song. `save` and `drop` have
+no such step: they are REFUSED while declarative is locked, with the toast
+`declarative mode is locked — unlock first, then save the draft` (or `…then
+delete the draft`), because the lock re-pins the stage to the declared song
+and `rice draft save`/`drop` act on the song the stage names, while `ricemenu`
+lists `stagingSong`. A save there would land under, and a drop would delete
+from, a song the menu never shows; unlocking first would change the mode as a
+side effect of a save or a delete. The refusal runs nothing, and is `failed`, not `partial`. Steps stop at the first
 failure. A failure after an earlier step succeeded is `partial`: nothing rolls
 back (the unlock stands, a minted draft stays saved), and the toast says so,
 prefixed `partial: `. The audit line is one per action, event `ricedraft`,
 `ricedraft-partial` or `ricedraft-failed`, detail `ricedraft action <enter|
-new|save>: <ok|partial|failed>` — never a draft or song name, which only the
+new|save|drop>: <ok|partial|failed>` — never a draft or song name, which only the
 toast carries. A malformed line is dropped with the plain `unparseable` audit
 and no reply.
 
