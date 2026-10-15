@@ -10884,7 +10884,9 @@ mod tests {
         entry.last_outcome = "accepted".to_string(); // the earlier successful POST
         aoide_storage::outbox::write_entry(&node_name, &entry).unwrap();
 
-        let to = aoide_storage::mail::Address { node: "wherever".to_string(), name: "bob".to_string() };
+        // Addressed to the name the letter went out as: that is what a receipt
+        // is for, and the only address a receipt is filed under.
+        let to = aoide_storage::mail::Address { node: node_name.clone(), name: "here".to_string() };
         let ack = aoide_storage::mail::mint_ack("bob", to, &msgid).unwrap();
         let outcome = aoide_storage::mail::deposit(ack, "test").unwrap();
         assert!(matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }), "a genuine, verified ack must file");

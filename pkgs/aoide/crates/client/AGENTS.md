@@ -700,7 +700,22 @@
   be; a `transit` container is the hub's custody, ended by the next hop's
   acceptance. Widening that set to letters would retire a letter on a delivery
   nobody acked. **Only a VERIFIED answer reaches it**: an unsigned, forged or
-  replayed `accepted` leaves all three kinds spooled.
+  replayed `accepted` leaves all three kinds spooled. Its letter write-back
+  goes through `outbox::update_entry`, so a letter a receipt retired during
+  the dial is not re-spooled; every post-dial write in `drain_node` does the
+  same. The reseal writes the same way, and an entry is attempted only after
+  `outbox::still_spooled` says it is spooled. The check comes AFTER the reseal,
+  so a reseal write cannot re-spool an entry past it.
+- **A receipt retires its letter on first filing, and on a duplicate of one.**
+  `settle_deposit` calls `retire_by_ack` for a receipt in either outcome; the
+  retire is idempotent. `mail::deposit` answers a second receipt from the same
+  signer for the same msgid `duplicate` and files it nothing. **The hub's
+  custody ends (`record_filed`) for a container this box filed, already held,
+  or refused for good** (`refusal_clears_on_retry` decides "for good": every
+  refusal of the bytes, and not a refusal of the box's own state, which keeps
+  custody). Every outcome that files nothing is named in `refused` and audited
+  by `refuse_container` or `refuse_envelope`, and the `DepositOutcome` match in
+  `poll_through` has no catch-all.
 - **Every mail answer is verified before it is read.** `post_signed` is the one
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a
@@ -839,7 +854,8 @@
   node.** Do not add a second address test for this, and do not push the
   decision back out to callers. `settle_deposit` is the ONE place an outcome
   turns into spool side effects (ack minted and spooled on a filed letter
-  or a letter duplicate, `retire_by_ack` on a filed receipt, a `transit`
+  or a letter duplicate, `retire_by_ack` on a receipt (filed, or a duplicate
+  of one), a `transit`
   entry retired on the hop that took it); the door
   reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
   `aoide-server` never keeps a second copy — do not put the ack mint back

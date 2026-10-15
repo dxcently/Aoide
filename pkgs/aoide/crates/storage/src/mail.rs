@@ -420,6 +420,15 @@ pub(crate) fn header_from_canonical_bytes(bytes: &[u8]) -> Option<Header> {
     })
 }
 
+/// Is `text` exactly one msgid: 64 lowercase hex digits, nothing around them.
+/// The one shape a receipt's text may take. A receipt's text is the msgid it
+/// acknowledges, and it becomes a path component in the outbox (`<msgid>.json`),
+/// so anything looser — a trailing newline, a `../`, a capital — is refused
+/// before it can name a file, not after.
+pub fn is_msgid(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// Recompute `msgid` from a (possibly tampered) header/text/sig triple —
 /// `hex sha256 over sig ‖ header ‖ 0x00 ‖ text`, no separator before
 /// `header`, one before `text` (MAIL.md "The envelope"). `None` only when
@@ -816,6 +825,42 @@ fn append_seen_line(msgid: &str, received_at: &str) -> Result<(), String> {
     f.write_all(b"\n").map_err(|e| e.to_string())
 }
 
+/// The index a filed receipt is keyed on: the signer, the mesh the receipt is
+/// signed in, and the msgid of the letter it acknowledges. Its own msgid is not
+/// in it, since a re-ack is a new envelope.
+fn receipt_key(envelope: &Envelope) -> String {
+    serde_json::to_string(&(&envelope.header.from.node, &envelope.header.origin_mesh, &envelope.text))
+        .unwrap_or_default()
+}
+
+fn receipts_path() -> PathBuf {
+    mail_dir().join("receipts.seen")
+}
+
+/// Every receipt key already filed, read from the sidecar index: one line per
+/// filed receipt, so the read grows with the letters this box has sent and never
+/// with the base.
+fn read_receipt_keys_unlocked() -> Result<HashSet<String>, String> {
+    let path = receipts_path();
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => Ok(raw.lines().map(str::to_string).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashSet::new()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+fn append_receipt_key(key: &str) -> Result<(), String> {
+    let path = receipts_path();
+    ensure_mail_dir()?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    f.write_all(key.as_bytes()).map_err(|e| e.to_string())?;
+    f.write_all(b"\n").map_err(|e| e.to_string())
+}
+
 fn load_cursors() -> Result<Cursors, String> {
     load_stage(&cursors_path())
 }
@@ -1149,6 +1194,10 @@ pub enum DepositOutcome {
     /// `msgid` does not recompute from `(header, text, sig)` — tampered or
     /// corrupt in transit.
     BadMsgid,
+    /// A verified `receipt` whose `text` is not exactly one msgid
+    /// ([`is_msgid`]). It names no letter this box could retire, so it files
+    /// nothing. Answered on the wire as `bad-msgid`, with its own detail.
+    MalformedAck,
     /// [`verify_origin_signature`] returned `false`.
     UnverifiedOrigin,
     /// A `charter` envelope arrived as plaintext ([`REFUSAL_NOT_CORRESPONDENCE`])
@@ -1200,7 +1249,37 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         if envelope.header.kind == ENTRY_TYPE_CHARTER {
             return Ok(DepositOutcome::NotCorrespondence);
         }
+        // A receipt names the one letter it acknowledges, and nothing else. A
+        // verified signer's receipt whose text is anything but one msgid names
+        // no letter this box can retire, so it is refused as a bad msgid.
+        if envelope.header.kind == ENTRY_TYPE_RECEIPT && !is_msgid(&envelope.text) {
+            return Ok(DepositOutcome::MalformedAck);
+        }
         let seen = read_seen_msgids_unlocked()?;
+        // A receipt files only for a letter this box still holds, addressed to the
+        // name that letter went out as. Anything else names no letter this box can
+        // retire, so it files nothing, and is answered `duplicate`: nothing is
+        // filed and nothing is owed, so the sender retires its copy instead of
+        // parking it. This bounds the base to the letters this box has sent: a
+        // flood of distinct msgids is refused before any write.
+        let receipt_key = if envelope.header.kind == ENTRY_TYPE_RECEIPT {
+            if crate::outbox::spooled_letter_sender(&envelope.text)?.as_deref() != Some(envelope.header.to.node.as_str()) {
+                return Ok(DepositOutcome::Duplicate { filed_letter: false });
+            }
+            // The second line of defence against an ack loop. A signer acknowledges
+            // a letter once, per mesh: a second receipt from the same signer, in the
+            // same mesh, for the same acked msgid files nothing. It covers the
+            // window between a filing and the sender's own settlement, which runs
+            // after this lock is released. A receipt in another mesh is a different
+            // acknowledgement and is not conflated with this one.
+            let key = receipt_key(&envelope);
+            if read_receipt_keys_unlocked()?.contains(&key) {
+                return Ok(DepositOutcome::Duplicate { filed_letter: false });
+            }
+            Some(key)
+        } else {
+            None
+        };
         if seen.contains(&envelope.msgid) {
             // Re-derive whether the already-filed entry was a letter,
             // without a second full parse of `base.jsonl` beyond what a
@@ -1215,6 +1294,9 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         let kind = envelope.header.kind.clone();
         let msgid = envelope.msgid.clone();
         file_received_entry(envelope, via)?;
+        if let Some(key) = receipt_key {
+            append_receipt_key(&key)?;
+        }
         Ok(DepositOutcome::Filed { msgid, kind })
     })
 }
@@ -1961,6 +2043,162 @@ mod tests {
             !verify_origin_signature(&unknown),
             "no key on record for from.node must refuse, never fall back to any other key"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A verified signer's receipt for `alice-host`, as that node would mint it.
+    fn alice_receipt(text: &str, minted_at: &str, alice: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", "bob", ENTRY_TYPE_RECEIPT, minted_at);
+        h.from.node = "alice-host".to_string();
+        let (sig, msgid) = seal(&h, text, alice);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// [`alice_receipt`] signed in `mesh` (`header.origin_mesh`), so the same
+    /// acknowledgement can be minted once per mesh.
+    fn alice_receipt_in(text: &str, minted_at: &str, mesh: &str, alice: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", "bob", ENTRY_TYPE_RECEIPT, minted_at);
+        h.from.node = "alice-host".to_string();
+        h.origin_mesh = mesh.to_string();
+        let (sig, msgid) = seal(&h, text, alice);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// A letter this box sent as `yomi` and still holds under `msgid`: the one
+    /// record a receipt for it is filed against. [`header`] names `yomi` as the
+    /// sending node, so a receipt addressed to `yomi` names this box.
+    fn spool_letter_sent_as_yomi(msgid: &str) {
+        let envelope = Envelope {
+            header: header("bob", "alice", ENTRY_TYPE_LETTER, "2026-09-06T00:00:00Z"),
+            text: String::new(),
+            sig: String::new(),
+            msgid: msgid.to_string(),
+        };
+        crate::outbox::write_entry("alice-host", &crate::outbox::OutboxEntry::fresh(envelope)).unwrap();
+    }
+
+    /// `alice-host` on record under a fresh key, so its receipts verify.
+    fn alice_on_record() -> identity::Keypair {
+        let alice = identity::mint_ephemeral().unwrap();
+        let mut nodes = Vec::new();
+        crate::node_store::upsert_paired_node(
+            &mut nodes,
+            "alice-host",
+            "https://alice",
+            &alice.info().pubkey_hex,
+            "2026-09-06T00:00:00Z",
+            &["message".to_string()],
+            "home",
+        );
+        crate::node_store::save_nodes(&nodes).unwrap();
+        alice
+    }
+
+    /// **A receipt names exactly one letter, or it files nothing.** Its text
+    /// becomes a path in the outbox, so a receipt whose text is anything but one
+    /// lowercase 64-hex msgid is refused as a bad msgid, signed or not. A proper
+    /// one still files.
+    #[test]
+    fn a_receipt_whose_text_is_not_exactly_one_msgid_is_refused() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-shape");
+        let alice = alice_on_record();
+        let letter = "ab".repeat(32);
+
+        for text in [format!("{letter} "), format!("{letter}\n"), format!("../{letter}"), letter.to_uppercase()] {
+            let ack = alice_receipt(&text, "2026-09-06T00:00:01Z", &alice);
+            assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::MalformedAck, "{text:?}");
+        }
+        assert!(read_base().unwrap().is_empty(), "no malformed receipt is filed");
+
+        spool_letter_sent_as_yomi(&letter);
+        let ack = alice_receipt(&letter, "2026-09-06T00:00:01Z", &alice);
+        assert!(matches!(deposit(ack, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A signer acknowledges a letter once.** A second receipt from the same
+    /// signer naming the same msgid — a re-ack minted in a later second, so a new
+    /// msgid — is answered `duplicate` and files nothing, however many times a
+    /// sender re-acks.
+    #[test]
+    fn a_second_receipt_from_the_same_signer_for_the_same_letter_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-dedup");
+        let alice = alice_on_record();
+        let letter = "cd".repeat(32);
+
+        spool_letter_sent_as_yomi(&letter);
+        let first = alice_receipt(&letter, "2026-09-06T00:00:01Z", &alice);
+        let again = alice_receipt(&letter, "2026-09-06T00:00:02Z", &alice);
+        assert_ne!(first.msgid, again.msgid, "a re-ack is a new envelope");
+        assert!(matches!(deposit(first, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
+        assert_eq!(deposit(again, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false });
+        assert_eq!(read_base().unwrap().len(), 1, "one receipt for the letter, however many re-acks arrive");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A flood of receipts for letters this box never sent files nothing.**
+    /// Each receipt names a fresh, well-formed msgid and is properly signed, so
+    /// every one passes the shape and signature checks. None names a letter this
+    /// box holds, so none is filed, and the base and the receipt index stay empty.
+    #[test]
+    fn a_flood_of_receipts_for_letters_never_sent_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-flood");
+        let alice = alice_on_record();
+
+        for i in 0..200u32 {
+            let text = format!("{i:064x}");
+            let ack = alice_receipt(&text, "2026-09-06T00:00:01Z", &alice);
+            assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false }, "{i}");
+        }
+        assert!(read_base().unwrap().is_empty(), "no receipt for an unsent letter is filed");
+        assert!(!receipts_path().exists(), "and nothing is indexed either");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A receipt addressed to a name other than the one its letter went out as
+    /// names a letter this box did send, but not to this name: it is not filed.
+    #[test]
+    fn a_receipt_addressed_to_another_name_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-addressee");
+        let alice = alice_on_record();
+        let letter = "ef".repeat(32);
+        spool_letter_sent_as_yomi(&letter);
+
+        let mut h = header("alice", "bob", ENTRY_TYPE_RECEIPT, "2026-09-06T00:00:01Z");
+        h.from.node = "alice-host".to_string();
+        h.to.node = "elsewhere".to_string();
+        let (sig, msgid) = seal(&h, &letter, &alice);
+        let ack = Envelope { header: h, text: letter.clone(), sig, msgid };
+        assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false });
+        assert!(read_base().unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The same acknowledgement in another mesh is a different acknowledgement.**
+    /// The dedup key is the signer, the mesh and the acked msgid, so a receipt
+    /// signed in mesh `far` does not stand in for the one signed in `home`.
+    #[test]
+    fn the_same_letters_receipt_in_another_mesh_is_not_conflated() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-mesh");
+        let alice = alice_on_record();
+        let letter = "ab".repeat(32);
+        spool_letter_sent_as_yomi(&letter);
+
+        let home = alice_receipt_in(&letter, "2026-09-06T00:00:01Z", "home", &alice);
+        let far = alice_receipt_in(&letter, "2026-09-06T00:00:02Z", "far", &alice);
+        assert!(matches!(deposit(home, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
+        assert!(matches!(deposit(far, "alice-host").unwrap(), DepositOutcome::Filed { .. }), "filed, not a duplicate");
+        assert_eq!(read_base().unwrap().len(), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

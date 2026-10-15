@@ -542,7 +542,9 @@ never the inbound/serve half (that's `aoide-server`).
   envelope's own `header.from.node`), then through `settle_deposit`:
   filing a letter spools its ack toward the letter's origin, a receipt
   retires the entry it confirms, and a re-poll before the ack files
-  nothing twice and spools nothing twice. **`aoide mail poll [<node>]` is
+  nothing twice and spools nothing twice. A re-ack of a letter already
+  filed files nothing either, and the write-back after a deposit never
+  re-spools a letter the ack has retired. **`aoide mail poll [<node>]` is
   the second caller of `poll_node`, and the reason it exists: an empty
   outbox never dials, so `drain_node`'s poll-on-contact can never reach a
   node with nothing to send — the one receive path the relay model needs

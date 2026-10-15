@@ -762,7 +762,10 @@ by decision — no embedded database yet
   policy in one function — recompute `msgid`, verify the origin
   signature, dedup against `seen.jsonl` (a filed `letter`'s duplicate
   reports whether it was ever filed, so the caller knows to re-spool the
-  ack), then file via the new `file_received_entry`. Both mint functions
+  ack), then file via the new `file_received_entry`. A receipt is filed
+  only against a letter still spooled here under its own name
+  (`outbox::spooled_letter_sender`), and a repeat of one already filed is
+  caught by `receipts.seen`, keyed on (signer, mesh, acked msgid). Both mint functions
   and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
   exactly P-M1's shape, addressed at a real node instead of `self`.
 
@@ -825,12 +828,13 @@ by decision — no embedded database yet
   file mutations and a SEPARATE, non-blocking per-node `.bsy` flock a
   drain holds across its whole dial cycle — two locks, two jobs, never
   conflated (this module's own doc has the full reasoning). Pure spool
-  CRUD only: `write_entry`/`list_entries`/`remove_entry`, `retire_by_ack`
-  (spec item 7's two checks — verified signer is the entry's `to.node`,
-  text names the entry's `msgid` — folded into ONE path lookup: an entry
-  is always spooled under its own `to.node`, so indexing by the ack's
-  already-origin-verified `from.node` IS the signer check, and keying by
-  `msgid` makes a wrong `text` a plain miss) and the link-state
+  CRUD only: `write_entry`/`update_entry`/`list_entries`/`remove_entry`,
+  `retire_by_ack` (spec item 7's two checks — verified signer is the
+  entry's `to.node`, text names the entry's `msgid` — folded into ONE path
+  lookup: an entry is always spooled under its own `to.node`, so indexing
+  by the ack's already-origin-verified `from.node` IS the signer check, and
+  keying by `msgid` makes a wrong `text` a plain miss; a `text` that is not
+  one msgid retires nothing before that lookup is made) and the link-state
   trio (`read_link_state`/`back_off`/`clear_link_state`, backoff off a
   `DRAIN_BACKOFF_FLOOR_SECS` floor doubling up to its own
   `BACKOFF_CEILING_SECS` (15 min) ceiling — deliberately not
