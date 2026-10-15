@@ -1281,6 +1281,57 @@ fn relay_proves_charter_key(node: &Node, mesh: &str) -> Result<(), String> {
     ))
 }
 
+/// Whether a container refusal can clear on a later poll. Such a refusal is a
+/// fact about THIS box's own state (its config, its charter, its disk), so the
+/// hub keeps custody and offers the container again. Every other refusal is a
+/// fact about the container: its bytes, its chain, or a key it names. The same
+/// bytes are refused the same way on every re-offer, so custody is released
+/// instead, which is recoverable because the origin keeps its own retry copy and
+/// re-sends it on its own drains.
+fn refusal_clears_on_retry(word: &str) -> bool {
+    use aoide_storage::charter::{
+        CHARTER_TAMPERED, CONFIG_INVALID, CONFIG_UNREADABLE, LOCAL_IO, NO_CHARTER_IN_FORCE, OPERATOR_MISMATCH,
+        STALE_CHARTER, UNKNOWN_OPERATOR,
+    };
+    matches!(
+        word,
+        LOCAL_IO
+            | CONFIG_UNREADABLE
+            | CONFIG_INVALID
+            | NO_CHARTER_IN_FORCE
+            | UNKNOWN_OPERATOR
+            | STALE_CHARTER
+            | CHARTER_TAMPERED
+            | OPERATOR_MISMATCH
+    )
+}
+
+/// A container the poll refused: audited and named to the caller, so `mail poll`
+/// reports why rather than answering "0 filed" (review N13, L9). What the refusal
+/// does to the hub's custody is decided by the caller, not here.
+fn refuse_container(node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
+    refuse_named("container", node_name, msgid, word, detail, refused);
+}
+
+/// A plaintext envelope the poll refused: the same audit and report as a
+/// container, under its own event name.
+fn refuse_envelope(node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
+    refuse_named("envelope", node_name, msgid, word, detail, refused);
+}
+
+fn refuse_named(what: &str, node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
+    let detail = if detail.is_empty() { String::new() } else { format!(": {}", foreign_words(detail, LINE_MAX)) };
+    let _ = aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::audit::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        &format!("mail.poll.{what}-refused"),
+        "invalid",
+        &format!("{what} {} from `{node_name}` refused: {word}{detail}", foreign_words(msgid, LINE_MAX)),
+    );
+    refused.push(format!("{msgid}: {word}"));
+}
+
 /// A refusal as one line for a caller that reports text: what, why, and the fix.
 fn taught_text(refusal: &aoide_protocol::output::Refusal) -> String {
     use aoide_protocol::output::Fix;
@@ -1400,55 +1451,72 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         // The polled node must be the chain's LAST hop: the hand-over this pull
         // is taking is the one that node signed for. Anything else is refused
         // like any other bad chain (the refusal is reported and audited below).
-        if aoide_storage::seal::chain_deposited_by(&container, node_name).is_err() {
-            refused.push(format!("{}: {}", container.msgid, aoide_storage::seal::BROKEN_CHAIN));
+        if let Err(refusal) = aoide_storage::seal::chain_deposited_by(&container, node_name) {
+            refuse_container(node_name, &container.msgid, &refusal.reason, &refusal.detail, &mut refused);
+            if !refusal_clears_on_retry(&refusal.reason) {
+                let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+            }
             continue;
         }
         let outcome = match aoide_storage::seal::deposit_container(&container, &mesh) {
             Ok(outcome) => outcome,
-            Err(_) => continue,
+            Err(e) => {
+                refuse_container(node_name, &container.msgid, aoide_storage::charter::LOCAL_IO, &e, &mut refused);
+                continue;
+            }
         };
         match outcome {
             aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
-                let Ok(filed_outcome) = aoide_storage::mail::deposit((*envelope).clone(), node_name) else {
-                    continue;
+                let filed_outcome = match aoide_storage::mail::deposit((*envelope).clone(), node_name) {
+                    Ok(outcome) => outcome,
+                    Err(e) => {
+                        refuse_container(node_name, &container.msgid, aoide_storage::charter::LOCAL_IO, &e, &mut refused);
+                        continue;
+                    }
                 };
+                // Every outcome that files nothing is named. The closed set is
+                // classified here with no catch-all, so a new variant has to be
+                // decided on. The four refusals are facts about the bytes.
+                let refusal = match &filed_outcome {
+                    aoide_storage::mail::DepositOutcome::Filed { .. }
+                    | aoide_storage::mail::DepositOutcome::Duplicate { .. } => None,
+                    aoide_storage::mail::DepositOutcome::BadMsgid
+                    | aoide_storage::mail::DepositOutcome::MalformedAck => Some("bad-msgid"),
+                    aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Some("unverified-origin"),
+                    aoide_storage::mail::DepositOutcome::NotCorrespondence => {
+                        Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
+                    }
+                };
+                if let Some(word) = refusal {
+                    settle_deposit(&envelope, &filed_outcome);
+                    refuse_container(node_name, &container.msgid, word, "", &mut refused);
+                    // These bytes are refused for good, so the hub's custody ends
+                    // here rather than re-offering them forever (`refusal_clears_on_retry`).
+                    let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                    continue;
+                }
                 if matches!(filed_outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
                     filed += 1;
                 }
                 // M1: recorded only once it is filed — see the door's own arm.
                 // L17: and a failed write is audited rather than dropped.
-                if matches!(
-                    filed_outcome,
-                    aoide_storage::mail::DepositOutcome::Filed { .. }
-                        | aoide_storage::mail::DepositOutcome::Duplicate { .. }
-                ) {
-                    if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
-                        let _ = aoide_protocol::audit::audit(
-                            &aoide_protocol::audit::default_audit_log(),
-                            aoide_protocol::audit::Door::Cli,
-                            aoide_protocol::audit::EventClass::Audit,
-                            "mail.poll.dedup-record-failed",
-                            "invalid",
-                            &format!("{msgid}: {e}"),
-                        );
-                    }
+                if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
+                    let _ = aoide_protocol::audit::audit(
+                        &aoide_protocol::audit::default_audit_log(),
+                        aoide_protocol::audit::Door::Cli,
+                        aoide_protocol::audit::EventClass::Audit,
+                        "mail.poll.dedup-record-failed",
+                        "invalid",
+                        &format!("{msgid}: {e}"),
+                    );
                 }
                 settle_deposit(&envelope, &filed_outcome);
                 // The hub's custody of the CONTAINER ends when it is told this
                 // box has it: the next poll of that node carries this msgid
                 // (`outbox::record_filed`), and until then the entry is offered
                 // again — a lost response must not lose the letter. Said only once
-                // the container is on this disk: a refusal here (an unverified
-                // origin, a bad msgid) filed nothing, and telling the hub otherwise
-                // would retire its only copy.
-                if matches!(
-                    filed_outcome,
-                    aoide_storage::mail::DepositOutcome::Filed { .. }
-                        | aoide_storage::mail::DepositOutcome::Duplicate { .. }
-                ) {
-                    let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
-                }
+                // the container is on this disk.
+                let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
             }
             aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
                 // **A duplicate is custody this box already has.** The hub is
@@ -1549,28 +1617,13 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                 let _ = aoide_storage::outbox::record_filed(node_name, &hop.container.msgid);
             }
             aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
-                // L9 (the branch review): a polled container that refuses used
-                // to vanish — no audit, no report — while the origin's `hold`
-                // entry stayed in its spool and was re-offered on every poll
-                // forever. The design's "parks AND IS REPORTED" needs a
-                // carrier on the pull path, and this is it: the destination
-                // writes the taught word it refused with. Best-effort, like
-                // every other audit call here — a log write must never take
-                // the poll down.
-                let _ = aoide_protocol::audit::audit(
-                    &aoide_protocol::audit::default_audit_log(),
-                    aoide_protocol::audit::Door::Cli,
-                    aoide_protocol::audit::EventClass::Audit,
-                    "mail.poll.container-refused",
-                    "invalid",
-                    &format!(
-                        "container {msgid} from `{node_name}` refused: {reason}: {}",
-                        foreign_words(&detail, LINE_MAX)
-                    ),
-                );
-                // …and NAMED to the caller, so `mail poll` reports it (review
-                // N13) rather than answering "0 filed" with no reason.
-                refused.push(format!("{}: {reason}", container.msgid));
+                // L9 (the branch review): a refused container is audited and
+                // named, never silently dropped (`refuse_container`). What it
+                // does to the hub's custody depends on the refusal alone.
+                refuse_container(node_name, &container.msgid, &reason, &detail, &mut refused);
+                if !refusal_clears_on_retry(&reason) {
+                    let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
+                }
             }
         }
     }
@@ -1579,8 +1632,26 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         let Ok(envelope) = serde_json::from_value::<Envelope>(envelope.clone()) else { continue };
         let outcome = match aoide_storage::mail::deposit(envelope.clone(), node_name) {
             Ok(outcome) => outcome,
-            Err(_) => continue,
+            Err(e) => {
+                refuse_envelope(node_name, &envelope.msgid, aoide_storage::charter::LOCAL_IO, &e, &mut refused);
+                continue;
+            }
         };
+        let refusal = match &outcome {
+            aoide_storage::mail::DepositOutcome::Filed { .. }
+            | aoide_storage::mail::DepositOutcome::Duplicate { .. } => None,
+            aoide_storage::mail::DepositOutcome::BadMsgid
+            | aoide_storage::mail::DepositOutcome::MalformedAck => Some("bad-msgid"),
+            aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Some("unverified-origin"),
+            aoide_storage::mail::DepositOutcome::NotCorrespondence => {
+                Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
+            }
+        };
+        if let Some(word) = refusal {
+            // A plaintext letter is not the hub's custody (it retires by ack, not
+            // by `filed`), so there is nothing to release here: it is named only.
+            refuse_envelope(node_name, &envelope.msgid, word, "", &mut refused);
+        }
         if matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
             filed += 1;
         }
@@ -4574,13 +4645,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A hub's custody ends only for a container this box filed.** A poll hands
-    /// over a container addressed here, sealed by a known relay, whose receipt
-    /// names no msgid: this box opens it and refuses it as a bad msgid. The hub
-    /// must not be told it was filed — it would retire its only copy of an ack
-    /// nobody here holds.
+    /// **A hub's custody ends for a container this box filed or refused for
+    /// good, and for nothing else.** A poll hands over a container addressed
+    /// here, sealed by a known relay, whose receipt names no msgid: this box
+    /// opens it and refuses it as a bad msgid. That refusal repeats on every
+    /// re-offer, so the hub is told custody has ended, and the refusal is named
+    /// to the caller. The origin keeps its own retry copy.
     #[test]
-    fn a_polled_container_this_box_refuses_is_not_acknowledged() {
+    fn a_polled_container_this_box_refuses_is_named_and_released() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("poll-refused-not-acked");
 
@@ -4627,10 +4699,157 @@ mod tests {
         let outcome = poll_node("relay", None).unwrap();
         assert_eq!(outcome.filed, 0, "nothing is filed: {outcome:?}");
         assert!(aoide_storage::mail::show(&msgid).unwrap().is_none(), "and nothing is on this disk");
+        assert_eq!(outcome.refused.len(), 1, "the refusal is named: {:?}", outcome.refused);
         assert!(
-            aoide_storage::outbox::filed_pending("relay").unwrap().is_empty(),
-            "the hub is not told a container this box refused was filed"
+            aoide_storage::outbox::filed_pending("relay").unwrap().contains(&msgid),
+            "a refusal that repeats on every re-offer releases the hub's custody"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The hub's own side of a pull, for a test that runs both ends in one
+    /// process: it retires what the poller says it took (its transit entries in
+    /// the spool it keeps for that poller), then offers what is still pollable,
+    /// as the server's `mail_poll` does.
+    fn hub_answer(hub: &str, body: &str) -> String {
+        let request: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+        let params = request.get("params").unwrap_or(&request);
+        for msgid in params.get("filed").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+            let _ = aoide_storage::outbox::retire_acknowledged(hub, msgid);
+        }
+        let (mut containers, mut envelopes) = (Vec::new(), Vec::new());
+        for (container, envelope) in aoide_storage::outbox::poll_payloads(hub).unwrap() {
+            match container {
+                Some(container) => containers.push(serde_json::to_value(container).unwrap()),
+                None => envelopes.push(serde_json::to_value(envelope).unwrap()),
+            }
+        }
+        json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": containers, "envelopes": envelopes } }).to_string()
+    }
+
+    /// A relay record whose door answers from `port`, granted `message`, so a poll
+    /// of it is admitted.
+    fn register_polled_relay(port: u16) {
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        relay.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.retain(|n| n.name != "relay");
+        nodes.push(relay);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    }
+
+    /// **A permanent refusal never starves a valid letter behind it.** The hub
+    /// holds 51 containers whose chain does not end at the poller, so each is
+    /// refused at once (`broken-chain`, a fact about the bytes). The first poll
+    /// is offered the 50 oldest; their custody is released, so the second poll's
+    /// hub retires them and offers the 51st and the valid letter, which files.
+    /// Without the release, every poll offers the same 50 and the letter never
+    /// arrives.
+    #[test]
+    fn fifty_one_refused_held_containers_never_starve_a_valid_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("refused-custody-cap");
+
+        register_local_origin();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        for i in 0..51 {
+            let letter =
+                aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", &format!("refused {i}")).unwrap();
+            let container = aoide_storage::seal::seal_envelope(
+                &letter,
+                &binding,
+                &letter.header.origin_mesh,
+                &letter.header.origin_mesh,
+                "relay",
+                "relay",
+                &now,
+            )
+            .unwrap();
+            let mut entry = OutboxEntry::transit_held(container);
+            // Oldest first, so the refused containers sort ahead of the letter.
+            entry.envelope.header.minted_at = format!("2020-01-01T00:{:02}:{:02}Z", i / 60, i % 60);
+            aoide_storage::outbox::write_entry("relay", &entry).unwrap();
+        }
+        let valid = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "the valid one").unwrap();
+        let valid_msgid = valid.msgid.clone();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::held(valid)).unwrap();
+        assert_eq!(aoide_storage::outbox::list_entries("relay").unwrap().len(), 52);
+
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+
+        let first = poll_node("relay", None).unwrap();
+        assert_eq!(first.refused.len(), 50, "the first poll is offered the 50 oldest: {:?}", first.refused);
+        assert!(aoide_storage::mail::show(&valid_msgid).unwrap().is_none(), "and the letter behind them is not yet offered");
+
+        let second = poll_node("relay", None).unwrap();
+        assert_eq!(second.filed, 1, "the second poll offers the valid letter and it files: {second:?}");
+        assert!(aoide_storage::mail::show(&valid_msgid).unwrap().is_some());
+        // The custody ends are carried to the hub by the NEXT poll's `filed` list.
+        let third = poll_node("relay", None).unwrap();
+        assert_eq!(third.filed, 0, "nothing new to file");
+        let left: Vec<String> =
+            aoide_storage::outbox::list_entries("relay").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec![valid_msgid.clone()], "every refused container's custody ended; the letter waits for its own ack");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A refusal of this box's own state keeps the hub's custody.** The
+    /// container is valid and opens, but this box cannot write its own base, so
+    /// the deposit fails for a local reason. The hub is not told, and offers the
+    /// container again; once the disk is sound, the next poll files it.
+    #[test]
+    fn a_local_fault_refusing_a_held_container_keeps_the_hubs_custody() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("local-fault-custody");
+
+        let me = register_local_origin();
+        // A letter from `relay` to this box, minted under that name, so the
+        // container's chain ends at the poller and the container opens here.
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "held by a local fault");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let msgid = letter.msgid.clone();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let now = aoide_storage::time::now_iso_utc();
+        let container =
+            aoide_storage::seal::seal_envelope(&letter, &binding, &mesh, &mesh, &me, &me, &now).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container)).unwrap();
+
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+        // A base this box cannot write: its seen set is a directory, so the
+        // deposit fails for a reason of its own state, not of the container.
+        let seen = aoide_storage::mail::seen_path();
+        std::fs::create_dir_all(&seen).unwrap();
+
+        let first = poll_node("relay", None).unwrap();
+        assert_eq!(first.filed, 0, "nothing is filed while the disk is unsound");
+        assert!(
+            first.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("local-io")),
+            "the refusal is named as a local fault: {:?}",
+            first.refused
+        );
+        assert!(
+            !aoide_storage::outbox::filed_pending("relay").unwrap().contains(&msgid),
+            "the hub is not told custody ended"
+        );
+        assert_eq!(aoide_storage::outbox::list_entries("relay").unwrap().len(), 1, "the hub still holds it");
+
+        std::fs::remove_dir_all(&seen).unwrap();
+        let second = poll_node("relay", None).unwrap();
+        assert_eq!(second.filed, 1, "the next poll offers it again and it files: {second:?}");
+        assert!(aoide_storage::mail::show(&msgid).unwrap().is_some());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

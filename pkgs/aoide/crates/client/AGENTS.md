@@ -708,9 +708,12 @@
   `settle_deposit` calls `retire_by_ack` for a receipt in either outcome; the
   retire is idempotent. `mail::deposit` answers a second receipt from the same
   signer for the same msgid `duplicate` and files it nothing. **The hub's
-  custody release (`record_filed`) is named only for a container this box
-  filed or already held**: a container it refused is never named, or the hub
-  retires its only copy.
+  custody ends (`record_filed`) for a container this box filed, already held,
+  or refused for good** (`refusal_clears_on_retry` decides "for good": every
+  refusal of the bytes, and not a refusal of the box's own state, which keeps
+  custody). Every outcome that files nothing is named in `refused` and audited
+  by `refuse_container` or `refuse_envelope`, and the `DepositOutcome` match in
+  `poll_through` has no catch-all.
 - **Every mail answer is verified before it is read.** `post_signed` is the one
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a

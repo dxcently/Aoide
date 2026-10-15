@@ -904,8 +904,10 @@ pub fn filed_pending(node: &str) -> Result<Vec<String>, String> {
     Ok(serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default())
 }
 
-/// Record that `msgid` was filed out of `node`'s poll, so the next poll of that
-/// node can tell it to retire its custody. Idempotent per msgid.
+/// Record that this box has taken custody of `msgid` out of `node`'s poll, or has
+/// refused it for good, so the next poll of that node can tell it to retire its
+/// custody. The wire key is still `filed`; it names the end of custody, which a
+/// permanent refusal ends too. Idempotent per msgid.
 pub fn record_filed(node: &str, msgid: &str) -> Result<(), String> {
     let node = node.to_string();
     let msgid = msgid.to_string();

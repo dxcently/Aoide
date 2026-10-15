@@ -495,13 +495,26 @@ door's audit name whitelist gains both names so they never log as bare
   asks instead of being declined as one oversized body). The caller's
   verified identity must BE `node` (no polling on another's behalf), hold
   `message` in the mesh the request names, and not be `down`. **`filed` is
-  the caller's acknowledgement** — the msgids it filed (or already held) out
-  of its PREVIOUS poll of this node, never one it refused
-  (`aoide_storage::outbox::filed_pending`) — and the hub
-  retires its own custody of those (a `transit` entry, and only that) before
-  it offers: a response can be lost, so the hand-over itself is not an
-  acknowledgement, and anything the poller has not yet named is offered
-  again. **One poll of a node runs at a time** (the `.poll` flock, tried and
+  the caller's acknowledgement** — the msgids it took custody of (filed, or
+  already held) out of its PREVIOUS poll of this node, and the msgids of
+  containers it refused for good (`bad-msgid`, `broken-chain`,
+  `unverified-origin`, `not-correspondence`, `open-failed`, and the other
+  refusals of the bytes themselves). A container refused for a reason of the
+  poller's own state (its disk, its config, its charter: `local-io`,
+  `config-unreadable`, `no-charter-in-force`, and the rest of that class) is
+  never named: its custody is kept and it is offered again. The hub retires
+  its own custody of the named msgids (a `transit` entry, and only that)
+  before it offers
+  (`aoide_storage::outbox::filed_pending`). A response can be lost, so the
+  hand-over itself is not an acknowledgement, and anything the poller has not
+  yet named is offered again. **The cost of a permanent refusal:** the hub
+  stops holding the container, so it cannot be re-offered from the hub. The
+  origin keeps its own retry copy until its receipt arrives, and its own
+  drains re-send it; the poller refuses it again if it is still refused. A
+  refused container leaves the hub before the next offer, so it never blocks
+  the poll behind it. A container held back by the poller's own state stays,
+  and a backlog of those can fill the `POLL_BATCH_CAP` window until the state
+  clears; that is the price of keeping custody for it. **One poll of a node runs at a time** (the `.poll` flock, tried and
   never waited for): two overlapping asks would both read `filed` before either
   recorded it, be handed the same letter, and mint two receipts for it — which
   the relay refuses as a different body for one msgid. The second ask answers
