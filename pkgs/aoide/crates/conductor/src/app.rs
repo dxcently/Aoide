@@ -591,6 +591,13 @@ pub struct PendingRow {
     /// The entry is a held launch (`spawn`/`resurrect`), not a held send: its
     /// `text` is the whole command line approving it would run.
     pub spawn: bool,
+    /// `send`, `spawn` or `resurrect`: what approving the entry runs, and so
+    /// what its confirm is titled.
+    pub kind: String,
+    /// What a human reads, spelled by the one escape rule in `conduct`.
+    pub shown: String,
+    /// A held resurrect's candidates, one spelled line each (empty otherwise).
+    pub plan: Vec<String>,
     /// The entry's fingerprint as `session pending list` prints it. Approve and
     /// deny send it as `--expect`, so the entry taken is the one drawn here.
     pub fingerprint: String,
@@ -607,6 +614,8 @@ pub struct SpawnConfirm {
     pub session_id: String,
     pub text: String,
     pub from: Option<String>,
+    pub kind: String,
+    pub plan: Vec<String>,
     pub fingerprint: String,
     pub scroll: usize,
     /// The furthest `scroll` that still shows the last line, written by the
@@ -1855,6 +1864,22 @@ impl App {
                 from: v["from"].as_str().map(String::from),
                 state: v["state"].as_str().unwrap_or("pending").to_string(),
                 spawn: v.get("spawn").is_some_and(|s| !s.is_null()),
+                kind: match v["spawn"]["path"][0].as_str() {
+                    Some("resurrect") => "resurrect",
+                    _ if v.get("spawn").is_some_and(|s| !s.is_null()) => "spawn",
+                    _ => "send",
+                }
+                .to_string(),
+                // A row from a `pending list` that predates `shown` is spelled here,
+                // by the same rule, so the row never paints the raw text.
+                shown: v["shown"]
+                    .as_str()
+                    .map(String::from)
+                    .unwrap_or_else(|| graph::visible(v["text"].as_str().unwrap_or(""))),
+                plan: v["plan"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|l| l.as_str().map(String::from)).collect())
+                    .unwrap_or_default(),
                 fingerprint: v["fingerprint"].as_str().unwrap_or("").to_string(),
             })
             .collect()
@@ -2389,13 +2414,10 @@ impl App {
                     return;
                 };
                 self.refresh_pending();
-                let unchanged = self.pending_rows().iter().any(|r| {
-                    r.id == confirm.id
-                        && r.spawn
-                        && r.session_id == confirm.session_id
-                        && r.text == confirm.text
-                        && r.fingerprint == confirm.fingerprint
-                });
+                let unchanged = self
+                    .pending_rows()
+                    .iter()
+                    .any(|r| r.id == confirm.id && r.fingerprint == confirm.fingerprint);
                 if unchanged {
                     let flags = BTreeMap::from([("expect".to_string(), confirm.fingerprint)]);
                     self.dispatch_with_flags(&["session", "pending", "approve"], &[confirm.id], flags);
@@ -2420,12 +2442,17 @@ impl App {
         };
         match row {
             ReviewRow::Header(_) => {}
-            ReviewRow::Pending(r) if accept && r.spawn => {
+            // Every held entry, a send included, waits on a second key: a row
+            // cannot show a whole command, and a send's `[submit]` and sender
+            // must be read before the text is typed.
+            ReviewRow::Pending(r) if accept => {
                 self.spawn_confirm = Some(SpawnConfirm {
                     id: r.id,
                     session_id: r.session_id,
-                    text: r.text,
+                    text: r.shown,
                     from: r.from,
+                    kind: r.kind,
+                    plan: r.plan,
                     fingerprint: r.fingerprint,
                     scroll: 0,
                     max_scroll: std::cell::Cell::new(0),
@@ -6833,6 +6860,7 @@ mod tests {
                         let mut entry = json!({
                             "id": i.to_string(), "sessionId": sid, "text": text, "submit": false,
                             "queuedAt": "t", "from": Value::Null, "state": "pending",
+                            "fingerprint": format!("{sid}|{text}"),
                         });
                         // A queued text that is a `spawn` command line is a held
                         // spawn, as the real list marks one.
@@ -6860,6 +6888,33 @@ mod tests {
         }
     }
 
+    /// A held send is not approved by its row's one key: `a` opens the confirm
+    /// with the whole entry, nothing is dispatched, and `n` cancels it. Before
+    /// the change `a` alone dispatched the approve.
+    #[test]
+    fn a_held_send_opens_its_confirm_on_a_and_dispatches_nothing_until_y() {
+        let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        PENDING_CALLS.lock().unwrap().clear();
+        *PENDING_QUEUE.lock().unwrap() = vec![("s0".into(), "a".into())];
+
+        with_isolated_stage(|| {
+            let mut app = App::for_test_with_dispatch(recording_pending_dispatch);
+            app.select_panel(Panel::Pending);
+            app.select_first_pending_row();
+
+            app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            assert!(app.spawn_confirm.is_some(), "a held send waits on a second key");
+            assert!(
+                !PENDING_CALLS.lock().unwrap().iter().any(|(p, _)| p == "session.pending.approve"),
+                "nothing approved on the first key"
+            );
+
+            app.handle_key(KeyEvent::from(KeyCode::Char('n')));
+            assert!(app.spawn_confirm.is_none());
+            assert!(!PENDING_CALLS.lock().unwrap().iter().any(|(p, _)| p == "session.pending.approve"));
+        });
+    }
+
     #[test]
     fn approve_dispatches_pending_approve_then_relists_and_positions_shift() {
         let _g = PENDING_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -6876,7 +6931,8 @@ mod tests {
             assert_eq!(app.pending_rows().len(), 3);
             app.select_first_pending_row(); // s0, the entry at position 0
 
-            app.handle_key(KeyEvent::from(KeyCode::Char('a'))); // approve
+            app.handle_key(KeyEvent::from(KeyCode::Char('a'))); // opens the confirm
+            app.handle_key(KeyEvent::from(KeyCode::Char('y'))); // approves
 
             let calls = PENDING_CALLS.lock().unwrap();
             // `reload_all` also refreshes the pair/node/mesh reads this slice
@@ -6962,7 +7018,9 @@ mod tests {
             app.select_first_pending_row();
 
             app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
             app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
 
             let rows = app.pending_rows();
             assert_eq!(rows.len(), 1);
@@ -7018,7 +7076,7 @@ mod tests {
             assert!(approvals().is_empty(), "the first key approves nothing");
             let confirm = app.spawn_confirm.as_ref().expect("a confirm view opened");
             assert_eq!(confirm.id, "1");
-            assert_eq!(confirm.text, command, "it holds the whole command as it replays");
+            assert_eq!(confirm.text, graph::visible(&command), "it holds the whole command as it replays");
 
             for key in [KeyCode::Char('a'), KeyCode::Char('A'), KeyCode::Enter, KeyCode::Char('x'), KeyCode::Tab] {
                 app.handle_key(KeyEvent::from(key));
@@ -7033,11 +7091,12 @@ mod tests {
             assert_eq!(rows.len(), 2);
             assert_eq!(rows[1].session_id, "s2", "the queue was re-listed");
 
-            // A send row needs no confirm: one `a` approves it, as before.
+            // A send row takes the same second key: `a` opens its confirm, `y` approves.
             app.select_first_pending_row();
             app.handle_key(KeyEvent::from(KeyCode::Char('a')));
-            assert!(app.spawn_confirm.is_none());
-            assert_eq!(approvals().len(), 2, "the send row was approved by its one key");
+            assert!(app.spawn_confirm.is_some(), "a send row opens its confirm");
+            app.handle_key(KeyEvent::from(KeyCode::Char('y')));
+            assert_eq!(approvals().len(), 2, "the send row was approved by its second key");
         });
     }
 

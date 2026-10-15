@@ -54,7 +54,7 @@ whenever it holds more rows than fit, and stays gone otherwise.
 | `q` / Ctrl-C | Quit outside text entry / quit globally |
 | Review: `j` / `k` | Walk session approvals, pairing requests and TOTP asks |
 | Review: `a` / `d` / `r` | Approve or resume / deny, reject or dismiss / re-list every queue |
-| Review on a held spawn: `a`, then `y` | Open the full command, then approve it; `n` or Esc cancels, arrows scroll |
+| Review on a held entry: `a`, then `y` | Open the whole entry, then approve it; `n` or Esc cancels, arrows and PgUp/PgDn scroll, a right click cancels, Ctrl-C quits and approves nothing |
 | Mesh: `e` / right-click | Pair, toggle a node's read/spawn/message grant, or unregister it |
 | Status: Enter or `e` | Edit the selected config key, or a secret's consumer grant |
 
@@ -225,11 +225,14 @@ own read's refusal, so a failed read never renders as an empty, all-clear
 queue. The cursor follows a row's identity, so a resolve that shortens the list
 moves the cursor with the rows that remain.
 
-`a` acts on whatever the cursor names. On a held spawn (or resurrect) it opens
-a confirm that shows the whole command, wrapped and scrollable, instead of
-approving from the one clipped row; only `y` approves, `n` and Esc cancel, and
-every other key does nothing. `y` re-reads the queue and approves only if the
-entry at that position is still the one on screen. Every row and the confirm
+`a` acts on whatever the cursor names. On any held entry (send, spawn or
+resurrect) it opens a confirm that shows the whole entry, wrapped and
+scrollable, instead of approving from the one row; only `y` approves, `n` and
+Esc cancel, arrows scroll, a right click cancels, and Ctrl-C quits without
+approving. A held resurrect's confirm lists each candidate and the restore it
+would type. The confirm's header leads with `from`, so the sender is read
+first. `y` re-reads the queue and approves only if the entry at that position
+is still the one on screen. Every row and the confirm
 spell a control, bidi or invisible character of the text as a visible escape
 (`\n`, `\x1b`, `\u{202e}`; `aoide_conduct::graph::visible`), never raw and
 never dropped. Approving or resuming a pairing request,

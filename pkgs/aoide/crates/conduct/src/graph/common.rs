@@ -122,7 +122,9 @@ fn visible_char(c: char) -> String {
         '\r' => "\\r".to_string(),
         '\t' => "\\t".to_string(),
         c if c.is_ascii() && c.is_control() => format!("\\x{:02x}", c as u32),
-        c if is_unsafe(c) || (c.is_whitespace() && c != ' ') => format!("\\u{{{:x}}}", c as u32),
+        c if is_unsafe(c) || (c.is_whitespace() && c != ' ') || is_mark_or_ignorable(c) => {
+            format!("\\u{{{:x}}}", c as u32)
+        }
         c => c.to_string(),
     }
 }
@@ -137,25 +139,38 @@ pub fn visible(s: &str) -> String {
     s.chars().map(visible_char).collect()
 }
 
-/// [`visible`] cut to `max` output characters with an ellipsis, never inside
-/// an escape.
-pub(in crate::graph) fn visible_clip(s: &str, max: usize) -> String {
-    let pieces: Vec<String> = s.chars().map(visible_char).collect();
-    if pieces.iter().map(|p| p.chars().count()).sum::<usize>() <= max {
-        return pieces.concat();
-    }
-    let mut out = String::new();
-    let mut width = 0;
-    for piece in &pieces {
-        let w = piece.chars().count();
-        if width + w > max.saturating_sub(1) {
-            break;
-        }
-        out.push_str(piece);
-        width += w;
-    }
-    out.push('…');
-    out
+/// [`visible`] for a held launch, every non-ASCII character spelled too: a
+/// Cyrillic `а` or a combining mark looks like the ASCII text it imitates, so an
+/// approver of a command reads only the ASCII it is shown. A held spawn's
+/// command goes through this, and nothing else does.
+pub fn visible_held(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii() { visible_char(c) } else { format!("\\u{{{:x}}}", c as u32) })
+        .collect()
+}
+
+/// Marks that draw over or into their neighbours (combining diacritics, the
+/// Mn/Me blocks that carry most overlays) and the default-ignorable code points
+/// a terminal or a font may draw as nothing. A reader cannot tell these from
+/// the text around them, so they are spelled, never printed.
+fn is_mark_or_ignorable(c: char) -> bool {
+    matches!(c as u32,
+        0x034F
+        | 0x0300..=0x036F
+        | 0x115F..=0x1160
+        | 0x17B4..=0x17B5
+        | 0x180B..=0x180F
+        | 0x1AB0..=0x1AFF
+        | 0x1DC0..=0x1DFF
+        | 0x2060..=0x206F
+        | 0x20D0..=0x20FF
+        | 0x3164
+        | 0xFE00..=0xFE0F
+        | 0xFE20..=0xFE2F
+        | 0xFEFF
+        | 0xFFA0
+        | 0xFFF0..=0xFFF8
+        | 0xE0000..=0xE0FFF)
 }
 
 /// Terminal escape sequences and control bytes removed from text the pty
@@ -270,14 +285,26 @@ mod tests {
         assert!(visible("a\nb\u{1b}\u{202e}").chars().all(|c| !is_unsafe(c)));
     }
 
-    /// The clip counts escaped characters and stops before an escape, never
-    /// inside one, and marks that it cut.
+    /// A combining mark and a default-ignorable are spelled, where they used to
+    /// print raw: a mark draws over its neighbour and an ignorable can hide
+    /// one, so neither may read as the text it sits in. Before the change each
+    /// of these came out byte-identical.
     #[test]
-    fn visible_clip_cuts_between_escapes_and_marks_it() {
-        assert_eq!(visible_clip("short\n", 10), "short\\n");
-        assert_eq!(visible_clip("ab\ncd", 4), "ab…", "the \\n that would straddle the cut is dropped whole");
-        assert_eq!(visible_clip("abcdef", 4), "abc…");
-        assert_eq!(visible_clip("a\u{1b}", 3), "a…");
+    fn visible_spells_combining_marks_and_default_ignorables() {
+        assert_eq!(visible("pro\u{34f}ject"), "pro\\u{34f}ject");
+        assert_eq!(visible("c\u{336}u\u{336}rl"), "c\\u{336}u\\u{336}rl");
+        assert_eq!(visible("\u{180b}x\u{fe0f}"), "\\u{180b}x\\u{fe0f}");
+        assert_eq!(visible("e\u{301}"), "e\\u{301}", "a precomposed-free accent is spelled too");
+        assert_eq!(visible("é 日本"), "é 日本", "plain letters and CJK are not marks");
+    }
+
+    /// A held launch's view is ASCII: a Cyrillic letter that looks like an ASCII
+    /// one is spelled, so the approver reads the command as it runs.
+    #[test]
+    fn visible_held_spells_every_non_ascii_character() {
+        assert_eq!(visible_held("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\\u{43e}ject");
+        assert_eq!(visible_held("a b\nc"), "a b\\nc");
+        assert_eq!(visible("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\u{43e}ject", "the general view keeps letters");
     }
 
     #[test]

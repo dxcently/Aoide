@@ -36,10 +36,13 @@ impl Invocation {
         if !tail {
             words.extend(self.args.iter().cloned());
         }
+        // A value flag is one word, `--key=value`, so a value that starts
+        // with `-` cannot read as a flag of its own.
         for (k, v) in self.flags.iter().filter(|(k, _)| k.as_str() != "json") {
-            words.push(format!("--{k}"));
-            if !bools.contains(&k.as_str()) {
-                words.push(v.clone());
+            if bools.contains(&k.as_str()) {
+                words.push(format!("--{k}"));
+            } else {
+                words.push(format!("--{k}={v}"));
             }
         }
         if tail {
@@ -77,10 +80,22 @@ mod tests {
         let i = inv(&["secrets", "automate"], &["sudo-pass", "grant", "orchestrator"], &[]);
         assert_eq!(i.command_line("aoide", &[], false), "aoide secrets automate sudo-pass grant orchestrator");
         let i = inv(&["secrets", "add"], &["db"], &[("key", "a b"), ("require-totp", "true"), ("json", "true")]);
-        assert_eq!(i.command_line("aoide", &["require-totp"], false), "aoide secrets add db --key 'a b' --require-totp");
+        assert_eq!(i.command_line("aoide", &["require-totp"], false), "aoide secrets add db '--key=a b' --require-totp");
         let i = inv(&["secrets", "add"], &["it's", "-x"], &[]);
         assert_eq!(i.command_line("aoide", &[], false), "aoide secrets add -- 'it'\\''s' -x");
         let i = inv(&["secrets", "exec"], &["psql", "db"], &[("as", "m"), ("secret", "db-prod")]);
-        assert_eq!(i.command_line("aoide", &[], true), "aoide secrets exec --as m --secret db-prod -- psql db");
+        assert_eq!(i.command_line("aoide", &[], true), "aoide secrets exec --as=m --secret=db-prod -- psql db");
+    }
+
+    /// A value that starts with `-` stays on its flag's word, so the line reads
+    /// the same as the argv that replays: `--agent=--windowed` is an agent named
+    /// `--windowed`, never a windowed launch with no agent. Before the change
+    /// the value was a separate word and read as the flag.
+    #[test]
+    fn a_dash_leading_value_stays_on_its_flags_word() {
+        let i = inv(&["spawn"], &[], &[("agent", "--windowed")]);
+        assert_eq!(i.command_line("aoide", &["windowed"], false), "aoide spawn --agent=--windowed");
+        let i = inv(&["spawn"], &["sh"], &[("prompt", "--")]);
+        assert_eq!(i.command_line("aoide", &[], true), "aoide spawn --prompt=-- -- sh");
     }
 }

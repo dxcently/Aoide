@@ -3254,8 +3254,8 @@ mod tests {
         assert_eq!(spawn.path, ["resurrect"]);
         assert_eq!(spawn.flags.get("project").map(String::as_str), Some("proj"));
         assert_eq!(held[0].from.as_deref(), Some("mcp"));
-        assert_eq!(held[0].text, "aoide resurrect --project proj", "the approver is shown the command");
-        assert_eq!(held[1].text, "aoide resurrect --all --project proj");
+        assert_eq!(held[0].text, "aoide resurrect --project=proj", "the approver is shown the command");
+        assert_eq!(held[1].text, "aoide resurrect --all --project=proj");
 
         std::thread::sleep(std::time::Duration::from_millis(600));
         assert!(!marker.exists(), "the held resurrect opened a terminal");
@@ -3263,7 +3263,7 @@ mod tests {
         assert!(roster.sessions.is_empty(), "no session was registered: {:?}", roster.sessions);
 
         let listed = crate::graph::pending::pending_list(&flag_invocation(&["session", "pending", "list"], &[]));
-        assert!(listed.message.contains("aoide resurrect --project proj"), "{}", listed.message);
+        assert!(listed.message.contains("aoide resurrect --project=proj"), "{}", listed.message);
 
         let approve = crate::graph::pending::pending_approve(&Invocation {
             path: vec!["session".into(), "pending".into(), "approve".into()],
@@ -3300,7 +3300,7 @@ mod tests {
         mcp.door = aoide_protocol::Door::Mcp;
         let out = session_resurrect(&mcp);
         assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{}", out.message);
-        assert_eq!(held_entries()[0].text, "aoide resurrect --project proj");
+        assert_eq!(held_entries()[0].text, "aoide resurrect --project=proj");
 
         set_ledger(&[
             ledger_entry("ledger-old-plan", "claude", &proj_path, "2026-08-20T01:00:00Z"),

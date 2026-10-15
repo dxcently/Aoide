@@ -151,7 +151,7 @@ in the message.
   --parent` and `graph link` when the id already has a record with another
   parent (a new id may register under a parent from any door, and the same
   parent again is a no-op). `session hook` (parent claim, rekey, stale-parent
-  clearing) and `session conduct` (it runs a command and upserts its record
+  clearing) and `conduct` (it runs a command and upserts its record
   by id) refuse outright for those doors. `session_spawn_with` also refuses a
   `--id` naming a live record or an existing socket, so an attested caller
   cannot bind over another session's record. A new command that writes
@@ -216,11 +216,13 @@ in the message.
   and `deny`, and across the crate boundary the conductor's PENDING rows) spells
   each character `is_unsafe` names, and any whitespace but a plain space, as
   an escape through `visible` (`graph/common.rs`): `\n`, `\x1b`, `\u{202e}`,
-  a backslash doubled. A send's preview is the whole text escaped and then
-  clipped between escapes, so the lines after a newline are not hidden; a held
-  spawn's line is its whole command. The JSON `text` is the bytes as they
-  replay. A new view of an entry calls `visible` and does not clean, strip or
-  clip the text itself. Pinned by
+  a backslash doubled, and the combining marks and default-ignorable code
+  points `visible` lists. A send's line is its whole escaped text, never
+  clipped. A held launch's line is `visible_held`: every non-ASCII character is
+  spelled too, so a lookalike letter reads as the escape it is. The JSON
+  `text` is the bytes as they replay; `shown` is the one spelling every
+  surface reads. A new view of an entry calls `visible` (or `visible_held` for
+  a held launch) and does not clean, strip or clip the text itself. Pinned by
   `list_spells_unsafe_characters_in_every_field_a_human_reads`,
   `a_held_spawn_lists_as_its_whole_command_and_deny_launches_nothing` and
   `visible_spells_every_unsafe_character_and_never_drops_one`. A held spawn's

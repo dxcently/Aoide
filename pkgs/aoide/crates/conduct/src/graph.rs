@@ -262,7 +262,7 @@ pub use self::common::clean_line;
 pub use self::common::strip_ansi;
 // `visible`: the one escaper for text a human is about to approve, shared with
 // `aoide-conductor`'s pending views so no surface renders an entry another way.
-pub use self::common::visible;
+pub use self::common::{visible, visible_held};
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a

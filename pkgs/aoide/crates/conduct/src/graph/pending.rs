@@ -45,7 +45,7 @@
 //! fail cleanly (a structured error, never a panic) without touching it —
 //! the entry stays exactly where it was for a human to inspect by hand.
 
-use super::common::{clean_line, refuse_unapproving_door, require_args, stage_error, visible, visible_clip};
+use super::common::{clean_line, refuse_unapproving_door, require_args, stage_error, visible, visible_held};
 use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
@@ -79,15 +79,6 @@ fn is_malformed(v: &Value) -> bool {
 /// The spawn a held entry is, or `None` for the ordinary held send.
 fn spawn_of(v: &Value) -> Option<PendingSpawn> {
     serde_json::from_value(v.get("spawn")?.clone()).ok()
-}
-
-/// A one-line, length-bounded preview of a pending entry's text, every
-/// unsafe character spelled as a visible escape ([`visible_clip`]): a newline
-/// shows as `\n` and the lines after it are not hidden, because everything
-/// the text holds is typed on approval.
-fn preview(text: &str) -> String {
-    const MAX: usize = 60;
-    visible_clip(text, MAX)
 }
 
 /// Read `pending.json`'s `pending` array as raw JSON — not the strict
@@ -195,13 +186,17 @@ fn entry_view(
     let spawn = spawn_of(v);
     // A held spawn is shown from what approving it replays, whole: an approver
     // who saw a clipped command line would be approving the rest blind. The
-    // data carries it as it replays; only the line a human reads escapes it.
+    // data carries it as it replays; `shown` is what a human reads, spelled
+    // once here so every surface reads the same escapes.
     let text = spawn.as_ref().map(PendingSpawn::command_line).unwrap_or(text);
+    let shown = if spawn.is_some() { visible_held(&text) } else { visible(&text) };
+    let plan: Vec<String> = spawn.as_ref().map(|s| s.shown.iter().map(|l| visible_held(l)).collect()).unwrap_or_default();
     let mut json = json!({
         "id": index.to_string(),
         "fingerprint": fingerprint(v),
         "sessionId": session_id,
         "text": text,
+        "shown": shown,
         "submit": submit,
         "queuedAt": queued_at,
         "from": from,
@@ -210,10 +205,11 @@ fn entry_view(
     });
     if let Some(spawn) = &spawn {
         json["spawn"] = json!(spawn);
+        json["plan"] = json!(plan);
     }
     let what = match spawn {
-        Some(_) => format!("spawn {} ← {}", visible(&session_id), visible(&text)),
-        None => format!("{} ← {}", visible(&grammar_label(&session_id, by_id, ids, host)), preview(&text)),
+        Some(_) => format!("spawn {} ← {shown}", visible(&session_id)),
+        None => format!("{} ← {shown}", visible(&grammar_label(&session_id, by_id, ids, host))),
     };
     let line = format!(
         "[{index}] {what}{}{}{} ({})",
@@ -528,7 +524,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         }));
     }
     Outcome::ok(cmd, format!("pending entry {index} approved → delivered to `{}`", visible(&session_id)))
-        .changed(vec![format!("pending[{index}] for {session_id}: approved and injected")])
+        .changed(vec![format!("pending[{index}] for {}: approved and injected", visible(&session_id))])
         .with_data(json!({
             "id": index.to_string(),
             "sessionId": session_id,
@@ -601,7 +597,7 @@ fn approve_spawn(
     }
     let done = if resurrect { "resurrected" } else { "spawned" };
     Outcome::ok(cmd, format!("pending entry {index} approved → {done} `{}`", visible(session_id)))
-        .changed(vec![format!("pending[{index}] for {session_id}: approved and launched")])
+        .changed(vec![format!("pending[{index}] for {}: approved and launched", visible(&session_id))])
         .with_data(json!({
             "id": index.to_string(),
             "sessionId": session_id,
@@ -650,7 +646,7 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
 
     audit_pending(inv, cmd, "denied", &format!("deny [{index}] {session_id}"), &text);
     Outcome::ok(cmd, format!("pending entry {index} for `{}` denied — nothing injected", visible(&session_id)))
-        .changed(vec![format!("pending[{index}] for {session_id}: denied")])
+        .changed(vec![format!("pending[{index}] for {}: denied", visible(&session_id))])
         .with_data(json!({ "id": index.to_string(), "sessionId": session_id, "injected": false }))
 }
 
@@ -1421,7 +1417,7 @@ mod tests {
         assert_eq!(replayed, spawn.command_line(), "the data is the command as it replays");
         assert!(replayed.contains('\u{1b}'));
         let shown = visible(replayed);
-        assert!(shown.starts_with("aoide spawn --agent claude --windowed -- sh -c "), "{shown}");
+        assert!(shown.starts_with("aoide spawn --agent=claude --windowed -- sh -c "), "{shown}");
         assert!(shown.ends_with(&format!("{tail}'")), "the command is shown to its last character: {shown}");
         assert!(shown.contains("\\x1b[2J"), "the escape is spelled out, not dropped: {shown}");
         assert!(out.message.contains(&shown), "the human line carries the same whole command: {}", out.message);
@@ -1732,6 +1728,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A held send's human line is its whole escaped text, not a clip of its
+    /// first sixty characters: the tail that matters is shown, and the JSON
+    /// carries the same spelling as `shown`. Before the change the line stopped
+    /// at sixty characters with an ellipsis and the JSON had no `shown`.
+    #[test]
+    fn a_send_preview_is_the_whole_escaped_text_and_json_carries_shown() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-whole-preview");
+        let text = format!("{} \n rm -rf ~", "x".repeat(300));
+        crate::graph::send::hold_pending("held-long", &text, false, Some("node:victim")).unwrap();
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        assert!(out.message.contains("rm -rf ~"), "the tail is on the line: {}", out.message);
+        assert!(out.message.contains("\\n rm"), "the newline is spelled: {}", out.message);
+        assert!(!out.message.contains('…'), "nothing is clipped: {}", out.message);
+        let shown = out.data.as_ref().unwrap()["pending"][0]["shown"].as_str().unwrap().to_string();
+        assert!(shown.ends_with("\\n rm -rf ~"), "{shown}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The queue file is bounded in its stored form: the pretty-printed JSON
     /// that `write_stage` writes, not a compact count. Holds of a large entry
     /// fill it until the file bound refuses one, and the file on disk never
@@ -1756,6 +1773,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn deny_spells_the_session_id_it_names_in_its_changed_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-changed-id");
+        let spawn = PendingSpawn { args: vec!["true".into()], ..PendingSpawn::default() };
+        crate::graph::send::hold_spawn("bad\n  changed: ok", &spawn.command_line(), spawn).unwrap();
+        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert!(out.changed.iter().all(|c| !c.contains('\n')), "{:?}", out.changed);
+        assert!(out.changed.iter().any(|c| c.contains("bad\\n  changed: ok")), "{:?}", out.changed);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn list_on_a_missing_queue_is_an_empty_ok_no_op() {

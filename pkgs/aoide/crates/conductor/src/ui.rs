@@ -256,7 +256,7 @@ fn keymap_hint(panel: Panel) -> &'static str {
         Panel::Roster => {
             "j/k select · s compose · e actions · r refresh (auto ~15s while open) · Tab panel · ? help · q quit"
         }
-        Panel::Pending => "j/k select · a approve/resume (spawn: a, y) · d deny/reject · r re-list · ? help · q quit",
+        Panel::Pending => "j/k select · a approve (then y) · d deny · Tab panel · r re-list · ? help · q quit",
     }
 }
 
@@ -1096,11 +1096,13 @@ fn pending_row_item<'a>(row: &crate::app::PendingRow) -> ListItem<'a> {
         .map(|f| format!(" (from {})", graph::visible(f)))
         .unwrap_or_default();
     let submit = if row.submit { " [submit]" } else { "" };
+    // The flags and the sender come before the text, so a long text clipped by
+    // the pane cannot hide who sent it or whether it submits.
     let line = format!(
-        "[{}] {marker}{} ← {}{submit}{from}  ({})",
+        "[{}] {marker}{}{submit}{from} ← {}  ({})",
         row.id,
         graph::visible(&row.session_id),
-        graph::visible(&row.text),
+        row.shown,
         graph::visible(&row.queued_at)
     );
     let style = if row.state == "malformed" {
@@ -1144,17 +1146,26 @@ fn draw_spawn_confirm(f: &mut Frame, area: Rect, app: &App) {
     let rect = centered(w, h, area);
     f.render_widget(Clear, rect);
 
-    let block = panel_block("approve this held spawn?", app);
+    let title = match confirm.kind.as_str() {
+        "send" => "approve this held send?",
+        "resurrect" => "approve this held resurrect?",
+        _ => "approve this held spawn?",
+    };
+    let block = panel_block(title, app);
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
     let [head, body, foot] =
         Layout::vertical([Constraint::Length(3), Constraint::Min(1), Constraint::Length(1)]).areas(inner);
 
+    // The sender leads, and the id is clipped: a long id must not push `from`
+    // off the header.
     let from = confirm.from.as_deref().map(graph::visible).unwrap_or_else(|| "(none)".to_string());
+    let id = graph::visible(&confirm.session_id);
+    let id = if id.chars().count() > 40 { format!("{}…", id.chars().take(39).collect::<String>()) } else { id };
     f.render_widget(
         Paragraph::new(vec![
-            Line::from(format!("id {} · from {from}", graph::visible(&confirm.session_id))),
+            Line::from(format!("from {from} · id {id}")),
             Line::from("Every character is shown: \\n, \\x1b, \\u{..} are escapes, a backslash is doubled.")
                 .style(theme::dim()),
             Line::from(""),
@@ -1162,7 +1173,14 @@ fn draw_spawn_confirm(f: &mut Frame, area: Rect, app: &App) {
         head,
     );
 
-    let rows = wrap_cells(&graph::visible(&confirm.text), body.width as usize);
+    let mut rows = wrap_cells(&confirm.text, body.width as usize);
+    if !confirm.plan.is_empty() {
+        rows.push(String::new());
+        rows.push("each candidate, and the restore it would type:".to_string());
+        for line in &confirm.plan {
+            rows.extend(wrap_cells(line, body.width as usize));
+        }
+    }
     let page = body.height as usize;
     let top = rows.len().saturating_sub(page);
     confirm.max_scroll.set(top);
@@ -2169,7 +2187,7 @@ mod tests {
 
         assert!(out.contains("REVIEW"), "panel title: {out}");
         assert!(
-            out.contains("[0] s0 ← do the thing [submit] (from sakaki/root/brave-otter (…snd))"),
+            out.contains("[0] s0 [submit] (from sakaki/root/brave-otter (…snd)) ← do the thing"),
             "first entry, full grammar: {out}"
         );
         assert!(
@@ -2202,7 +2220,7 @@ mod tests {
         term.draw(|f| draw(f, &a)).unwrap();
         let out = dump(term.backend().buffer());
         assert!(
-            out.contains("[0] t\\x1b[2J ← ok\\nrm -rf ~\\u{202e}"),
+            out.contains("[0] t\\x1b[2J (from mcp) ← ok\\nrm -rf ~\\u{202e}"),
             "escapes are spelled, the text after the newline is in the row: {out}"
         );
         assert!(!out.contains('\u{1b}') && !out.contains('\u{202e}'), "nothing raw reaches the buffer");

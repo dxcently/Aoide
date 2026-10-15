@@ -552,7 +552,7 @@ launched: false}`. The bare form is refused there with `reason:
 working directory and launches the manifest's own commands, which a held line
 replayed from the approver's directory would neither show nor find.
 
-**Flag mode (`--project`/`--all`/`--id`) — unchanged.**
+**Flag mode (`--project`/`--all`/`--id`).**
 
 - **Reads:** `state/session-ledger.jsonl` (the durable, append-only record
   written exactly once at roster exit, P-D8) — resolves `--project` against
@@ -754,12 +754,15 @@ aoide session pending list [--json]
   resolutions in one breath).
 - **Notes:** read-only. The queue `send` parks a held injection in when no
   delivering rule clears it: every A2A send, an MCP send with no attested
-  rule behind it, and a whole `spawn` from an unattested MCP caller, which
-  `list` shows as the command that approving it would run. The human line
+  rule behind it, and a whole `spawn` or `resurrect --project …` from an
+  unattested MCP caller, which `list` shows as the command that approving it
+  would run. The human line
   spells every character a terminal would act on as a visible escape (`\n`,
-  `\x1b`, `\u{202e}`, a backslash doubled), never stripping or printing one,
-  and a send's preview is its whole text, so the lines after a newline are not
-  hidden; `data.pending[].text` keeps the bytes as they replay. One entry may
+  `\x1b`, `\u{202e}`, a backslash doubled), never stripping or printing one.
+  A send's line is its whole escaped text, unclipped, and a held launch's is
+  its whole command with every non-ASCII character spelled too. The JSON
+  carries that spelling as `shown`, and `data.pending[].text` keeps the bytes
+  as they replay. One entry may
   serialize to at most 64 KiB (`reason: "pending-too-large"`, audited).
 
 ### aoide session pending approve

@@ -6941,7 +6941,7 @@ mod tests {
                 said(&out)
             );
             assert!(
-                said(&out).contains("--task build-reports"),
+                said(&out).contains("--task=build-reports"),
                 "and the fix is the whole line with the slug mended: {}",
                 said(&out)
             );
@@ -9922,10 +9922,10 @@ mod tests {
         let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "self/Bob")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Usage, "msg: {}", said(&out));
         assert!(!said(&out).contains("Bob"), "the offending bytes must never be echoed");
-        assert_eq!(fix_run(&out), "aoide mail send --to self/bob -- <text>", "a fix never repeats the letter");
+        assert_eq!(fix_run(&out), "aoide mail send --to=self/bob -- <text>", "a fix never repeats the letter");
         let secret = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["secret text"], &[("to", "self/Bad_Name")]));
         assert!(!said(&secret).contains("secret text"), "{}", said(&secret));
-        assert_eq!(fix_run(&secret), "aoide mail send --to self/bad-name -- <text>");
+        assert_eq!(fix_run(&secret), "aoide mail send --to=self/bad-name -- <text>");
         assert_eq!(out.data.unwrap()["reason"], "invalid-name");
 
         let names = handle_mail_names(&mail_inv(&["mail"], &[]));

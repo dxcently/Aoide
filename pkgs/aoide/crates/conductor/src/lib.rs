@@ -1739,6 +1739,8 @@ mod tests {
                 session_id: "held".to_string(),
                 text: "aoide spawn -- true".to_string(),
                 from: Some("mcp".to_string()),
+                kind: "spawn".to_string(),
+                plan: Vec::new(),
                 fingerprint: "fp".to_string(),
                 scroll: 0,
                 max_scroll: std::cell::Cell::new(0),

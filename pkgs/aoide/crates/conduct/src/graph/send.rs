@@ -184,9 +184,10 @@ impl Default for PendingSpawn {
 }
 
 impl PendingSpawn {
-    /// The line an approver is shown, and could paste: `aoide spawn --flag
-    /// value … -- <command>` (or `aoide resurrect --project <name> …`), every
-    /// word quoted.
+    /// The command a held launch replays, as one shell line: `aoide spawn
+    /// --flag=value … -- <command>` (or `aoide resurrect --project=<name> …`),
+    /// every word quoted. The approver's view spells it through `visible_held`,
+    /// so a copy of that view is not a paste.
     pub fn command_line(&self) -> String {
         Invocation {
             path: self.path.clone(),
@@ -2975,8 +2976,8 @@ const HOOK_PARENT_FLAG: &str = "__daemon-hook-parent";
 /// on [`STDIN_PAYLOAD_FLAG`] instead of the wire growing a new field. The
 /// daemon-side invocation (flag present) skips both the routing attempt AND
 /// the real stdin read, using the forwarded payload directly. Only the CLI
-/// door routes ([`hook_as_read`]): any other door runs the hook here, where
-/// `may_ring` is false.
+/// door routes ([`hook_as_read`]). A door that cannot approve is refused before
+/// any stdin is read, so no other door reaches this arm.
 ///
 /// **The two arms, and the one rule between them.** The hook is the only
 /// process that can read what a harness reports about itself — its own pid and
@@ -3053,7 +3054,8 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
 /// a parent's armed mailboxes (`may_ring`), so a hook from MCP or the network
 /// door that reached it would ring as the daemon's own.
 /// `aoide_client::daemon::daemon_dispatch` answers `None` for every other
-/// door, and the hook runs below with `may_ring` false.
+/// door. A non-approving door never reaches this function, so `may_ring` is
+/// false only where a test calls it directly.
 pub(in crate::graph) fn hook_as_read(inv: &Invocation, profile: &'static AgentProfile, buf: String) -> Outcome {
     let may_ring = inv.door == Door::Daemon;
     // THIS process is the hook: its own pid IS the kernel fact, and its own env
