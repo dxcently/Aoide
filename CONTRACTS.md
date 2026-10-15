@@ -7325,14 +7325,17 @@ mints a key to answer. A client refuses an unsigned answer.
 
 **A signature does not make an answer's words safe to print.** A relay or a
 destination can be hostile and hold its own key, so the client strips every
-control and invisible character from any word of an answer that reaches the
-operator or a stored outcome, and clips it: to 200 characters when the answer
-verified, and to 120 (labelled `it said: …; not acted on`) when it did not. The
-cleaning happens where the word is read out of the answer, so the entry's
-`lastOutcome`, the link record, a poll's error, its own refusal and its
-`refused` and `withheld` lines are inert for every printer. A word the client
-acts on (`down`, `config-invalid`) is judged on the raw string before it is
-cleaned.
+control and invisible character from any word of an answer before it is kept,
+returned or logged, and clips it: to 200 characters when the answer verified,
+and to 120 (labelled `it said: …; not acted on`) when it did not. The cleaning
+happens where the word is read out of the answer, so the entry's `lastOutcome`,
+the link record, a poll's error, its own refusal, its `refused` and `withheld`
+lines and every `mail.answer.*` and `mail.poll.*` audit line are inert for
+every reader. That includes an error that quotes the answer, such as the parse
+error of a binding. `aoide mail outbox` and a send's delivery line also clean a
+stored `lastOutcome` or link record as they print it, because a build before
+this rule stored those words as they came. A word the client acts on (`down`,
+`config-invalid`) is judged on the raw string before it is cleaned.
 
 **Identity IS the key; the name is a label (#63 P-ID5).** The resolved
 `Node` is the one whose stored `pubkey` verifies the signature — the

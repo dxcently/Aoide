@@ -5108,14 +5108,6 @@ fn has_delivered_ack(base: &[aoide_storage::mail::Entry], to_node: &str, msgid: 
     })
 }
 
-fn non_empty(s: &str) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
-    }
-}
-
 /// `data.delivery`'s fixed shape — every branch fills all five fields so a
 /// caller never has to guess which are present for which status.
 fn delivery_shape(status: &str, reason: Option<String>, scope: Option<&str>, next_attempt_at: Option<&str>, ack_pending: bool) -> Value {
@@ -5179,7 +5171,7 @@ fn delivery_projection(
     link: Option<&aoide_storage::outbox::LinkState>,
 ) -> Value {
     if entry.refused {
-        return delivery_shape("refused", non_empty(&entry.last_outcome), Some("entry"), None, false);
+        return delivery_shape("refused", crate::mail_wire::outcome_line(&entry.last_outcome), Some("entry"), None, false);
     }
     if has_delivered_ack(base, node, &entry.envelope.msgid) {
         return delivery_shape("delivered", None, None, None, false);
@@ -5187,12 +5179,12 @@ fn delivery_projection(
     let accepted = matches!(entry.last_outcome.as_str(), "accepted" | "duplicate");
     if accepted {
         return match link {
-            Some(l) => delivery_shape("accepted", non_empty(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), true),
+            Some(l) => delivery_shape("accepted", crate::mail_wire::outcome_line(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), true),
             None => delivery_shape("accepted", None, None, None, true),
         };
     }
     if let Some(l) = link {
-        return delivery_shape("retrying", non_empty(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), false);
+        return delivery_shape("retrying", crate::mail_wire::outcome_line(&l.last_outcome), Some("link"), Some(&l.next_attempt_at), false);
     }
     delivery_shape("queued", None, None, None, false)
 }
@@ -5891,7 +5883,7 @@ fn outbox_node_summary(entries: &[aoide_storage::outbox::OutboxEntry]) -> Value 
     let mut refused = 0u64;
     for e in entries {
         *tries_histogram.entry(e.tries.to_string()).or_insert(0) += 1;
-        let outcome_key = if e.last_outcome.is_empty() { "(none)".to_string() } else { e.last_outcome.clone() };
+        let outcome_key = crate::mail_wire::outcome_line(&e.last_outcome).unwrap_or_else(|| "(none)".to_string());
         *last_outcome_counts.entry(outcome_key).or_insert(0) += 1;
         if e.refused {
             refused += 1;
@@ -5963,7 +5955,7 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
                 "sealed": e.is_sealed(),
                 "tries": e.tries,
                 "lastTryAt": e.last_try_at,
-                "lastOutcome": e.last_outcome,
+                "lastOutcome": crate::mail_wire::outcome_line(&e.last_outcome).unwrap_or_default(),
                 "refused": e.refused,
                 "delivery": delivery,
             }));
@@ -10295,6 +10287,57 @@ mod tests {
         let row = &out.data.as_ref().unwrap()["entries"][0];
         assert_printable(row["lastOutcome"].as_str().unwrap());
         assert_printable(row["delivery"]["reason"].as_str().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **`mail outbox` prints what an older build stored raw inert.** A build
+    /// before a far end's words were cleaned where they are read kept them as
+    /// they came, in an entry's `last_outcome` and in a node's `link.json`, and
+    /// those files are still on disk. Cleaning is not at the store alone: the
+    /// text, the rows, the `delivery` projection and the summary's keys all
+    /// print through the same reader, and the file itself is left as found.
+    #[test]
+    fn mail_outbox_cleans_an_outcome_an_older_build_stored_raw() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-legacy-raw");
+        let raw = format!("refused: {}", hostile_words());
+        let mut parked = aoide_storage::outbox::OutboxEntry::fresh(
+            aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "parked").unwrap(),
+        );
+        parked.refused = true;
+        parked.tries = 1;
+        parked.last_outcome = raw.clone();
+        aoide_storage::outbox::write_entry("peer-node", &parked).unwrap();
+        let waiting = aoide_storage::mail::mint_outbound_letter("here", "other-node", "bob", "waiting").unwrap();
+        aoide_storage::outbox::write_entry("other-node", &aoide_storage::outbox::OutboxEntry::fresh(waiting)).unwrap();
+        aoide_storage::outbox::back_off("other-node", 1_700_000_000, &raw).unwrap();
+
+        let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
+
+        let text = said(&out);
+        assert_eq!(text.matches("reason refused: overwritten [2J]0;titlecleared desrever x").count(), 2, "both reasons are shown, cleaned: {text}");
+        assert_printable(&text);
+        let data = out.data.as_ref().unwrap();
+        let rows = data["entries"].as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        for row in rows {
+            assert_printable(row["delivery"]["reason"].as_str().unwrap());
+        }
+        let parked_row = rows.iter().find(|row| row["node"] == "peer-node").unwrap();
+        assert_printable(parked_row["lastOutcome"].as_str().unwrap());
+        assert_eq!(parked_row["delivery"]["reasonScope"], "entry");
+        let link_row = rows.iter().find(|row| row["node"] == "other-node").unwrap();
+        assert_eq!(link_row["delivery"]["reasonScope"], "link");
+        for summary in data["summary"].as_object().unwrap().values() {
+            for outcome in summary["lastOutcomeCounts"].as_object().unwrap().keys() {
+                assert_printable(outcome);
+            }
+        }
+        assert_eq!(
+            aoide_storage::outbox::list_entries("peer-node").unwrap()[0].last_outcome,
+            raw,
+            "the stored record is not rewritten: only what is printed is cleaned"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

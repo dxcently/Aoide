@@ -710,13 +710,21 @@
   for a terminal: a relay or a destination can be hostile and hold its own
   key. `foreign_words` (the strip and clip of `aoide_protocol::untrusted`, in
   one helper) is the only way a word of an answer reaches a stored outcome
-  (`last_outcome`, the link record), a poll's `Err` or a `PollOutcome` line:
-  clipped to `LINE_MAX` (200) for a verified answer, and to `SAID_MAX` (120)
-  for an unsigned one, which is also labelled. Clean there and never at a
-  printer, so every printer is safe at once; never format a raw body word,
-  signed or not, into anything a person will read. A word that is classified
-  (`down`, `config-invalid`) is judged on the raw string BEFORE it is cleaned,
-  because stripping a format character can turn one word into another.
+  (`last_outcome`, the link record), a poll's `Err`, a `PollOutcome` line or an
+  audit line (every `mail.answer.*` and `mail.poll.*` one, a container's
+  `msgid` and a refusal's `detail` included): clipped to `LINE_MAX` (200) for a
+  verified answer, and to `SAID_MAX` (120) for an unsigned one, which is also
+  labelled. An error that quotes the answer (a serde error naming a binding's
+  value) is a word of the answer and passes through it too. A node or mesh
+  name in a line is one this box's own declarations hold and validated, so it
+  is not one. Clean there, so every reader of a record this build writes is
+  safe at once; never format a raw body word, signed or not, into anything a
+  person will read. A record an older build wrote is not clean, so
+  `mail_wire::outcome_line` is the one reader of a stored outcome on the way
+  out: `mail outbox`, a send's `delivery` and the charter drain row print
+  through it. A word that is classified (`down`, `config-invalid`) is judged on
+  the raw string BEFORE it is cleaned, because stripping a format character can
+  turn one word into another.
 - **`drain_node` decides it has nothing to dial before the binding exchange.**
   The exchange is a dial, and an unsigned answer to it is an audit line. The
   daemon drains every node that ever had mail (its directory is never removed)

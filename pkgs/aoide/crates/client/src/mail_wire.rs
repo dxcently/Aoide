@@ -134,9 +134,19 @@ const SAID_MAX: usize = 120;
 /// printer of the entry's `last_outcome`, the link record, a poll's `Err` and
 /// a [`PollOutcome`] safe at once. A caller that classifies a word does so on
 /// the RAW string before it cleans, since stripping a format character can turn
-/// one word into another.
+/// one word into another. The audit lines a poll writes are read by a person
+/// too, so their msgids and refusal details pass through here as well.
 fn foreign_words(words: &str, max: usize) -> String {
     aoide_protocol::untrusted::clip_flat(&aoide_protocol::untrusted::strip_unsafe(words), max)
+}
+
+/// A stored outcome (`last_outcome`, the link record) as the one line a printer
+/// hands a person, or `None` when nothing printable is left. A build that
+/// stores it cleans it ([`foreign_words`]); an older one stored the far end's
+/// words as they came, and those files are still on disk, so every printer of a
+/// stored outcome reads it through here too.
+pub(crate) fn outcome_line(stored: &str) -> Option<String> {
+    Some(aoide_protocol::untrusted::clean_line(stored)).filter(|line| !line.is_empty())
 }
 
 /// What an unsigned answer said, as the far end wrote it: the JSON-RPC
@@ -1230,7 +1240,13 @@ fn relay_proves_charter_key(node: &Node, mesh: &str) -> Result<(), String> {
         match post_signed(node, "aoide/binding", json!({}), Some(mesh)) {
             SignedCall::Result(result) => {
                 serde_json::from_value(result.get("binding").cloned().unwrap_or(Value::Null))
-                    .map_err(|e| format!("relay `{}` answered no readable binding: {e}", node.name))?
+                    .map_err(|e| {
+                        format!(
+                            "relay `{}` answered no readable binding: {}",
+                            node.name,
+                            foreign_words(&e.to_string(), LINE_MAX)
+                        )
+                    })?
             }
             SignedCall::Refused(detail) => {
                 return Err(format!("relay `{}` refused the identity check: {detail}", node.name))
@@ -1366,6 +1382,9 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         let Ok(container) = serde_json::from_value::<aoide_storage::seal::Container>(container.clone()) else {
             continue;
         };
+        // The far end's `msgid`, as every audit line below names it: a refused
+        // container proved nothing about its own, and a log is read by a person.
+        let msgid = foreign_words(&container.msgid, LINE_MAX);
         // The poll's own mesh: the request was SIGNED with it (above), and the
         // container is verified against it here — `deposit_container` compares
         // the container's SIGNED `originMesh` with this, so a letter minted for
@@ -1403,7 +1422,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                             aoide_protocol::audit::EventClass::Audit,
                             "mail.poll.dedup-record-failed",
                             "invalid",
-                            &format!("{}: {e}", container.msgid),
+                            &format!("{msgid}: {e}"),
                         );
                     }
                 }
@@ -1443,7 +1462,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                         aoide_protocol::audit::EventClass::Audit,
                         "mail.poll.dedup-record-failed",
                         "invalid",
-                        &format!("{}: {e}", container.msgid),
+                        &format!("{msgid}: {e}"),
                     );
                 }
                 let _ = aoide_protocol::audit::audit(
@@ -1485,10 +1504,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                         aoide_protocol::audit::EventClass::Audit,
                         "mail.poll.transit-not-filed",
                         "invalid",
-                        &format!(
-                            "container {} from `{node_name}` could not be filed as transit at {at}: {e}",
-                            hop.container.msgid
-                        ),
+                        &format!("container {msgid} from `{node_name}` could not be filed as transit at {at}: {e}"),
                     );
                     refused.push(format!("{}: transit: {e}", hop.container.msgid));
                     continue;
@@ -1500,8 +1516,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                     "mail.poll.transit",
                     "ok",
                     &format!(
-                        "container {} from `{node_name}` carried on to `{}` in mesh `{}`{}",
-                        hop.container.msgid,
+                        "container {msgid} from `{node_name}` carried on to `{}` in mesh `{}`{}",
                         hop.next,
                         hop.mesh,
                         if hop.held { ", held for its own poll" } else { "" }
@@ -1532,8 +1547,8 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                     "mail.poll.container-refused",
                     "invalid",
                     &format!(
-                        "container {} from `{node_name}` refused: {reason}: {detail}",
-                        container.msgid
+                        "container {msgid} from `{node_name}` refused: {reason}: {}",
+                        foreign_words(&detail, LINE_MAX)
                     ),
                 );
                 // …and NAMED to the caller, so `mail poll` reports it (review
@@ -1615,7 +1630,7 @@ pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_
     let theirs: aoide_storage::seal::Binding = serde_json::from_value(
         result.get("binding").cloned().unwrap_or(Value::Null),
     )
-    .map_err(|e| format!("binding: {e}"))?;
+    .map_err(|e| format!("binding: {}", foreign_words(&e.to_string(), LINE_MAX)))?;
     // A refused learn is not an error here: `stale-binding` means we already
     // hold a newer one, which is the state we want. Only a binding we cannot
     // verify is worth reporting, and it costs the caller nothing but the
@@ -3760,6 +3775,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A disguised `config-invalid` is not the word.** An unsigned answer can
+    /// spell the word with a zero-width character or with fullwidth letters, and
+    /// each reads as `config-invalid` once cleaned or on a screen. The lead that
+    /// says "fix the config, not the version" is the client's own judgement of the
+    /// word the far end used, so it is made on the raw string: a disguised one
+    /// reads as any other unsigned answer, and the entry stays live, never parked.
+    #[test]
+    fn a_disguised_unsigned_config_invalid_is_not_read_as_the_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unsigned-config-invalid-disguised");
+        let result = |reason: &str| {
+            json!({ "jsonrpc": "2.0", "id": 1, "result": { "status": "refused", "reason": reason, "detail": "d" } }).to_string()
+        };
+        let error = |message: &str| json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": message } }).to_string();
+        let cases = [
+            ("a zero-width space", result("config\u{200b}-invalid"), false),
+            ("a soft hyphen", result("config-\u{ad}invalid"), false),
+            ("fullwidth letters", result("ｃｏｎｆｉｇ-ｉｎｖａｌｉｄ"), false),
+            ("a disguised error message", error("config\u{200b}-invalid"), false),
+            ("the word itself", result("config-invalid"), true),
+        ];
+        for (i, (how, body, genuine)) in cases.into_iter().enumerate() {
+            let name = format!("far-{i}");
+            spool_letter_to(&name, scripted_door(move |_| reply_with(&body, &[])));
+
+            drain_node(&name).unwrap();
+
+            let entry = aoide_storage::outbox::list_entries(&name).unwrap().remove(0);
+            assert!(!entry.refused, "{how}: an unsigned answer parks nothing: {entry:?}");
+            assert!(entry.last_outcome.starts_with("unauthenticated:"), "{how}: {}", entry.last_outcome);
+            let says_config = entry.last_outcome.contains("its own config is invalid");
+            assert_eq!(says_config, genuine, "{how}: only the word itself reads as a broken config: {}", entry.last_outcome);
+            assert_eq!(entry.last_outcome.contains("upgrade aoide on"), !genuine, "{how}: {}", entry.last_outcome);
+            assert!(aoide_storage::outbox::read_link_state(&name).unwrap().is_some(), "{how}: the link backs off");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **A signed error parks the letter.** The same error, signed by the key on
     /// file, is the far end's own refusal and parks the letter at its sender, as
     /// any verified refusal does.
@@ -3927,6 +3981,129 @@ mod tests {
         assert!(err.starts_with("overwritten [2J]0;titlecleared desrever x"), "{err}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A far end's word laced with what a person's terminal obeys and a JSON line
+    /// lets through: an escape sequence, a C1 control, a bidi override, a braille
+    /// blank and DEL. Cleaned, it reads `<word>[31mend`.
+    fn laced(word: &str) -> String {
+        format!("{word}\u{1b}[31m\u{9b}\u{202e}\u{2800}\u{7f}end")
+    }
+
+    /// **A polled container's words are inert in the audit log.** A container
+    /// the destination refuses is logged with its own `msgid` and the refusal's
+    /// `detail`, which quotes its `suite`. JSON escapes only what sits below
+    /// U+0020, so a bidi override, a braille blank, DEL and a C1 control would
+    /// reach whoever reads the log with `cat`. The poll's own `refused` line was
+    /// already clean; the log line must be too, and bounded.
+    #[test]
+    fn a_polled_containers_words_are_inert_in_the_audit_log() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("polled-container-audit-inert");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "held for chiyo").unwrap();
+        let live = aoide_storage::seal::publish_binding().unwrap();
+        let container =
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &aoide_storage::time::now_iso_utc())
+                .unwrap();
+        let mut wire = serde_json::to_value(&container).unwrap();
+        // The polled node signed the chain's last hop, so the chain check passes
+        // and the destination's own refusal is what gets logged.
+        wire["transit"][0]["node"] = json!("relay");
+        wire["msgid"] = json!(laced("msgid"));
+        wire["suite"] = json!(format!("{}{}", laced("suite"), "x".repeat(10_000)));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [wire] } }).to_string();
+        let key = own_key();
+        let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[relay]).unwrap();
+
+        let polled = poll_node("relay", None).unwrap();
+
+        assert_eq!(polled.refused.len(), 1, "{polled:?}");
+        assert_inert(&polled.refused[0], LINE_MAX);
+        let log = std::fs::read_to_string(dir.join("log")).unwrap();
+        let lines: Vec<Value> = log.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let refused = lines
+            .iter()
+            .find(|line| line["command"] == "mail.poll.container-refused")
+            .unwrap_or_else(|| panic!("the refusal is audited: {log}"));
+        let message = refused["message"].as_str().unwrap();
+        assert!(message.starts_with("container msgid[31mend from `relay` refused: unsupported-suite: "), "{message}");
+        assert!(message.contains("suite `suite[31mend"), "the words are kept, cleaned: {message}");
+        for line in &lines {
+            assert_inert(line["message"].as_str().unwrap(), 500);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A charter relay's unreadable binding is reported inert and bounded.**
+    /// The parse error of a binding quotes the signed value it choked on, so a
+    /// relay holding its own key can put 10 KB, and a braille blank that serde's
+    /// own escaping lets through, into the poll's `Err`.
+    #[test]
+    fn a_charter_relays_unreadable_binding_is_reported_inert_and_bounded() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-relay-unreadable-binding");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+        let (relay_line, _, relay_binding) = mint_box(&dir.join("relay-box"), "relay");
+        charter_with_relay(&line_at(&relay_line, "https://relay.example.net/"));
+        let hostile = format!("{}{}", laced("hostile"), "x".repeat(10_000));
+
+        for field in ["v", "generation"] {
+            let mut binding = relay_binding.clone();
+            binding[field] = json!(hostile);
+            let relay_key = || box_keypair(&dir.join("relay-box"));
+            let port = replaying_relay(binding, relay_key(), Some(relay_key()), false);
+            let mut target = poll_target("relay", None).unwrap();
+            target.node.url = format!("http://127.0.0.1:{port}/");
+
+            let err = poll_through("relay", None, target).expect_err("a binding that does not parse proves nothing");
+
+            let lead = "relay `relay` answered no readable binding: ";
+            assert!(err.starts_with(lead), "{field}: {err}");
+            assert!(err.contains("hostile"), "{field}: the error is kept, cleaned: {err}");
+            assert_inert(&err, lead.len() + LINE_MAX);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same for the exchange a poll or a drain makes with a record's peer:
+    /// its callers discard the `Err`, but it is returned, and a caller that
+    /// prints it must not be handed the peer's quoted value.
+    #[test]
+    fn a_peers_unreadable_binding_is_reported_inert_and_bounded() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peer-unreadable-binding");
+        let hostile = format!("{}{}", laced("hostile"), "x".repeat(10_000));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "binding": { "v": hostile } } }).to_string();
+        let key = own_key();
+        let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+        let mut peer = keyed_node("elsewhere");
+        peer.url = format!("http://127.0.0.1:{port}/");
+        peer.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+
+        let err = exchange_bindings(&peer, Some("home")).expect_err("a binding that does not parse is not learned");
+
+        assert!(err.starts_with("binding: ") && err.contains("hostile"), "{err}");
+        assert_inert(&err, "binding: ".len() + LINE_MAX);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stored outcome with nothing printable left is no outcome at all, and one
+    /// an older build stored raw reads clean.
+    #[test]
+    fn a_stored_outcome_is_read_clean_or_not_at_all() {
+        assert_eq!(outcome_line(""), None);
+        assert_eq!(outcome_line("\u{1b}\u{202e}\u{2800} "), None, "only unsafe characters are left");
+        assert_eq!(outcome_line("accepted").as_deref(), Some("accepted"));
+        let kept = outcome_line(&format!("refused: {}", hostile_words())).expect("the words that are left are printed");
+        assert_inert(&kept, LINE_MAX);
+        assert!(kept.starts_with("refused: overwritten [2J]0;titlecleared desrever x"), "{kept}");
     }
 
     /// **A pass with nothing to deposit dials nothing.** The daemon drains every

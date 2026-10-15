@@ -485,8 +485,11 @@ never the inbound/serve half (that's `aoide-server`).
   (`foreign_words`), clipped to 200 characters: a refusal's `reason` and
   `detail`, a JSON-RPC `error`, a poll's own refusal, a `withheld` entry, and
   a refused container's `msgid`. So the entry's `last_outcome`, the link
-  record, a poll's `Err` and a `PollOutcome` are safe to print as they stand,
-  and a signature does not make a stranger's text safe for a terminal. The
+  record, a poll's `Err`, a `PollOutcome` and the `mail.answer.*` and
+  `mail.poll.*` audit lines hold none of a stranger's control characters, and a
+  signature does not make a stranger's text safe for a terminal. A record an
+  older build stored uncleaned is cleaned on the way out by `outcome_line`
+  (`mail outbox`, a send's `delivery`, the charter drain row). The
   `down`/`config-invalid` classification is judged on the raw word first.
   `drain_node`'s loop walks up
   to `DRAIN_BATCH_CAP` (50) non-refused entries oldest first — a per-call
@@ -679,9 +682,9 @@ never the inbound/serve half (that's `aoide-server`).
   count), `oldestMintedAtAgeSecs` (age of the oldest entry's
   `envelope.header.mintedAt`, `null` if the node has no entries or an
   unparseable timestamp), `tries` (a histogram keyed by `tries` value as a
-  string), `lastOutcomeCounts` (keyed by `lastOutcome`, or the literal
-  `"(none)"` for an entry that hasn't failed yet), and `refused` (count of
-  entries parked `refused: true`). This is a summary added onto the
+  string), `lastOutcomeCounts` (keyed by the printed `lastOutcome`, or the
+  literal `"(none)"` for an entry that hasn't failed yet), and `refused`
+  (count of entries parked `refused: true`). This is a summary added onto the
   existing `mail outbox --json` payload, not a new subcommand — the
   per-entry `rows` it sits beside are unchanged. This command never
   dials — it is the read side of the projection, not a drain. `handle_mail_outbox_rm` (`mail outbox rm
