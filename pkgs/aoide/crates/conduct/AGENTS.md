@@ -1961,11 +1961,16 @@ in the message.
   every row, and no allocation may grow with a field's length times the query's
   word count. Every string such a node or letter wrote is clipped where it is
   read (`clip`: `LINE_MAX` characters, reading only the field's head):
-  `remote_row` for a far row, `filed` for a letter's subject, sender, recipients
-  and thread, `mail_facts` for a mailbox's name; a task stays whole because
-  `remote_task` already bounds it. A `matched` value is clipped the same way,
-  whichever row or letter it came from. A query takes at most `WORDS_MAX` (64)
-  words and `ALTERNATIVES_MAX` (256) alternatives. The resolver's candidates are
+  `remote_row` for a far row's text, `local_row` for a local row's text, `filed`
+  for a letter's subject, sender, recipients and thread, `mail_facts` for a
+  mailbox's name; a task stays whole because `remote_task` already bounds it. A
+  far session's ids are never clipped (a clip folds two ids into one): `legal_claims`
+  refuses a session whose id, parent or remote link is not a
+  `valid_claimed_session_id`, and the scope names the node `ids refused`. A
+  `matched` value is clipped the same way, whichever row or letter it came
+  from, and names its term by its index in `words`. A query takes at most
+  `WORDS_MAX` (64) words and `ALTERNATIVES_MAX` (256) alternatives, refused as
+  soon as `split_line` passes the word cap. The resolver's candidates are
   gathered once per answer (`Refs`), and each distinct `parent:` value is
   resolved once. `--related` checks each row against a `Target` built once,
   whose remote children and mailboxes are sets. A row's bare fields are read
@@ -1978,16 +1983,21 @@ in the message.
   the letters filed to the mailboxes it reads (an index by mailbox, merged back
   into the base's order), and a row's threads dedupe through a set;
   `reasons_between` pairs threads and mailboxes and dedupes its reasons through
-  sets as well. Every list in a row holds at most `LIST_MAX` (20) beside its
-  full count: edges, `reads`, `cc`, `threads`, a letter's `to`, a related row's
-  `reasons`, and the candidates a refusal names (with `and N more`). A machine
-  answer lists at most `ROWS_MAX` (200) rows beside `total` and `more`; the
-  human form lists them all. A new list in a row takes a cap and a count, and a
-  new string a node or letter wrote takes a `clip` where it is read. The timing
-  tests in `find.rs` (the twenty-thousand-row, cap and mail tests) fail on a
-  quadratic or per-component regression; their bounds are many times the idle
-  run so a loaded builder passes them, and a quadratic mutant still fails them.
-  Keep both properties when touching these paths.
+  sets as well. A letter is held once (`Rc`) and each reader's row holds a
+  pointer to it. Every list in a row holds at most `LIST_MAX` (20) beside its
+  full count: edges, `reads`, `leads`, `cc`, `threads`, a letter's `to`, a
+  related row's `reasons`, and the candidates a refusal names (with `and N
+  more`). `matched` holds one entry per query word. A machine answer lists at
+  most `ROWS_MAX` (200) rows in its message and its data alike, plus one `and N
+  more` line, beside `total` and `more`; the human form lists them all. A list
+  row carries `cc` and `threads` as counts only. The serialized machine answer
+  is bounded by 8 MiB, stated in SESSION-FIND.md Decision 13 and measured by
+  `the_worst_machine_answer_serializes_under_its_stated_bound`. A new list in a
+  row takes a cap and a count, and a new string a node or letter wrote takes a
+  `clip` where it is read. The letter visit test counts work through `VISITS`,
+  not time. The other wall-clock bounds in `find.rs` are an order of magnitude
+  above their idle runs, so a loaded builder passes them, and a quadratic mutant
+  still fails them. Keep both properties when touching these paths.
 - **A remote row's project is the one its node published.**
   `who.rs::remote_project` is the one rule: the stored `project`, clipped to a
   line, and none when the node published none. Bare `session`'s

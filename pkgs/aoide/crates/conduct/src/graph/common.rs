@@ -116,6 +116,12 @@ const CLIP_READ: usize = 4 * LINE_MAX;
 /// every copy of it that an answer repeats once per query word.
 pub(in crate::graph) fn clip(text: &str) -> String {
     match text.char_indices().nth(CLIP_READ) {
+        // The head is cut only when the rest holds something a reader would
+        // see. The ellipsis is added after the head is flattened, so a head
+        // of padding cannot hide the cut.
+        Some((end, _)) if text[end..].chars().any(|c| !c.is_whitespace() && !is_unsafe(c)) => {
+            clip_flat(&format!("{}…", clip_flat(&strip_unsafe(&text[..end]), usize::MAX)), LINE_MAX)
+        }
         Some((end, _)) => clean_line(&text[..end]),
         None => clean_line(text),
     }
@@ -304,6 +310,15 @@ pub(in crate::graph) fn clip_flat(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_field_cut_after_padding_still_says_it_was_cut() {
+        let padded = format!("a{}x", " ".repeat(900));
+        let clipped = clip(&padded);
+        assert_eq!(clipped, "a…", "the cut is marked even though the head flattens short");
+        assert_eq!(clip(&format!("a{}", " ".repeat(900))), "a", "trailing padding alone is no cut");
+        assert_eq!(clip(&"b".repeat(1000)).chars().count(), LINE_MAX);
+    }
 
     #[test]
     fn clean_line_strips_colour_and_keeps_its_literal_text() {
