@@ -525,6 +525,7 @@ mod tests {
             kind: None,
             parent: None,
             native_role: None,
+            task: None,
             remote_parent: None,
             remote_children: Vec::new(),
         }

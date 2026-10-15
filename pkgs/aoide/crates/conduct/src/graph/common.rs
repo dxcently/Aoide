@@ -173,6 +173,26 @@ fn is_mark_or_ignorable(c: char) -> bool {
         | 0xE0000..=0xE0FFF)
 }
 
+/// How many characters of a field [`clip`] reads. [`clean_line`] keeps at most
+/// `LINE_MAX`, so a few lines' worth is all it can use of a field of any length.
+const CLIP_READ: usize = 4 * LINE_MAX;
+
+/// `text` as one clean line of at most `LINE_MAX` characters. Only its head is
+/// read, so a field costs the same however long its author made it, and so does
+/// every copy of it that an answer repeats once per query word.
+pub(in crate::graph) fn clip(text: &str) -> String {
+    match text.char_indices().nth(CLIP_READ) {
+        // The head is cut only when the rest holds something a reader would
+        // see. The ellipsis is added after the head is flattened, so a head
+        // of padding cannot hide the cut.
+        Some((end, _)) if text[end..].chars().any(|c| !c.is_whitespace() && !is_unsafe(c)) => {
+            clip_flat(&format!("{}…", clip_flat(&strip_unsafe(&text[..end]), usize::MAX)), LINE_MAX)
+        }
+        Some((end, _)) => clean_line(&text[..end]),
+        None => clean_line(text),
+    }
+}
+
 /// Terminal escape sequences and control bytes removed from text the pty
 /// wrote, leaving printable text plus `\n`, `\r` and `\t`.
 ///
@@ -305,6 +325,15 @@ mod tests {
         assert_eq!(visible_held("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\\u{43e}ject");
         assert_eq!(visible_held("a b\nc"), "a b\\nc");
         assert_eq!(visible("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\u{43e}ject", "the general view keeps letters");
+    }
+
+    #[test]
+    fn a_field_cut_after_padding_still_says_it_was_cut() {
+        let padded = format!("a{}x", " ".repeat(900));
+        let clipped = clip(&padded);
+        assert_eq!(clipped, "a…", "the cut is marked even though the head flattens short");
+        assert_eq!(clip(&format!("a{}", " ".repeat(900))), "a", "trailing padding alone is no cut");
+        assert_eq!(clip(&"b".repeat(1000)).chars().count(), LINE_MAX);
     }
 
     #[test]

@@ -60,7 +60,8 @@ use super::session_store::{
     audit_ignored_wrap_hook, clear_stale_parent, do_hook_session_start, do_session_end,
     do_session_phase, protected_wrap, reserved_id_refusal,
     do_session_phase_if, do_subagent_end, do_subagent_rekey,
-    do_subagent_spawn, ensure_session_ceiling, now_iso_utc, refresh_subagent_says,
+    do_subagent_spawn, ensure_session_ceiling, live_harness_anchoring, now_iso_utc,
+    refresh_subagent_says,
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
     stamp_harness_session_id, stamp_session_start_at, stored_phase,
 };
@@ -1843,7 +1844,10 @@ enum HookAction {
     /// unanswered AskUserQuestion); a settled `idle`/`done` session must not be
     /// flipped by the ~60s idle heartbeat.
     PhaseIfRunning { id: String, phase: String },
-    End { id: String },
+    /// The session ended. `continues`: the payload's `reason` is one the
+    /// profile names as leaving the harness process alive under another
+    /// session id, so the end is no death and says nothing to a spawner.
+    End { id: String, continues: bool },
 }
 
 /// Map ONE hook payload (`session_id`, `hook_event_name`, optional `cwd`) to a
@@ -2074,7 +2078,13 @@ fn map_hook(profile: &AgentProfile, payload: &Value) -> Option<HookAction> {
                 sub_id: format!("sub:{k}"),
             })
         }
-        HookClass::SessionEnd => Some(HookAction::End { id: id.to_string() }),
+        HookClass::SessionEnd => Some(HookAction::End {
+            id: id.to_string(),
+            continues: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| profile.session_end_continues.contains(&reason)),
+        }),
         // A DEDICATED needs-input event (kimi: `PermissionRequest`) — the same
         // unconditional `awaiting` a permission Notification yields. Claude's
         // map can never produce this class at the top level (its Awaiting only
@@ -2094,7 +2104,7 @@ fn map_hook(profile: &AgentProfile, payload: &Value) -> Option<HookAction> {
 /// profile — the test-facing wrapper (production resolves the profile from
 /// `--agent` via [`hook_profile_for`] and calls [`hook_for_profile`]).
 #[cfg(test)]
-fn hook_from_str(buf: &str) -> Outcome {
+pub(super) fn hook_from_str(buf: &str) -> Outcome {
     let profile = agent_profile(CLAUDE_PROFILE.name).expect("the claude profile is registered");
     hook_for_profile(profile, buf)
 }
@@ -2274,7 +2284,9 @@ fn hook_ensure_session_with(
     }
     let attested = attest.then(|| hook_pid.and_then(&resolve_wrap)).flatten();
     if let Some(w) = attested.as_deref() {
-        stamp_attested_parent(id, w);
+        if live_harness_anchoring(id, hook_pid).is_none() {
+            stamp_attested_parent(id, w);
+        }
     }
     let reported = vouched_payload_pid(payload, hook_pid);
     let existing = load_stage::<SessionsFile>(&sessions_path()).ok();
@@ -2463,6 +2475,23 @@ fn hook_for_profile_gated(
             // touch the sub-agent node that holds the id.
             if let Some(refusal) = reserved_id_refusal("session.start", &id) {
                 return fold_hook_outcome(cmd, refusal, None, claim_note);
+            }
+            // A SessionStart re-chains and re-parents an id that is already
+            // registered, so one from outside its live harness is refused
+            // whole: nothing moves, and the hook still exits ok and says so
+            // only in its audited outcome, which names the session and its
+            // harness.
+            if let Some(harness) = live_harness_anchoring(&id, hook_pid) {
+                return Outcome::ok(
+                    cmd,
+                    format!("no-op: session `{id}` is anchored to its live harness (pid {harness})"),
+                )
+                .with_data(json!({
+                    "action": "none",
+                    "reason": "harness-anchored",
+                    "sessionId": id,
+                    "harness": harness,
+                }));
             }
             // A claude launched INSIDE a conducted session inherits its parent's
             // `AOIDE_SESSION_ID` in the HOOK PROCESS's env — thread it as the
@@ -2778,7 +2807,9 @@ fn hook_for_profile_gated(
             do_subagent_end(&sub_id);
             Outcome::ok("session.hook", format!("subagent end {sub_id}"))
         }
-        HookAction::End { id } => do_session_end(&id),
+        // A process that lives on has no death to attest: the end is real and
+        // says nothing to the spawner.
+        HookAction::End { id, continues } => do_session_end(&id, hook_pid, !continues),
     };
     // Publish a harness-reported context-window ceiling onto the record
     // IMMEDIATELY (every hook carries it — pi's extension reads the active
@@ -2944,6 +2975,18 @@ const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
 /// the one of the three that is not ordinary same-uid input.
 pub const DAEMON_PEER_PID_FLAG: &str = "__daemon-peer-pid";
 
+/// The door's own peer pid on a daemon-run invocation
+/// ([`DAEMON_PEER_PID_FLAG`]), or `None` when the door stamped none.
+/// `session_end_caller` reads it only on `Door::Daemon`, which the daemon
+/// builds literally. `session_hook` reads it wherever the forwarded payload
+/// ([`STDIN_PAYLOAD_FLAG`]) rides, and no other door can carry either key: the
+/// daemon overwrites the stamp, the CLI refuses a flag its command does not
+/// declare, and the MCP and A2A doors build their flags from declared names. So
+/// a flag typed by a caller never passes for a kernel fact.
+pub(in crate::graph) fn door_pid(inv: &Invocation) -> Option<i32> {
+    inv.flags.get(DAEMON_PEER_PID_FLAG).and_then(|s| s.parse::<i32>().ok()).filter(|p| *p > 0)
+}
+
 /// Internal-only flag key carrying the HOOK PROCESS's own `AOIDE_SESSION_ID`
 /// across the same daemon hop the payload rides — never set by a real
 /// CLI/MCP/A2A caller, never registered in `commands/graph.rs`'s `flags:`
@@ -3032,11 +3075,7 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
         // and stamps no ancestry, never falling back to this process's own —
         // that would be `aoided`'s ancestry, the false fact this door exists to
         // stop recording.
-        let door_pid = inv
-            .flags
-            .get(DAEMON_PEER_PID_FLAG)
-            .and_then(|s| s.parse::<i32>().ok())
-            .filter(|p| *p > 0);
+        let door_pid = door_pid(inv);
         // The claim comes off the wire or not at all — deliberately no env
         // fallback here (`own_parent_claim`'s own doc). It is CHECKED against
         // `door_pid`'s ancestry before it is used.
@@ -5520,7 +5559,7 @@ mod tests {
         );
         // The shared parent ends — its on-disk sessions.json record flips to
         // `done` (sib-a/sib-b are not `kind: subagent`, so they survive intact).
-        do_session_end("orch");
+        do_session_end("orch", None, true);
 
         let out = deliver_local_with(
             &send_invocation(&["nope"], &[("id", target)]),
@@ -6602,6 +6641,42 @@ mod tests {
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "session_id": "s" })).is_none());
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "hook_event_name": "SessionStart" })).is_none());
         assert!(map_hook(&CLAUDE_PROFILE, &json!({ "session_id": "", "hook_event_name": "SessionStart" })).is_none());
+    }
+    /// Whether a SessionEnd leaves the harness process alive is the profile's
+    /// word on the payload's raw `reason`: claude names `clear` and `resume`,
+    /// compared exactly; a harness that names none never skips on the field.
+    #[test]
+    fn a_session_end_continues_only_for_a_reason_the_profile_names() {
+        let continues = |profile: &AgentProfile, reason: Option<Value>| {
+            let mut payload = json!({ "session_id": "s", "hook_event_name": "SessionEnd" });
+            if let Some(reason) = reason {
+                payload["reason"] = reason;
+            }
+            match map_hook(profile, &payload) {
+                Some(HookAction::End { id, continues }) if id == "s" => continues,
+                other => panic!("a SessionEnd maps to End, got {other:?}"),
+            }
+        };
+        for reason in ["clear", "resume"] {
+            assert!(continues(&CLAUDE_PROFILE, Some(json!(reason))), "{reason}");
+        }
+        let gone = [
+            Some(json!("logout")),
+            Some(json!("prompt_input_exit")),
+            Some(json!("other")),
+            Some(json!("clear\u{200b}")),
+            Some(json!("CLEAR")),
+            Some(json!(["clear"])),
+            Some(json!(null)),
+            None,
+        ];
+        for reason in gone {
+            assert!(!continues(&CLAUDE_PROFILE, reason.clone()), "{reason:?}");
+        }
+        for name in ["kimi", "pi"] {
+            let profile = agent_profile(name).unwrap();
+            assert!(!continues(profile, Some(json!("clear"))), "{name} documents no reason");
+        }
     }
     #[test]
     fn hook_garbage_stdin_is_an_ok_noop_never_nonzero() {
@@ -8332,11 +8407,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&fake_dir);
     }
 
+    /// The window bind is the one route where only the chain rule stands
+    /// between a stranger's per-turn hook and a record's chain: a windowless
+    /// record's hook binds the window its caller owns and then moves the chain
+    /// to the caller's. A live harness outside the caller's chain keeps the
+    /// chain; a dead one lets it move. A record that stores no chain but a pid
+    /// holds it the same, since that pid is its harness. A live harness outside
+    /// the caller's chain also anchors the record against the bind itself: the
+    /// window stays unbound. Where no live harness anchors it, the window binds
+    /// and moves no chain, parent or fact.
+    #[cfg(unix)]
+    #[test]
+    fn a_per_turn_hook_that_binds_a_window_cannot_take_the_chain_of_a_live_harness() {
+        const DEAD: i32 = 2_000_000_000;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("anchor-bind");
+        let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let me = std::process::id() as i32;
+        let mut owner = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut harness = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let (_fake_env, fake_dir) = fake_hypr_socket("anchor-bind");
+        std::env::set_var("AOIDE_TEST_CLIENT_PID", owner.id().to_string());
+        std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "com.example.App");
+        let chain_of = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().hook_ancestry
+        };
+        let held = vec![harness.id() as i32, DEAD];
+        let free = vec![DEAD, DEAD + 1];
+        for (id, stored) in [("held", &held), ("free", &free)] {
+            do_hook_session_start(aoide_protocol::Door::Cli, id, Some("claude"), Some("/p"), None, None, None, stored);
+            let payload = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+            hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        assert_eq!(chain_of("held"), held, "a live harness outside the caller's chain holds it");
+        assert_eq!(chain_of("free").first(), Some(&me), "a dead one lets the caller's chain land");
+
+        for (id, pid) in [("pid-held", harness.id()), ("pid-free", DEAD as u32)] {
+            do_session_start(id, Some("claude"), Some("/p"), None, None, None, None, None, Some(pid));
+            let payload = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+            hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        let window_of = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().window_address
+        };
+        assert!(chain_of("pid-held").is_empty(), "a live pid is the harness of a chainless record, and holds it");
+        assert_eq!(window_of("pid-held"), "", "a stranger's bind onto an anchored record is refused");
+        assert_eq!(window_of("held"), "", "and so is one onto a record anchored by its stored chain");
+        // The fake compositor answers one read per discovery, and a loaded box can
+        // miss its budget once. A turn retries the bind until it lands, so retry too.
+        let free_payload = json!({ "session_id": "pid-free", "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while window_of("pid-free") != "0xAA" && std::time::Instant::now() < deadline {
+            hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &free_payload.to_string(), false, Some(owner.id() as i32), None);
+        }
+        assert_eq!(window_of("pid-free"), "0xAA", "the window binds where no live harness anchors the record");
+        assert_eq!(chain_of("pid-free").first(), Some(&me), "a dead pid lets the caller's chain land");
+        for c in [&mut owner, &mut harness] {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        let _ = std::fs::remove_dir_all(&fake_dir);
+    }
+
     /// A SessionStart refreshes the stored hook chain only where trust allows. A
-    /// dead chain moves. A pid-less record's chain moves even over a live process
-    /// outside the new one, and a record anchored to a live pid of its own outside
-    /// the new chain is refused. A sealed record's chain moves but its pid does not
-    /// (pid trust).
+    /// dead chain moves. A pid-less record's chain moves even over a live shell
+    /// or terminal outside the new one, but not over its live harness, and a
+    /// record anchored to a live pid of its own outside the new chain is
+    /// refused. A sealed record's chain moves but its pid does not (pid trust).
     /// An unsealed record whose pid is dead takes the pi payload's pid (the
     /// unchanged `pid_may_move` path).
     #[test]
@@ -8385,6 +8524,26 @@ mod tests {
         let _ = live.kill();
         let _ = live.wait();
 
+        // r2b: pid-less, and the live process outside the new chain is its
+        // harness. The SessionStart is a stranger's and is refused whole: the
+        // chain stays.
+        let mut harness = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let held = vec![harness.id() as i32, DEAD];
+        do_hook_session_start(aoide_protocol::Door::Cli, "r2b", Some("claude"), Some("/p"), None, None, None, &held);
+        let out = hook_for_profile_gated(aoide_protocol::Door::Cli, claude, &claude_start("r2b"), false, Some(me), None);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "a refusal never fails the hook");
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "harness-anchored");
+        assert_eq!(data["harness"], held[0]);
+        assert!(
+            out.message.contains("`r2b`") && out.message.contains(&held[0].to_string()),
+            "the audited message names the session and its harness: {}",
+            out.message
+        );
+        assert_eq!(load("r2b").hook_ancestry, held, "a live harness outside the new chain holds it");
+        let _ = harness.kill();
+        let _ = harness.wait();
+
         // r3: sealed, dead pid, dead chain. The pi payload's pid is refused by
         // `pid_may_move`, and the chain still refreshes.
         do_hook_session_start(aoide_protocol::Door::Cli,
@@ -8401,6 +8560,37 @@ mod tests {
         do_hook_session_start(aoide_protocol::Door::Cli, "r4", Some("pi"), Some("/p"), None, None, Some(DEAD as u32), &[DEAD]);
         hook_for_profile_gated(aoide_protocol::Door::Cli, pi, &pi_start("r4", me), false, Some(me), None);
         assert_eq!(load("r4").pid, Some(me as u32), "an unsealed dead pid is replaced");
+    }
+
+    /// A per-turn hook follows its session to the wrap that hosts it now, as a
+    /// `--resume` under a new wrap needs, but only for a hook that runs under
+    /// the session's harness or whose harness has exited. A stranger's hook,
+    /// attested to a wrap of its own, does not re-parent a session whose
+    /// harness lives.
+    #[cfg(unix)]
+    #[test]
+    fn a_per_turn_hook_from_outside_the_live_harness_does_not_re_parent_the_session() {
+        const DEAD: i32 = 2_000_000_000;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("anchor-parent");
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let me = std::process::id() as i32;
+        let mut live = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        for wrap in ["wrapk", "wrapa"] {
+            do_session_start(wrap, Some("claude"), Some("/w"), None, None, Some(true), None, None, None);
+        }
+        let parent = |id: &str| {
+            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().parent_session_id
+        };
+        let prompt = |id: &str| json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+        for (id, harness, want) in [("held", live.id() as i32, "wrapk"), ("free", DEAD, "wrapa")] {
+            do_hook_session_start(aoide_protocol::Door::Cli, id, Some("claude"), Some("/w"), None, Some("wrapk"), None, &[harness, 4242]);
+            hook_ensure_session_with(aoide_protocol::Door::Cli, claude, &prompt(id), id, Some(me), true, |_| Some("wrapa".to_string()), None);
+            assert_eq!(parent(id).as_deref(), Some(want), "{id}");
+        }
+        let _ = live.kill();
+        let _ = live.wait();
     }
 
     /// L2, at the door's own entry point: a `session hook` served with a payload

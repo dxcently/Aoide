@@ -162,7 +162,7 @@ pub(in crate::graph) fn connect_for_ring(path: impl AsRef<std::path::Path>) -> s
 /// (`conductable == Some(true)`), or does its `parentSessionId` chain reach
 /// one? Cycle-guarded; `None` for a dangling link, a chain that never
 /// crosses a conducted record, or an unknown starting id.
-fn conducted_ancestor(id: &str, sessions: &[SessionRecord]) -> Option<String> {
+pub(in crate::graph) fn conducted_ancestor(id: &str, sessions: &[SessionRecord]) -> Option<String> {
     let mut current = id.to_string();
     let mut seen = HashSet::new();
     loop {

@@ -28,6 +28,7 @@ use aoide_protocol::output::Outcome;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::node_store::Node;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// Extract every `kind:"session"` node from a node's CACHED graph document
 /// as (sessionId, petname, role) triples — role derived from the SAME
@@ -39,17 +40,14 @@ pub(super) fn node_cached_sessions(graph: &Value) -> Vec<(String, Option<String>
     let empty: Vec<Value> = Vec::new();
     let nodes = graph.get("nodes").and_then(Value::as_array).unwrap_or(&empty);
     let edges = graph.get("edges").and_then(Value::as_array).unwrap_or(&empty);
+    let spawned = super::who::spawned_into(edges);
     nodes
         .iter()
         .filter(|n| n["kind"] == "session")
         .map(|n| {
             let full_id = n["id"].as_str().unwrap_or("");
             let session_id = full_id.strip_prefix("session:").unwrap_or(full_id).to_string();
-            let role = if edges.iter().any(|e| e["kind"] == "spawned" && e["to"] == full_id) {
-                "child"
-            } else {
-                "root"
-            };
+            let role = if spawned.contains_key(full_id) { "child" } else { "root" };
             let petname = n["petname"].as_str().map(String::from);
             (session_id, petname, role)
         })
@@ -154,25 +152,30 @@ pub(super) fn unresolved_remote(
     sess: &[(String, Option<String>, &'static str)],
     resolved: Resolution,
 ) -> Outcome {
-    let labels = |ids: &[String]| -> Vec<String> {
-        ids.iter()
-            .filter_map(|id| {
-                sess.iter()
-                    .find(|(sid, _, _)| sid == id)
-                    .map(|(sid, pet, role)| node_session_label(node, sid, pet.as_deref(), role))
-            })
-            .collect()
-    };
     match resolved {
-        Resolution::Ambiguous(ids) => Outcome::error(
-            cmd,
-            format!(
-                "`{query}` is ambiguous on node `{node}` — {} session(s) match: {}",
-                ids.len(),
-                labels(&ids).join(", ")
-            ),
-        )
-        .with_data(json!({ "reason": "ambiguous", "node": node, "query": query, "candidates": ids })),
+        Resolution::Ambiguous(ids) => {
+            // One pass over the cached sessions, then a probe per candidate:
+            // a far node can make every one of its sessions a candidate, and a
+            // scan of the set per candidate would be quadratic in them.
+            let mut by_id: HashMap<&str, &(String, Option<String>, &'static str)> = HashMap::new();
+            for entry in sess {
+                by_id.entry(entry.0.as_str()).or_insert(entry);
+            }
+            let labels: Vec<String> = ids
+                .iter()
+                .filter_map(|id| by_id.get(id.as_str()))
+                .map(|(sid, pet, role)| node_session_label(node, sid, pet.as_deref(), role))
+                .collect();
+            Outcome::error(
+                cmd,
+                format!(
+                    "`{query}` is ambiguous on node `{node}` — {} session(s) match: {}",
+                    ids.len(),
+                    labels.join(", ")
+                ),
+            )
+            .with_data(json!({ "reason": "ambiguous", "node": node, "query": query, "candidates": ids }))
+        }
         Resolution::NotFound => {
             let available = sess
                 .iter()
@@ -226,6 +229,7 @@ pub(super) fn resolve_on_node(cmd: &'static str, node: &str, query: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     /// Pure, no I/O — mirrors `aoide_storage::addr`'s own table-driven
     /// style, scoped to what this function adds on top of `addr::resolve`
@@ -320,5 +324,69 @@ mod tests {
             }
             assert!(out.message.contains("moc.elpmaxe"), "the text itself still shows: {}", out.message);
         }
+    }
+
+    /// `n` sessions of a far node's cached document, each spawned by its
+    /// predecessor, as the extraction sees them.
+    fn chain_document(n: usize) -> Value {
+        let nodes: Vec<Value> = (0..n).map(|i| json!({ "id": format!("session:s{i}"), "kind": "session" })).collect();
+        let edges: Vec<Value> = (1..n)
+            .map(|i| json!({ "from": format!("session:s{}", i - 1), "to": format!("session:s{i}"), "kind": "spawned" }))
+            .collect();
+        json!({ "nodes": nodes, "edges": edges })
+    }
+
+    #[test]
+    fn a_session_is_a_child_when_any_spawned_edge_leads_to_it() {
+        let graph = json!({
+            "nodes": [
+                { "id": "session:a", "kind": "session", "petname": "brave-otter" },
+                { "id": "session:b", "kind": "session" },
+                { "id": "session:c", "kind": "session" },
+            ],
+            "edges": [
+                { "from": "session:a", "to": "session:b", "kind": "spawned" },
+                { "from": "session:a", "to": "session:c", "kind": "resumed" },
+            ],
+        });
+        assert_eq!(
+            node_cached_sessions(&graph),
+            vec![
+                ("a".to_string(), Some("brave-otter".to_string()), "root"),
+                ("b".to_string(), None, "child"),
+                ("c".to_string(), None, "root"),
+            ],
+        );
+    }
+
+    #[test]
+    fn extracting_a_far_nodes_cached_sessions_costs_linear_in_the_document() {
+        // Eight times the sessions, about eight times the time; a scan of
+        // every edge per session costs sixty-four.
+        let cost = |n: usize| move || node_cached_sessions(&chain_document(n)).len();
+        // An absolute ceiling, not a linearity proof (see who.rs's far join).
+        let limit = Duration::from_secs(10);
+        let (big, _) = aoide_test_support::finishes_within(limit, cost(64_000))
+            .unwrap_or_else(|| panic!("64k sessions took over {limit:?}: the extraction is too slow"));
+        println!("node_cached_sessions: 64k sessions {big:?}");
+    }
+
+    #[test]
+    fn a_node_whose_every_session_matches_is_refused_in_linear_time() {
+        // A far node may name every one of its sessions the same: the refusal
+        // then labels all of them, once each.
+        let cost = |n: usize| {
+            move || {
+                let sess: Vec<(String, Option<String>, &'static str)> =
+                    (0..n).map(|i| (format!("s{i}"), Some("twin".to_string()), "child")).collect();
+                let ids: Vec<String> = sess.iter().map(|(id, _, _)| id.clone()).collect();
+                unresolved_remote("send", "far", "twin", &sess, Resolution::Ambiguous(ids)).message.len()
+            }
+        };
+        let limit = Duration::from_secs(10);
+        let (big, len) = aoide_test_support::finishes_within(limit, cost(128_000))
+            .unwrap_or_else(|| panic!("128k candidates took over {limit:?}: the refusal is too slow"));
+        assert!(len > 128_000 * 10, "the refusal still labels every candidate");
+        println!("unresolved_remote: 128k candidates {big:?}");
     }
 }

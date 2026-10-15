@@ -800,6 +800,13 @@ by decision — no embedded database yet
   every `.stage.lock` holder in this crate takes it only for a brief
   in-memory read-modify-write — asking the mailbase's ordinary writers to
   wait behind a socket op would be a real regression, not a refactor.
+  The find index (`docs/architecture/SESSION-FIND.md`) reads the store with
+  no lock at all. `peek_base` returns the correspondence entries up to the
+  last newline, so a tail the next write would truncate is never reported;
+  `peek_cursors` returns the reader maps with each pseudo-reader dropped, and
+  `None` for a legacy flat file, which only a locked read migrates, so its
+  caller reports unknown and never none. Neither writes, migrates, or takes
+  `.stage.lock`; `read_base` and `unread_for` keep their locked paths.
 - `outbox` — the per-node BSO-style spool (P-M2): `state/outbox/<node>/`,
   one JSON file per pending envelope plus each link's own backoff state
   (`link.json`), guarded by the same crate-wide stage lock `mail` uses for
@@ -872,6 +879,14 @@ by decision — no embedded database yet
   Leaving it unbounded would hand one JSON array of whole envelopes to a
   client that refuses any response over 20 MiB (`MAX_RESPONSE_BYTES`): a
   stall no retry could clear, since nothing at the hub would change.
+- `git` — the git seam (`src/git.rs`). Five subprocess operations: `toplevel`
+  finds a repo, and four (`hash_object_write`, `hash_object`, `cat_file_blob`,
+  `anchor`) name a pre-image by blob sha under `refs/aoide/`. `common_dir(path)`
+  is the one pure read: the git common directory of the repo `path` sits in,
+  found by walking up to the nearest `.git` and following a file's `gitdir:`
+  through its `commondir`. Every linked worktree of one repo answers the same
+  path, and no `git` process runs, so it answers with `git` absent from
+  `PATH`. It is the repo key `session find`'s "same repo" reason compares.
 - `identity` — this instance's lazily-minted ed25519 keypair (pairing
   workstream P-P1, `docs/architecture/PAIRING.md`, CONTRACTS.md §4's
   `state/identity/` subsection): `state/identity/ed25519.key` (the raw

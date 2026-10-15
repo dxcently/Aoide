@@ -398,35 +398,56 @@ pub fn nodes_path() -> std::path::PathBuf {
     state_dir().join("nodes.json")
 }
 
-/// Read the registry, tolerating a missing/corrupt/wrong-shape file as an
-/// empty list — an absent file is simply "no nodes registered", never an
-/// error. Pre-charter records are folded into per-mesh grants here
-/// ([`migrate_grants`]); nothing outside this function sees the old shape.
+/// Read the registry, tolerating a missing, corrupt or wrong-shape file as an
+/// empty list. [`read_nodes`] is the same read with a corrupt file named as an
+/// error, for a caller that must say so. Pre-charter records are folded into
+/// per-mesh grants by [`migrate_grants`]; nothing outside the read sees the old
+/// shape.
 pub fn load_nodes() -> Vec<Node> {
-    match std::fs::read_to_string(nodes_path()) {
-        Ok(raw) => {
-            // P-CHARTER (review finding 7): the migration targets the home
-            // mesh the CONFIG names. A config that will not parse has no
-            // answer to give, and guessing the built-in default would fold
-            // every record into a mesh the operator never named — so the
-            // fold is skipped entirely, grants read as empty (fail closed,
-            // no gate can be satisfied by a guess) and the skip is reported.
-            // `allows` on disk is left exactly as it is; the next successful
-            // load migrates it.
-            let home = crate::config::home_mesh_fallible().ok();
-            let migration = match home.as_deref() {
-                Some(home) => migrate_grants(&raw, home),
-                None => Migration {
-                    registry: parse_registry(&raw).unwrap_or_default(),
-                    skipped: vec!["the config does not load, so pre-charter grants were NOT migrated — \
-                                   fix `config.toml`; every record reads as grantless until it does"
-                        .to_string()],
-                },
-            };
-            report_skips(&migration.skipped);
-            migration.registry.nodes
+    read_nodes().unwrap_or_default()
+}
+
+/// [`load_nodes`] with the corrupt case named: `Err` when `nodes.json` exists
+/// but is not a registry, or cannot be read. An absent file is `Ok` and empty.
+pub fn read_nodes() -> Result<Vec<Node>, String> {
+    let path = nodes_path();
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    // P-CHARTER (review finding 7): the migration targets the home
+    // mesh the CONFIG names. A config that will not parse has no
+    // answer to give, and guessing the built-in default would fold
+    // every record into a mesh the operator never named — so the
+    // fold is skipped entirely, grants read as empty (fail closed,
+    // no gate can be satisfied by a guess) and the skip is reported.
+    // `allows` on disk is left exactly as it is; the next successful
+    // load migrates it.
+    let home = crate::config::home_mesh_fallible().ok();
+    let migration = match home.as_deref() {
+        Some(home) => migrate_grants(&raw, home),
+        None => {
+            let registry = parse_registry(&raw);
+            let mut skipped = vec![
+                "the config does not load, so pre-charter grants were NOT migrated — \
+                 fix `config.toml`; every record reads as grantless until it does"
+                    .to_string(),
+            ];
+            if registry.is_none() {
+                skipped.push("state/nodes.json is not a registry".to_string());
+            }
+            Migration {
+                unreadable: registry.is_none().then(|| "state/nodes.json is not a registry".to_string()),
+                registry: registry.unwrap_or_default(),
+                skipped,
+            }
         }
-        Err(_) => Vec::new(),
+    };
+    report_skips(&migration.skipped);
+    match migration.unreadable {
+        Some(why) => Err(why),
+        None => Ok(migration.registry.nodes),
     }
 }
 
@@ -440,6 +461,9 @@ pub struct Migration {
     pub registry: NodeRegistry,
     /// One line per thing skipped, each naming the record it was about.
     pub skipped: Vec<String>,
+    /// Set when the text is not a registry at all, so [`read_nodes`] names it
+    /// as an error rather than reading an empty list.
+    pub unreadable: Option<String>,
 }
 
 /// Read `nodes.json`'s text into a registry, folding every record's
@@ -472,7 +496,8 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
     let mut skipped: Vec<String> = Vec::new();
     let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
         skipped.push("state/nodes.json is not readable JSON — read as an empty registry".to_string());
-        return Migration { registry: NodeRegistry::default(), skipped };
+        let unreadable = Some("state/nodes.json is not readable JSON".to_string());
+        return Migration { registry: NodeRegistry::default(), skipped, unreadable };
     };
     // A pre-rename registry still says `peers` (the serde alias on
     // `NodeRegistry::nodes`); this raw-JSON pass must honour it too.
@@ -483,7 +508,8 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
     }
     let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) else {
         skipped.push("state/nodes.json has no `nodes` array — read as an empty registry".to_string());
-        return Migration { registry: NodeRegistry::default(), skipped };
+        let unreadable = Some("state/nodes.json has no `nodes` array".to_string());
+        return Migration { registry: NodeRegistry::default(), skipped, unreadable };
     };
     for (i, node) in nodes.iter_mut().enumerate() {
         let Some(obj) = node.as_object_mut() else {
@@ -556,10 +582,11 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
         }
     }
     match parse_registry(&serde_json::to_string(&value).unwrap_or_default()) {
-        Some(registry) => Migration { registry, skipped },
+        Some(registry) => Migration { registry, skipped, unreadable: None },
         None => {
             skipped.push("state/nodes.json could not be read as a registry — read as empty".to_string());
-            Migration { registry: NodeRegistry::default(), skipped }
+            let unreadable = Some("state/nodes.json could not be read as a registry".to_string());
+            Migration { registry: NodeRegistry::default(), skipped, unreadable }
         }
     }
 }
@@ -1218,11 +1245,23 @@ pub fn node_cache_path(name: &str) -> std::path::PathBuf {
     node_cache_dir().join(format!("{name}.json"))
 }
 
-/// Read one node's cache entry, tolerating a missing/corrupt file as `None`
-/// (never pulled / unreadable — the caller treats both as "no data yet").
+/// Read one node's cache entry, tolerating a missing or unparsable file as
+/// `None` (never pulled, or unreadable: the caller treats both as "no data
+/// yet"). [`read_node_cache`] names the unparsable case instead.
 pub fn load_node_cache(name: &str) -> Option<NodeCacheEntry> {
-    let raw = std::fs::read_to_string(node_cache_path(name)).ok()?;
-    serde_json::from_str(&raw).ok()
+    read_node_cache(name).ok().flatten()
+}
+
+/// One node's cache entry: `Ok(None)` when it was never written, `Err` when the
+/// file is there and does not parse, or cannot be read.
+pub fn read_node_cache(name: &str) -> Result<Option<NodeCacheEntry>, String> {
+    let path = node_cache_path(name);
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    serde_json::from_str(&raw).map(Some).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Atomic-write one node's cache entry.
@@ -2222,5 +2261,38 @@ mod tests {
         nodes[0].via = Some("ssh://khoa@sakaki".to_string());
         assert!(set_node_via(&mut nodes, "alpha", None).is_ok());
         assert_eq!(nodes[0].via, None);
+    }
+
+    #[test]
+    fn a_corrupt_registry_or_cache_is_named_and_an_absent_one_is_empty() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_cfg = std::env::var(crate::config::ENV_CONFIG).ok();
+        let root = aoide_test_support::unique_tmp("nodes-corrupt");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::remove_var(crate::config::ENV_CONFIG);
+        let _ = std::fs::create_dir_all(crate::fs::state_dir());
+        let _ = std::fs::create_dir_all(node_cache_dir());
+
+        assert_eq!(read_nodes().map(|n| n.len()), Ok(0), "an absent registry is empty, not an error");
+        assert_eq!(read_node_cache("sakaki").map(|e| e.is_none()), Ok(true), "an absent cache is None");
+
+        std::fs::write(nodes_path(), "not json").unwrap();
+        assert!(read_nodes().is_err(), "a corrupt registry is named, not read as empty");
+        assert!(load_nodes().is_empty(), "load_nodes still reads it as empty");
+
+        std::fs::write(node_cache_path("sakaki"), "{").unwrap();
+        assert!(read_node_cache("sakaki").is_err(), "an unparsable cache is named");
+        assert!(load_node_cache("sakaki").is_none(), "load_node_cache still reads it as none");
+
+        match saved_cfg {
+            Some(v) => std::env::set_var(crate::config::ENV_CONFIG, v),
+            None => std::env::remove_var(crate::config::ENV_CONFIG),
+        }
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

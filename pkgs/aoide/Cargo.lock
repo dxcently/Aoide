@@ -170,6 +170,7 @@ dependencies = [
  "aoide-conduct",
  "aoide-protocol",
  "aoide-storage",
+ "aoide-test-support",
  "crossterm",
  "ratatui",
  "serde",

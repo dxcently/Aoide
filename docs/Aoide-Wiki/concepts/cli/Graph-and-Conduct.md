@@ -415,10 +415,11 @@ aoide session [<filter>] [--hosts] [--all] [--json]
   host/role/petname line, or `node/<rest>`), falling back to a substring
   match.
 - **Writes:** nothing.
-- **Output:** a Unicode roster grouped by PROJECT — a registered
-  `projects.json` name, else a `.aoide/project.json` manifest directory's own
-  basename, else a trailing `(no project)` bucket — or, under `--hosts`, by
-  HOST: this host, then each node. Node presence: `online` /
+- **Output:** a Unicode roster grouped by PROJECT — for a local session a
+  registered `projects.json` name, else a `.aoide/project.json` manifest
+  directory's own basename; for a session from another node only the project
+  that node published; else a trailing `(no project)` bucket — or, under
+  `--hosts`, by HOST: this host, then each node. Node presence: `online` /
   `unreachable` / `never-pulled`. Session presence: `online` / `stale` /
   `done` (`done` omitted without `--all`). `--json` mirrors either grouping
   structurally.
@@ -806,6 +807,45 @@ aoide session pending deny <id> [--json]
 - **Notes:** the door must be able to approve, as for `approve`: over MCP or
   A2A it is refused and audited (`reason: "door-cannot-approve"`) with every
   entry still queued, so a caller cannot clear what a human has yet to see.
+
+### aoide session find
+
+```
+aoide session find [<query>…] [--related <ref>] [--all] [--json]
+```
+
+- **Reads:** `state/stage/{sessions,hooks,projects}.json`, every registered
+  node's cache (`state/node-cache/<name>.json`), the mailbase peeked without a
+  lock (`mail::peek_cursors`, `mail::peek_base`), and each local cwd's git
+  common dir. A far node's cache is read, never refreshed.
+- **Writes:** nothing. No lock, no daemon dispatch, no node is dialled.
+- **Output:** one line per row, then `N of M · scope: …`. The scope line names
+  where each node's rows came from: `stage`, a `cache` with its age (`(stale)`
+  past the five-minute TTL), or `never pulled`. A cached row reads
+  `was <state>`. `--related <ref>` prints the target's carries (agent, where,
+  role, mailboxes, cc, edges), then the sessions that share a reason with it,
+  each with its reasons. `--json`, or any door but the CLI, carries the same
+  facts in `data`: `query`, `scope`, `sessions` (carries, `unknown`,
+  `matched`) and `related`. The human form builds no row JSON. MCP and A2A
+  pass the query as one string, split like the conductor's line
+  (`agent:claude state:working` is two terms; `cc:"pr 41"` keeps its space);
+  the daemon's array elements are the words. A far row's text fields, a
+  letter's text, a mailbox's name and a `matched` value are clipped to a line.
+  Every list in a row (mailboxes, cc'd letters, threads, a letter's To
+  addresses, edges, a related row's reasons) holds at most 20 beside its full
+  count, and `sessions` and `related` list at most 200 rows beside `total` and
+  `more`. A cached row's project is the one its node published, and none when
+  it published none: its cwd is never read against this box's disk or
+  projects.
+- **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
+  refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
+  over 64 words, or one with more than 256 alternatives in all its terms, each
+  with its fix. An ambiguous `parent:` reference, or a `--related` name that no
+  row or cache holds, is a refusal listing the candidates, at most 20, then
+  how many more. A far session named without its node, after `--related` or
+  `parent:`, is refused with the `node/name` form. A `node/name` its node's
+  cache does not hold teaches `aoide node pull <node>` when that node was never
+  pulled or its cache is stale.
 
 ### aoide session trace
 

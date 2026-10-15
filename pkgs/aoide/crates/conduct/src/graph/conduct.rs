@@ -14,15 +14,15 @@
 use super::doc::restage_graph;
 use super::model::{
     canonical_state, clear_screen_ask, hooks_path, load_stage, sessions_path, write_stage,
-    HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
+    HookDeath, HooksFile, RestoreSnapshot, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use super::prompt::{Prompt, PromptWatch};
-use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize};
+use super::pty::{die_by_signal, spawn_on_pty, take_wrap_signal, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize, WrapSignals};
 #[cfg(unix)]
 use super::pty::signal_name;
 use super::session_store::{
-    do_session_end, do_session_start, reserved_id_refusal, set_session_log_path, stamp_headless,
-    stamp_origin, stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task,
+    do_session_end, do_session_start, record_hook_deaths, reserved_id_refusal, set_session_log_path,
+    stamp_headless, stamp_origin, stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task,
     stamp_wrap,
 };
 use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
@@ -1663,6 +1663,22 @@ fn classify_end(timed_out: bool, status: Option<Ended>) -> (String, Option<Strin
     }
 }
 
+/// How a conducted child ended, as the death fact a hook child it hosted carries
+/// ([`HookDeath`]): the same discriminator `classify_end` writes onto the record,
+/// with a signal kept as its number. A wrapper's own deadline kill is `timeout`,
+/// never the child's exit, and a status the host cannot name is no status at all.
+fn hook_death_of(ended: Ended, timed_out: bool) -> HookDeath {
+    if timed_out {
+        return HookDeath { outcome: Some("timeout".into()), ..Default::default() };
+    }
+    match ended {
+        Ended::Code(code) => HookDeath { outcome: Some("exit".into()), exit_code: Some(code), ..Default::default() },
+        #[cfg(unix)]
+        Ended::Signal(signo) => HookDeath { outcome: Some("signal".into()), signal: Some(signo), ..Default::default() },
+        Ended::Unknown => HookDeath::default(),
+    }
+}
+
 /// Where the multiplex loop ended: whether the wrapper's own deadline fired,
 /// whether the DIRECT CHILD had already exited while a descendant still held
 /// the PTY slave (its own fact, never a timeout), and — for a deadline kill
@@ -1677,6 +1693,8 @@ struct MultiplexEnd {
     /// cannot (see `Pty::hung_up`), so a host that cannot answer never has a
     /// guessed fact stamped into every run's outcome.
     pty_held_after_exit: Option<bool>,
+    /// The end signal the loop answered, if one arrived while it ran.
+    end_signal: Option<i32>,
 }
 
 /// The single-thread multiplexer. Shuttles: real stdin → terminal (you type
@@ -1728,6 +1746,13 @@ fn conduct_multiplex(
         conduct_refresh_shell(id, pty, shell_pid, interactive, &mut shell_watch, None); // stamp initial cwd/state now.
     }
 
+    // An end signal sent to the wrap itself is forwarded to the child once. The
+    // child gets a short grace to go, then SIGKILL, so the wrap always reaches
+    // its own death record. The child's exit is then recorded as the death.
+    const WRAP_SIGNAL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+    let mut forwarded_at: Option<std::time::Instant> = None;
+    let mut end_signal: Option<i32> = None;
+
     let mut timed_out = false;
     // The DIRECT CHILD's own exit governs completion, so a descendant holding
     // the PTY slave open (the master never hangs up then) can no longer keep a
@@ -1772,6 +1797,16 @@ fn conduct_multiplex(
         // re-read on Unix, the console's own size compared on Windows.
         if let Some(ws) = console.resized() {
             pty.resize(&ws);
+        }
+        if let Some(sig) = take_wrap_signal() {
+            end_signal = Some(sig);
+            if forwarded_at.is_none() && !child_exited {
+                unsafe { libc::kill(shell_pid as libc::pid_t, sig) };
+                forwarded_at = Some(std::time::Instant::now());
+            }
+        }
+        if !child_exited && forwarded_at.is_some_and(|at| at.elapsed() >= WRAP_SIGNAL_GRACE) {
+            unsafe { libc::kill(shell_pid as libc::pid_t, libc::SIGKILL) };
         }
 
         // Bounded wait: `min(remaining, wait_timeout)`, checked on both sides —
@@ -1876,7 +1911,7 @@ fn conduct_multiplex(
         None
     };
 
-    MultiplexEnd { timed_out, killed_with, pty_held_after_exit }
+    MultiplexEnd { timed_out, killed_with, pty_held_after_exit, end_signal }
 }
 
 /// The `killedWith` label: the post-kill status as SECONDARY evidence, in the
@@ -1918,6 +1953,9 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     ) {
         return refusal;
     }
+    // The wrap answers an end signal from the moment it runs: one that lands
+    // before its child exists is forwarded at the first pass of the multiplex.
+    let _wrap_signals = WrapSignals::install();
     if inv.args.is_empty() {
         return Outcome::usage(
             cmd,
@@ -2261,6 +2299,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // NO exit code — the old `code().unwrap_or(-1)` collapse is gone.
     let ended = child.ended();
     let (outcome, signal, exit_code) = classify_end(end.timed_out, Some(ended));
+    let death = hook_death_of(ended, end.timed_out);
 
     // Restore the console, close the channel and unlink the socket, resolve
     // the session — whatever happened. The terminal closes AFTER the output is
@@ -2278,7 +2317,18 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     if task.is_some() {
         stamp_session_exit(&id, exit_code, Some(&outcome), &now_iso_utc());
     }
-    let _ = do_session_end(&id);
+    // The wrap saw its own harness end: a hook child it hosts whose turn is still
+    // open is recorded as died now, before this wrap ends its own record.
+    record_hook_deaths(&id, std::process::id(), &death);
+    // The wrap ends its own record: it is the process the record names, and it
+    // tells no spawner anything its death record above did not.
+    let _ = do_session_end(&id, i32::try_from(std::process::id()).ok(), false);
+    // An end signal the wrap answered is its own end: it leaves by that signal, so
+    // its parent reads the signal, not a status of its own. The record is written
+    // above, and the signal is taken again here in case it arrived after the loop.
+    if let Some(sig) = end.end_signal.or_else(take_wrap_signal) {
+        die_by_signal(sig);
+    }
 
     let changed = vec![format!("session {id}: running → done")];
     // The end facts, as they actually are: `outcome` is the discriminator, and
@@ -2336,6 +2386,19 @@ mod tests {
     use super::*;
     use crate::graph::session_store::upsert_session;
     use crate::graph::testutil::*;
+
+    /// The death a wrap records for its own child: a signal is its number, a
+    /// deadline kill is `timeout` (the wrapper's act, not the child's exit), and a
+    /// status the host cannot name is no status.
+    #[cfg(unix)]
+    #[test]
+    fn the_wrap_names_its_childs_end_in_the_fact_a_hook_child_carries() {
+        let signal = hook_death_of(Ended::Signal(9), false);
+        assert_eq!(signal, HookDeath { outcome: Some("signal".into()), signal: Some(9), ..Default::default() });
+        assert_eq!(hook_death_of(Ended::Code(3), false), HookDeath { outcome: Some("exit".into()), exit_code: Some(3), ..Default::default() });
+        assert_eq!(hook_death_of(Ended::Signal(9), true), HookDeath { outcome: Some("timeout".into()), ..Default::default() });
+        assert_eq!(hook_death_of(Ended::Unknown, false), HookDeath::default());
+    }
 
     /// `spawn_on_pty`'s env shaping, pinned without spawning anything: the
     /// PARENT harness's session markers are removed, the aoide parent edge and

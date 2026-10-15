@@ -1227,6 +1227,56 @@ pub fn read_base() -> Result<Vec<Entry>, String> {
     with_lock(read_entries_unlocked)
 }
 
+/// `cursors.json` read with no lock, no migration and no write: the reader
+/// maps, each name's pseudo-reader (the key equal to the name) dropped, and a
+/// name left with no reader omitted. A missing file is an empty map, since
+/// nobody is enrolled. `None` when the file is there but not in the per-reader
+/// shape: a legacy flat file that only a locked read migrates, or one that does
+/// not parse. A caller reports that as unknown, never as none.
+pub fn peek_cursors() -> Option<Cursors> {
+    let raw = match std::fs::read_to_string(cursors_path()) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(Cursors::new()),
+        Err(_) => return None,
+    };
+    let top: BTreeMap<String, serde_json::Value> = serde_json::from_str(&raw).ok()?;
+    let mut out = Cursors::new();
+    for (name, value) in top {
+        // The migration's own test for the old flat shape, verbatim.
+        if value.get("seq").and_then(serde_json::Value::as_u64).is_some() {
+            return None;
+        }
+        let cursor: Cursor = serde_json::from_value(value).ok()?;
+        let readers: Cursor = cursor.into_iter().filter(|(reader, _)| *reader != name).collect();
+        if !readers.is_empty() {
+            out.insert(name, readers);
+        }
+    }
+    Some(out)
+}
+
+/// `base.jsonl`'s correspondence entries, read with no lock and no write. Only
+/// the bytes up to the last newline count: the write path treats a tail with no
+/// newline as torn and truncates it, so a peek never reports a line the next
+/// write would remove. Transit and malformed lines are skipped, as
+/// [`read_entries_unlocked`] skips them. A missing file is empty.
+pub fn peek_base() -> Result<Vec<Entry>, String> {
+    let path = base_path();
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let complete = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    Ok(bytes[..complete]
+        .split(|&b| b == b'\n')
+        .filter_map(|line| match serde_json::from_slice::<BaseLine>(line).ok()? {
+            BaseLine::Entry(entry) => Some(*entry),
+            BaseLine::Transit(_) => None,
+        })
+        .collect())
+}
+
 /// The letters `name` holds that are UNREAD BY `reader_session`, plus that
 /// reader's own mark — a PEEK. **Writes nothing**: no `save_cursors`, no mark
 /// created for a reader that has none (absent reads as `0`, the same floor
@@ -1707,6 +1757,107 @@ mod tests {
             "must never resolve into a real ~/.aoide tree"
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── peeks: the lock-free reads the find index is built from ──────────
+
+    #[test]
+    fn a_peek_drops_the_pseudo_reader_and_keeps_the_real_readers() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-pseudo");
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        std::fs::write(
+            cursors_path(),
+            r#"{"alice":{"alice":{"seq":2},"sess-1":{"seq":2,"rung":1}},"bob":{"bob":{"seq":1}}}"#,
+        )
+        .unwrap();
+
+        let want = Cursors::from([(
+            "alice".to_string(),
+            Cursor::from([("sess-1".to_string(), Mark { seq: 2, rung: 1 })]),
+        )]);
+        assert_eq!(
+            peek_cursors(),
+            Some(want),
+            "the pseudo-reader is nobody, so bob, whose only key is that, is absent"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_cursors_file_is_no_readers_and_a_legacy_one_is_unknown() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-missing-legacy");
+        assert_eq!(peek_cursors(), Some(Cursors::new()), "nobody is enrolled yet");
+
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        std::fs::write(cursors_path(), r#"{"alice":{"seq":3,"readers":["sess-1"]}}"#).unwrap();
+        assert_eq!(peek_cursors(), None, "the flat shape is unknown here, never an empty map");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peek_never_writes_and_never_migrates_a_legacy_file() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-untouched");
+        file_letter("alice", "bob", "hi").unwrap();
+        std::fs::write(cursors_path(), r#"{"alice":{"seq":3,"readers":["sess-1"]}}"#).unwrap();
+
+        // An old mtime, so any write since would move it to now.
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let before: Vec<_> = [base_path(), cursors_path()]
+            .into_iter()
+            .map(|p| {
+                std::fs::OpenOptions::new().write(true).open(&p).unwrap().set_modified(old).unwrap();
+                let bytes = std::fs::read(&p).unwrap();
+                let mtime = std::fs::metadata(&p).unwrap().modified().unwrap();
+                (p, bytes, mtime)
+            })
+            .collect();
+
+        assert_eq!(peek_cursors(), None);
+        assert_eq!(peek_base().unwrap().len(), 1);
+        for (p, bytes, mtime) in &before {
+            assert_eq!(&std::fs::read(p).unwrap(), bytes, "{} bytes changed", p.display());
+            assert_eq!(std::fs::metadata(p).unwrap().modified().unwrap(), *mtime, "{} was written", p.display());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peek_skips_a_torn_last_line_that_is_otherwise_complete_json() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-torn");
+        file_letter("alice", "bob", "one").unwrap();
+        let line = std::fs::read_to_string(base_path()).unwrap();
+        let torn = line.trim_end_matches('\n').to_string();
+        assert!(serde_json::from_str::<BaseLine>(&torn).is_ok(), "the tail parses: only the missing newline makes it torn");
+        std::fs::write(base_path(), format!("{line}{torn}")).unwrap();
+
+        let entries = peek_base().unwrap();
+        assert_eq!(entries.len(), 1, "a tail with no newline is not part of the file yet");
+        assert_eq!(entries[0].seq, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_peek_takes_no_lock_and_completes_while_the_stage_lock_is_held() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("peek-no-lock");
+        file_letter("alice", "bob", "hi").unwrap();
+
+        crate::fs::try_stage_lock(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send((peek_base().map(|e| e.len()), peek_cursors().is_some()));
+            });
+            let got = rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("a peek must not wait on the stage lock");
+            assert_eq!(got, (Ok(1), true));
+        })
+        .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

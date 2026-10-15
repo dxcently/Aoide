@@ -3,7 +3,8 @@
 //! [`super::doc::restage_graph`] so the read path never drifts.
 
 use super::common::{load_inputs, require_args, stage_error};
-use super::doc::{build_graph, drop_remote_child_rows, prune_done_keeping, render, restage_graph, would_cycle};
+use super::session_store::{anchored_refusal, live_harness_anchoring};
+use super::doc::{build_graph, drop_remote_child_rows, prune_done_sparing, render, restage_graph, would_cycle};
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
     write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, STAGE_GRAPH_VERSION,
@@ -995,6 +996,14 @@ fn link_inner(inv: &Invocation, child: String, parent: String) -> Outcome {
         .with_data(json!({ "reason": "cycle", "child": child, "parent": parent }));
     }
     let parent_known = file.sessions.iter().any(|s| s.session_id == parent);
+    // A re-parent of a record its live harness anchors is refused unless this
+    // process runs under that harness (see `live_harness_anchoring`).
+    let stored = file.sessions.iter().find(|s| s.session_id == child).and_then(|s| s.parent_session_id.as_deref());
+    if stored != Some(parent.as_str()) {
+        if let Some(harness) = live_harness_anchoring(&child, Some(std::process::id() as i32)) {
+            return anchored_refusal("graph.link", &child, harness);
+        }
+    }
 
     let rec = file
         .sessions
@@ -1049,26 +1058,28 @@ fn prune_inner() -> Outcome {
         Err(e) => return stage_error("session.prune", e),
     };
 
+    let held = crate::graph::pingback::held_deaths(&h_file.hooks);
     // A finished record whose sealed wrap process still runs is held, not
-    // dropped. Its exit (or the reaper, once the pid is gone) ends it.
+    // dropped. Its exit (or the reaper, once the pid is gone) ends it. The
+    // sparing below enforces that rule too; this list only words the answer.
     let live = super::identity::live_sealed_wrap_ids(&s_file.sessions);
-    let held: Vec<String> = s_file
+    let live_held: Vec<String> = s_file
         .sessions
         .iter()
         .filter(|s| s.state == "done" && live.contains(&s.session_id))
         .map(|s| s.session_id.clone())
         .collect();
-    let held_note = if held.is_empty() {
+    let held_note = if live_held.is_empty() {
         String::new()
     } else {
         format!(
             "; kept {} finished record(s) whose sealed wrap still runs ({}), they end when that process exits",
-            held.len(),
-            held.join(", ")
+            live_held.len(),
+            live_held.join(", ")
         )
     };
 
-    let (kept_s, kept_h, removed, cleared) = prune_done_keeping(
+    let (kept_s, kept_h, removed, cleared) = prune_done_sparing(
         std::mem::take(&mut s_file.sessions),
         std::mem::take(&mut h_file.hooks),
         // The user's OWN sweep: the one path allowed to drop a finished task
@@ -1076,7 +1087,7 @@ fn prune_inner() -> Outcome {
         // the durable history — ledger, letters, transcript, sidecar — stays on
         // disk either way).
         true,
-        &live,
+        &held,
     );
 
     if removed.is_empty() {
@@ -1084,7 +1095,7 @@ fn prune_inner() -> Outcome {
             "session.prune",
             format!("nothing to prune (no `done` sessions){held_note}"),
         )
-        .with_data(json!({ "removed": [], "clearedParents": [], "held": held }));
+        .with_data(json!({ "removed": [], "clearedParents": [], "held": live_held }));
     }
 
     s_file.sessions = kept_s;
@@ -1121,7 +1132,7 @@ fn prune_inner() -> Outcome {
         ),
     )
     .changed(changed)
-    .with_data(json!({ "removed": removed, "clearedParents": cleared, "held": held }))
+    .with_data(json!({ "removed": removed, "clearedParents": cleared, "held": live_held }))
 }
 
 #[cfg(test)]

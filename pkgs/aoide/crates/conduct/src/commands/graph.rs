@@ -128,11 +128,11 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "phase"],
-            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins).",
+            summary: "Upsert the live hook phase for a session in state/stage/hooks.json (latest updatedAt wins). A `done` phase (and `exit`, `finished`, `complete`, which fold to it) is `session end`.",
             args: [],
             flags: [
                 flag!("id", "string", "Session id (required)."),
-                flag!("phase", "string", "Live phase to record; folded to one canonical state: working | awaiting | stopped | idle | done."),
+                flag!("phase", "string", "Live phase to record, folded to one canonical state: working | awaiting | stopped | idle | done. `died` is not recordable here: a wrap records its child's death."),
             ],
             gated: false,
             implemented: true,
@@ -144,7 +144,7 @@ pub fn register(r: &mut Registry) {
     r.insert({
         let mut c = cmd!(
             path: ["session", "end"],
-            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown.",
+            summary: "Mark a session done (state=done in sessions.json, phase=done in hooks.json); ok no-op if unknown. From outside a live harness it is refused and writes nothing (reason `harness-anchored`).",
             args: [],
             flags: [flag!("id", "string", "Session id to end (required).")],
             gated: false,
@@ -375,7 +375,7 @@ pub fn register(r: &mut Registry) {
     // landed after every entry above it.
     r.insert(cmd!(
         path: ["session"],
-        summary: "Roster listing: this box's own sessions plus every registered node, probed in parallel on every call (the retired `aoide who` command's exact probe/cache-fallback pipeline). Bare groups sessions by PROJECT (a registered projects.json name, else a .aoide/project.json manifest directory's own basename, else a trailing (no project) bucket); --hosts groups by HOST instead — this host, then each node, byte-identical to `who`'s old rendering. --json mirrors either grouping structurally.",
+        summary: "Roster listing: this box's own sessions plus every registered node, probed in parallel on every call (the retired `aoide who` command's exact probe/cache-fallback pipeline). Bare groups sessions by PROJECT (a local session by a registered projects.json name, else a .aoide/project.json manifest directory's own basename; a session from another node only by the project that node published; else a trailing (no project) bucket); --hosts groups by HOST instead — this host, then each node, byte-identical to `who`'s old rendering. --json mirrors either grouping structurally.",
         args: [arg!("filter", "string", false, "Narrow what's displayed (never what's probed): a local session id/tail4/petname, a host/role/petname line, node/<rest>, or a plain substring against a node/session name.")],
         flags: [
             flag!("hosts", "bool", "Group by host instead of by project — the retired `who` command's own grouping."),
@@ -466,6 +466,28 @@ pub fn register(r: &mut Registry) {
         examples: [
             "project lead aoide 7e3f5976-98b2-44a4-827c-c687a0d9526e",
             "project lead aoide --none",
+        ],
+    ));
+    r.insert(cmd!(
+        path: ["session", "find"],
+        summary: "Find sessions on this box and on every registered node, from the stage and each node's cached graph. Reads files only: it probes no node, takes no lock and writes nothing; `node pull` refreshes a cache. Each word is a term (`key:value`, keys agent, kind, state, node, project, role, mailbox, cc, parent) or a bare word matched against petname, task, title, id and cwd. Every word must match. Rows sort by the weakest bare word's grade, then the sum of grades, local before cached, state urgency, then the label. `--related <ref>` shows <ref>'s carries and the sessions that share a fact with it (lineage, sibling, role, mailbox, thread, project, repo), each with its reasons; the query words then narrow those. A cached row reads `was <state>` and its mailboxes and cc are unknown: its node does not publish them. The scope line names where each node's rows came from and how old its cache is.",
+        args: [arg!("query", "string", false, "Query words, one per shell argument or daemon array element; MCP and A2A pass them as one string. Quote a value with spaces: `cc:\"pr 41\"`. With --related these narrow the related rows.")],
+        flags: [
+            flag!("related", "string", "Show <ref>'s carries and the sessions related to it. <ref> resolves like `send --to`, and `node/<rest>` names a cached row."),
+            flag!("all", "bool", "Also list `done` sessions (omitted by default)."),
+            flag!("json", "bool", "Carry the same facts in `data`: query, scope, sessions (with carries, unknown and matched terms) and related. Every door but the CLI carries them without this flag."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_find,
+        examples: [
+            "session find brave",
+            "session find agent:kimi state:working",
+            "session find role:review node:yomi",
+            "session find mailbox:reviewer",
+            "session find cc:\"pr 41\"",
+            "session find parent:warm-birch",
+            "session find --related brave-otter",
         ],
     ));
 }

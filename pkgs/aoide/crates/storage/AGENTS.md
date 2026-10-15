@@ -30,6 +30,13 @@
   `upsert_session` is the one writer that applies it; a new writer of
   `SessionRecord.pid` from caller-supplied input must call it too. The seal
   binds the pid, so a movable pid is a forgeable seal.
+- **A hook record's death fact is erased only by a live phase.**
+  `session::upsert_hook` leaves a `done` record that carries a `death` untouched
+  when asked for `done` again (a repeated `session end`, a duplicate
+  `SessionEnd`, a reap), because the fact is the unclaimed evidence the
+  ping-back is waiting to say. Any other phase supersedes it: a session that
+  runs again under the same id has not died. `record_death` writes the phase and
+  the fact together and assumes an open phase; its callers check that first.
 - **`runtime_dir::socket_dir` is a PURE resolution.** It answers a path and
   creates nothing — `tunnel::list_records`' own tests depend on "the `aoide/`
   subdirectory does not exist until a writer makes it", and a resolver that
@@ -920,6 +927,31 @@
   origin's readers like a letter; an ordinary `receipt` never does) is a
   one-line change in one function, never a grep-and-fix across every
   caller.
+- **`mail::peek_base`/`peek_cursors` are the lock-free mailbase reads, and
+  they change nothing (SESSION-FIND B2).** A peek never calls `with_lock`, so
+  it never runs `migrate_if_needed`/`migrate_cursors_if_needed`: a legacy flat
+  `cursors.json` reads as `None` (unknown), never migrated and never as an
+  empty map. `peek_base` counts bytes up to the last newline only, the same
+  line `truncate_torn_tail` keeps, so a peek never reports a line the next
+  write would remove. `peek_cursors` drops the pseudo-reader key and omits a
+  name left with no reader. Don't route a peek through `read_base`'s locked
+  path: find takes no lock, and a peek that waits on a writer stalls the page.
+- **`git::common_dir` is the one `git.rs` function that runs no process
+  (SESSION-FIND B2).** It canonicalizes its input, walks up to the nearest
+  `.git`, and follows a file's `gitdir:` (relative to the file's own
+  directory) and that gitdir's `commondir`. It judges the `.git` entry's kind
+  with `symlink_metadata`: a symlink, FIFO or socket answers as no repo. A git
+  file is opened with `O_NOFOLLOW | O_NONBLOCK` (the open refuses a symlink
+  and cannot block on a FIFO), its kind is judged on the open descriptor, and
+  it is read to at most 4 KiB. Its no-git-on-`PATH` test re-runs itself in a
+  child with an empty `PATH`, because the parent's `PATH` is shared by every
+  test thread. Don't give it a `Command`.
+- **`node_store`'s loaders come in two forms.** `load_nodes` and
+  `load_node_cache` read a corrupt file as empty or `None`, for the callers
+  that only need the data. `read_nodes` and `read_node_cache` return `Err`
+  for a file that is there and does not parse; a caller that shows the
+  operator a node's state (`session find`) uses those, so it can say
+  "registry unreadable" or "cache unreadable" rather than an empty roster.
 - **`outbox`'s two locks are never conflated (P-M2).** The crate-wide
   stage lock (`with_lock`, wrapping `fs::try_stage_lock`) guards file
   mutations only and is held for microseconds; `.bsy`
