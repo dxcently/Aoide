@@ -475,7 +475,7 @@ pub fn register(r: &mut Registry) {
         flags: [
             flag!("related", "string", "Show <ref>'s carries and the sessions related to it. <ref> resolves like `send --to`, and `node/<rest>` names a cached row."),
             flag!("all", "bool", "Also list `done` sessions (omitted by default)."),
-            flag!("json", "bool", "Carry the same facts in `data`: query, scope, sessions (with carries, unknown and matched terms) and related."),
+            flag!("json", "bool", "Carry the same facts in `data`: query, scope, sessions (with carries, unknown and matched terms) and related. Every door but the CLI carries them without this flag."),
         ],
         gated: false,
         implemented: true,

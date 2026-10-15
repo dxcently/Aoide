@@ -1932,19 +1932,48 @@ in the message.
   and nothing written. It never infers a session from a name. A `parent:`
   reference resolves through `storage::addr::resolve` with the `send --to`
   rule, case-sensitive, and an ambiguous one is a refusal listing its
-  candidates, never the first match. `mailbox:` and `cc:` read a row only when
-  it is local (`mailbox:` by `key_fields`, `cc:` by a `None` `cc` on a cached
-  row), so a far node's unpublished mail facts never match. Terms filter and
-  only bare words rank; the four sort keys are the order, and nothing else
-  reorders a result. `related` ranks by its strongest reason, then by how many
-  reasons it has, then by `tiebreak`. `mail_facts` takes the peeked cursors and
-  entries as arguments and never reads them itself; a cached row gets no mail
-  facts at all, so its mail reasons never hold. `load_index` is the only
-  reader, and it reads files only: the stage, each node's cache and a mailbase
-  peek, never a lock or a migration. `session_find` calls no probe and no
-  pull. Its box name arrives as an argument (`session_find_with`), so a test
-  never reads it, and its no-dial and no-write proofs are the find tests
+  candidates, never the first match; a far session's name typed without its
+  node is refused with the `node/name` form (`held_elsewhere`). Only a local
+  row's own `remote_parent` names a parent: a far row's is its node's
+  unvouched claim, so it never makes a local session its parent
+  (`parent_match`), and a far node's claim about a row on another node never
+  makes a `--related` reason (`reasons_between`). `mailbox:` and `cc:` read a
+  row only when it is local (`mailbox:` by `key_fields`, `cc:` by a `None`
+  `cc` on a cached row), so a far node's unpublished mail facts never match.
+  Terms filter and only bare words rank; the four sort keys are the order,
+  and nothing else reorders a result. `related` ranks by its strongest
+  reason, then by how many reasons it has, then by `tiebreak`. `mail_facts`
+  takes the peeked cursors and entries as arguments and never reads them
+  itself; a cached row gets no mail facts at all, so its mail reasons never
+  hold. `load_index` is the only reader, and it reads files only: the stage,
+  each node's cache and a mailbase peek, never a lock or a migration.
+  `session_find` calls no probe and no pull. Its box name arrives as an
+  argument (`session_find_with`), so a test never reads it, and its no-dial
+  and no-write proofs are the find tests
   `find_reads_the_stage_and_the_caches_and_writes_nothing_and_dials_no_node`.
+- **`graph::find` stays linear in a hostile far node's rows.** A far node
+  chooses its rows, ids, cwds and edges, and one cache may hold 20 MiB, so
+  no step may cost rows times rows, and no allocation may grow with anything
+  but the row it serves. A query takes at most `WORDS_MAX` (64) words and
+  `ALTERNATIVES_MAX` (256) alternatives. The resolver's candidates are
+  gathered once per answer (`Refs`), and each distinct `parent:` value is
+  resolved once. `--related` checks each row against a `Target` built once,
+  whose remote children are a set. A row's bare fields are read only when
+  the query has a bare word, and the cwd is folded once, its components
+  slices of that fold, never a string each. A hit's `matched` is built only
+  when `find` is asked to `explain`. Edge lists and the candidates a refusal
+  names hold at most `LIST_MAX` (20), the edge lists beside their full count
+  and a refusal's with `and N more`. The timing tests in `find.rs` (the
+  twenty-thousand-row and cap tests) fail on a quadratic or per-component
+  regression; keep them when touching these paths.
+- **Row JSON is for a machine reader only.** `sessions` and `related`, with
+  each row's `matched`, are built when `--json` is passed or the door is not
+  the CLI (`teach::quiet`'s rule in aoide-client), so an MCP caller gets them
+  without the flag and a human answer builds none. Every human line passes
+  through `fit` (clipped to `ROW_MAX`, 240 characters) after each field's
+  `clean_line`, and a fix that names text a far node wrote passes it through
+  `plain_word`, which hands the operator a placeholder for anything but one
+  plain word. A new human line or a new fix goes through them.
 - **Every string `who.rs` prints off a pulled document goes through
   `common::clean_line`** (`shown`/`endpoint` — control characters and the bidi
   formatting marks stripped, flattened, clipped to `common::LINE_MAX`), in the

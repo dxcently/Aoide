@@ -160,13 +160,17 @@ word must match (AND); inside one term, commas are alternatives (OR):
 Case folds on both sides (`str::to_lowercase`), except `parent:`, whose ref
 goes verbatim to `storage::addr::resolve` (case-sensitive by its own contract;
 an ambiguous ref is a taught error listing the candidates, never a first
-match). An unknown key, an empty value or an unclosed quote is a taught error
-naming the keys. A literal `"` in a word is refused as well: the shell or the
-query line strips the quotes, and the fix runs the word without them.
-`session:<id>` is refused with the bare id as the fix, since a session is found
-by its id as a bare word. A query over 64 words, or one with more than
-256 alternatives in all its terms, is refused with its cap named. `mailbox:` and `cc:` never match a
-remote row, and the line `mail is not published by <node>` says why.
+match). A far session's petname or id typed without its node is refused with
+the `parent:<node>/<name>` form, since a far session answers only under its
+node's name; a ref nothing holds matches no row. A refusal lists at most 20
+candidates, then how many more there are. An unknown key, an empty value or an
+unclosed quote is a taught error naming the keys. A literal `"` in a word is
+refused as well: the shell or the query line strips the quotes, and the fix
+runs the word without them. `session:<id>` is refused with the bare id as the
+fix, since a session is found by its id as a bare word. A query over 64 words,
+or one with more than 256 alternatives in all its terms, is refused with its
+cap named. `mailbox:` and `cc:` never match a remote row, and the line
+`mail is not published by <node>` says why.
 
 A bare word grades against each field — **exact** (the whole field, or a whole
 cwd component) > **prefix** > **substring** — and takes its best field's grade
@@ -219,10 +223,11 @@ probes every node live on every call.
 `--related <ref>` resolves one session (like `send --to`, `node/<rest>` for a
 cached row) and returns every other row that shares a fact with it, each with
 every reason it has. A far session answers only under its node's name: a bare
-far petname is refused with the `node/name` form, and a name no row holds by
-petname or id is refused with the bare name to find. Reasons are derived per
-call and never stored: they are not `graph.json` edges and not §22's typed
-edges.
+far petname is refused with the `node/name` form. A `node/name` its node's rows
+do not hold by petname or id is refused with `aoide node pull <node>` as the
+fix when this box holds no readable cache of that node, or only a stale one,
+and with the bare name to find otherwise. Reasons are derived per call and
+never stored: they are not `graph.json` edges and not §22's typed edges.
 
 | Order | Reason | Holds when | Shown as |
 |---|---|---|---|
@@ -301,10 +306,12 @@ facts in `data`:
   "related":  [{ "node", "sessionId", "reasons": [{ "kind", "detail" }] }] }
 ```
 
-`sessions` and `related` ride only with `--json`: the human form builds no row
-JSON. `unknown` rides on remote rows; `related` rides with `--related`. The
-`children`, `siblings` and `remoteChildren` lists ride only on the `--related`
-target, at most 20 each; each `…Count` key is the full size on every row.
+`sessions` and `related` ride only for a machine reader: `--json`, or any door
+but a terminal's CLI, so an MCP caller gets them without the flag. The human
+form builds neither, nor a row's `matched` terms. `unknown` rides on remote
+rows; `related` rides with `--related`. The `children`, `siblings` and
+`remoteChildren` lists ride only on the `--related` target, at most 20 each;
+each `…Count` key is the full size on every row.
 `cacheAge` is the cache's age in seconds, `null` for this box's rows. An absent
 key, a key named in `unknown`, and an empty list are three different answers:
 not recorded, not published to this box, recorded as none. Titles, subjects
@@ -439,7 +446,7 @@ answer, and the User conducts from the shell while agents conduct from the CLI.
 | A question neither door answers: who reads mailbox X, who was cc'd on this thread, which runs carry task Y, what else touches this session. Without find it is `cursors.json` read by hand, `aoide session`, and grep. | The conductor is still a place one decides to open. Find lands in the shell first, so its use shows up as `session find` records, not conductor launches. |
 | `aoide session <filter>` matches id, petname and label only, case-sensitively, and probes every node live (in parallel, up to 2 s each). Find also matches title, task and cwd, folds case, and answers from disk. | Remote rows are as old as the last `aoide node pull`; nothing pulls on a timer. Find shows the age and does not make it fresh. |
 | In the conductor, one session among many is `/`, a few letters, Enter — not a rank-by-rank walk. The related walk (Enter re-roots on a related row) is browsing the shell does badly. | On a box with no registered projects, `project:` and "same project" are empty; "same repo" covers part of that. |
-| Agents gain the same answer over MCP (`session find --json`), before they address a letter. | Mail facts are sparse: a session carries a mailbox only once it has run `mail read` (or the doorbell enrolled it by petname), and no role is ever assigned until ML3/ML4 exist. For most sessions "carries" is primitives, task and edges. |
+| Agents gain the same answer over MCP (`session find`, whose `data` is the `--json` form on every door but the CLI), before they address a letter. | Mail facts are sparse: a session carries a mailbox only once it has run `mail read` (or the doorbell enrolled it by petname), and no role is ever assigned until ML3/ML4 exist. For most sessions "carries" is primitives, task and edges. |
 | | Find does not act. After finding, `aoide send` is still the shell's one line. |
 
 It may not change conductor usage. The check: two weeks after T1 lands, count

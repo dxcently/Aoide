@@ -775,14 +775,18 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
   past the five-minute TTL), or `never pulled`. A cached row reads
   `was <state>`. `--related <ref>` prints the target's carries (agent, where,
   role, mailboxes, cc, edges), then the sessions that share a reason with it,
-  each with its reasons. `--json` carries the same facts in `data`: `query`,
-  `scope`, `sessions` (carries, `unknown`, `matched`) and `related`.
+  each with its reasons. `--json`, or any door but the CLI, carries the same
+  facts in `data`: `query`, `scope`, `sessions` (carries, `unknown`,
+  `matched`) and `related`. The human form builds no row JSON.
 - **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
   refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
   over 64 words, or one with more than 256 alternatives in all its terms, each
   with its fix. An ambiguous `parent:` reference, or a `--related` name that no
-  row or cache holds, is a refusal listing the candidates. A far session named
-  without its node is refused with the `node/name` form.
+  row or cache holds, is a refusal listing the candidates, at most 20, then
+  how many more. A far session named without its node, after `--related` or
+  `parent:`, is refused with the `node/name` form. A `node/name` its node's
+  cache does not hold teaches `aoide node pull <node>` when that node was never
+  pulled or its cache is stale.
 
 ### aoide session trace
 
