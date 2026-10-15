@@ -14,8 +14,8 @@ are core `aoide` identity, root `AGENTS.md`).
 - `dispatch`/`registry` — lyra's own argv parsing, dispatch, and golden
   command-path snapshot, independent of core's.
 - `commands::LAYOUT` — how `lyra` lists itself (Start here · Songs &
-  liveries · Widgets & icons · Desktop apps · Screen control · Dialogs &
-  notices · Agent interfaces · System), adopted by `all()` through
+  liveries · Widgets & icons · Desktop apps · Clipboard · Screen control ·
+  Dialogs & notices · Agent interfaces · System), adopted by `all()` through
   `Registry::arrange`; bare `lyra`, `--help`, group pages and `guide` read it.
 - `guide` — `lyra guide`.
 - `commands` — lyra's `commands::all()`, pulling in `song`, `screen`, and
@@ -395,6 +395,12 @@ are core `aoide` identity, root `AGENTS.md`).
   never read the file; `publish` replaces it atomically, and only when the
   document minus `at` changed. docs/Aoide-Wiki/concepts/cli/Apps-Commands.md
   has the commands.
+- `commands::clipboard` — `clipboard delete <id>`/`clipboard clear`: one
+  cliphist history entry or all of them, plus the launcher's cached
+  thumbnails under `$XDG_CACHE_HOME/aoide-clipboard/previews`, over the
+  `cliphist` on `PATH`. The bridge `AoideClipboard.qml`'s `deleteById`/`clear`
+  run. docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md has the commands
+  and their `data.reason` codes.
 
 ## What it consumes
 
@@ -407,7 +413,7 @@ serve --stdio`'s door loop).
 Command paths: onboard/rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald/take/element/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
-apps — everything that paints, or that only a desktop needs.
+apps/clipboard — everything that paints, or that only a desktop needs.
 `element seed` (L-E1,
 docs/architecture/ELEMENTS.md) renders a song's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything
