@@ -759,15 +759,49 @@ pub fn box_paths() -> Result<Vec<PathBuf>, String> {
 /// then both receipt generations. Raw: assumes the caller holds the lock, or
 /// is a lock-free peek that accepts a line being appended beside it.
 fn read_entries_unlocked() -> Result<Vec<Entry>, String> {
+    let mut out = read_boxes_unlocked()?;
+    out.extend(read_receipts_unlocked()?);
+    out.sort_by_key(|e| e.seq);
+    Ok(out)
+}
+
+/// Every letter in every box, unsorted. Receipts are not here: a receipt names
+/// a sender as its `to`, never a mailbox a reader can open.
+fn read_boxes_unlocked() -> Result<Vec<Entry>, String> {
     let mut out = Vec::new();
     for path in box_paths()? {
         out.extend(read_file_entries(&path)?);
     }
+    Ok(out)
+}
+
+/// Every receipt on both generations of `receipts.log`, unsorted.
+fn read_receipts_unlocked() -> Result<Vec<Entry>, String> {
+    let mut out = Vec::new();
     for path in receipt_generations() {
         out.extend(read_file_entries(&path)?);
     }
-    out.sort_by_key(|e| e.seq);
     Ok(out)
+}
+
+/// Every letter in every box, in `seq` order, under the lock. The bare-mail
+/// and `--all-names` listings read this: they name mailboxes, not senders.
+pub fn read_boxes() -> Result<Vec<Entry>, String> {
+    with_lock(|| {
+        let mut out = read_boxes_unlocked()?;
+        out.sort_by_key(|e| e.seq);
+        Ok(out)
+    })
+}
+
+/// Every receipt filed on this box, in `seq` order, under the lock: the only
+/// reader of `receipts.log`. A receipt is never a letter a reader pulls.
+pub fn read_receipts() -> Result<Vec<Entry>, String> {
+    with_lock(|| {
+        let mut out = read_receipts_unlocked()?;
+        out.sort_by_key(|e| e.seq);
+        Ok(out)
+    })
 }
 
 /// The highest `seq` any line on disk names, in the boxes, the receipts, and an
@@ -1406,7 +1440,7 @@ pub fn read_for(name: &str, reread: bool, reader_session: Option<&str>) -> Resul
     let name = name.to_string();
     let reader_session = reader_session.map(|s| s.to_string());
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
+        let entries = read_file_entries(&box_path(&name))?;
         let mut cursors = load_cursors()?;
         let reader = reader_id(&name, reader_session.as_deref());
         let cursor = cursors.entry(name.clone()).or_default();
@@ -1433,7 +1467,7 @@ pub fn read_for(name: &str, reread: bool, reader_session: Option<&str>) -> Resul
 pub fn read_all_names(reread: bool, reader_session: Option<&str>) -> Result<Vec<Entry>, String> {
     let reader_session = reader_session.map(|s| s.to_string());
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
+        let entries = read_boxes_unlocked()?;
         let mut cursors = load_cursors()?;
         let mut names: Vec<String> =
             entries.iter().map(|e| e.envelope.header.to.name.clone()).collect();
@@ -1511,7 +1545,7 @@ pub fn show(msgid: &str) -> Result<Option<Entry>, String> {
 pub fn names_with_unread(reader_session: Option<&str>) -> Result<Vec<String>, String> {
     let reader_session = reader_session.map(|s| s.to_string());
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
+        let entries = read_boxes_unlocked()?;
         let cursors = load_cursors()?;
         let mut max_by_name: BTreeMap<String, u64> = BTreeMap::new();
         for e in &entries {
@@ -1564,7 +1598,7 @@ pub struct RingTargets {
 pub fn ring_targets(name: &str) -> Result<RingTargets, String> {
     let name = name.to_string();
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
+        let entries = read_file_entries(&box_path(&name))?;
         let max_arm = entries
             .iter()
             .filter(|e| e.envelope.header.to.name == name && arms(&e.kind))
@@ -1627,7 +1661,6 @@ pub fn stamp_rung(name: &str, reader: &str, seq: u64) -> Result<(), String> {
 pub fn armed_names_for_reader(reader: &str) -> Result<Vec<(String, u64)>, String> {
     let reader = reader.to_string();
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
         let cursors = load_cursors()?;
         let mut out = Vec::new();
         for (name, cursor) in &cursors {
@@ -1635,7 +1668,7 @@ pub fn armed_names_for_reader(reader: &str) -> Result<Vec<(String, u64)>, String
                 continue;
             }
             let Some(mark) = cursor.get(&reader) else { continue };
-            let max_arm = entries
+            let max_arm = read_file_entries(&box_path(name))?
                 .iter()
                 .filter(|e| &e.envelope.header.to.name == name && arms(&e.kind))
                 .map(|e| e.seq)
@@ -3339,6 +3372,47 @@ mod tests {
 
         let err = enrol_reader("bob", "bob").unwrap_err();
         assert!(!err.is_empty(), "the pseudo-reader is never enrolled");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bare_mail_no_longer_lists_session_ids() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("bare-mail-no-session-ids");
+
+        file_letter("alice", "bob", "for bob").unwrap();
+        file_receipt("sess-1", "alice", "some-msgid").unwrap();
+        assert_eq!(names_with_unread(None).unwrap(), vec!["bob".to_string()]);
+        assert!(read_all_names(false, None).unwrap().iter().all(|e| e.envelope.header.to.name == "bob"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mail_read_for_a_session_id_shows_no_receipts() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("read-for-session-no-receipts");
+
+        file_receipt("bob", "sess-1", "m1").unwrap();
+        assert_eq!(read_receipts().unwrap().len(), 1, "the receipt is filed, and read_receipts sees it");
+        assert!(read_for("sess-1", false, None).unwrap().is_empty());
+        assert!(read_all_names(false, None).unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn armed_names_reads_only_the_readers_boxes() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("armed-names-readers-boxes");
+
+        file_letter("alice", "bob", "wake up").unwrap();
+        enrol_reader("bob", "sess-1").unwrap();
+        // A box nobody enrolled `sess-1` in: unreadable as a file, so any read
+        // of it would fail the whole call.
+        std::fs::create_dir_all(box_path("dave")).unwrap();
+        assert_eq!(armed_names_for_reader("sess-1").unwrap(), vec![("bob".to_string(), 1)]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

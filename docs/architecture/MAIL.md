@@ -350,6 +350,10 @@ An entry is an envelope plus local facts:
   inherits the name's old `seq`, and a name with no recorded reader
   keeps its mark under the name itself. Nobody re-reads what they had
   already read.
+- Readers follow the files. Bare `mail` and `mail read --all-names` list
+  boxes only, so a receipt's sender never appears as a mailbox. A receipt is
+  read by the delivery projection alone (`mail::read_receipts`), and
+  `mail read --for <session>` finds the session's box and nothing else.
 - Dedup memory is the box itself. Pruning (`aoide mail rm --older-than`)
   removes a letter's line and so its `msgid`: a pruned letter re-offered
   later is filed again, unread. This is the accepted direction (forgetting

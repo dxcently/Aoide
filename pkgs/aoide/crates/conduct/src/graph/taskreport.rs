@@ -506,7 +506,7 @@ fn file_report(rec: &SessionRecord, slug: &str, mailbox: &str) -> Result<Option<
     // findable is reported as NO msgid rather than a fabricated one — and the
     // caller treats a missing msgid as "filed, unverified identity", never as
     // proof.
-    let found = aoide_storage::mail::read_base().ok().and_then(|entries| {
+    let found = aoide_storage::mail::read_box(&mailbox).ok().and_then(|entries| {
         entries
             .into_iter()
             .rev()
@@ -663,11 +663,7 @@ mod tests {
     }
 
     fn reports_for(slug: &str) -> Vec<mail::Entry> {
-        mail::read_base()
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.envelope.header.to.name == slug)
-            .collect()
+        mail::read_box(slug).unwrap()
     }
 
     /// The whole durable path in one pass: a daemon-door tick files exactly one

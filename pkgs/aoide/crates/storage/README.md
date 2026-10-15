@@ -738,6 +738,9 @@ by decision — no embedded database yet
   torn multi-byte tail cannot wedge them.
   `mail::file_receipt` is the shared seam `conduct`'s `deliver_local` files a
   delivered message through; `mail::file_letter` is `mail send`'s own engine.
+  Readers follow the files: `read_boxes` (letters), `read_receipts` (acks),
+  `read_box(name)` and `read_for` (one box), `read_base` (both, by seq, for
+  export and the audit views). Bare `mail` and `--all-names` use the boxes only.
   Keep-all: `mail rm --older-than` is the only pruning, and it takes the dedup
   memory with the line (a pruned letter re-offered is filed again).
 

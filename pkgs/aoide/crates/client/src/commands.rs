@@ -5091,10 +5091,10 @@ fn handle_mail_names(_inv: &Invocation) -> Outcome {
 /// [`aoide_storage::mail::file_letter`]/`file_receipt` always stamp THIS
 /// box's own name instead — so finding one here already carries that
 /// proof; this never re-verifies it. `base` is a single
-/// [`aoide_storage::mail::read_base`] shared across every entry a caller
+/// [`aoide_storage::mail::read_receipts`] shared across every entry a caller
 /// projects (a `mail outbox` listing, or `mail send`'s post-spool read) —
-/// hoisted there so this check never re-parses `base.jsonl` per entry; a
-/// read failure degrades to an empty `base` (matching this check's own
+/// hoisted there so this check never re-reads `receipts.log` per entry; a
+/// read failure degrades to an empty list (matching this check's own
 /// former "no ack seen" default), never a propagated error.
 fn has_delivered_ack(base: &[aoide_storage::mail::Entry], to_node: &str, msgid: &str) -> bool {
     base.iter().any(|e| {
@@ -5157,7 +5157,7 @@ fn delivery_status_unavailable(err: &str) -> Value {
 /// - `queued`: none of the above — nothing has ever gone wrong, or
 ///   nothing has been attempted yet.
 ///
-/// `base` is the caller's own single [`aoide_storage::mail::read_base`],
+/// `base` is the caller's own single [`aoide_storage::mail::read_receipts`],
 /// read once and reused across every entry the caller projects — never
 /// re-read per entry here (see [`has_delivered_ack`]).
 fn delivery_projection(
@@ -5207,8 +5207,8 @@ fn post_send_delivery(node: &str, msgid: &str) -> Value {
         Ok(l) => l,
         Err(e) => return delivery_status_unavailable(&e),
     };
-    let base = aoide_storage::mail::read_base().unwrap_or_default();
-    delivery_projection(&base, node, entry, link.as_ref())
+    let receipts = aoide_storage::mail::read_receipts().unwrap_or_default();
+    delivery_projection(&receipts, node, entry, link.as_ref())
 }
 
 /// `aoide mail send --to (self|<node>)/<name> [--from <who>] -- <text …> [--json]`.
@@ -5740,8 +5740,8 @@ fn handle_mail_read(inv: &Invocation) -> Outcome {
 /// `typed` holds none. A mailbox with no mail is a valid, empty mailbox (a
 /// reader polls its own before anything arrives), so this is only ever a hint.
 fn near_mailbox(typed: &str) -> Option<String> {
-    let base = aoide_storage::mail::read_base().ok()?;
-    let mut names: Vec<String> = base.iter().map(|e| e.envelope.header.to.name.clone()).filter(|n| !n.is_empty()).collect();
+    let boxes = aoide_storage::mail::read_boxes().ok()?;
+    let mut names: Vec<String> = boxes.iter().map(|e| e.envelope.header.to.name.clone()).filter(|n| !n.is_empty()).collect();
     names.sort();
     names.dedup();
     if names.iter().any(|n| n == typed) {
@@ -5931,7 +5931,7 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
             Err(e) => return teach::store_failed(cmd, "state/outbox", &e),
         },
     };
-    let base = aoide_storage::mail::read_base().unwrap_or_default();
+    let receipts = aoide_storage::mail::read_receipts().unwrap_or_default();
     let mut rows: Vec<Value> = Vec::new();
     let mut summary = serde_json::Map::new();
     for node in &nodes {
@@ -5951,7 +5951,7 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
         let link = aoide_storage::outbox::read_link_state(node);
         for e in &entries {
             let delivery = match &link {
-                Ok(l) => delivery_projection(&base, node, e, l.as_ref()),
+                Ok(l) => delivery_projection(&receipts, node, e, l.as_ref()),
                 Err(err) => delivery_status_unavailable(err),
             };
             rows.push(json!({
@@ -11807,6 +11807,22 @@ printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: reply-id\r\n\r\n{{"jsonrpc":"2.0","id
         assert_eq!(d["reasonScope"], "entry");
         assert_eq!(d["nextAttemptAt"], "2026-10-15T00:00:12Z");
         assert_eq!(d["ackPending"], false);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn has_delivered_ack_reads_receipts_log() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("delivered-from-receipts-log");
+        let node = aoide_storage::display::local_node_name();
+
+        aoide_storage::mail::file_receipt("bob", "alice", "the-msgid").unwrap();
+        assert!(has_delivered_ack(&aoide_storage::mail::read_receipts().unwrap(), &node, "the-msgid"));
+        assert!(
+            !has_delivered_ack(&aoide_storage::mail::read_boxes().unwrap(), &node, "the-msgid"),
+            "a receipt is never in a box"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

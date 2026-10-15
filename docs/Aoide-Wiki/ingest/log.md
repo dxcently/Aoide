@@ -4887,3 +4887,16 @@ pkgs/aoide/crates/conduct/src/graph/view.rs,
 pkgs/aoide/crates/conduct/src/graph/find.rs,
 pkgs/aoide/crates/conduct/README.md, pkgs/aoide/crates/cli/tests/mesh_transit.rs,
 docs/architecture/MAIL.md, CONTRACTS.md, docs/Aoide-Wiki/ingest/log.md
+
+## [2026-10-15] change | receipts are read from receipts.log, letters from boxes
+
+Bare `mail`, `mail read --all-names` and the near-miss hint list boxes only, so
+a receipt's sender never shows as a mailbox. The delivery projection reads
+`receipts.log` alone, and the report read-back reads its own box. `mail read
+--for` a session id finds that session's box and no acks.
+
+Pages touched: pkgs/aoide/crates/storage/src/mail.rs,
+pkgs/aoide/crates/client/src/commands.rs,
+pkgs/aoide/crates/conduct/src/graph/taskreport.rs,
+pkgs/aoide/crates/storage/README.md, docs/architecture/MAIL.md,
+docs/Aoide-Wiki/ingest/log.md
