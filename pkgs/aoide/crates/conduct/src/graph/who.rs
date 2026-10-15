@@ -75,18 +75,21 @@
 //!
 //! ## Project attribution (bare `session`'s own grouping)
 //!
-//! [`project_bucket`] reuses whichever attribution the codebase already
-//! computes — never a third one: a registered `projects.json` name
-//! ([`super::model::anchor_for`], longest-prefix, PURE string matching, so
-//! it resolves identically for a node session's cwd under the fleet's
-//! shared-path convention the same way `grant.rs`'s node-spec relativization
-//! already leans on) wins when present; else a `.aoide/project.json`
-//! manifest found by walking up from the cwd ON THIS HOST'S OWN FILESYSTEM
+//! A local session's bucket is [`project_of`]'s: its effective project, else
+//! its own, else [`project_bucket`], which reuses whichever attribution the
+//! codebase already computes — never a third one. A registered `projects.json`
+//! name ([`super::model::anchor_for`], longest-prefix, pure string matching)
+//! wins when present; else a `.aoide/project.json` manifest found by walking
+//! up from the cwd on this host's own filesystem
 //! (`aoide_storage::manifest::walk_up`) renders by that directory's own
-//! basename — a node's foreign cwd simply never resolves a manifest here
-//! (the walk is real `Path::is_file()` checks against THIS filesystem), so
-//! it falls through harmlessly rather than lying about a match. Neither
-//! resolving lands the session in the trailing [`NO_PROJECT`] bucket.
+//! basename. Neither resolving lands the session in the trailing
+//! [`NO_PROJECT`] bucket.
+//!
+//! A session from another node is bucketed by [`remote_project`] alone: the
+//! project its node published, clipped to a line, else [`NO_PROJECT`]. Its cwd
+//! is a path that node chose, so it is never matched against this box's
+//! projects and never walked up this box's disk. `session find` reads the same
+//! two rules, so the two commands file a row identically.
 
 use super::model::{resolved_parent, HookRecord, Project, SessionRecord};
 use super::spawn::TASK_MAX;
@@ -895,16 +898,27 @@ fn remote_tags(s: &SessionView) -> String {
     tags
 }
 
-/// The trailing catch-all bucket name for a session whose cwd resolves
-/// neither a registered project nor a manifest (module doc's "Project
-/// attribution") — always sorted last in [`group_by_project`]'s output.
+/// The trailing catch-all bucket name for a session with no project: a local
+/// one whose cwd resolves neither a registered project nor a manifest, a
+/// remote one whose node published none (module doc's "Project attribution")
+/// — always sorted last in [`group_by_project`]'s output.
 const NO_PROJECT: &str = "(no project)";
 
-/// The project a session renders under: its effective project (the owner
+/// The project a LOCAL session renders under: its effective project (the owner
 /// chain), else its own, else the anchor its cwd sits under. Bare `session`'s
-/// grouping and find's `project:` both read this one rule.
+/// grouping and find's `project:` both read this one rule for a local row, and
+/// [`remote_project`] for every other.
 pub(super) fn project_of(sv: &SessionView, projects: &[Project]) -> Option<String> {
     sv.effective_project.clone().or_else(|| sv.project.clone()).or_else(|| project_bucket(&sv.cwd, projects))
+}
+
+/// The project a session from another node renders under: the one its node
+/// published, clipped to a line, and none when it published none. Its cwd is a
+/// path that node chose, so it is never matched against this box's projects
+/// and never walked up this box's disk. Bare `session`'s grouping and find's
+/// `project:` both read this one rule for a remote row.
+pub(super) fn remote_project(sv: &SessionView) -> Option<String> {
+    sv.project.as_deref().map(super::common::clip)
 }
 
 /// Attribute one session's cwd to a project bucket for bare `session`'s
@@ -947,7 +961,8 @@ fn group_by_project(nodes: Vec<NodeView>, projects: &[Project]) -> Vec<ProjectGr
     let mut buckets: std::collections::HashMap<String, Vec<SessionView>> = std::collections::HashMap::new();
     for node in nodes {
         for sv in node.sessions {
-            let name = project_of(&sv, projects).unwrap_or_else(|| NO_PROJECT.to_string());
+            let project = if node.is_local { project_of(&sv, projects) } else { remote_project(&sv) };
+            let name = project.unwrap_or_else(|| NO_PROJECT.to_string());
             if !buckets.contains_key(&name) {
                 order.push(name.clone());
             }
@@ -975,9 +990,9 @@ fn group_by_project(nodes: Vec<NodeView>, projects: &[Project]) -> Vec<ProjectGr
 fn render_groups(groups: &[ProjectGroup]) -> String {
     let mut out: Vec<String> = Vec::new();
     for g in groups {
-        // The bucket name is a project's own name — or, for a cwd matching
-        // neither, that cwd's basename off a session record that may have come
-        // off a pulled document: cleaned like every other printed string.
+        // The bucket name is a project's own name — a manifest directory's
+        // basename, or a project a pulled node published: cleaned like every
+        // other printed string.
         out.push(format!("◆ {}", shown(&g.name)));
         for (i, s) in g.sessions.iter().enumerate() {
             let last = i + 1 == g.sessions.len();
@@ -1753,37 +1768,75 @@ mod tests {
         assert_eq!(groups[2].sessions[0].session_id, "s1");
     }
 
+    /// One remote node's sessions, as its graph document publishes them.
+    fn far_node(sessions: Vec<Value>) -> NodeView {
+        let graph = json!({ "schemaVersion": "0", "nodes": sessions, "edges": [] });
+        build_mesh_node(&node("yomi-strix"), Ok(graph), None)
+    }
+
+    fn far_session(id: &str, cwd: &str) -> Value {
+        json!({ "id": format!("session:{id}"), "kind": "session", "state": "working", "agent": "claude", "cwd": cwd })
+    }
+
+    /// Where `group_by_project` filed each session, by id.
+    fn filed_under(groups: &[ProjectGroup]) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = groups
+            .iter()
+            .flat_map(|g| g.sessions.iter().map(|s| (s.session_id.clone(), g.name.clone())))
+            .collect();
+        out.sort();
+        out
+    }
+
     #[test]
-    fn group_by_project_attributes_a_remote_sessions_cwd_the_same_host_agnostic_way() {
-        // A node's session cwd matching a LOCALLY-registered project's path
-        // string (the fleet's shared-path convention, `grant.rs`'s own node
-        // relativization leans on the same thing) attributes purely by
-        // string match — no filesystem access, so it works identically for
-        // a foreign host's cwd.
-        let nodes = vec![NodeView {
-            name: "yomi-strix".to_string(),
-            is_local: false,
-            presence: "online",
-            fetched_at: None,
-            error: None,
-            stale: false,
-            sessions: vec![SessionView {
-                session_id: "r1".into(),
-                label: "yomi-strix/root/r1".into(),
-                petname: None,
-                agent: "claude".into(),
-                state: "working".into(),
-                presence: "online",
-                cwd: "/home/k/Aoide/pkgs/aoide".into(), project: None,
-                effective_project: None,
-                exempt: false,
-                title: None, model: None, kind: None, parent: None, native_role: None, task: None, remote_parent: None, remote_children: Vec::new(),
-            }],
-        }];
+    fn group_by_project_files_a_remote_session_under_no_project_though_its_cwd_sits_under_a_registered_root() {
         let projects = vec![project("aoide", "/home/k/Aoide")];
-        let groups = group_by_project(nodes, &projects);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].name, "aoide");
+        let near = build_local_node(&[session("near", "/home/k/Aoide/pkgs/aoide", "working", "1", None)], &[], &projects, &[], "sakaki");
+        let far = far_node(vec![far_session("far", "/home/k/Aoide/pkgs/aoide")]);
+        let groups = group_by_project(vec![near, far], &projects);
+        assert_eq!(
+            filed_under(&groups),
+            [("far".to_string(), NO_PROJECT.to_string()), ("near".to_string(), "aoide".to_string())],
+            "a local row still anchors by its cwd; a far cwd is a path its node chose"
+        );
+    }
+
+    #[test]
+    fn group_by_project_never_walks_this_boxs_disk_for_a_remote_sessions_manifest() {
+        let root = std::env::temp_dir().join(format!("aoide-who-far-manifest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let nested = root.join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        aoide_storage::manifest::save_manifest(&root, &aoide_storage::manifest::Manifest::default()).unwrap();
+        let cwd = nested.to_string_lossy().into_owned();
+        let bucket = root.file_name().unwrap().to_string_lossy().into_owned();
+
+        let near = build_local_node(&[session("near", &cwd, "working", "1", None)], &[], &[], &[], "sakaki");
+        let far = far_node(vec![far_session("far", &cwd)]);
+        let groups = group_by_project(vec![near, far], &[]);
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(
+            filed_under(&groups),
+            [("far".to_string(), NO_PROJECT.to_string()), ("near".to_string(), bucket)],
+            "a local row still buckets by the manifest above its cwd; a far cwd is only text"
+        );
+    }
+
+    #[test]
+    fn group_by_project_files_a_remote_session_under_the_project_its_node_published_clipped_to_a_line() {
+        let projects = vec![project("aoide", "/home/k/Aoide")];
+        let mut stored = far_session("stored", "/home/k/Aoide/pkgs/aoide");
+        stored["project"] = json!("elsewhere");
+        let mut long = far_session("long", "/far");
+        long["project"] = json!("j".repeat(5 << 20));
+        let groups = group_by_project(vec![far_node(vec![stored, long])], &projects);
+
+        let filed = filed_under(&groups);
+        assert_eq!(filed[1], ("stored".to_string(), "elsewhere".to_string()), "the published project wins over the anchor");
+        let (id, bucket) = &filed[0];
+        assert_eq!(id, "long");
+        assert!(bucket.chars().count() <= crate::graph::common::LINE_MAX && bucket.ends_with('…'), "{} characters", bucket.chars().count());
     }
 
     #[test]
@@ -2168,7 +2221,7 @@ mod tests {
     }
 
     #[test]
-    fn bare_mode_attributes_a_remote_session_to_a_registered_project_by_cwd() {
+    fn bare_mode_files_a_remote_session_under_no_project_though_its_cwd_sits_under_a_registered_root() {
         let _env = Env::set_up("project-grouping-remote");
         let pf = super::super::model::ProjectsFile {
             schema_version: "0".to_string(),
@@ -2182,7 +2235,7 @@ mod tests {
         let data = out.data.unwrap();
         let projects = data["projects"].as_array().unwrap();
         assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0]["name"], "aoide");
+        assert_eq!(projects[0]["name"], NO_PROJECT, "a far cwd is a path its node chose, never matched here");
         assert_eq!(projects[0]["sessions"][0]["sessionId"], "r1");
     }
 

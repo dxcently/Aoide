@@ -408,10 +408,11 @@ aoide session [<filter>] [--hosts] [--all] [--json]
   host/role/petname line, or `node/<rest>`), falling back to a substring
   match.
 - **Writes:** nothing.
-- **Output:** a Unicode roster grouped by PROJECT — a registered
-  `projects.json` name, else a `.aoide/project.json` manifest directory's own
-  basename, else a trailing `(no project)` bucket — or, under `--hosts`, by
-  HOST: this host, then each node. Node presence: `online` /
+- **Output:** a Unicode roster grouped by PROJECT — for a local session a
+  registered `projects.json` name, else a `.aoide/project.json` manifest
+  directory's own basename; for a session from another node only the project
+  that node published; else a trailing `(no project)` bucket — or, under
+  `--hosts`, by HOST: this host, then each node. Node presence: `online` /
   `unreachable` / `never-pulled`. Session presence: `online` / `stale` /
   `done` (`done` omitted without `--all`). `--json` mirrors either grouping
   structurally.

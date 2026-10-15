@@ -375,7 +375,7 @@ pub fn register(r: &mut Registry) {
     // landed after every entry above it.
     r.insert(cmd!(
         path: ["session"],
-        summary: "Roster listing: this box's own sessions plus every registered node, probed in parallel on every call (the retired `aoide who` command's exact probe/cache-fallback pipeline). Bare groups sessions by PROJECT (a registered projects.json name, else a .aoide/project.json manifest directory's own basename, else a trailing (no project) bucket); --hosts groups by HOST instead — this host, then each node, byte-identical to `who`'s old rendering. --json mirrors either grouping structurally.",
+        summary: "Roster listing: this box's own sessions plus every registered node, probed in parallel on every call (the retired `aoide who` command's exact probe/cache-fallback pipeline). Bare groups sessions by PROJECT (a local session by a registered projects.json name, else a .aoide/project.json manifest directory's own basename; a session from another node only by the project that node published; else a trailing (no project) bucket); --hosts groups by HOST instead — this host, then each node, byte-identical to `who`'s old rendering. --json mirrors either grouping structurally.",
         args: [arg!("filter", "string", false, "Narrow what's displayed (never what's probed): a local session id/tail4/petname, a host/role/petname line, node/<rest>, or a plain substring against a node/session name.")],
         flags: [
             flag!("hosts", "bool", "Group by host instead of by project — the retired `who` command's own grouping."),

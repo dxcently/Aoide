@@ -9,10 +9,10 @@
 //! [`session_find`] renders the answer. Nothing here probes a node, takes a
 //! lock or writes a file.
 
-use super::common::{clean_line, load_inputs, strip_unsafe, LINE_MAX};
+use super::common::{clean_line, clip, load_inputs, strip_unsafe, LINE_MAX};
 use super::doorbell::conducted_ancestor;
 use super::model::{merged_sessions, HookRecord, Project, SessionRecord};
-use super::who::{build_local_node, cached_node, glyph, project_of, session_presence, SessionView};
+use super::who::{build_local_node, cached_node, glyph, project_of, remote_project, session_presence, SessionView};
 use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::state::canonical_state;
 use aoide_protocol::suggest::closest;
@@ -389,20 +389,6 @@ fn grade(want: &str, have: &str) -> Option<Grade> {
         Some(Grade::Substring)
     } else {
         None
-    }
-}
-
-/// How many characters of a field [`clip`] reads. [`clean_line`] keeps at most
-/// `LINE_MAX`, so a few lines' worth is all it can use of a field of any length.
-const CLIP_READ: usize = 4 * LINE_MAX;
-
-/// `text` as one clean line of at most `LINE_MAX` characters. Only its head is
-/// read, so a field costs the same however long its author made it, and so does
-/// every copy of it that an answer repeats once per query word.
-fn clip(text: &str) -> String {
-    match text.char_indices().nth(CLIP_READ) {
-        Some((end, _)) => clean_line(&text[..end]),
-        None => clean_line(text),
     }
 }
 
@@ -1191,20 +1177,19 @@ fn local_row(sv: &SessionView, rec: Option<&SessionRecord>, merged: &[SessionRec
 /// read here: the node does not publish its mailboxes. Every text field the
 /// node wrote is clipped to one clean line first ([`clip`]), so a match and
 /// every byte of output cost one line per field however long the node made it.
-/// Its project is the one its node published and nothing else: a bucket derived
-/// from its cwd would walk this box's disk and match this box's projects with a
-/// path the node chose. A task is already a legal slug (`remote_task`), so it
-/// stays whole.
+/// Its project is [`remote_project`]'s: the one its node published and nothing
+/// else. A task is already a legal slug (`remote_task`), so it stays whole.
 fn remote_row(node: &str, mut sv: SessionView) -> Row {
     for text in [&mut sv.session_id, &mut sv.state, &mut sv.cwd, &mut sv.agent] {
         *text = clip(text);
     }
-    for text in [&mut sv.petname, &mut sv.title, &mut sv.model, &mut sv.kind, &mut sv.project, &mut sv.native_role, &mut sv.parent]
+    for text in [&mut sv.petname, &mut sv.title, &mut sv.model, &mut sv.kind, &mut sv.native_role, &mut sv.parent]
         .into_iter()
         .flatten()
     {
         *text = clip(text);
     }
+    let project = remote_project(&sv);
     let link = |node: &str, id: &str| (clip(node), clip(id));
     Row {
         node: node.to_string(),
@@ -1219,7 +1204,7 @@ fn remote_row(node: &str, mut sv: SessionView) -> Row {
         kind: sv.kind,
         state: sv.state,
         presence: sv.presence,
-        project: sv.project,
+        project,
         native_role: sv.native_role,
         leads: Vec::new(),
         report_to: None,

@@ -107,6 +107,20 @@ pub fn clean_line(s: &str) -> String {
     clip_flat(&strip_unsafe(s), LINE_MAX)
 }
 
+/// How many characters of a field [`clip`] reads. [`clean_line`] keeps at most
+/// `LINE_MAX`, so a few lines' worth is all it can use of a field of any length.
+const CLIP_READ: usize = 4 * LINE_MAX;
+
+/// `text` as one clean line of at most `LINE_MAX` characters. Only its head is
+/// read, so a field costs the same however long its author made it, and so does
+/// every copy of it that an answer repeats once per query word.
+pub(in crate::graph) fn clip(text: &str) -> String {
+    match text.char_indices().nth(CLIP_READ) {
+        Some((end, _)) => clean_line(&text[..end]),
+        None => clean_line(text),
+    }
+}
+
 /// The strip half of [`clean_line`], on its own: every character [`is_unsafe`]
 /// refuses, gone. Split out because a caller with its OWN clip — the
 /// ping-back's 80-character `SAY_MAX`, not this module's [`LINE_MAX`] — must

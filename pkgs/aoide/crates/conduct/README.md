@@ -1435,8 +1435,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   against the owner chain in `build_local_node`; else `project_bucket`: a
   registered `projects.json` name via `anchor_for`, else a
   `.aoide/project.json` manifest directory's own basename via `walk_up`,
-  else a trailing `(no project)` bucket — a remote row has no
-  `effective_project` and keeps this same ladder verbatim);
+  else a trailing `(no project)` bucket; a remote row has no
+  `effective_project` and is filed by `remote_project` alone, the project its
+  node published, else `(no project)`, never by its cwd);
   `--hosts` groups by HOST instead (a `--json` session row carries
   `parentSessionId` when its spawner is a session on the same node, so a
   consumer can rank a far forest) — this host, then each node,
@@ -1516,15 +1517,16 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   phrase. `load_index` joins the stage (through
   `who.rs`'s `build_local_node`), each node's cache (through
   `who.rs::cached_node`) and the mailbase peek into the index, with the scope
-  line's facts. A local row buckets through `who.rs::project_of`, the rule bare
-  `session` groups by; a cached row has the project its node published, or
-  none, since its cwd is a path the node chose and is never read against this
-  box's disk or projects. `session_find` renders the answer and reads files
-  only: no node is dialled and nothing is written. A human line is clipped by
-  `fit` to 240 characters, a fix names far text only through `plain_word`, and
-  a refusal lists at most 20 candidates, then how many more. A `node/name` the
-  cache does not hold teaches `aoide node pull` when the node was never pulled
-  or its cache is stale.
+  line's facts. A local row buckets through `who.rs::project_of` and a
+  cached row through `who.rs::remote_project` (the project its node
+  published, or none), the two rules bare `session` groups by; a cached row's
+  cwd is a path the node chose and is never read against this box's disk or
+  projects. `session_find` renders the answer and reads files only: no node is
+  dialled and nothing is written. A human line is clipped by `fit` to 240
+  characters, a fix names far text only through `plain_word`, and a refusal
+  lists at most 20 candidates, then how many more. A `node/name` the cache does
+  not hold teaches `aoide node pull` when the node was never pulled or its cache
+  is stale.
 - `mail_bridge` (P-M2, architect's ruling 1: "spool in storage, wire lane
   in client, bridge through conduct") — a thin, three-function passthrough
   onto `aoide_client::mail_wire`'s outbox drain and receive path, with no

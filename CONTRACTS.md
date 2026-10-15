@@ -1329,11 +1329,13 @@ writes it. Ledger-driven views do NOT run that ladder: `resurrect --project
 will not offer for that session.
 `SessionRecord.project` and the graph node's `project` keep publishing the
 stored value only; `aoide session`'s bucket names and the conductor's
-per-project counts read the derived view. An additive `effectiveProject`
-(string) rides beside the stored `project` on two documents, present only
-when the resolver finds one — never a dangling null: the `graph.json`
-session node, and every `aoide session --json` row in both groupings
-(`--hosts` and the default project grouping, built from one
+per-project counts read the derived view, except that `aoide session` files a
+row built from a remote node's graph document under the stored `project` that
+node published, and under no project when it published none, never by its cwd.
+An additive `effectiveProject` (string) rides beside the stored `project` on
+two documents, present only when the resolver finds one — never a dangling
+null: the `graph.json` session node, and every `aoide session --json` row in
+both groupings (`--hosts` and the default project grouping, built from one
 `session_view_json`). It is LOCAL ONLY: rows a remote node's graph document
 supplies never carry it (no local session slice to walk), and `node list`
 rows do not carry it either. The same rows carry `nativeRole` under the

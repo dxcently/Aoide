@@ -1778,17 +1778,17 @@ in the message.
   duplicate the local-stage-load + node-probe sequence for a future
   grouping — extend the branch, not the collection.
 - **`project_bucket` reuses whichever project attribution the codebase
-  already computes — never a third one.** A registered `projects.json`
-  name via `anchor_for` (pure string matching — works identically for a
-  node session's cwd under the fleet's shared-path convention) wins; else a
-  `.aoide/project.json` manifest found by walking up FROM THE SESSION'S OWN
-  CWD on this host's own filesystem (`aoide_storage::manifest::walk_up`)
-  renders by that directory's basename. Don't walk up from the CURRENT
-  process's cwd instead (that's `grant.rs`'s "current project" concept, a
-  different thing) — `project_bucket` must attribute EVERY session by its
-  OWN cwd, local or node, or a multi-session listing would silently
-  misattribute every session but the first. `graph::find` is the one reader
-  that does not: a cached row keeps only the project its node published.
+  already computes — never a third one, and only for a LOCAL session.** A
+  registered `projects.json` name via `anchor_for` (pure string matching)
+  wins; else a `.aoide/project.json` manifest found by walking up FROM THE
+  SESSION'S OWN CWD on this host's own filesystem
+  (`aoide_storage::manifest::walk_up`) renders by that directory's basename.
+  Don't walk up from the CURRENT process's cwd instead (that's `grant.rs`'s
+  "current project" concept, a different thing) — `project_bucket` must
+  attribute EVERY local session by its OWN cwd, or a multi-session listing
+  would silently misattribute every session but the first. A session from
+  another node never reaches it: `who.rs::remote_project` is its whole rule
+  (the next entry).
 - **A project is a set of anchor roots — `anchor_for` is longest-root-wins
   across EVERY root of EVERY project, not just each project's first.**
   `cwd_under` itself stays single-root (unchanged) and is simply called
@@ -1980,14 +1980,16 @@ in the message.
   or per-component regression; their bounds are many times the idle run so a
   loaded builder passes them, and a quadratic mutant still fails them. Keep
   both properties when touching these paths.
-- **A cached row's project is the one its node published.** `remote_row`
-  keeps the stored `project`, clipped, and calls neither `project_of` nor
-  `project_bucket`. A far cwd is a path the node chose: bucketing it would stat
-  this box's disk up the whole path and match this box's `projects.json`
-  roots, so a node could steer reads here and put itself under a local
-  project. A local row still buckets through `project_of`. A node that
-  published no project has none in find, where bare `session` may file it by
-  its cwd (the entry above on `project_bucket`).
+- **A remote row's project is the one its node published.**
+  `who.rs::remote_project` is the one rule: the stored `project`, clipped to a
+  line, and none when the node published none. Bare `session`'s
+  `group_by_project` calls it for every row of a non-local node and
+  `find`'s `remote_row` for every cached row; neither calls `project_of` or
+  `project_bucket` with a far cwd. A far cwd is a path the node chose:
+  bucketing it would stat this box's disk up the whole path and match this
+  box's `projects.json` roots, so a node could steer reads here and put its
+  rows under a local project. A local row still buckets through `project_of`.
+  A node that published no project is under no project in both commands.
 - **Row JSON is for a machine reader only.** `sessions` and `related`, with
   each row's `matched`, are built when `--json` is passed or the door is not
   the CLI (`teach::quiet`'s rule in aoide-client), so an MCP caller gets them
