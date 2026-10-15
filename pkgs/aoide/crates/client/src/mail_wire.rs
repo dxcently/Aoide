@@ -4957,6 +4957,48 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **Every poll outcome that files nothing is named, not only the containers.**
+    /// A plaintext receipt that names no msgid is refused `bad-msgid`; the poll
+    /// reports it, where a bare "0 filed" would hide it.
+    #[test]
+    fn a_plaintext_envelope_the_poll_refuses_is_named_not_dropped() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-envelope-refused");
+
+        let me = register_local_origin();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let receipt = aoide_storage::mail::mint_ack_in_mesh(
+            "bob",
+            aoide_storage::mail::Address { node: me.clone(), name: "alice".to_string() },
+            "not a msgid",
+            "home",
+        );
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let receipt = receipt.unwrap();
+        let msgid = receipt.msgid.clone();
+
+        let (_listener, port, _seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
+            poll_answer(&[receipt]),
+        );
+        register_polled_relay(port);
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed: {outcome:?}");
+        assert!(
+            outcome.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("bad-msgid")),
+            "the refusal is named to the caller: {:?}",
+            outcome.refused
+        );
+        assert!(aoide_storage::mail::show(&msgid).unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The hub's own side of a pull, for a test that runs both ends in one
     /// process: it retires what the poller says it took (its transit entries in
     /// the spool it keeps for that poller), then offers what is still pollable,

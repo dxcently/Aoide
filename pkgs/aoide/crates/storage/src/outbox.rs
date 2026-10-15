@@ -1451,8 +1451,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A receipt's text never names a path.** A receipt whose text is not one
-    /// msgid retires nothing, and no file outside the spool is ever looked for.
+    /// **A receipt whose text is not one msgid retires nothing.** The guard in
+    /// [`retire_by_ack`] that says so is defence in depth: `mail::deposit` already
+    /// refuses such a receipt (`MalformedAck`) before it reaches here, so the
+    /// guard stops a path being built from the text only if that refusal is ever
+    /// lost. This test pins the result, not the guard: without the guard the
+    /// lookup would also miss for these inputs.
     #[test]
     fn an_ack_whose_text_is_not_a_msgid_retires_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
