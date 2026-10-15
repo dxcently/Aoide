@@ -9,8 +9,9 @@ The User's ruling: find agent sessions across every agent, and for specific
 ones, and see what each carries — its primitives, roles, mailboxes and cc's.
 `aoide session find <query>` answers that from a bare terminal; the
 conductor's `/` page renders the same answer and holds no logic of its own.
-Find returns facts. Each row says why it matched (`matched` in `--json`). It
-never routes, sends, rings, pulls or writes.
+Find returns facts. Each row says why it matched (`matched`, in the machine
+form: `--json`, or any door but a terminal's CLI). It never routes, sends,
+rings, pulls or writes.
 
 "Across all agents and for specific ones" reads two ways, and both are in
 scope: every harness (claude, kimi, codex threads, eidolon, pi, shells) or one
@@ -136,12 +137,14 @@ so find and bare `session` can never file a row differently.
 aoide session find [<query>…] [--related <ref>] [--all] [--json]
 ```
 
-A query is a list of words. On the command line each word is one shell
-argument, quoted the way the shell quotes (`cc:"pr 41"` is one word, value
-`pr 41`); the conductor's query line splits on spaces and honours `"…"`; both
-reach the parser as the same list. A word whose text before the first `:` is a
-key below is a term; every other word is a bare word. Every term and every bare
-word must match (AND); inside one term, commas are alternatives (OR):
+A query is a list of words. On the command line each word is one shell argument,
+quoted the way the shell quotes (`cc:"pr 41"` is one word, value `pr 41`). The
+conductor's query line splits on spaces and honours `"…"`, and so does the one
+`query` string that MCP, A2A and the daemon carry: there,
+`agent:claude state:working` is two terms and `cc:"pr 41"` is one word. All
+three reach the parser as the same list. A word whose text before the first `:`
+is a key below is a term; every other word is a bare word. Every term and every
+bare word must match (AND); inside one term, commas are alternatives (OR):
 `state:working,awaiting`.
 
 | Term | Matches when | How |
@@ -298,7 +301,7 @@ facts in `data`:
                    "role":      { "task", "nativeRole", "leads": [] },
                    "mailboxes": { "reads": [{ "name", "unread", "via" }], "inbox": [], "reportTo" },
                    "cc":        [{ "msgid", "threadId", "subject", "from", "to": [] }],
-                   "threads":   [],
+                   "threads":   [], "threadsCount",
                    "edges":     { "parent", "childrenCount", "siblingsCount", "wrap",
                                   "remoteParent", "remoteChildrenCount", "repo" } },
                  "unknown": ["mailboxes", "cc", "threads"],
@@ -310,8 +313,9 @@ facts in `data`:
 but a terminal's CLI, so an MCP caller gets them without the flag. The human
 form builds neither, nor a row's `matched` terms. `unknown` rides on remote
 rows; `related` rides with `--related`. The `children`, `siblings` and
-`remoteChildren` lists ride only on the `--related` target, at most 20 each;
-each `…Count` key is the full size on every row.
+`remoteChildren` lists ride only on the `--related` target. Those three and
+`threads` hold at most 20 each, the first filed, and each `…Count` key is the
+full size on every row.
 `cacheAge` is the cache's age in seconds, `null` for this box's rows. An absent
 key, a key named in `unknown`, and an empty list are three different answers:
 not recorded, not published to this box, recorded as none. Titles, subjects
@@ -319,7 +323,9 @@ and sender names are text other sessions and nodes wrote. Every such field, in
 the human rows and in `--json`, has its control, format and bidi characters
 stripped (Decision 10). In the human form each field also flattens its
 whitespace and clips to 200 characters, and a row clips to 240, so one row is
-one terminal line. A far row's fields are that node's claims, and the header
+one terminal line. In `--json` a far row's text fields are clipped the same way
+when the row is built, and a `matched` value is clipped to 200 characters
+(Decision 13). A far row's fields are that node's claims, and the header
 above the rows says so with each node's cache age. A consumer treats every such
 string as data (house rule 4). The human cc line names the newest letter and
 counts the rest; `--json` carries them all.
@@ -574,6 +580,21 @@ alternative would have given, and what the chosen call costs.
     as it publishes them, lets a far node link itself to this box's sessions and
     show as related. Cost: a remote link this box never recorded is invisible
     here, and a far row sharing a task with a local row is not related to it.
+
+13. **An answer's size follows the rows, never the query times a field.** A far
+    node chooses its rows, ids, cwds and edges, one cache may hold 20 MiB, and a
+    paired node can deposit letters into this box's mail. So a far row's text
+    fields are clipped to one clean line of 200 characters when the row is
+    built, before the project bucket walks its cwd or a match reads it; a
+    `matched` value is clipped the same way; a query takes at most 64 words and
+    256 alternatives; the base is walked a few times in all and never once per
+    row (unread counts search each mailbox's sorted marks, a letter is decoded
+    once, and threads and reasons dedupe through sets); and a row's lists hold
+    at most 20 beside their counts. The alternative, bound only the output,
+    leaves a 5 MiB title cloned once per word into every machine reader's
+    answer: four rows at 64 words made 1.4 GB of JSON. Cost: a far field is
+    found by its first 200 characters only, and a far session id longer than
+    that names itself clipped, which no honest node produces.
 
 ## How it sits with other work
 

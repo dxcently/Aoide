@@ -1951,25 +1951,42 @@ in the message.
   argument (`session_find_with`), so a test never reads it, and its no-dial
   and no-write proofs are the find tests
   `find_reads_the_stage_and_the_caches_and_writes_nothing_and_dials_no_node`.
-- **`graph::find` stays linear in a hostile far node's rows.** A far node
-  chooses its rows, ids, cwds and edges, and one cache may hold 20 MiB, so
-  no step may cost rows times rows, and no allocation may grow with anything
-  but the row it serves. A query takes at most `WORDS_MAX` (64) words and
+- **`graph::find` stays linear in a hostile far node's rows and a paired
+  node's letters.** A far node chooses its rows, ids, cwds and edges, one
+  cache may hold 20 MiB, and a paired node can deposit letters into local
+  mail. So no step may cost rows times rows, letters times rows, or letters
+  times mailboxes, and no allocation may grow with a field's length times the
+  query's word count. `remote_row` clips every text field the node wrote to one
+  clean line (`clip`: `LINE_MAX` characters, reading only the field's head)
+  before anything reads it, `project_of` included, whose walk up a cwd is
+  quadratic in the path's length; a task stays whole because `remote_task`
+  already bounds it. A `matched` value is clipped the same way, whichever row
+  or letter it came from. A query takes at most `WORDS_MAX` (64) words and
   `ALTERNATIVES_MAX` (256) alternatives. The resolver's candidates are
   gathered once per answer (`Refs`), and each distinct `parent:` value is
   resolved once. `--related` checks each row against a `Target` built once,
   whose remote children are a set. A row's bare fields are read only when
   the query has a bare word, and the cwd is folded once, its components
-  slices of that fold, never a string each. A hit's `matched` is built only
-  when `find` is asked to `explain`. Edge lists and the candidates a refusal
-  names hold at most `LIST_MAX` (20), the edge lists beside their full count
-  and a refusal's with `and N more`. The timing tests in `find.rs` (the
-  twenty-thousand-row and cap tests) fail on a quadratic or per-component
-  regression; keep them when touching these paths.
+  slices of that fold, never a string each. `find` returns rows and never a
+  `matched`: `Found::explain` builds one, and only the machine block of
+  `list_view` calls it, so a human answer has no flag to get wrong. In
+  `mail_facts`, unread counts search each mailbox's sorted marks, a letter is
+  decoded once however many rows read its mailbox (`filed`), and a row's
+  threads dedupe through a set; `reasons_between` pairs threads and dedupes
+  its reasons through sets as well. Edge lists, a row's `threads` and the
+  candidates a refusal names hold at most `LIST_MAX` (20), the lists beside
+  their full count and a refusal's with `and N more`. The timing tests in
+  `find.rs` (the twenty-thousand-row, cap and mail tests) fail on a quadratic
+  or per-component regression; their bounds are many times the idle run so a
+  loaded builder passes them, and a quadratic mutant still fails them. Keep
+  both properties when touching these paths.
 - **Row JSON is for a machine reader only.** `sessions` and `related`, with
   each row's `matched`, are built when `--json` is passed or the door is not
   the CLI (`teach::quiet`'s rule in aoide-client), so an MCP caller gets them
-  without the flag and a human answer builds none. Every human line passes
+  without the flag and a human answer builds none. The same doors carry the
+  registry's one `query` argument as one string, so a lone argument on any door
+  but the CLI is a query line and `words` splits it with `split_line`; a CLI
+  argument is a word already and is never split again. Every human line passes
   through `fit` (clipped to `ROW_MAX`, 240 characters) after each field's
   `clean_line`, and a fix that names text a far node wrote passes it through
   `plain_word`, which hands the operator a placeholder for anything but one

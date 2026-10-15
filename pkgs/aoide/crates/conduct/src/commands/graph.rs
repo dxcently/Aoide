@@ -471,7 +471,7 @@ pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["session", "find"],
         summary: "Find sessions on this box and on every registered node, from the stage and each node's cached graph. Reads files only: it probes no node, takes no lock and writes nothing; `node pull` refreshes a cache. Each word is a term (`key:value`, keys agent, kind, state, node, project, role, mailbox, cc, parent) or a bare word matched against petname, task, title, id and cwd. Every word must match. Rows sort by the weakest bare word's grade, then the sum of grades, local before cached, state urgency, then the label. `--related <ref>` shows <ref>'s carries and the sessions that share a fact with it (lineage, sibling, role, mailbox, thread, project, repo), each with its reasons; the query words then narrow those. A cached row reads `was <state>` and its mailboxes and cc are unknown: its node does not publish them. The scope line names where each node's rows came from and how old its cache is.",
-        args: [arg!("query", "string", false, "Query words, one per shell argument. Quote a value with spaces: `cc:\"pr 41\"`. With --related these narrow the related rows.")],
+        args: [arg!("query", "string", false, "Query words, one per shell argument; MCP, A2A and the daemon pass them as one string. Quote a value with spaces: `cc:\"pr 41\"`. With --related these narrow the related rows.")],
         flags: [
             flag!("related", "string", "Show <ref>'s carries and the sessions related to it. <ref> resolves like `send --to`, and `node/<rest>` names a cached row."),
             flag!("all", "bool", "Also list `done` sessions (omitted by default)."),

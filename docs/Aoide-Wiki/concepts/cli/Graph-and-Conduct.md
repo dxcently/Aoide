@@ -777,7 +777,11 @@ aoide session find [<query>…] [--related <ref>] [--all] [--json]
   role, mailboxes, cc, edges), then the sessions that share a reason with it,
   each with its reasons. `--json`, or any door but the CLI, carries the same
   facts in `data`: `query`, `scope`, `sessions` (carries, `unknown`,
-  `matched`) and `related`. The human form builds no row JSON.
+  `matched`) and `related`. The human form builds no row JSON. MCP, A2A and
+  the daemon pass the query as one string, split like the conductor's line
+  (`agent:claude state:working` is two terms; `cc:"pr 41"` keeps its space).
+  A far row's text fields, a `matched` value and each `threads` list are
+  clipped to a line or to 20 entries beside their full count.
 - **Refusals:** an unknown key, an empty value or an unclosed quote is a usage
   refusal naming the keys. So is a literal `"`, a `session:<id>` term, a query
   over 64 words, or one with more than 256 alternatives in all its terms, each

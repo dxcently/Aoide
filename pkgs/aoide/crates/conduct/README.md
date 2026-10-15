@@ -1500,16 +1500,20 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `FindIndex` of plain `Row`s, and `related` ranks the rows that share a reason
   with one `Target`. `Refs` gathers the resolver's candidates once per answer,
   and a far session's name typed without its node is refused with the
-  `node/name` form. `find` builds each hit's `matched` only when asked to
-  `explain`, and the handler asks, and builds row JSON, only for a machine
-  reader: `--json`, or any door but the CLI. `mail_facts` fills each local row's
-  mail from the `storage::mail::peek_cursors` and `peek_base` results it is
-  given: a row reads through its wrap, its unread count is the `unread_for`
-  count, and a cc is a letter filed to a mailbox the row reads whose Cc names
-  that mailbox. `carries` gives a row's mailboxes, cc, threads and edges, and
-  names in `unknown` the mail facts its node does not publish. Reasons (lineage,
-  remote lineage, sibling, same role, mailbox, thread, project, repo) are kept
-  strongest first, once per phrase. `load_index` joins the stage (through
+  `node/name` form. `find` ranks rows and builds no `matched`: `Found::explain`
+  does, and the handler asks, and builds row JSON, only for a machine reader:
+  `--json`, or any door but the CLI. Those doors carry the query as one string,
+  which `words` splits with `split_line`. `remote_row` clips every text field a
+  far node wrote to one line, and a `matched` value is clipped the same way.
+  `mail_facts` fills each local row's mail from the
+  `storage::mail::peek_cursors` and `peek_base` results it is given: a row
+  reads through its wrap, its unread count is the `unread_for` count, and a cc
+  is a letter filed to a mailbox the row reads whose Cc names that mailbox. It
+  decodes each letter once. `carries` gives a row's mailboxes, cc, threads (at
+  most 20, beside their count) and edges, and names in `unknown` the mail facts
+  its node does not publish. Reasons (lineage, remote lineage, sibling, same
+  role, mailbox, thread, project, repo) are kept strongest first, once per
+  phrase. `load_index` joins the stage (through
   `who.rs`'s `build_local_node`), each node's cache (through
   `who.rs::cached_node`) and the mailbase peek into the index, with the scope
   line's facts. Rows bucket through `who.rs::project_of`, the rule bare
