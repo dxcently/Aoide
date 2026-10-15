@@ -354,6 +354,10 @@ An entry is an envelope plus local facts:
   boxes only, so a receipt's sender never appears as a mailbox. A receipt is
   read by the delivery projection alone (`mail::read_receipts`), and
   `mail read --for <session>` finds the session's box and nothing else.
+- Receipts. A far receipt's text is exactly one lowercase 64-hex msgid, and
+  a second receipt from the same signer, in the same mesh, for the same
+  letter files nothing. A local receipt keeps `sha256:<hex> <n>B`, the digest
+  and length of the message, never its text.
 - Dedup memory is the box itself. Pruning (`aoide mail rm --older-than`)
   removes a letter's line and so its `msgid`: a pruned letter re-offered
   later is filed again, unread. This is the accepted direction (forgetting

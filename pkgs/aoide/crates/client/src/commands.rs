@@ -10917,8 +10917,8 @@ mod tests {
         let outcome = aoide_storage::mail::deposit(ack, "test").unwrap();
         assert!(matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }), "a genuine, verified ack must file");
 
-        let base = aoide_storage::mail::read_base().unwrap();
-        let d = delivery_projection(&base, &node_name, &entry, None);
+        let receipts = aoide_storage::mail::read_receipts().unwrap();
+        let d = delivery_projection(&receipts, &node_name, &entry, None);
         assert_eq!(d["status"], "delivered", "a real ack beats the stale accepted bookkeeping");
         assert_eq!(d["ackPending"], false);
 
@@ -11807,22 +11807,6 @@ printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: reply-id\r\n\r\n{{"jsonrpc":"2.0","id
         assert_eq!(d["reasonScope"], "entry");
         assert_eq!(d["nextAttemptAt"], "2026-10-15T00:00:12Z");
         assert_eq!(d["ackPending"], false);
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn has_delivered_ack_reads_receipts_log() {
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = aoide_test_support::isolated_mail_root("delivered-from-receipts-log");
-        let node = aoide_storage::display::local_node_name();
-
-        aoide_storage::mail::file_receipt("bob", "alice", "the-msgid").unwrap();
-        assert!(has_delivered_ack(&aoide_storage::mail::read_receipts().unwrap(), &node, "the-msgid"));
-        assert!(
-            !has_delivered_ack(&aoide_storage::mail::read_boxes().unwrap(), &node, "the-msgid"),
-            "a receipt is never in a box"
-        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

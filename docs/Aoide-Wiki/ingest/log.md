@@ -4900,3 +4900,17 @@ pkgs/aoide/crates/client/src/commands.rs,
 pkgs/aoide/crates/conduct/src/graph/taskreport.rs,
 pkgs/aoide/crates/storage/README.md, docs/architecture/MAIL.md,
 docs/Aoide-Wiki/ingest/log.md
+
+## [2026-10-15] change | the destination keeps no gate, and receipts keep digests
+
+The pre-open gate (`containers.jsonl`) belongs to a hub and a charter. A
+destination opens a container addressed to it and dedups against its own box,
+so a re-offer is re-opened and its ack re-spooled. The gate rotates at 4 MiB,
+and a lookup reads both generations. A local receipt stores the sha256 and
+length of the message, not its text.
+
+Pages touched: pkgs/aoide/crates/storage/src/seal.rs,
+pkgs/aoide/crates/storage/src/mail.rs, pkgs/aoide/crates/server/src/a2a.rs,
+pkgs/aoide/crates/client/src/mail_wire.rs, pkgs/aoide/crates/client/src/commands.rs,
+pkgs/aoide/crates/storage/AGENTS.md, docs/architecture/MAIL.md, CONTRACTS.md,
+docs/Aoide-Wiki/ingest/log.md

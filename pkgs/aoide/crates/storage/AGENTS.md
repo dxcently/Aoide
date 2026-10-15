@@ -122,11 +122,13 @@
   this module's own source text and fails the build if a serializable struct
   ever grows a field that looks like key material — the same mechanical gate
   `identity.rs` runs on itself.
-- **The filed record is the truth about filing, never a dedup gate's
-  memory.** `state/mail/containers.jsonl` only decides whether a container may
-  be OPENED, and it means **admitted AND filed**: `seal::record_admitted` is
-  called by the caller once `mail::deposit` has returned `Filed` or
-  `Duplicate`, never from inside `seal::deposit_container`. Whether a duplicate
+- **The box is the only dedup a destination has.** `state/mail/containers.jsonl`
+  (both generations) is the pre-open gate of a HUB and of a charter, and it
+  is written only by `seal::file_transit_hop` (a hop, once it is on disk) and
+  the charter's applied arm. A destination opens every container and dedups
+  against its own box in `mail::deposit`, so it never reads or writes the gate.
+  The record means **admitted AND filed**, and it is never written from inside
+  `seal::deposit_container`. Whether a duplicate
   was originally a letter — and so whether a lost receipt is owed — is read
   back out of the boxes through `mail::filed_kind`/`mail::show`, never
   remembered by the gate. Both halves of that ordering are load-bearing: record

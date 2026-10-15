@@ -994,8 +994,15 @@ pub fn file_receipt(from: &str, to_name: &str, text: &str) -> Result<(), String>
     let node = display::local_node_name();
     let from_addr = Address { node: node.clone(), name: from.to_string() };
     let to_addr = Address { node, name: to_name.to_string() };
-    let text = text.to_string();
-    with_lock(move || file_entry(ENTRY_TYPE_RECEIPT, from_addr, to_addr, &text, "self").map(|_| ()))
+    let stored = local_receipt_text(text);
+    with_lock(move || file_entry(ENTRY_TYPE_RECEIPT, from_addr, to_addr, &stored, "self").map(|_| ()))
+}
+
+/// What a local receipt keeps of the message it acknowledges: its sha256 and
+/// byte length, never the text. The conduct audit line already holds the
+/// message, and nothing reads a local receipt's text back.
+fn local_receipt_text(text: &str) -> String {
+    format!("sha256:{} {}B", hex_encode(&Sha256::digest(text.as_bytes())), text.len())
 }
 
 /// File one letter locally — `mail send --to self/<name>`'s engine, and the
@@ -3413,6 +3420,22 @@ mod tests {
         // of it would fail the whole call.
         std::fs::create_dir_all(box_path("dave")).unwrap();
         assert_eq!(armed_names_for_reader("sess-1").unwrap(), vec![("bob".to_string(), 1)]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_local_receipt_stores_a_digest() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("local-receipt-digest");
+
+        file_receipt("bob", "alice", "the message body").unwrap();
+        let got = read_receipts().unwrap();
+        assert_eq!(got.len(), 1);
+        let expected = format!("sha256:{} 16B", hex_encode(&Sha256::digest(b"the message body")));
+        assert_eq!(got[0].envelope.text, expected, "the text is the digest and the length, never the message");
+        let e = &got[0].envelope;
+        assert_eq!(compute_msgid(&e.header, &e.text, &e.sig).as_deref(), Some(e.msgid.as_str()), "the digest text is what is signed");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

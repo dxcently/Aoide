@@ -5828,6 +5828,10 @@ file, so a node re-added under the same name inherits nothing.
 
 The sealed container's own dedup gate, append-only, one JSON object per
 admitted **and filed** container: `originKey`, `toNode`, `msgid`, `digest`.
+It is a HUB's and a charter's gate only. A destination never reads or writes
+it: a container addressed here is opened and deduped against its box. Writes
+run under the stage lock and rotate to `containers.jsonl.1` at 4 MiB, and a
+lookup reads both generations.
 
 Separate from the box dedup (the `msgid` already filed in a box) because it
 answers a different question at a different time. The box dedup is consulted
@@ -8932,10 +8936,11 @@ be a container version this build knows (`unsupported-container-version`, its
 own word so an operator debugging a v2 container is not sent hunting a
 board/epoch bug); the outer
 origin signature is verified under the key on record for `origin.node`
-(`unverified-origin`); the container is deduped against
-`state/mail/containers.jsonl` (§4) — a duplicate answers `"duplicate"` WITHOUT
-opening anything, and a same-`msgid` collision with different immutable bytes
-answers `context-mismatch`; and only then is `ct` opened. Past the open, the
+(`unverified-origin`); a HOP is deduped against `state/mail/containers.jsonl`
+(§4) — a duplicate answers `"duplicate"` WITHOUT opening anything, and a
+same-`msgid` collision with different immutable bytes answers
+`context-mismatch`; a container addressed here is not gated, and `ct` is
+opened. Past the open, the
 inner `ctx` must equal the recomputed outer one (`context-mismatch`), the inner
 `msgid` must recompute to the container's (`bad-msgid`), the inner addressing
 must agree with the outer (`addressing-mismatch`), the inner envelope signature

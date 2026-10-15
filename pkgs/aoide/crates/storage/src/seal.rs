@@ -52,6 +52,7 @@
 //! reaching the raw bytes would mean either a second direct cryptography
 //! dependency or a hand-rolled bech32 decoder — both refused.
 
+use aoide_protocol::feed;
 use crate::charter::Refusal;
 use crate::fs;
 use crate::identity;
@@ -1197,6 +1198,12 @@ fn container_seen_path() -> PathBuf {
     mail::mail_dir().join("containers.jsonl")
 }
 
+/// The gate's rotated generation: `containers.jsonl.1`, read after the current
+/// file so the newest record wins.
+fn container_seen_rotated_path() -> PathBuf {
+    mail::mail_dir().join("containers.jsonl.1")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ContainerSeen {
@@ -1221,7 +1228,7 @@ pub enum Seen {
 /// another route is a duplicate and the same `msgid` with different bytes
 /// is a collision.
 fn check_seen(container: &Container, digest: &str) -> Result<Seen, String> {
-    let entries = read_container_seen()?;
+    let entries = fs::try_stage_lock(read_container_seen)??;
     let mut hit = None;
     for entry in entries.into_iter().rev() {
         if entry.origin_key == container.origin.key
@@ -1246,18 +1253,15 @@ fn check_seen(container: &Container, digest: &str) -> Result<Seen, String> {
     }
 }
 
+/// Every record on both generations, oldest first. Raw: the caller holds the
+/// stage lock.
 fn read_container_seen() -> Result<Vec<ContainerSeen>, String> {
-    let path = container_seen_path();
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("{}: {e}", path.display())),
-    };
-    Ok(text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str::<ContainerSeen>(l).ok())
-        .collect())
+    let mut out = Vec::new();
+    for path in [container_seen_rotated_path(), container_seen_path()] {
+        let lines = feed::read_lines(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        out.extend(lines.iter().filter_map(|l| serde_json::from_slice::<ContainerSeen>(l).ok()));
+    }
+    Ok(out)
 }
 
 /// Record an admitted-and-filed container, so the next identical attempt
@@ -1299,13 +1303,11 @@ fn record_seen(container: &Container, digest: &str) -> Result<(), String> {
     })
     .map_err(|e| e.to_string())?;
     crate::fs::ensure_write_dir(&mail::mail_dir()).map_err(|e| e.to_string())?;
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(container_seen_path())
-        .map_err(|e| e.to_string())?;
-    writeln!(f, "{line}").map_err(|e| e.to_string())
+    fs::try_stage_lock(|| {
+        let path = container_seen_path();
+        feed::rotate_at(&path, mail::ROTATE_AT).map_err(|e| format!("{}: {e}", path.display()))?;
+        feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+    })?
 }
 
 // ── The two verification halves ─────────────────────────────────────────
@@ -1526,31 +1528,26 @@ pub fn deposit_container_over(
         return Ok(refusal("unverified-origin", "the outer signature does not verify".to_string()));
     }
 
-    // 4. Dedup, before anything is opened.
     let digest = hex_encode(&sha256(&dedup_bytes(&ctx, &ct, &sig)));
-    match check_seen(container, &digest)? {
-        Seen::Collision => {
-            return Ok(refusal(
-                CONTEXT_MISMATCH,
-                format!("msgid {} reappeared with different immutable bytes", container.msgid),
-            ))
-        }
-        Seen::Duplicate { filed_letter } => return Ok(ContainerOutcome::Duplicate { filed_letter }),
-        Seen::Fresh => {
-            // Deliberately NOT recorded here (the branch review's M1). The
-            // gate means "admitted AND filed", so the caller records with
-            // the digest it gets back on `Opened` once `mail::deposit` has
-            // actually filed. Recording at this point instead would (a) turn
-            // every refusal past this line into a permanent `duplicate` on
-            // the retry that should have re-run it, and (b) claim a filing
-            // that a crash between here and `base.jsonl` never performed.
-        }
-    }
 
     // 5. Whose letter is this? This box's own names in that zone are the charter
     //    line's name for its identity key (`routing::own_name_in` — the policy
     //    name) and the address form the origin wrote into `to.node`.
     if !for_here {
+        // The pre-open gate is a HUB's: it answers a re-offered hop without
+        // opening it. A destination opens every container and dedups against
+        // its own box (`mail::deposit`), so it never consults or writes the gate.
+        match check_seen(container, &digest)? {
+            Seen::Collision => {
+                return Ok(refusal(
+                    CONTEXT_MISMATCH,
+                    format!("msgid {} reappeared with different immutable bytes", container.msgid),
+                ))
+            }
+            Seen::Duplicate { filed_letter } => return Ok(ContainerOutcome::Duplicate { filed_letter }),
+            // Recorded by `file_transit_hop` once the hop is on disk, never here.
+            Seen::Fresh => {}
+        }
         // This box carries a letter AS a mesh's member: a charter mesh that does
         // not carry its key has no name to carry it as — NOT the hostname, which
         // is not a name any mesh gave anyone — and there is nothing to check the
@@ -2490,6 +2487,30 @@ mod tests {
         }
         assert!(suspicious.is_empty(), "private material in a Serialize type: {suspicious:?}");
     }
+
+    /// The gate's generation survives a rotation: a container admitted before
+    /// `containers.jsonl` rotated is still answered `duplicate` from `.1`.
+    #[test]
+    fn the_gate_rotates_and_still_recognises_a_previous_generation_duplicate() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = aoide_test_support::isolated_mail_root("gate-rotates");
+
+        let first = sample_container();
+        record_admitted(&first, "digest-1").unwrap();
+        let path = container_seen_path();
+        let filler = "x".repeat(mail::ROTATE_AT as usize);
+        std::fs::write(&path, format!("{}\n{filler}\n", std::fs::read_to_string(&path).unwrap())).unwrap();
+
+        let mut second = sample_container();
+        second.msgid = "f".repeat(64);
+        record_admitted(&second, "digest-2").unwrap();
+        assert!(container_seen_rotated_path().exists(), "the full generation rotated to .1");
+        assert!(matches!(check_seen(&first, "digest-1").unwrap(), Seen::Duplicate { .. }));
+        assert!(matches!(check_seen(&second, "digest-2").unwrap(), Seen::Duplicate { .. }));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 }
 
 /// The container's own acceptance evidence (`HTTPS-MESH-API.md`'s P-SEAL
@@ -2710,10 +2731,7 @@ mod container_tests {
         env(&aoide_test_support::unique_tmp("seal-duplicate"));
 
         let (container, envelope) = sealed_letter();
-        let digest = match deposit_container(&container).unwrap() {
-            ContainerOutcome::Opened { digest, .. } => digest,
-            other => panic!("opens: {other:?}"),
-        };
+        assert!(matches!(deposit_container(&container).unwrap(), ContainerOutcome::Opened { .. }));
 
         // Not yet filed, not yet recorded: a second attempt RE-RUNS rather
         // than answering `duplicate` for a letter that is on no disk.
@@ -2722,18 +2740,13 @@ mod container_tests {
             "an unfiled, unrecorded container re-runs — the gate has nothing to gate on"
         );
 
-        // Now file it and record it, which is the door's own order.
+        // Filed. The destination keeps no gate record, so the container opens
+        // again and its box answers: a duplicate that is a letter, so an ack is owed.
         let filed = mail::deposit(envelope.clone(), "self").unwrap();
         assert!(matches!(filed, mail::DepositOutcome::Filed { .. }), "{filed:?}");
-        record_admitted(&container, &digest).unwrap();
-
-        let again = deposit_container(&container).unwrap();
-        match again {
-            ContainerOutcome::Duplicate { filed_letter } => {
-                assert!(filed_letter, "the filed record says this was a letter, so an ack is owed");
-            }
-            other => panic!("now it is a gated duplicate: {other:?}"),
-        }
+        assert!(matches!(deposit_container(&container).unwrap(), ContainerOutcome::Opened { .. }));
+        let again = mail::deposit(envelope.clone(), "self").unwrap();
+        assert_eq!(again, mail::DepositOutcome::Duplicate { filed_letter: true });
     }
 
     /// The review's own M1 case (b): a refusal decided AFTER the gate must
@@ -2809,12 +2822,9 @@ mod container_tests {
         }
         assert_eq!(mail::read_base().unwrap().len(), 1, "and nothing was filed twice");
 
-        // Once recorded, the gate takes over and the open never happens again.
-        record_admitted(&container, &digest).unwrap();
-        assert!(matches!(
-            deposit_container(&container).unwrap(),
-            ContainerOutcome::Duplicate { .. }
-        ));
+        // The destination has no gate to record into: the open happens again and
+        // the box is still the only memory.
+        assert!(matches!(deposit_container(&container).unwrap(), ContainerOutcome::Opened { .. }));
     }
 
     #[test]

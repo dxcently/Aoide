@@ -1502,7 +1502,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
             }
         };
         match outcome {
-            aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
+            aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => {
                 let filed_outcome = match aoide_storage::mail::deposit((*envelope).clone(), node_name) {
                     Ok(outcome) => outcome,
                     Err(e) => {
@@ -1537,18 +1537,6 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                 }
                 if matches!(filed_outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
                     filed += 1;
-                }
-                // M1: recorded only once it is filed — see the door's own arm.
-                // L17: and a failed write is audited rather than dropped.
-                if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
-                    let _ = aoide_protocol::audit::audit(
-                        &aoide_protocol::audit::default_audit_log(),
-                        aoide_protocol::audit::Door::Cli,
-                        aoide_protocol::audit::EventClass::Audit,
-                        "mail.poll.dedup-record-failed",
-                        "invalid",
-                        &format!("{msgid}: {e}"),
-                    );
                 }
                 settle_deposit(&envelope, &filed_outcome);
                 // The hub's custody of the CONTAINER ends when it is told this
@@ -6077,6 +6065,123 @@ mod tests {
             DRAIN_BATCH_CAP,
             "no deferred letter was attempted before its window passed"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A letter a relay hands this box, sealed to it: the relay's own letter
+    /// minted under the relay's name, so the chain ends at the poller.
+    fn container_from_relay(me: &str) -> (String, aoide_storage::seal::Container) {
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", me, "bob", "held for the destination");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let now = aoide_storage::time::now_iso_utc();
+        let container =
+            aoide_storage::seal::seal_envelope(&letter, &binding, &mesh, &mesh, me, me, &now).unwrap();
+        (letter.msgid, container)
+    }
+
+    /// The destination never writes the pre-open gate: a container addressed here
+    /// is opened, filed in its box, and leaves `containers.jsonl` alone.
+    #[test]
+    fn the_destination_never_writes_containers_jsonl() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("destination-no-gate");
+
+        let me = register_local_origin();
+        let (msgid, container) = container_from_relay(&me);
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container)).unwrap();
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+
+        let polled = poll_node("relay", None).unwrap();
+        assert_eq!(polled.filed, 1, "the letter files: {polled:?}");
+        assert!(aoide_storage::mail::show(&msgid).unwrap().is_some());
+        assert!(
+            !aoide_storage::mail::mail_dir().join("containers.jsonl").exists(),
+            "a destination writes no containers.jsonl"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A container the destination already filed, offered again, is reopened and
+    /// dedups against its box, and its ack is spooled again.
+    #[test]
+    fn a_reoffered_container_at_its_destination_is_reopened_and_reacked() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("destination-reopen");
+
+        let me = register_local_origin();
+        let (msgid, container) = container_from_relay(&me);
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container.clone())).unwrap();
+        // The hub offers what its spool holds and retires nothing: the poller's
+        // own `filed` record must not take the re-offered container away first.
+        let (_listener, port, seen) = answering_door(|_| {
+            let (mut containers, mut envelopes) = (Vec::new(), Vec::new());
+            for (container, envelope) in aoide_storage::outbox::poll_payloads("relay").unwrap() {
+                match container {
+                    Some(container) => containers.push(serde_json::to_value(container).unwrap()),
+                    None => envelopes.push(serde_json::to_value(envelope).unwrap()),
+                }
+            }
+            json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": containers, "envelopes": envelopes } }).to_string()
+        });
+        register_polled_relay(port);
+        assert_eq!(poll_node("relay", None).unwrap().filed, 1);
+
+        // The ack has gone out; the hub offers the container again and the ack is lost.
+        for ack in aoide_storage::outbox::list_entries("relay").unwrap() {
+            aoide_storage::outbox::remove_entry("relay", &ack.envelope.msgid).unwrap();
+        }
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container)).unwrap();
+
+        let before = mentions(&deposit_bodies(&seen), &msgid);
+        let again = poll_node("relay", None).unwrap();
+        assert_eq!(again.filed, 0, "nothing files twice: {again:?}");
+        assert!(again.refused.is_empty(), "{again:?}");
+        assert!(
+            mentions(&deposit_bodies(&seen), &msgid) > before,
+            "the destination answers the re-offer with its ack again"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A second ack for a letter that is still live retires it: the duplicate
+    /// files nothing, and the sender's entry does not come back.
+    #[test]
+    fn a_duplicate_ack_still_retires_a_live_entry() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("duplicate-ack-retires");
+
+        let me = register_local_origin();
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.push(keyed_node("far"));
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "far", "bob", "hi").unwrap();
+        let msgid = letter.msgid.clone();
+        let mesh = letter.header.origin_mesh.clone();
+        let ack = far_receipt("far", &me, &mesh, &msgid);
+
+        aoide_storage::outbox::write_entry("far", &OutboxEntry::fresh(letter.clone())).unwrap();
+        let first = aoide_storage::mail::deposit(ack.clone(), "far").unwrap();
+        assert!(matches!(first, aoide_storage::mail::DepositOutcome::Filed { .. }), "{first:?}");
+        settle_deposit(&ack, &first);
+        assert!(aoide_storage::outbox::list_entries("far").unwrap().is_empty());
+
+        aoide_storage::outbox::write_entry("far", &OutboxEntry::fresh(letter)).unwrap();
+        let second = aoide_storage::mail::deposit(ack.clone(), "far").unwrap();
+        assert_eq!(second, aoide_storage::mail::DepositOutcome::Duplicate { filed_letter: false });
+        settle_deposit(&ack, &second);
+        assert!(aoide_storage::outbox::list_entries("far").unwrap().is_empty(), "the duplicate retires it again");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -3723,36 +3723,11 @@ fn deposit_sealed(
                 "charter": { "mesh": mesh, "version": version, "rekeyed": rekeyed },
             }))
         }
-        aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
+        aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => {
+            // The destination files into its own box and dedups there. It never
+            // writes the pre-open gate: that record belongs to a hub's hop.
             let filed = aoide_storage::mail::deposit((*envelope).clone(), &hop_name)
                 .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
-            // M1: record the container only now that it is FILED (either
-            // freshly filed, or already in `seen.jsonl` — both mean the
-            // letter is on this disk). Recording any earlier would answer
-            // `duplicate` to a refusal that should re-run and would claim a
-            // filing a crash between the gate and `base.jsonl` never made.
-            match &filed {
-                aoide_storage::mail::DepositOutcome::Filed { .. }
-                | aoide_storage::mail::DepositOutcome::Duplicate { .. } => {
-                    // L17: the gate's write failing is NOT silent. The letter
-                    // is filed either way and the next identical container is
-                    // still answered correctly (from `seen.jsonl`), but a
-                    // `containers.jsonl` that cannot be written costs an
-                    // unnecessary open every time — an operator needs to see
-                    // that, not a clean-looking audit line.
-                    if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
-                        let _ = audit(
-                            ctx.audit_log,
-                            Door::A2a,
-                            EventClass::Audit,
-                            "a2a.aoide/mailDeposit",
-                            "invalid",
-                            &format!("dedup record write failed for {}: {e}", container.msgid),
-                        );
-                    }
-                }
-                _ => {}
-            }
             aoide_conduct::mail_bridge::settle_deposit(&envelope, &filed);
             match &filed {
                 aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => {
@@ -15634,29 +15609,17 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
         let root = mail_deposit_root("hub-parked");
         act_as(&root, "here");
+        std::env::set_var("AOIDE_ROOT", &root);
+        let far_key = hop_fixture();
+        let container = hop_container(&far_key);
 
-        let origin_name = setup_verifiable_origin(&["message"]);
+        // A hop: the container is for another node, the hub carries it on to
+        // `dave`, and the gate records the hop once it is on disk.
         let audit_log = root.join("log");
-        let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
-
-        // A sealed letter this box IS the destination of: the first deposit files
-        // it and records the container, so the second is a duplicate.
-        let envelope = aoide_storage::mail::mint_outbound_letter(
-            "alice",
-            &aoide_storage::display::local_node_name(),
-            "bob",
-            "held here",
-        )
-        .unwrap();
-        let container = {
-            let binding = aoide_storage::seal::publish_binding().unwrap();
-            let mesh = envelope.header.origin_mesh.clone();
-            let me = aoide_storage::display::local_node_name();
-            aoide_storage::seal::seal_envelope(&envelope, &binding, &mesh, &mesh, &me, &me, &aoide_storage::time::now_iso_utc())
-                .unwrap()
-        };
+        let ctx = mail_deposit_ctx(&audit_log, Some("far"));
         let params = json!({ "container": container });
         let first = mail_deposit(&params, &ctx).unwrap();
         assert_eq!(first["status"], "accepted", "{first}");
@@ -15666,8 +15629,8 @@ mod tests {
         let mut parked = aoide_storage::outbox::OutboxEntry::transit(container.clone());
         parked.refused = true;
         parked.last_try_at = aoide_storage::time::now_iso_utc();
-        parked.last_outcome = "refused: no-route: `chiyo` is not a node of mesh `home`".to_string();
-        aoide_storage::outbox::write_entry("chiyo", &parked).unwrap();
+        parked.last_outcome = "refused: no-route: `dave` is not a node of mesh `home`".to_string();
+        aoide_storage::outbox::write_entry("dave", &parked).unwrap();
 
         let again = mail_deposit(&params, &ctx).unwrap();
         assert_eq!(again["status"], "refused", "{again}");
@@ -15681,6 +15644,10 @@ mod tests {
         assert!(log.contains("parked: no-route"), "the answer is audited: {log}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
     }
 
     /// The fixture the door's transit tests need: a mesh whose only member that
@@ -15806,12 +15773,6 @@ mod tests {
         assert!(
             aoide_storage::outbox::list_entries("far").unwrap().is_empty(),
             "and no receipt is minted back to the depositing hop"
-        );
-        assert!(
-            !serde_json::to_string(&aoide_storage::outbox::list_entries("dave").unwrap()).unwrap()
-                .contains("\"ct\"")
-                || true,
-            "the container waits in the spool, which is where a retry reads it"
         );
         assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "spooled toward `dave`");
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
