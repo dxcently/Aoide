@@ -599,19 +599,23 @@ mod tests {
     }
 
     #[test]
-    fn a_fifo_with_a_writer_and_data_is_not_read_as_a_git_file() {
+    fn a_fifo_holding_a_whole_gitdir_line_is_not_read_as_a_git_file() {
         use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
         let dir = unique_tmp("git-file-fifo-data");
         std::fs::create_dir_all(&dir).unwrap();
         let fifo = dir.join(".git");
         assert!(Command::new("mkfifo").arg(&fifo).status().expect("mkfifo runs").success());
-        // Opened read-write, so a writer is present and a reader's open cannot
-        // wait, and the pipe holds a gitdir line a reader would otherwise get.
-        let mut writer = std::fs::OpenOptions::new().read(true).write(true).open(&fifo).unwrap();
+        // A held reader keeps the pipe's bytes once the writer is gone, so the
+        // line ends in an end of file and a read of the FIFO would get it
+        // whole. Only the kind check on the open descriptor refuses it.
+        let held = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(&fifo).unwrap();
+        let mut writer = std::fs::OpenOptions::new().write(true).open(&fifo).unwrap();
         writer.write_all(b"gitdir: /somewhere\n").unwrap();
+        drop(writer);
 
         assert_eq!(read_within_five_seconds(fifo), Some(None), "a FIFO is no git file, whatever it holds");
-        drop(writer);
+        drop(held);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
