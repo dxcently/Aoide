@@ -3047,6 +3047,16 @@ fn deposit_answer(outcome: &aoide_storage::mail::DepositOutcome, from_node: &str
             "reason": aoide_storage::mail::REFUSAL_UNKNOWN_BOX,
             "detail": aoide_storage::mail::UNKNOWN_BOX_DETAIL,
         }),
+        DepositOutcome::TooLarge => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_TOO_LARGE,
+            "detail": aoide_storage::mail::TOO_LARGE_DETAIL,
+        }),
+        DepositOutcome::BoxFull => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_BOX_FULL,
+            "detail": aoide_storage::mail::BOX_FULL_DETAIL,
+        }),
     }
 }
 
@@ -3203,7 +3213,9 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         | aoide_storage::mail::DepositOutcome::MalformedAck
         | aoide_storage::mail::DepositOutcome::UnverifiedOrigin
         | aoide_storage::mail::DepositOutcome::NotCorrespondence
-        | aoide_storage::mail::DepositOutcome::UnknownBox => "invalid",
+        | aoide_storage::mail::DepositOutcome::UnknownBox
+        | aoide_storage::mail::DepositOutcome::TooLarge => "invalid",
+        aoide_storage::mail::DepositOutcome::BoxFull => "refused",
         _ => "ok",
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);

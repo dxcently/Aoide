@@ -751,7 +751,10 @@ by decision — no embedded database yet
   A box is created by a local act only (`box_add`, `enrol_reader`,
   `file_letter`); a far letter to an absent box is `UnknownBox`, and
   `valid_box_name` (grammar, at most 63 bytes, not a DOS device name) is the
-  one name rule. `box_rm` removes a box's log and its cursor keys, refused
+  one name rule. A letter is admitted under `CAPS` (`admit`): a box holds
+  16 MiB, one verified origin key a quarter of it, all boxes 240 MiB, and a
+  letter is at most 256 KiB serialized. A refusal compacts first, dropping
+  only lines every reader has read (`compact_unlocked`). `box_rm` removes a box's log and its cursor keys, refused
   while any reader has unread letters unless forced, and audited before the
   removal (a box whose audit cannot be written is kept).
 

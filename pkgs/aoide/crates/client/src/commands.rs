@@ -11320,6 +11320,7 @@ mod tests {
             received_at: "2026-01-01T00:00:00Z".into(),
             kind: aoide_storage::mail::ENTRY_TYPE_LETTER.into(),
             via: "self".into(),
+            origin: String::new(),
             envelope: aoide_storage::mail::Envelope {
                 header,
                 text: text.into(),

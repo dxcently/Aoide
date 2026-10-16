@@ -226,6 +226,11 @@ pub struct Entry {
     /// The hop that deposited it; always `"self"` in P-M1 — there is no
     /// other hop yet.
     pub via: String,
+    /// The verified origin key the letter was deposited under, for the sender's
+    /// quarter ([`Caps`]). Empty for a local letter and a migrated line, which
+    /// have no quarter, and skipped when empty, so those lines are unchanged.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub origin: String,
     pub envelope: Envelope,
 }
 
@@ -288,6 +293,64 @@ pub const ROTATE_AT: u64 = 4 * 1024 * 1024;
 /// The longest box name, the DNS label limit, so a 64-hex board id is never a
 /// box name.
 pub const BOX_NAME_MAX: usize = 63;
+
+/// The largest envelope a letter may serialize to. A letter over it is refused
+/// `too-large` at the mint and at the door, before any box is read.
+pub const LETTER_MAX: usize = 256 * 1024;
+/// The most a single box file may hold, measured after the append.
+pub const BOX_MAX: u64 = 16 * 1024 * 1024;
+/// The most all box files together may hold. With the two rotating logs at
+/// [`ROTATE_AT`] each, all mail stays under 256 MiB by construction.
+pub const BOXES_MAX: u64 = 240 * 1024 * 1024;
+
+/// The caps a deposit is admitted under. [`CAPS`] is the store's own; a test
+/// passes a small one through [`deposit_within`] and [`fit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Caps {
+    pub box_max: u64,
+    pub boxes_max: u64,
+}
+
+pub const CAPS: Caps = Caps { box_max: BOX_MAX, boxes_max: BOXES_MAX };
+
+/// Which cap refused a line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Full {
+    /// The target box would exceed `box_max`.
+    Box,
+    /// The sender's share of the target box would exceed a quarter of `box_max`.
+    Origin,
+    /// All boxes together would exceed `boxes_max`.
+    Total,
+}
+
+/// Admits one line of `line_len` bytes to a box of `box_len`, given the
+/// sender's bytes in it (`origin_len`, `None` for a local letter, which has no
+/// quarter), and all boxes' bytes (`boxes_len`). Pure: the store's policy is
+/// this one comparison chain.
+pub fn admit(caps: Caps, box_len: u64, origin_len: Option<u64>, boxes_len: u64, line_len: u64) -> Result<(), Full> {
+    if box_len + line_len > caps.box_max {
+        return Err(Full::Box);
+    }
+    if let Some(origin) = origin_len {
+        if origin + line_len > caps.box_max / 4 {
+            return Err(Full::Origin);
+        }
+    }
+    if boxes_len + line_len > caps.boxes_max {
+        return Err(Full::Total);
+    }
+    Ok(())
+}
+
+/// Refusal word for a letter the target box has no room for. Nothing is filed
+/// or acknowledged, and the sender defers the letter and keeps it.
+/// (`REFUSAL_BOX_FULL` is declared above.)
+pub const REFUSAL_TOO_LARGE: &str = "too-large";
+/// The fixed detail a `too-large` answer carries.
+pub const TOO_LARGE_DETAIL: &str = "the letter is over 256 KiB serialized; nothing was filed; send less text";
+/// The fixed detail a `box-full` answer carries. It names no box.
+pub const BOX_FULL_DETAIL: &str = "a mailbox on this node is full; nothing was filed or acknowledged; keep the letter and retry";
 
 /// The counter's value, `None` while no counter has been written yet.
 fn read_counter() -> Result<Option<u64>, String> {
@@ -613,6 +676,7 @@ fn migrate_if_needed() -> Result<(), String> {
             received_at: row.received_at.clone(),
             kind: ENTRY_TYPE_RECEIPT.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope,
         };
         append_entry(&entry)?;
@@ -816,6 +880,142 @@ pub fn box_paths() -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
+/// One line of a box as it sits on disk: its bytes without the newline, and the
+/// entry it parses to (`None` for a line that does not parse, which is kept).
+struct BoxLine {
+    raw: Vec<u8>,
+    entry: Option<Entry>,
+}
+
+impl BoxLine {
+    /// The bytes this line takes on disk, its newline included.
+    fn bytes(&self) -> u64 {
+        self.raw.len() as u64 + 1
+    }
+}
+
+/// Every line of one box file, in order. A missing file is no lines.
+fn box_lines(path: &std::path::Path) -> Result<Vec<BoxLine>, String> {
+    let raw = feed::read_lines(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(raw.into_iter().map(|raw| BoxLine { entry: serde_json::from_slice(&raw).ok(), raw }).collect())
+}
+
+/// The total bytes of every box file, from `stat` alone.
+fn boxes_bytes() -> Result<u64, String> {
+    let mut total = 0u64;
+    for path in box_paths()? {
+        total += std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+    }
+    Ok(total)
+}
+
+/// The floor of `name`: the lowest mark among its readers, so every line at or
+/// below it has been read by every reader. Zero when the name has no readers,
+/// so nothing unread is ever reclaimed.
+fn floor_of(cursors: &Cursors, name: &str) -> u64 {
+    cursors.get(name).and_then(|readers| readers.values().map(|m| m.seq).min()).unwrap_or(0)
+}
+
+/// Rewrites one box without the lines every reader has read (at or below their
+/// box's floor). A line that does not parse is kept. Writes nothing when no
+/// line is reclaimable: the first parseable line's seq is checked first, so a
+/// refused flood against an unread box costs one read and no write. Returns
+/// whether it rewrote the box. Raw — assumes the caller holds the lock.
+fn compact_unlocked(path: &std::path::Path, cursors: &Cursors) -> Result<bool, String> {
+    let lines = box_lines(path)?;
+    let reclaimable = |e: &Entry| e.seq <= floor_of(cursors, &e.envelope.header.to.name);
+    let Some(first) = lines.iter().find_map(|l| l.entry.as_ref()) else {
+        return Ok(false);
+    };
+    if !reclaimable(first) {
+        return Ok(false);
+    }
+    let kept: Vec<&BoxLine> = lines.iter().filter(|l| l.entry.as_ref().is_none_or(|e| !reclaimable(e))).collect();
+    if kept.len() == lines.len() {
+        return Ok(false);
+    }
+    let mut body = Vec::new();
+    for line in kept {
+        body.extend_from_slice(&line.raw);
+        body.push(b'\n');
+    }
+    atomic_write_private(path, &body).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(true)
+}
+
+/// [`compact_unlocked`] over every box file, in name order.
+fn compact_every_box(cursors: &Cursors) -> Result<(), String> {
+    for path in box_paths()? {
+        compact_unlocked(&path, cursors)?;
+    }
+    Ok(())
+}
+
+/// The bytes [`admit`] reads for a line to `target` under `origin`: the target
+/// box's length, the sender's bytes in it (`None` when there is no quarter),
+/// and every box's total. Raw — assumes the caller holds the lock.
+fn measure(target: &std::path::Path, origin: Option<&str>) -> Result<(u64, Option<u64>, u64), String> {
+    let box_len = match std::fs::metadata(target) {
+        Ok(m) => m.len(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(e) => return Err(format!("{}: {e}", target.display())),
+    };
+    let origin_len = match origin {
+        Some(key) => Some(
+            box_lines(target)?
+                .iter()
+                .filter(|l| l.entry.as_ref().is_some_and(|e| e.origin == key))
+                .map(BoxLine::bytes)
+                .sum(),
+        ),
+        None => None,
+    };
+    Ok((box_len, origin_len, boxes_bytes()?))
+}
+
+/// Whether one line of `line_len` bytes fits `target` under `caps`, compacting
+/// first when a cap refuses it. A box-level or quarter refusal compacts the
+/// target; a total refusal then compacts every box. Returns `false` when the
+/// line still does not fit. Raw — assumes the caller holds the lock.
+fn fit(caps: Caps, target: &std::path::Path, origin: Option<&str>, line_len: u64) -> Result<bool, String> {
+    let check = |target: &std::path::Path| -> Result<Result<(), Full>, String> {
+        let (box_len, origin_len, boxes_len) = measure(target, origin)?;
+        Ok(admit(caps, box_len, origin_len, boxes_len, line_len))
+    };
+    if check(target)?.is_ok() {
+        return Ok(true);
+    }
+    let cursors = load_cursors()?;
+    compact_unlocked(target, &cursors)?;
+    match check(target)? {
+        Ok(()) => Ok(true),
+        Err(Full::Total) => {
+            compact_every_box(&cursors)?;
+            Ok(check(target)?.is_ok())
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// The bytes one entry takes as a line, newline included, if it were filed now
+/// with `origin`. Serialized with the seq [`peek_next_seq`] names.
+fn line_bytes(envelope: &Envelope, via: &str, origin: &str) -> Result<u64, String> {
+    let entry = Entry {
+        seq: peek_next_seq()?,
+        received_at: now_iso_utc(),
+        kind: envelope.header.kind.clone(),
+        via: via.to_string(),
+        origin: origin.to_string(),
+        envelope: envelope.clone(),
+    };
+    Ok(serde_json::to_vec(&entry).map_err(|e| e.to_string())?.len() as u64 + 1)
+}
+
+/// The serialized size of an envelope, as a letter's cap measures it.
+fn envelope_len(envelope: &Envelope) -> usize {
+    serde_json::to_vec(envelope).map_or(usize::MAX, |v| v.len())
+}
+
 /// Every correspondence entry on disk, in one global `seq` order: every box,
 /// then both receipt generations. Raw: assumes the caller holds the lock, or
 /// is a lock-free peek that accepts a line being appended beside it.
@@ -943,6 +1143,16 @@ fn base_tail_seq_unlocked() -> Result<u64, String> {
 /// leaves a gap and never a reuse. A counter at `u64::MAX` is refused, never
 /// wrapped. Raw — assumes the caller already holds the lock.
 fn next_seq() -> Result<u64, String> {
+    let seq = peek_next_seq()?;
+    let path = seq_path();
+    ensure_mail_dir()?;
+    atomic_write_private(&path, format!("{seq}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(seq)
+}
+
+/// The seq [`next_seq`] would issue, written nowhere. A caller sizes a line
+/// with it before it commits to filing. Raw — assumes the caller holds the lock.
+fn peek_next_seq() -> Result<u64, String> {
     let path = seq_path();
     let counter = match std::fs::read_to_string(&path) {
         Ok(raw) => raw
@@ -952,13 +1162,10 @@ fn next_seq() -> Result<u64, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => seq_floor()?,
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    let seq = counter
+    counter
         .max(base_tail_seq_unlocked()?)
         .checked_add(1)
-        .ok_or_else(|| format!("{}: the sequence counter is u64::MAX; fix: remove the line numbered {} under state/mail/", path.display(), u64::MAX))?;
-    ensure_mail_dir()?;
-    atomic_write_private(&path, format!("{seq}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(seq)
+        .ok_or_else(|| format!("{}: the sequence counter is u64::MAX; fix: remove the line numbered {} under state/mail/", path.display(), u64::MAX))
 }
 
 /// The floor a missing counter starts from: the highest seq of any line, or of
@@ -1129,11 +1336,20 @@ fn file_entry(kind: &str, from: Address, to: Address, text: &str, via: &str) -> 
     };
     let (sig, msgid) = seal(&header, text, &kp);
     let envelope = Envelope { header, text: text.to_string(), sig, msgid: msgid.clone() };
+    if kind == ENTRY_TYPE_LETTER {
+        // A local letter has no quarter, but it has the box and store caps.
+        check_letter_size(&envelope)?;
+        let target = box_path(&envelope.header.to.name);
+        if !fit(CAPS, &target, None, line_bytes(&envelope, via, "")?)? {
+            return Err(box_full_teaching(&envelope.header.to.name));
+        }
+    }
     let entry = Entry {
         seq: next_seq()?,
         received_at: now_iso_utc(),
         kind: kind.to_string(),
         via: via.to_string(),
+        origin: String::new(),
         envelope,
     };
     append_entry(&entry)?;
@@ -1148,16 +1364,36 @@ fn file_entry(kind: &str, from: Address, to: Address, text: &str, via: &str) -> 
 /// envelope itself — the door already resolved this by key before calling
 /// here). Raw — called only from inside [`with_lock`]'s closure
 /// ([`deposit`]'s own).
-fn file_received_entry(envelope: Envelope, via: &str) -> Result<Entry, String> {
+fn file_received_entry(envelope: Envelope, via: &str, origin: &str) -> Result<Entry, String> {
     let entry = Entry {
         seq: next_seq()?,
         received_at: now_iso_utc(),
         kind: envelope.header.kind.clone(),
         via: via.to_string(),
+        origin: origin.to_string(),
         envelope,
     };
     append_entry(&entry)?;
     Ok(entry)
+}
+
+/// A letter over [`LETTER_MAX`] serialized is refused at the mint and at the door.
+fn check_letter_size(envelope: &Envelope) -> Result<(), String> {
+    let len = envelope_len(envelope);
+    if len > LETTER_MAX {
+        return Err(format!(
+            "the letter is {len} bytes serialized, over the {LETTER_MAX}-byte cap; send less text, or split it across letters"
+        ));
+    }
+    Ok(())
+}
+
+/// The error a local send to a full box returns: what is full, and the two
+/// ways out of it.
+fn box_full_teaching(name: &str) -> String {
+    format!(
+        "mailbox `{name}` cannot take this letter: its box or the mail store is full. Read it with `aoide mail read --for {name}`, or remove it with `aoide mail box rm {name} --force`, then send again"
+    )
 }
 
 /// File one delivery receipt — `mail::file_receipt`, the direct replacement
@@ -1306,7 +1542,11 @@ fn mint_kind_from(
         origin_mesh: mesh.to_string(),
     };
     let (sig, msgid) = seal(&header, text, &kp);
-    Ok(Envelope { header, text: text.to_string(), sig, msgid })
+    let envelope = Envelope { header, text: text.to_string(), sig, msgid };
+    if kind == ENTRY_TYPE_LETTER {
+        check_letter_size(&envelope)?;
+    }
+    Ok(envelope)
 }
 
 /// The mesh a letter or ack to `node` is minted in when the caller names
@@ -1411,25 +1651,31 @@ pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envel
 /// SEALED lane calls [`verify_origin_signature_in`] with the set its own deposit
 /// already loaded, so the container's two halves cannot read two different sets.
 pub fn verify_origin_signature(envelope: &Envelope) -> bool {
-    let Ok(set) = crate::routing::declarations() else {
-        // A set that will not load names nobody: nothing verifies.
-        return false;
-    };
-    verify_origin_signature_in(envelope, &set)
+    verified_origin_key(envelope).is_some()
+}
+
+/// The key that verifies `envelope`'s origin signature, the one a deposit is
+/// quartered under. `None` when no key on record for `from.node` in its mesh
+/// verifies it, or when the declarations will not load.
+pub fn verified_origin_key(envelope: &Envelope) -> Option<String> {
+    let set = crate::routing::declarations().ok()?;
+    verified_origin_key_in(envelope, &set)
 }
 
 /// [`verify_origin_signature`] over a declaration set the caller already holds —
 /// what a SEALED deposit uses, so one deposit reads the declarations once and
 /// its two signature checks cannot disagree about which set they read.
 pub fn verify_origin_signature_in(envelope: &Envelope, set: &[crate::routing::Loaded]) -> bool {
-    let Some(pubkey_hex) = crate::routing::key_in(set, &envelope.header.origin_mesh, &envelope.header.from.node)
-    else {
-        return false;
-    };
+    verified_origin_key_in(envelope, set).is_some()
+}
+
+/// [`verified_origin_key`] over a declaration set the caller already holds.
+pub fn verified_origin_key_in(envelope: &Envelope, set: &[crate::routing::Loaded]) -> Option<String> {
+    let pubkey_hex = crate::routing::key_in(set, &envelope.header.origin_mesh, &envelope.header.from.node)?;
     let mut sig_input = canonical_header_bytes(&envelope.header);
     sig_input.push(0u8);
     sig_input.extend_from_slice(envelope.text.as_bytes());
-    crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig)
+    crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig).then_some(pubkey_hex)
 }
 
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
@@ -1462,6 +1708,11 @@ pub enum DepositOutcome {
     /// A letter to a name with no box on this node. Nothing is filed and no box
     /// is created: a far deposit never creates one ([`REFUSAL_UNKNOWN_BOX`]).
     UnknownBox,
+    /// A letter over [`LETTER_MAX`] serialized. Nothing is read or filed.
+    TooLarge,
+    /// The box has no room for this letter under one of [`admit`]'s caps, even
+    /// after compaction. Nothing is filed or acknowledged ([`REFUSAL_BOX_FULL`]).
+    BoxFull,
 }
 
 // L2 (the branch review): there was a `Refused { reason, detail }` variant
@@ -1489,6 +1740,11 @@ pub fn filed_kind(msgid: &str) -> Option<String> {
 /// (contrast the OUTBOX drain, which must never hold this lock across an
 /// ssh dial). `via` is the hop's resolved name (`ctx.signed_caller`).
 pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> {
+    deposit_within(envelope, via, CAPS)
+}
+
+/// [`deposit`] under `caps`. A test passes a small one; the store's own is [`CAPS`].
+pub(crate) fn deposit_within(envelope: Envelope, via: &str, caps: Caps) -> Result<DepositOutcome, String> {
     with_lock(move || {
         let Some(recomputed) = compute_msgid(&envelope.header, &envelope.text, &envelope.sig) else {
             return Ok(DepositOutcome::BadMsgid);
@@ -1496,9 +1752,9 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         if recomputed != envelope.msgid {
             return Ok(DepositOutcome::BadMsgid);
         }
-        if !verify_origin_signature(&envelope) {
+        let Some(origin) = verified_origin_key(&envelope) else {
             return Ok(DepositOutcome::UnverifiedOrigin);
-        }
+        };
         // Only a letter and a receipt are filed. A `charter` is APPLIED from the
         // sealed container it arrives in, never filed, and any other kind is not
         // correspondence at all. Refused before the dedup read or any write.
@@ -1509,7 +1765,7 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         // A receipt names the one letter it acknowledges, and nothing else. A
         // verified signer's receipt whose text is anything but one msgid names
         // no letter this box can retire, so it is refused as a bad msgid.
-        if envelope.header.kind == ENTRY_TYPE_RECEIPT && !is_msgid(&envelope.text) {
+        if kind == ENTRY_TYPE_RECEIPT && !is_msgid(&envelope.text) {
             return Ok(DepositOutcome::MalformedAck);
         }
         // A receipt files only for a letter this box still holds, addressed to the
@@ -1518,7 +1774,7 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         // filed and nothing is owed, so the sender retires its copy instead of
         // parking it. This bounds the receipts to the letters this box has sent: a
         // flood of distinct msgids is refused before any write.
-        if envelope.header.kind == ENTRY_TYPE_RECEIPT {
+        if kind == ENTRY_TYPE_RECEIPT {
             if crate::outbox::spooled_letter_sender(&envelope.text)?.as_deref() != Some(envelope.header.to.node.as_str()) {
                 return Ok(DepositOutcome::Duplicate { filed_letter: false });
             }
@@ -1528,22 +1784,35 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
             if read_receipt_keys_unlocked()?.contains(&receipt_key(&envelope)) {
                 return Ok(DepositOutcome::Duplicate { filed_letter: false });
             }
-        } else {
-            // A letter goes only to a box a local act created. A far deposit never
-            // creates one, so an absent box is refused before any read or write.
-            if !box_exists(&envelope.header.to.name) {
-                return Ok(DepositOutcome::UnknownBox);
-            }
-            // A letter's msgid covers its `to.name`, so the one box it routes to is the
-            // only place a re-offer can already be filed. Its box is the memory.
-            let target = route(&envelope.header.kind, &envelope.header.to.name);
-            if let Some(found) = read_file_entries(&target)?.into_iter().find(|e| e.envelope.msgid == envelope.msgid) {
-                return Ok(DepositOutcome::Duplicate { filed_letter: found.kind == ENTRY_TYPE_LETTER });
-            }
+            let kind = kind.to_string();
+            let msgid = envelope.msgid.clone();
+            file_received_entry(envelope, via, &origin)?;
+            return Ok(DepositOutcome::Filed { msgid, kind });
         }
-        let kind = envelope.header.kind.clone();
+        // A letter: the size cap first, then the box must exist, then the box is
+        // the dedup memory, then the caps. None of it writes until it fits.
+        if envelope_len(&envelope) > LETTER_MAX {
+            return Ok(DepositOutcome::TooLarge);
+        }
+        if !box_exists(&envelope.header.to.name) {
+            return Ok(DepositOutcome::UnknownBox);
+        }
+        let target = box_path(&envelope.header.to.name);
+        if let Some(found) = box_lines(&target)?
+            .into_iter()
+            .filter_map(|l| l.entry)
+            .find(|e| e.envelope.msgid == envelope.msgid)
+        {
+            return Ok(DepositOutcome::Duplicate { filed_letter: found.kind == ENTRY_TYPE_LETTER });
+        }
+        // The quarter is the verified origin key's, and a local letter has none.
+        let quarter = (via != "self").then_some(origin.as_str());
+        if !fit(caps, &target, quarter, line_bytes(&envelope, via, quarter.unwrap_or(""))?)? {
+            return Ok(DepositOutcome::BoxFull);
+        }
+        let kind = kind.to_string();
         let msgid = envelope.msgid.clone();
-        file_received_entry(envelope, via)?;
+        file_received_entry(envelope, via, quarter.unwrap_or(""))?;
         Ok(DepositOutcome::Filed { msgid, kind })
     })
 }
@@ -2126,6 +2395,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_LETTER.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope: Envelope { header: h, text: text.to_string(), sig, msgid },
         }
     }
@@ -2752,6 +3022,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_RECEIPT.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope: Envelope { header: receipt_header, text, sig, msgid },
         };
         let transit = r#"{"seq":2,"receivedAt":"2026-09-06T00:00:00Z","type":"transit","via":"self","digest":"d","next":"n","mesh":"","held":false}"#;
@@ -2846,6 +3117,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_LETTER.to_string(),
             via: "alice-host".to_string(),
+            origin: String::new(),
             envelope: letter.clone(),
         };
         append_entry(&entry).unwrap();
@@ -3227,6 +3499,7 @@ mod tests {
             received_at: "2026-08-21T00:00:00Z".to_string(),
             kind: ENTRY_TYPE_RECEIPT.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope: Envelope { header: row1_header, text: "first".to_string(), sig, msgid: row1_msgid.clone() },
         };
         std::fs::write(base_path(), format!("{}\n", serde_json::to_string(&row1_entry).unwrap())).unwrap();
@@ -3626,6 +3899,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_LETTER.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope,
         };
         std::fs::create_dir_all(mail_dir()).unwrap();
@@ -3979,6 +4253,278 @@ mod tests {
         assert!(box_rm("ghost", true).is_err());
         assert!(!box_path("ghost").exists());
         assert!(box_rm("con", true).is_err(), "a name the grammar refuses is refused");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A signed envelope from `node` to `to` of `kind`, signed by `kp` (on record
+    /// for `node`, see [`key_on_record`]): what a far node deposits.
+    fn signed_from(node: &str, to: &str, kind: &str, text: &str, kp: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", to, kind, "2026-09-06T00:00:00Z");
+        h.from.node = node.to_string();
+        let (sig, msgid) = seal(&h, text, kp);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// A fresh key on record for `node`, so its letters verify.
+    fn key_on_record(node: &str) -> identity::Keypair {
+        let kp = identity::mint_ephemeral().unwrap();
+        same_key_on_record(node, &kp);
+        kp
+    }
+
+    /// `kp` on record for `node`, which may be a second name for one key.
+    fn same_key_on_record(node: &str, kp: &identity::Keypair) {
+        let mut nodes = crate::node_store::load_nodes();
+        crate::node_store::upsert_paired_node(
+            &mut nodes,
+            node,
+            "https://far",
+            &kp.info().pubkey_hex,
+            "2026-09-06T00:00:00Z",
+            &["message".to_string()],
+            "home",
+        );
+        crate::node_store::save_nodes(&nodes).unwrap();
+    }
+
+    /// Pads `name`'s box file to exactly [`BOX_MAX`] with lines that do not parse:
+    /// a full box, with no letters for compaction to reclaim.
+    fn fill_box_to_the_cap(name: &str) {
+        std::fs::create_dir_all(boxes_dir()).unwrap();
+        let line = format!("{}\n", "x".repeat(1023));
+        std::fs::write(box_path(name), line.repeat((BOX_MAX / 1024) as usize)).unwrap();
+        assert_eq!(std::fs::metadata(box_path(name)).unwrap().len(), BOX_MAX);
+    }
+
+    fn small_caps(box_max: u64) -> Caps {
+        Caps { box_max, boxes_max: u64::MAX / 2 }
+    }
+
+    #[test]
+    fn admit_refuses_a_line_past_the_box_cap() {
+        assert_eq!(admit(CAPS, BOX_MAX - 10, None, 0, 10), Ok(()));
+        assert_eq!(admit(CAPS, BOX_MAX - 9, None, 0, 10), Err(Full::Box));
+    }
+
+    #[test]
+    fn admit_refuses_past_a_quarter_of_the_box_for_one_origin() {
+        let quarter = BOX_MAX / 4;
+        assert_eq!(admit(CAPS, 0, Some(quarter - 10), 0, 10), Ok(()));
+        assert_eq!(admit(CAPS, 0, Some(quarter - 9), 0, 10), Err(Full::Origin));
+    }
+
+    #[test]
+    fn admit_refuses_past_the_store_total() {
+        assert_eq!(admit(CAPS, 0, None, BOXES_MAX - 10, 10), Ok(()));
+        assert_eq!(admit(CAPS, 0, None, BOXES_MAX - 9, 10), Err(Full::Total));
+    }
+
+    #[test]
+    fn admit_exempts_a_local_letter_from_the_quarter() {
+        let quarter = BOX_MAX / 4;
+        assert_eq!(admit(CAPS, 0, None, 0, quarter + 1), Ok(()), "a local letter has no quarter, only the box cap");
+    }
+
+    /// A letter over 256 KiB serialized is refused at the mint and at the door,
+    /// and the door reads no box first.
+    #[test]
+    fn a_letter_over_256k_is_refused_too_large_at_mint_and_at_the_door() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-too-large");
+        let big = "a".repeat(300_000);
+        let me = crate::display::local_node_name();
+        let minted = mint_outbound_letter("alice", &me, "bob", &big);
+        assert!(minted.is_err(), "the mint refuses an over-cap letter");
+        assert!(minted.unwrap_err().contains("over the 262144-byte cap"));
+
+        let alice = key_on_record("alice-host");
+        let outcome = deposit(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &big, &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::TooLarge);
+        assert!(!box_path("bob").exists(), "an over-cap letter creates and reads no box");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A full box refuses `box-full` before any line is written: the box is
+    /// byte-for-byte unchanged, and the letter is not `Filed`, so no ack is owed
+    /// (the ack is spooled only on `Filed`, `client::mail_wire::settle_deposit`).
+    #[test]
+    fn a_full_box_refuses_box_full_before_filing_and_before_any_ack() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-box-full");
+        box_add("bob").unwrap();
+        fill_box_to_the_cap("bob");
+        let before = std::fs::read(box_path("bob")).unwrap();
+        let alice = key_on_record("alice-host");
+
+        let outcome = deposit(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::BoxFull);
+        assert_eq!(std::fs::read(box_path("bob")).unwrap(), before, "a full box took a line");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One origin key may hold a quarter of a box. Past it, that key is refused
+    /// `box-full` while the box itself still has room, and another key still files
+    /// into the same box.
+    #[test]
+    fn one_origin_key_is_held_to_a_quarter_while_another_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-quarter");
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        let bob_host = key_on_record("bob-host");
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 50 {
+            let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("alice {filed}"), &alice);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(filed >= 2, "a quarter holds more than one letter: {filed}");
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(len < caps.box_max, "the refusal came from the quarter, not the box: {len} bytes");
+        assert!(matches!(
+            deposit_within(signed_from("bob-host", "bob", ENTRY_TYPE_LETTER, "bob", &bob_host), "sakaki", caps).unwrap(),
+            DepositOutcome::Filed { .. }
+        ), "another key files into the same box");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The quarter is the verified key's, not the name's: one key that signs
+    /// under two node names is one sender, so it shares one quarter.
+    #[test]
+    fn one_key_under_two_mesh_names_gets_one_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-one-key");
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        same_key_on_record("alice-two", &alice);
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 50 {
+            let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("one {filed}"), &alice);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(filed >= 2, "the first name files: {filed}");
+        assert_eq!(
+            deposit_within(signed_from("alice-two", "bob", ENTRY_TYPE_LETTER, "two", &alice), "sakaki", caps).unwrap(),
+            DepositOutcome::BoxFull,
+            "the second name shares the first name's quarter"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Compaction removes only the lines every reader of their box has read.
+    #[test]
+    fn compaction_reclaims_only_lines_every_reader_has_read() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-compact");
+        for text in ["one", "two", "three"] {
+            file_letter("alice", "bob", text).unwrap();
+        }
+        enrol_reader("bob", "r1").unwrap();
+        let mut cursors = load_cursors().unwrap();
+        cursors.get_mut("bob").unwrap().get_mut("r1").unwrap().seq = 2;
+        save_cursors(&cursors).unwrap();
+
+        assert!(compact_unlocked(&box_path("bob"), &load_cursors().unwrap()).unwrap(), "two lines are read");
+        let left: Vec<u64> = box_lines(&box_path("bob")).unwrap().iter().filter_map(|l| l.entry.as_ref()).map(|e| e.seq).collect();
+        assert_eq!(left, vec![3], "only the unread line remains, and it keeps its seq");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Under pressure, an unread letter is never reclaimed: with no reader past it
+    /// the floor is zero, and the flood is refused instead.
+    #[test]
+    fn an_unread_letter_survives_compaction_under_pressure() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-unread-survives");
+        let alice = key_on_record("alice-host");
+        box_add("bob").unwrap();
+        enrol_reader("bob", "r1").unwrap();
+        assert!(matches!(
+            deposit_within(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "unread", &alice), "sakaki", small_caps(1 << 20)).unwrap(),
+            DepositOutcome::Filed { .. }
+        ));
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        let tight = small_caps(len + 10);
+        let flood = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "flood", &alice);
+        assert_eq!(deposit_within(flood, "sakaki", tight).unwrap(), DepositOutcome::BoxFull);
+        let kept: Vec<u64> = box_lines(&box_path("bob")).unwrap().iter().filter_map(|l| l.entry.as_ref()).map(|e| e.seq).collect();
+        assert_eq!(kept, vec![1], "the unread letter is still there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The store cap reclaims read lines from other boxes before it refuses: a
+    /// letter that would not fit beside carol's read mail fits once carol's read
+    /// mail is compacted.
+    #[test]
+    fn the_boxes_cap_compacts_other_boxes_before_refusing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-total");
+        for text in ["c1", "c2", "c3"] {
+            file_letter("alice", "carol", text).unwrap();
+        }
+        enrol_reader("carol", "r").unwrap();
+        read_for("carol", false, Some("r")).unwrap();
+        let carol_len = std::fs::metadata(box_path("carol")).unwrap().len();
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "fits after carol", &alice);
+
+        let caps = Caps { box_max: 1 << 20, boxes_max: carol_len + 10 };
+        assert!(matches!(
+            deposit_within(letter, "sakaki", caps).unwrap(),
+            DepositOutcome::Filed { .. }
+        ), "carol's read mail is reclaimed, so the store has room");
+        assert!(box_lines(&box_path("carol")).unwrap().is_empty(), "carol's read lines were compacted");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A refused flood against a box nobody has read rewrites nothing: the box
+    /// keeps its inode and its mtime, because nothing is reclaimable.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_flood_rewrites_nothing_when_nothing_is_read() {
+        use std::os::unix::fs::MetadataExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-no-rewrite");
+        let alice = key_on_record("alice-host");
+        box_add("bob").unwrap();
+        enrol_reader("bob", "r1").unwrap();
+        assert!(matches!(
+            deposit_within(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "first", &alice), "sakaki", small_caps(1 << 20)).unwrap(),
+            DepositOutcome::Filed { .. }
+        ));
+        let before = std::fs::metadata(box_path("bob")).unwrap();
+        let tight = small_caps(before.len() + 10);
+        for i in 0..5 {
+            let flood = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("flood {i}"), &alice);
+            assert_eq!(deposit_within(flood, "sakaki", tight).unwrap(), DepositOutcome::BoxFull);
+        }
+        let after = std::fs::metadata(box_path("bob")).unwrap();
+        assert_eq!(after.ino(), before.ino(), "the box was replaced");
+        assert_eq!(after.len(), before.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A local send to a full box returns the way out, not a bare refusal.
+    #[test]
+    fn local_send_to_a_full_box_teaches_the_fix() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-teach");
+        box_add("bob").unwrap();
+        fill_box_to_the_cap("bob");
+        let err = file_letter("alice", "bob", "hi").unwrap_err();
+        assert!(err.contains("aoide mail read --for bob") && err.contains("aoide mail box rm bob --force"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

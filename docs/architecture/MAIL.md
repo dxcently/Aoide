@@ -120,11 +120,14 @@ FidoNet node could.
     `aoide/mailDeposit` and `aoide/mailPoll` beside the pairing methods.
     One door, one inspection, separate windows; gate/no-gate never
     depends on payload shape.
-14. **Flood control is Fido-pure: dedup + excommunication.** No quotas,
-    no eviction, no auto-expiry. The `msgid` seen-set drops repeats; a
-    flooding node is declared `down`. Accepted exposure: between flood
-    start and the User's `down` gesture, disk absorbs it. The audit log's
-    one line per deposit, with origin, is the detection.
+14. **Flood control: dedup, caps, and excommunication.** The box is the
+    dedup memory, so a repeat is dropped. The store is capped (§Store): a
+    letter over 256 KiB is `too-large`; a box holds 16 MiB; one origin key
+    holds a quarter of a box; all boxes together hold 240 MiB. A full box
+    answers `box-full` and files nothing, so the sender keeps and retries.
+    Nothing is evicted and nothing expires: the caps refuse, and only a
+    read letter is ever reclaimed. A flooding node is declared `down`. The
+    audit log's one line per deposit, with origin, is the detection.
 15. **Declared node status: `hold` and `down`.** In the mesh config,
     per node. `hold` queues at the sender silently; `down` refuses fast
     and stops routing to/from that node. The UNREACHABLE-vocabulary
@@ -371,6 +374,34 @@ that points `AOIDE_ROOT` (and so `state_dir()`) at a per-test temp root
 under its existing `env_lock`, and every storage test that touches mail
 uses it — closing the path by which a fixture once wrote fixture rows
 into the live inbox.
+
+### Caps and compaction
+
+The store is bounded by four caps, all `const`s in `storage/src/mail.rs`:
+
+| Cap | Value | Measured as | Refusal |
+|---|---|---|---|
+| Letter | 256 KiB | the envelope, serialized | `too-large`, at the mint and at the door |
+| Box | 16 MiB | the box file, after the append | `box-full` |
+| Quarter | 4 MiB | the bytes one verified origin key holds in the box | `box-full` |
+| Store | 240 MiB | every box file together | `box-full` |
+
+Receipts, the containers gate and the re-ack record are not capped by these;
+they rotate at their own caps (§Security model). A local letter has no quarter,
+only the box and store caps. The quarter keys on the verified origin key, so a
+key that signs under two node names shares one quarter.
+
+A capped refusal first compacts. A box or quarter refusal compacts its box; a
+store refusal compacts every box. Compaction drops a line only when every
+reader of its box has read it: the floor is the lowest reader mark, zero when
+a box has no readers, so an unread letter is never reclaimed. A refused flood
+against a box nobody has read rewrites nothing. A full box refuses before
+anything is written and before any ack is owed, so the sender keeps the
+letter and retries.
+
+Compaction is the reason a box's seq list can have gaps. A reader's mark still
+means "read through this seq", and export and mailview order by seq, so the
+gaps are harmless.
 
 ## Addressing and filing
 
@@ -1455,12 +1486,11 @@ paired node that merely misbehaves.
 - **Floods** are visible (one audit line per deposit, with origin) and
   bounded only by disk until `down`. A hub amplifies roughly threefold
   per letter — outbox copy, returning ack — and the boxes, receipts and
-  outbox directories grow unbounded by ruling (receipts rotate at 4 MiB,
-  and each box is a capped log of its own). The
+  outbox directories grow with the mail that is accepted. The boxes are
+  capped (§Store), receipts rotate at 4 MiB, and a full box refuses. The
   doorbell latch keeps a flood off the pty; the audit log and the disk
   are where it is felt, and `node allow … message off` is the same-
-  minute answer. Quotas are addable at the door later without any
-  schema change; they are deliberately not in v1.
+  minute answer.
 - **Same-uid honesty**: nothing here is a secret from a local process —
   not the mailbase, not the outbox, not `from.name`, not an epoch key.
 - **Several operators, several meshes.** Filing-not-secrecy is an
@@ -1739,8 +1769,8 @@ needs chiyo lit and the mesh declarations deployed in the ruled order.
 
 - No mailbox registry in the sense of a list of allowed names: a box is
   a file a local act created, and a far deposit never creates one.
-- No quotas, no eviction, no auto-expiry — dedup + `down` are the whole
-  flood story in v1 (User ruling; quotas remain addable at the door).
+- No eviction, no auto-expiry. The caps (decision 14, §Store) refuse a
+  full box; they never drop a letter that is unread.
 - No public flag and no public board — every board has members and an
   epoch key.
 - No plaintext letter or post in transit — every letter that leaves its

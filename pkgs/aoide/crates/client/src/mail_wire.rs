@@ -1536,6 +1536,8 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                         Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
                     }
                     aoide_storage::mail::DepositOutcome::UnknownBox => Some(aoide_storage::mail::REFUSAL_UNKNOWN_BOX),
+                    aoide_storage::mail::DepositOutcome::TooLarge => Some(aoide_storage::mail::REFUSAL_TOO_LARGE),
+                    aoide_storage::mail::DepositOutcome::BoxFull => Some(aoide_storage::mail::REFUSAL_BOX_FULL),
                 };
                 if let Some(word) = refusal {
                     settle_deposit(&envelope, &filed_outcome);
@@ -1689,6 +1691,8 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                 Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
             }
             aoide_storage::mail::DepositOutcome::UnknownBox => Some(aoide_storage::mail::REFUSAL_UNKNOWN_BOX),
+            aoide_storage::mail::DepositOutcome::TooLarge => Some(aoide_storage::mail::REFUSAL_TOO_LARGE),
+            aoide_storage::mail::DepositOutcome::BoxFull => Some(aoide_storage::mail::REFUSAL_BOX_FULL),
         };
         if let Some(word) = refusal {
             // A plaintext letter is not the hub's custody (it retires by ack, not
