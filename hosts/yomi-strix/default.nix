@@ -41,12 +41,16 @@
   # `aoide.song`, which every `rice.nix` self-gates on. `available` is what it
   # builds in to STAGE without a rebuild but does not perform.
   #
-  # yomi performs cadenza and nothing else: the phosphor key, a green-CRT termui
-  # console — the song this machine has performed since the switch that made it
-  # the reference rig. The other committed rices are reached from the machine's
-  # own songbook (`aoide rice stage <n>`), which this host's songbook already
-  # holds — that is the point of the split.
-  habit.song.declared = "cadenza";
+  # yomi performs barcarolle: Windows 7 Aero rebuilt on the AoideOS slots — a
+  # glass superbar whose buttons are Hyprland workspaces, the Start menu and its
+  # flyouts, the iMac G3 launcher, white-plate balloons, over a teal Frutiger
+  # Aero wallpaper. Declaring is what bakes the half a stage cannot: Stylix
+  # theming, the compositor's geometry and window borders, the assembled
+  # widgets, and the boot default; `lyra reload` is what keeps the staged half
+  # live between switches. The other committed rices are reached from the
+  # machine's own songbook (`aoide rice stage <n>`), which this host's songbook
+  # already holds — that is the point of the split.
+  habit.song.declared = "barcarolle";
   habit.song.available = [ ];
 
   # ── People ─────────────────────────────────────────────────────────────────
