@@ -5093,9 +5093,9 @@ fn handle_mail_names(_inv: &Invocation) -> Outcome {
 /// proof; this never re-verifies it. `base` is a single
 /// [`aoide_storage::mail::read_receipts`] shared across every entry a caller
 /// projects (a `mail outbox` listing, or `mail send`'s post-spool read) —
-/// hoisted there so this check never re-reads `receipts.log` per entry; a
-/// read failure degrades to an empty list (matching this check's own
-/// former "no ack seen" default), never a propagated error.
+/// hoisted there so this check never re-reads `receipts.log` per entry. The
+/// caller reads it once and surfaces a read failure itself; an empty `base`
+/// would read as "no ack seen", which a failed read must never claim.
 fn has_delivered_ack(base: &[aoide_storage::mail::Entry], to_node: &str, msgid: &str) -> bool {
     base.iter().any(|e| {
         e.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT
@@ -5207,7 +5207,10 @@ fn post_send_delivery(node: &str, msgid: &str) -> Value {
         Ok(l) => l,
         Err(e) => return delivery_status_unavailable(&e),
     };
-    let receipts = aoide_storage::mail::read_receipts().unwrap_or_default();
+    let receipts = match aoide_storage::mail::read_receipts() {
+        Ok(r) => r,
+        Err(e) => return delivery_status_unavailable(&e),
+    };
     delivery_projection(&receipts, node, entry, link.as_ref())
 }
 
@@ -5931,7 +5934,10 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
             Err(e) => return teach::store_failed(cmd, "state/outbox", &e),
         },
     };
-    let receipts = aoide_storage::mail::read_receipts().unwrap_or_default();
+    let receipts = match aoide_storage::mail::read_receipts() {
+        Ok(r) => r,
+        Err(e) => return teach::store_failed(cmd, "state/mail/receipts.log", &e),
+    };
     let mut rows: Vec<Value> = Vec::new();
     let mut summary = serde_json::Map::new();
     for node in &nodes {
@@ -10872,6 +10878,45 @@ mod tests {
         assert_eq!(outcome, aoide_storage::mail::DepositOutcome::BadMsgid);
         let base = aoide_storage::mail::read_base().unwrap();
         assert_ne!(delivery_projection(&base, &node_name, &entry, None)["status"], "delivered");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A far receipt keeps its msgid as text, and `has_delivered_ack` reads it
+    /// from `receipts.log`, never from a box. Restored from 704bc5b8, which
+    /// deleted it when local receipts became digests: a far receipt is not one.
+    #[test]
+    fn has_delivered_ack_reads_receipts_log() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("delivered-from-receipts-log");
+
+        let node_name = aoide_storage::display::local_node_name();
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let mut nodes = Vec::new();
+        aoide_storage::node_store::upsert_paired_node(
+            &mut nodes,
+            &node_name,
+            "https://irrelevant.example",
+            &kp.info().pubkey_hex,
+            "2026-09-07T00:00:00Z",
+            &[],
+            "home",
+        );
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let letter = aoide_storage::mail::mint_outbound_letter("here", &node_name, "bob", "hi").unwrap();
+        let msgid = letter.msgid.clone();
+        aoide_storage::outbox::write_entry(&node_name, &aoide_storage::outbox::OutboxEntry::fresh(letter)).unwrap();
+
+        let to = aoide_storage::mail::Address { node: node_name.clone(), name: "here".to_string() };
+        let ack = aoide_storage::mail::mint_ack("bob", to, &msgid).unwrap();
+        assert!(matches!(aoide_storage::mail::deposit(ack, "test").unwrap(), aoide_storage::mail::DepositOutcome::Filed { .. }));
+
+        assert!(has_delivered_ack(&aoide_storage::mail::read_receipts().unwrap(), &node_name, &msgid));
+        assert!(
+            !has_delivered_ack(&aoide_storage::mail::read_boxes().unwrap(), &node_name, &msgid),
+            "a receipt is never in a box"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

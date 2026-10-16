@@ -596,7 +596,7 @@ door's audit name whitelist gains both names so they never log as bare
   signer, in the same mesh, for the same acked letter files nothing, however
   many times the destination re-acks it (`receipts.log`). A receipt in
   another mesh is a different acknowledgement and is filed.
-  **What is bounded, and what is not.** The base gains at most one receipt
+  **What is bounded, and what is not.** The receipts log gains at most one receipt
   per letter this box sent, per signer and mesh; a flood of receipts for
   letters it never sent is refused before anything is written. A letter this
   box sent and has already retired is not spooled any longer, so a late
@@ -622,6 +622,15 @@ door's audit name whitelist gains both names so they never log as bare
   follows is a no-op for a retired letter; it never re-spools it. A
   letter re-spooled by its own answer would be re-offered on the next
   drain, re-acked, and re-retired, once per drain, for ever.
+  **A re-ack is limited to one per hour.** The destination acks a letter when
+  it files it, and again when a duplicate of that letter arrives, because a
+  re-offer means the earlier ack may have been lost. Each key (origin node,
+  origin mesh, acked msgid) is acked at most once per hour: `state/mail/reacks.log`
+  holds the last ack time per key, rotates at 1 MiB, is read up to its cap,
+  and is written under the stage lock. N replays inside the hour spool one
+  ack between them; the first replay after the hour spools another. A record
+  that cannot be read or written acks anyway, because a withheld ack leaves
+  the origin re-offering with nothing to retire it.
   Acks are still spooled like any entry, so an ack survives a
   dead link instead of vanishing on it. A hub can mint a receipt; it
   cannot sign as the destination, so it cannot make an origin stop

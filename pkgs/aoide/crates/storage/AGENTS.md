@@ -884,6 +884,17 @@
   — latching first and writing second would strand a reader that a crash
   or a failed write never actually reached, silent and unrung until the
   next unrelated letter arrives.
+- **`fs::try_stage_lock` is fail-closed AND re-entrant on its thread.** A
+  nested call under a held `.stage.lock` (from `with_stage_lock` or another
+  `try_stage_lock`) runs its closure directly; a fresh `flock` on a second fd
+  of the same file would block forever. An un-openable lock file still refuses
+  the call, never runs it unlocked. The gate (`seal::check_seen`,
+  `record_seen`) uses `try_stage_lock`, so it refuses without its lock.
+- **Rotating mail logs are read only to their cap.** `receipts.log`,
+  `containers.jsonl` and `reacks.log` are read with `feed::read_lines_up_to`
+  at `ROTATE_AT` (or `REACKS_MAX`), and an append rotates them first
+  (`rotate_before_append`) so they stay under it. A file past its cap is read
+  only up to it, never in full.
 - **The mailbase stage lock is held only inside `ring_targets`/
   `stamp_rung`/`enrol_reader`/`armed_names_for_reader` themselves, never
   by a caller across I/O (P-M5a-1; ruling R2).** Each call is a single

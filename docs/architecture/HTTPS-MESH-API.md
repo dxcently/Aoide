@@ -1260,8 +1260,8 @@ Its rules:
   reported, never dropped silently. Epoch identities a node has already unwrapped are
   kept in its own state and survive the rotation; a wrap still in flight follows the
   same grace rule as any letter.
-- **Already-filed mail survives key loss.** `base.jsonl` holds the opened envelope in
-  plaintext, so filed letters and posts are unaffected. Only copies that are sealed
+- **Already-filed mail survives key loss.** The mailbox files hold the opened envelope
+  in plaintext, so filed letters and posts are unaffected. Only copies that are sealed
   but not filed (outbox, in transit, spooled) become unreadable. Losing the identity
   signing key means re-pairing the node or giving it a new charter line. There is no
   escrow and no recovery authority.
@@ -1282,7 +1282,7 @@ mail and every board epoch wrapped to it. FS/PCS is a **clearly labelled optiona
 future decision**. Neither the User nor v1 has accepted it as a guarantee. If it is
 required, the selection moves to MLS or a ratchet BEFORE P-SEAL.
 
-Decrypted letters and posts live in plaintext in `state/mail/base.jsonl`, as today.
+Decrypted letters and posts live in plaintext in `state/mail/boxes/`, as today.
 The outbox, every hub's spool and every board log on a relay hold sealed containers,
 and keys are 0600. No at-rest secrecy is claimed.
 

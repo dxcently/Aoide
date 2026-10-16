@@ -78,7 +78,8 @@ start at [[aoide-cli]] and the group pages linked below.
   manifest), `conduct`, and `mail`/`mail read`/`mail poll` (the receive half
   of `send`).
   Stage files: `state/stage/{sessions,hooks,projects,graph,pending,
-  herald}.json`; the mailbase at `state/mail/base.jsonl`; control sockets at
+  herald}.json`; the mail store at `state/mail/` (one `boxes/<name>.log` per
+  mailbox, `receipts.log`); control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
 - [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
   shot/ocr/diff/send` and the nine `screen point` commands. Captures and sidecars

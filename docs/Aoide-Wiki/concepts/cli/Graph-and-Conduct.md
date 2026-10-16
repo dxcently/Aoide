@@ -991,7 +991,7 @@ aoide session reap [--announce] [--json]
 
 What `send` delivered is read back through the `mail` group; there is no
 separate group for it. A message that actually landed is filed as one
-**receipt** in the addressed mailbase (`state/mail/base.jsonl`), addressed from
+**receipt** in `state/mail/receipts.log`, addressed from
 the sender to the session name it landed in — by every path that lands bytes in
 a live session: `send`'s local-delivery success path (a direct `--id`, a
 `--to <local target>`, and `pending approve`'s re-drive), the A2A door's
@@ -1004,11 +1004,12 @@ aoide mail read [--for <name>] [--all-names] [--reread] [--json]
 aoide mail poll                                      # ask every paired node for its spool
 ```
 
-- **Reads:** `state/mail/base.jsonl` (absent → empty, never an error), plus the
-  reader's own cursor; `--reread` reprints already-read entries for the names
+- **Reads:** the mailbox files `state/mail/boxes/<name>.log` (absent → empty,
+  never an error), plus the reader's own cursor. Receipts are not read here; `--reread` reprints already-read entries for the names
   selected, while the cursor only ever moves forward.
-- **Writes:** the cursor, on `mail read`/`mail mark`. `mail rm` prunes base
-  entries older than the given age — the only pruning there is.
+- **Writes:** the cursor, on `mail read`/`mail mark`. `mail rm` prunes entries
+  older than the given age from every box and both receipt generations — the
+  only pruning there is.
 - **Notes:** not gated.
 
 The store is `aoide_storage::mail` — envelope/entry types, the canonical header,

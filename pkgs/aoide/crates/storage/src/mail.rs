@@ -704,6 +704,21 @@ fn read_file_entries(path: &std::path::Path) -> Result<Vec<Entry>, String> {
     Ok(lines.iter().filter_map(|l| serde_json::from_slice::<Entry>(l).ok()).collect())
 }
 
+/// Rotates a rotating log before a record of `record_len` bytes (newline
+/// included) is appended, so the log stays under `cap` after the append and a
+/// reader can bound its read at the cap.
+pub(crate) fn rotate_before_append(path: &std::path::Path, cap: u64, record_len: usize) -> Result<(), String> {
+    feed::rotate_at(path, cap.saturating_sub(record_len as u64)).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The records of one rotating log, read up to [`ROTATE_AT`] bytes. Every
+/// append keeps a generation under the cap ([`rotate_before_append`]), so this
+/// reads all of it; a file past the cap is read only to the cap.
+pub(crate) fn read_rotating_entries(path: &std::path::Path) -> Result<Vec<Entry>, String> {
+    let lines = feed::read_lines_up_to(path, ROTATE_AT).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(lines.iter().filter_map(|l| serde_json::from_slice::<Entry>(l).ok()).collect())
+}
+
 /// `receipts.log` and its one rotated generation, in that order.
 fn receipt_generations() -> [PathBuf; 2] {
     let current = receipts_log_path();
@@ -779,7 +794,7 @@ fn read_boxes_unlocked() -> Result<Vec<Entry>, String> {
 fn read_receipts_unlocked() -> Result<Vec<Entry>, String> {
     let mut out = Vec::new();
     for path in receipt_generations() {
-        out.extend(read_file_entries(&path)?);
+        out.extend(read_rotating_entries(&path)?);
     }
     Ok(out)
 }
@@ -826,13 +841,61 @@ fn tail_seq_unlocked() -> Result<u64, String> {
     Ok(max)
 }
 
+/// The seq of the last complete line of `base.jsonl`, the one file an older
+/// binary appends to, or 0 when there is none or its last line does not parse.
+/// Reads backward from the end in 64 KiB chunks, so filing never reads the
+/// whole file. Raw — assumes the caller holds the lock.
+fn base_tail_seq_unlocked() -> Result<u64, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    #[derive(Deserialize)]
+    struct SeqOnly {
+        seq: u64,
+    }
+    let seq_of = |line: &[u8]| serde_json::from_slice::<SeqOnly>(line).map_or(0, |s| s.seq);
+    const CHUNK: u64 = 64 * 1024;
+    let path = base_path();
+    let mut file = match std::fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let io = |e: std::io::Error| format!("{}: {e}", path.display());
+    let mut end = file.metadata().map_err(io)?.len();
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let start = end.saturating_sub(CHUNK);
+        let mut chunk = vec![0u8; (end - start) as usize];
+        file.seek(SeekFrom::Start(start)).map_err(io)?;
+        file.read_exact(&mut chunk).map_err(io)?;
+        chunk.append(&mut buf);
+        buf = chunk;
+        end = start;
+        // Bytes after the last newline are a torn record; the complete line
+        // before them is the tail, and it may begin in an earlier chunk.
+        match buf.iter().rposition(|&b| b == b'\n') {
+            None if start == 0 => return Ok(0),
+            None => {}
+            Some(last) => {
+                let body = &buf[..last];
+                match body.iter().rposition(|&b| b == b'\n') {
+                    Some(i) => return Ok(seq_of(&body[i + 1..])),
+                    None if start == 0 => return Ok(seq_of(body)),
+                    None => {}
+                }
+            }
+        }
+    }
+}
+
 /// The next global sequence number, issued under the lock (P4). The counter
 /// file is the source of truth, and it is never reset by a prune: a line an
-/// older binary appended is counted too (`max` with the tail), so no number is
-/// ever issued twice. A missing counter starts from the highest seq any line or
-/// mark names. The new value is written durably before the caller appends the
-/// line it numbers, so a crash leaves a gap and never a reuse. Raw — assumes
-/// the caller already holds the lock.
+/// older binary appended to `base.jsonl` is counted too (`max` with that file's
+/// tail), so no number is ever issued twice. Box and receipt lines are not
+/// re-read here: the counter already covers them. A missing counter starts from
+/// the highest seq any line or mark names (`seq_floor`). The new value is
+/// written durably before the caller appends the line it numbers, so a crash
+/// leaves a gap and never a reuse. A counter at `u64::MAX` is refused, never
+/// wrapped. Raw — assumes the caller already holds the lock.
 fn next_seq() -> Result<u64, String> {
     let path = seq_path();
     let counter = match std::fs::read_to_string(&path) {
@@ -843,7 +906,10 @@ fn next_seq() -> Result<u64, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => seq_floor()?,
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    let seq = counter.max(tail_seq_unlocked()?) + 1;
+    let seq = counter
+        .max(base_tail_seq_unlocked()?)
+        .checked_add(1)
+        .ok_or_else(|| format!("{}: the sequence counter is u64::MAX; fix: remove the line numbered {} under state/mail/", path.display(), u64::MAX))?;
     ensure_mail_dir()?;
     atomic_write_private(&path, format!("{seq}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(seq)
@@ -880,7 +946,7 @@ fn append_entry(entry: &Entry) -> Result<(), String> {
     ensure_mail_dir()?;
     crate::fs::ensure_write_dir(&boxes_dir()).map_err(|e| format!("{}: {e}", boxes_dir().display()))?;
     if entry.kind == ENTRY_TYPE_RECEIPT {
-        feed::rotate_at(&path, ROTATE_AT).map_err(|e| format!("{}: {e}", path.display()))?;
+        rotate_before_append(&path, ROTATE_AT, line.len() + 1)?;
     }
     feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -889,8 +955,78 @@ fn append_entry(entry: &Entry) -> Result<(), String> {
 /// signed in, and the msgid of the letter it acknowledges. Its own msgid is not
 /// in it, since a re-ack is a new envelope.
 fn receipt_key(envelope: &Envelope) -> String {
-    serde_json::to_string(&(&envelope.header.from.node, &envelope.header.origin_mesh, &envelope.text))
-        .unwrap_or_default()
+    dedup_key(&envelope.header.from.node, &envelope.header.origin_mesh, &envelope.text)
+}
+
+/// The key a far acknowledgement is deduplicated on, and a re-ack is limited
+/// on: the origin node, the mesh, and the acked msgid. [`receipt_key`] is this
+/// key over a receipt's text.
+fn dedup_key(origin_node: &str, origin_mesh: &str, acked_msgid: &str) -> String {
+    serde_json::to_string(&(origin_node, origin_mesh, acked_msgid)).unwrap_or_default()
+}
+
+/// How long one re-ack per key is held back, in seconds.
+pub const REACK_WINDOW_SECS: u64 = 3600;
+/// The cap on `reacks.log`, which rotates to `.1` past it.
+pub const REACKS_MAX: u64 = 1024 * 1024;
+
+/// One line of `reacks.log`: the last time an ack for `key` was spooled.
+#[derive(Serialize, Deserialize)]
+struct ReAck {
+    key: String,
+    at: u64,
+}
+
+fn reacks_log_path() -> PathBuf {
+    mail_dir().join("reacks.log")
+}
+
+/// The last `at` recorded for `key` across both generations, if any. Each
+/// generation is read up to [`REACKS_MAX`].
+fn last_reack_unlocked(key: &str) -> Result<Option<u64>, String> {
+    let mut last: Option<u64> = None;
+    for path in [reacks_log_path(), PathBuf::from(format!("{}.1", reacks_log_path().display()))] {
+        let lines = feed::read_lines_up_to(&path, REACKS_MAX).map_err(|e| format!("{}: {e}", path.display()))?;
+        for line in lines {
+            if let Ok(r) = serde_json::from_slice::<ReAck>(&line) {
+                if r.key == key {
+                    last = Some(last.map_or(r.at, |l| l.max(r.at)));
+                }
+            }
+        }
+    }
+    Ok(last)
+}
+
+fn record_reack_unlocked(key: &str, at: u64) -> Result<(), String> {
+    let line = serde_json::to_string(&ReAck { key: key.to_string(), at }).map_err(|e| e.to_string())?;
+    let path = reacks_log_path();
+    ensure_mail_dir()?;
+    rotate_before_append(&path, REACKS_MAX, line.len() + 1)?;
+    feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Records that an ack for this letter was spooled at `now` (epoch seconds),
+/// so a duplicate of it inside [`REACK_WINDOW_SECS`] is held back.
+pub fn note_ack(origin_node: &str, origin_mesh: &str, acked_msgid: &str, now: u64) -> Result<(), String> {
+    with_lock(|| record_reack_unlocked(&dedup_key(origin_node, origin_mesh, acked_msgid), now))
+}
+
+/// Whether a duplicate letter's ack goes out now: at most one per key per
+/// [`REACK_WINDOW_SECS`], so N replays inside the window spool one ack between
+/// them. When it is due the spool is recorded under the same lock, so two
+/// concurrent duplicates cannot both pass.
+pub fn reack_due(origin_node: &str, origin_mesh: &str, acked_msgid: &str, now: u64) -> Result<bool, String> {
+    with_lock(|| {
+        let key = dedup_key(origin_node, origin_mesh, acked_msgid);
+        if let Some(at) = last_reack_unlocked(&key)? {
+            if now.saturating_sub(at) < REACK_WINDOW_SECS {
+                return Ok(false);
+            }
+        }
+        record_reack_unlocked(&key, now)?;
+        Ok(true)
+    })
 }
 
 /// Every receipt key already filed, across both generations of `receipts.log`.
@@ -898,7 +1034,7 @@ fn receipt_key(envelope: &Envelope) -> String {
 fn read_receipt_keys_unlocked() -> Result<HashSet<String>, String> {
     let mut keys = HashSet::new();
     for path in receipt_generations() {
-        for entry in read_file_entries(&path)? {
+        for entry in read_rotating_entries(&path)? {
             keys.insert(receipt_key(&entry.envelope));
         }
     }
@@ -999,8 +1135,10 @@ pub fn file_receipt(from: &str, to_name: &str, text: &str) -> Result<(), String>
 }
 
 /// What a local receipt keeps of the message it acknowledges: its sha256 and
-/// byte length, never the text. The conduct audit line already holds the
-/// message, and nothing reads a local receipt's text back.
+/// byte length, never the text. A `send` receipt's message is on its conduct
+/// audit line. The doorbell receipt has no audit line, and its text is only the
+/// fixed nudge, so its digest covers the nudge and nothing more. Nothing reads
+/// a local receipt's text back.
 fn local_receipt_text(text: &str) -> String {
     format!("sha256:{} {}B", hex_encode(&Sha256::digest(text.as_bytes())), text.len())
 }
@@ -2397,12 +2535,45 @@ mod tests {
         let (_env, dir) = root("older-writer");
         file_letter("alice", "bob", "one").unwrap();
 
-        // An older binary appends a line this binary's counter never issued.
+        // An older binary appends to base.jsonl, the one file it writes, a
+        // line this binary's counter never issued.
         let old = letter_entry("bob", 9, "from the old writer");
-        append_entry(&old).unwrap();
+        feed::append_line(&base_path(), serde_json::to_string(&old).unwrap().as_bytes()).unwrap();
 
         let next = file_letter("alice", "bob", "two").unwrap();
         assert_eq!(next.seq, 10, "a number the older writer used is never reissued");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Filing reads the counter and base.jsonl's tail, never the boxes: a line
+    /// with a huge seq in a box does not move the counter on the next filing.
+    #[test]
+    fn a_box_line_is_not_reread_per_filing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-not-reread");
+        file_letter("alice", "bob", "one").unwrap();
+        append_entry(&letter_entry("bob", 1_000_000, "planted")).unwrap();
+
+        let next = file_letter("alice", "bob", "two").unwrap();
+        assert_eq!(next.seq, 2, "the counter moved to a seq read from a box line");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A counter at u64::MAX refuses the filing with a taught error and writes
+    /// no line, instead of wrapping to 0 and hiding later mail.
+    #[test]
+    fn next_seq_refuses_to_wrap_past_u64_max() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("seq-wrap");
+        file_letter("alice", "bob", "one").unwrap();
+        let before = std::fs::read(box_path("bob")).unwrap();
+        std::fs::write(seq_path(), format!("{}\n", u64::MAX)).unwrap();
+
+        let err = file_letter("alice", "bob", "two").unwrap_err();
+        assert!(err.contains("u64::MAX"), "the refusal names the exhausted counter, got {err}");
+        assert_eq!(std::fs::read(box_path("bob")).unwrap(), before, "no line was written");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3421,6 +3592,88 @@ mod tests {
         std::fs::create_dir_all(box_path("dave")).unwrap();
         assert_eq!(armed_names_for_reader("sess-1").unwrap(), vec![("bob".to_string(), 1)]);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A receipt past the read cap is never read: `receipts.log` is read up to
+    /// [`ROTATE_AT`], so a valid receipt beyond it does not count.
+    #[test]
+    fn receipts_read_is_bounded_to_the_rotation_cap() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("receipts-read-cap");
+        file_receipt("bob", "alice", "one").unwrap();
+        let line = std::fs::read(receipts_log_path()).unwrap();
+        let mut body = vec![b'x'; ROTATE_AT as usize];
+        body.push(b'\n');
+        body.extend_from_slice(&line);
+        std::fs::write(receipts_log_path(), body).unwrap();
+
+        assert!(read_receipts().unwrap().is_empty(), "a receipt past the cap is never read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An append rotates a receipt generation first when the record would
+    /// cross the cap, so `receipts.log` stays under [`ROTATE_AT`] after it.
+    #[test]
+    fn a_receipt_log_never_grows_past_the_cap() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("receipts-cap");
+        file_receipt("bob", "alice", "one").unwrap();
+        let mut full = vec![b'x'; ROTATE_AT as usize - 41];
+        full.push(b'\n');
+        std::fs::write(receipts_log_path(), full).unwrap();
+
+        file_receipt("bob", "alice", "two").unwrap();
+        assert!(receipt_generations()[1].exists(), "the full generation rotated to .1");
+        let len = std::fs::metadata(receipts_log_path()).unwrap().len();
+        assert!(len < ROTATE_AT, "receipts.log is {len} bytes, past the {ROTATE_AT} cap");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// N replays of one duplicate inside the hour spool one ack between them,
+    /// and the first replay after the hour spools another.
+    #[test]
+    fn replays_inside_the_hour_spool_one_ack_and_a_replay_after_it_spools_another() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("reack-window");
+        let t0 = 1_000_000;
+        let mut spooled = 0;
+        spooled += usize::from(reack_due("alice-host", "home", "ab", t0).unwrap());
+        for i in 1..=5 {
+            spooled += usize::from(reack_due("alice-host", "home", "ab", t0 + i).unwrap());
+        }
+        assert_eq!(spooled, 1, "N replays inside the hour spool one ack");
+        assert!(!reack_due("alice-host", "home", "ab", t0 + REACK_WINDOW_SECS - 1).unwrap());
+        assert!(reack_due("alice-host", "home", "ab", t0 + REACK_WINDOW_SECS).unwrap(), "a replay after the hour spools another");
+        assert!(!reack_due("alice-host", "home", "ab", t0 + REACK_WINDOW_SECS + 1).unwrap());
+        assert!(reack_due("alice-host", "other-mesh", "ab", t0).unwrap(), "the mesh is part of the key");
+        assert!(reack_due("alice-host", "home", "cd", t0).unwrap(), "the msgid is part of the key");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A first ack noted for a letter holds back its own duplicate inside the hour.
+    #[test]
+    fn a_noted_first_ack_holds_back_the_next_duplicate() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("reack-noted");
+        note_ack("alice-host", "home", "ab", 500).unwrap();
+        assert!(!reack_due("alice-host", "home", "ab", 501).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The re-ack record rotates under its cap instead of growing past it.
+    #[test]
+    fn the_reack_record_rotates_under_its_cap() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("reack-cap");
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        let mut full = vec![b'x'; REACKS_MAX as usize - 40];
+        full.push(b'\n');
+        std::fs::write(reacks_log_path(), full).unwrap();
+        assert!(reack_due("alice-host", "home", "ab", 1).unwrap());
+        assert!(PathBuf::from(format!("{}.1", reacks_log_path().display())).exists(), "the full generation rotated");
+        let len = std::fs::metadata(reacks_log_path()).unwrap().len();
+        assert!(len < REACKS_MAX, "reacks.log is {len} bytes, past the cap");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

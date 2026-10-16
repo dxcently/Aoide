@@ -1728,18 +1728,6 @@ pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
     // close releases the lock itself. The normal path returns through the
     // explicit `LOCK_UN` below, which releases the lock first and clears the
     // flag as `_stamp` drops; nothing of this thread runs between the two.
-    struct StampedByThisThread;
-    impl StampedByThisThread {
-        fn take() -> Self {
-            STAGE_LOCK_HELD.with(|h| h.set(true));
-            StampedByThisThread
-        }
-    }
-    impl Drop for StampedByThisThread {
-        fn drop(&mut self) {
-            STAGE_LOCK_HELD.with(|h| h.set(false));
-        }
-    }
     let _stamp = held.then(StampedByThisThread::take);
     let out = f();
     if held {
@@ -1755,14 +1743,40 @@ thread_local! {
     static STAGE_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Fail-closed sibling of [`with_stage_lock`]: mail's base-log append (MAIL.md,
+/// Sets [`STAGE_LOCK_HELD`] for as long as it lives. Created only after a
+/// successful `flock` of `.stage.lock`, and dropped before the lock is released.
+struct StampedByThisThread;
+impl StampedByThisThread {
+    fn take() -> Self {
+        STAGE_LOCK_HELD.with(|h| h.set(true));
+        StampedByThisThread
+    }
+}
+impl Drop for StampedByThisThread {
+    fn drop(&mut self) {
+        STAGE_LOCK_HELD.with(|h| h.set(false));
+    }
+}
+
+/// Fail-closed sibling of [`with_stage_lock`], and re-entrant on the same
+/// thread the same way: a nested call under a held lock runs `f` directly.
+/// Mail's base-log append (MAIL.md,
 /// "Store") must never let two writers interleave two entries, so a lock that
 /// can't be taken has to reject the write rather than run it anyway. Blocks on
 /// `LOCK_EX` (a concurrent opener waits, per the architect's ruling that a second
 /// writer queues rather than races) — it only returns `Err` when the lock file
 /// itself can't be opened or created, not when another writer briefly holds it.
 pub fn try_stage_lock<T>(f: impl FnOnce() -> T) -> Result<T, String> {
-    lock_path(stage_dir().join(".stage.lock"), f)
+    // Re-entrant on this thread: a nested call under a held `.stage.lock` runs
+    // directly. A second `flock` on a fresh fd of the same file would block
+    // forever, and mail's filed-kind read sits under the gate's own lock.
+    if STAGE_LOCK_HELD.with(std::cell::Cell::get) {
+        return Ok(f());
+    }
+    lock_path(stage_dir().join(".stage.lock"), || {
+        let _stamp = StampedByThisThread::take();
+        f()
+    })
 }
 
 /// Fail-closed `flock(LOCK_EX)` on a dedicated file at `path`, held for the

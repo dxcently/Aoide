@@ -476,9 +476,20 @@ pub fn settle_deposit(envelope: &Envelope, outcome: &aoide_storage::mail::Deposi
     use aoide_storage::mail::DepositOutcome;
     match outcome {
         DepositOutcome::Filed { kind, .. } if kind == aoide_storage::mail::ENTRY_TYPE_LETTER => {
+            let h = &envelope.header;
+            let _ = aoide_storage::mail::note_ack(&h.from.node, &h.origin_mesh, &envelope.msgid, unix_now() as u64);
             spool_and_drain_ack(envelope, &envelope.msgid)
         }
-        DepositOutcome::Duplicate { filed_letter: true } => spool_and_drain_ack(envelope, &envelope.msgid),
+        // A duplicate re-acks at most once per key per hour (`reack_due`). A
+        // record that cannot be read or written acks anyway: a withheld ack
+        // leaves the origin re-offering with nothing to retire it.
+        DepositOutcome::Duplicate { filed_letter: true } => {
+            let h = &envelope.header;
+            let due = aoide_storage::mail::reack_due(&h.from.node, &h.origin_mesh, &envelope.msgid, unix_now() as u64);
+            if due.unwrap_or(true) {
+                spool_and_drain_ack(envelope, &envelope.msgid);
+            }
+        }
         // A receipt retires its letter whether this is its first filing or a
         // re-ack of one already filed: retiring is idempotent, and the one place a
         // verified receipt is allowed to act is here.
@@ -6112,10 +6123,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A container the destination already filed, offered again, is reopened and
-    /// dedups against its box, and its ack is spooled again.
+    /// A container the destination already filed, offered again inside the hour,
+    /// is reopened and dedups against its box. Its ack is held back: the first
+    /// ack already went out, and a re-ack is limited to one per key per hour
+    /// (`reack_due`). The re-ack after the hour is proved in storage.
     #[test]
-    fn a_reoffered_container_at_its_destination_is_reopened_and_reacked() {
+    fn a_reoffered_container_at_its_destination_is_reopened_and_its_reack_is_held_back() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("destination-reopen");
 
@@ -6147,9 +6160,10 @@ mod tests {
         let again = poll_node("relay", None).unwrap();
         assert_eq!(again.filed, 0, "nothing files twice: {again:?}");
         assert!(again.refused.is_empty(), "{again:?}");
-        assert!(
-            mentions(&deposit_bodies(&seen), &msgid) > before,
-            "the destination answers the re-offer with its ack again"
+        assert_eq!(
+            mentions(&deposit_bodies(&seen), &msgid),
+            before,
+            "a re-offer inside the hour sends no second ack"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

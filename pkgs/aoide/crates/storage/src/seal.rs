@@ -1258,7 +1258,7 @@ fn check_seen(container: &Container, digest: &str) -> Result<Seen, String> {
 fn read_container_seen() -> Result<Vec<ContainerSeen>, String> {
     let mut out = Vec::new();
     for path in [container_seen_rotated_path(), container_seen_path()] {
-        let lines = feed::read_lines(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let lines = feed::read_lines_up_to(&path, mail::ROTATE_AT).map_err(|e| format!("{}: {e}", path.display()))?;
         out.extend(lines.iter().filter_map(|l| serde_json::from_slice::<ContainerSeen>(l).ok()));
     }
     Ok(out)
@@ -1305,7 +1305,7 @@ fn record_seen(container: &Container, digest: &str) -> Result<(), String> {
     crate::fs::ensure_write_dir(&mail::mail_dir()).map_err(|e| e.to_string())?;
     fs::try_stage_lock(|| {
         let path = container_seen_path();
-        feed::rotate_at(&path, mail::ROTATE_AT).map_err(|e| format!("{}: {e}", path.display()))?;
+        mail::rotate_before_append(&path, mail::ROTATE_AT, line.len() + 1)?;
         feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
     })?
 }
@@ -2507,6 +2507,87 @@ mod tests {
         assert!(container_seen_rotated_path().exists(), "the full generation rotated to .1");
         assert!(matches!(check_seen(&first, "digest-1").unwrap(), Seen::Duplicate { .. }));
         assert!(matches!(check_seen(&second, "digest-2").unwrap(), Seen::Duplicate { .. }));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The gate is fail-closed: a stage lock that cannot be opened refuses the
+    /// read and the record, and runs neither unlocked. The lock file is made a
+    /// directory so the open fails.
+    #[test]
+    fn the_gate_refuses_when_the_stage_lock_cannot_be_opened() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = aoide_test_support::isolated_mail_root("gate-lock-unopenable");
+        std::fs::create_dir_all(crate::fs::stage_dir().join(".stage.lock")).unwrap();
+
+        assert!(record_admitted(&sample_container(), "digest-1").is_err(), "a record without its lock is refused");
+        assert!(check_seen(&sample_container(), "digest-1").is_err(), "a read without its lock is refused");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The gate reads at most its rotation cap: a record past it is not a
+    /// duplicate, so the container is `Fresh` again.
+    #[test]
+    fn the_gate_reads_at_most_its_rotation_cap() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = aoide_test_support::isolated_mail_root("gate-read-cap");
+
+        let first = sample_container();
+        record_admitted(&first, "digest-1").unwrap();
+        let line = std::fs::read(container_seen_path()).unwrap();
+        let mut body = vec![b'x'; mail::ROTATE_AT as usize];
+        body.push(b'\n');
+        body.extend_from_slice(&line);
+        std::fs::write(container_seen_path(), body).unwrap();
+
+        assert!(matches!(check_seen(&first, "digest-1").unwrap(), Seen::Fresh), "a record past the cap is not read");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hub hop files exactly two things here: its spool entry toward `next`
+    /// and its gate record. It writes no mailbox line and no `base.jsonl`.
+    #[test]
+    fn a_hub_hop_writes_spool_and_gate_and_no_mailbase_line() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = aoide_test_support::isolated_mail_root("hub-hop-files");
+
+        let hop = TransitHop {
+            container: Box::new(sample_container()),
+            next: "chiyo".to_string(),
+            mesh: "home".to_string(),
+            held: false,
+            digest: "digest-hop".to_string(),
+        };
+        file_transit_hop(&hop).unwrap();
+
+        assert_eq!(crate::outbox::list_entries("chiyo").unwrap().len(), 1, "the spool holds the hop");
+        assert!(mail::read_base().unwrap().is_empty(), "a hop writes no mailbox line");
+        assert!(mail::box_paths().unwrap().is_empty(), "a hop creates no box");
+        assert!(!mail::base_path().exists(), "a hop writes no base.jsonl");
+        assert_eq!(std::fs::read_to_string(container_seen_path()).unwrap().lines().count(), 1, "the gate records the hop");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The gate's read and record take the re-entrant stage lock, so a caller
+    /// already inside `with_stage_lock` does not block on a second flock of the
+    /// same file. Blocking would fail the test by timeout, not by assertion.
+    #[test]
+    fn the_gate_reads_and_records_under_an_outer_stage_lock() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = aoide_test_support::isolated_mail_root("gate-nested-lock");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let c = sample_container();
+            let out = crate::fs::with_stage_lock(|| -> Result<bool, String> {
+                record_admitted(&c, "digest-1")?;
+                Ok(matches!(check_seen(&c, "digest-1")?, Seen::Duplicate { .. }))
+            });
+            let _ = tx.send(out);
+        });
+        let seen = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the gate blocked on a stage lock its caller already holds");
+        assert!(seen.unwrap(), "the outer caller's record is a duplicate on the next read");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -3413,7 +3413,12 @@ mod tests {
         assert_eq!(e.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
         assert_eq!(e.envelope.header.from.name, "orchestrator-1");
         assert_eq!(e.envelope.header.to.name, id);
-        assert_eq!(e.envelope.text, "do the thing", "the RAW text, not the prefixed wire payload");
+        let digest = e.envelope.text.strip_prefix("sha256:").and_then(|r| r.strip_suffix(" 12B"));
+        assert!(
+            digest.is_some_and(|d| d.len() == 64 && d.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))),
+            "a local receipt keeps the sha256 and length of the RAW text, not the text, got {:?}",
+            e.envelope.text
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

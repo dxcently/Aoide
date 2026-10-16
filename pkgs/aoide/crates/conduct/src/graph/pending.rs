@@ -1011,7 +1011,12 @@ mod tests {
         assert_eq!(entries.len(), 1, "approval's re-drive filed the message");
         assert_eq!(entries[0].envelope.header.from.name, "queuer-a", "the ORIGINAL queuer, not the approver");
         assert_eq!(entries[0].envelope.header.to.name, id);
-        assert_eq!(entries[0].envelope.text, "hello mail");
+        let digest = entries[0].envelope.text.strip_prefix("sha256:").and_then(|r| r.strip_suffix(" 10B"));
+        assert!(
+            digest.is_some_and(|d| d.len() == 64 && d.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))),
+            "a local receipt keeps the sha256 and length of the RAW text, got {:?}",
+            entries[0].envelope.text
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

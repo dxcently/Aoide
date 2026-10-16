@@ -735,7 +735,12 @@ by decision — no embedded database yet
   `aoide_protocol::feed::append_line` (which cuts a torn tail and fsyncs).
   The box line IS the filing: its `msgid` is the dedup key, and there is no
   second index. Reads go through `feed::read_lines`, which works on bytes, so a
-  torn multi-byte tail cannot wedge them.
+  torn multi-byte tail cannot wedge them. The rotating logs (`receipts.log`,
+  `containers.jsonl`, `reacks.log`) are read with `feed::read_lines_up_to`
+  at their cap, and rotated before an append so they stay under it; a box
+  is not capped on read yet. The filing counter reads only `base.jsonl`'s
+  tail, never the boxes. `reacks.log` limits a duplicate's re-ack to one per
+  key per hour (`reack_due`, `note_ack`).
   `mail::file_receipt` is the shared seam `conduct`'s `deliver_local` files a
   delivered message through; `mail::file_letter` is `mail send`'s own engine.
   Readers follow the files: `read_boxes` (letters), `read_receipts` (acks),

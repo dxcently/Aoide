@@ -285,11 +285,20 @@ fn cut_torn_tail(file: &mut File) -> std::io::Result<()> {
 /// character cannot make the whole log unreadable, and the caller parses each
 /// record and skips the ones that do not parse. A missing file is empty.
 pub fn read_lines(path: &Path) -> std::io::Result<Vec<Vec<u8>>> {
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
+    read_lines_up_to(path, u64::MAX)
+}
+
+/// [`read_lines`] for a log its caller keeps under `cap` bytes: at most the
+/// first `cap` bytes are read, so a file past the cap costs `cap` and no more.
+/// A record the bound cuts is torn and dropped, as a crash-torn record is.
+pub fn read_lines_up_to(path: &Path, cap: u64) -> std::io::Result<Vec<Vec<u8>>> {
+    let file = match File::open(path) {
+        Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
+    let mut bytes = Vec::new();
+    file.take(cap).read_to_end(&mut bytes)?;
     let mut lines: Vec<Vec<u8>> = bytes.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect();
     lines.pop();
     Ok(lines)
@@ -606,6 +615,15 @@ mod tests {
         let path = tmp_path("torn-utf8");
         std::fs::write(&path, b"x\n\xE2\x82").unwrap();
         assert_eq!(read_lines(&path).unwrap(), vec![b"x".to_vec()]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn read_lines_up_to_reads_no_further_than_the_cap() {
+        let path = tmp_path("read-cap");
+        std::fs::write(&path, b"a\nb\nc\n").unwrap();
+        assert_eq!(read_lines_up_to(&path, 4).unwrap(), vec![b"a".to_vec(), b"b".to_vec()]);
+        assert_eq!(read_lines_up_to(&path, 3).unwrap(), vec![b"a".to_vec()], "a record the bound cuts is dropped");
         std::fs::remove_file(&path).ok();
     }
 
