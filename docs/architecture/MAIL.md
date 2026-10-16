@@ -411,6 +411,14 @@ against a box nobody has read rewrites nothing. A full box refuses before
 anything is written and before any ack is owed, so the sender keeps the
 letter and retries.
 
+**Lock-hold bounds.** A read or write of one box holds the stage lock for that
+box's size, at most 16 MiB. Some operations read every box and the receipts
+under the lock, so they hold it for the store's size, at most 240 MiB plus the
+two receipt generations: `show`, `unread_for`, `names_with_unread`,
+`read_all_names`, `read_base`, `rm_older_than`, and the one-shot migrations. A
+far deposit reads every box for its key share (see above), so it holds the lock
+for the store's size too.
+
 A migrated line is capped like any other. Its box takes it when it has room;
 a line the box has no room for is parked in `_legacy`, and a line that fits
 neither stays in `base.jsonl.migrated`, which the migration keeps and which
