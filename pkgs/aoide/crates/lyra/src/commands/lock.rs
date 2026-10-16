@@ -31,7 +31,7 @@ use crate::output::{Fix, Kind, Outcome};
 use crate::registry::{arg, cmd, Registry};
 use aoide_protocol::Door;
 use serde_json::{json, Value};
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -236,26 +236,41 @@ fn wait_until(child: &mut Child, deadline: Instant) -> Option<std::process::Exit
 }
 
 /// Start hyprlock in its own process group and leave it holding the lock.
+///
+/// Its stderr goes to an unlinked scratch file, never a pipe: hyprlock
+/// outlives this process, and a pipe whose reader has exited turns its next
+/// log line into SIGPIPE — the lock would die under the user.
 fn spawn_hyprlock() -> Result<u32, String> {
+    let mut said = scratch_file().map_err(|e| format!("hyprlock stderr: {e}"))?;
+    let stderr = said.try_clone().map_err(|e| format!("hyprlock stderr: {e}"))?;
     let mut child = Command::new("hyprlock")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(stderr)
         .process_group(0)
         .spawn()
         .map_err(|e| format!("spawn hyprlock: {e}"))?;
     let settle = Instant::now() + HYPRLOCK_SETTLE;
     while Instant::now() < settle {
         if let Ok(Some(status)) = child.try_wait() {
-            let mut said = String::new();
-            if let Some(mut pipe) = child.stderr.take() {
-                let _ = pipe.read_to_string(&mut said);
-            }
-            return Err(format!("hyprlock exited at once ({status}): {}", said.trim()));
+            let mut text = String::new();
+            let _ = said.rewind();
+            let _ = said.read_to_string(&mut text);
+            return Err(format!("hyprlock exited at once ({status}): {}", text.trim()));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
     Ok(child.id())
+}
+
+/// A private read-write file with no name left on disk.
+fn scratch_file() -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("lyra-lock-{}-{nanos}", std::process::id()));
+    let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path)?;
+    std::fs::remove_file(&path)?;
+    Ok(file)
 }
 
 /// A logind session id as a D-Bus object-path label (`sd_bus_path_encode`):
@@ -307,6 +322,7 @@ esac
 here="${0%/bin/hyprlock}"
 echo "run" >> "$here/hyprlock.log"
 if [ -e "$here/hl-fail" ]; then echo "session lock already held" >&2; exit 1; fi
+if [ -e "$here/hl-late" ]; then while [ ! -e "$here/hl-speak" ]; do :; done; echo "still locked" >&2 && echo "wrote" >> "$here/hyprlock.log"; fi
 while :; do read -r _ 2>/dev/null || :; [ -e "$here/hl-stop" ] && exit 0; done
 "#;
 
@@ -461,6 +477,18 @@ case "$1" in show-user) echo 3 ;; esac
         assert_eq!(o.status.exit_code(), 1);
         assert_eq!(data(&o)["reason"], "hyprlock-failed");
         assert!(data(&o)["detail"].as_str().unwrap().contains("session lock already held"), "{o:?}");
+    }
+
+    #[test]
+    fn hyprlock_keeps_logging_after_lyra_returns() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-hllate");
+        rig.touch("hl-late");
+        let o = handle_lock(&inv(&["lock"], &[]));
+        assert_eq!(o.status, Status::Ok, "{o:?}");
+        rig.touch("hl-speak");
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(rig.log("hyprlock"), "run\nwrote\n", "a late stderr line must not kill the locker");
     }
 
     #[test]
