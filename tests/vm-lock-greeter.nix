@@ -214,6 +214,21 @@ pkgs.testers.runNixOSTest {
             "for f in /run/user/$(id -u greeter)/quickshell/by-id/*/log.qslog; do quickshell log --no-color $f; done"
         )
 
+    # Every 100 ms, the compositor's lock state into /tmp/locked.log; the
+    # watcher's pid is in /tmp/locked.pid.
+    def watch_locked(m):
+        m.succeed(khoa_cmd(m, "nohup sh -c 'while :; do hyprctl -j locked | jq -c .locked; sleep 0.1; done' > /tmp/locked.log 2>&1 & echo $! > /tmp/locked.pid"))
+
+    # Stop the watcher, and assert the session never read unlocked between
+    # its first `true` and its last.
+    def assert_never_unlocked(m):
+        m.succeed("kill $(cat /tmp/locked.pid)")
+        seen = m.succeed("cat /tmp/locked.log").split()
+        assert "true" in seen, f"never locked: {seen}"
+        first = seen.index("true")
+        last = len(seen) - 1 - seen[::-1].index("true")
+        assert all(x == "true" for x in seen[first : last + 1]), f"unlocked in between: {seen}"
+
     hyprlock_running = "ps -u khoa -o args= | grep -Eq '(^|/)hyprlock( |$)'"
 
     def wait_shell(m, secure="false"):
@@ -401,6 +416,58 @@ pkgs.testers.runNixOSTest {
         face.wait_until_fails(hyprlock_running, timeout=30)
         wait_hypr_locked(face, False)
         face.succeed("mv /etc/pam.d/aoide-lock.off /etc/pam.d/aoide-lock")
+
+    with subtest("face: a PAM stack that fails hands the held lock to hyprlock without unlocking"):
+        # A module that will not load is PAM itself failing: Linux-PAM marks
+        # it faulty and pam_authenticate returns PAM_MODULE_UNKNOWN, not the
+        # PAM_AUTH_ERR a refusing stack (pam_deny) gives — so this is an error
+        # the conversation cannot get past, not a wrong password.
+        face.succeed(
+            "mv /etc/pam.d/aoide-lock /etc/pam.d/aoide-lock.orig; "
+            "printf 'auth required /nonexistent/pam_aoide_missing.so\naccount required pam_unix.so\n' > /etc/pam.d/aoide-lock"
+        )
+        watch_locked(face)
+        o = lyra_lock(face)
+        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'PAM failed while locked'", timeout=30)
+        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'hyprlock holds the lock; letting go'", timeout=30)
+        # The host quits so the unit restarts a shell that can lock again.
+        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'aoide-quickshell ended'", timeout=30)
+        face.wait_until_succeeds(hyprlock_running, timeout=10)
+        wait_hypr_locked(face, True)
+        wait_hint(face, "no")
+        face.sleep(10)
+        face.screenshot("15-pam-error-hyprlock")
+        face.send_chars("test\n")
+        face.wait_until_fails(hyprlock_running, timeout=30)
+        wait_hypr_locked(face, False)
+        assert_never_unlocked(face)
+        face.succeed("rm /etc/pam.d/aoide-lock; mv /etc/pam.d/aoide-lock.orig /etc/pam.d/aoide-lock")
+        wait_shell(face)
+
+    with subtest("face: after a hand-over the shell locks again, and a conversation that cannot restart is handed over"):
+        floors = int(face.succeed("journalctl -b --no-pager | grep -c 'the floor takes over' || true").strip())
+        o = lyra_lock(face)
+        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+        wait_hint(face, "yes")
+        assert lock_secure(face) == "true"
+        watch_locked(face)
+        # PAM goes away under a held lock; the next refusal cannot restart
+        # the conversation, so the lock goes to hyprlock.
+        face.succeed("mv /etc/pam.d/aoide-lock /etc/pam.d/aoide-lock.off")
+        # The fixture face never reports ready; let the floor take the keys.
+        face.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'the floor takes over') -gt {floors}", timeout=30)
+        face.send_chars("wrong-password\n")
+        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'the conversation could not restart'", timeout=30)
+        face.wait_until_succeeds(hyprlock_running, timeout=30)
+        wait_hypr_locked(face, True)
+        face.succeed("mv /etc/pam.d/aoide-lock.off /etc/pam.d/aoide-lock")
+        face.sleep(10)
+        face.send_chars("test\n")
+        face.wait_until_fails(hyprlock_running, timeout=30)
+        wait_hypr_locked(face, False)
+        assert_never_unlocked(face)
+        wait_shell(face)
 
     # ══ plain: ly + hyprlock ═══════════════════════════════════════════════
     with subtest("plain: the login screen is ly"):
