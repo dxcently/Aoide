@@ -40,6 +40,16 @@ modules/dendrites/lyra/
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Selecting the lane is the switch; it sets
   `aoide.lyra.enable` `true`.
+- **`default.nix` — the lock.** `lyra lock` is this lane's command, so the
+  lane installs both lockers it may run and their PAM services: `aoide-lock`
+  for the shell's `LockHost.qml` (a service of its own, not `login`'s
+  session-and-tty stack, and a name a host can tune for the lock alone) and
+  `hyprlock` for hyprlock, whose package goes in directly rather than through
+  `programs.hyprlock` (which would also start a config-less hypridle). It
+  ships hyprlock's system-wide config, `/etc/xdg/hypr/hyprlock.conf`: the ten
+  `$aoide_lock_*` variables at the plain look, `source` of the declared then
+  the staged dress (CONTRACTS.md §4), then the widgets that read them, by
+  paint keys only. A user's own `~/.config/hypr/hyprlock.conf` wins over it.
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
   unix-socket commands, and the only consumer of Hyprland's IPC (QML never
@@ -130,7 +140,7 @@ the dress; the kitty lane names only the path. The seed publishes
 `song/declared/hyprlock.conf` the same way: the declared song's lock-screen
 dress, rendered at build time by the lyra binary (`lyra livery emit hyprlock`)
 from the same venue-recoloured notes and the song's own `lockscreen.<ext>`,
-comments only when it ships none. The host's hyprlock lane sources it before
+comments only when it ships none. hyprlock's config (the lock, above) sources it before
 `song/stage/hyprlock.conf`, so a host that has never staged a song locks in the
 declared one.
 

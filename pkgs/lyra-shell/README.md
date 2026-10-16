@@ -6,7 +6,7 @@ a shell. Nothing here runs, and no config is named here.
 
 ```
 pkgs/lyra-shell/              →   ${pkgs.lyra-shell}/share/lyra/
-  qml/        30 .qml + slots.md      qml/
+  qml/        31 .qml + slots.md      qml/
   icons/      catalog.json, selection.json, iconoir/, LICENSE-*   icons/
   preview/fixtures/{one,many,…}/      preview/fixtures/…
 ```

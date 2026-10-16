@@ -5,9 +5,9 @@ the mechanism (build walk, manifest, resolution, injected-prop contract);
 this file owns the catalog — which slot names actually have a host anchor
 wired today, so a song author knows what's real to dress.
 
-## Two anchor kinds
+## Three anchor kinds
 
-Every slot below is hosted by one of two anchors:
+Every slot below is hosted by one of three anchors:
 
 - **`WidgetSlot`** — an `Item`. Sizes itself off the loaded child and parents
   it into an existing layout (a popout body, a repeater delegate, …). The
@@ -21,6 +21,15 @@ Every slot below is hosted by one of two anchors:
   documents its namespace here — that contract (which layer, what
   identifies it to the compositor lane's layerrules) travels with the slot,
   same as extras/fallback.
+- **The session-lock host** (`LockHost.qml`) — a `Scope` holding the shell's
+  one `WlSessionLock` and one `PamContext`. Per screen it creates a
+  `WlSessionLockSurface` and, inside it, the face: an `Item`-rooted body the
+  host fills to the surface. It resolves the face through the staging engine
+  from the ACTIVE song alone (`stagingEngine.has`), never the baseline, and
+  its own plain password field — the floor — is under every face and shows
+  whenever the face is absent or fails to load. Authentication, the lock
+  itself and logind's `LockedHint` stay in the host; the face paints and
+  answers only through the `auth` extra. `lyra lock` is its only entry.
 
 Both anchor kinds resolve through the SAME baseline-fallback chain
 (`StagingEngine.resolveSong`, CONTRACTS.md §5): the active song's own file if
@@ -123,6 +132,7 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `AoideSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A song dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 | `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime songbook's songs, back to declarative, then the draft rows, which a song's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a song may dress it with its own body (cadenza and fugue do) |
+| `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml`; `lyra lock` locks through it (`ipc call lock lock`) when the staged song's own manifest entry has this slot, else runs hyprlock | `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()` | the host's floor password field: no baseline song is ever borrowed, so a song without a face is a hyprlock song |
 | `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface, over the staged cover image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active song>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the cover image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `cover set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
@@ -143,8 +153,9 @@ A namespace in this table is a **mapped layer surface** — and a song declares
 which of those it expects to be persistently mapped, by namespace, in
 `aoide.arrangement.surfaces` (`CONTRACTS.md` §5, published as
 `run/qml/songs/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
-Surfaces summoned on demand — `powermenu`/`launcher`/`switcher` here, plus the OSD, lock
-screen, greeter and `*Preview` surfaces — are deliberately **not** declared.
+Surfaces summoned on demand — `powermenu`/`launcher`/`switcher` here, plus the OSD
+and `*Preview` surfaces — are deliberately **not** declared. The lock screen is no
+layer surface at all: it is a session-lock surface the session-lock host owns.
 
 A slot is added to this table **only once a real anchor (`WidgetSlot` or
 `SurfaceSlot`) is wired for it** — matching CONTRACTS.md §5's "what IS

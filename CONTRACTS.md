@@ -2295,7 +2295,10 @@ picture being the `lockscreen.<ext>` found in `DIR`.
 No push: hyprlock reads its config afresh at every lock, so the next lock is
 already dressed.
 
-Reader: a host's hyprlock lane. It defines the ten variables with its own look
+Reader: hyprlock's own config — the lyra lane ships it as
+`/etc/xdg/hypr/hyprlock.conf`, the system-wide file hyprlock reads when the
+user has no `~/.config/hypr/hyprlock.conf`, and a host that writes its own
+takes on the same obligations. It defines the ten variables with its own look
 as their values, `source`s `song/declared/hyprlock.conf` (below) and then this
 file, and only then writes its widgets, which name the variables. hyprlang
 substitutes the LAST definition for every line parsed after it, so a dressed
@@ -2321,7 +2324,7 @@ empty or garbage sourced file is a collected config error that hyprlock logs
 sourced file is dropped at end of file; the picture decodes after the lock is
 held, and a missing or undecodable one draws the solid ground colour. Only a
 missing MAIN config exits before locking, and that file is the lane's own
-store link, never song-controlled. Re-check on every hyprlock or hyprlang
+store link (or the host's), never song-controlled. Re-check on every hyprlock or hyprlang
 bump.
 
 A song with no picture writes no variables, so it cannot undo a dress an
@@ -2350,7 +2353,7 @@ Always present on a host that declares a song: comments only when the song
 ships no picture, so no earlier song's dress outlives a switch. Read-only for
 everyone else.
 
-Reader: the host's hyprlock lane, which sources it BEFORE
+Reader: hyprlock's config (above), which sources it BEFORE
 `song/stage/hyprlock.conf`. That ordering is the whole contract: the declared
 file dresses the lock of a host that has never staged anything, and a stage
 overrides it the moment one runs. A missing file is a logged config error and
@@ -6951,7 +6954,11 @@ screen, with the picture and colours from tiers it already authors
 (`song/stage/hyprlock.conf`, §4); a song that ships none leaves the lock as the
 venue has it, and deleting the file takes the opinion away with no trace. The
 name is the render surface's, `aoide.surfaces.lockscreen`. The declared song's
-dress is rendered at build time (`song/declared/hyprlock.conf`, §4).
+dress is rendered at build time (`song/declared/hyprlock.conf`, §4). The
+picture dresses hyprlock only: a song that also ships a `widgets/lockscreen.qml`
+face is locked by the shell's session-lock host instead (`lyra lock`;
+`pkgs/lyra-shell/qml/slots.md`), and hyprlock wears the picture only when the
+shell cannot take the lock.
 
 The picture is authored at 16:9 and keeps its subject, the tile and the mark,
 inside the central ±20% of its height. The password field then sits at 26% of

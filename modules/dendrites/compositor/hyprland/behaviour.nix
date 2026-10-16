@@ -167,9 +167,15 @@ in
         # force_default_wallpaper = -1 kills Hyprland's built-in wallpaper: the
         # Aoide wallpaper is a quickshell layer surface (AoideWallpaper.qml) and
         # is the sole painter, so Hyprland must not draw its own underneath.
+        #
+        # allow_session_lock_restore: a lock client that dies leaves the
+        # session LOCKED (Hyprland paints its own lock-dead screen and takes
+        # no input to the desktop); this only lets the next client re-take
+        # the lock, which is how `lyra lock` recovers a crashed shell lock.
         misc {
             force_default_wallpaper = -1
             disable_hyprland_logo = true
+            allow_session_lock_restore = true
         }
 
         ecosystem {

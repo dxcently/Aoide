@@ -321,6 +321,15 @@ ShellRoot {
     // `openPictures()`, else the plain picker (AoideWallpaperPicker.qml).
     AoideWallpaperPicker { livery: livery; launcher: launcherSlot.item }
 
+    // The session lock (LockHost.qml): one WlSessionLock + PamContext, the
+    // active song's own `lockscreen.qml` face on every screen, and the floor
+    // field under it. `lyra lock` is its only entry (`ipc call lock lock`).
+    LockHost {
+        livery: livery
+        bridge: bridge
+        stagingEngine: stagingEngine
+    }
+
     // aoide:switcher: the one registration; it toggles whichever body the
     // `switcher` slot holds — the active song's widgets/switcher.qml, else
     // sonata's, else the plain AoideSwitcher below (the floor). Not bound
