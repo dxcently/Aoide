@@ -212,7 +212,7 @@ sakaki (over ssh from osaka):
 
 ```sh
 aoide mail outbox yomi-strix --json     # the sealed container, held for yomi's own ask
-grep '"type":"transit"' $AOIDE_ROOT/state/mail/base.jsonl | tail -n 3   # a transit line for the msgid, no mailbox, no text
+grep -rl '"type":"transit"' $AOIDE_ROOT/state/mail/ | wc -l   # 0: a hub files no transit line; the container is in the outbox and the gate
 ```
 
 yomi (wait for the timer or ask now):
@@ -231,7 +231,7 @@ osaka (the receipt waits at the relay for osaka's ask):
 ```sh
 aoide mail poll sakaki
 aoide mail outbox sakaki --json
-grep '"type":"receipt"' $AOIDE_ROOT/state/mail/base.jsonl | grep -c <msgid of T1>
+cat $AOIDE_ROOT/state/mail/receipts.log* | grep '"type":"receipt"' | grep -c <msgid of T1>
 ```
 
 Expected: `1 envelope(s) filed` (the receipt), the T1 entry gone from the outbox
@@ -261,8 +261,8 @@ aoide mail read --for conductor
 
 Expected: the text `$M yomi-to-osaka`. Then on yomi, after its next timer
 tick (or `aoide mail poll sakaki`): the T2 entry is gone from
-`aoide mail outbox sakaki`, and `grep '"type":"receipt"'
-$AOIDE_ROOT/state/mail/base.jsonl | grep -c <msgid of T2>` is `1`.
+`aoide mail outbox sakaki`, and `cat $AOIDE_ROOT/state/mail/receipts.log*
+| grep '"type":"receipt"' | grep -c <msgid of T2>` is `1`.
 
 ## 5. T3: an unsigned request is refused
 
@@ -335,8 +335,8 @@ jq -r '.container | {purpose, msgid, mesh, to: .to.node, ct_bytes: (.ct|length)}
 
 Expected: the marker and the mailbox name appear nowhere; the container shows
 `ct` as an opaque string and only routing facts beside it (node names, msgid,
-mesh, size). A `type=transit` line in `state/mail/base.jsonl` holds metadata
-and no body (MAIL.md Store). The entry leaves the spool on the poll AFTER the
+mesh, size). The hub's gate line in `state/mail/containers.jsonl` holds
+metadata and no body; no transit line is filed (MAIL.md Store). The entry leaves the spool on the poll AFTER the
 one that took the letter: yomi's poll that files it records the msgid, and the
 next poll carries that acknowledgement to the relay, which then retires its
 custody. After that second poll the `jq` glob matches nothing. The relay sees who wrote to whom, when and how
