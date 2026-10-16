@@ -34,7 +34,14 @@ Every slot below is hosted by one of three anchors:
   shellbridge action (power included) is reachable from a locked screen.
   The host starts its PAM conversation before it asks for the lock: one that
   cannot start (no `/etc/pam.d/aoide-lock`) means the host does not lock
-  (`ipc call lock lock` answers `false`) and `lyra lock` runs hyprlock.
+  (`ipc call lock lock` answers `false`) and `lyra lock` runs hyprlock. A
+  conversation that fails while locked (a PAM error, not a wrong password)
+  or cannot restart hands the held lock to hyprlock (`lyra lock
+  --hyprlock`, in its own `systemd-run --user --scope` so hyprlock outlives
+  the shell), and the host lets go of its own only once hyprlock holds
+  it, so the session never shows unlocked; the shell then quits and its
+  unit restarts it, since Quickshell 0.3.1 cannot lock again in a process
+  whose lock was let go while held.
   `lyra lock` is its only entry, and the host itself, which re-locks at
   start while `LockedHint` is still `yes` (a crashed shell's lock, taken
   back).

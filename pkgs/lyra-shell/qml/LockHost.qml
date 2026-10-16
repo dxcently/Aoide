@@ -17,8 +17,24 @@
 // start (no `/etc/pam.d/aoide-lock`) means no lock at all — `lock` answers
 // `false` and `lyra lock` runs hyprlock — never a screen that nothing can
 // open. A lock the compositor denies aborts the conversation. After a
-// refused password the conversation restarts once the old one reports
-// itself inactive.
+// refused password (a plain `Failed`, or `MaxTries`) the conversation
+// restarts once the old one reports itself inactive.
+//
+// A PAM stack that starts but then fails (`onError`: a module that will not
+// load, a broken stack) cannot open the lock, so the host hands it over:
+// once the lock is secure it runs `lyra lock --hyprlock`, and Hyprland
+// (`misc:allow_session_lock_restore`, src/managers/SessionLockManager.cpp
+// onNewSessionLock) gives hyprlock the held lock — the session never
+// unlocks. The hand-over runs in its own transient scope (`systemd-run
+// --user --scope`), so hyprlock lives outside this shell's unit and survives
+// it. Only when hyprlock is up does this host let go of its lock, by
+// destroying its `WlSessionLock` without unlocking (Quickshell sends
+// `destroy`, not `unlock_and_destroy`, which leaves hyprlock's lock
+// standing), then quits so the unit restarts a fresh shell: Quickshell 0.3.1
+// cannot take a second lock in a process whose lock was destroyed held. A
+// conversation that cannot restart while locked is handed over the same way.
+// If hyprlock cannot take it either, the host keeps the lock: closed, never
+// open.
 //
 // The face receives the universal `livery`, `bridge` as null — no shellbridge
 // behind a locked screen, so no power or other action reaches the bridge from
@@ -98,10 +114,18 @@ Scope {
     property bool _failed: false
     property bool _pamAgain: false
 
+    // The current session lock; replaced after a hand-over.
+    readonly property var sessionLock: lockLoader.item
+
     // Starts the conversation, then asks for the lock; false when PAM cannot
-    // start, and then nothing is locked.
+    // start, and then nothing is locked. A lock already held gets a live
+    // conversation if it has none.
     function lock() {
-        if (sessionLock.locked) return true
+        if (!sessionLock) return false
+        if (sessionLock.locked) {
+            if (!pam.active && !root._pamAgain && !root._handingOver) root._restartPam()
+            return true
+        }
         auth.failures = 0
         auth.busy = false
         root._failed = false
@@ -123,10 +147,60 @@ Scope {
             return
         }
         root._pamAgain = false
-        if (!sessionLock.locked) return
+        if (!sessionLock || !sessionLock.locked || root._handingOver) return
         auth.busy = false
-        if (!pam.start())
-            root._sync("Authentication could not start.", true)
+        if (!pam.start()) root._handOver("the conversation could not restart")
+    }
+
+    // ── The hand-over to hyprlock ─────────────────────────────────────────
+    property bool _handingOver: false
+    property bool _handOverWanted: false
+
+    function _handOver(why) {
+        if (root._handingOver) return
+        root._handingOver = true
+        root._pamAgain = false
+        if (pam.active) pam.abort()
+        console.warn("[aoide/lockhost] PAM failed while locked (" + why + "); handing the lock to hyprlock")
+        root._sync("Authentication is unavailable here; hyprlock is taking over.", true)
+        auth.responseRequired = false
+        // Hyprland hands a lock over only once the one held is confirmed.
+        if (sessionLock.secure) handover.running = true
+        else root._handOverWanted = true
+    }
+
+    function _handedOver(said) {
+        root._handingOver = false
+        if (!said || !said.data || said.data.locker !== "hyprlock") {
+            console.warn("[aoide/lockhost] hyprlock did not take the lock; this host keeps it")
+            root._sync("Authentication is unavailable, and hyprlock did not start.", true)
+            return
+        }
+        console.info("[aoide/lockhost] hyprlock holds the lock; letting go of this one without unlocking")
+        // `lyra lock` cleared the hint once hyprlock held the screen.
+        root._hintHave = false
+        root._hintWant = false
+        lockLoader.active = false
+        // Quickshell 0.3.1 never clears its process-wide lock manager when a
+        // held lock is destroyed (src/wayland/session_lock/lock.cpp:16-21 never
+        // resets manager->active, which manager.cpp:15 refuses on), so
+        // this process can never lock again: exit, and the unit's
+        // Restart=always brings back a shell that can.
+        Qt.callLater(Qt.quit)
+    }
+
+    property Process _handover: Process {
+        id: handover
+        // hyprlock must outlive this shell (it quits right after, and a unit
+        // stop kills its whole cgroup), so the hand-over runs in its own scope.
+        command: ["systemd-run", "--user", "--scope", "--collect", "--quiet", "lyra", "lock", "--hyprlock", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var said = null
+                try { said = JSON.parse(text) } catch (e) {}
+                root._handedOver(said)
+            }
+        }
     }
 
     property bool _hintWant: false
@@ -181,6 +255,10 @@ Scope {
                 auth.unlocked()
                 return
             }
+            if (result !== PamResult.Failed && result !== PamResult.MaxTries) {
+                root._handOver(PamResult.toString(result))
+                return
+            }
             auth.failures += 1
             root._sync("The password is incorrect.", true)
             root._failed = true
@@ -188,8 +266,7 @@ Scope {
         }
         onError: err => {
             auth.busy = false
-            root._sync("Authentication error: " + PamError.toString(err), true)
-            root._restartPam()
+            if (sessionLock && sessionLock.locked) root._handOver(PamError.toString(err))
         }
     }
 
@@ -220,133 +297,145 @@ Scope {
     property IpcHandler _ipc: IpcHandler {
         target: "lock"
         function lock(): bool { return root.lock() }
-        function secure(): bool { return sessionLock.secure }
+        function secure(): bool { return !!sessionLock && sessionLock.secure }
     }
 
-    WlSessionLock {
-        id: sessionLock
+    LazyLoader {
+        id: lockLoader
+        active: true
 
-        onSecureStateChanged: if (sessionLock.secure) root._hint(true)
-        onLockStateChanged: {
-            if (sessionLock.locked) return
-            root._pamAgain = false
-            if (pam.active) pam.abort()
-            root._hint(false)
-        }
+        WlSessionLock {
+            id: lockObj
 
-        WlSessionLockSurface {
-            id: surface
-            color: "#000000"
-
-            property var face: null
-
-            Component.onCompleted: surface._build()
-
-            function _build() {
-                if (root.faceSource === "") return
-                var comp = Qt.createComponent(root.faceSource)
-                if (comp.status === Component.Loading)
-                    comp.statusChanged.connect(function () { surface._finish(comp) })
-                else
-                    surface._finish(comp)
-            }
-
-            function _finish(comp) {
-                if (comp.status !== Component.Ready) {
-                    if (comp.status === Component.Error)
-                        console.warn("[aoide/lockhost] the face failed to load:", comp.errorString())
-                    return
-                }
-                root.auth.ready = false
-                var item = comp.createObject(faceHolder, {
-                    "livery": root.livery,
-                    "bridge": null,
-                    "auth": root.auth
-                })
-                if (!item) {
-                    console.warn("[aoide/lockhost] the face could not be created; the floor stays")
-                    return
-                }
-                item.anchors.fill = faceHolder
-                surface.face = item
-                readyWatch.restart()
-            }
-
-            Timer {
-                id: readyWatch
-                interval: root.faceReadyMs
-                onTriggered: {
-                    if (surface.face === null || root.auth.ready) return
-                    console.warn("[aoide/lockhost] the face did not report ready within", interval, "ms; the floor takes over")
-                    surface.face.destroy()
-                    surface.face = null
+            onSecureStateChanged: {
+                if (!lockObj.secure) return
+                root._hint(true)
+                if (root._handOverWanted) {
+                    root._handOverWanted = false
+                    handover.running = true
                 }
             }
+            onLockStateChanged: {
+                if (lockObj.locked) return
+                root._pamAgain = false
+                if (pam.active) pam.abort()
+                root._hint(false)
+            }
 
-            // The floor: a plain password field, under the face, shown
-            // whenever there is no face.
-            Rectangle {
-                id: floor
-                anchors.fill: parent
-                color: "#101014"
-                visible: surface.face === null
+            WlSessionLockSurface {
+                id: surface
+                color: "#000000"
 
-                Column {
-                    anchors.centerIn: parent
-                    spacing: 14
-                    width: 360
+                property var face: null
 
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        text: root.auth.userName
-                        color: "#e8e8ec"
-                        font.pixelSize: 22
+                Component.onCompleted: surface._build()
+
+                function _build() {
+                    if (root.faceSource === "") return
+                    var comp = Qt.createComponent(root.faceSource)
+                    if (comp.status === Component.Loading)
+                        comp.statusChanged.connect(function () { surface._finish(comp) })
+                    else
+                        surface._finish(comp)
+                }
+
+                function _finish(comp) {
+                    if (comp.status !== Component.Ready) {
+                        if (comp.status === Component.Error)
+                            console.warn("[aoide/lockhost] the face failed to load:", comp.errorString())
+                        return
                     }
+                    root.auth.ready = false
+                    var item = comp.createObject(faceHolder, {
+                        "livery": root.livery,
+                        "bridge": null,
+                        "auth": root.auth
+                    })
+                    if (!item) {
+                        console.warn("[aoide/lockhost] the face could not be created; the floor stays")
+                        return
+                    }
+                    item.anchors.fill = faceHolder
+                    surface.face = item
+                    readyWatch.restart()
+                }
 
-                    Rectangle {
-                        width: parent.width
-                        height: 44
-                        radius: 6
-                        color: "#1e1e24"
-                        border.color: floorField.activeFocus ? "#8ab4f8" : "#4a4a55"
-                        border.width: 2
+                Timer {
+                    id: readyWatch
+                    interval: root.faceReadyMs
+                    onTriggered: {
+                        if (surface.face === null || root.auth.ready) return
+                        console.warn("[aoide/lockhost] the face did not report ready within", interval, "ms; the floor takes over")
+                        surface.face.destroy()
+                        surface.face = null
+                    }
+                }
 
-                        TextInput {
-                            id: floorField
-                            objectName: "lockFloorField"
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            verticalAlignment: TextInput.AlignVCenter
+                // The floor: a plain password field, under the face, shown
+                // whenever there is no face.
+                Rectangle {
+                    id: floor
+                    anchors.fill: parent
+                    color: "#101014"
+                    visible: surface.face === null
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 14
+                        width: 360
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: root.auth.userName
                             color: "#e8e8ec"
-                            font.pixelSize: 18
-                            echoMode: TextInput.Password
-                            enabled: floor.visible && !root.auth.busy
-                            focus: floor.visible
-                            onAccepted: {
-                                root.auth.respond(text)
-                                text = ""
+                            font.pixelSize: 22
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 44
+                            radius: 6
+                            color: "#1e1e24"
+                            border.color: floorField.activeFocus ? "#8ab4f8" : "#4a4a55"
+                            border.width: 2
+
+                            TextInput {
+                                id: floorField
+                                objectName: "lockFloorField"
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: "#e8e8ec"
+                                font.pixelSize: 18
+                                echoMode: TextInput.Password
+                                enabled: floor.visible && !root.auth.busy
+                                focus: floor.visible
+                                onAccepted: {
+                                    root.auth.respond(text)
+                                    text = ""
+                                }
                             }
+                        }
+
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            text: root.auth.message
+                            color: root.auth.messageIsError ? "#ff8a80" : "#b0b0b8"
+                            font.pixelSize: 14
                         }
                     }
 
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
-                        text: root.auth.message
-                        color: root.auth.messageIsError ? "#ff8a80" : "#b0b0b8"
-                        font.pixelSize: 14
-                    }
+                    onVisibleChanged: if (visible) floorField.forceActiveFocus()
+                    Component.onCompleted: if (visible) floorField.forceActiveFocus()
                 }
 
-                onVisibleChanged: if (visible) floorField.forceActiveFocus()
-                Component.onCompleted: if (visible) floorField.forceActiveFocus()
-            }
-
-            Item {
-                id: faceHolder
-                anchors.fill: parent
+                Item {
+                    id: faceHolder
+                    anchors.fill: parent
+                }
             }
         }
     }

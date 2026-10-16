@@ -116,7 +116,9 @@ start at [[aoide-cli]] and the group pages linked below.
   alias): the running shell's `LockHost` in the staged song's face when that
   song dresses the `lockscreen` slot and the shell's PAM service
   (`/etc/pam.d/aoide-lock`) exists, confirmed by the compositor within 5 s,
-  else hyprlock, which clears a `LockedHint` a dead shell lock left at `yes`.
+  else hyprlock, which clears a `LockedHint` a dead shell lock left at `yes`;
+  `--hyprlock` skips the shell (the lock host's hand-over when its PAM
+  conversation fails while it holds the lock).
   `lyra lock hint yes|no` sets logind's `LockedHint`, which the lock host
   calls on lock and unlock; bare `lyra lock hint` reads it, which the lock
   host does at start to take back a lock its crashed predecessor held.

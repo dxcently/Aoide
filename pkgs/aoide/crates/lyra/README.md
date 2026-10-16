@@ -415,7 +415,11 @@ are core `aoide` identity, root `AGENTS.md`).
   lock host, hangs or never confirms, runs `hyprlock` in its own process
   group; a hyprlock that exits within 500 ms is a failure (`hyprlock-failed`,
   exit 1), never a lock — unless the shell, asked `secure` once more, now
-  answers `true` (a confirmation that came late), which is a shell lock. `LockedHint` marks the shell's lock only: hyprlock
+  answers `true` (a confirmation that came late), which is a shell lock.
+  `lock --hyprlock` skips the shell: LockHost's hand-over when its PAM
+  conversation fails under a held lock — Hyprland
+  (`misc:allow_session_lock_restore`) gives hyprlock the held lock, and the
+  shell then drops its own without unlocking. `LockedHint` marks the shell's lock only: hyprlock
   sets none (locked-state readers see it by its process), so once hyprlock
   holds the screen a hint still at `yes` — a dead shell lock — is cleared
   (`hintCleared`). `lock hint yes|no` sets logind's `LockedHint` with

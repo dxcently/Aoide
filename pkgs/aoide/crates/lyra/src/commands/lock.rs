@@ -33,7 +33,7 @@
 
 use crate::dispatch::Invocation;
 use crate::output::{Fix, Kind, Outcome};
-use crate::registry::{arg, cmd, Registry};
+use crate::registry::{arg, cmd, flag, Registry};
 use aoide_protocol::Door;
 use serde_json::{json, Value};
 use std::io::{Read, Seek};
@@ -63,11 +63,15 @@ pub fn register(r: &mut Registry) {
         path: ["lock"],
         summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s) when the shell's PAM service /etc/pam.d/aoide-lock exists; every other song, a missing PAM service, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
         args: [],
-        flags: [],
+        flags: [flag!(
+            "hyprlock",
+            "bool",
+            "Lock with hyprlock and never ask the shell: the shell's own hand-over when its PAM conversation fails while it holds the lock (hyprlock takes the held lock over, misc:allow_session_lock_restore)."
+        )],
         gated: false,
         implemented: true,
         handler: handle_lock,
-        examples: ["lock", "lock --json"],
+        examples: ["lock", "lock --json", "lock --hyprlock --json"],
         brief: "Lock the screen in the staged song's face.",
         doors: &[Door::Cli],
     ));
@@ -85,14 +89,14 @@ pub fn register(r: &mut Registry) {
     ));
 }
 
-fn handle_lock(_inv: &Invocation) -> Outcome {
-    lock_with(Path::new(SHELL_PAM))
+fn handle_lock(inv: &Invocation) -> Outcome {
+    lock_with(Path::new(SHELL_PAM), inv.flag_present("hyprlock"))
 }
 
-fn lock_with(shell_pam: &Path) -> Outcome {
+fn lock_with(shell_pam: &Path, hyprlock_only: bool) -> Outcome {
     let cmd = "lock";
     let song = active_song();
-    let face = song.as_deref().filter(|s| dresses_face(&manifest_path(), s));
+    let face = song.as_deref().filter(|s| !hyprlock_only && dresses_face(&manifest_path(), s));
     let mut shell_refused = None;
     if let Some(song) = face {
         let tried = if shell_pam.is_file() {
@@ -448,7 +452,7 @@ esac
         }
 
         fn lock(&self) -> Outcome {
-            lock_with(&self.root.join("pam/aoide-lock"))
+            lock_with(&self.root.join("pam/aoide-lock"), false)
         }
 
         fn touch(&self, name: &str) {
@@ -684,6 +688,21 @@ esac
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert_eq!(data(&o)["locker"], "shell");
         assert_eq!(rig.log("hyprlock"), "run\n");
+    }
+
+    #[test]
+    fn hyprlock_only_never_asks_the_shell_and_clears_its_hint() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-handover");
+        rig.stage("barcarolle", FACE);
+        rig.touch("qs-secure");
+        rig.touch("lh-yes");
+        let o = lock_with(&rig.root.join("pam/aoide-lock"), true);
+        assert_eq!(o.status, Status::Ok, "{o:?}");
+        assert_eq!(data(&o)["locker"], "hyprlock");
+        assert!(data(&o)["shellRefused"].is_null(), "{o:?}");
+        assert_eq!(data(&o)["hintCleared"], true);
+        assert_eq!(rig.log("quickshell"), "");
     }
 
     #[test]
