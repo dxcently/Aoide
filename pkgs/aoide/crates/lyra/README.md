@@ -404,12 +404,18 @@ are core `aoide` identity, root `AGENTS.md`).
 - `commands::lock` — `lock` and `lock hint [yes|no]`, the one lock entry
   (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
   staged song whose OWN manifest entry carries `lockscreen` is locked by the
-  running shell: `quickshell -p run/qml/shell.qml ipc call lock lock`, then
-  `ipc call lock secure` until it answers `true` (the compositor confirmed
-  the lock) inside 5 s. A song with no face, and a shell that is down, has
-  no lock host, hangs or never confirms, runs `hyprlock` in its own process
+  running shell when `/etc/pam.d/aoide-lock` exists:
+  `quickshell -p run/qml/shell.qml ipc call lock lock` (the shell answers
+  `false` when its PAM conversation cannot start, and then never locks),
+  then `ipc call lock secure` until it answers `true` (the compositor
+  confirmed the lock) inside 5 s. The budget is 5 s, not 2 s, because each
+  `quickshell ipc` client takes about 1.2 s to start on a slow machine (the
+  graphical VM test) and a lock is two of them at least. A song with no
+  face, a missing PAM service, and a shell that is down, refuses, has no
+  lock host, hangs or never confirms, runs `hyprlock` in its own process
   group; a hyprlock that exits within 500 ms is a failure (`hyprlock-failed`,
-  exit 1), never a lock. `LockedHint` marks the shell's lock only: hyprlock
+  exit 1), never a lock — unless the shell, asked `secure` once more, now
+  answers `true` (a confirmation that came late), which is a shell lock. `LockedHint` marks the shell's lock only: hyprlock
   sets none (locked-state readers see it by its process), so once hyprlock
   holds the screen a hint still at `yes` — a dead shell lock — is cleared
   (`hintCleared`). `lock hint yes|no` sets logind's `LockedHint` with

@@ -12,6 +12,14 @@
 // `quickshell ipc call lock lock`, then polls `ipc call lock secure` until the
 // compositor confirms. Nothing else locks through here.
 //
+// PAM first, the lock second: `lock` starts the `aoide-lock` conversation and
+// only then asks the compositor for the lock. A conversation that cannot
+// start (no `/etc/pam.d/aoide-lock`) means no lock at all — `lock` answers
+// `false` and `lyra lock` runs hyprlock — never a screen that nothing can
+// open. A lock the compositor denies aborts the conversation. After a
+// refused password the conversation restarts once the old one reports
+// itself inactive.
+//
 // The face receives the universal `livery`, `bridge` as null — no shellbridge
 // behind a locked screen, so no power or other action reaches the bridge from
 // it, the same as the greeter — and one extra, `auth`,
@@ -35,14 +43,19 @@
 //
 // LockedHint: `lyra lock hint yes|no` follows the lock, so the popup
 // watchers' locked check sees this lock the way it sees hyprlock's process:
-// `yes` from `lockStateChanged` once the compositor grants the lock, `no` from
-// the unlock itself, since `WlSessionLock` emits nothing for an unlock it was
-// asked for (Quickshell 0.3.1 checks `isLocked()` after releasing the lock).
+// `yes` once the compositor reports the lock secure, `no` from the unlock
+// itself (`WlSessionLock` emits nothing for an unlock it was asked for:
+// Quickshell 0.3.1 checks `isLocked()` after releasing the lock) or from a
+// lock the compositor dropped. The writes are serialized — one `lyra lock
+// hint` at a time, the last state wanted written last, none repeated — so a
+// denied lock never leaves a `yes` behind.
 // The hint marks this host's lock only — hyprlock sets none, and `lyra lock`
 // clears a stale `yes` once hyprlock holds the screen. A crashed shell leaves
 // the hint at `yes` and the compositor keeps the session locked; this host
 // reads the hint when it starts (`lyra lock hint`) and, on `yes`, locks at
 // once — Hyprland's `misc:allow_session_lock_restore` hands it the lock back.
+// If its PAM conversation cannot start it hands the lock to `lyra lock`,
+// which then runs hyprlock.
 
 import QtQuick
 import Quickshell
@@ -83,31 +96,57 @@ Scope {
     }
 
     property bool _failed: false
+    property bool _pamAgain: false
 
+    // Starts the conversation, then asks for the lock; false when PAM cannot
+    // start, and then nothing is locked.
     function lock() {
-        if (sessionLock.locked) return
+        if (sessionLock.locked) return true
         auth.failures = 0
+        auth.busy = false
         root._failed = false
+        root._pamAgain = false
+        if (pam.active) pam.abort()
+        if (!pam.start()) {
+            console.warn("[aoide/lockhost] the aoide-lock PAM conversation cannot start; not locking")
+            return false
+        }
         sessionLock.locked = true
-        root._startPam()
+        return true
     }
 
-    // A conversation that just completed may still read active for a beat,
-    // so a restart waits it out rather than leaving the face with nothing
-    // to answer.
-    function _startPam() {
-        if (!sessionLock.locked) return
+    // A conversation that just ended may still read active; the restart then
+    // waits for its `activeChanged`.
+    function _restartPam() {
         if (pam.active) {
-            Qt.callLater(root._startPam)
+            root._pamAgain = true
             return
         }
+        root._pamAgain = false
+        if (!sessionLock.locked) return
         auth.busy = false
         if (!pam.start())
             root._sync("Authentication could not start.", true)
     }
 
+    property bool _hintWant: false
+    property bool _hintHave: false
+
     function _hint(locked) {
-        Quickshell.execDetached(["lyra", "lock", "hint", locked ? "yes" : "no"])
+        root._hintWant = locked
+        root._hintFlush()
+    }
+
+    function _hintFlush() {
+        if (hintWriter.running || root._hintWant === root._hintHave) return
+        root._hintHave = root._hintWant
+        hintWriter.command = ["lyra", "lock", "hint", root._hintHave ? "yes" : "no"]
+        hintWriter.running = true
+    }
+
+    property Process _hintWriter: Process {
+        id: hintWriter
+        onExited: root._hintFlush()
     }
 
     function _sync(message, isError) {
@@ -120,6 +159,8 @@ Scope {
     property PamContext _pam: PamContext {
         id: pam
         config: "aoide-lock"
+
+        onActiveChanged: if (!pam.active && root._pamAgain) root._restartPam()
 
         onPamMessage: {
             auth.busy = false
@@ -143,12 +184,12 @@ Scope {
             auth.failures += 1
             root._sync("The password is incorrect.", true)
             root._failed = true
-            Qt.callLater(root._startPam)
+            root._restartPam()
         }
         onError: err => {
             auth.busy = false
             root._sync("Authentication error: " + PamError.toString(err), true)
-            Qt.callLater(root._startPam)
+            root._restartPam()
         }
     }
 
@@ -168,7 +209,9 @@ Scope {
                 try { said = JSON.parse(text) } catch (e) { return }
                 if (said && said.data && said.data.lockedHint === true) {
                     console.info("[aoide/lockhost] LockedHint is still yes; taking the lock back")
-                    root.lock()
+                    root._hintHave = true
+                    root._hintWant = true
+                    if (!root.lock()) Quickshell.execDetached(["lyra", "lock"])
                 }
             }
         }
@@ -176,14 +219,20 @@ Scope {
 
     property IpcHandler _ipc: IpcHandler {
         target: "lock"
-        function lock(): void { root.lock() }
+        function lock(): bool { return root.lock() }
         function secure(): bool { return sessionLock.secure }
     }
 
     WlSessionLock {
         id: sessionLock
 
-        onLockStateChanged: root._hint(sessionLock.locked)
+        onSecureStateChanged: if (sessionLock.secure) root._hint(true)
+        onLockStateChanged: {
+            if (sessionLock.locked) return
+            root._pamAgain = false
+            if (pam.active) pam.abort()
+            root._hint(false)
+        }
 
         WlSessionLockSurface {
             id: surface

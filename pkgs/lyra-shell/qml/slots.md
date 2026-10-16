@@ -32,6 +32,9 @@ Every slot below is hosted by one of three anchors:
   lock itself and logind's `LockedHint` stay in the host; the face paints and
   answers only through the `auth` extra; it gets `bridge` as null, so no
   shellbridge action (power included) is reachable from a locked screen.
+  The host starts its PAM conversation before it asks for the lock: one that
+  cannot start (no `/etc/pam.d/aoide-lock`) means the host does not lock
+  (`ipc call lock lock` answers `false`) and `lyra lock` runs hyprlock.
   `lyra lock` is its only entry, and the host itself, which re-locks at
   start while `LockedHint` is still `yes` (a crashed shell's lock, taken
   back).
@@ -40,6 +43,13 @@ Every slot below is hosted by one of three anchors:
   entry point of its own shell: the greeter lane builds a store tree with it
   as `shell.qml` and runs it as greetd's greeter in cage, where greetd's IPC
   authenticates and launches the session.
+
+  Both faces run inside their host's own process — the session shell, or
+  the greeter's — with that process's rights: QML has no sandbox. That a
+  face spawns nothing (no `Process`, no `execDetached`) and reaches the
+  system only through `auth` is a review rule for song authors, not a
+  boundary the host enforces; a null `bridge` removes the shellbridge, not
+  QML's own reach.
 
 Both anchor kinds resolve through the SAME baseline-fallback chain
 (`StagingEngine.resolveSong`, CONTRACTS.md §5): the active song's own file if

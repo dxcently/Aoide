@@ -114,7 +114,8 @@ start at [[aoide-cli]] and the group pages linked below.
   the launcher's cached thumbnails.
 - `lyra lock` — the one lock entry (`SUPER+ESCAPE`, the power menu, the `lock`
   alias): the running shell's `LockHost` in the staged song's face when that
-  song dresses the `lockscreen` slot, confirmed by the compositor within 5 s,
+  song dresses the `lockscreen` slot and the shell's PAM service
+  (`/etc/pam.d/aoide-lock`) exists, confirmed by the compositor within 5 s,
   else hyprlock, which clears a `LockedHint` a dead shell lock left at `yes`.
   `lyra lock hint yes|no` sets logind's `LockedHint`, which the lock host
   calls on lock and unlock; bare `lyra lock hint` reads it, which the lock

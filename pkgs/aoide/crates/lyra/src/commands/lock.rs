@@ -3,18 +3,23 @@
 //!
 //! - A staged song that dresses the `lockscreen` slot (its own entry in
 //!   `run/qml/songs/manifest.json`, no baseline fallback) is locked by the
-//!   running shell: `quickshell -p <run/qml/shell.qml> ipc call lock lock`
-//!   reaches `LockHost.qml`, which holds the Wayland session lock and paints
-//!   the song's face. The call counts only once the shell answers
+//!   running shell, when the shell's PAM service (`/etc/pam.d/aoide-lock`)
+//!   exists: `quickshell -p <run/qml/shell.qml> ipc call lock lock` reaches
+//!   `LockHost.qml`, which starts its PAM conversation, holds the Wayland
+//!   session lock and paints the song's face, and answers `false` when the
+//!   conversation cannot start. The call counts only once the shell answers
 //!   `ipc call lock secure` with `true` — the compositor has confirmed the
-//!   lock — inside [`SHELL_ANSWER`]. A shell that is not running, does not
-//!   answer, or never confirms falls through to hyprlock, so the command
-//!   never reports a lock it did not get.
+//!   lock — inside [`SHELL_ANSWER`]. A missing PAM service, and a shell that
+//!   is not running, refuses, does not answer, or never confirms, falls
+//!   through to hyprlock, so the command never reports a lock it did not get
+//!   and never leaves a lock nothing can open.
 //! - Every other song, and that fall-through, runs `hyprlock`, dressed by
 //!   `song/declared/hyprlock.conf` and `song/stage/hyprlock.conf` through the
 //!   host's hyprlock config. hyprlock is spawned in its own process group and
 //!   left running; a hyprlock that exits inside [`HYPRLOCK_SETTLE`] (another
-//!   lock holds the session, no config) is a failure, never a lock.
+//!   lock holds the session, no config) is a failure, never a lock — unless
+//!   the shell, asked once more, now answers `secure`: its confirmation came
+//!   late and the shell holds the lock.
 //!
 //! `lyra lock hint yes|no` sets logind's `LockedHint` on the session a lock
 //! covers ([`aoide_protocol::dialog::lock_session_id`]). LockHost calls it
@@ -41,7 +46,14 @@ use std::time::{Duration, Instant};
 pub const FACE_SLOT: &str = "lockscreen";
 
 /// How long the shell has to take the lock and the compositor to confirm it.
+/// Each `quickshell ipc` client takes about 1.2 s to start on a slow
+/// machine (measured in the graphical VM test), and a lock is at least two
+/// of them (`lock`, then `secure`), so 5 s, not the 2 s first planned.
 const SHELL_ANSWER: Duration = Duration::from_secs(5);
+
+/// The PAM service LockHost's conversation runs; without it the shell
+/// cannot unlock, so it is never asked to lock.
+const SHELL_PAM: &str = "/etc/pam.d/aoide-lock";
 
 /// How long a spawned hyprlock must stay up to count as holding the lock.
 const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
@@ -49,7 +61,7 @@ const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["lock"],
-        summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s); every other song, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
+        summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s) when the shell's PAM service /etc/pam.d/aoide-lock exists; every other song, a missing PAM service, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
         args: [],
         flags: [],
         gated: false,
@@ -74,16 +86,22 @@ pub fn register(r: &mut Registry) {
 }
 
 fn handle_lock(_inv: &Invocation) -> Outcome {
+    lock_with(Path::new(SHELL_PAM))
+}
+
+fn lock_with(shell_pam: &Path) -> Outcome {
     let cmd = "lock";
     let song = active_song();
     let face = song.as_deref().filter(|s| dresses_face(&manifest_path(), s));
     let mut shell_refused = None;
     if let Some(song) = face {
-        match shell_lock(SHELL_ANSWER) {
-            Ok(()) => {
-                return Outcome::ok(cmd, format!("locked by the shell in `{song}`'s face"))
-                    .with_data(json!({ "locker": "shell", "song": song }));
-            }
+        let tried = if shell_pam.is_file() {
+            shell_lock(SHELL_ANSWER)
+        } else {
+            Err(format!("the shell's PAM service {} is missing", shell_pam.display()))
+        };
+        match tried {
+            Ok(()) => return shell_locked(cmd, song),
             Err(why) => shell_refused = Some(why),
         }
     }
@@ -101,16 +119,29 @@ fn handle_lock(_inv: &Invocation) -> Outcome {
                 "hintCleared": clear_stale_hint(),
             }))
         }
-        Err(detail) => Outcome::refuse(
-            cmd,
-            Kind::Failed,
-            "the screen is not locked",
-            "hyprlock did not stay up",
-            Fix::Run("hyprlock".to_string()),
-        )
-        .with_fields(json!({ "reason": "hyprlock-failed", "shellRefused": shell_refused }))
-        .with_detail(detail),
+        Err(detail) => {
+            // A shell that was asked may have confirmed after its budget:
+            // hyprlock then finds the session locked and leaves at once.
+            if let (Some(song), true) = (face, shell_refused.is_some() && shell_pam.is_file()) {
+                if qs_call(&["secure"], Instant::now() + SHELL_ANSWER).is_ok_and(|s| s == "true") {
+                    return shell_locked(cmd, song);
+                }
+            }
+            Outcome::refuse(
+                cmd,
+                Kind::Failed,
+                "the screen is not locked",
+                "hyprlock did not stay up",
+                Fix::Run("hyprlock".to_string()),
+            )
+            .with_fields(json!({ "reason": "hyprlock-failed", "shellRefused": shell_refused }))
+            .with_detail(detail)
+        }
     }
+}
+
+fn shell_locked(cmd: &str, song: &str) -> Outcome {
+    Outcome::ok(cmd, format!("locked by the shell in `{song}`'s face")).with_data(json!({ "locker": "shell", "song": song }))
 }
 
 fn handle_hint(inv: &Invocation) -> Outcome {
@@ -215,9 +246,10 @@ fn dresses_face(manifest: &Path, song: &str) -> bool {
 /// Ask the running shell to lock, then wait for the compositor's word.
 fn shell_lock(budget: Duration) -> Result<(), String> {
     let deadline = Instant::now() + budget;
-    let said = qs_call(&["lock"], deadline)?;
-    if !said.is_empty() {
-        return Err(format!("the shell has no lock host: {said}"));
+    match qs_call(&["lock"], deadline)?.as_str() {
+        "true" => {}
+        "false" => return Err("the shell could not start its PAM conversation".to_string()),
+        said => return Err(format!("the shell has no lock host: {said}")),
     }
     let unconfirmed = || format!("the compositor did not confirm the shell's lock within {} s", budget.as_secs());
     loop {
@@ -359,8 +391,10 @@ if [ -e "$here/qs-hang" ]; then while :; do :; done; fi
 if [ -e "$here/qs-dead" ]; then echo "No running instances for $2"; exit 255; fi
 fn=""; for a in "$@"; do fn="$a"; done
 case "$fn" in
-lock) [ -e "$here/qs-nohost" ] && echo "Not ready to accept queries yet."; exit 0 ;;
-secure) if [ -e "$here/qs-secure" ]; then echo true; else echo false; fi ;;
+lock) if [ -e "$here/qs-nohost" ]; then echo "Not ready to accept queries yet."
+  elif [ -e "$here/qs-nopam" ]; then echo false
+  else echo true; fi; exit 0 ;;
+secure) if [ -e "$here/qs-secure" ] || { [ -e "$here/qs-late" ] && [ -e "$here/hyprlock.log" ]; }; then echo true; else echo false; fi ;;
 esac
 "#;
 
@@ -400,6 +434,8 @@ esac
             let stage = root.join("aoide/song/stage");
             std::fs::create_dir_all(&stage).unwrap();
             std::fs::create_dir_all(root.join("aoide/run/qml/songs")).unwrap();
+            std::fs::create_dir_all(root.join("pam")).unwrap();
+            std::fs::write(root.join("pam/aoide-lock"), b"").unwrap();
             std::env::set_var("PATH", &bin);
             std::env::set_var("AOIDE_STAGE_DIR", &stage);
             std::env::remove_var("XDG_SESSION_ID");
@@ -409,6 +445,10 @@ esac
         fn stage(&self, song: &str, manifest: &str) {
             std::fs::write(self.root.join("aoide/song/stage/livery.json"), format!(r#"{{"song":"{song}"}}"#)).unwrap();
             std::fs::write(self.root.join("aoide/run/qml/songs/manifest.json"), manifest).unwrap();
+        }
+
+        fn lock(&self) -> Outcome {
+            lock_with(&self.root.join("pam/aoide-lock"))
         }
 
         fn touch(&self, name: &str) {
@@ -441,7 +481,7 @@ esac
         let rig = Rig::new("lock-shell");
         rig.stage("barcarolle", FACE);
         rig.touch("qs-secure");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert_eq!(data(&o)["locker"], "shell");
         let calls = rig.log("quickshell");
@@ -458,7 +498,7 @@ esac
         // sonata dresses no lockscreen; the baseline is never borrowed.
         rig.stage("sonata", FACE);
         rig.touch("qs-secure");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert_eq!(data(&o)["locker"], "hyprlock");
         assert!(data(&o)["shellRefused"].is_null());
@@ -470,7 +510,7 @@ esac
     fn nothing_staged_runs_hyprlock() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let rig = Rig::new("lock-unstaged");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert_eq!(data(&o)["locker"], "hyprlock");
         assert_eq!(rig.log("quickshell"), "");
@@ -483,7 +523,7 @@ esac
             let rig = Rig::new(tag);
             rig.stage("barcarolle", FACE);
             rig.touch(marker);
-            let o = handle_lock(&inv(&["lock"], &[]));
+            let o = rig.lock();
             assert_eq!(o.status, Status::Ok, "{o:?}");
             assert_eq!(data(&o)["locker"], "hyprlock");
             assert!(data(&o)["shellRefused"].as_str().unwrap().contains(said), "{o:?}");
@@ -496,7 +536,7 @@ esac
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let rig = Rig::new("lock-unconfirmed");
         rig.stage("barcarolle", FACE);
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert_eq!(data(&o)["locker"], "hyprlock");
         assert!(data(&o)["shellRefused"].as_str().unwrap().contains("did not confirm"), "{o:?}");
@@ -509,7 +549,7 @@ esac
         rig.stage("barcarolle", FACE);
         rig.touch("qs-hang");
         let started = Instant::now();
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         let took = started.elapsed();
         assert!(took < SHELL_ANSWER + Duration::from_secs(2), "took {took:?}");
         assert_eq!(data(&o)["locker"], "hyprlock", "{o:?}");
@@ -521,7 +561,7 @@ esac
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let rig = Rig::new("lock-hlfail");
         rig.touch("hl-fail");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(o.status, Status::Error, "{o:?}");
         assert_eq!(o.status.exit_code(), 1);
         assert_eq!(data(&o)["reason"], "hyprlock-failed");
@@ -533,7 +573,7 @@ esac
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let rig = Rig::new("lock-hllate");
         rig.touch("hl-late");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(o.status, Status::Ok, "{o:?}");
         rig.touch("hl-speak");
         std::thread::sleep(Duration::from_millis(300));
@@ -579,7 +619,7 @@ esac
         rig.stage("barcarolle", FACE);
         rig.touch("qs-dead");
         rig.touch("lh-yes");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(data(&o)["locker"], "hyprlock", "{o:?}");
         assert_eq!(data(&o)["hintCleared"], true);
         assert!(rig.log("busctl").ends_with("SetLockedHint b false\n"), "{}", rig.log("busctl"));
@@ -587,7 +627,7 @@ esac
         let rig = Rig::new("lock-hint-clear");
         rig.stage("barcarolle", FACE);
         rig.touch("qs-dead");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(data(&o)["hintCleared"], false);
         assert_eq!(rig.log("busctl"), "");
     }
@@ -598,9 +638,52 @@ esac
         let rig = Rig::new("lock-hint-hlfail");
         rig.touch("hl-fail");
         rig.touch("lh-yes");
-        let o = handle_lock(&inv(&["lock"], &[]));
+        let o = rig.lock();
         assert_eq!(o.status, Status::Error, "{o:?}");
         assert_eq!(rig.log("busctl"), "", "the compositor may still hold a dead shell's lock");
+    }
+
+    #[test]
+    fn a_missing_shell_pam_service_runs_hyprlock_and_never_asks_the_shell() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-nopamfile");
+        rig.stage("barcarolle", FACE);
+        rig.touch("qs-secure");
+        std::fs::remove_file(rig.root.join("pam/aoide-lock")).unwrap();
+        let o = rig.lock();
+        assert_eq!(o.status, Status::Ok, "{o:?}");
+        assert_eq!(data(&o)["locker"], "hyprlock");
+        assert!(data(&o)["shellRefused"].as_str().unwrap().contains("PAM service"), "{o:?}");
+        assert_eq!(rig.log("quickshell"), "", "a shell that could not unlock is never asked to lock");
+    }
+
+    #[test]
+    fn a_shell_whose_pam_conversation_cannot_start_falls_through_at_once() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-nopam");
+        rig.stage("barcarolle", FACE);
+        rig.touch("qs-nopam");
+        let started = Instant::now();
+        let o = rig.lock();
+        assert!(started.elapsed() < SHELL_ANSWER, "a refusal is not waited out");
+        assert_eq!(data(&o)["locker"], "hyprlock", "{o:?}");
+        assert!(data(&o)["shellRefused"].as_str().unwrap().contains("PAM conversation"), "{o:?}");
+        assert!(!rig.log("quickshell").contains("secure"), "{}", rig.log("quickshell"));
+    }
+
+    #[test]
+    fn a_late_shell_confirmation_is_a_shell_lock_not_a_hyprlock_failure() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-late");
+        rig.stage("barcarolle", FACE);
+        // The compositor confirms only after the budget (here: once hyprlock
+        // has tried), and hyprlock then finds the session locked.
+        rig.touch("qs-late");
+        rig.touch("hl-fail");
+        let o = rig.lock();
+        assert_eq!(o.status, Status::Ok, "{o:?}");
+        assert_eq!(data(&o)["locker"], "shell");
+        assert_eq!(rig.log("hyprlock"), "run\n");
     }
 
     #[test]

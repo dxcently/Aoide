@@ -360,7 +360,10 @@
 - **`lyra lock` never reports a lock it did not get, and its tests never
   reach a real locker.** The shell counts only after `ipc call lock secure`
   answers `true`; anything short of that falls through to hyprlock, and a
-  hyprlock that exits inside the settle window is a refusal. A stale
+  hyprlock that exits inside the settle window is a refusal unless one more
+  `secure` says the shell holds the lock after all. The shell is never asked
+  to lock without `/etc/pam.d/aoide-lock`: a lock nothing can open is the
+  one outcome worse than no lock. A stale
   `LockedHint` is cleared only after hyprlock holds the screen: a failed
   hyprlock leaves it standing, because the restarted shell re-locks on it.
   The face is
