@@ -1743,6 +1743,12 @@ thread_local! {
     static STAGE_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// Whether THIS thread holds the `.stage.lock` right now: true inside
+/// [`with_stage_lock`] or [`try_stage_lock`] on a successful lock.
+pub fn stage_lock_held() -> bool {
+    STAGE_LOCK_HELD.with(std::cell::Cell::get)
+}
+
 /// Sets [`STAGE_LOCK_HELD`] for as long as it lives. Created only after a
 /// successful `flock` of `.stage.lock`, and dropped before the lock is released.
 struct StampedByThisThread;
