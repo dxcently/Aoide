@@ -23,7 +23,8 @@ in
         `run/qml/` (the live-deployed QML tree), and the composed
         `songbook/` all hang off this one directory. Exported as
         `AOIDE_ROOT` on every unit that runs an `aoide`/`aoided`/`lyra`
-        binary and into interactive shells. Core code default, matching
+        binary, and into `aoide.user`'s own login shells (never another
+        account's, root's included). Core code default, matching
         this option's own default exactly (unset == set-to-default): `~/.aoide`,
         no nix required.
 
@@ -45,7 +46,8 @@ in
         The dev git checkout — the seam `rice declare`'s commit-in step,
         `aoide soundcheck`'s scan root, and the committed songbook's `nix
         eval` registry regen all read the checkout through. Exported as
-        `AOIDE_FLAKE_ROOT` on the same units/shells `aoide.root` is.
+        `AOIDE_FLAKE_ROOT` on the same units, and in `aoide.user`'s own login
+        shells, as `aoide.root` is.
         Separate from the runtime root (`aoide.root`) since L-C2: composing
         a song happens under the runtime root, committing it happens in
         this checkout. Core code default, matching this option's own

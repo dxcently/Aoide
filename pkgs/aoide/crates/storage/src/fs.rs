@@ -1436,49 +1436,20 @@ fn shallow_state_reason(state: &std::path::Path, homes: &[std::path::PathBuf]) -
 }
 
 /// Every home the shallow rule protects, each with its parents: a non-empty
-/// `$HOME`, the passwd home of the effective uid, and `/home/$AOIDE_USER` (the
-/// home [`aoide_home`] names) when `$AOIDE_USER` is non-empty. A run may mean
-/// any of them, so all are guarded together. [`aoide_home`]'s literal
-/// `/home/khoa` fallback, a guess about some other machine, is never one.
+/// `$HOME`, the passwd home of the effective uid, and the home `$AOIDE_USER`
+/// names (its passwd home, `/home/<user>` without an entry) when non-empty. A
+/// run may mean any of them, so all are guarded together.
 #[cfg(unix)]
 fn guard_homes() -> Vec<std::path::PathBuf> {
     let named = |var: &str| std::env::var_os(var).filter(|v| !v.is_empty());
     let home = named("HOME").map(std::path::PathBuf::from);
-    let user = named("AOIDE_USER").map(|user| std::path::Path::new("/home").join(user));
-    home.into_iter().chain(passwd_home()).chain(user).collect()
+    let user = named("AOIDE_USER").map(|user| aoide_protocol::audit::user_home(&user.to_string_lossy()));
+    home.into_iter().chain(aoide_protocol::audit::passwd_home()).chain(user).collect()
 }
 
 #[cfg(windows)]
 fn guard_homes() -> Vec<std::path::PathBuf> {
     vec![aoide_protocol::aoide_home()]
-}
-
-/// The effective uid's home from the passwd database (`getpwuid_r`), or
-/// `None` when it has no entry or an empty one.
-#[cfg(unix)]
-fn passwd_home() -> Option<std::path::PathBuf> {
-    use std::os::unix::ffi::OsStrExt;
-    let mut buf: Vec<libc::c_char> = vec![0; 1024];
-    loop {
-        // SAFETY: `passwd` is integers and raw pointers, for which all-zero is
-        // a valid value; `getpwuid_r` fills it before anything reads it.
-        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
-        let mut found: *mut libc::passwd = std::ptr::null_mut();
-        // SAFETY: `pwd`, `buf` and `found` are the out-parameters
-        // `getpwuid_r` documents, `buf` passed with its own length.
-        let ret = unsafe { libc::getpwuid_r(libc::geteuid(), &mut pwd, buf.as_mut_ptr(), buf.len(), &mut found) };
-        if ret == libc::ERANGE && buf.len() < 1 << 20 {
-            buf.resize(buf.len() * 2, 0);
-            continue;
-        }
-        if ret != 0 || found.is_null() || pwd.pw_dir.is_null() {
-            return None;
-        }
-        // SAFETY: on success `pw_dir` is a NUL-terminated string inside `buf`,
-        // which is still alive here.
-        let dir = unsafe { std::ffi::CStr::from_ptr(pwd.pw_dir) }.to_bytes();
-        return (!dir.is_empty()).then(|| std::ffi::OsStr::from_bytes(dir).into());
-    }
 }
 
 /// Where the kernel puts `path`: its longest existing prefix resolved through
@@ -3102,7 +3073,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = MigrationEnvGuard::capture_and_clear();
         // A sandbox may run as a uid with no passwd entry; the rest still holds.
-        let passwd: Vec<_> = passwd_home().into_iter().collect();
+        let passwd: Vec<_> = aoide_protocol::audit::passwd_home().into_iter().collect();
         assert!(passwd.iter().all(|home| home.is_absolute()), "a passwd home is an absolute path: {passwd:?}");
         std::env::set_var("HOME", "");
         assert_eq!(guard_homes(), passwd, "an empty HOME counts as unset; the passwd home stays");
@@ -3219,6 +3190,22 @@ mod tests {
         assert!(err.to_string().contains("home directory"), "the refusal must say why: {err}");
         assert_eq!(unix_mode(&home), 0o755, "HOME was chmodded because AOIDE_USER named another home");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// `AOIDE_USER` guards the passwd home of the name it gives, not a
+    /// `/home/<name>` guess: `AOIDE_USER=root` guards root's passwd home and
+    /// not `/home/root`. The old `Path::new("/home").join(user)` put
+    /// `/home/root` here, which is the path this must not guard.
+    #[cfg(unix)]
+    #[test]
+    fn aoide_user_guards_its_passwd_home() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        std::env::set_var("AOIDE_USER", "root");
+        let homes = guard_homes();
+        let root = aoide_protocol::audit::user_home("root");
+        assert!(homes.contains(&root), "root's passwd home is guarded: {homes:?}");
+        assert!(!homes.contains(&std::path::PathBuf::from("/home/root")), "no /home/root guess: {homes:?}");
     }
 
     /// The canonical check's own job: refusing a shallow `state/` before
