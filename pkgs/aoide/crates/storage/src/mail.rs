@@ -565,6 +565,71 @@ fn ensure_mail_dir() -> Result<(), String> {
 /// and archived raw. The archive is never read. Transit lines are not entries,
 /// so they stay in the archive.
 fn migrate_base_if_needed() -> Result<(), String> {
+    migrate_base_within(CAPS)
+}
+
+/// The bytes a migration has put in each box and in the store, so each migrated
+/// line is admitted from memory: a per-line `measure` would read the store once
+/// for every line.
+struct MigrationBudget {
+    boxes: BTreeMap<PathBuf, u64>,
+    total: u64,
+}
+
+impl MigrationBudget {
+    fn load() -> Result<Self, String> {
+        let mut budget = MigrationBudget { boxes: BTreeMap::new(), total: 0 };
+        for path in box_paths()? {
+            let len = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+            budget.boxes.insert(path, len);
+            budget.total += len;
+        }
+        Ok(budget)
+    }
+
+    fn admits(&self, caps: Caps, path: &std::path::Path, line_len: u64) -> bool {
+        let box_len = self.boxes.get(path).copied().unwrap_or(0);
+        admit(caps, box_len, None, self.total, line_len).is_ok()
+    }
+
+    fn add(&mut self, path: &std::path::Path, line_len: u64) {
+        *self.boxes.entry(path.to_path_buf()).or_insert(0) += line_len;
+        self.total += line_len;
+    }
+}
+
+/// Files one migrated line under `caps`, and says where it went. A migrated line
+/// has no origin, so only the box and store caps apply to it. A line its own box
+/// has no room for is parked in `_legacy`, which is counted in the store and read
+/// by no box reader, so it is kept but not shown. A line that fits neither stays
+/// in the archive the migration keeps, and the migration says so on stderr.
+fn file_migrated(entry: &Entry, caps: Caps, budget: &mut MigrationBudget) -> Result<(), String> {
+    if entry.kind == ENTRY_TYPE_RECEIPT {
+        return append_entry(entry);
+    }
+    let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+    let line_len = line.len() as u64 + 1;
+    let own = box_path(&entry.envelope.header.to.name);
+    if budget.admits(caps, &own, line_len) {
+        append_entry(entry)?;
+        budget.add(&own, line_len);
+        return Ok(());
+    }
+    let legacy = legacy_box_path();
+    if budget.admits(caps, &legacy, line_len) {
+        feed::append_line(&legacy, line.as_bytes()).map_err(|e| format!("{}: {e}", legacy.display()))?;
+        budget.add(&legacy, line_len);
+        return Ok(());
+    }
+    eprintln!(
+        "[aoide/mail] migration: no room for a line to `{}` in its box or in _legacy; it stays in base.jsonl.migrated",
+        entry.envelope.header.to.name
+    );
+    Ok(())
+}
+
+/// [`migrate_base_if_needed`] under `caps`. A test passes a small one.
+fn migrate_base_within(caps: Caps) -> Result<(), String> {
     let base = base_path();
     if !base.exists() {
         return Ok(());
@@ -573,6 +638,7 @@ fn migrate_base_if_needed() -> Result<(), String> {
     let late = archive.exists();
     let lines = feed::read_lines(&base).map_err(|e| format!("{}: {e}", base.display()))?;
     let mut filed = Filed::load()?;
+    let mut budget = MigrationBudget::load()?;
     for line in &lines {
         let Ok(mut entry) = serde_json::from_slice::<Entry>(line) else { continue };
         if filed.holds(&entry) {
@@ -581,7 +647,7 @@ fn migrate_base_if_needed() -> Result<(), String> {
         if late {
             entry.seq = next_seq()?;
         }
-        append_entry(&entry)?;
+        file_migrated(&entry, caps, &mut budget)?;
         filed.add(&entry);
     }
     if late {
@@ -2275,6 +2341,7 @@ pub struct BoxRemoval {
 }
 
 /// `mail box rm <name> [--force]`: removes the box's log and its cursor keys.
+/// `_legacy` is removable by its own name, the one refused name that is.
 /// Refused while any letter in the box is unread by its readers (every reader
 /// on the name, the pseudo-reader included, since a role box is read under its
 /// own name) or while nobody has read it and it holds mail, unless `force`. The
@@ -2282,7 +2349,7 @@ pub struct BoxRemoval {
 /// written stops it: no box is removed without its line. A name with no box is
 /// refused, and nothing is created.
 pub fn box_rm(name: &str, force: bool) -> Result<BoxRemoval, String> {
-    if !valid_box_name(name) {
+    if name != LEGACY_BOX && !valid_box_name(name) {
         return Err(format!("invalid mailbox name `{name}`: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name"));
     }
     let name = name.to_string();
@@ -2311,7 +2378,19 @@ pub fn box_rm(name: &str, force: bool) -> Result<BoxRemoval, String> {
             &format!("removing mailbox `{name}`: {} letters, {} reader marks, force={force}", removal.entries, removal.readers),
         )
         .map_err(|e| format!("the audit log cannot be written, so the mailbox is kept: {e}"))?;
-        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if let Err(e) = std::fs::remove_file(&path) {
+            // The audit line above already says the removal began: this one says it
+            // did not finish, so the log never reads as removed when it is not.
+            let _ = aoide_protocol::audit::audit(
+                &aoide_protocol::audit::default_audit_log(),
+                aoide_protocol::Door::Cli,
+                aoide_protocol::audit::EventClass::Audit,
+                "mail.box.rm",
+                "failed",
+                &format!("removal of mailbox `{name}` failed after its audit line: {e}"),
+            );
+            return Err(format!("{}: {e}", path.display()));
+        }
         cursors.remove(&name);
         save_cursors(&cursors)?;
         Ok(removal)
@@ -4302,6 +4381,93 @@ mod tests {
         let line = std::fs::read_to_string(&log).unwrap();
         assert!(line.contains("mail.box.rm") && line.contains("bob"), "{line}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A migrated base cannot push a box past its cap: a line its box has no room
+    /// for is parked in `_legacy`, and one that fits neither stays in the archive.
+    #[test]
+    fn a_migrated_box_never_grows_past_box_max() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7b-migrate-cap");
+        let proto = letter_entry("bob", 0, &"x".repeat(1000));
+        let caps = small_caps(20_000);
+        let mut body = String::new();
+        for i in 0..60u64 {
+            let mut e = proto.clone();
+            e.seq = i + 1;
+            e.envelope.msgid = format!("{:064x}", i + 1);
+            body.push_str(&serde_json::to_string(&e).unwrap());
+            body.push('\n');
+        }
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        std::fs::write(base_path(), body).unwrap();
+
+        // `with_lock` would migrate under the store's own caps first, so the test
+        // takes the same lock and runs the migration under the small ones.
+        crate::fs::try_stage_lock(|| {
+            ensure_mail_dir()?;
+            migrate_base_within(caps)
+        })
+        .unwrap()
+        .unwrap();
+        let bob = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(bob <= caps.box_max, "the migrated box holds {bob} bytes, past the cap");
+        let parked = std::fs::metadata(legacy_box_path()).map(|m| m.len()).unwrap_or(0);
+        assert!(parked > 0, "the overflow is parked in _legacy");
+        let live = read_entries_unlocked().unwrap().len();
+        assert!(live < 60, "the caps refuse some lines: {live} filed");
+        let archived = std::fs::read_to_string(mail_dir().join("base.jsonl.migrated")).unwrap().lines().count();
+        assert_eq!(archived, 60, "every line the migration could not file is still in the archive");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `_legacy` is removable by its own name, the one name the grammar refuses
+    /// that `box rm` accepts; every other refused name stays refused.
+    #[test]
+    fn box_rm_removes_the_legacy_box_by_its_own_name() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7b-legacy-rm");
+        append_entry(&letter_entry("Bad Name", 1, "grandfathered")).unwrap();
+        assert!(legacy_box_path().exists());
+        assert_eq!(box_rm(LEGACY_BOX, true).unwrap(), BoxRemoval { entries: 1, readers: 0 });
+        assert!(!legacy_box_path().exists(), "the legacy box is gone");
+        assert!(box_rm("Bad Name", true).is_err(), "any other refused name stays refused");
+        assert!(box_add(LEGACY_BOX).is_err(), "and the legacy box is never created by add");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A removal that fails after its audit line writes a second line that says
+    /// so: the log never shows a box removed that is still there.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_box_removal_writes_a_second_audit_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7b-rm-failed");
+        file_letter("alice", "bob", "one").unwrap();
+        let log = aoide_protocol::audit::default_audit_log();
+        let boxes = boxes_dir();
+        std::fs::set_permissions(&boxes, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = box_rm("bob", true);
+        std::fs::set_permissions(&boxes, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err(), "the removal fails");
+        assert!(box_path("bob").exists(), "the box is still there");
+        let lines = std::fs::read_to_string(&log).unwrap();
+        assert!(lines.contains("removing mailbox `bob`"), "the first line: {lines}");
+        assert!(lines.contains("failed") && lines.contains("`bob`"), "the second line says it failed: {lines}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The refusal details are fixed text that names no box, so an answer cannot
+    /// say which boxes exist: a box's name is in none of them.
+    #[test]
+    fn the_refusal_detail_never_names_the_box() {
+        for name in ["bob", "zebra-9"] {
+            for detail in [BOX_FULL_DETAIL, UNKNOWN_BOX_DETAIL, TOO_LARGE_DETAIL] {
+                assert!(!detail.contains(name), "{detail} names {name}");
+            }
+        }
     }
 
     /// A box nobody created is not there to remove, and nothing is created.

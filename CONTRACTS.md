@@ -4857,7 +4857,8 @@ serve` door unit, and the CLI all resolve the same directory.
 
 ```
 boxes/<name>.log   append-only, one entry per line: a letter's box
-boxes/_legacy.log  letters whose name the grammar refuses
+boxes/_legacy.log  letters whose name the grammar refuses, and migrated lines
+                   their own box had no room for
 receipts.log       receipts, rotated to receipts.log.1 at 4 MiB
 cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
 seq             the last sequence number issued (written before its line)

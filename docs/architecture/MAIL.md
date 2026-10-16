@@ -268,7 +268,8 @@ file):
 
 ```
 boxes/<name>.log   one entry per line, append-only: a letter's box
-boxes/_legacy.log  letters whose name the grammar refuses (grandfathered)
+boxes/_legacy.log  letters whose name the grammar refuses (grandfathered), and
+                   migrated lines their own box had no room for
 receipts.log       receipts, rotated to receipts.log.1 at 4 MiB
 cursors.json       { "<name>": { "<reader>": { "seq", "rung" } } }
 seq                the last sequence number issued, ASCII decimal, written
@@ -409,6 +410,11 @@ mark stops holding the floor down once the reaper retires it. A refused flood
 against a box nobody has read rewrites nothing. A full box refuses before
 anything is written and before any ack is owed, so the sender keeps the
 letter and retries.
+
+A migrated line is capped like any other. Its box takes it when it has room;
+a line the box has no room for is parked in `_legacy`, and a line that fits
+neither stays in `base.jsonl.migrated`, which the migration keeps and which
+no reader reads. The migration says so on stderr.
 
 Compaction is the reason a box's seq list can have gaps. A reader's mark still
 means "read through this seq", and export and mailview order by seq, so the
@@ -1527,7 +1533,7 @@ aoide mail read [--for <name>] [--all-names] [--reread] [--transit]   print + ad
 aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
 aoide mail box add <name>                                create an empty mailbox so far mail to it can file (idempotent; CLI only)
-aoide mail box rm <name> [--force]                       remove a mailbox, its letters and its reader marks; refused while unread, audited first (CLI only)
+aoide mail box rm <name> [--force]                       remove a mailbox, its letters and its reader marks; refused while unread, audited first, and a failed removal is audited again (CLI only; `_legacy` by its own name)
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the boxes (dedup goes with them)

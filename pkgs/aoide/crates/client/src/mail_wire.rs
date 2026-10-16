@@ -6248,6 +6248,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A box-full refusal owes no ack: nothing is filed, `settle_deposit` spools
+    /// nothing, and neither node's outbox holds an entry for the letter.
+    #[test]
+    fn a_box_full_refusal_spools_no_ack() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-full-no-ack");
+
+        let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        // Unparseable lines fill the box to its cap and compaction keeps them.
+        let line = format!("{}\n", "x".repeat(1023));
+        std::fs::write(
+            aoide_storage::mail::box_path("bob"),
+            line.repeat((aoide_storage::mail::BOX_MAX / 1024) as usize),
+        )
+        .unwrap();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "no room").unwrap();
+        let outcome = aoide_storage::mail::deposit(letter.clone(), "relay").unwrap();
+        assert_eq!(outcome, aoide_storage::mail::DepositOutcome::BoxFull);
+        settle_deposit(&letter, &outcome);
+
+        assert!(aoide_storage::outbox::list_entries(&me).unwrap().is_empty(), "no ack for a letter not filed");
+        assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A second ack for a letter that is still live retires it: the duplicate
     /// files nothing, and the sender's entry does not come back.
     #[test]
