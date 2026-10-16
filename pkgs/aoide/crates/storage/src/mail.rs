@@ -117,7 +117,7 @@ use crate::stage::{load_stage, write_stage};
 use crate::time::{now_iso_utc, parse_iso_utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
 /// The canonical header's `version` field for this phase. Bumps only if the
@@ -942,18 +942,42 @@ pub fn ensure_auto_boxes() -> Result<(), String> {
     box_add(CONDUCTOR_BOX).map(|_| ())
 }
 
-/// The one rule for a dead box (MAIL.md "Store"): its name keeps a reader map
-/// that is empty, because every reader key it had was retired with its session
-/// (`retire_readers`). A name no reader ever touched has no entry at all, a name
-/// a pseudo-reader still holds is not empty, and the role box `conductor` is
-/// never dead, so none of those is dead.
-fn is_dead(name: &str, cursors: &Cursors) -> bool {
-    name != CONDUCTOR_BOX && cursors.get(name).is_some_and(BTreeMap::is_empty)
+/// The session boxes this store knows, and whether each is dead: a box is
+/// recorded when its session's first insert makes it (`ensure_session_box`), and
+/// `retire_readers` marks it dead when the roster it is handed no longer names
+/// its session, and live again when the roster does (MAIL.md "Store").
+pub type SessionBoxes = BTreeMap<String, bool>;
+
+pub fn session_boxes_path() -> PathBuf {
+    mail_dir().join("session-boxes.json")
+}
+
+fn load_session_boxes() -> Result<SessionBoxes, String> {
+    match std::fs::read(session_boxes_path()) {
+        Ok(raw) => serde_json::from_slice(&raw).map_err(|e| format!("{}: {e}", session_boxes_path().display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(SessionBoxes::new()),
+        Err(e) => Err(format!("{}: {e}", session_boxes_path().display())),
+    }
+}
+
+fn save_session_boxes(boxes: &SessionBoxes) -> Result<(), String> {
+    let body = serde_json::to_vec(boxes).map_err(|e| e.to_string())?;
+    atomic_write_private(&session_boxes_path(), &body).map_err(|e| format!("{}: {e}", session_boxes_path().display()))
+}
+
+/// The one rule for a dead box (MAIL.md "Store"). A box is dead when its name is
+/// a session box the roster has gone without, or when every reader key it had was
+/// retired (its reader map is empty). A name a pseudo-reader still holds is not
+/// empty, a name nothing recorded and nothing read has neither mark, and the role
+/// box `conductor` is never dead.
+fn is_dead(name: &str, cursors: &Cursors, sessions: &SessionBoxes) -> bool {
+    name != CONDUCTOR_BOX
+        && (sessions.get(name) == Some(&true) || cursors.get(name).is_some_and(BTreeMap::is_empty))
 }
 
 /// Whether a far letter may file to `name`: the box exists and is not dead.
-fn box_accepts(name: &str, cursors: &Cursors) -> bool {
-    box_exists(name) && !is_dead(name, cursors)
+fn box_accepts(name: &str, cursors: &Cursors, sessions: &SessionBoxes) -> bool {
+    box_exists(name) && !is_dead(name, cursors, sessions)
 }
 
 /// Reap's half of a dead box's life (MAIL.md "Store"): deletes every dead box
@@ -961,18 +985,21 @@ fn box_accepts(name: &str, cursors: &Cursors) -> bool {
 /// happens. A dead box that still holds mail stays, dead, until its letters are
 /// gone. Returns the names it deleted. Runs under the stage lock.
 pub fn reap_dead_boxes() -> Result<Vec<String>, String> {
-    if !cursors_path().exists() {
+    if !cursors_path().exists() && !session_boxes_path().exists() {
         return Ok(Vec::new());
     }
     with_lock(|| {
         let mut cursors = load_cursors()?;
-        let dead: Vec<String> = cursors.keys().filter(|name| is_dead(name, &cursors)).cloned().collect();
+        let mut sessions = load_session_boxes()?;
+        let names: BTreeSet<String> = cursors.keys().chain(sessions.keys()).cloned().collect();
+        let dead: Vec<String> = names.into_iter().filter(|name| is_dead(name, &cursors, &sessions)).collect();
         let mut removed = Vec::new();
         let mut failure = Ok(());
         for name in dead {
             match reap_dead_box(&name) {
                 Ok(true) => {
                     cursors.remove(&name);
+                    sessions.remove(&name);
                     removed.push(name);
                 }
                 Ok(false) => {}
@@ -984,6 +1011,7 @@ pub fn reap_dead_boxes() -> Result<Vec<String>, String> {
         }
         if !removed.is_empty() {
             save_cursors(&cursors)?;
+            save_session_boxes(&sessions)?;
         }
         failure.map(|()| removed)
     })
@@ -1012,10 +1040,23 @@ fn reap_dead_box(name: &str) -> Result<bool, String> {
 }
 
 /// Gives a session its mailbox on every roster insert, a local act like
-/// [`box_add`]. Best effort: a name the grammar refuses has no box, and the
-/// insert is not refused for it.
+/// [`box_add`], and records it as a live session box, so an insert after a reap
+/// brings the box back. Best effort: a name the grammar refuses has no box and
+/// no record, and the insert is not refused for it.
 pub fn ensure_session_box(session_id: &str) {
-    let _ = box_add(session_id);
+    if !valid_box_name(session_id) {
+        return;
+    }
+    let name = session_id.to_string();
+    let recorded = with_lock(move || {
+        create_box_unlocked(&name)?;
+        let mut sessions = load_session_boxes()?;
+        sessions.insert(name, false);
+        save_session_boxes(&sessions)
+    });
+    if let Err(e) = recorded {
+        eprintln!("[aoide/mail] session box `{session_id}` not recorded: {e}");
+    }
 }
 
 /// `mail box add <name>`: creates the box `name`, empty, if it is absent, so a
@@ -1988,7 +2029,7 @@ pub(crate) fn deposit_within(envelope: Envelope, via: &str, caps: Caps) -> Resul
         if envelope_len(&envelope) > LETTER_MAX {
             return Ok(DepositOutcome::TooLarge);
         }
-        if !box_accepts(&envelope.header.to.name, &load_cursors()?) {
+        if !box_accepts(&envelope.header.to.name, &load_cursors()?, &load_session_boxes()?) {
             return Ok(DepositOutcome::UnknownBox);
         }
         let target = box_path(&envelope.header.to.name);
@@ -2395,25 +2436,40 @@ pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
 /// `cursors.json`, so the reaper never creates a mail store. Returns the retired
 /// `(name, reader)` pairs, in name order.
 pub fn retire_readers(live: &std::collections::HashSet<&str>) -> Result<Vec<(String, String)>, String> {
-    if !cursors_path().exists() {
+    if !cursors_path().exists() && !session_boxes_path().exists() {
         return Ok(Vec::new());
     }
     with_lock(|| {
-        let mut cursors = load_cursors()?;
         let mut retired = Vec::new();
-        for (name, readers) in cursors.iter_mut() {
-            readers.retain(|reader, _| {
-                let keep = reader == name || live.contains(reader.as_str());
-                if !keep {
-                    retired.push((name.clone(), reader.clone()));
-                }
-                keep
-            });
+        if cursors_path().exists() {
+            let mut cursors = load_cursors()?;
+            for (name, readers) in cursors.iter_mut() {
+                readers.retain(|reader, _| {
+                    let keep = reader == name || live.contains(reader.as_str());
+                    if !keep {
+                        retired.push((name.clone(), reader.clone()));
+                    }
+                    keep
+                });
+            }
+            if !retired.is_empty() {
+                save_cursors(&cursors)?;
+            }
         }
-        if retired.is_empty() {
-            return Ok(retired);
+        // The roster decides each session box's liveness, and nothing else does:
+        // a box whose session is not on the roster is dead, one that is, is live.
+        let mut sessions = load_session_boxes()?;
+        let mut changed = false;
+        for (name, dead) in sessions.iter_mut() {
+            let now_dead = !live.contains(name.as_str());
+            if *dead != now_dead {
+                *dead = now_dead;
+                changed = true;
+            }
         }
-        save_cursors(&cursors)?;
+        if changed {
+            save_session_boxes(&sessions)?;
+        }
         Ok(retired)
     })
 }
@@ -5137,6 +5193,79 @@ mod tests {
         assert!(mail_dir().join("base.jsonl.migrated").exists(), "the base is archived");
         let line = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap();
         assert!(line.contains("mail.migrate") && line.contains("unfiled 1"), "{line}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A session that never read is still reaped: its box is dead, a far letter
+    /// to it is refused, and the reap deletes the empty box with an audit line.
+    #[test]
+    fn a_reaped_session_that_never_read_is_dead_and_its_empty_box_is_reaped() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-never-read");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-a");
+        assert!(box_exists("sess-a"), "the session's box exists from its first insert");
+
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let far = signed_from("alice-host", "sess-a", ENTRY_TYPE_LETTER, "late", &alice);
+        assert_eq!(deposit(far, "sakaki").unwrap(), DepositOutcome::UnknownBox, "a reaped session's box refuses");
+
+        assert_eq!(reap_dead_boxes().unwrap(), vec!["sess-a".to_string()], "the empty dead box is reaped");
+        assert!(!box_path("sess-a").exists(), "its file is gone");
+        let line = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap();
+        assert!(line.contains("mail.box.reap") && line.contains("sess-a"), "{line}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A live session that never read still files: the roster, not a read, says
+    /// whether its box is dead.
+    #[test]
+    fn a_live_session_that_never_read_still_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-live");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-b");
+
+        retire_readers(&["sess-b"].into_iter().collect()).unwrap();
+        let far = signed_from("alice-host", "sess-b", ENTRY_TYPE_LETTER, "hello", &alice);
+        assert!(matches!(deposit(far, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "a live session's box files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A re-inserted session gets a live box back: after a reap deleted it, the
+    /// same far letter files again.
+    #[test]
+    fn a_reinserted_session_files_again_after_its_box_was_reaped() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-reinsert");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-c");
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        assert_eq!(reap_dead_boxes().unwrap(), vec!["sess-c".to_string()]);
+
+        ensure_session_box("sess-c");
+        let far = signed_from("alice-host", "sess-c", ENTRY_TYPE_LETTER, "back", &alice);
+        assert!(matches!(deposit(far, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "the re-inserted session files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A reaped session's box that still holds mail stays, refuses far letters,
+    /// and the reap drops none of its letters.
+    #[test]
+    fn a_reaped_session_box_holding_mail_stays_and_drops_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-holds-mail");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-d");
+        file_letter("alice", "sess-d", "keep me").unwrap();
+
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let far = signed_from("alice-host", "sess-d", ENTRY_TYPE_LETTER, "late", &alice);
+        assert_eq!(deposit(far, "sakaki").unwrap(), DepositOutcome::UnknownBox, "a dead box with mail still refuses");
+        assert_eq!(reap_dead_boxes().unwrap(), Vec::<String>::new(), "a box holding mail is not reaped");
+        let texts: Vec<String> =
+            read_file_entries(&box_path("sess-d")).unwrap().into_iter().map(|e| e.envelope.text).collect();
+        assert_eq!(texts, vec!["keep me".to_string()], "no letter is dropped");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

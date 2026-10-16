@@ -272,6 +272,7 @@ boxes/_legacy.log  letters whose name the grammar refuses (grandfathered), and
                    migrated lines their own box had no room for
 receipts.log       receipts, rotated to receipts.log.1 at 4 MiB
 cursors.json       { "<name>": { "<reader>": { "seq", "rung" } } }
+session-boxes.json { "<name>": <dead: bool> }, one per session box
 seq                the last sequence number issued, ASCII decimal, written
                    before the line it numbers
 ```
@@ -355,14 +356,19 @@ An entry is an envelope plus local facts:
   a line only when every enrolled reader of its box has read it. A reader
   that joins later starts with an unread mark and sees whatever the box still
   holds; letters compacted away before it joined are gone for it.
-- **Dead boxes.** A box is dead when every reader key it had was retired with
-  its session: the name keeps an empty reader map. A name no reader ever
-  touched has no entry and is not dead; a name a pseudo-reader holds is not
-  dead; the role box `conductor` is never dead. A far letter to a dead box is
-  refused `unknown-box`, and the origin keeps it. Each reaper pass deletes a
-  dead box that holds no letter, with its cursor key, and writes an audit line
-  first. A dead box holding mail stays until its letters are gone. A session
-  that starts again re-creates its box (see §Addressing).
+- **Dead boxes.** A session's box is recorded in `session-boxes.json` when the
+  session's first insert makes it. Every reaper pass marks each recorded box
+  from the roster it has just written: dead when its session is no longer on
+  the roster, live when it is. So a session that never read is reaped like any
+  other, and the roster is the only liveness input. A box is also dead when
+  every reader key it had was retired, which leaves its reader map empty. A far
+  letter to a dead box is refused `unknown-box`, and the origin keeps it. Each
+  reaper pass deletes a dead box that holds no letter, with its cursor key and
+  its record, after an audit line. A dead box that still holds mail stays,
+  refuses far letters, and drops none of its letters until they are gone. A
+  session that starts again marks its box live and re-creates it if it was
+  reaped. The role box `conductor` is never dead, and a `mail box add` box is
+  not recorded, so the roster does not mark it.
 - Each mark also carries `rung`: the doorbell latch, the highest arming
   `seq` this reader has already been rung for. A reader arms again only
   once its own read catches up to `rung`; omitted from `cursors.json`

@@ -750,8 +750,10 @@ by decision — no embedded database yet
   memory with the line (a pruned letter re-offered is filed again).
   A box is created by a local act only (`box_add`, `enrol_reader`,
   `file_letter`, `ensure_session_box` at every roster insert); a far letter to
-  an absent or dead box is `UnknownBox`. A dead box is one whose every reader
-  was retired (`is_dead`), and `reap_dead_boxes` deletes the empty ones.
+  an absent or dead box is `UnknownBox`. A session box is dead when the roster
+  no longer names its session (`session-boxes.json`, marked by
+  `retire_readers`); a name whose reader map is empty is dead too (`is_dead`).
+  `reap_dead_boxes` deletes the empty dead boxes.
   `valid_box_name` (grammar, at most 63 bytes, not a DOS device name) is the
   one name rule. A letter is admitted under `CAPS` (`admit`): a box holds
   16 MiB, one verified origin key a quarter of it and a quarter of the store,

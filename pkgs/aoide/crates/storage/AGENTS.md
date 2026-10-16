@@ -104,13 +104,15 @@
   (`session start`, the eidolon and codex-app reconciles, subagents).
   `valid_box_name` is the one name rule, and the conductor's petname check
   calls it.
-- **A dead box refuses a far letter, by one rule.** `is_dead` (the name's
-  cursor entry exists and is empty, and the name is not `conductor`) is the
-  only definition. `box_accepts` is `box_exists && !is_dead`, and the far
-  deposit calls it. `retire_readers` leaves a name's reader map empty when its
-  last key goes, and `reap_dead_boxes` deletes a dead box that holds no letter,
-  after its audit line. Keep the empty entry: dropping it would revive the box.
-  A `box add` box with no reader is not dead.
+- **A dead box refuses a far letter, by one rule.** `is_dead` is the only
+  definition: a session box the roster has gone without (`session-boxes.json`,
+  written by `ensure_session_box` and marked by `retire_readers` from the roster
+  it is handed), or a name whose reader map is empty, and never `conductor`.
+  `box_accepts` is `box_exists && !is_dead`, and the far deposit calls it.
+  `reap_dead_boxes` deletes a dead box that holds no letter, with its cursor key
+  and record, after its audit line. Keep the empty reader entry: dropping it
+  would revive the box. Liveness comes from the roster only, never from a read,
+  so a session that never read is still reaped. A `box add` box is not recorded.
 - **Every letter is admitted by `admit()` before a line is written.** The
   caps are `CAPS` (a box 16 MiB, a quarter of it per verified origin key, a
   quarter of the store per verified origin key, all boxes 240 MiB), and a

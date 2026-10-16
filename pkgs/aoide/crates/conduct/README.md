@@ -546,8 +546,9 @@ stripping one, and a held spawn shows as its whole command.
   retires the mail reader keys of sessions no longer on it
   (`retire_mail_readers` → `aoide_storage::mail::retire_readers`; the
   pseudo-reader is kept), so a dead session's mark stops pinning its box's
-  compaction floor. A box whose last reader went is dead, and the same hold
-  then deletes the dead boxes that are empty (`mail::reap_dead_boxes`, audited).
+  compaction floor. A session's box is dead once the roster no longer names
+  its session, and the same hold then deletes the dead boxes that are empty
+  (`mail::reap_dead_boxes`, audited).
   The pass retires nothing unless it holds the stage lock and can read the
   roster: an absent or unreadable `sessions.json` is not an empty roster.
   `try_stage_lock` is re-entrant on its thread, so mail's
