@@ -12,6 +12,11 @@
 #          and `lyra lock` locks through the shell's LockHost.
 #   plain  declares `plainsong`, which ships no face: ly at boot, and
 #          `lyra lock` runs hyprlock.
+#   night  declares `nocturne`, whose greeter face throws at start and never
+#          reports ready: the greeter host's floor takes the login.
+#
+# `face` carries a second account, so its greeter has a choice to make and a
+# user to switch away from.
 #
 # The song hook is this file's own copy of lib/aoideos.nix's, over the fixture
 # songbook instead of the committed one (the same wiring tests/consumer does
@@ -109,6 +114,7 @@ let
 
   face = resolve "aubade";
   plain = resolve "plainsong";
+  night = resolve "nocturne";
 
   machine = resolved: {
     imports = resolved.modules ++ [
@@ -138,8 +144,15 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = face.specialArgs;
   node.pkgsReadOnly = false;
 
-  nodes.face = machine face;
+  nodes.face = {
+    imports = [ (machine face) ];
+    users.users.bram = {
+      isNormalUser = true;
+      initialPassword = "bram-pw";
+    };
+  };
   nodes.plain = machine plain;
+  nodes.night = machine night;
 
   testScript = ''
     import json
@@ -182,6 +195,27 @@ pkgs.testers.runNixOSTest {
         out = as_khoa(m, "lyra lock --json")
         return json.loads(out)
 
+    # The shell's own word on its lock: the compositor has confirmed it.
+    def lock_secure(m):
+        return as_khoa(m, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock secure").strip()
+
+    # The compositor's own word, whoever holds the lock.
+    def hypr_locked(m):
+        return json.loads(as_khoa(m, "hyprctl -j locked"))["locked"]
+
+    def wait_hypr_locked(m, want):
+        m.wait_until_succeeds(khoa_cmd(m, "hyprctl -j locked") + f" | jq -e '.locked == {str(want).lower()}'", timeout=30)
+
+    # The greeter's own log (its Quickshell instance logs to the greeter's
+    # runtime dir; greetd keeps no greeter output). Read before a login ends
+    # the greeter session and its runtime dir.
+    def greeter_log(m):
+        return m.succeed(
+            "for f in /run/user/$(id -u greeter)/quickshell/by-id/*/log.qslog; do quickshell log --no-color $f; done"
+        )
+
+    hyprlock_running = "ps -u khoa -o args= | grep -Eq '(^|/)hyprlock( |$)'"
+
     def wait_shell(m, secure="false"):
         m.wait_until_succeeds(
             khoa_cmd(m, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock secure") + f" | grep -qx {secure}",
@@ -208,22 +242,40 @@ pkgs.testers.runNixOSTest {
         face.wait_until_succeeds("ps -u greeter -o args= | grep -q /bin/cage", timeout=90)
         face.wait_until_succeeds("ps -u greeter -o args= | grep -q 'quickshell.*aoide-greeter-tree'", timeout=90)
         face.fail("systemctl is-active ly.service")
-        # The face has read passwd, picked the one account and asked greetd
-        # for its password prompt; give the frame a moment to paint.
+        # Two accounts: the face asks which. Past the 3 s ready wait, so a
+        # face still standing here reported ready.
         face.sleep(8)
         face.screenshot("01-greeter")
 
-    with subtest("face: the greeter refuses a wrong password"):
+    with subtest("face: the greeter refuses a wrong password, and switch user starts over"):
+        face.send_chars("bram\n")
+        face.sleep(3)
+        face.screenshot("01b-greeter-bram")
         before = pam_failures(face, "greetd")
         face.send_chars("wrong-password\n")
         face.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'pam_unix(greetd:auth): authentication failure') -gt {before}", timeout=30)
         face.sleep(3)
-        face.fail("loginctl list-sessions --no-legend | grep -w khoa")
+        face.fail("loginctl list-sessions --no-legend | grep -Ew 'khoa|bram'")
         face.screenshot("02-greeter-refused")
+        # The conversation starts over by itself: a second answer is asked
+        # for, and refused.
+        before = pam_failures(face, "greetd")
+        face.send_chars("wrong-again\n")
+        face.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'pam_unix(greetd:auth): authentication failure') -gt {before}", timeout=30)
+        face.sleep(3)
+        face.send_key("esc")
+        face.sleep(2)
+        face.screenshot("02b-greeter-switch-user")
+        face.send_chars("khoa\n")
+        face.sleep(3)
+        said = greeter_log(face)
+        assert "the face did not report ready" not in said, said
+        assert "unanswered conversation" not in said, said
 
-    with subtest("face: the right password starts a user-class session"):
+    with subtest("face: the right password starts a user-class session for the account chosen"):
         face.send_chars("test\n")
         face.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w khoa", timeout=60)
+        face.fail("loginctl list-sessions --no-legend | grep -w bram")
         session = display_session(face)
         cls = face.succeed(f"loginctl show-session {session} -p Class --value").strip()
         assert cls == "user", f"khoa's session is class {cls!r}, not 'user'"
@@ -231,6 +283,9 @@ pkgs.testers.runNixOSTest {
         wait_shell(face)
         face.sleep(5)
         face.screenshot("03-desktop")
+        # Every window-owning slot was handed the shellbridge.
+        face.succeed("journalctl -b --no-pager | grep -q 'aubade powermenu: bridge is set'")
+        face.fail("journalctl -b --no-pager | grep -Eq 'was given no bridge|aubade powermenu: bridge is missing'")
 
     # ══ face: lyra lock through the shell ═════════════════════════════════
     with subtest("face: lyra lock locks through the shell and sets LockedHint"):
@@ -257,6 +312,8 @@ pkgs.testers.runNixOSTest {
         face.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'pam_unix(aoide-lock:auth): authentication failure') -gt {before}", timeout=30)
         face.sleep(2)
         assert locked_hint(face) == "yes", "a wrong password unlocked the session"
+        assert lock_secure(face) == "true", "a wrong password released the shell's lock"
+        assert hypr_locked(face), "a wrong password released the compositor's lock"
         face.screenshot("05-lock-refused")
         face.send_chars("test\n")
         wait_hint(face, "no")
@@ -279,9 +336,11 @@ pkgs.testers.runNixOSTest {
         face.sleep(2)
         face.screenshot("07-shell-crashed-while-locked")
         assert locked_hint(face) == "yes", "the hint dropped with the shell"
+        assert hypr_locked(face), "the compositor let the session go with the shell"
         # Restart=always brings the shell back; it reads LockedHint=yes at
         # start and locks on its own — no `lyra lock` here.
         wait_shell(face, secure="true")
+        assert hypr_locked(face)
         face.succeed("journalctl -b --no-pager | grep -q 'LockedHint is still yes; taking the lock back'")
         assert locked_hint(face) == "yes"
         face.sleep(3)
@@ -310,6 +369,38 @@ pkgs.testers.runNixOSTest {
         # The throwing face has no field: only the floor can take this.
         face.send_chars("test\n")
         wait_hint(face, "no")
+
+    with subtest("face: with no aoide-lock PAM service the lock is hyprlock's, never a lockout"):
+        face.succeed("mv /etc/pam.d/aoide-lock /etc/pam.d/aoide-lock.off")
+        # The shell refuses outright and locks nothing.
+        said = as_khoa(face, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock lock").strip()
+        assert said == "false", f"the shell answered {said!r} with no PAM service"
+        assert not hypr_locked(face), "the shell locked with no way to unlock"
+        o = lyra_lock(face)
+        assert o["data"]["locker"] == "hyprlock", f"lyra lock used {o}"
+        assert "PAM service" in o["data"]["shellRefused"], f"{o}"
+        face.wait_until_succeeds(hyprlock_running, timeout=10)
+        wait_hypr_locked(face, True)
+        face.sleep(10)
+        face.screenshot("14-no-pam-hyprlock")
+        face.send_chars("test\n")
+        face.wait_until_fails(hyprlock_running, timeout=30)
+        wait_hypr_locked(face, False)
+
+    with subtest("face: the start-up re-lock with no PAM service hands the lock to hyprlock"):
+        as_khoa(face, "lyra lock hint yes")
+        wait_hint(face, "yes")
+        as_khoa(face, "systemctl --user restart aoide-quickshell.service")
+        face.wait_until_succeeds(hyprlock_running, timeout=60)
+        face.succeed("journalctl -b --no-pager | grep -q 'PAM conversation cannot start; not locking'")
+        wait_hypr_locked(face, True)
+        # hyprlock holds the screen, so the stale yes is gone.
+        wait_hint(face, "no")
+        face.sleep(10)
+        face.send_chars("test\n")
+        face.wait_until_fails(hyprlock_running, timeout=30)
+        wait_hypr_locked(face, False)
+        face.succeed("mv /etc/pam.d/aoide-lock.off /etc/pam.d/aoide-lock")
 
     # ══ plain: ly + hyprlock ═══════════════════════════════════════════════
     with subtest("plain: the login screen is ly"):
@@ -343,15 +434,33 @@ pkgs.testers.runNixOSTest {
         plain.sleep(10)
         plain.succeed("ps -u khoa -o args= | grep -Eq '(^|/)hyprlock( |$)'")
         plain.screenshot("11-hyprlock")
+        wait_hypr_locked(plain, True)
         before = pam_failures(plain, "hyprlock")
         plain.send_chars("wrong-password\n")
         plain.wait_until_succeeds(f"test $(journalctl -b --no-pager | grep -c 'pam_unix(hyprlock:auth): authentication failure') -gt {before}", timeout=30)
         plain.succeed("ps -u khoa -o args= | grep -Eq '(^|/)hyprlock( |$)'")
+        assert hypr_locked(plain), "a wrong password released hyprlock's lock"
         # hyprlock takes no input while it shows the failure.
         plain.sleep(4)
         plain.send_chars("test\n")
         plain.wait_until_fails("ps -u khoa -o args= | grep -Eq '(^|/)hyprlock( |$)'", timeout=30)
         plain.sleep(2)
         plain.screenshot("12-hyprlock-unlocked")
+        wait_hypr_locked(plain, False)
+
+    # ══ night: a greeter face that never reports ready ═════════════════════
+    with subtest("night: a greeter face that never reports ready gives way to the floor, which logs in"):
+        night.wait_for_unit("greetd.service")
+        night.wait_until_succeeds("ps -u greeter -o args= | grep -q 'quickshell.*aoide-greeter-tree'", timeout=90)
+        night.sleep(8)
+        night.screenshot("13-greeter-floor")
+        said = greeter_log(night)
+        assert "the face's start-up failed" in said, said
+        assert "the face did not report ready" in said, said
+        # One account, chosen already: the floor's password field has focus.
+        # The throwing face has no field, so only the floor can log in.
+        night.send_chars("test\n")
+        night.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w khoa", timeout=60)
+        night.wait_until_succeeds("ps -u khoa -o args= | grep -Eq '(^|/)Hyprland( |$)'", timeout=60)
   '';
 }

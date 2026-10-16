@@ -1,5 +1,6 @@
-// The fixture greeter face: the chosen account, one password field, the
-// host's message and a failure count, all through the host's `auth`.
+// The fixture greeter face: an account field while none is chosen, then one
+// password field for the chosen account; Escape goes back to choosing
+// (switch user). The host's message and a failure count, all through `auth`.
 import QtQuick
 
 Rectangle {
@@ -8,7 +9,14 @@ Rectangle {
     property var bridge
     property var auth
 
+    readonly property bool choosing: face.auth.selectedUser === ""
+
     color: "#3d1d57"
+
+    onChoosingChanged: {
+        field.text = ""
+        field.forceActiveFocus()
+    }
 
     Column {
         anchors.centerIn: parent
@@ -21,7 +29,7 @@ Rectangle {
         }
 
         Text {
-            text: "user: " + (face.auth.selectedUser || "-") + " of " + face.auth.users.length
+            text: (face.choosing ? "account? " : "user: " + face.auth.selectedUser) + " of " + face.auth.users.length
             color: "#e0c3fc"
             font.pixelSize: 20
         }
@@ -39,10 +47,12 @@ Rectangle {
                 anchors.margins: 12
                 color: "#f1faee"
                 font.pixelSize: 20
-                echoMode: TextInput.Password
+                echoMode: face.choosing ? TextInput.Normal : TextInput.Password
                 focus: true
+                Keys.onEscapePressed: face.auth.selectUser("")
                 onAccepted: {
-                    face.auth.respond(text)
+                    if (face.choosing) face.auth.selectUser(text)
+                    else face.auth.respond(text)
                     text = ""
                 }
             }
