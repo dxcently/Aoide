@@ -33,7 +33,8 @@ environment seams: `AOIDE_AUDIT_LOG` (the single audit-log path, from
 `AOIDE_FLAKE_ROOT` (the dev checkout), and `AOIDE_USER`. The daemon resolves
 the log in order: `--audit-log` flag → `$AOIDE_AUDIT_LOG` → `$AOIDE_ROOT/log`
 (when `$AOIDE_ROOT` is absolute) → `<home>/.aoide/log`, where home is
-`$AOIDE_USER` → `/home/<user>`, else `$HOME`.
+`$AOIDE_USER`'s passwd home (`/home/<user>` without an entry), else
+`$HOME` when set, else the effective uid's passwd home.
 
 The real policy-surface code paths: the audit log is **JSON-lines** (one
 record per append, tagged with door / event class / status), appended for

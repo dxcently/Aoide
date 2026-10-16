@@ -1249,8 +1249,9 @@ kernel puts it inside `state/`. The lock refuses, before any chmod, a
 root, and a home directory or one of its parents. Those are judged on
 canonical paths, and again on the directory the open returns, so a symlinked
 home is protected by its real path. Every home a run could mean is guarded
-together: a non-empty `$HOME`, the passwd home of the effective uid, and
-`/home/$AOIDE_USER` when `$AOIDE_USER` is set. A `state/` the OS will not make
+together: a non-empty `$HOME`, the passwd home of the effective uid, and the
+passwd home of `$AOIDE_USER` when it is set (`/home/<name>` for a name with no
+entry). A `state/` the OS will not make
 `0700` fails the write and names the path and the fix: a chmod when this user
 owns it, a chown when another user does. Start-up locks a `state/` that
 exists, and a tree the start-up migration moves into `state/` is locked there

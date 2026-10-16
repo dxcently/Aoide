@@ -51,9 +51,13 @@ pub fn audit_log_path(inv: &crate::invocation::Invocation) -> PathBuf {
 /// The Aoide user's home — what [`default_audit_log`] and `aoide-storage`'s
 /// root resolve against when neither is overridden.
 ///
-/// **Unix**: `$AOIDE_USER` → `/home/<user>` (the deployment variable the nix
-/// modules export), else `$HOME`, else the literal `/home/khoa` this chain
-/// shipped with.
+/// **Unix**: `$AOIDE_USER` → that user's passwd home (`getpwnam_r`;
+/// `/home/<user>` when the passwd database has no entry for the name), else
+/// `$HOME` when it is set (an empty one is returned as written, and the storage
+/// root's guard refuses the relative path it makes), else the passwd home of the
+/// effective uid, else the temp dir. The last arm is the native Windows arm's
+/// last resort: a process with neither input has no per-user directory to
+/// name, and a literal path would be a guess about some other account's home.
 ///
 /// **Native Windows**: `$USERPROFILE`, else `$HOMEDRIVE$HOMEPATH`, else the
 /// temp dir — the same last-resort shape `aoide_storage::runtime_dir` takes.
@@ -68,10 +72,68 @@ pub fn audit_log_path(inv: &crate::invocation::Invocation) -> PathBuf {
 pub fn aoide_home() -> PathBuf {
     if let Ok(user) = std::env::var("AOIDE_USER") {
         if !user.is_empty() {
-            return Path::new("/home").join(&user);
+            return user_home(&user);
         }
     }
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/home/khoa".into()))
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(passwd_home)
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// The effective uid's home from the passwd database (`getpwuid_r`), or `None`
+/// when that uid has no entry or an empty home.
+#[cfg(unix)]
+pub fn passwd_home() -> Option<PathBuf> {
+    passwd_dir(|pwd, buf, found| {
+        // SAFETY: the out-parameters are the ones `getpwuid_r` documents, and
+        // `buf` is passed with its own length.
+        unsafe { libc::getpwuid_r(libc::geteuid(), pwd, buf.as_mut_ptr(), buf.len(), found) }
+    })
+}
+
+/// `user`'s home from the passwd database (`getpwnam_r`), or `/home/<user>`
+/// when the name has no entry (or cannot be a C string).
+#[cfg(unix)]
+pub fn user_home(user: &str) -> PathBuf {
+    let fallback = || Path::new("/home").join(user);
+    let Ok(name) = std::ffi::CString::new(user) else {
+        return fallback();
+    };
+    passwd_dir(|pwd, buf, found| {
+        // SAFETY: `name` is a live NUL-terminated string, and the rest are the
+        // out-parameters `getpwnam_r` documents, `buf` with its own length.
+        unsafe { libc::getpwnam_r(name.as_ptr(), pwd, buf.as_mut_ptr(), buf.len(), found) }
+    })
+    .unwrap_or_else(fallback)
+}
+
+/// Runs one passwd lookup, growing its buffer on `ERANGE` up to 1 MiB, and
+/// returns the entry's home directory.
+#[cfg(unix)]
+fn passwd_dir(
+    lookup: impl Fn(*mut libc::passwd, &mut [libc::c_char], *mut *mut libc::passwd) -> libc::c_int,
+) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf: Vec<libc::c_char> = vec![0; 1024];
+    loop {
+        // SAFETY: all-zero is a valid `passwd` (integers and raw pointers), and
+        // the lookup fills it before anything reads it.
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        let ret = lookup(&mut pwd, &mut buf, &mut found);
+        if ret == libc::ERANGE && buf.len() < 1 << 20 {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        if ret != 0 || found.is_null() || pwd.pw_dir.is_null() {
+            return None;
+        }
+        // SAFETY: on success `pw_dir` is a NUL-terminated string inside `buf`,
+        // which is still alive here.
+        let dir = unsafe { std::ffi::CStr::from_ptr(pwd.pw_dir) }.to_bytes();
+        return (!dir.is_empty()).then(|| PathBuf::from(std::ffi::OsStr::from_bytes(dir)));
+    }
 }
 
 #[cfg(windows)]
@@ -471,5 +533,97 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_USER", v),
             None => std::env::remove_var("AOIDE_USER"),
         }
+    }
+
+    /// Serialises the tests below that set `HOME`/`AOIDE_USER`. This crate has
+    /// no shared env lock (the storage crate's [`env_lock`] is its own binary's),
+    /// so the one this module needs is local to it.
+    #[cfg(unix)]
+    static HOME_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets `HOME` and `AOIDE_USER` to `home`/`user` (`None` unsets), runs `f`,
+    /// and puts both back.
+    #[cfg(unix)]
+    fn with_home_env(home: Option<&str>, user: Option<&str>, f: impl FnOnce()) {
+        let _guard = HOME_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = (std::env::var_os("HOME"), std::env::var_os("AOIDE_USER"));
+        for (var, value) in [("HOME", home), ("AOIDE_USER", user)] {
+            match value {
+                Some(v) => std::env::set_var(var, v),
+                None => std::env::remove_var(var),
+            }
+        }
+        f();
+        match saved.0 {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match saved.1 {
+            Some(v) => std::env::set_var("AOIDE_USER", v),
+            None => std::env::remove_var("AOIDE_USER"),
+        }
+    }
+
+    /// The name of the effective uid in the passwd database, or `None`.
+    #[cfg(unix)]
+    fn euid_name() -> Option<String> {
+        let mut buf = vec![0 as libc::c_char; 16 * 1024];
+        // SAFETY: all-zero is a valid `passwd`; `getpwuid_r` fills it.
+        let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        // SAFETY: out-parameters as `getpwuid_r` documents, `buf` with its length.
+        let ret = unsafe { libc::getpwuid_r(libc::geteuid(), &mut pwd, buf.as_mut_ptr(), buf.len(), &mut found) };
+        (ret == 0 && !found.is_null()).then(|| {
+            // SAFETY: on success `pw_name` is NUL-terminated inside `buf`.
+            unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) }.to_string_lossy().into_owned()
+        })
+    }
+
+    /// With `HOME` unset (and `AOIDE_USER` too) the home is the euid's passwd
+    /// home. The old chain returned the literal `/home/khoa` here. On this box
+    /// the euid is khoa, whose passwd home is `/home/khoa`, so the literal passed
+    /// by coincidence: the literal is only refuted on another account.
+    #[cfg(unix)]
+    #[test]
+    fn with_no_home_the_home_is_the_euid_passwd_home() {
+        let expected = passwd_home().unwrap_or_else(std::env::temp_dir);
+        with_home_env(None, None, || assert_eq!(aoide_home(), expected));
+        assert!(expected.is_absolute(), "the answer is a real directory, not a fragment: {expected:?}");
+    }
+
+    /// `AOIDE_USER=root` names root's passwd home, not `/home/root`. The old
+    /// `Path::new("/home").join(user)` answered `/home/root` here. The expected
+    /// value is the passwd entry itself, not a literal: a nix build sandbox
+    /// gives root the home `/build`.
+    #[cfg(unix)]
+    #[test]
+    fn aoide_user_resolves_through_the_passwd_database() {
+        let root = user_home("root");
+        assert!(root.is_absolute(), "root has a passwd home: {root:?}");
+        assert_ne!(root, std::path::Path::new("/home/root"), "no /home/root guess");
+        with_home_env(Some("/home/ignored"), Some("root"), || {
+            assert_eq!(aoide_home(), root, "AOIDE_USER beats HOME");
+        });
+    }
+
+    /// The euid's own name resolves to the euid's passwd home, through the
+    /// name lookup and the uid lookup alike.
+    #[cfg(unix)]
+    #[test]
+    fn aoide_user_of_the_current_user_is_its_passwd_home() {
+        let name = euid_name().expect("the test uid has a passwd entry");
+        let home = passwd_home().expect("the test uid has a passwd home");
+        assert_eq!(user_home(&name), home);
+        with_home_env(None, Some(&name), || assert_eq!(aoide_home(), home));
+    }
+
+    /// A name with no passwd entry keeps the `/home/<name>` answer.
+    #[cfg(unix)]
+    #[test]
+    fn an_unknown_aoide_user_keeps_the_home_name_answer() {
+        let name = format!("aoide-no-such-user-{}", std::process::id());
+        let expected = std::path::Path::new("/home").join(&name);
+        assert_eq!(user_home(&name), expected);
+        with_home_env(Some("/home/ignored"), Some(&name), || assert_eq!(aoide_home(), expected));
     }
 }
