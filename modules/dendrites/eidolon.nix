@@ -25,25 +25,31 @@
 #     store: changing the default model is a change here plus a rebuild, not
 #     an edit to ~/.config/eidolon/config.toml.
 #
-#     `fallback_model` is the second name behind that one: a launch whose
-#     model does not resolve on this machine (key never stored, endpoint
-#     moved) opens on `sonnet` — the Claude CLI, on the subscription — instead
-#     of refusing. It is *resolution* only: a provider that answers and then
-#     errors mid-turn still surfaces that error, and `space m` is how a
-#     running session changes its mind. `persona = "Rook"` is the voice every
-#     session starts in, resolved against the vault below; a session that pins
-#     its own voice — or a reopened log that already carries one — is never
-#     re-dressed. Both keys are additions in ~/eidolon
-#     (crates/cli/src/config.rs, `fallback_model`/`persona`): a binary older
-#     than them ignores the lines silently rather than failing, which is why
-#     they can land before the install does.
+#     `default_persona = "10 ♜ AGENT/rook/AGENTS.md"` is the voice every
+#     session a launch *creates* opens in: the pin resolved against the vault
+#     below, where that path is Rook — a path, not a bare name, because the
+#     vault keeps its agents under `10 ♜ AGENT/<agent>/` and carries no
+#     `wiki/personalities/` entry to pin by. A launch that names its own voice
+#     (`--persona`, `:persona`), or a reopened log that already carries one,
+#     is never re-dressed; a pin that resolves to nothing is reported on
+#     stderr rather than worn silently.
+#
+#     `fallback_model` names no field in the binary — crates/cli/src/config.rs
+#     carries `default_persona`, never a bare `persona`, and no
+#     `fallback_model` at all — so that line is inert, and the substitution a
+#     launch does perform when a journaled model no longer resolves is
+#     `default_model`, announced as `[model] … opening this session on …`.
+#     Unknown keys are ignored rather than refused, which is how a line can
+#     land here before the install does.
 #
 #     The `[mneme]` stanza points at the vault on sakaki. Its passphrase is
 #     deliberately NOT written here: ~/.config/eidolon/mneme.pass (0600) is
 #     the operator's out-of-band file, read and trimmed by Eidolon at call
-#     time, so the credential never enters the Nix store. With the vault
-#     wired, personas come alive — Rook is wiki/personalities/Rook ♜.md, worn
-#     per session with `eidolon tui --persona Rook` or `:persona Rook`.
+#     time, so the credential never enters the Nix store. Two notes ride a
+#     pin — the persona, and the memory beside it — and the memory folder is
+#     `wiki/agent-memory/` in the binary (`PERSONA_MEMORY_FOLDER`,
+#     crates/core/src/persona.rs), so a vault that keeps its memory elsewhere
+#     wears the persona alone.
 
 {
   config,
@@ -59,7 +65,7 @@
     habit.home.home.file.".config/eidolon/config.toml".text = ''
       default_model = "ollama:deepseek-v4.1-flash"
       fallback_model = "sonnet"
-      persona = "Rook"
+      default_persona = "10 ♜ AGENT/rook/AGENTS.md"
 
       [claude_cli]
 
