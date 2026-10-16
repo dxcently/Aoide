@@ -182,11 +182,23 @@ pkgs.testers.runNixOSTest {
         out = as_khoa(m, "lyra lock --json")
         return json.loads(out)
 
-    def wait_shell(m):
+    def wait_shell(m, secure="false"):
         m.wait_until_succeeds(
-            khoa_cmd(m, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock secure") + " | grep -qx false",
+            khoa_cmd(m, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock secure") + f" | grep -qx {secure}",
             timeout=90,
         )
+
+    # Swap the aubade lock face for a fixture, restart the shell, lock.
+    def lock_with_face(m, fixture):
+        m.succeed(
+            "f=/home/khoa/.aoide/run/qml/songs/aubade/lockscreen.qml; "
+            f"chmod u+w $(dirname $f); rm -f $f; cp {fixture} $f; chown khoa $f"
+        )
+        as_khoa(m, "systemctl --user restart aoide-quickshell.service")
+        wait_shell(m)
+        o = lyra_lock(m)
+        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+        wait_hint(m, "yes")
 
     start_all()
 
@@ -255,7 +267,7 @@ pkgs.testers.runNixOSTest {
         face.send_chars("test\n")
         wait_hint(face, "no")
 
-    with subtest("face: a crashed shell leaves the session locked, and a re-lock restores it"):
+    with subtest("face: a crashed shell leaves the session locked, and the restarted shell takes it back"):
         o = lyra_lock(face)
         assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
         wait_hint(face, "yes")
@@ -264,10 +276,11 @@ pkgs.testers.runNixOSTest {
         face.sleep(2)
         face.screenshot("07-shell-crashed-while-locked")
         assert locked_hint(face) == "yes", "the hint dropped with the shell"
-        # Restart=always brings the shell back; it holds no lock until asked.
-        wait_shell(face)
-        o = lyra_lock(face)
-        assert o["data"]["locker"] == "shell", f"the re-lock used {o}"
+        # Restart=always brings the shell back; it reads LockedHint=yes at
+        # start and locks on its own — no `lyra lock` here.
+        wait_shell(face, secure="true")
+        face.succeed("journalctl -b --no-pager | grep -q 'LockedHint is still yes; taking the lock back'")
+        assert locked_hint(face) == "yes"
         face.sleep(3)
         face.screenshot("08-relocked")
         face.send_chars("test\n")
@@ -276,19 +289,22 @@ pkgs.testers.runNixOSTest {
         face.screenshot("08b-relock-unlocked")
 
     with subtest("face: a face that fails to load leaves the floor, which unlocks"):
-        face.succeed(
-            "f=/home/khoa/.aoide/run/qml/songs/aubade/lockscreen.qml; "
-            "chmod u+w $(dirname $f); rm -f $f; "
-            "cp ${./lock-greeter/broken-lockscreen.qml} $f; chown khoa $f"
-        )
-        as_khoa(face, "systemctl --user restart aoide-quickshell.service")
-        wait_shell(face)
-        o = lyra_lock(face)
-        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
-        wait_hint(face, "yes")
+        lock_with_face(face, "${./lock-greeter/broken-lockscreen.qml}")
         face.sleep(3)
         face.screenshot("09-floor")
         face.succeed("journalctl -b --no-pager | grep -q 'the face failed to load'")
+        face.send_chars("test\n")
+        wait_hint(face, "no")
+
+    with subtest("face: a face that never reports ready gives way to the floor, which unlocks"):
+        # Every aubade lock so far stood well past the wait: a face that
+        # reports ready is never taken down.
+        face.fail("journalctl -b --no-pager | grep -q 'the face did not report ready'")
+        lock_with_face(face, "${./lock-greeter/throwing-lockscreen.qml}")
+        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'the face did not report ready'", timeout=15)
+        face.sleep(2)
+        face.screenshot("09b-floor-after-unready-face")
+        # The throwing face has no field: only the floor can take this.
         face.send_chars("test\n")
         wait_hint(face, "no")
 
@@ -307,12 +323,21 @@ pkgs.testers.runNixOSTest {
         plain.wait_until_succeeds("loginctl list-sessions --no-legend | grep -w khoa", timeout=60)
         plain.wait_until_succeeds("ps -u khoa -o args= | grep -Eq '(^|/)Hyprland( |$)'", timeout=60)
         plain.sleep(5)
+        # A hint a dead shell lock left at yes: hyprlock taking the screen
+        # clears it, since hyprlock is seen by its process, never the hint.
+        as_khoa(plain, "lyra lock hint yes")
+        wait_hint(plain, "yes")
         o = lyra_lock(plain)
         assert o["data"]["locker"] == "hyprlock", f"lyra lock used {o}"
+        assert o["data"]["hintCleared"] is True, f"the stale hint stood: {o}"
+        assert locked_hint(plain) == "no"
         # hyprlock leaves at once when the compositor refuses its lock, so
         # one still running seconds later holds the session.
         plain.wait_until_succeeds("ps -u khoa -o args= | grep -Eq '(^|/)hyprlock( |$)'", timeout=10)
-        plain.sleep(5)
+        # hyprlock waits out its 2 s resource gathering here (no screencopy
+        # buffer on this GPU) and then fades its widgets in: the field is fully
+        # drawn some 8 s after the lock.
+        plain.sleep(10)
         plain.succeed("ps -u khoa -o args= | grep -Eq '(^|/)hyprlock( |$)'")
         plain.screenshot("11-hyprlock")
         before = pam_failures(plain, "hyprlock")

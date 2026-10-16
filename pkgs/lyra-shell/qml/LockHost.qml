@@ -18,20 +18,29 @@
 // `failures` (a failure's message stays up until the next answer, under the
 // re-prompt), `userName` (the passwd name, from `id -un`), the
 // `respond(text)` function and the `unlocked()` signal. A face never sees the
-// `PamContext`, and answers it only through `respond`.
+// `PamContext`, and answers it only through `respond`. One property flows the
+// other way: the face sets `auth.ready = true` once it is up.
 //
 // THE FLOOR: every surface carries this file's own plain password field
 // under the face. It shows whenever the face is not there — no face in the
-// active song, a face that fails to compile, or one that cannot be created
-// (a missing required property) — so a locked screen is never without input.
+// active song, a face that fails to compile, one that cannot be created (a
+// missing required property), or one that has not set `auth.ready` within
+// `faceReadyMs` of its creation (a face whose own start-up threw, and so may
+// paint without a field): that face is destroyed. So a locked screen is never
+// without input. 3 s: a face is created synchronously and sets `ready` from
+// its own `Component.onCompleted`, so a working face is ready in the frame it
+// appears; the wait only bounds how long a broken one stands before the floor.
 //
 // LockedHint: `lyra lock hint yes|no` follows the lock, so the popup
 // watchers' locked check sees this lock the way it sees hyprlock's process:
 // `yes` from `lockStateChanged` once the compositor grants the lock, `no` from
 // the unlock itself, since `WlSessionLock` emits nothing for an unlock it was
-// asked for (Quickshell 0.3.1 checks `isLocked()` after releasing the lock). A crashed shell leaves the hint at `yes` and the compositor keeps
-// the session locked (Hyprland's `misc:allow_session_lock_restore` lets the
-// next `lyra lock` take it back).
+// asked for (Quickshell 0.3.1 checks `isLocked()` after releasing the lock).
+// The hint marks this host's lock only — hyprlock sets none, and `lyra lock`
+// clears a stale `yes` once hyprlock holds the screen. A crashed shell leaves
+// the hint at `yes` and the compositor keeps the session locked; this host
+// reads the hint when it starts (`lyra lock hint`) and, on `yes`, locks at
+// once — Hyprland's `misc:allow_session_lock_restore` hands it the lock back.
 
 import QtQuick
 import Quickshell
@@ -47,6 +56,7 @@ Scope {
     required property var stagingEngine
 
     readonly property string faceSlot: "lockscreen"
+    readonly property int faceReadyMs: 3000
     readonly property string faceSource:
         stagingEngine.has(livery.songName, faceSlot) ? stagingEngine.source(livery.songName, faceSlot) : ""
 
@@ -60,6 +70,7 @@ Scope {
         property bool busy: false
         property int failures: 0
         property string userName: ""
+        property bool ready: false
         signal unlocked()
 
         function respond(text) {
@@ -146,6 +157,22 @@ Scope {
         stdout: StdioCollector { onStreamFinished: auth.userName = text.trim() }
     }
 
+    // A lock a crashed predecessor held is taken back at start.
+    property Process _relock: Process {
+        command: ["lyra", "lock", "hint", "--json"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var said = null
+                try { said = JSON.parse(text) } catch (e) { return }
+                if (said && said.data && said.data.lockedHint === true) {
+                    console.info("[aoide/lockhost] LockedHint is still yes; taking the lock back")
+                    root.lock()
+                }
+            }
+        }
+    }
+
     property IpcHandler _ipc: IpcHandler {
         target: "lock"
         function lock(): void { root.lock() }
@@ -180,6 +207,7 @@ Scope {
                         console.warn("[aoide/lockhost] the face failed to load:", comp.errorString())
                     return
                 }
+                root.auth.ready = false
                 var item = comp.createObject(faceHolder, {
                     "livery": root.livery,
                     "bridge": root.bridge,
@@ -191,6 +219,18 @@ Scope {
                 }
                 item.anchors.fill = faceHolder
                 surface.face = item
+                readyWatch.restart()
+            }
+
+            Timer {
+                id: readyWatch
+                interval: root.faceReadyMs
+                onTriggered: {
+                    if (surface.face === null || root.auth.ready) return
+                    console.warn("[aoide/lockhost] the face did not report ready within", interval, "ms; the floor takes over")
+                    surface.face.destroy()
+                    surface.face = null
+                }
             }
 
             // The floor: a plain password field, under the face, shown

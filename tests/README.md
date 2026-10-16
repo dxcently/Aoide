@@ -15,7 +15,10 @@ what those checks actually test.
   Quickshell greeter, `lyra lock` through the shell's LockHost), `plainsong`
   ships none (ly, and `lyra lock` runs hyprlock). It types passwords at the
   greeter and the lock, follows logind's `LockedHint`, kills the shell while
-  locked, and swaps in `lock-greeter/broken-lockscreen.qml` to prove the floor.
+  locked and watches the restarted shell take the lock back on its own, and
+  swaps in `lock-greeter/broken-lockscreen.qml` (does not compile) and
+  `lock-greeter/throwing-lockscreen.qml` (never reports ready) to prove the
+  floor.
   Screenshots land in the driver's output directory. Requires KVM.
 - `portability.nix` — asserts `packages.aoide-static` is genuinely free of
   nix, wired as `checks.<system>.portability` (`lib/checks.nix` Check 8).

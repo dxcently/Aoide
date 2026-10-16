@@ -60,5 +60,8 @@ Rectangle {
         }
     }
 
-    Component.onCompleted: field.forceActiveFocus()
+    Component.onCompleted: {
+        field.forceActiveFocus()
+        face.auth.ready = true
+    }
 }

@@ -19,10 +19,13 @@
 // `failures` (a failure's message stays up until the next answer, under the
 // re-prompt), `users` (passwd accounts with uid >= 1000 and a login shell, as
 // `{ name, realName }`), `selectedUser`, `selectUser(name)` (starts that
-// account's conversation; "" goes back to choosing), and `respond(text)`.
+// account's conversation; "" goes back to choosing), and `respond(text)`;
+// the face sets `auth.ready = true` once it is up.
 //
 // THE FLOOR: as on the lock, this file's own plain user + password fields sit
-// under the face and show whenever the face is missing or fails to load.
+// under the face and show whenever the face is missing, fails to load, or has
+// not set `auth.ready` within `faceReadyMs` (3 s, as on the lock) of its
+// creation — that face is destroyed.
 
 import QtQuick
 import Quickshell
@@ -40,6 +43,7 @@ ShellRoot {
     readonly property string faceSource:
         stagingEngine.has(livery.songName, "greeter") ? stagingEngine.source(livery.songName, "greeter") : ""
 
+    readonly property int faceReadyMs: 3000
     property var sessionCommand: []
     property string sessionDesktop: ""
     property bool _failed: false
@@ -54,6 +58,7 @@ ShellRoot {
         property int failures: 0
         property var users: []
         property string selectedUser: ""
+        property bool ready: false
 
         function selectUser(name) {
             if (Greetd.state !== GreetdState.Inactive) Greetd.cancelSession()
@@ -178,6 +183,7 @@ ShellRoot {
                     console.warn("[aoide/greeter] the face failed to load:", comp.errorString())
                 return
             }
+            auth.ready = false
             var item = comp.createObject(faceHolder, { "livery": livery, "bridge": null, "auth": auth })
             if (!item) {
                 console.warn("[aoide/greeter] the face could not be created; the floor stays")
@@ -185,6 +191,18 @@ ShellRoot {
             }
             item.anchors.fill = faceHolder
             win.face = item
+            readyWatch.restart()
+        }
+
+        Timer {
+            id: readyWatch
+            interval: root.faceReadyMs
+            onTriggered: {
+                if (win.face === null || auth.ready) return
+                console.warn("[aoide/greeter] the face did not report ready within", interval, "ms; the floor takes over")
+                win.face.destroy()
+                win.face = null
+            }
         }
 
         Rectangle {
