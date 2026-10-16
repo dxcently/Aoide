@@ -49,7 +49,10 @@ Every slot below is hosted by one of three anchors:
   (the face from the DECLARED song only, the floor under it), but as the
   entry point of its own shell: the greeter lane builds a store tree with it
   as `shell.qml` and runs it as greetd's greeter in cage, where greetd's IPC
-  authenticates and launches the session.
+  authenticates and launches the session. That tree is the face's
+  `AOIDE_ROOT`, and it carries the song's `icons/` at the same
+  `song/songbook/<owner>/icons` a face reads in the session, so a face
+  loads its icons by one path in both places.
 
   Both faces run inside their host's own process — the session shell, or
   the greeter's — with that process's rights: QML has no sandbox. That a

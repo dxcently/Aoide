@@ -7,8 +7,11 @@
 #     greeter. greetd runs `cage` as its greeter user, and in it Quickshell on
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
 #     tree's `shell.qml`, `LiveryState`/`StagingEngine` beside it, the face's
-#     song folder from the shipped songbook (`pkgs.lyra-songbook`), the dress
-#     as `song/stage/livery.json`, and `session.json`: the display manager's
+#     song folder from the shipped songbook (`pkgs.lyra-songbook`), that
+#     song's `icons/` (when it has one) at `song/songbook/<owner>/icons` —
+#     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
+#     session too — the dress as `song/stage/livery.json`, and
+#     `session.json`: the display manager's
 #     session wrapper (`services.displayManager.sessionData.wrapper`, the
 #     one ly runs — it sources the profile and evaluates the Exec line with
 #     the shell's own quoting) followed by the default session's Exec line
@@ -97,7 +100,12 @@ let
     mkdir -p "$q/songs/${face.owner}" "$out/song/stage"
     cp ${pkgs.lyra-shell}/share/lyra/qml/LiveryState.qml ${pkgs.lyra-shell}/share/lyra/qml/StagingEngine.qml "$q/"
     cp ${pkgs.lyra-shell}/share/lyra/qml/GreeterHost.qml "$q/shell.qml"
-    cp -r ${pkgs.lyra-songbook}/share/lyra/songbook/${face.owner}/widgets/. "$q/songs/${face.owner}/"
+    song=${pkgs.lyra-songbook}/share/lyra/songbook/${face.owner}
+    cp -r "$song/widgets/." "$q/songs/${face.owner}/"
+    if [ -d "$song/icons" ]; then
+      mkdir -p "$out/song/songbook/${face.owner}"
+      cp -r "$song/icons" "$out/song/songbook/${face.owner}/icons"
+    fi
     cp ${manifest} "$q/songs/manifest.json"
     echo '{}' > "$q/songs/registry.json"
     cp ${dress} "$out/song/stage/livery.json"

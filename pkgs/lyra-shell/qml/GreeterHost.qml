@@ -3,9 +3,10 @@
 //
 // The greeter lane (modules/dendrites/greeter.nix) builds a store tree with
 // this file as `run/qml/shell.qml`, LiveryState + StagingEngine beside it, the
-// DECLARED song's widgets under `songs/<owner>/` and its dress as
-// `song/stage/livery.json`, and points `AOIDE_ROOT` at it — nothing here reads
-// /home. greetd runs it as its greeter user inside cage.
+// DECLARED song's widgets under `songs/<owner>/`, its `icons/` (when it has
+// one) at `song/songbook/<owner>/icons` — where a face finds them under
+// `AOIDE_ROOT` in the session too — and its dress as `song/stage/livery.json`,
+// and points `AOIDE_ROOT` at it — nothing here reads /home. greetd runs it as its greeter user inside cage.
 //
 // Authentication is greetd's (`Quickshell.Services.Greetd`): `createSession`,
 // `respond`, then `launch` with the session the lane wrote into the tree

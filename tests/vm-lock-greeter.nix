@@ -7,9 +7,10 @@
 # (compositor with its hyprland provider, the hyprland behaviour lane, greeter,
 # quickshell, lyra):
 #
-#   face   declares `aubade`, which ships `widgets/greeter.qml` and
-#          `widgets/lockscreen.qml`: greetd + the Quickshell greeter at boot,
-#          and `lyra lock` locks through the shell's LockHost.
+#   face   declares `aubade`, which ships `widgets/greeter.qml`,
+#          `widgets/lockscreen.qml` and an `icons/` its greeter face loads:
+#          greetd + the Quickshell greeter at boot, and `lyra lock` locks
+#          through the shell's LockHost.
 #   plain  declares `plainsong`, which ships no face: ly at boot, and
 #          `lyra lock` runs hyprlock.
 #   night  declares `nocturne`, whose greeter face throws at start and never
@@ -261,6 +262,10 @@ pkgs.testers.runNixOSTest {
         # face still standing here reported ready.
         face.sleep(8)
         face.screenshot("01-greeter")
+        # The song's icons/ rode into the greeter tree, at the path a face
+        # reads under AOIDE_ROOT.
+        said = greeter_log(face)
+        assert "[fixture] greeter icon loaded" in said, said
 
     with subtest("face: the greeter refuses a wrong password, and switch user starts over"):
         face.send_chars("bram\n")

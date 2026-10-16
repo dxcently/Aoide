@@ -1,7 +1,9 @@
 // The fixture greeter face: an account field while none is chosen, then one
 // password field for the chosen account; Escape goes back to choosing
 // (switch user). The host's message and a failure count, all through `auth`.
+// An icon from the song's own icons/, by the path a face uses in the session.
 import QtQuick
+import Quickshell
 
 Rectangle {
     id: face
@@ -21,6 +23,11 @@ Rectangle {
     Column {
         anchors.centerIn: parent
         spacing: 14
+
+        Image {
+            source: "file://" + Quickshell.env("AOIDE_ROOT") + "/song/songbook/aubade/icons/sun.svg"
+            onStatusChanged: if (status === Image.Ready) console.log("[fixture] greeter icon loaded")
+        }
 
         Text {
             text: "AUBADE GREETER FACE"
