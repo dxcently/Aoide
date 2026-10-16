@@ -3374,6 +3374,24 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     }
     let poller = ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default();
 
+    // What the poller says it was handed and did NOT file (its box was full, or
+    // it could not take the bytes yet). Each msgid that is a well-formed msgid
+    // defers that entry in THIS poller's own spool, so it is not offered again at
+    // the head of every batch; an old hub never reads the key (MAIL.md §Wire).
+    let deferred: Vec<String> = params
+        .get("deferred")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .filter(|text| aoide_storage::mail::is_msgid(text))
+                .take(aoide_storage::outbox::DEFERRED_LIST_CAP)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    aoide_storage::outbox::defer_named(&poller, &deferred)
+        .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     let payloads = aoide_storage::outbox::poll_payloads(&poller)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     // The acknowledgements land FIRST, so what this answer offers is what the
@@ -15592,6 +15610,176 @@ mod tests {
         );
         assert!(!poll_admitted(None, &grant, "box-b"), "no verified signature resolution at all");
         assert!(!poll_admitted(sig("box-b"), &Grant::none(), "box-b"), "and no grant to speak with either");
+    }
+
+    /// **A poller's `deferred` list defers the entries it names, in its own
+    /// spool and nowhere else.** The poller was handed a container and did not
+    /// file it (its box is full), so it names it; the hub defers that entry for
+    /// this poller only, and another node's entry for the same msgid is untouched.
+    #[test]
+    fn a_hub_defers_only_the_callers_own_entries() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-own");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container.clone()))
+            .unwrap();
+        aoide_storage::outbox::write_entry("box-c", &aoide_storage::outbox::OutboxEntry::transit_held(container))
+            .unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        mail_poll(&json!({ "node": "box-b", "deferred": [msgid] }), &ctx).unwrap();
+
+        let own = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(own.len(), 1, "{own:?}");
+        assert_eq!(own[0].tries, 1, "named: the hub defers it for this poller");
+        assert!(own[0].last_outcome.starts_with("deferred:"), "{}", own[0].last_outcome);
+        let other = aoide_storage::outbox::list_entries("box-c").unwrap();
+        assert_eq!(other[0].tries, 0, "another node's entry for the same msgid is not deferred");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **Fifty deferred entries never take a poll's batch.** The poller names
+    /// the fifty it could not file; they wait their window, so the one fresh
+    /// letter behind them is the whole answer. Without the deferral the first
+    /// fifty fill the batch and the fresh letter waits for the next poll, and
+    /// the next, for as long as the wall stands.
+    #[test]
+    fn a_wall_of_deferred_poll_entries_never_starves_a_fresh_letter() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-wall");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        let seal = |text: &str| {
+            let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", text).unwrap();
+            aoide_storage::seal::seal_envelope(&envelope, &binding, "", "", "box-b", "box-b", &now).unwrap()
+        };
+        let mut wall = Vec::new();
+        for i in 0..50 {
+            let container = seal(&format!("wall {i}"));
+            wall.push(container.msgid.clone());
+            aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container))
+                .unwrap();
+        }
+        let fresh = seal("the fresh one");
+        let fresh_msgid = fresh.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(fresh)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let answer = mail_poll(&json!({ "node": "box-b", "deferred": wall }), &ctx).unwrap();
+        let offered: Vec<String> = answer["containers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c["msgid"].as_str().map(str::to_string))
+            .collect();
+        assert_eq!(offered, vec![fresh_msgid], "the deferred fifty take no slot; the fresh letter is offered");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **The `deferred` key is additive.** An old hub reads its params with
+    /// `get` and never looks at the key, so a poll that carries it must answer
+    /// exactly what the same poll without it answers. Names a msgid this hub
+    /// does not hold, so the list changes nothing it could not already see.
+    /// (This guards a compatibility property, so it passes before the fix too.)
+    #[test]
+    fn an_old_hub_ignores_the_deferred_list() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-old-hub");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let plain = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        let with_key = mail_poll(&json!({ "node": "box-b", "deferred": ["0".repeat(64)] }), &ctx).unwrap();
+        assert_eq!(plain["containers"], with_key["containers"], "the key changes nothing unnamed");
+        assert_eq!(with_key["containers"][0]["msgid"], json!(msgid));
+        assert_eq!(aoide_storage::outbox::list_entries("box-b").unwrap()[0].tries, 0);
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **Junk in the `deferred` list is dropped, and a valid msgid beside it
+    /// still counts.** A non-hex text never names a spool file, so a `../` or a
+    /// capital is not a path and not a msgid; the lowercase hex msgid next to it
+    /// is deferred as usual.
+    #[test]
+    fn a_deferred_list_with_a_non_hex_msgid_is_ignored() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-junk");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let junk = json!(["../escape", msgid.to_uppercase(), 7, msgid]);
+        mail_poll(&json!({ "node": "box-b", "deferred": junk }), &ctx).unwrap();
+
+        let own = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(own.len(), 1, "{own:?}");
+        assert_eq!(own[0].tries, 1, "the valid msgid is deferred; the junk names nothing");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     /// The poll's own acknowledgement, at the door: a `transit` entry held for

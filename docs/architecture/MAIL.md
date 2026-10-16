@@ -565,7 +565,8 @@ door's audit name whitelist gains both names so they never log as bare
      relayed.
   Receipts (acks) are envelopes deposited through the same method — one
   routing path for everything, so acks traverse hubs for free.
-- **`aoide/mailPoll`** `{ node, filed? }` → `{ envelopes[], containers[] }`.
+- **`aoide/mailPoll`** `{ node, filed?, deferred? }` → `{ envelopes[],
+  containers[] }`.
   The caller asks
   "anything waiting for me?" and receives every outbox entry spooled
   toward the caller's node — all `hold` ones, and `now` ones whose own
@@ -582,7 +583,8 @@ door's audit name whitelist gains both names so they never log as bare
   refusals of the bytes themselves). A container refused for a reason of the
   poller's own state (its disk, its config, its charter, its box being full:
   `local-io`, `config-unreadable`, `no-charter-in-force`, `box-full`, and the
-  rest of that class) is never named: its custody is kept and it is offered
+  rest of that class) is never named in `filed`: its custody is kept, and it is
+  named in `deferred` (below), so the hub waits its window before it is offered
   again. The hub retires
   its own custody of the named msgids (its spool entry, and only that)
   before it offers
@@ -595,7 +597,21 @@ door's audit name whitelist gains both names so they never log as bare
   refused container leaves the hub before the next offer, so it never blocks
   the poll behind it. A container held back by the poller's own state stays,
   and a backlog of those can fill the `POLL_BATCH_CAP` window until the state
-  clears; that is the price of keeping custody for it. **One poll of a node runs at a time** (the `.poll` flock, tried and
+  clears; that is the price of keeping custody for it. **`deferred` is the
+  poller's word on what it was handed and did not settle.** It carries the
+  msgids of the last answered poll that the poller neither filed, dedup'd, nor
+  refused for good (a box-full letter, a container held back by its own state, a
+  plaintext letter it could not take): at most fifty, and only well-formed
+  msgids (lowercase 64-hex) are read, anything else is dropped. The hub defers
+  those of its OWN spool entries for this caller
+  (`aoide_storage::outbox::defer_named`): each is tried once more and waits its
+  window (`deferral_due`) before it is handed again, so fifty unfileable letters
+  at the head of the spool cannot fill every batch. It defers no other node's
+  entry, and it never ends a container's custody. An old hub never reads the
+  key, so its answer is unchanged. The poller replaces its stored list with what
+  the answered poll left unfiled; a poll that got no answer keeps the old list
+  for the next ask. **One poll of a node runs at a time** (the `.poll` flock,
+  tried and
   never waited for): two overlapping asks would both read `filed` before either
   recorded it, be handed the same letter, and mint two receipts for it — which
   the relay refuses as a different body for one msgid. The second ask answers

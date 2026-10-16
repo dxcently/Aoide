@@ -1030,6 +1030,72 @@ fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
     crate::fs::atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Most msgids one poll carries in `deferred`, and most one stored list keeps:
+/// the poll's own batch size, so a deferral list never outgrows what a poll
+/// offers.
+pub const DEFERRED_LIST_CAP: usize = POLL_BATCH_CAP;
+
+fn deferred_path(node: &str) -> PathBuf {
+    node_dir(node).join(".deferred")
+}
+
+/// The msgids `node`'s last answered poll handed this box and this box did not
+/// file, dedup, or refuse for good: the `deferred` list the next poll carries
+/// (MAIL.md §Wire). Empty when there is none, and tolerant of a missing or
+/// unreadable file, as [`filed_pending`] is.
+pub fn deferred_pending(node: &str) -> Result<Vec<String>, String> {
+    read_list(&deferred_path(node))
+}
+
+/// Replace `node`'s deferred list with what the answered poll left unfiled. A
+/// poll that never got an answer does not reach this, so its list is carried
+/// again. Capped at [`DEFERRED_LIST_CAP`].
+pub fn record_deferred(node: &str, msgids: &[String]) -> Result<(), String> {
+    let node = node.to_string();
+    let kept: Vec<String> = msgids.iter().take(DEFERRED_LIST_CAP).cloned().collect();
+    with_lock(move || {
+        let path = deferred_path(&node);
+        if kept.is_empty() {
+            let _ = std::fs::remove_file(&path);
+            return Ok(());
+        }
+        let json = serde_json::to_string(&kept).map_err(|e| e.to_string())?;
+        crate::fs::atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
+    })
+}
+
+/// Defer the entries of `node`'s OWN spool that `poller` named as handed-over
+/// and unfiled: each is tried once more and waits its [`deferral_due`] window
+/// from now, so it is not offered again until the window passes. Only
+/// `node`'s directory is read or written, so a poller can never defer another
+/// node's entry. Each read-modify-write is one lock hold. Returns how many were
+/// deferred; a msgid this hub does not hold is skipped.
+pub fn defer_named(node: &str, msgids: &[String]) -> Result<usize, String> {
+    let node = node.to_string();
+    let msgids = msgids.to_vec();
+    with_lock(move || {
+        let mut deferred = 0;
+        for msgid in msgids.iter().filter(|m| crate::mail::is_msgid(m)) {
+            let Ok(raw) = std::fs::read_to_string(entry_path(&node, msgid)) else { continue };
+            let Ok(mut entry) = serde_json::from_str::<OutboxEntry>(&raw) else { continue };
+            entry.tries = entry.tries.saturating_add(1);
+            entry.last_try_at = crate::time::now_iso_utc();
+            entry.last_outcome = format!("{DEFERRED_PREFIX} poller did not file");
+            write_entry_unlocked(&node, &entry)?;
+            deferred += 1;
+        }
+        Ok(deferred)
+    })
+}
+
+fn read_list(path: &std::path::Path) -> Result<Vec<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => Ok(serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
 /// The word a hub owes the depositing hop when THIS box's own custody of a
 /// container is PARKED — `None` when there is no such entry anywhere in the
 /// spool. A hub whose next hop refuses (an older relay, a policy refusal) parks

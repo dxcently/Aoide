@@ -160,8 +160,10 @@
 - **`outbox::poll_payloads` is a poll's only hand-over point, and it returns
   pairs.** The container rides beside its envelope so the door can hand a
   sealed entry over as a container and NO plaintext, while an entry spooled
-  before the destination published a binding still appears as an envelope. A
-  poll is still a pure read: nothing is marked, moved or counted.
+  before the destination published a binding still appears as an envelope. The
+  hand-over is a pure read: nothing is marked, moved or counted. The one write a
+  poll makes on the hub is `defer_named`, which stamps only the caller's own
+  entries it names in `deferred` (MAIL.md §Wire).
 
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
