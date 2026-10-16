@@ -749,7 +749,9 @@ by decision — no embedded database yet
   Keep-all: `mail rm --older-than` is the only pruning, and it takes the dedup
   memory with the line (a pruned letter re-offered is filed again).
   A box is created by a local act only (`box_add`, `enrol_reader`,
-  `file_letter`); a far letter to an absent box is `UnknownBox`, and
+  `file_letter`, `ensure_session_box` at every roster insert); a far letter to
+  an absent or dead box is `UnknownBox`. A dead box is one whose every reader
+  was retired (`is_dead`), and `reap_dead_boxes` deletes the empty ones.
   `valid_box_name` (grammar, at most 63 bytes, not a DOS device name) is the
   one name rule. A letter is admitted under `CAPS` (`admit`): a box holds
   16 MiB, one verified origin key a quarter of it and a quarter of the store,
@@ -811,6 +813,11 @@ by decision — no embedded database yet
   `^[a-z0-9][a-z0-9-]*$` (`node_store::valid_node_name`) before taking
   the lock — validated, never clamped; a letter already on disk under an
   off-grammar name from before this rule stays filed and readable.
+
+  `fs::stage_lock_held()` answers one question for the calling thread: does
+  it hold `.stage.lock` now, by a `with_stage_lock` or `try_stage_lock` that
+  took the flock. A step whose correctness needs the lock checks it and does
+  nothing without it. Reap's reader retirement is the one caller that does.
 
   P-M5a-2 adds `with_ring_lock` — a dedicated `.ring.lock` file in
   `mail_dir()`, `flock`ed by `fs::lock_path` (the same primitive

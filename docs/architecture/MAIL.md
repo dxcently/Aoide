@@ -348,8 +348,21 @@ An entry is an envelope plus local facts:
   is the safe direction, and silent loss is not. A reader whose session
   has left the roster is retired: each reaper pass, in the same lock hold
   as the roster it reads, drops every reader key that names no session on
-  it, and a name left with no reader with it. The pseudo-reader is never
-  retired. The reader set is also what the doorbell rings.
+  it. The pseudo-reader is never retired. The reader set is also what the
+  doorbell rings. A roster the reaper cannot read (`sessions.json` absent or
+  unparseable) retires nothing, since an absent file is not an empty roster.
+- **A read by any enrolled reader counts as delivered.** Compaction removes
+  a line only when every enrolled reader of its box has read it. A reader
+  that joins later starts with an unread mark and sees whatever the box still
+  holds; letters compacted away before it joined are gone for it.
+- **Dead boxes.** A box is dead when every reader key it had was retired with
+  its session: the name keeps an empty reader map. A name no reader ever
+  touched has no entry and is not dead; a name a pseudo-reader holds is not
+  dead; the role box `conductor` is never dead. A far letter to a dead box is
+  refused `unknown-box`, and the origin keeps it. Each reaper pass deletes a
+  dead box that holds no letter, with its cursor key, and writes an audit line
+  first. A dead box holding mail stays until its letters are gone. A session
+  that starts again re-creates its box (see §Addressing).
 - Each mark also carries `rung`: the doorbell latch, the highest arming
   `seq` this reader has already been rung for. A reader arms again only
   once its own read catches up to `rung`; omitted from `cursors.json`
@@ -416,13 +429,16 @@ box's size, at most 16 MiB. Some operations read every box and the receipts
 under the lock, so they hold it for the store's size, at most 240 MiB plus the
 two receipt generations: `show`, `unread_for`, `names_with_unread`,
 `read_all_names`, `read_base`, `rm_older_than`, and the one-shot migrations. A
-far deposit reads every box for its key share (see above), so it holds the lock
-for the store's size too.
+far deposit opens every box for its key share (see above), so it holds the lock
+for the store's size too, and its cost scales with the number of boxes as well
+as with the letter's own box. A dead-box pass (`reap_dead_boxes`) and the
+reader retirement beside it read the boxes they delete, under the same lock.
 
 A migrated line is capped like any other. Its box takes it when it has room;
 a line the box has no room for is parked in `_legacy`, and a line that fits
 neither stays in `base.jsonl.migrated`, which the migration keeps and which
-no reader reads. The migration says so on stderr.
+no reader reads. Each migration writes one audit line that gives the unfiled
+count it left in `base.jsonl.migrated`, and says so on stderr.
 
 Compaction is the reason a box's seq list can have gaps. A reader's mark still
 means "read through this seq", and export and mailview order by seq, so the
@@ -458,7 +474,9 @@ gaps are harmless.
   mailbox can hold several runs' letters — the RUN is the sender's session id,
   and a letter whose sender is not the run being watched is shown as an earlier
   (or unrelated) run, never merged into that run's report. This adds no
-  addressing form, no store, and no delivery rule.
+  addressing form, no store, and no delivery rule. A far spawn the charter
+  allows (`may_spawn`) makes its child's box as a local act, when the child's
+  session starts. A refused far spawn starts nothing and creates no box file.
 - **A task run's two mailboxes stay apart.** `self/<slug>` is the CHILD's own
   inbox: only the letters sent TO the subagent, read against the child's own
   cursor. The wrapper's end-of-run report goes to a REPORT mailbox instead —
@@ -487,11 +505,15 @@ gaps are harmless.
   the bytes' destination, so it is named in `filed` and offered no more);
   the origin keeps its own copy and re-sends it on retry. A local send to
   `self/<name>` and `aoide mail box add <name>` create the box, and so does
-  enrolling a reader in it. A session's first start makes its own box, and
-  `aoided` makes `conductor` when it starts, so both are there before any far
-  letter names them. Reading a box that does not exist changes
-  nothing. Only `letter` and `receipt` are
-  filed; any other kind is `not-correspondence`.
+  enrolling a reader in it. Every roster insert makes its session's box, once,
+  as a local act: a session start, a session the eidolon or codex-app
+  reconcile tracks, and a subagent. A session that starts again after its box
+  was reaped gets the box back the same way. `aoided` makes `conductor` when it
+  starts, so both are there before any far letter names them. A far letter to
+  a dead box is refused the same way (§Store), and a start that cannot make its
+  box does not fail: the name is then simply unknown until a local act makes
+  it. Reading a box that does not exist changes nothing. Only `letter` and
+  `receipt` are filed; any other kind is `not-correspondence`.
 - `from.node` is asserted by the origin signature. `from.name` is the
   sending session's petname taken from `AOIDE_SESSION_ID`/`--from`,
   **attribution only** — any same-uid process can claim any name, as

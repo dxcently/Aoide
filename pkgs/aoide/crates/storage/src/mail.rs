@@ -601,11 +601,13 @@ impl MigrationBudget {
 /// Files one migrated line under `caps`, and says where it went. A migrated line
 /// has no origin, so only the box and store caps apply to it. A line its own box
 /// has no room for is parked in `_legacy`, which is counted in the store and read
-/// by no box reader, so it is kept but not shown. A line that fits neither stays
-/// in the archive the migration keeps, and the migration says so on stderr.
-fn file_migrated(entry: &Entry, caps: Caps, budget: &mut MigrationBudget) -> Result<(), String> {
+/// by no box reader, so it is kept but not shown. Returns whether the line was
+/// filed; one that fits neither stays in the archive the migration keeps, and
+/// the migration says so on stderr and in its audit line.
+fn file_migrated(entry: &Entry, caps: Caps, budget: &mut MigrationBudget) -> Result<bool, String> {
     if entry.kind == ENTRY_TYPE_RECEIPT {
-        return append_entry(entry);
+        append_entry(entry)?;
+        return Ok(true);
     }
     let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
     let line_len = line.len() as u64 + 1;
@@ -613,19 +615,19 @@ fn file_migrated(entry: &Entry, caps: Caps, budget: &mut MigrationBudget) -> Res
     if budget.admits(caps, &own, line_len) {
         append_entry(entry)?;
         budget.add(&own, line_len);
-        return Ok(());
+        return Ok(true);
     }
     let legacy = legacy_box_path();
     if budget.admits(caps, &legacy, line_len) {
         feed::append_line(&legacy, line.as_bytes()).map_err(|e| format!("{}: {e}", legacy.display()))?;
         budget.add(&legacy, line_len);
-        return Ok(());
+        return Ok(true);
     }
     eprintln!(
         "[aoide/mail] migration: no room for a line to `{}` in its box or in _legacy; it stays in base.jsonl.migrated",
         entry.envelope.header.to.name
     );
-    Ok(())
+    Ok(false)
 }
 
 /// [`migrate_base_if_needed`] under `caps`. A test passes a small one.
@@ -639,17 +641,35 @@ fn migrate_base_within(caps: Caps) -> Result<(), String> {
     let lines = feed::read_lines(&base).map_err(|e| format!("{}: {e}", base.display()))?;
     let mut filed = Filed::load()?;
     let mut budget = MigrationBudget::load()?;
+    let mut unfiled = 0usize;
     for line in &lines {
-        let Ok(mut entry) = serde_json::from_slice::<Entry>(line) else { continue };
+        let Ok(mut entry) = serde_json::from_slice::<Entry>(line) else {
+            unfiled += 1;
+            continue;
+        };
         if filed.holds(&entry) {
             continue;
         }
         if late {
             entry.seq = next_seq()?;
         }
-        file_migrated(&entry, caps, &mut budget)?;
-        filed.add(&entry);
+        if file_migrated(&entry, caps, &mut budget)? {
+            filed.add(&entry);
+        } else {
+            unfiled += 1;
+        }
     }
+    // One audit line per migration, written before the archive is, so a line
+    // that cannot be audited leaves base.jsonl in place for the next try.
+    aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        "mail.migrate",
+        "ok",
+        &format!("migration of base.jsonl: {} lines, unfiled {unfiled}, kept in base.jsonl.migrated", lines.len()),
+    )
+    .map_err(|e| format!("the audit log cannot be written, so the migration waits: {e}"))?;
     if late {
         for line in &lines {
             feed::append_line(&archive, line).map_err(|e| format!("{}: {e}", archive.display()))?;
@@ -920,6 +940,82 @@ pub const CONDUCTOR_BOX: &str = "conductor";
 /// far deposit to a name no local act created is still refused.
 pub fn ensure_auto_boxes() -> Result<(), String> {
     box_add(CONDUCTOR_BOX).map(|_| ())
+}
+
+/// The one rule for a dead box (MAIL.md "Store"): its name keeps a reader map
+/// that is empty, because every reader key it had was retired with its session
+/// (`retire_readers`). A name no reader ever touched has no entry at all, a name
+/// a pseudo-reader still holds is not empty, and the role box `conductor` is
+/// never dead, so none of those is dead.
+fn is_dead(name: &str, cursors: &Cursors) -> bool {
+    name != CONDUCTOR_BOX && cursors.get(name).is_some_and(BTreeMap::is_empty)
+}
+
+/// Whether a far letter may file to `name`: the box exists and is not dead.
+fn box_accepts(name: &str, cursors: &Cursors) -> bool {
+    box_exists(name) && !is_dead(name, cursors)
+}
+
+/// Reap's half of a dead box's life (MAIL.md "Store"): deletes every dead box
+/// that holds no letter, with its cursor key, and audits each deletion before it
+/// happens. A dead box that still holds mail stays, dead, until its letters are
+/// gone. Returns the names it deleted. Runs under the stage lock.
+pub fn reap_dead_boxes() -> Result<Vec<String>, String> {
+    if !cursors_path().exists() {
+        return Ok(Vec::new());
+    }
+    with_lock(|| {
+        let mut cursors = load_cursors()?;
+        let dead: Vec<String> = cursors.keys().filter(|name| is_dead(name, &cursors)).cloned().collect();
+        let mut removed = Vec::new();
+        let mut failure = Ok(());
+        for name in dead {
+            match reap_dead_box(&name) {
+                Ok(true) => {
+                    cursors.remove(&name);
+                    removed.push(name);
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    failure = Err(e);
+                    break;
+                }
+            }
+        }
+        if !removed.is_empty() {
+            save_cursors(&cursors)?;
+        }
+        failure.map(|()| removed)
+    })
+}
+
+/// Deletes one dead box's file if it holds no letter, after its audit line.
+/// `Ok(false)` when it holds mail and stays.
+fn reap_dead_box(name: &str) -> Result<bool, String> {
+    let path = box_path(name);
+    if path.exists() {
+        if !box_lines(&path)?.is_empty() {
+            return Ok(false);
+        }
+        aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.box.reap",
+            "ok",
+            &format!("reaping dead mailbox `{name}`: its session is gone and it holds no letters"),
+        )
+        .map_err(|e| format!("the audit log cannot be written, so the mailbox is kept: {e}"))?;
+        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(true)
+}
+
+/// Gives a session its mailbox on every roster insert, a local act like
+/// [`box_add`]. Best effort: a name the grammar refuses has no box, and the
+/// insert is not refused for it.
+pub fn ensure_session_box(session_id: &str) {
+    let _ = box_add(session_id);
 }
 
 /// `mail box add <name>`: creates the box `name`, empty, if it is absent, so a
@@ -1801,8 +1897,10 @@ pub enum DepositOutcome {
     /// is applied from a sealed container and never filed; any other kind is
     /// not correspondence ([`REFUSAL_NOT_CORRESPONDENCE`]).
     NotCorrespondence,
-    /// A letter to a name with no box on this node. Nothing is filed and no box
-    /// is created: a far deposit never creates one ([`REFUSAL_UNKNOWN_BOX`]).
+    /// A letter to a name with no box on this node, or to a dead box ([`is_dead`]:
+    /// its every reader was retired). Nothing is filed and no box is created: a
+    /// far deposit never creates one ([`REFUSAL_UNKNOWN_BOX`]), and the origin
+    /// keeps its copy.
     UnknownBox,
     /// A letter over [`LETTER_MAX`] serialized. Nothing is read or filed.
     TooLarge,
@@ -1890,7 +1988,7 @@ pub(crate) fn deposit_within(envelope: Envelope, via: &str, caps: Caps) -> Resul
         if envelope_len(&envelope) > LETTER_MAX {
             return Ok(DepositOutcome::TooLarge);
         }
-        if !box_exists(&envelope.header.to.name) {
+        if !box_accepts(&envelope.header.to.name, &load_cursors()?) {
             return Ok(DepositOutcome::UnknownBox);
         }
         let target = box_path(&envelope.header.to.name);
@@ -2288,12 +2386,14 @@ pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
 }
 
 /// Retires every reader key that is neither a session in `live` nor its name's
-/// own pseudo-reader, and drops a name left with no readers (MAIL.md "Store").
-/// A dead reader's mark no longer holds its box's floor down, so the box's read
-/// lines become reclaimable on the next compaction. Writes `cursors.json` only
-/// when a key leaves, and touches nothing when there is no `cursors.json`, so
-/// the reaper never creates a mail store. Returns the retired `(name, reader)`
-/// pairs, in name order.
+/// own pseudo-reader (MAIL.md "Store"). A name left with no reader keeps an
+/// empty reader map, which is what makes its box dead ([`is_dead`]): a far
+/// letter to it is refused, and [`reap_dead_boxes`] may delete it once it is
+/// empty. A dead reader's mark no longer holds its box's floor down, so the
+/// box's read lines become reclaimable on the next compaction. Writes
+/// `cursors.json` only when a key leaves, and touches nothing when there is no
+/// `cursors.json`, so the reaper never creates a mail store. Returns the retired
+/// `(name, reader)` pairs, in name order.
 pub fn retire_readers(live: &std::collections::HashSet<&str>) -> Result<Vec<(String, String)>, String> {
     if !cursors_path().exists() {
         return Ok(Vec::new());
@@ -2313,7 +2413,6 @@ pub fn retire_readers(live: &std::collections::HashSet<&str>) -> Result<Vec<(Str
         if retired.is_empty() {
             return Ok(retired);
         }
-        cursors.retain(|_, readers| !readers.is_empty());
         save_cursors(&cursors)?;
         Ok(retired)
     })
@@ -4963,6 +5062,81 @@ mod tests {
         let left: Vec<String> =
             box_lines(&box_path("bob")).unwrap().iter().filter_map(|l| l.entry.as_ref()).map(|e| e.envelope.text.clone()).collect();
         assert_eq!(left, vec!["next".to_string()], "the read letters were compacted away");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A box whose every reader was retired is dead: a far letter to it is
+    /// refused `unknown-box` and the origin keeps it. A box no reader ever
+    /// touched, and a box a pseudo-reader still holds, are not dead.
+    #[test]
+    fn a_far_deposit_to_a_dead_box_is_refused_and_a_live_box_still_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("dead-box-deposit");
+        let alice = key_on_record("alice-host");
+        box_add("erin").unwrap();
+        enrol_reader("erin", "gone").unwrap();
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let to_erin = signed_from("alice-host", "erin", ENTRY_TYPE_LETTER, "hello?", &alice);
+        assert_eq!(deposit(to_erin, "sakaki").unwrap(), DepositOutcome::UnknownBox, "a dead box refuses");
+
+        box_add("frank").unwrap();
+        let to_frank = signed_from("alice-host", "frank", ENTRY_TYPE_LETTER, "untouched", &alice);
+        assert!(matches!(deposit(to_frank, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "a box no reader touched files");
+
+        box_add("gina").unwrap();
+        read_for("gina", false, None).unwrap();
+        enrol_reader("gina", "gone").unwrap();
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let to_gina = signed_from("alice-host", "gina", ENTRY_TYPE_LETTER, "pseudo", &alice);
+        assert!(matches!(deposit(to_gina, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "a pseudo-reader keeps its box alive");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reap deletes a dead box once it holds no letter, and says so in the audit
+    /// log. A dead box that still holds mail stays, and a resurrected session's
+    /// box is created again from its first deposit.
+    #[test]
+    fn reap_deletes_an_empty_dead_box_audited_and_keeps_one_holding_mail() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("dead-box-reap");
+        let alice = key_on_record("alice-host");
+        box_add("erin").unwrap();
+        enrol_reader("erin", "gone").unwrap();
+        box_add("hank").unwrap();
+        file_letter("alice", "hank", "mail stays").unwrap();
+        enrol_reader("hank", "gone").unwrap();
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+
+        assert_eq!(reap_dead_boxes().unwrap(), vec!["erin".to_string()], "only the empty dead box goes");
+        assert!(!box_path("erin").exists(), "the empty dead box is deleted");
+        assert!(box_path("hank").exists(), "a dead box holding mail stays");
+        assert!(!load_cursors().unwrap().contains_key("erin"), "its cursor key goes with it");
+        let line = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap();
+        assert!(line.contains("mail.box.reap") && line.contains("erin"), "{line}");
+
+        ensure_session_box("erin");
+        ensure_session_box("not a name");
+        assert!(box_exists("erin"), "a resurrected session gets its box back");
+        assert!(!box_exists("not a name"), "a name the grammar refuses has no box, and no error");
+        let to_erin = signed_from("alice-host", "erin", ENTRY_TYPE_LETTER, "back", &alice);
+        assert!(matches!(deposit(to_erin, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "the new box files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A migration writes one audit line that says how many lines it left
+    /// unfiled in the archive. A line that fits no box is that count.
+    #[test]
+    fn a_migration_audits_the_unfiled_count_it_leaves_in_the_archive() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-audit");
+        let small = serde_json::to_string(&letter_entry("bob", 1, "fits")).unwrap();
+        let big = serde_json::to_string(&letter_entry("bob", 2, &"x".repeat(2000))).unwrap();
+        write_base(&[small, big]);
+
+        migrate_base_within(small_caps(1000)).unwrap();
+        assert!(mail_dir().join("base.jsonl.migrated").exists(), "the base is archived");
+        let line = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap();
+        assert!(line.contains("mail.migrate") && line.contains("unfiled 1"), "{line}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

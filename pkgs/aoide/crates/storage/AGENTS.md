@@ -100,8 +100,17 @@
 - **A far deposit never creates a box.** A letter to a name with no box is
   `UnknownBox` (`unknown-box`), before any read or write. A box is created
   only by a local act: `box_add` (`mail box add`), `enrol_reader`, and
-  `file_letter`. `valid_box_name` is the one name rule, and the conductor's
-  petname check calls it.
+  `file_letter`, and by a roster insert through `ensure_session_box`
+  (`session start`, the eidolon and codex-app reconciles, subagents).
+  `valid_box_name` is the one name rule, and the conductor's petname check
+  calls it.
+- **A dead box refuses a far letter, by one rule.** `is_dead` (the name's
+  cursor entry exists and is empty, and the name is not `conductor`) is the
+  only definition. `box_accepts` is `box_exists && !is_dead`, and the far
+  deposit calls it. `retire_readers` leaves a name's reader map empty when its
+  last key goes, and `reap_dead_boxes` deletes a dead box that holds no letter,
+  after its audit line. Keep the empty entry: dropping it would revive the box.
+  A `box add` box with no reader is not dead.
 - **Every letter is admitted by `admit()` before a line is written.** The
   caps are `CAPS` (a box 16 MiB, a quarter of it per verified origin key, a
   quarter of the store per verified origin key, all boxes 240 MiB), and a
@@ -903,6 +912,11 @@
   — latching first and writing second would strand a reader that a crash
   or a failed write never actually reached, silent and unrung until the
   next unrelated letter arrives.
+- **`fs::stage_lock_held()` says whether THIS thread holds `.stage.lock`
+  right now** (true inside a `with_stage_lock` or `try_stage_lock` that took
+  the flock). A step that needs the lock as its precondition checks it and
+  does nothing without it, never a `debug_assert`: reap's reader retirement
+  (`conduct::reap`) is the example, and an unlocked call retires nothing.
 - **`fs::try_stage_lock` is fail-closed AND re-entrant on its thread.** A
   nested call under a held `.stage.lock` (from `with_stage_lock` or another
   `try_stage_lock`) runs its closure directly; a fresh `flock` on a second fd

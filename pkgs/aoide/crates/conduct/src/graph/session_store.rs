@@ -495,7 +495,7 @@ fn do_session_start_inner(
     // Tracking a session gives it its mailbox, once, on its first start. A name
     // the grammar refuses has no box, and the start is not refused for it.
     if inserted {
-        let _ = aoide_storage::mail::box_add(id);
+        aoide_storage::mail::ensure_session_box(id);
     }
     // The hook chain lands in this same locked write, and only where
     // `ancestry_may_move` allows (see that fn): a record anchored to a live pid of
@@ -1691,6 +1691,7 @@ pub(in crate::graph) fn do_subagent_spawn(
                 petname: Some(petname),
                 ..Default::default()
             });
+            aoide_storage::mail::ensure_session_box(sub_id);
         }
         if file.schema_version.is_empty() {
             file.schema_version = STAGE_GRAPH_VERSION.to_string();

@@ -269,6 +269,7 @@ pub(crate) fn reconcile_codex_app_threads(
                 petname: Some(petname),
                 ..Default::default()
             });
+            aoide_storage::mail::ensure_session_box(id);
             changed = true;
         }
     }
