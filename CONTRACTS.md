@@ -5005,7 +5005,8 @@ cursor; `mail mark --for <name>` advances the caller's mark the same way,
 without printing; `mail rm --older-than <Nd|Nh>` is the only pruning, and
 dedup memory goes with the line, so a pruned letter re-offered later is filed
 again, unread (forgetting re-delivers; it never loses). The store is capped:
-a box holds 16 MiB, one origin key a quarter of one, and all boxes 240 MiB
+a box holds 16 MiB, one origin key a quarter of one and a quarter of the store,
+and all boxes 240 MiB
 (MAIL.md §Store, "Caps and compaction"). A capped refusal is `box-full` and
 files nothing; compaction drops only lines every reader has read.
 

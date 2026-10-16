@@ -103,8 +103,9 @@
   `file_letter`. `valid_box_name` is the one name rule, and the conductor's
   petname check calls it.
 - **Every letter is admitted by `admit()` before a line is written.** The
-  caps are `CAPS` (a box 16 MiB, a quarter of it per verified origin key,
-  all boxes 240 MiB), and a letter over `LETTER_MAX` (256 KiB serialized) is
+  caps are `CAPS` (a box 16 MiB, a quarter of it per verified origin key, a
+  quarter of the store per verified origin key, all boxes 240 MiB), and a
+  letter over `LETTER_MAX` (256 KiB serialized) is
   `too-large` before any box is read. A refusal compacts first: a box or
   quarter refusal compacts its box, a store refusal compacts every box. A
   line is dropped only when every reader of its box has read it (the floor

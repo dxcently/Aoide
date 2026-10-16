@@ -320,21 +320,34 @@ pub enum Full {
     Box,
     /// The sender's share of the target box would exceed a quarter of `box_max`.
     Origin,
+    /// The sender's share of every box would exceed a quarter of `boxes_max`.
+    OriginTotal,
     /// All boxes together would exceed `boxes_max`.
     Total,
 }
 
-/// Admits one line of `line_len` bytes to a box of `box_len`, given the
-/// sender's bytes in it (`origin_len`, `None` for a local letter, which has no
-/// quarter), and all boxes' bytes (`boxes_len`). Pure: the store's policy is
-/// this one comparison chain.
-pub fn admit(caps: Caps, box_len: u64, origin_len: Option<u64>, boxes_len: u64, line_len: u64) -> Result<(), Full> {
+/// The bytes one verified origin key holds: in the target box, and across every
+/// box together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Held {
+    pub in_box: u64,
+    pub in_store: u64,
+}
+
+/// Admits one line of `line_len` bytes to a box of `box_len`, given the bytes
+/// the sender holds (`held`, `None` for a local letter, which has no quarter),
+/// and all boxes' bytes (`boxes_len`). Pure: the store's policy is this one
+/// comparison chain.
+pub fn admit(caps: Caps, box_len: u64, held: Option<Held>, boxes_len: u64, line_len: u64) -> Result<(), Full> {
     if box_len + line_len > caps.box_max {
         return Err(Full::Box);
     }
-    if let Some(origin) = origin_len {
-        if origin + line_len > caps.box_max / 4 {
+    if let Some(held) = held {
+        if held.in_box + line_len > caps.box_max / 4 {
             return Err(Full::Origin);
+        }
+        if held.in_store + line_len > caps.boxes_max / 4 {
+            return Err(Full::OriginTotal);
         }
     }
     if boxes_len + line_len > caps.boxes_max {
@@ -952,33 +965,42 @@ fn compact_every_box(cursors: &Cursors) -> Result<(), String> {
 /// The bytes [`admit`] reads for a line to `target` under `origin`: the target
 /// box's length, the sender's bytes in it (`None` when there is no quarter),
 /// and every box's total. Raw — assumes the caller holds the lock.
-fn measure(target: &std::path::Path, origin: Option<&str>) -> Result<(u64, Option<u64>, u64), String> {
+fn measure(target: &std::path::Path, origin: Option<&str>) -> Result<(u64, Option<Held>, u64), String> {
     let box_len = match std::fs::metadata(target) {
         Ok(m) => m.len(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
         Err(e) => return Err(format!("{}: {e}", target.display())),
     };
-    let origin_len = match origin {
-        Some(key) => Some(
-            box_lines(target)?
-                .iter()
-                .filter(|l| l.entry.as_ref().is_some_and(|e| e.origin == key))
-                .map(BoxLine::bytes)
-                .sum(),
-        ),
-        None => None,
+    let Some(key) = origin else {
+        return Ok((box_len, None, boxes_bytes()?));
     };
-    Ok((box_len, origin_len, boxes_bytes()?))
+    // The key's share of every box: one read of each box file, so a deposit
+    // costs the store's size, bounded by the store cap (MAIL.md "Caps").
+    let (mut in_box, mut in_store, mut boxes_len) = (0u64, 0u64, 0u64);
+    for path in box_paths()? {
+        boxes_len += std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+        let held: u64 = box_lines(&path)?
+            .iter()
+            .filter(|l| l.entry.as_ref().is_some_and(|e| e.origin == key))
+            .map(BoxLine::bytes)
+            .sum();
+        in_store += held;
+        if path == target {
+            in_box = held;
+        }
+    }
+    Ok((box_len, Some(Held { in_box, in_store }), boxes_len))
 }
 
 /// Whether one line of `line_len` bytes fits `target` under `caps`, compacting
 /// first when a cap refuses it. A box-level or quarter refusal compacts the
-/// target; a total refusal then compacts every box. Returns `false` when the
-/// line still does not fit. Raw — assumes the caller holds the lock.
+/// target; a total refusal, box-wide or per key, then compacts every box.
+/// Returns `false` when the line still does not fit. Raw — assumes the caller
+/// holds the lock.
 fn fit(caps: Caps, target: &std::path::Path, origin: Option<&str>, line_len: u64) -> Result<bool, String> {
     let check = |target: &std::path::Path| -> Result<Result<(), Full>, String> {
-        let (box_len, origin_len, boxes_len) = measure(target, origin)?;
-        Ok(admit(caps, box_len, origin_len, boxes_len, line_len))
+        let (box_len, held, boxes_len) = measure(target, origin)?;
+        Ok(admit(caps, box_len, held, boxes_len, line_len))
     };
     if check(target)?.is_ok() {
         return Ok(true);
@@ -987,7 +1009,7 @@ fn fit(caps: Caps, target: &std::path::Path, origin: Option<&str>, line_len: u64
     compact_unlocked(target, &cursors)?;
     match check(target)? {
         Ok(()) => Ok(true),
-        Err(Full::Total) => {
+        Err(Full::Total | Full::OriginTotal) => {
             compact_every_box(&cursors)?;
             Ok(check(target)?.is_ok())
         }
@@ -4346,8 +4368,17 @@ mod tests {
     #[test]
     fn admit_refuses_past_a_quarter_of_the_box_for_one_origin() {
         let quarter = BOX_MAX / 4;
-        assert_eq!(admit(CAPS, 0, Some(quarter - 10), 0, 10), Ok(()));
-        assert_eq!(admit(CAPS, 0, Some(quarter - 9), 0, 10), Err(Full::Origin));
+        let held = |in_box| Some(Held { in_box, in_store: 0 });
+        assert_eq!(admit(CAPS, 0, held(quarter - 10), 0, 10), Ok(()));
+        assert_eq!(admit(CAPS, 0, held(quarter - 9), 0, 10), Err(Full::Origin));
+    }
+
+    #[test]
+    fn admit_refuses_past_a_quarter_of_the_store_for_one_origin() {
+        let quarter = BOXES_MAX / 4;
+        let held = |in_store| Some(Held { in_box: 0, in_store });
+        assert_eq!(admit(CAPS, 0, held(quarter - 10), 0, 10), Ok(()));
+        assert_eq!(admit(CAPS, 0, held(quarter - 9), 0, 10), Err(Full::OriginTotal));
     }
 
     #[test]
@@ -4481,6 +4512,79 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// One origin key may hold a quarter of the STORE across every box, not only
+    /// a quarter of each box: a key that fills sixty boxes in turn is refused once
+    /// it holds the store's quarter, and the store keeps room for another key.
+    #[test]
+    fn one_key_filling_sixty_boxes_is_held_to_a_quarter_of_the_store() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-store-quarter");
+        let names: Vec<String> = (0..60).map(|i| format!("b{i:02}")).collect();
+        for name in &names {
+            box_add(name).unwrap();
+        }
+        let alice = key_on_record("alice-host");
+        let bob = key_on_record("bob-host");
+        let caps = Caps { box_max: 20_000, boxes_max: 40_000 };
+
+        let mut refused = false;
+        'fill: for round in 0..3 {
+            for name in &names {
+                let letter = signed_from("alice-host", name, ENTRY_TYPE_LETTER, &format!("alice {round}"), &alice);
+                match deposit_within(letter, "sakaki", caps).unwrap() {
+                    DepositOutcome::Filed { .. } => {}
+                    DepositOutcome::BoxFull => {
+                        refused = true;
+                        break 'fill;
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+        }
+        assert!(refused, "one key was never refused");
+        let total: u64 = box_paths().unwrap().iter().map(|p| std::fs::metadata(p).unwrap().len()).sum();
+        assert!(total <= caps.boxes_max / 4, "one key held {total} bytes of the store");
+        assert!(matches!(
+            deposit_within(signed_from("bob-host", "b00", ENTRY_TYPE_LETTER, "bob", &bob), "sakaki", caps).unwrap(),
+            DepositOutcome::Filed { .. }
+        ), "another key still files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The store quarter is the verified key's: one key under two node names
+    /// shares it, so the second name is refused where it would otherwise file.
+    #[test]
+    fn one_key_under_two_names_shares_the_store_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-store-quarter-two-names");
+        let spread = ["b00", "b01", "b02", "b03"];
+        for name in spread.iter().chain(["b10"].iter()) {
+            box_add(name).unwrap();
+        }
+        let alice = key_on_record("alice-host");
+        same_key_on_record("alice-two", &alice);
+        let caps = Caps { box_max: 20_000, boxes_max: 40_000 };
+
+        // Spread over four boxes, so each box's own quarter stays clear and the
+        // store's quarter is what refuses.
+        let mut filed = 0;
+        for round in 0..200 {
+            let letter = signed_from("alice-host", spread[round % spread.len()], ENTRY_TYPE_LETTER, &format!("one {round}"), &alice);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(filed >= 2, "the first name files: {filed}");
+        assert_eq!(
+            deposit_within(signed_from("alice-two", "b10", ENTRY_TYPE_LETTER, "two", &alice), "sakaki", caps).unwrap(),
+            DepositOutcome::BoxFull,
+            "the second name shares the first name's store quarter"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The quarter is the verified key's, not the name's: one key that signs
     /// under two node names is one sender, so it shares one quarter.
     #[test]
@@ -4558,8 +4662,9 @@ mod tests {
     fn the_boxes_cap_compacts_other_boxes_before_refusing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("s6-total");
-        for text in ["c1", "c2", "c3"] {
-            file_letter("alice", "carol", text).unwrap();
+        // Carol's lines are longer than the letter, so three of them outweigh it.
+        for text in ["1", "2", "3"] {
+            file_letter("alice", "carol", &format!("{text}{}", "c".repeat(200))).unwrap();
         }
         enrol_reader("carol", "r").unwrap();
         read_for("carol", false, Some("r")).unwrap();
@@ -4567,8 +4672,11 @@ mod tests {
         box_add("bob").unwrap();
         let alice = key_on_record("alice-host");
         let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "fits after carol", &alice);
-
-        let caps = Caps { box_max: 1 << 20, boxes_max: carol_len + 10 };
+        // The store is four of the letter's lines: the letter fits its own store
+        // quarter, and the store is full only while carol's read mail is in it.
+        let line = line_bytes(&letter, "sakaki", &alice.info().pubkey_hex).unwrap();
+        assert!(carol_len > 3 * line, "carol's three lines outweigh the letter: {carol_len} vs {line}");
+        let caps = Caps { box_max: 1 << 20, boxes_max: 4 * line };
         assert!(matches!(
             deposit_within(letter, "sakaki", caps).unwrap(),
             DepositOutcome::Filed { .. }

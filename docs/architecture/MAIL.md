@@ -123,7 +123,8 @@ FidoNet node could.
 14. **Flood control: dedup, caps, and excommunication.** The box is the
     dedup memory, so a repeat is dropped. The store is capped (§Store): a
     letter over 256 KiB is `too-large`; a box holds 16 MiB; one origin key
-    holds a quarter of a box; all boxes together hold 240 MiB. A full box
+    holds a quarter of a box and a quarter of the store; all boxes together
+    hold 240 MiB. A full box
     answers `box-full` and files nothing, so the sender keeps and retries.
     Nothing is evicted and nothing expires: the caps refuse, and only a
     read letter is ever reclaimed. A flooding node is declared `down`. The
@@ -387,14 +388,18 @@ The store is bounded by four caps, all `const`s in `storage/src/mail.rs`:
 | Letter | 256 KiB | the envelope, serialized | `too-large`, at the mint and at the door |
 | Box | 16 MiB | the box file, after the append | `box-full` |
 | Quarter | 4 MiB | the bytes one verified origin key holds in the box | `box-full` |
+| Key share | 60 MiB | the bytes one verified origin key holds across every box | `box-full` |
 | Store | 240 MiB | every box file together | `box-full` |
 
 Receipts, the containers gate and the re-ack record are not capped by these;
 they rotate at their own caps (§Security model). A letter signed by this box's
 own identity key has no quarter, only the box and store caps, whichever hop
 brought it. Every other letter is held to the quarter of its verified origin
-key, so a key that signs under two node names shares one quarter, and a hop's
-name never exempts a letter.
+key, and to a quarter of the store across every box (the key share), so a key
+that signs under two node names shares both, a key that fills many boxes is
+held to the store's quarter, and a hop's name never exempts a letter. The key
+share reads every box file on each far deposit, so its cost is the store's
+size, bounded by the store cap.
 
 A capped refusal first compacts. A box or quarter refusal compacts its box; a
 store refusal compacts every box. Compaction drops a line only when every
