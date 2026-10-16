@@ -54,6 +54,9 @@ QtObject {
     required property var bridge
     required property var stagingEngine
 
+    // As SurfaceSlot: `required` is not enforced on a declared instance.
+    Component.onCompleted: if (root.bridge === undefined) console.warn("[aoide/songsurfaces] was given no bridge")
+
     // [{ slot, decl }, …] — every surface-kind entry the active song
     // declares. Empty for a song with no `.widgets` (sonata today, the only
     // committed song) — the Instantiator below then holds zero delegates: a

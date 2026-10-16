@@ -99,7 +99,13 @@ QtObject {
 
     onResolvedSourceChanged: _rebuild()
     onExtraPropsChanged: _rebuild()
-    Component.onCompleted: _rebuild()
+    // Quickshell does not enforce `required` on a declared instance: an
+    // anchor left without its bridge would hand the body `undefined` in
+    // silence, so it says so.
+    Component.onCompleted: {
+        if (root.bridge === undefined) console.warn("[aoide/surfaceslot] slot", root.slot, "was given no bridge")
+        _rebuild()
+    }
 
     // Explicit re-trigger on the manifest's own load, not just a transitive
     // dependency through resolvedSong/resolvedSource. QtObject has no
