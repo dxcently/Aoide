@@ -240,6 +240,9 @@ pkgs.testers.runNixOSTest {
         # The secrets/pairing popup watchers' locked check, read the way they
         # read it: from outside every session, through the Display session.
         assert locked_hint(face) == "yes"
+        # No shellbridge behind a locked screen: no power action from it.
+        face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'aubade lock face: bridge is null'", timeout=15)
+        face.fail("journalctl -b --no-pager | grep -q 'aubade lock face: bridge is set'")
         face.sleep(3)
         face.screenshot("04-lock-face")
 

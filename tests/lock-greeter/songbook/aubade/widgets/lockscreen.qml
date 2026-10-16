@@ -63,5 +63,6 @@ Rectangle {
     Component.onCompleted: {
         field.forceActiveFocus()
         face.auth.ready = true
+        console.info("aubade lock face: bridge is " + (face.bridge === null ? "null" : "set"))
     }
 }

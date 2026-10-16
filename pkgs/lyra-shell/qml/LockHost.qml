@@ -12,7 +12,9 @@
 // `quickshell ipc call lock lock`, then polls `ipc call lock secure` until the
 // compositor confirms. Nothing else locks through here.
 //
-// The face receives the universal `livery` + `bridge` and one extra, `auth`,
+// The face receives the universal `livery`, `bridge` as null — no shellbridge
+// behind a locked screen, so no power or other action reaches the bridge from
+// it, the same as the greeter — and one extra, `auth`,
 // whose plain properties mirror the PAM conversation: `message`,
 // `messageIsError`, `responseRequired`, `responseVisible`, `busy`,
 // `failures` (a failure's message stays up until the next answer, under the
@@ -52,7 +54,6 @@ Scope {
     id: root
 
     required property var livery
-    required property var bridge
     required property var stagingEngine
 
     readonly property string faceSlot: "lockscreen"
@@ -210,7 +211,7 @@ Scope {
                 root.auth.ready = false
                 var item = comp.createObject(faceHolder, {
                     "livery": root.livery,
-                    "bridge": root.bridge,
+                    "bridge": null,
                     "auth": root.auth
                 })
                 if (!item) {

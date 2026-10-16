@@ -286,7 +286,6 @@ ShellRoot {
         id: powermenuSlot
         slot: "powermenu"
         livery: livery
-        bridge: bridge
         stagingEngine: stagingEngine
     }
     SurfaceSlot {
@@ -304,7 +303,6 @@ ShellRoot {
         id: heraldSlot
         slot: "herald"
         livery: livery
-        bridge: bridge
         stagingEngine: stagingEngine
     }
     // The declared widget-type registry's runtime half (CONTRACTS.md §5;
@@ -314,7 +312,6 @@ ShellRoot {
     // instead of a fixed slot name.
     SongSurfaces {
         livery: livery
-        bridge: bridge
         stagingEngine: stagingEngine
     }
     // aoide:wallpaper: the launcher's own Desktop Pictures when its body has
@@ -326,7 +323,6 @@ ShellRoot {
     // field under it. `lyra lock` is its only entry (`ipc call lock lock`).
     LockHost {
         livery: livery
-        bridge: bridge
         stagingEngine: stagingEngine
     }
 
