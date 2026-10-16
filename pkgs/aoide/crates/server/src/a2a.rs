@@ -3014,6 +3014,42 @@ fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Pat
     }
 }
 
+/// The answer to one deposit, the same whichever door took it: a plaintext
+/// `mailDeposit` and the destination of a sealed container both answer through
+/// here. Every refusal names its word and a fixed detail; none names a box.
+fn deposit_answer(outcome: &aoide_storage::mail::DepositOutcome, from_node: &str) -> Value {
+    use aoide_storage::mail::DepositOutcome;
+    match outcome {
+        DepositOutcome::Filed { msgid, .. } => json!({ "status": "accepted", "msgid": msgid }),
+        DepositOutcome::Duplicate { .. } => json!({ "status": "duplicate" }),
+        DepositOutcome::BadMsgid => json!({
+            "status": "refused",
+            "reason": "bad-msgid",
+            "detail": "envelope msgid does not match the recomputed value",
+        }),
+        DepositOutcome::MalformedAck => json!({
+            "status": "refused",
+            "reason": "bad-msgid",
+            "detail": "receipt text is not exactly one msgid: it names no letter",
+        }),
+        DepositOutcome::UnverifiedOrigin => json!({
+            "status": "refused",
+            "reason": "unverified-origin",
+            "detail": format!("no key on record for `{from_node}` verifies this envelope's origin signature"),
+        }),
+        DepositOutcome::NotCorrespondence => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
+            "detail": "only a letter or a receipt is filed; a `charter` is applied from a sealed container",
+        }),
+        DepositOutcome::UnknownBox => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_UNKNOWN_BOX,
+            "detail": aoide_storage::mail::UNKNOWN_BOX_DETAIL,
+        }),
+    }
+}
+
 /// `aoide/mailDeposit` (P-M2): `{envelope: <the sealed Envelope, exactly as
 /// aoide_storage::mail::Envelope serializes>}`. The declarations are read FIRST
 /// (once per request, `config-invalid` on an unloadable set), then the caller's
@@ -3166,7 +3202,8 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         aoide_storage::mail::DepositOutcome::BadMsgid
         | aoide_storage::mail::DepositOutcome::MalformedAck
         | aoide_storage::mail::DepositOutcome::UnverifiedOrigin
-        | aoide_storage::mail::DepositOutcome::NotCorrespondence => "invalid",
+        | aoide_storage::mail::DepositOutcome::NotCorrespondence
+        | aoide_storage::mail::DepositOutcome::UnknownBox => "invalid",
         _ => "ok",
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
@@ -3179,33 +3216,7 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     // answer.
     aoide_conduct::mail_bridge::settle_deposit(&envelope, &outcome);
 
-    match &outcome {
-        aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => Ok(json!({ "status": "accepted", "msgid": msgid })),
-        aoide_storage::mail::DepositOutcome::Duplicate { .. } => Ok(json!({ "status": "duplicate" })),
-        aoide_storage::mail::DepositOutcome::BadMsgid => Ok(json!({
-            "status": "refused",
-            "reason": "bad-msgid",
-            "detail": "envelope msgid does not match the recomputed value",
-        })),
-        aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
-            "status": "refused",
-            "reason": "bad-msgid",
-            "detail": "receipt text is not exactly one msgid: it names no letter",
-        })),
-        aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
-            "status": "refused",
-            "reason": "unverified-origin",
-            "detail": format!(
-                "no key on record for `{}` verifies this envelope's origin signature",
-                envelope.header.from.node
-            ),
-        })),
-        aoide_storage::mail::DepositOutcome::NotCorrespondence => Ok(json!({
-            "status": "refused",
-            "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
-            "detail": "a `charter` envelope is applied from a sealed container; this one arrived as plaintext, with nothing to apply",
-        })),
-    }
+    Ok(deposit_answer(&outcome, &envelope.header.from.node))
 }
 
 // ── `aoide/mailPoll` (messaging plan P-M3, CONTRACTS.md §6) ────────────────
@@ -3743,32 +3754,7 @@ fn deposit_sealed(
             let filed = aoide_storage::mail::deposit((*envelope).clone(), &hop_name)
                 .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
             aoide_conduct::mail_bridge::settle_deposit(&envelope, &filed);
-            match &filed {
-                aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => {
-                    Ok(json!({ "status": "accepted", "msgid": msgid }))
-                }
-                aoide_storage::mail::DepositOutcome::Duplicate { .. } => Ok(json!({ "status": "duplicate" })),
-                aoide_storage::mail::DepositOutcome::BadMsgid => Ok(json!({
-                    "status": "refused",
-                    "reason": "bad-msgid",
-                    "detail": "envelope msgid does not match the recomputed value",
-                })),
-                aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
-                    "status": "refused",
-                    "reason": "bad-msgid",
-                    "detail": "receipt text is not exactly one msgid: it names no letter",
-                })),
-                aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
-                    "status": "refused",
-                    "reason": "unverified-origin",
-                    "detail": "the inner envelope's origin signature does not verify",
-                })),
-                aoide_storage::mail::DepositOutcome::NotCorrespondence => Ok(json!({
-                    "status": "refused",
-                    "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
-                    "detail": "the opened envelope claims a `charter` kind, which is applied from a container's own payload and never filed",
-                })),
-            }
+            Ok(deposit_answer(&filed, &envelope.header.from.node))
         }
     }
 }
@@ -15190,6 +15176,7 @@ mod tests {
         act_as(&root, "here");
 
         let origin_name = setup_verifiable_origin(&["message"]);
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hello from the wire").unwrap();
         assert_eq!(envelope.header.from.node, origin_name);
 
@@ -15312,6 +15299,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hello twice").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -15342,6 +15330,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -15386,6 +15375,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -15425,6 +15415,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -17587,6 +17578,7 @@ mod tests {
         let origin_name = setup_verifiable_origin(&["message"]);
 
         let audit_log = root.join("log");
+        aoide_storage::mail::box_add("bob").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "bob", "hi").unwrap();
         let params = json!({ "envelope": envelope });
 
@@ -17611,6 +17603,33 @@ mod tests {
         let filed = mail_deposit(&params, &door).expect("the direct lane still accepts a plaintext envelope");
         assert_eq!(filed["status"], "accepted", "{filed}");
         assert_eq!(aoide_storage::mail::read_base().unwrap().len(), 1, "the direct lane filed it");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// A letter to a name with no box answers `unknown-box` with the fixed
+    /// detail, which names no box; nothing is filed and no box is created.
+    #[test]
+    fn an_unknown_box_answers_unknown_box_and_names_no_box() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("unknown-box");
+        act_as(&root, "here");
+        let origin_name = setup_verifiable_origin(&["message"]);
+
+        let audit_log = root.join("log");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "carol", "hi").unwrap();
+        let params = json!({ "envelope": envelope });
+        let door = mail_deposit_ctx(&audit_log, Some(&origin_name));
+        let refused = mail_deposit(&params, &door).expect("a refusal is a result, not a JSON-RPC error");
+
+        assert_eq!(refused["status"], "refused", "{refused}");
+        assert_eq!(refused["reason"], "unknown-box", "{refused}");
+        assert_eq!(refused["detail"], aoide_storage::mail::UNKNOWN_BOX_DETAIL, "{refused}");
+        assert!(!refused.to_string().contains("carol"), "the answer names no box: {refused}");
+        assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing is filed");
+        assert!(!aoide_storage::mail::box_path("carol").exists(), "a far deposit created a box");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }

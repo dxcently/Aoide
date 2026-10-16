@@ -394,6 +394,7 @@ fn chiyos_poll_files_the_letter_and_the_origins_entry_retires_on_the_receipt() {
 
     // `chiyo` receives it: the door's verification, then the filing.
     fx.enter("chiyo");
+    aoide_storage::mail::box_add("conductor").unwrap();
     let (container, digest) = match aoide_storage::seal::deposit_container(&hand_over, HOME).unwrap() {
         aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
             assert_eq!(envelope.text, "the whole way");
@@ -498,6 +499,7 @@ fn a_host_whose_name_is_not_its_charter_name_acks_as_the_charter_name() {
     aoide_storage::outbox::write_entry("sakaki", &aoide_storage::outbox::OutboxEntry::fresh(letter.clone())).unwrap();
 
     fx.enter("chiyo");
+    aoide_storage::mail::box_add("conductor").unwrap();
     std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
     let outcome = aoide_storage::mail::deposit(letter.clone(), "conductor").unwrap();
     assert!(matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }), "{outcome:?}");
@@ -784,6 +786,7 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
     // `chiyo` asks its relay: the hand-over is a real deposit through `sakaki`'s
     // door, the letter is filed, and the receipt is spooled back.
     fx.enter("chiyo");
+    aoide_storage::mail::box_add("conductor").unwrap();
     let sakaki_key = aoide_storage::charter::governing(HOME).unwrap().nodes["sakaki"].key.clone();
     let mut nodes = aoide_storage::node_store::load_nodes();
     aoide_storage::node_store::upsert_paired_node(
@@ -1174,6 +1177,7 @@ fn a_letter_the_poller_already_has_is_acknowledged_and_the_hub_retires_it() {
     // ...and chiyo, having filed it by another route already, answers duplicate
     // when the relay offers it — then acknowledges, and the relay retires.
     fx.enter("chiyo");
+    aoide_storage::mail::box_add("conductor").unwrap();
     let (container, digest) = match aoide_storage::seal::deposit_container(&container, HOME).unwrap() {
         aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
             assert!(matches!(
@@ -2174,6 +2178,7 @@ fn a_poll_node_holding_only_the_charter_files_its_letter_through_the_relays_http
 
     let _front = tls_front(fx.ports["sakaki"], sakaki_door);
     fx.enter("chiyo");
+    aoide_storage::mail::box_add("conductor").unwrap();
     assert!(
         !aoide_storage::node_store::load_nodes().iter().any(|n| n.name == "sakaki"),
         "chiyo holds no pair record for its relay"

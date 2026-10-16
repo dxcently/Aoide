@@ -748,6 +748,10 @@ by decision — no embedded database yet
   export and the audit views). Bare `mail` and `--all-names` use the boxes only.
   Keep-all: `mail rm --older-than` is the only pruning, and it takes the dedup
   memory with the line (a pruned letter re-offered is filed again).
+  A box is created by a local act only (`box_add`, `enrol_reader`,
+  `file_letter`); a far letter to an absent box is `UnknownBox`, and
+  `valid_box_name` (grammar, at most 63 bytes, not a DOS device name) is the
+  one name rule.
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key

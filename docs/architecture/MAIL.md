@@ -66,8 +66,10 @@ FidoNet node could.
    member — the one noun for it in code, config, wire, and docs; "edge"
    names a verified pairing between two nodes. The name is free text
    (FidoNet's `toUserName`): the envelope routes to the node, the node
-   files the letter under the name. **No mailbox registry** — a mailbox
-   exists by being named in a `to` or read by name.
+   files the letter under the name. **A box exists only where a local act
+   made it**: `aoide mail box add`, enrolling a reader, a local send to
+   `self/<name>`. A far letter to a name with no box is refused
+   `unknown-box` and creates nothing (see §Addressing).
 4. **Filing, not secrecy — on the node.** Every agent on a node is the
    same unix user; any intra-host lock would be fiction. A name says who a
    letter is *for*, never who may read it. FidoNet netmail was
@@ -378,9 +380,10 @@ into the live inbox.
   this box's own node name (`display::local_host_name()`) when the
   envelope is minted, so the literal never enters a header — a letter
   filed locally is the same bytes it would be on the wire. `<name>`
-  satisfies the node-name grammar (`^[a-z0-9][a-z0-9-]*$`,
-  `valid_node_name`) or the filing is refused before anything is
-  written — never clamped, never rewritten.
+  satisfies `valid_box_name`: the node-name grammar
+  (`^[a-z0-9][a-z0-9-]*$`), at most 63 bytes, and not a DOS device name
+  (`con`, `nul`, `com0`-`com9`, `lpt0`-`lpt9`), on every OS. The filing is
+  refused before anything is written — never clamped, never rewritten.
 - **`--hold` needs a node destination.** It spools the entry with the
   `hold` flavor — a drain never dials it, and it leaves only when that
   node polls (`aoide/mailPoll`). A `self/<name>` filing is local and
@@ -415,11 +418,16 @@ into the live inbox.
   record, the route from the mesh declaration. **The agent never sees a
   transport line.** `self/<name>` files locally and rings the doorbell;
   it is how a session leaves a note for a role on its own box.
-- Arrival files under `to.name`, whether or not any session by that
-  name exists or ever will. No bounce for unknown names: the mailbox
-  exists because the letter named it. Bare `aoide mail` therefore always
-  prints the names that have unread mail — a mis-typed name is visible
-  there, not lost.
+- Arrival files under `to.name` when that box exists. A far letter to a
+  name with no box is answered `refused` with reason `unknown-box` and the
+  fixed detail `no mailbox of that name is on this node; nothing was filed
+  or acknowledged`. The detail names no box, so a relay learns nothing
+  about which names exist. The sender parks the letter, and it is released
+  by `aoide mail outbox retry` once the box exists. A local send to
+  `self/<name>` and `aoide mail box add <name>` create the box, and so does
+  enrolling a reader in it. Reading a box that does not exist changes
+  nothing. Only `letter` and `receipt` are
+  filed; any other kind is `not-correspondence`.
 - `from.node` is asserted by the origin signature. `from.name` is the
   sending session's petname taken from `AOIDE_SESSION_ID`/`--from`,
   **attribution only** — any same-uid process can claim any name, as
@@ -1471,6 +1479,7 @@ aoide mail send --to <node>/<name> [--hold] -- <text>
 aoide mail read [--for <name>] [--all-names] [--reread] [--transit]   print + advance cursor
 aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
+aoide mail box add <name>                                create an empty mailbox so far mail to it can file (idempotent; CLI only)
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the boxes (dedup goes with them)
@@ -1727,8 +1736,8 @@ needs chiyo lit and the mesh declarations deployed in the ruled order.
 
 ## Kill-list
 
-- No mailbox registry, no `mailbox create` — a box exists by being
-  named (User ruling).
+- No mailbox registry in the sense of a list of allowed names: a box is
+  a file a local act created, and a far deposit never creates one.
 - No quotas, no eviction, no auto-expiry — dedup + `down` are the whole
   flood story in v1 (User ruling; quotas remain addable at the door).
 - No public flag and no public board — every board has members and an

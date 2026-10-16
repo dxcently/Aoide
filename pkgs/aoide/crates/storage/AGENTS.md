@@ -95,7 +95,13 @@
   `aoide mesh join --operator` as the trust-entry step.
 - **A `charter` kind is never filed, in either lane.** The container path
   applies it; `mail::deposit` refuses a PLAINTEXT envelope with that kind
-  (`not-correspondence`), because it carries no charter at all.
+  (`not-correspondence`), because it carries no charter at all. `deposit`
+  files only `letter` and `receipt`; every other kind is `not-correspondence`.
+- **A far deposit never creates a box.** A letter to a name with no box is
+  `UnknownBox` (`unknown-box`), before any read or write. A box is created
+  only by a local act: `box_add` (`mail box add`), `enrol_reader`, and
+  `file_letter`. `valid_box_name` is the one name rule, and the conductor's
+  petname check calls it.
 - **The charter arm's zone check reads SIGNED values only.** The mesh the
   carrier's own envelope signed (`ctx.origin_mesh`) is compared against the
   mesh inside the operator's signature input, and a disagreement is refused

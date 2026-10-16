@@ -9339,9 +9339,11 @@ stop that ping-ponging forever). A rejected envelope answers instead:
 ```
 
 — `"unverified-origin"` replacing `"bad-msgid"` when no key on record verifies
-the origin signature, and `"not-correspondence"` (P-CHARTER) when the envelope's
-`type` is `charter`: a charter is applied from a sealed container's own payload,
-never filed as correspondence. `reason` is exactly the token MAIL.md §Transit
+the origin signature, and `"not-correspondence"` when the envelope's `type` is
+neither `letter` nor `receipt` (a `charter` is applied from a sealed container's
+own payload, never filed as correspondence). A letter to a name with no box on
+this node answers `"unknown-box"`, with a fixed detail that names no box; the
+sender parks it (MAIL.md §Addressing). `reason` is exactly the token MAIL.md §Transit
 names for each of these among its `refused` reasons; the rest of that list —
 `no-route`, `down`, `unknown-mesh`, `zone-violation` — belongs to the transit
 lane and to a sealed charter container's own zone check, below, not to this one.

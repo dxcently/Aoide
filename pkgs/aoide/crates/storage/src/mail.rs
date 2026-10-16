@@ -138,6 +138,13 @@ pub const REFUSAL_NOT_CORRESPONDENCE: &str = "not-correspondence";
 /// box's state, not the letter's bytes. The sender defers and keeps the letter,
 /// and a poller keeps the hub's custody of the container.
 pub const REFUSAL_BOX_FULL: &str = "box-full";
+/// A letter names a box this node does not have. Nothing is filed or acked,
+/// and the sender parks the letter: it is a fact about the name, not a verdict
+/// on the bytes, and the answer names no box ([`UNKNOWN_BOX_DETAIL`]).
+pub const REFUSAL_UNKNOWN_BOX: &str = "unknown-box";
+/// The fixed detail every `unknown-box` answer carries. It names no box, so a
+/// relay or a hostile sender learns nothing about which names exist.
+pub const UNKNOWN_BOX_DETAIL: &str = "no mailbox of that name is on this node; nothing was filed or acknowledged";
 /// `Header.kind`/`Entry.kind`'s value for a `charter` letter (P-CHARTER) — a signed
 /// charter travelling as mail. Unlike a letter and a receipt this kind is never
 /// FILED: the enclosed charter is applied to `state/mesh/`, and the letter's local
@@ -730,9 +737,48 @@ fn receipt_generations() -> [PathBuf; 2] {
 /// refuses. Its name starts with `_`, which the grammar never does.
 const LEGACY_BOX: &str = "_legacy";
 
-/// A box name the grammar accepts: a node name, at most [`BOX_NAME_MAX`] bytes.
+/// A box name the grammar accepts: a node name, at most [`BOX_NAME_MAX`] bytes,
+/// and not a DOS device name. One rule on every OS: a box file must be
+/// creatable on Windows too, so `con.log` is refused here, not there.
 pub fn valid_box_name(name: &str) -> bool {
-    crate::node_store::valid_node_name(name) && name.len() <= BOX_NAME_MAX
+    crate::node_store::valid_node_name(name) && name.len() <= BOX_NAME_MAX && !is_device_name(name)
+}
+
+/// `con`, `prn`, `aux`, `nul`, and `com0`..`com9`, `lpt0`..`lpt9`.
+fn is_device_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    matches!(name, "con" | "prn" | "aux" | "nul")
+        || (bytes.len() == 4 && (name.starts_with("com") || name.starts_with("lpt")) && bytes[3].is_ascii_digit())
+}
+
+/// Whether `name`'s box exists. A box exists only because a local act created
+/// it ([`box_add`], [`enrol_reader`], [`file_letter`]), never because a far
+/// deposit named it.
+pub fn box_exists(name: &str) -> bool {
+    valid_box_name(name) && box_path(name).exists()
+}
+
+/// Creates `name`'s box file, owner-only and empty, if it does not exist.
+/// Returns whether it created it. Raw — assumes the caller holds the lock.
+fn create_box_unlocked(name: &str) -> Result<bool, String> {
+    let path = box_path(name);
+    if path.exists() {
+        return Ok(false);
+    }
+    ensure_mail_dir()?;
+    crate::fs::ensure_write_dir(&boxes_dir()).map_err(|e| format!("{}: {e}", boxes_dir().display()))?;
+    feed::ensure_log(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(true)
+}
+
+/// `mail box add <name>`: creates the box `name`, empty, if it is absent, so a
+/// far letter to it can file. Returns whether this call created it.
+pub fn box_add(name: &str) -> Result<bool, String> {
+    if !valid_box_name(name) {
+        return Err(format!("invalid mailbox name `{name}`: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name"));
+    }
+    let name = name.to_string();
+    with_lock(move || create_box_unlocked(&name))
 }
 
 /// The legacy box file: letters whose name the grammar refuses.
@@ -1148,14 +1194,18 @@ fn local_receipt_text(text: &str) -> String {
 /// this box's own name (P-M2's `--to` resolution happens one layer up, in
 /// the command handler). Always `via: "self"`.
 pub fn file_letter(from_name: &str, to_name: &str, text: &str) -> Result<Entry, String> {
-    if !crate::node_store::valid_node_name(to_name) {
-        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
+    if !valid_box_name(to_name) {
+        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name".to_string());
     }
     let node = display::local_node_name();
     let from_addr = Address { node: node.clone(), name: from_name.to_string() };
     let to_addr = Address { node, name: to_name.to_string() };
     let text = text.to_string();
-    with_lock(move || file_entry(ENTRY_TYPE_LETTER, from_addr, to_addr, &text, "self"))
+    let box_name = to_name.to_string();
+    with_lock(move || {
+        create_box_unlocked(&box_name)?;
+        file_entry(ENTRY_TYPE_LETTER, from_addr, to_addr, &text, "self")
+    })
 }
 
 /// File a letter ADDRESSED TO A REMOTE NODE — mints and signs exactly like
@@ -1405,9 +1455,13 @@ pub enum DepositOutcome {
     MalformedAck,
     /// [`verify_origin_signature`] returned `false`.
     UnverifiedOrigin,
-    /// A `charter` envelope arrived as plaintext ([`REFUSAL_NOT_CORRESPONDENCE`])
-    /// — a kind that is applied from a sealed container and never filed.
+    /// A kind other than `letter` or `receipt` arrived as plaintext: a `charter`
+    /// is applied from a sealed container and never filed; any other kind is
+    /// not correspondence ([`REFUSAL_NOT_CORRESPONDENCE`]).
     NotCorrespondence,
+    /// A letter to a name with no box on this node. Nothing is filed and no box
+    /// is created: a far deposit never creates one ([`REFUSAL_UNKNOWN_BOX`]).
+    UnknownBox,
 }
 
 // L2 (the branch review): there was a `Refused { reason, detail }` variant
@@ -1445,13 +1499,11 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         if !verify_origin_signature(&envelope) {
             return Ok(DepositOutcome::UnverifiedOrigin);
         }
-        // A `charter` envelope is APPLIED from the sealed container it arrives
-        // in, never filed: the container's payload is the charter, and a
-        // plaintext envelope claiming this kind has no charter in it at all.
-        // Filing it would put a letter in a mailbox whose whole content is a
-        // claim about itself — so it is refused, with its own word, before the
-        // dedup read or any write.
-        if envelope.header.kind == ENTRY_TYPE_CHARTER {
+        // Only a letter and a receipt are filed. A `charter` is APPLIED from the
+        // sealed container it arrives in, never filed, and any other kind is not
+        // correspondence at all. Refused before the dedup read or any write.
+        let kind = envelope.header.kind.as_str();
+        if kind != ENTRY_TYPE_LETTER && kind != ENTRY_TYPE_RECEIPT {
             return Ok(DepositOutcome::NotCorrespondence);
         }
         // A receipt names the one letter it acknowledges, and nothing else. A
@@ -1477,6 +1529,11 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
                 return Ok(DepositOutcome::Duplicate { filed_letter: false });
             }
         } else {
+            // A letter goes only to a box a local act created. A far deposit never
+            // creates one, so an absent box is refused before any read or write.
+            if !box_exists(&envelope.header.to.name) {
+                return Ok(DepositOutcome::UnknownBox);
+            }
             // A letter's msgid covers its `to.name`, so the one box it routes to is the
             // only place a re-offer can already be filed. Its box is the memory.
             let target = route(&envelope.header.kind, &envelope.header.to.name);
@@ -1585,6 +1642,9 @@ pub fn read_for(name: &str, reread: bool, reader_session: Option<&str>) -> Resul
     let name = name.to_string();
     let reader_session = reader_session.map(|s| s.to_string());
     with_lock(move || {
+        if !box_path(&name).exists() {
+            return Ok(Vec::new());
+        }
         let entries = read_file_entries(&box_path(&name))?;
         let mut cursors = load_cursors()?;
         let reader = reader_id(&name, reader_session.as_deref());
@@ -1653,7 +1713,10 @@ pub fn mark(name: &str, reader_session: Option<&str>) -> Result<u64, String> {
     let name = name.to_string();
     let reader_session = reader_session.map(|s| s.to_string());
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
+        if !box_path(&name).exists() {
+            return Ok(0);
+        }
+        let entries = read_file_entries(&box_path(&name))?;
         let max_seq = entries
             .iter()
             .filter(|e| e.envelope.header.to.name == name)
@@ -1835,8 +1898,8 @@ pub fn armed_names_for_reader(reader: &str) -> Result<Vec<(String, u64)>, String
 /// name` (the pseudo-reader is never enrolled — it is not a target) and an
 /// invalid `name`; writes nothing in either case.
 pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
-    if !crate::node_store::valid_node_name(name) {
-        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
+    if !valid_box_name(name) {
+        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name".to_string());
     }
     if reader == name {
         return Err(format!("{reader}: the pseudo-reader is never enrolled"));
@@ -1844,6 +1907,7 @@ pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
     let name = name.to_string();
     let reader = reader.to_string();
     with_lock(move || {
+        create_box_unlocked(&name)?;
         let mut cursors = load_cursors()?;
         cursors.entry(name).or_default().entry(reader).or_default();
         save_cursors(&cursors)?;
@@ -2703,6 +2767,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("redeposit");
         let alice = alice_on_record();
+        box_add("bob").unwrap();
         let letter = alice_letter("hello", &alice);
 
         assert!(matches!(deposit(letter.clone(), "alice-host").unwrap(), DepositOutcome::Filed { .. }));
@@ -3257,7 +3322,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("ring-rearm");
 
-        read_for("bob", false, Some("sess-1")).unwrap(); // enrols sess-1, seq 0
+        enrol_reader("bob", "sess-1").unwrap(); // enrols sess-1, seq 0
         file_letter("alice", "bob", "one").unwrap(); // seq 1, arming
         let t1 = ring_targets("bob").unwrap();
         assert_eq!(t1.armed, vec![("sess-1".to_string(), 1)], "an unread letter arms");
@@ -3449,7 +3514,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("ring-receipt-never-arms");
 
-        read_for("bob", false, Some("sess-1")).unwrap();
+        enrol_reader("bob", "sess-1").unwrap();
         file_receipt("x", "bob", "t").unwrap();
 
         let t = ring_targets("bob").unwrap();
@@ -3467,8 +3532,8 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("armed-names-for-reader");
 
-        read_for("bob", false, Some("sess-1")).unwrap();
-        read_for("carol", false, Some("sess-1")).unwrap();
+        enrol_reader("bob", "sess-1").unwrap();
+        enrol_reader("carol", "sess-1").unwrap();
         file_letter("alice", "bob", "one").unwrap(); // arms bob for sess-1; carol gets nothing new
 
         let armed = armed_names_for_reader("sess-1").unwrap();
@@ -3690,6 +3755,95 @@ mod tests {
         let e = &got[0].envelope;
         assert_eq!(compute_msgid(&e.header, &e.text, &e.sig).as_deref(), Some(e.msgid.as_str()), "the digest text is what is signed");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A letter from `alice-host` to `to` of `kind`, signed by `alice` (on
+    /// record, see [`alice_on_record`]): what a far node deposits.
+    fn signed_from_alice(to: &str, kind: &str, text: &str, alice: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", to, kind, "2026-09-06T00:00:00Z");
+        h.from.node = "alice-host".to_string();
+        let (sig, msgid) = seal(&h, text, alice);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// A far deposit to a box nobody created is refused `unknown-box`: it
+    /// creates no box file and no cursor.
+    #[test]
+    fn a_far_deposit_to_an_unknown_box_is_refused_and_creates_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-unknown-box");
+        let alice = alice_on_record();
+        let outcome = deposit(signed_from_alice("carol", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::UnknownBox);
+        assert!(!box_path("carol").exists(), "a far deposit created a box");
+        assert!(load_cursors().unwrap().get("carol").is_none(), "a far deposit wrote a cursor");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The local act that creates a box lets the same far letter file.
+    #[test]
+    fn mail_box_add_then_the_deposit_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-box-add");
+        let alice = alice_on_record();
+        assert!(box_add("carol").unwrap(), "the first add creates the box");
+        assert!(!box_add("carol").unwrap(), "a second add finds it and writes nothing");
+        assert!(box_path("carol").exists());
+        let outcome = deposit(signed_from_alice("carol", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap();
+        assert!(matches!(outcome, DepositOutcome::Filed { .. }), "{outcome:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reserved device names and names past 63 bytes are refused on every OS,
+    /// by the one grammar, and `box add` refuses them before it writes.
+    #[test]
+    fn reserved_and_overlong_names_are_refused_on_every_os() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-reserved");
+        for name in ["con", "nul", "prn", "aux", "com0", "com1", "lpt9", &"a".repeat(64)] {
+            assert!(!valid_box_name(name), "{name} must be refused");
+            assert!(box_add(name).is_err(), "box add must refuse {name}");
+            assert!(!box_path(name).exists(), "{name} wrote a box");
+        }
+        assert!(valid_box_name(&"a".repeat(63)), "63 bytes is the limit");
+        assert!(valid_box_name("carol"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only a letter is correspondence a box holds: any other kind is
+    /// `not-correspondence`, filed nowhere.
+    #[test]
+    fn a_far_post_kind_is_not_correspondence() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-post");
+        let alice = alice_on_record();
+        box_add("carol").unwrap();
+        let outcome = deposit(signed_from_alice("carol", "post", "hi", &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::NotCorrespondence);
+        assert!(read_file_entries(&box_path("carol")).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reading a box nobody created writes no cursor, and never creates the box.
+    #[test]
+    fn a_read_of_an_absent_box_writes_no_cursor() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-absent-read");
+        assert!(read_for("ghost", true, None).unwrap().is_empty());
+        assert_eq!(mark("ghost", None).unwrap(), 0);
+        assert!(load_cursors().unwrap().get("ghost").is_none(), "a read of an absent box wrote a cursor");
+        assert!(!box_path("ghost").exists(), "a read created the box");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Enrolling a reader creates the box it reads, so a far letter can land.
+    #[test]
+    fn enrolling_a_reader_creates_its_box() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-enrol-box");
+        enrol_reader("carol", "sess-1").unwrap();
+        assert!(box_path("carol").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
