@@ -406,7 +406,7 @@ are core `aoide` identity, root `AGENTS.md`).
   staged song whose OWN manifest entry carries `lockscreen` is locked by the
   running shell: `quickshell -p run/qml/shell.qml ipc call lock lock`, then
   `ipc call lock secure` until it answers `true` (the compositor confirmed
-  the lock) inside 2 s. A song with no face, and a shell that is down, has
+  the lock) inside 5 s. A song with no face, and a shell that is down, has
   no lock host, hangs or never confirms, runs `hyprlock` in its own process
   group; a hyprlock that exits within 500 ms is a failure (`hyprlock-failed`,
   exit 1), never a lock. `lock hint` sets logind's `LockedHint` with

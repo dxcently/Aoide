@@ -263,6 +263,11 @@ in
     # the home module so Hyprland is installed exactly once (system side).
     programs.hyprland.enable = true;
 
+    # The package registers two sessions, `hyprland` and `hyprland-uwsm`, and
+    # this lane runs the first: uwsm is not enabled, so its session would end
+    # at once. Naming it is what a greeter with no session picker launches.
+    services.displayManager.defaultSession = lib.mkDefault "hyprland";
+
     habit.home = {
       wayland.windowManager.hyprland = {
         enable = true;

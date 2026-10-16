@@ -8,8 +8,9 @@
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
 #     tree's `shell.qml`, `LiveryState`/`StagingEngine` beside it, the face's
 #     song folder from the shipped songbook (`pkgs.lyra-songbook`), the dress
-#     as `song/stage/livery.json`, and `session.json`, the command of the
-#     session the display manager registers. `AOIDE_ROOT` points at the tree,
+#     as `song/stage/livery.json`, and `session.json`, the command and desktop
+#     name of the display manager's default session (the hyprland provider
+#     names it). `AOIDE_ROOT` points at the tree,
 #     so nothing reads /home and a staged song never reaches the login screen.
 #     Authentication is greetd's: the host creates a session for the chosen
 #     account, answers its prompts with what the face hands `respond()`, and
@@ -72,9 +73,10 @@ let
     }
   );
 
-  # The default session when the host names one, else the first registered
-  # Wayland session; its Exec, field codes dropped, is what the greeter
-  # launches once greetd says the account is authenticated.
+  # The default session when one is named, else the first registered Wayland
+  # session; its Exec, field codes dropped, is what the greeter launches once
+  # greetd says the account is authenticated, and its file name is the
+  # session's `XDG_SESSION_DESKTOP`.
   sessions = config.services.displayManager.sessionData.desktops;
   defaultSession = config.services.displayManager.defaultSession;
   pick =
@@ -97,8 +99,8 @@ let
     pick=${pick}
     exec_line=$(sed -n 's/^Exec=//p' "$pick" | head -n1)
     test -n "$exec_line" || { echo "no session Exec in $pick" >&2; exit 1; }
-    jq -n --arg e "$exec_line" \
-      '{command: ($e | split(" ") | map(select(length > 0 and (startswith("%") | not))))}' \
+    jq -n --arg e "$exec_line" --arg d "$(basename "$pick" .desktop)" \
+      '{command: ($e | split(" ") | map(select(length > 0 and (startswith("%") | not)))), desktop: $d}' \
       > "$out/session.json"
   '';
 
@@ -107,6 +109,7 @@ let
   greeterShell = pkgs.writeShellScript "aoide-greeter" ''
     export AOIDE_ROOT=${tree}
     export QT_QPA_PLATFORMTHEME=
+    export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
     export QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins
     export XDG_CACHE_HOME="''${XDG_RUNTIME_DIR:-/tmp}/aoide-greeter-cache"
     exec ${quickshellPkg}/bin/quickshell -p ${tree}/run/qml/shell.qml

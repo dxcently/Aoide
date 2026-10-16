@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 pub const FACE_SLOT: &str = "lockscreen";
 
 /// How long the shell has to take the lock and the compositor to confirm it.
-const SHELL_ANSWER: Duration = Duration::from_secs(2);
+const SHELL_ANSWER: Duration = Duration::from_secs(5);
 
 /// How long a spawned hyprlock must stay up to count as holding the lock.
 const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
@@ -49,7 +49,7 @@ const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["lock"],
-        summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 2 s); every other song, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf.",
+        summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s); every other song, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf.",
         args: [],
         flags: [],
         gated: false,

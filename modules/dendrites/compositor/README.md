@@ -21,7 +21,9 @@ modules/dendrites/compositor/
   tree. Each provider file is a plain module of its own.
 - **`hyprland/default.nix` — the LOOK.** Wires Hyprland as the NixOS Wayland
   compositor (`programs.hyprland`, the home-manager `wayland.windowManager.
-  hyprland` config, `package = null` so the binary is installed once), applies
+  hyprland` config, `package = null` so the binary is installed once, and
+  `hyprland` as the display manager's default session, since the package also
+  registers a uwsm session this lane does not enable), applies
   compositor-side livery (gaps/radius/borders/blur, the `aoide-*` layerrules,
   hyprglass, kitty rounding) at build time, and exposes the Hyprland IPC
   socket for shellbridge to consume. Selecting it is the switch; it sets no fact.
@@ -37,8 +39,8 @@ modules/dendrites/compositor/
 - **`modules/dendrites/greeter.nix` — the greeter.** When the declared song
   ships `widgets/greeter.qml` (`aoide.songbook.greeter`), greetd running
   `cage` + Quickshell as its greeter user on a store tree (the lane's
-  `GreeterHost.qml`, the face from the shipped songbook, the dress, the session
-  command); otherwise `ly` on tty1 with the livery's colours, plus the
+  `GreeterHost.qml`, the face from the shipped songbook, the dress, and the
+  command of the display manager's default session); otherwise `ly` on tty1 with the livery's colours, plus the
   `systemd.services.display-manager.wantedBy` line the nixpkgs ly module omits.
   Either way it authenticates before it launches that same Hyprland session.
   It is a separate lane because a host can want the compositor without a

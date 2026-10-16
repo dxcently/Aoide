@@ -8,14 +8,16 @@
 // /home. greetd runs it as its greeter user inside cage.
 //
 // Authentication is greetd's (`Quickshell.Services.Greetd`): `createSession`,
-// `respond`, then `launch` with the session command the lane wrote into the
-// tree (`session.json`, the Exec of the session the display manager
-// registers). No session starts without greetd's say-so.
+// `respond`, then `launch` with the session the lane wrote into the tree
+// (`session.json`: the Exec of the display manager's default session, and its
+// desktop name for `XDG_SESSION_DESKTOP`; `XDG_SESSION_TYPE` is `wayland`, the
+// only kind the lane picks from). No session starts without greetd's say-so.
 //
 // The face — the declared song's `widgets/greeter.qml` — receives `livery`,
 // `bridge` (null: a greeter has no shellbridge) and one extra, `auth`:
 // `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`,
-// `failures`, `users` (passwd accounts with uid >= 1000 and a login shell, as
+// `failures` (a failure's message stays up until the next answer, under the
+// re-prompt), `users` (passwd accounts with uid >= 1000 and a login shell, as
 // `{ name, realName }`), `selectedUser`, `selectUser(name)` (starts that
 // account's conversation; "" goes back to choosing), and `respond(text)`.
 //
@@ -39,6 +41,8 @@ ShellRoot {
         stagingEngine.has(livery.songName, "greeter") ? stagingEngine.source(livery.songName, "greeter") : ""
 
     property var sessionCommand: []
+    property string sessionDesktop: ""
+    property bool _failed: false
 
     readonly property QtObject auth: QtObject {
         id: auth
@@ -54,6 +58,7 @@ ShellRoot {
         function selectUser(name) {
             if (Greetd.state !== GreetdState.Inactive) Greetd.cancelSession()
             auth.selectedUser = name
+            root._failed = false
             auth.message = ""
             auth.messageIsError = false
             auth.responseRequired = false
@@ -64,6 +69,7 @@ ShellRoot {
             if (!auth.responseRequired) return
             auth.busy = true
             auth.responseRequired = false
+            root._failed = false
             Greetd.respond(text)
         }
     }
@@ -78,14 +84,17 @@ ShellRoot {
         target: Greetd
         function onAuthMessage(message, error, responseRequired, echoResponse) {
             auth.busy = false
-            auth.message = message
-            auth.messageIsError = error
+            if (!root._failed) {
+                auth.message = message
+                auth.messageIsError = error
+            }
             auth.responseRequired = responseRequired
             auth.responseVisible = echoResponse
         }
         function onAuthFailure(message) {
             auth.busy = false
             auth.failures += 1
+            root._failed = true
             auth.message = "The user name or password is incorrect."
             auth.messageIsError = true
             auth.responseRequired = false
@@ -98,7 +107,7 @@ ShellRoot {
                 Greetd.cancelSession()
                 return
             }
-            Greetd.launch(root.sessionCommand, [], true)
+            Greetd.launch(root.sessionCommand, ["XDG_SESSION_TYPE=wayland", "XDG_SESSION_DESKTOP=" + root.sessionDesktop], true)
         }
         function onError(error) {
             auth.busy = false
@@ -132,7 +141,11 @@ ShellRoot {
     FileView {
         path: root.aoideRoot + "/session.json"
         onLoaded: {
-            try { root.sessionCommand = JSON.parse(text()).command || [] }
+            try {
+                var s = JSON.parse(text())
+                root.sessionCommand = s.command || []
+                root.sessionDesktop = s.desktop || ""
+            }
             catch (e) { console.warn("[aoide/greeter] session.json:", e) }
         }
     }

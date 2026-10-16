@@ -15,7 +15,8 @@
 // The face receives the universal `livery` + `bridge` and one extra, `auth`,
 // whose plain properties mirror the PAM conversation: `message`,
 // `messageIsError`, `responseRequired`, `responseVisible`, `busy`,
-// `failures`, `userName` (the passwd name, from `id -un`), the
+// `failures` (a failure's message stays up until the next answer, under the
+// re-prompt), `userName` (the passwd name, from `id -un`), the
 // `respond(text)` function and the `unlocked()` signal. A face never sees the
 // `PamContext`, and answers it only through `respond`.
 //
@@ -24,9 +25,11 @@
 // active song, a face that fails to compile, or one that cannot be created
 // (a missing required property) — so a locked screen is never without input.
 //
-// LockedHint: `lyra lock hint yes|no` follows `WlSessionLock.locked`, so the
-// popup watchers' locked check sees this lock the way it sees hyprlock's
-// process. A crashed shell leaves the hint at `yes` and the compositor keeps
+// LockedHint: `lyra lock hint yes|no` follows the lock, so the popup
+// watchers' locked check sees this lock the way it sees hyprlock's process:
+// `yes` from `lockStateChanged` once the compositor grants the lock, `no` from
+// the unlock itself, since `WlSessionLock` emits nothing for an unlock it was
+// asked for (Quickshell 0.3.1 checks `isLocked()` after releasing the lock). A crashed shell leaves the hint at `yes` and the compositor keeps
 // the session locked (Hyprland's `misc:allow_session_lock_restore` lets the
 // next `lyra lock` take it back).
 
@@ -62,13 +65,17 @@ Scope {
         function respond(text) {
             if (!pam.active || !pam.responseRequired) return
             auth.busy = true
+            root._failed = false
             pam.respond(text)
         }
     }
 
+    property bool _failed: false
+
     function lock() {
         if (sessionLock.locked) return
         auth.failures = 0
+        root._failed = false
         sessionLock.locked = true
         root._startPam()
     }
@@ -87,6 +94,10 @@ Scope {
             root._sync("Authentication could not start.", true)
     }
 
+    function _hint(locked) {
+        Quickshell.execDetached(["lyra", "lock", "hint", locked ? "yes" : "no"])
+    }
+
     function _sync(message, isError) {
         auth.message = message
         auth.messageIsError = isError
@@ -100,7 +111,12 @@ Scope {
 
         onPamMessage: {
             auth.busy = false
-            root._sync(pam.message, pam.messageIsError)
+            if (root._failed) {
+                auth.responseRequired = pam.responseRequired
+                auth.responseVisible = pam.responseVisible
+            } else {
+                root._sync(pam.message, pam.messageIsError)
+            }
         }
         onCompleted: result => {
             auth.busy = false
@@ -108,11 +124,13 @@ Scope {
                 auth.message = ""
                 auth.responseRequired = false
                 sessionLock.locked = false
+                root._hint(false)
                 auth.unlocked()
                 return
             }
             auth.failures += 1
             root._sync("The password is incorrect.", true)
+            root._failed = true
             Qt.callLater(root._startPam)
         }
         onError: err => {
@@ -137,7 +155,7 @@ Scope {
     WlSessionLock {
         id: sessionLock
 
-        onLockStateChanged: Quickshell.execDetached(["lyra", "lock", "hint", sessionLock.locked ? "yes" : "no"])
+        onLockStateChanged: root._hint(sessionLock.locked)
 
         WlSessionLockSurface {
             id: surface
