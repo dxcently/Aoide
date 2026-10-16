@@ -149,8 +149,9 @@ lyra shellbridge [--run] [--json]
   (`state: "error"`, data `{socket, stageDir, wrote}`). Socket commands
   (`pkgs/aoide/crates/conduct/src/shellbridge.rs`): `focuswindow` /
   `focussession` (Hyprland jump via `crate::graph`), `power`
-  (`lock|logout|suspend|hibernate|reboot|shutdown` → spawns `hyprlock`,
-  `hyprctl dispatch exit`, or `systemctl suspend|hibernate|reboot|poweroff`,
+  (`lock|logout|suspend|hibernate|reboot|shutdown` → `hyprctl dispatch exec
+  "lyra lock"` (the compositor runs the locker, so it never inherits this
+  unit's NoNewPrivileges), `hyprctl dispatch exit`, or `systemctl suspend|hibernate|reboot|poweroff`,
   detached with a reaper thread), `ricemode` (the RICE menu's switch, a closed
   `stage <name>|declarative` whitelist: re-execs `lyra rice mode stage <name>` /
   a bare `lyra rice mode declarative` with `--json`, waits, then fires a

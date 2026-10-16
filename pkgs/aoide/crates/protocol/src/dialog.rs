@@ -52,13 +52,53 @@ pub fn locker_process_name() -> String {
     std::env::var("AOIDE_SECRETS_LOCKER").unwrap_or_else(|_| "hyprlock".to_string())
 }
 
-/// `loginctl show-session <id> -p LockedHint --value`, gated on
-/// `$XDG_SESSION_ID` being set at all — `None` on any failure (no session
-/// id, `loginctl` missing, a non-zero exit, unparseable output), never an
+/// The logind session a lock covers and a locked-state read asks about:
+/// `$XDG_SESSION_ID` when the caller runs inside a session, else the
+/// caller's user's DISPLAY session (`loginctl show-user <uid> -p Display`).
+/// The second tier is the load-bearing one on a desktop: the popup watchers
+/// and the Quickshell lock host are user units, which run outside every
+/// session and carry no `$XDG_SESSION_ID`, while the lock they read or set
+/// covers the graphical session the user logged into. `None` when neither
+/// tier answers with a well-formed id (ASCII alphanumerics only, as logind
+/// names them), so nothing else ever reaches a `loginctl` argv or a bus path.
+pub fn lock_session_id() -> Option<String> {
+    pick_session(std::env::var("XDG_SESSION_ID").ok(), display_session)
+}
+
+fn pick_session(env: Option<String>, display: impl FnOnce() -> Option<String>) -> Option<String> {
+    let well_formed = |id: &String| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric());
+    env.filter(well_formed).or_else(|| display().filter(well_formed))
+}
+
+#[cfg(unix)]
+fn display_session() -> Option<String> {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let output = Command::new("loginctl")
+        .args(["show-user", &uid.to_string(), "-p", "Display", "--value"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(not(unix))]
+fn display_session() -> Option<String> {
+    None
+}
+
+/// `loginctl show-session <id> -p LockedHint --value` for
+/// [`lock_session_id`]'s session — `None` on any failure (no session,
+/// `loginctl` missing, a non-zero exit, unparseable output), never an
 /// error: this is one OR term of [`locked_state`], and an unanswerable
 /// probe must read as "doesn't say locked," not "locked."
 pub fn probe_loginctl_locked() -> Option<bool> {
-    let session = std::env::var("XDG_SESSION_ID").ok()?;
+    let session = lock_session_id()?;
     let output = Command::new("loginctl")
         .args(["show-session", &session, "-p", "LockedHint", "--value"])
         .stdin(Stdio::null())
@@ -353,6 +393,28 @@ mod tests {
     use std::path::{Path, PathBuf};
     #[cfg(unix)]
     use std::sync::Mutex;
+
+    // ── lock_session_id's two tiers ──────────────────────────────────
+
+    #[test]
+    fn the_callers_own_session_wins_and_the_display_session_is_never_asked() {
+        let got = pick_session(Some("3".into()), || panic!("display asked although the env answered"));
+        assert_eq!(got.as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn a_unit_outside_any_session_falls_back_to_the_display_session() {
+        assert_eq!(pick_session(None, || Some("c2".into())).as_deref(), Some("c2"));
+        assert_eq!(pick_session(Some(String::new()), || Some("4".into())).as_deref(), Some("4"));
+    }
+
+    #[test]
+    fn a_session_id_that_is_not_plain_alphanumerics_is_no_session() {
+        assert_eq!(pick_session(Some("3 -p Name".into()), || None), None);
+        assert_eq!(pick_session(None, || Some("../1".into())), None);
+        assert_eq!(pick_session(None, || Some(String::new())), None);
+        assert_eq!(pick_session(None, || None), None);
+    }
 
     // ── locked_state (the OR logic, injected probes) ─────────────────
 

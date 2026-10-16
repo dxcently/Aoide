@@ -92,7 +92,7 @@ in
             poweroff = "systemctl poweroff";
             sleep = "systemctl suspend";
             hibernate = "systemctl hibernate";
-            lock = "hyprlock";
+            lock = "lyra lock";
 
             # lsd
             ls = "lsd";

@@ -47,7 +47,9 @@
 //! `crate::xdg`: the installed desktop apps with their resolved icons, and
 //! `song/stage/apps.json`) follow, and `clipboard` (`clipboard delete`/
 //! `clipboard clear`, over the `cliphist` on `PATH`: one history entry or all
-//! of them, with the launcher's cached thumbnails) closes the list.
+//! of them, with the launcher's cached thumbnails) follows, and `lock` (`lock`,
+//! the one lock entry, and `lock hint`, logind's LockedHint for the shell's
+//! lock host) closes the list.
 //! `registry.rs`'s golden test is the sole authority for the command set
 //! (`pkgs/aoide/crates/AGENTS.md`, "Golden discipline").
 pub mod apps;
@@ -55,6 +57,7 @@ pub mod clipboard;
 pub mod dialog_qml;
 pub mod icon;
 pub mod infra;
+pub mod lock;
 pub mod meta;
 pub mod onboard;
 pub mod pair;
@@ -89,7 +92,13 @@ const LAYOUT: Layout = Layout {
         ),
         ("Desktop apps", &[("apps", "Installed apps and their icons, as the shell lists them")]),
         ("Clipboard", &[("clipboard", "Delete one clipboard-history entry, or wipe them all")]),
-        ("Screen control", &[("screen", "See and drive the desktop: info, shots, pointer, OCR, diff")]),
+        (
+            "Screen control",
+            &[
+                ("screen", "See and drive the desktop: info, shots, pointer, OCR, diff"),
+                ("lock", "Lock the screen in the staged song's face, or with hyprlock"),
+            ],
+        ),
         (
             "Dialogs & notices",
             &[
@@ -130,6 +139,7 @@ pub fn all() -> Registry {
     icon::register(&mut r); // icon.collections + icon.list + icon.resolve — the pinned icon collections (Iconify data) resolved into the lane's own SVG tree, no network at render (I1)
     apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, song/stage/apps.json
     clipboard::register(&mut r); // clipboard delete/clear — remove cliphist history entries and their cached thumbnails
+    lock::register(&mut r); // lock + lock.hint — the one lock entry (the shell's LockHost for a song with a face, else hyprlock) and logind's LockedHint
 
     r.arrange(LAYOUT);
     r

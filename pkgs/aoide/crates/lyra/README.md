@@ -14,7 +14,7 @@ are core `aoide` identity, root `AGENTS.md`).
 - `dispatch`/`registry` — lyra's own argv parsing, dispatch, and golden
   command-path snapshot, independent of core's.
 - `commands::LAYOUT` — how `lyra` lists itself (Start here · Songs &
-  liveries · Widgets & icons · Desktop apps · Clipboard · Screen control ·
+  liveries · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock) ·
   Dialogs & notices · Agent interfaces · System), adopted by `all()` through
   `Registry::arrange`; bare `lyra`, `--help`, group pages and `guide` read it.
 - `guide` — `lyra guide`.
@@ -401,6 +401,17 @@ are core `aoide` identity, root `AGENTS.md`).
   `cliphist` on `PATH`. The bridge `AoideClipboard.qml`'s `deleteById`/`clear`
   run. docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md has the commands
   and their `data.reason` codes.
+- `commands::lock` — `lock` and `lock hint yes|no`, the one lock entry
+  (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
+  staged song whose OWN manifest entry carries `lockscreen` is locked by the
+  running shell: `quickshell -p run/qml/shell.qml ipc call lock lock`, then
+  `ipc call lock secure` until it answers `true` (the compositor confirmed
+  the lock) inside 2 s. A song with no face, and a shell that is down, has
+  no lock host, hangs or never confirms, runs `hyprlock` in its own process
+  group; a hyprlock that exits within 500 ms is a failure (`hyprlock-failed`,
+  exit 1), never a lock. `lock hint` sets logind's `LockedHint` with
+  `busctl` on `aoide_protocol::dialog::lock_session_id()`'s session, which
+  `LockHost.qml` (pkgs/lyra-shell/qml) calls on lock and unlock.
 
 ## What it consumes
 
@@ -413,7 +424,7 @@ serve --stdio`'s door loop).
 Command paths: onboard/rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald/take/element/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
-apps/clipboard — everything that paints, or that only a desktop needs.
+apps/clipboard/lock/lock hint — everything that paints, or that only a desktop needs.
 `element seed` (L-E1,
 docs/architecture/ELEMENTS.md) renders a song's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything

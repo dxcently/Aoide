@@ -152,6 +152,8 @@ mod tests {
             "livery.emit",
             "livery.lint",
             "livery.resolve",
+            "lock",
+            "lock.hint",
             "mcp.serve",
             "onboard",
             "pair.ask",

@@ -357,6 +357,17 @@
   real binary and the real history are unreachable from them; keep it so.
   The thumbnail path is `AoideClipboard.qml`'s `previewDir`, mirrored, not
   shared: change both together.
+- **`lyra lock` never reports a lock it did not get, and its tests never
+  reach a real locker.** The shell counts only after `ipc call lock secure`
+  answers `true`; anything short of that falls through to hyprlock, and a
+  hyprlock that exits inside the settle window is a refusal. The face is
+  decided by the staged song's OWN manifest entry: never the baseline song,
+  so a song without a face is a hyprlock song. The command is run by the
+  compositor or a terminal, never as the child of a NoNewPrivileges unit
+  (unix_chkpwd). Its tests put builtins-only `quickshell`, `hyprlock`,
+  `busctl` and `loginctl` stand-ins on a `PATH` holding nothing else, under a
+  scratch `AOIDE_STAGE_DIR`; keep it so — a test that reached the real
+  binaries would lock the operator's screen.
 - **`apps publish --run` re-resolves every path on every tick and holds no
   watch.** A nix profile swap re-points a chain of symlinks, so an inotify
   watch on a store path never fires again; `fingerprint` re-resolves each
@@ -388,6 +399,8 @@
 - `docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md` and
   `AoideClipboard.qml`'s header when a `lyra clipboard` output shape,
   `data.reason` code or the thumbnail path changes.
+- `pkgs/lyra-shell/qml/LockHost.qml`'s header and `slots.md` when `lyra
+  lock`'s IPC (`lock`/`secure`) or `lock hint` changes.
 - `CONTRACTS.md` §4 (`song/stage/apps.json`) and
   `docs/Aoide-Wiki/concepts/cli/Apps-Commands.md` when the `apps.json`
   document, the listing filter or the icon rules change.

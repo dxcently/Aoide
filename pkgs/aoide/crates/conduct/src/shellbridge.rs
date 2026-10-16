@@ -92,7 +92,7 @@ pub enum BridgeCommand {
     /// `{ "cmd": "power", "action": "lock|logout|suspend|hibernate|reboot|shutdown" }`
     /// — a system action from the Exodos powermenu (AoideExodos.qml). QML never
     /// shells out; this command is the gate through which the six endings reach
-    /// hyprlock / hyprctl / systemctl.
+    /// lyra lock / hyprctl / systemctl.
     Power { action: PowerAction },
     /// `{ "cmd": "ricemode", "action": "stage|declarative", "name": "…" }` — a
     /// row of the bar's RICE menu: switch the stage to the named runtime song,
@@ -404,13 +404,15 @@ impl PowerAction {
     }
 
     /// The program + args this action spawns. `lock` asks the compositor to
-    /// start hyprlock rather than spawning it here: this unit runs with
-    /// NoNewPrivileges, which a child inherits, and hyprlock's PAM check needs
-    /// the setuid `unix_chkpwd`, so a hyprlock spawned here refuses every
-    /// password. `logout` exits the compositor; the rest are systemd commands.
+    /// run `lyra lock` (the one lock entry: the shell's lock host for a song
+    /// with a face, else hyprlock) rather than spawning it here: this unit
+    /// runs with NoNewPrivileges, which a child inherits, and hyprlock's PAM
+    /// check needs the setuid `unix_chkpwd`, so a locker spawned here refuses
+    /// every password. `logout` exits the compositor; the rest are systemd
+    /// commands.
     fn command(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            Self::Lock => ("hyprctl", &["dispatch", "exec", "hyprlock"]),
+            Self::Lock => ("hyprctl", &["dispatch", "exec", "lyra lock"]),
             Self::Logout => ("hyprctl", &["dispatch", "exit"]),
             Self::Suspend => ("systemctl", &["suspend"]),
             Self::Hibernate => ("systemctl", &["hibernate"]),
@@ -2891,7 +2893,7 @@ mod tests {
     fn lock_is_started_by_the_compositor_never_as_this_units_child() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (prog, args) = PowerAction::Lock.command();
-        assert_eq!((prog, args), ("hyprctl", &["dispatch", "exec", "hyprlock"][..]));
+        assert_eq!((prog, args), ("hyprctl", &["dispatch", "exec", "lyra lock"][..]));
     }
 
     #[test]

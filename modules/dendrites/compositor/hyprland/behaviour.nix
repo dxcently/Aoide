@@ -213,10 +213,11 @@ in
         # else the plain AoideSwitcher) is registered by shell.qml but not bound
         # here: the venue binds its combo.
 
-        # Lock screen (hyprlock directly — no lock command exists in either
-        # binary; the shellbridge powermenu's PowerAction::Lock shells the
-        # same locker)
-        bind = SUPER, ESCAPE, exec, hyprlock
+        # Lock screen: `lyra lock`, the one lock entry (the staged song's face
+        # through the shell's LockHost, else hyprlock). The shellbridge
+        # powermenu's PowerAction::Lock and the `lock` alias run the same
+        # command. Bare name, as the rice binds below.
+        bind = SUPER, ESCAPE, exec, lyra lock
 
         # Panel dock (Hyprland global shortcut → the center-left panel's
         # GlobalShortcut toggle). SUPER+G opens/closes the center-left book-edge

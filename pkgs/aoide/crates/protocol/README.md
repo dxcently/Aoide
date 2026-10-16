@@ -176,7 +176,10 @@ other crate in this workspace sits above.
   spawn-error/infra-failure) and `run_entry_dialog` (the generic
   spawn-poll-parse loop behind it), the screen-lock probes a popup gate
   consults first (`locked_state`, `is_locked`, `probe_loginctl_locked`,
-  `probe_locker_running`, `locker_process_name`), the spawn-retry backoff
+  `probe_locker_running`, `locker_process_name`) and the session they and
+  `lyra lock hint` name (`lock_session_id`: `$XDG_SESSION_ID`, else the
+  user's logind display session, since every popup watcher and the shell's
+  lock host are user units outside any session), the spawn-retry backoff
   (`next_spawn_backoff` + its floor/ceiling) and its interruptible sleep
   (`sleep_backoff_interruptible`, #108 — chops the backoff into ~200ms
   ticks against a caller-owned `AtomicBool` so Ctrl-C/shutdown never waits

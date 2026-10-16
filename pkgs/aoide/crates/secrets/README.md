@@ -1167,12 +1167,14 @@ watching secret events — ^C to leave (parked asks stay parked)
   are always a different button, worded differently, exactly the design's
   own "never adjacent, never share a word" rule for `[d]` vs `[i]`.
 - **Unlock-gated.** Before opening a dialog, `watch::is_locked` ORs two
-  signals: `loginctl show-session <id> -p LockedHint --value` (skipped
-  entirely when `$XDG_SESSION_ID` is unset; an unanswerable probe reads as
-  "not locked," never as "locked") OR'd with a `/proc` scan for a named
-  locker PROCESS, `AOIDE_SECRETS_LOCKER` (default `hyprlock` — the design
-  doc verified hyprlock 0.9.6 sets no `LockedHint`, so this half is
-  load-bearing on this rig, not a redundant fallback). While locked, the
+  signals: `loginctl show-session <id> -p LockedHint --value` on
+  `$XDG_SESSION_ID`, else on the user's logind display session (this unit
+  runs outside every session; skipped when neither names one, and an
+  unanswerable probe reads as "not locked," never as "locked") OR'd with a
+  `/proc` scan for a named locker PROCESS, `AOIDE_SECRETS_LOCKER` (default
+  `hyprlock` — the design doc verified hyprlock 0.9.6 sets no `LockedHint`,
+  so this half is load-bearing for hyprlock, not a redundant fallback). The
+  shell's own lock (`LockHost.qml`, `lyra lock`) sets the hint itself. While locked, the
   loop holds the dialog and re-polls once a second; once unlocked it opens
   the dialog — but ONLY if the near-expiry rule below still allows it.
 - **Near-expiry, two coherent thresholds, one policy (task #76 item 1,

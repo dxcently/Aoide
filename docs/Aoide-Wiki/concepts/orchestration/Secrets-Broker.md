@@ -204,8 +204,10 @@ extra button maps to dismiss, and the two are always visually and texturally
 distinct so neither is mistaken for the other. A dialog opens only when the
 screen is unlocked, checked by ORing `loginctl`'s `LockedHint` with a
 `/proc` scan for a named locker process (`AOIDE_SECRETS_LOCKER`, default
-`hyprlock`) — the process scan exists because some lockers set no
-`LockedHint` at all. A failing `zenity` spawn backs off from 1 second up to
+`hyprlock`). The hint is read on `$XDG_SESSION_ID`, else on the user's
+display session, because the watcher is a user unit outside every session.
+The shell's lock host sets it (`lyra lock hint`); the process scan exists
+because hyprlock sets no `LockedHint` at all. A failing `zenity` spawn backs off from 1 second up to
 a 60-second ceiling globally across every ask, rather than retrying on
 every poll tick forever. `released`/`completed`/`dismissed`/`expired` never
 drive a dialog — only `parked` does — so a busy automation consumer never

@@ -362,8 +362,9 @@ aoide secrets watch [--json] [--popup]
   object per line.
 - **Notes:** CLI-only, operator-side, blocks until Ctrl-C. `--popup`
   swaps the terminal prompt for a `zenity --entry --hide-text` dialog,
-  parked-only, unlock-gated (`loginctl`'s `LockedHint` OR'd with an
-  `AOIDE_SECRETS_LOCKER`-named `/proc` scan, default `hyprlock`); a code
+  parked-only, unlock-gated (`loginctl`'s `LockedHint` on `$XDG_SESSION_ID`,
+  else the user's display session, OR'd with an `AOIDE_SECRETS_LOCKER`-named
+  `/proc` scan, default `hyprlock`); a code
   prompt refuses to open below 10 seconds remaining and force-closes at
   15 seconds without reopening. `--json` and `--popup` are mutually
   exclusive (declared on the registry entry).

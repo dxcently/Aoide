@@ -44,7 +44,10 @@
 //! LockedHint` OR'd with a `/proc` scan for a named locker process, default
 //! `hyprlock` — `AOIDE_SECRETS_LOCKER` overrides it; the design doc verified
 //! hyprlock cannot set `LockedHint`, so the `/proc` half is load-bearing,
-//! not a redundant fallback) and PARKED-ONLY: `released`/`completed`/
+//! not a redundant fallback. The shell's own lock host sets `LockedHint`
+//! through `lyra lock hint`, and the hint is read on the user's display
+//! session when this unit has no `$XDG_SESSION_ID`, so a shell lock holds
+//! popups too) and PARKED-ONLY: `released`/`completed`/
 //! `dismissed`/`expired` never spawn a dialog, only narrate (same as every
 //! other mode) — a tight automation loop never becomes a toast storm. The
 //! near-expiry lockout ([`LOCKOUT_SECS`]) is enforced exactly as it is for
