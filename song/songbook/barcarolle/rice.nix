@@ -85,7 +85,7 @@
     # Segoe UI unavailable; fall back to Noto Sans (bar uses Noto Sans per intent).
     aoide.livery.fonts.monospace = {
       name = "Noto Sans Mono";
-      package = pkgs.noto-fonts-cjk;
+      package = pkgs.noto-fonts-cjk-sans;
     };
 
     # ── Cover art ───────────────────────────────────────────────────────────
