@@ -456,9 +456,15 @@ gaps are harmless.
 - Arrival files under `to.name` when that box exists. A far letter to a
   name with no box is answered `refused` with reason `unknown-box` and the
   fixed detail `no mailbox of that name is on this node; nothing was filed
-  or acknowledged`. The detail names no box, so a relay learns nothing
-  about which names exist. The sender parks the letter, and it is released
-  by `aoide mail outbox retry` once the box exists. A local send to
+  or acknowledged`. The detail names no box, but the word is itself a
+  probe: a relay that sends letters learns which names have a box from
+  which ones come back `unknown-box` and which come back filed or
+  acknowledged. Nothing in the answer can hide that, so it is accepted,
+  not prevented. The sender parks the letter, and it is released by
+  `aoide mail outbox retry` once the box exists. A hub that handed the
+  container over releases its custody of it (`unknown-box` is a verdict on
+  the bytes' destination, so it is named in `filed` and offered no more);
+  the origin keeps its own copy and re-sends it on retry. A local send to
   `self/<name>` and `aoide mail box add <name>` create the box, and so does
   enrolling a reader in it. Reading a box that does not exist changes
   nothing. Only `letter` and `receipt` are

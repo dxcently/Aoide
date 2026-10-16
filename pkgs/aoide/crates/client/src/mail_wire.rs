@@ -1343,7 +1343,6 @@ fn refusal_clears_on_retry(word: &str) -> bool {
     matches!(
         word,
         aoide_storage::mail::REFUSAL_BOX_FULL
-            | aoide_storage::mail::REFUSAL_UNKNOWN_BOX
             | LOCAL_IO
             | CONFIG_UNREADABLE
             | CONFIG_INVALID
@@ -5153,6 +5152,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **Refused unknown-box containers never starve a fresh letter.** The hub
+    /// holds 50 containers to a box this node does not have, so each is refused
+    /// `unknown-box`. The first poll is offered all 50; the hub releases them on
+    /// the next poll's `filed` list, so the valid letter behind them files. With
+    /// the box kept as custody, every poll offers the same 50 and it never does.
+    #[test]
+    fn fifty_refused_unknown_box_containers_never_starve_a_fresh_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unknown-box-custody");
+
+        let me = register_local_origin();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        aoide_storage::mail::box_add("bob").unwrap();
+        for i in 0..50 {
+            // Minted as the relay, to a box this node does not have, so the
+            // chain ends at this node and the refusal is `unknown-box`.
+            let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+            std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+            let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "ghost", &format!("unknown {i}"));
+            match saved {
+                Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+                None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+            }
+            let letter = letter.unwrap();
+            let mesh = letter.header.origin_mesh.clone();
+            let container = aoide_storage::seal::seal_envelope(&letter, &binding, &mesh, &mesh, &me, &me, &now).unwrap();
+            let mut entry = OutboxEntry::transit_held(container);
+            entry.envelope.header.minted_at = format!("2020-01-01T00:{:02}:{:02}Z", i / 60, i % 60);
+            aoide_storage::outbox::write_entry("relay", &entry).unwrap();
+        }
+        let valid = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "the fresh one").unwrap();
+        let valid_msgid = valid.msgid.clone();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::held(valid)).unwrap();
+
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+
+        let first = poll_node("relay", None).unwrap();
+        assert_eq!(first.refused.len(), 50, "the first poll is offered the 50 oldest: {:?}", first.refused);
+        assert!(first.refused.iter().all(|r| r.ends_with("unknown-box")), "{:?}", first.refused);
+        let second = poll_node("relay", None).unwrap();
+        assert_eq!(second.filed, 1, "the fresh letter files on the second poll: {second:?}");
+        assert!(aoide_storage::mail::show(&valid_msgid).unwrap().is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **A refusal of this box's own state keeps the hub's custody.** The
     /// container is valid and opens, but this box cannot write its own base, so
     /// the deposit fails for a local reason. The hub is not told, and offers the
@@ -6008,11 +6055,13 @@ mod tests {
         assert!(!refusal_clears_on_retry(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE));
     }
 
-    /// An `unknown-box` answer parks the letter at the sender, and a hub keeps
-    /// its custody: the box can be created later, and then the letter files.
+    /// An `unknown-box` answer parks the letter at the sender, and a hub releases
+    /// its custody: the bytes are refused the same way on every re-offer, and the
+    /// origin keeps its own retry copy, so a box created later is reached by the
+    /// origin's `outbox retry`, not by the hub holding the letter forever.
     #[test]
-    fn an_unknown_box_parks_at_the_sender_and_keeps_the_hubs_custody() {
-        assert!(refusal_clears_on_retry(aoide_storage::mail::REFUSAL_UNKNOWN_BOX));
+    fn an_unknown_box_parks_at_the_sender_and_releases_the_hubs_custody() {
+        assert!(!refusal_clears_on_retry(aoide_storage::mail::REFUSAL_UNKNOWN_BOX));
         let answer = json!({
             "status": "refused",
             "reason": aoide_storage::mail::REFUSAL_UNKNOWN_BOX,

@@ -9345,9 +9345,10 @@ the origin signature, and `"not-correspondence"` when the envelope's `type` is
 neither `letter` nor `receipt` (a `charter` is applied from a sealed container's
 own payload, never filed as correspondence). A letter to a name with no box on
 this node answers `"unknown-box"`, with a fixed detail that names no box; the
-sender parks it (MAIL.md §Addressing). `reason` is exactly the token MAIL.md §Transit
-names for each of these among its `refused` reasons; the rest of that list —
-`no-route`, `down`, `unknown-mesh`, `zone-violation` — belongs to the transit
+sender parks it (MAIL.md §Addressing), and a hub that handed the container over
+releases its custody of it (MAIL.md §Wire). `reason` is exactly the token
+MAIL.md §Transit names for each of these among its `refused` reasons; the rest
+of that list — `no-route`, `down`, `unknown-mesh`, `zone-violation` — belongs to the transit
 lane and to a sealed charter container's own zone check, below, not to this one.
 **Two of those words are LINK states on the sender's side — `down` and
 `config-invalid` — and never park anything**: the entry stays live and retries
