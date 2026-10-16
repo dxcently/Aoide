@@ -1803,8 +1803,9 @@ pub(crate) fn deposit_within(envelope: Envelope, via: &str, caps: Caps) -> Resul
         {
             return Ok(DepositOutcome::Duplicate { filed_letter: found.kind == ENTRY_TYPE_LETTER });
         }
-        // The quarter is the verified origin key's, and a local letter has none.
-        let quarter = (via != "self").then_some(origin.as_str());
+        // The quarter is the verified origin key's, and only this box's own key
+        // has none: a hop's name never decides it.
+        let quarter = (!is_own_key(&origin)).then_some(origin.as_str());
         if !fit(caps, &target, quarter, line_bytes(&envelope, via, quarter.unwrap_or(""))?)? {
             return Ok(DepositOutcome::BoxFull);
         }
@@ -1813,6 +1814,12 @@ pub(crate) fn deposit_within(envelope: Envelope, via: &str, caps: Caps) -> Resul
         file_received_entry(envelope, via, quarter.unwrap_or(""))?;
         Ok(DepositOutcome::Filed { msgid, kind })
     })
+}
+
+/// Whether `key` is this box's own identity key, the one key a letter has no
+/// quarter under. A missing identity is no own key, so the quarter applies.
+fn is_own_key(key: &str) -> bool {
+    identity::load_existing().ok().flatten().is_some_and(|kp| kp.info().pubkey_hex == key)
 }
 
 /// One mailbox's correspondence entries, read under the lock: the file a letter
@@ -4420,6 +4427,57 @@ mod tests {
             deposit_within(signed_from("bob-host", "bob", ENTRY_TYPE_LETTER, "bob", &bob_host), "sakaki", caps).unwrap(),
             DepositOutcome::Filed { .. }
         ), "another key files into the same box");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hop's name is never a reason to skip the quarter. A far letter whose
+    /// hop is named `self` is held to its origin's quarter like any other, and
+    /// the box holds no more than a quarter of the far key's bytes.
+    #[test]
+    fn a_far_hop_named_self_is_held_to_the_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s9-hop-self");
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 50 {
+            let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("alice {filed}"), &alice);
+            match deposit_within(letter, "self", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(len <= caps.box_max / 4, "a far hop named self took {len} bytes past the quarter");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// This box's own signed letter is exempt from the quarter whatever hop
+    /// brought it, so the box fills to its cap, not to a quarter.
+    #[test]
+    fn a_letter_this_box_signed_is_exempt_from_the_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s9-own-key");
+        box_add("bob").unwrap();
+        let me = crate::display::local_node_name();
+        let (own, _) = identity::load_or_mint().unwrap();
+        same_key_on_record(&me, &own);
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 200 {
+            let letter = signed_from(&me, "bob", ENTRY_TYPE_LETTER, &format!("mine {filed}"), &own);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(len > caps.box_max / 4, "its own letters are not held to the quarter: {len} bytes");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -390,9 +390,11 @@ The store is bounded by four caps, all `const`s in `storage/src/mail.rs`:
 | Store | 240 MiB | every box file together | `box-full` |
 
 Receipts, the containers gate and the re-ack record are not capped by these;
-they rotate at their own caps (§Security model). A local letter has no quarter,
-only the box and store caps. The quarter keys on the verified origin key, so a
-key that signs under two node names shares one quarter.
+they rotate at their own caps (§Security model). A letter signed by this box's
+own identity key has no quarter, only the box and store caps, whichever hop
+brought it. Every other letter is held to the quarter of its verified origin
+key, so a key that signs under two node names shares one quarter, and a hop's
+name never exempts a letter.
 
 A capped refusal first compacts. A box or quarter refusal compacts its box; a
 store refusal compacts every box. Compaction drops a line only when every
