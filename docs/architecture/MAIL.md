@@ -343,8 +343,11 @@ An entry is an envelope plus local facts:
   each other, which is the honest floor: nothing distinguishes them. A
   respawned session is a new reader and sees the name from the
   beginning, the way an NNTP client with no `.newsrc` does: re-delivery
-  is the safe direction, and silent loss is not. The reader set is also
-  what the doorbell rings.
+  is the safe direction, and silent loss is not. A reader whose session
+  has left the roster is retired: each reaper pass, in the same lock hold
+  as the roster it reads, drops every reader key that names no session on
+  it, and a name left with no reader with it. The pseudo-reader is never
+  retired. The reader set is also what the doorbell rings.
 - Each mark also carries `rung`: the doorbell latch, the highest arming
   `seq` this reader has already been rung for. A reader arms again only
   once its own read catches up to `rung`; omitted from `cursors.json`
@@ -394,7 +397,8 @@ key that signs under two node names shares one quarter.
 A capped refusal first compacts. A box or quarter refusal compacts its box; a
 store refusal compacts every box. Compaction drops a line only when every
 reader of its box has read it: the floor is the lowest reader mark, zero when
-a box has no readers, so an unread letter is never reclaimed. A refused flood
+a box has no readers, so an unread letter is never reclaimed. A dead session's
+mark stops holding the floor down once the reaper retires it. A refused flood
 against a box nobody has read rewrites nothing. A full box refuses before
 anything is written and before any ack is owed, so the sender keeps the
 letter and retries.

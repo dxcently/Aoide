@@ -518,14 +518,12 @@ fn seal(header: &Header, text: &str, kp: &identity::Keypair) -> (String, String)
 /// Fail-closed choke point EVERY mail operation, read or write, funnels
 /// through exactly once at its own top level: takes the shared stage lock
 /// ([`crate::fs::try_stage_lock`]), runs [`migrate_if_needed`], then `f`.
-/// **Never call this from inside a function that is itself only ever
-/// reached through `with_lock`** — `try_stage_lock` opens a fresh fd per
-/// call and never nests, unlike `with_stage_lock`, which runs a nested call
-/// on the thread that already holds it (`fs.rs`): nesting this one deadlocks
-/// a real second acquisition and merely
-/// double-locks/unlocks in the best case. Every raw helper below
-/// (`read_entries_unlocked`, `append_base_line`, `next_seq`, …) is written
-/// assuming its caller already holds this lock.
+/// `try_stage_lock` is re-entrant on its thread, so a caller already inside
+/// `with_stage_lock` (the reaper's [`retire_readers`]) runs this in that same
+/// hold. Every raw helper below (`read_entries_unlocked`, `append_base_line`,
+/// `next_seq`, …) is written assuming its caller already holds this lock, and
+/// never calls `with_lock` itself: the migrations at its top are not meant to
+/// run twice in one operation.
 fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     match crate::fs::try_stage_lock(move || {
         ensure_mail_dir()?;
@@ -2181,6 +2179,38 @@ pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
         cursors.entry(name).or_default().entry(reader).or_default();
         save_cursors(&cursors)?;
         Ok(())
+    })
+}
+
+/// Retires every reader key that is neither a session in `live` nor its name's
+/// own pseudo-reader, and drops a name left with no readers (MAIL.md "Store").
+/// A dead reader's mark no longer holds its box's floor down, so the box's read
+/// lines become reclaimable on the next compaction. Writes `cursors.json` only
+/// when a key leaves, and touches nothing when there is no `cursors.json`, so
+/// the reaper never creates a mail store. Returns the retired `(name, reader)`
+/// pairs, in name order.
+pub fn retire_readers(live: &std::collections::HashSet<&str>) -> Result<Vec<(String, String)>, String> {
+    if !cursors_path().exists() {
+        return Ok(Vec::new());
+    }
+    with_lock(|| {
+        let mut cursors = load_cursors()?;
+        let mut retired = Vec::new();
+        for (name, readers) in cursors.iter_mut() {
+            readers.retain(|reader, _| {
+                let keep = reader == name || live.contains(reader.as_str());
+                if !keep {
+                    retired.push((name.clone(), reader.clone()));
+                }
+                keep
+            });
+        }
+        if retired.is_empty() {
+            return Ok(retired);
+        }
+        cursors.retain(|_, readers| !readers.is_empty());
+        save_cursors(&cursors)?;
+        Ok(retired)
     })
 }
 
@@ -4525,6 +4555,52 @@ mod tests {
         fill_box_to_the_cap("bob");
         let err = file_letter("alice", "bob", "hi").unwrap_err();
         assert!(err.contains("aoide mail read --for bob") && err.contains("aoide mail box rm bob --force"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reaping retires a dead session's reader key and keeps the pseudo-reader,
+    /// the key equal to its box's name, which no session owns.
+    #[test]
+    fn pseudo_readers_are_kept() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7-pseudo");
+        file_letter("alice", "bob", "hi").unwrap();
+        read_for("bob", false, None).unwrap();
+        enrol_reader("bob", "dead").unwrap();
+
+        let retired = retire_readers(&std::collections::HashSet::new()).unwrap();
+        assert_eq!(retired, vec![("bob".to_string(), "dead".to_string())]);
+        let readers: Vec<String> = load_cursors().unwrap()["bob"].keys().cloned().collect();
+        assert_eq!(readers, vec!["bob".to_string()], "the pseudo-reader keeps its mark");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A dead reader that never read pins its box at floor zero, so a deposit is
+    /// refused. Once reaping retires it, the live reader's mark is the floor and
+    /// the same deposit compacts the read letters away and files.
+    #[test]
+    fn a_box_pinned_by_a_dead_reader_compacts_after_reap() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7-pinned");
+        let alice = key_on_record("alice-host");
+        box_add("bob").unwrap();
+        enrol_reader("bob", "live").unwrap();
+        enrol_reader("bob", "dead").unwrap();
+        // Local letters carry no quarter, so eight of them fill the box past
+        // anything a far sender's quarter would refuse on its own.
+        for i in 0..8 {
+            file_letter("carol", "bob", &format!("read {i}")).unwrap();
+        }
+        read_for("bob", false, Some("live")).unwrap();
+        let tight = small_caps(std::fs::metadata(box_path("bob")).unwrap().len() + 10);
+        let next = || signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "next", &alice);
+        assert_eq!(deposit_within(next(), "sakaki", tight).unwrap(), DepositOutcome::BoxFull, "the dead reader pins the box");
+
+        retire_readers(&["live"].into_iter().collect()).unwrap();
+        assert!(matches!(deposit_within(next(), "sakaki", tight).unwrap(), DepositOutcome::Filed { .. }));
+        let left: Vec<String> =
+            box_lines(&box_path("bob")).unwrap().iter().filter_map(|l| l.entry.as_ref()).map(|e| e.envelope.text.clone()).collect();
+        assert_eq!(left, vec!["next".to_string()], "the read letters were compacted away");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
