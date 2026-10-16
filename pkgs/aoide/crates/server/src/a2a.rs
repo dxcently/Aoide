@@ -15330,7 +15330,7 @@ mod tests {
     }
 
     #[test]
-    fn a_duplicate_of_a_filed_letter_respools_its_ack() {
+    fn a_duplicate_of_a_filed_letter_inside_the_hour_holds_its_reack_back() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
@@ -15353,10 +15353,12 @@ mod tests {
         aoide_storage::outbox::remove_entry(&origin_name, &before[0].envelope.msgid).unwrap();
         assert!(aoide_storage::outbox::list_entries(&origin_name).unwrap().is_empty(), "ack removed, simulating an earlier successful drain");
 
-        mail_deposit(&params, &ctx).unwrap(); // the SAME envelope again — a duplicate.
+        // The SAME envelope again, inside the hour: a duplicate re-acks at most
+        // once per key per hour (`mail::reack_due`), and the first ack already
+        // went out. The re-ack after the hour is proved in storage.
+        mail_deposit(&params, &ctx).unwrap();
         let after = aoide_storage::outbox::list_entries(&origin_name).unwrap();
-        assert_eq!(after.len(), 1, "a duplicate of a filed LETTER respools its ack");
-        assert_eq!(after[0].envelope.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
+        assert!(after.is_empty(), "a duplicate inside the hour spools no second ack: {after:?}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
