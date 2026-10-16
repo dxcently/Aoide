@@ -40,7 +40,9 @@ modules/dendrites/compositor/
   ships `widgets/greeter.qml` (`aoide.songbook.greeter`), greetd running
   `cage` + Quickshell as its greeter user on a store tree (the lane's
   `GreeterHost.qml`, the face from the shipped songbook, the dress, and the
-  command of the display manager's default session); otherwise `ly` on tty1 with the livery's colours, plus the
+  display manager's session wrapper with the default session's Exec — the
+  default session must be named, evaluation fails otherwise; cage types in
+  the host's `services.xserver.xkb` layout); otherwise `ly` on tty1 with the livery's colours, plus the
   `systemd.services.display-manager.wantedBy` line the nixpkgs ly module omits.
   Either way it authenticates before it launches that same Hyprland session.
   It is a separate lane because a host can want the compositor without a

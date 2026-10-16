@@ -9,9 +9,12 @@
 //
 // Authentication is greetd's (`Quickshell.Services.Greetd`): `createSession`,
 // `respond`, then `launch` with the session the lane wrote into the tree
-// (`session.json`: the Exec of the display manager's default session, and its
-// desktop name for `XDG_SESSION_DESKTOP`; `XDG_SESSION_TYPE` is `wayland`, the
-// only kind the lane picks from). No session starts without greetd's say-so.
+// (`session.json`: the display manager's session wrapper and the default
+// session's whole Exec line for it to evaluate, and the desktop name for
+// `XDG_SESSION_DESKTOP`; `XDG_SESSION_TYPE` is `wayland`, the only kind the
+// lane picks from). No session starts without greetd's say-so, and none
+// from a readiness no answer earned. After a cancel the next conversation
+// waits out greetd's reply to it (`settle`).
 //
 // The face — the declared song's `widgets/greeter.qml` — receives `livery`,
 // `bridge` (null: a greeter has no shellbridge) and one extra, `auth`:
@@ -61,13 +64,17 @@ ShellRoot {
         property bool ready: false
 
         function selectUser(name) {
-            if (Greetd.state !== GreetdState.Inactive) Greetd.cancelSession()
+            if (Greetd.state !== GreetdState.Inactive) {
+                Greetd.cancelSession()
+                settle.restart()
+            }
             auth.selectedUser = name
             root._failed = false
             auth.message = ""
             auth.messageIsError = false
             auth.responseRequired = false
-            if (name !== "") Qt.callLater(root._begin)
+            if (name === "") settle.stop()
+            else if (!settle.running) root._begin()
         }
 
         function respond(text) {
@@ -75,12 +82,36 @@ ShellRoot {
             auth.busy = true
             auth.responseRequired = false
             root._failed = false
+            root._answered = true
             Greetd.respond(text)
         }
     }
 
+    // A cancelled conversation leaves greetd's reply to the cancel still
+    // unread, and Quickshell (0.3.1) reads a `success` as the readiness of
+    // whatever conversation is current by then. Quickshell flips to Inactive
+    // the moment it sends the cancel — before greetd answers — so a session
+    // created on that `stateChanged` takes the stray `success` as its own.
+    // After any cancel (switch user, and the one Quickshell sends itself
+    // after a refused password) the next conversation therefore starts
+    // `settle` later, once the reply has been read.
+    Timer {
+        id: settle
+        interval: 300
+        onTriggered: root._begin()
+    }
+
+    // Set once this conversation has been answered: greetd never reports an
+    // unanswered one ready, so such a readiness is a stray and launches
+    // nothing.
+    property bool _answered: false
+    // A refusal's cancel is still to be answered by greetd.
+    property bool _cancelReply: false
+
     function _begin() {
+        root._cancelReply = false
         if (auth.selectedUser === "" || Greetd.state !== GreetdState.Inactive) return
+        root._answered = false
         auth.busy = false
         Greetd.createSession(auth.selectedUser)
     }
@@ -103,9 +134,16 @@ ShellRoot {
             auth.message = "The user name or password is incorrect."
             auth.messageIsError = true
             auth.responseRequired = false
-            Qt.callLater(root._begin)
+            root._cancelReply = true
+            settle.restart()
         }
         function onReadyToLaunch() {
+            if (!root._answered) {
+                console.warn("[aoide/greeter] greetd reported an unanswered conversation ready; starting over")
+                Greetd.cancelSession()
+                settle.restart()
+                return
+            }
             if (root.sessionCommand.length === 0) {
                 auth.message = "No session to start."
                 auth.messageIsError = true
@@ -115,11 +153,18 @@ ShellRoot {
             Greetd.launch(root.sessionCommand, ["XDG_SESSION_TYPE=wayland", "XDG_SESSION_DESKTOP=" + root.sessionDesktop], true)
         }
         function onError(error) {
+            // greetd answers the cancel Quickshell sends after a refused
+            // password with an error of its own; the refusal stays the word.
+            if (root._cancelReply) {
+                root._cancelReply = false
+                console.info("[aoide/greeter] greetd's reply to the cancel after a refusal:", error)
+                return
+            }
             auth.busy = false
             auth.message = error
             auth.messageIsError = true
             auth.responseRequired = false
-            Qt.callLater(root._begin)
+            settle.restart()
         }
     }
 

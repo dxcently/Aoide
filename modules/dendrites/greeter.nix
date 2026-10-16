@@ -8,9 +8,16 @@
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
 #     tree's `shell.qml`, `LiveryState`/`StagingEngine` beside it, the face's
 #     song folder from the shipped songbook (`pkgs.lyra-songbook`), the dress
-#     as `song/stage/livery.json`, and `session.json`, the command and desktop
-#     name of the display manager's default session (the hyprland provider
-#     names it). `AOIDE_ROOT` points at the tree,
+#     as `song/stage/livery.json`, and `session.json`: the display manager's
+#     session wrapper (`services.displayManager.sessionData.wrapper`, the
+#     one ly runs — it sources the profile and evaluates the Exec line with
+#     the shell's own quoting) followed by the default session's Exec line
+#     whole, field codes dropped, plus the session's desktop name. The
+#     default session must be named (`services.displayManager.defaultSession`;
+#     the hyprland provider names it) — evaluation fails otherwise, never a
+#     guess. cage takes its keyboard layout from the host's
+#     `services.xserver.xkb`, so a password types as it will in the session.
+#     `AOIDE_ROOT` points at the tree,
 #     so nothing reads /home and a staged song never reaches the login screen.
 #     Authentication is greetd's: the host creates a session for the chosen
 #     account, answers its prompts with what the face hands `respond()`, and
@@ -29,9 +36,9 @@
 #
 # Selecting the dendrite is the switch: a host that does not select it boots
 # to the tty it lands on. Reads the dress (`aoide.livery`), the song selection
-# (`aoide.song`, `aoide.songbook.greeter`) and the session the display manager
-# registers (`services.displayManager.sessionData`, which ly reads too) —
-# root AGENTS.md house rule 5.
+# (`aoide.song`, `aoide.songbook.greeter`), the session the display manager
+# registers (`services.displayManager.sessionData`, which ly reads too) and
+# the host's keyboard (`services.xserver.xkb`) — root AGENTS.md house rule 5.
 {
   config,
   lib,
@@ -73,17 +80,17 @@ let
     }
   );
 
-  # The default session when one is named, else the first registered Wayland
-  # session; its Exec, field codes dropped, is what the greeter launches once
-  # greetd says the account is authenticated, and its file name is the
-  # session's `XDG_SESSION_DESKTOP`.
+  # The default session's Exec, field codes dropped and otherwise whole, run
+  # by the display manager's session wrapper; its file name is the session's
+  # `XDG_SESSION_DESKTOP`.
   sessions = config.services.displayManager.sessionData.desktops;
-  defaultSession = config.services.displayManager.defaultSession;
-  pick =
-    if defaultSession != null then
-      ''"$dir/${defaultSession}.desktop"''
+  defaultSession =
+    if config.services.displayManager.defaultSession != null then
+      config.services.displayManager.defaultSession
     else
-      ''"$(ls "$dir"/*.desktop | head -n1)"'';
+      throw "greeter: the Quickshell greeter launches services.displayManager.defaultSession, and none is set; name the session (the compositor provider sets it).";
+  wrapper = config.services.displayManager.sessionData.wrapper;
+  xkb = config.services.xserver.xkb;
 
   tree = pkgs.runCommand "aoide-greeter-tree" { nativeBuildInputs = [ pkgs.jq ]; } ''
     q=$out/run/qml
@@ -95,19 +102,22 @@ let
     echo '{}' > "$q/songs/registry.json"
     cp ${dress} "$out/song/stage/livery.json"
 
-    dir=${sessions}/share/wayland-sessions
-    pick=${pick}
-    exec_line=$(sed -n 's/^Exec=//p' "$pick" | head -n1)
+    pick=${sessions}/share/wayland-sessions/${defaultSession}.desktop
+    test -f "$pick" || { echo "the default session ${defaultSession} is no registered Wayland session" >&2; exit 1; }
+    exec_line=$(sed -n 's/^Exec=//p' "$pick" | head -n1 | sed -E ':a; s/(^| )%[a-zA-Z]( |$)/\1/; ta; s/%%/%/g')
     test -n "$exec_line" || { echo "no session Exec in $pick" >&2; exit 1; }
-    jq -n --arg e "$exec_line" --arg d "$(basename "$pick" .desktop)" \
-      '{command: ($e | split(" ") | map(select(length > 0 and (startswith("%") | not)))), desktop: $d}' \
-      > "$out/session.json"
+    jq -n --arg w ${wrapper} --arg e "$exec_line" --arg d ${defaultSession} \
+      '{command: [$w, $e], desktop: $d}' > "$out/session.json"
   '';
 
   # What cage runs as the greeter user. The cache goes under the greeter's
   # runtime dir: the greeter account has no home to write.
   greeterShell = pkgs.writeShellScript "aoide-greeter" ''
     export AOIDE_ROOT=${tree}
+    export XKB_DEFAULT_LAYOUT=${lib.escapeShellArg xkb.layout}
+    export XKB_DEFAULT_VARIANT=${lib.escapeShellArg xkb.variant}
+    export XKB_DEFAULT_OPTIONS=${lib.escapeShellArg xkb.options}
+    export XKB_DEFAULT_MODEL=${lib.escapeShellArg xkb.model}
     export QT_QPA_PLATFORMTHEME=
     export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
     export QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins
