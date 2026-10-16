@@ -49,10 +49,11 @@
 #   they need under that path themselves. The graph commands exercised here
 #   are all CONDUCTING operations, so on the real (unoverridden) layout they'd
 #   resolve under state/stage/ (CONTRACTS.md §4) — the deployed shellbridge
-#   unit no longer overrides AOIDE_STAGE_DIR at all. This test still sets it
-#   (both trees name one directory when the override is present) purely for
-#   isolation from the real ~/Aoide tree; it is not a claim about where
-#   conducting files belong in production.
+#   unit no longer overrides AOIDE_STAGE_DIR at all. The aoided unit sets no
+#   AOIDE_STAGE_DIR either, so it writes conducting files under its own
+#   $AOIDE_ROOT/state/stage. This test points AOIDE_STAGE_DIR at that same
+#   directory, so the CLI and the daemon read one store. It is not a claim
+#   about where conducting files belong in production.
 {
   pkgs,
   inputs,
@@ -243,6 +244,13 @@ pkgs.testers.runNixOSTest {
     # `aoide guide` exits 0.
     machine.succeed("aoide guide")
 
+    # The runtime root is khoa's, so only khoa's login shell carries it. A root
+    # login shell must not (it would make root write into khoa's home).
+    assert machine.succeed("bash -lc 'printenv AOIDE_ROOT || true'").strip() == "", \
+        "root's login shell inherited AOIDE_ROOT"
+    assert machine.succeed("su -l khoa -c 'printenv AOIDE_ROOT'").strip() == "/home/khoa/.aoide", \
+        "khoa's login shell lacks AOIDE_ROOT"
+
     # ── 3. ly (the greeter) ──────────────────────────────────────────────────
     # ly will attempt to spawn Hyprland on the virtual GPU and loop. We assert
     # the unit is *enabled* (exists in the service graph) rather than
@@ -340,12 +348,15 @@ pkgs.testers.runNixOSTest {
     # ever touched under it — quickshell is disabled in this VM (see the
     # trims note at the top of this file), so nothing rice-shaped is
     # exercised — hence state/stage/, the tree those files resolve to on the
-    # real (unoverridden) layout.
-    stage_dir = "/home/khoa/Aoide/state/stage"
+    # real (unoverridden) layout. It is the aoided unit's own
+    # $AOIDE_ROOT/state/stage: `project add` goes through that daemon, which
+    # writes projects.json there, so the CLI graph must read the same file.
+    stage_dir = "/home/khoa/.aoide/state/stage"
 
     # ── 5. Graph commands (run as khoa) ──────────────────────────────────────
     # AOIDE_STAGE_DIR is set explicitly because graph commands are invoked via
     # `su -c` (no login shell), so the user-service environment is not present.
+    # It names the daemon's stage dir (see stage_dir above), not a second one.
     graph_env = (
         f"AOIDE_STAGE_DIR={stage_dir} "
         f"AOIDE_USER=khoa "

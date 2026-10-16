@@ -53,18 +53,23 @@ lib.mkIf config.aoide.enable {
   # `resurrect` are ordinary commands an operator runs in a shell, and a
   # shell inherits this no more than a systemd unit does. One option, two
   # consumers.
-  environment.sessionVariables =
-    (lib.optionalAttrs (config.aoide.terminal != "") { AOIDE_TERMINAL = config.aoide.terminal; })
-    // {
-      # Non-default values only need to WORK; the defaults are chosen so
-      # that unset == set-to-default already matches core's own code
-      # default (L-C2, task #107) — exported anyway so an interactive shell
-      # agrees with every unit above on where the runtime root/checkout
-      # sit, the same "one option, two consumers" shape `AOIDE_TERMINAL`
-      # already holds.
-      AOIDE_ROOT = config.aoide.root;
-      AOIDE_FLAKE_ROOT = config.aoide.checkout;
-    };
+  environment.sessionVariables = lib.optionalAttrs (config.aoide.terminal != "") {
+    AOIDE_TERMINAL = config.aoide.terminal;
+  };
+
+  # The runtime root and checkout are `aoide.user`'s, so only that user's login
+  # shells get them. A system-wide export would hand khoa's `~/.aoide` to every
+  # login shell, root's included: root's `aoide` would then write into khoa's
+  # home (the vm-boot failure), and AOIDE_ROOT beats HOME, so no HOME fallback
+  # could stop it. Non-default values only need to WORK; the defaults already
+  # match core's own code default (L-C2, task #107), and this export keeps an
+  # interactive shell agreeing with every unit above on where they sit.
+  environment.extraInit = ''
+    if [ "$(id -un)" = ${lib.escapeShellArg config.aoide.user} ]; then
+      export AOIDE_ROOT=${lib.escapeShellArg config.aoide.root}
+      export AOIDE_FLAKE_ROOT=${lib.escapeShellArg config.aoide.checkout}
+    fi
+  '';
 
   # ── aoided systemd user service ──────────────────────────────────────────
   systemd.user.services.aoided = {
