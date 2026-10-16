@@ -23,9 +23,18 @@ other crate in this workspace sits above.
   stub head under "Not yet implemented".
   `Flag` also declares `value` (placeholder), `required`, `default`,
   `values` and `conflicts`, `Arg` declares `values` and `required_after`,
-  `Command` declares `one_of` and `brief`;
-  `Command::check` enforces them (defaults applied first) and
-  `Command::invoke` is check-then-handler, the entry every `dispatch()` uses.
+  `Command` declares `one_of` and `brief`, and `doors` (which doors may call
+  it; `CLI_DOORS` = `[cli, daemon]` when absent). `Flag` declares `doors` too
+  (empty = the command's doors). `Command::opens(door)` is the predicate.
+  `Command::check` enforces the declarations (the door gate first, then the
+  argument rules with defaults applied) and `Command::invoke` is
+  check-then-handler, the entry every `dispatch()` uses. A door the command
+  does not declare, or a flag closed to the door it came through, is refused
+  as usage before the handler runs.
+  The doors bound the protocol callers: MCP and A2A. A same-uid process that
+  opens the aoided socket is the Daemon door, and a same-uid shell is the CLI
+  door. The registry does not bound either of those; the uid boundary is
+  outside it.
 - `style` — terminal manners, decided in one place: `Style` (the role
   vocabulary — `heading`, `name`, `args`, `required`, `error`, `usage`, `why`,
   `fix`, `suggest`, `stub` — over the ANSI 16 base colors, or plain), `Color`

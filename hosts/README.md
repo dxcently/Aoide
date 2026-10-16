@@ -21,7 +21,7 @@ darwin constructor to answer it.
 ```nix
 { pkgs, ... }:
 {
-  habit.aggregation.base.enable = true;      # groups, one line each
+  habit.aggregation.nucleus.enable = true;      # groups, one line each
   habit.dendrites.obsidian.enable = true;    # lone capabilities
   habit.users.khoa = {
     definition = ../../users/khoa.nix;       # shared, never copied

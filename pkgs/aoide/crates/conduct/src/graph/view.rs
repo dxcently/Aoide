@@ -277,6 +277,13 @@ impl Frame {
 
 /// `session watch <id> [--tail N] [--snapshot] [--json]` — see the module doc.
 pub fn session_watch(inv: &Invocation) -> Outcome {
+    session_watch_as(inv, super::send::real_attested_sender)
+}
+
+/// [`session_watch`] with the caller's attested session injected, so a test
+/// names the caller. An MCP watch resolves and reads only its scope's runs: a
+/// run outside the scope is unknown to it, by id, tail or petname alike.
+pub(crate) fn session_watch_as(inv: &Invocation, caller: impl Fn(&[SessionRecord]) -> Option<String>) -> Outcome {
     let cmd = "session.watch";
     let args = match require_args(inv, &["id"]) {
         Ok(a) => a,
@@ -320,10 +327,19 @@ pub fn session_watch(inv: &Invocation) -> Outcome {
         Ok(f) => f,
         Err(e) => return stage_error(cmd, e),
     };
+    // An MCP read names only what its scope holds: the candidates, the roster
+    // the frame reads and the ambiguity text are all cut to the scope first, so
+    // an out-of-scope run cannot resolve, and cannot be named in a refusal.
+    let scope = super::send::read_scope(inv, &file.sessions, caller);
+    let visible: Vec<SessionRecord> = file
+        .sessions
+        .iter()
+        .filter(|r| super::send::in_read_scope(&scope, &r.session_id))
+        .cloned()
+        .collect();
     let host = aoide_storage::display::local_host_name();
     let ids: HashSet<&str> = file.sessions.iter().map(|s| s.session_id.as_str()).collect();
-    let candidates: Vec<LocalCandidate<'_>> = file
-        .sessions
+    let candidates: Vec<LocalCandidate<'_>> = visible
         .iter()
         .map(|s| {
             let role = if resolved_parent(s, &ids).is_some() { "child" } else { "root" };
@@ -334,6 +350,9 @@ pub fn session_watch(inv: &Invocation) -> Outcome {
     let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
     let id = match addr::resolve(&target, &host, &candidates, &node_names) {
         Resolution::Local(id) => id,
+        // A far node is a fetch made on the caller's behalf, which no MCP read
+        // may make: over MCP it is refused as the unknown id it is not.
+        Resolution::Remote { .. } if scope.is_some() => return unknown_run(cmd, &target),
         Resolution::Remote { node, query } => {
             return watch_remote(&nodes, &node, &query, tail, snapshot, json_mode)
         }
@@ -349,7 +368,7 @@ pub fn session_watch(inv: &Invocation) -> Outcome {
             .with_data(json!({ "reason": "ambiguous", "target": target, "candidates": found }))
         }
         Resolution::NotFound => {
-            let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
+            let hint = if scope.is_none() && !target.contains('/') && node_names.contains(&target.as_str()) {
                 format!(" (`{target}` names a known node, not a local session)")
             } else {
                 String::new()
@@ -359,7 +378,7 @@ pub fn session_watch(inv: &Invocation) -> Outcome {
         }
     };
 
-    let frame = match gather(&id, tail, false, &file.sessions, &host, &ids) {
+    let frame = match gather(&id, tail, false, &visible, &host, &ids) {
         Ok(f) => f,
         Err(o) => return o,
     };
@@ -376,11 +395,18 @@ pub fn session_watch(inv: &Invocation) -> Outcome {
 
     // Live: the frame above is the opening frame (sanitized — the live
     // STREAM below is what prints raw bytes, and only onto a real terminal).
-    let opening = match gather(&id, tail, !json_mode && stdout_is_terminal(), &file.sessions, &host, &ids) {
+    let opening = match gather(&id, tail, !json_mode && stdout_is_terminal(), &visible, &host, &ids) {
         Ok(f) => f,
         Err(_) => frame.clone(),
     };
     follow(cmd, &id, &opening, tail, json_mode, &host)
+}
+
+/// The refusal every unknown id gets, spelled once so an out-of-scope or remote
+/// target over MCP is indistinguishable from a run that does not exist.
+fn unknown_run(cmd: &str, target: &str) -> Outcome {
+    Outcome::error(cmd, format!("no session matches `{target}`"))
+        .with_data(json!({ "reason": "not-found", "target": target }))
 }
 
 /// `--tail <n>`: a non-numeric or zero value is a usage error, never a
@@ -1893,6 +1919,63 @@ mod tests {
         let out = session_watch(&inv);
         assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{}", out.message);
         assert!(out.message.contains("--snapshot"), "{}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+
+    /// Finding 5: over MCP a run outside the caller's scope is not a run the
+    /// caller can name. Its id, its tail4 and its petname all refuse with the
+    /// same text an unknown id gets, and its frame never leaves the box.
+    #[test]
+    fn an_mcp_watch_refuses_a_sibling_run_by_id_tail_or_petname_as_unknown() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("view-mcp-sibling");
+        let me = finished_run(&root, "me-run-aaaa", "fix-own", Some(0));
+        let mut sibling = finished_run(&root, "sib-run-bbbb", "fix-other", Some(0));
+        sibling.petname = Some("quiet-otter".to_string());
+        write_roster(vec![me, sibling]);
+        let mcp = |target: &str| Invocation {
+            path: vec!["session".to_string(), "watch".to_string()],
+            args: vec![target.to_string()],
+            flags: BTreeMap::from([("snapshot".to_string(), "true".to_string())]),
+            door: Door::Mcp,
+        };
+        let unknown = session_watch_as(&mcp("no-such-run"), |_| Some("me-run-aaaa".to_string()));
+        assert_eq!(unknown.status, aoide_protocol::output::Status::Error, "{}", unknown.message);
+        for target in ["sib-run-bbbb", "bbbb", "quiet-otter"] {
+            let out = session_watch_as(&mcp(target), |_| Some("me-run-aaaa".to_string()));
+            assert_eq!(out.message, unknown.message.replace("no-such-run", target), "`{target}` must refuse as an unknown id");
+            assert_eq!(out.data, Some(json!({ "reason": "not-found", "target": target })), "`{target}`");
+            assert!(!format!("{out:?}").contains("line one"), "`{target}` leaked its run output: {out:?}");
+        }
+        let own = session_watch_as(&mcp("me-run-aaaa"), |_| Some("me-run-aaaa".to_string()));
+        assert_eq!(own.status, aoide_protocol::output::Status::Ok, "the caller's own run answers: {}", own.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 5, the remote branch: a `node/<query>` target is a fetch to a far
+    /// node on the caller's behalf, so over MCP it refuses as an unknown id, and
+    /// no fetch is made. The CLI still reads it.
+    #[test]
+    fn an_mcp_watch_refuses_a_remote_target_as_unknown_and_never_fetches() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("view-mcp-remote");
+        write_roster(vec![finished_run(&root, "me-run-aaaa", "fix-own", Some(0))]);
+        aoide_storage::node_store::save_nodes(&[remote_node()]).unwrap();
+        let mcp = Invocation {
+            path: vec!["session".to_string(), "watch".to_string()],
+            args: vec!["yomi/far-run".to_string()],
+            flags: BTreeMap::from([("snapshot".to_string(), "true".to_string())]),
+            door: Door::Mcp,
+        };
+        let out = session_watch_as(&mcp, |_| Some("me-run-aaaa".to_string()));
+        let unknown = session_watch_as(
+            &Invocation { args: vec!["no-such-run".to_string()], ..mcp.clone() },
+            |_| Some("me-run-aaaa".to_string()),
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.message, unknown.message.replace("no-such-run", "yomi/far-run"), "the remote target refuses as unknown");
+        assert!(!out.message.contains("node"), "no node hint on the MCP door: {}", out.message);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -1,6 +1,6 @@
 # modules/dendrites/networkmanager.nix — the NetworkManager applet package.
 #
-# Dendrite shape: guarded on aoide.networkmanager.enable, carries its own
+# Dendrite shape: selection is the switch, carries its own
 # dependency. Ships pkgs.networkmanagerapplet — which provides BOTH
 # nm-connection-editor (the GUI network editor) and nm-applet (the tray
 # indicator, a StatusNotifierItem client). The Quickshell shell now hosts a
@@ -16,38 +16,33 @@
 # skeletons already set it). This dendrite only assumes it.
 
 {
-  config,
   lib,
   pkgs,
   ...
 }:
 {
-  options.aoide.networkmanager.enable = lib.mkEnableOption "the NetworkManager applet package (nm-connection-editor + nm-applet)";
 
-  config = lib.mkMerge [
-    { aoide.networkmanager.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.networkmanager.enable {
-      environment.systemPackages = [ pkgs.networkmanagerapplet ];
+  config = {
+    environment.systemPackages = [ pkgs.networkmanagerapplet ];
 
-      systemd.user.services.aoide-nm-applet = {
-        description = "NetworkManager tray applet (docks in the Aoide bar's SNI tray)";
-        wantedBy = [ "graphical-session.target" ];
-        after = [ "graphical-session.target" ];
-        partOf = [ "graphical-session.target" ];
-        unitConfig.ConditionEnvironment = "WAYLAND_DISPLAY";
+    systemd.user.services.aoide-nm-applet = {
+      description = "NetworkManager tray applet (docks in the Aoide bar's SNI tray)";
+      wantedBy = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+      unitConfig.ConditionEnvironment = "WAYLAND_DISPLAY";
 
-        serviceConfig = {
-          # No CLI flags: this nixpkgs build links libayatana-appindicator
-          # (confirmed via its wrapper's GI_TYPELIB_PATH), so it registers as a
-          # StatusNotifierItem automatically — the shape Quickshell's
-          # SystemTray service reads. nm-applet does not parse a --help/
-          # --indicator flag; it is not meant for CLI interaction at all.
-          ExecStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
-          Restart = "on-failure";
-          RestartSec = "3s";
-          NoNewPrivileges = true;
-        };
+      serviceConfig = {
+        # No CLI flags: this nixpkgs build links libayatana-appindicator
+        # (confirmed via its wrapper's GI_TYPELIB_PATH), so it registers as a
+        # StatusNotifierItem automatically — the shape Quickshell's
+        # SystemTray service reads. nm-applet does not parse a --help/
+        # --indicator flag; it is not meant for CLI interaction at all.
+        ExecStart = "${pkgs.networkmanagerapplet}/bin/nm-applet";
+        Restart = "on-failure";
+        RestartSec = "3s";
+        NoNewPrivileges = true;
       };
-    })
-  ];
+    };
+  };
 }

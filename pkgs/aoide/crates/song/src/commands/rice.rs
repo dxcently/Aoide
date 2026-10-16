@@ -12,6 +12,7 @@ use crate::lint;
 use aoide_storage::fs as shellbridge;
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -22,6 +23,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_lint,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "list"],
@@ -31,6 +33,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_list,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "stage"],
@@ -40,6 +43,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_stage_entry,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "compose"],
@@ -53,6 +57,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_rice_compose,
         examples: ["rice compose moonlight --from sonata"],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
 }
 
@@ -1327,7 +1332,7 @@ mod tests {
         assert_eq!(first.data.as_ref().unwrap()["coverStage"], "default");
 
         // The user picks a wallpaper while `dusk` is what is staged.
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk"), None).unwrap();
         assert!(crate::cover::staged_is_pick());
 
         // …and re-staging the SAME song leaves that pick exactly where it was,
@@ -1366,7 +1371,7 @@ mod tests {
 
         let staged = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
         assert_eq!(staged.status, Status::Ok);
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk"), None).unwrap();
         assert!(crate::cover::staged_is_pick());
 
         // Switching to a song with NO derivable cover drops the pick AND the

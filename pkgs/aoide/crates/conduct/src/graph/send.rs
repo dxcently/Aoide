@@ -77,7 +77,7 @@ use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
 use aoide_storage::session::pid_may_move;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 #[cfg(windows)]
@@ -296,6 +296,36 @@ fn autogate_env() -> bool {
 fn attested_parent_of(rec: &SessionRecord) -> Option<&str> {
     let parent = rec.parent_session_id.as_deref().filter(|p| !p.is_empty())?;
     (rec.attested_spawner.as_deref() == Some(parent)).then_some(parent)
+}
+
+/// What an MCP read may show: the caller's own attested session and every
+/// session under it by attested spawn edges (`attested_parent_of`, the stamp
+/// the autogate trusts). `None` off MCP, where nothing is clipped. An
+/// unattested MCP caller gets the empty set, so it sees nothing at all.
+/// `caller` resolves the attested session id; production passes
+/// [`real_attested_sender`], tests pass a fixed answer.
+pub(in crate::graph) fn read_scope(
+    inv: &Invocation,
+    sessions: &[SessionRecord],
+    caller: impl Fn(&[SessionRecord]) -> Option<String>,
+) -> Option<BTreeSet<String>> {
+    if inv.door != Door::Mcp {
+        return None;
+    }
+    let Some(me) = caller(sessions) else { return Some(BTreeSet::new()) };
+    let mut scope = BTreeSet::from([me]);
+    while let Some(child) = sessions
+        .iter()
+        .find(|rec| attested_parent_of(rec).is_some_and(|p| scope.contains(p)) && !scope.contains(&rec.session_id))
+    {
+        scope.insert(child.session_id.clone());
+    }
+    Some(scope)
+}
+
+/// Whether a read with `scope` (from [`read_scope`]) may show `id`.
+pub(in crate::graph) fn in_read_scope(scope: &Option<BTreeSet<String>>, id: &str) -> bool {
+    scope.as_ref().is_none_or(|set| set.contains(id))
 }
 
 /// The parent-autogate rule (pure, unit-tested): the sender may freely command a

@@ -228,11 +228,6 @@ pub(crate) fn prompt_failed(inv: &Invocation, cmd: &str, err: &str) -> Outcome {
     .with_detail(err)
 }
 
-/// A command only a person at a terminal may run, reached over another door (exit 2).
-pub(crate) fn cli_only(inv: &Invocation, cmd: &str, why: &str) -> Outcome {
-    Outcome::refuse(cmd, Kind::Usage, format!("`aoide {}` is CLI-only", inv.path.join(" ")), why, Fix::Run(line(inv)))
-}
-
 /// A `--secs` that is not a positive whole number (exit 2).
 pub(crate) fn bad_secs(inv: &Invocation, cmd: &str, default: u64) -> Outcome {
     let typed = inv.flags.get("secs").cloned().unwrap_or_default();

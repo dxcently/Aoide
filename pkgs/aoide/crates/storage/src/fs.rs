@@ -2894,6 +2894,9 @@ mod tests {
 
     #[test]
     fn the_private_temp_is_created_already_0600_before_any_rename() {
+        // `write_temp_file` reads the state dir (`ensure_write_dir` ->
+        // `state_dir()`), which the env-lock holders in this module repoint.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // The review-bounced defect: an earlier revision of
         // `atomic_write_private` created its temp at `File::create`'s
         // umask-derived default mode and `chmod`ed the FINAL path only

@@ -4123,6 +4123,7 @@ mod tests {
     }
     #[test]
     fn reaper_grace_ignores_a_degenerate_empty_clients_snapshot() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // A momentary empty `hyprctl clients` read during a reload window must not
         // mass-reap the windowed roster: the grace downgrades it to pid-only.
         let windowed = vec![SessionRecord {
@@ -4403,13 +4404,9 @@ mod tests {
 /// Binding is explicit local orchestration state, never a remote access grant.
 pub fn session_bind(inv: &Invocation) -> Outcome {
     let cmd = "session.bind";
-    match inv.door {
-        aoide_protocol::Door::Cli => {
-            return aoide_client::daemon::daemon_dispatch(inv).unwrap_or_else(||
-                Outcome::error(cmd, "aoided must be running to bind an enduring agent"));
-        }
-        aoide_protocol::Door::Daemon => {}
-        _ => return Outcome::error(cmd, "session bind is local-only; remote doors cannot assign an enduring identity"),
+    if inv.door != aoide_protocol::Door::Daemon {
+        return aoide_client::daemon::daemon_dispatch(inv).unwrap_or_else(||
+            Outcome::error(cmd, "aoided must be running to bind an enduring agent"));
     }
     let id = match require_flag(inv, "id") {
         Ok(id) => id,
@@ -4487,11 +4484,13 @@ mod enduring_binding_tests {
 
     #[test]
     fn remote_binding_is_refused_before_session_lookup() {
+        let mut r = aoide_protocol::registry::Registry::new();
+        crate::commands::graph::register(&mut r);
         for door in [aoide_protocol::Door::Mcp, aoide_protocol::Door::A2a] {
             let inv = Invocation {path:vec!["session".into(),"bind".into()], args:vec![], flags:Default::default(), door};
-            let out = session_bind(&inv);
-            assert_eq!(out.status, aoide_protocol::output::Status::Error);
-            assert!(out.message.contains("local-only"));
+            let out = r.get(&inv.path).expect("session bind is registered").invoke("aoide", &inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+            assert!(out.message.contains("is not open to the"), "{}", out.message);
         }
     }
 }

@@ -1,7 +1,7 @@
 # modules/dendrites/inference.nix — local LLM inference tooling: Ollama and
 # llama.cpp on PATH, CPU/RAM-backed.
 #
-# Dendrite shape (CONTRACTS.md §2): guarded on aoide.inference.enable,
+# Dendrite shape (CONTRACTS.md §2): selection is the switch,
 # carries its own dependencies, reads no other module.
 #
 # Plain packages, no GPU override: yomi-strix's unified LPDDR5X (~256GB/s)
@@ -16,21 +16,16 @@
 # is the proven precedent for that pass on this exact chip.
 
 {
-  config,
   lib,
   pkgs,
   ...
 }:
 {
-  options.aoide.inference.enable = lib.mkEnableOption "local LLM inference tooling (Ollama + llama.cpp)";
 
-  config = lib.mkMerge [
-    { aoide.inference.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.inference.enable {
-      environment.systemPackages = [
-        pkgs.ollama
-        pkgs.llama-cpp
-      ];
-    })
-  ];
+  config = {
+    environment.systemPackages = [
+      pkgs.ollama
+      pkgs.llama-cpp
+    ];
+  };
 }

@@ -288,7 +288,7 @@ An entry is an envelope plus local facts:
   the counter is never reset by a prune, and a line an older binary appended
   is counted too.
 - Three processes write this store: the `aoided` timer, the `aoide a2a
-  serve` door (a separate unit, `modules/nucleus/aoided.nix`), and the
+  serve` door (a separate unit, `modules/dendrites/aoided.nix`), and the
   CLI (`mail send`, `mail read`). **Every mutation of the mailbase or an
   outbox runs under the stage lock, and refuses when the lock is not
   held.** Today's `with_stage_lock` (`storage/src/fs.rs`) runs its

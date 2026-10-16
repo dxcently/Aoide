@@ -12,7 +12,7 @@
 #
 # Security boundary: forwarded notification text is untrusted input. Adapters
 # must wrap it as data and never execute it as a command. This is enforced by
-# the adapter pattern (modules/nucleus/melete-adapter.nix), not by aoided
+# the adapter pattern (modules/dendrites/melete-adapter.nix), not by aoided
 # itself — but aoided's subscription-class gating is the structural backstop.
 #
 # The `aoide` binary (installed by pkgs/aoide, Agent B) ships both `aoide` (CLI)

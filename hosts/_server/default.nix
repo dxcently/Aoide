@@ -7,7 +7,7 @@
 # `enable = false` outranks the aggregation's membership.
 { lib, ... }:
 {
-  habit.aggregation.base.enable = true;
+  habit.aggregation.nucleus.enable = true;
 
   habit.dendrites.kitty.enable = false;
 

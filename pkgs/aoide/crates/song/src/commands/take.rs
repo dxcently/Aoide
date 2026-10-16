@@ -74,6 +74,7 @@ use aoide_storage::takes::{self, TakeRecord};
 use aoide_storage::time::{now_iso_utc, parse_iso_utc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use aoide_protocol::Door;
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
@@ -84,6 +85,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "list"],
@@ -93,6 +95,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take_list,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "mark"],
@@ -102,6 +105,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take_mark,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "diff"],
@@ -114,6 +118,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_rice_take_diff,
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "take", "prune"],
@@ -2649,8 +2654,12 @@ mod tests {
         assert!(take1.cover.is_some());
         assert!(!crate::cover::staged_is_pick());
 
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("sonata"))
-            .unwrap();
+        crate::cover::stage_pick(
+            std::path::Path::new("/tmp/chosen.png"),
+            Some("sonata"),
+            Some(crate::cover::POSITION_TILE),
+        )
+        .unwrap();
         let take2 = snapshot("rice.take", "stage").unwrap();
         assert!(take2.cover.is_some());
 
@@ -2665,6 +2674,8 @@ mod tests {
         assert_eq!(crate::cover::staged_path().as_deref(), Some("/tmp/chosen.png"));
         let raw = std::fs::read_to_string(stage.join("cover.json")).unwrap();
         assert!(raw.contains("\"pick\": true"), "verbatim: {raw}");
+        assert!(raw.contains("\"position\": \"tile\""), "verbatim: {raw}");
+        assert!(raw.contains("\"tile\": true"), "verbatim: {raw}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

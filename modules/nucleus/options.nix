@@ -9,8 +9,9 @@
 # code review — `lib/checks.nix` has no check that inspects a lane's reads, as
 # rule 5 says.
 #
-# Discovered and applied unconditionally on every host (like dxflake's
-# nucleus — no mkIf guard). It declares options and eval-clean defaults only;
+# Applied unconditionally on every host as an extra module (no mkIf guard;
+# the services that act on these options are the `nucleus` aggregation's
+# members, not this file). It declares options and eval-clean defaults only;
 # it wires no behaviour, so an empty config evaluates cleanly.
 {
   lib,
@@ -19,7 +20,6 @@
 let
   inherit (lib)
     mkOption
-    mkEnableOption
     types
     literalExpression
     ;
@@ -28,6 +28,39 @@ let
   # livery files stay easy to author; the livery engine's `rice lint` is the
   # authoritative validator (the native livery engine, pkgs/aoide).
   hexColor = types.strMatching "#?[0-9a-fA-F]{6}";
+
+  # ── Enable facts: set only by the dendrite that owns them ─────────────────
+  # NixOS's `readOnly` cannot carry the `default` a fact needs (the default
+  # counts as a second definition and fails the owner's own `true`), so the
+  # guard is the merge. The merge sees only the winning definitions: the
+  # priority filter runs first. A winner from any file but the owner or this
+  # declaration's default is refused, and so is a tie between the owner and a
+  # write at its priority. A host write the owner outranks (a `mkDefault`
+  # against the owner's plain `true`) never reaches the merge: it is dropped and
+  # cannot change the value.
+  inherit (import ../default.nix) catalogue;
+  mkFact =
+    name:
+    let
+      owner = toString catalogue.${name};
+    in
+    types.bool
+    // {
+      merge =
+        loc: defs:
+        let
+          # The owner is the file the catalogue names for `name`; an entry may be
+          # a directory (`lyra = ./dendrites/lyra;`), answered by its `default.nix`.
+          fromOwnerOrDecl =
+            d:
+            lib.removeSuffix "/default.nix" (toString d.file) == owner
+            || lib.hasSuffix "/modules/nucleus/options.nix" (toString d.file);
+        in
+        if lib.length defs == 1 && fromOwnerOrDecl (lib.head defs) then
+          (lib.head defs).value
+        else
+          throw "The option `${lib.showOption loc}' is a read-only fact, set only by the dendrite that owns it. Read it, never set it.";
+    };
 
   # ── Component override submodules ─────────────────────────────────────────
   # v0 component tier: bar.* / notif.* / window.*. Each field is optional and
@@ -711,22 +744,22 @@ in
     # What a paint lane brings into existence, declared ONCE. No module reads
     # another module (root AGENTS.md house rule 5), so a cross-lane question —
     # "does this host paint", "is there a shell here" — is never answered by
-    # reading the lane's own option. The lane that owns the thing sets its own
-    # fact `mkDefault true` when it is on (the compositor sets its own, and so
-    # does the greeter); core plumbing and other lanes read the fact.
-    # Each defaults to `false`: a host with no paint lane is headless.
-    # `aoide.lyra.enable` below — declared beside the package it installs — is
-    # the fifth fact in this family, same rule.
+    # reading the lane's own option. Each fact is true exactly when its dendrite
+    # is selected, and that dendrite sets it to plain `true`; `mkFact` refuses any
+    # other write that takes effect. Each defaults to `false`: a host with no
+    # paint lane is headless. `aoide.lyra.enable` below, declared beside the
+    # package it installs, is the third fact in this family.
     quickshell = {
       enable = mkOption {
-        type = types.bool;
+        type = mkFact "quickshell";
         default = false;
         description = ''
-          A Quickshell shell surface exists on this host. Set `mkDefault true`
-          by the lane that runs one (`dendrites/quickshell.nix` — the package
-          and the `aoide-quickshell` service). This is the FACT, not that
-          lane's own option: a host whose shell is painted by something else
-          leaves it false while still having a graphical session.
+          A fact: a Quickshell shell surface exists on this host. True exactly
+          when the `quickshell` dendrite is selected (`dendrites/quickshell.nix`,
+          the package and the `aoide-quickshell` service), which sets it. Set
+          only by that dendrite; read it, never set it. A host whose shell is
+          painted by something else leaves the dendrite unselected and this
+          false, while still having a graphical session.
         '';
       };
 
@@ -745,34 +778,14 @@ in
     };
 
     stylix.enable = mkOption {
-      type = types.bool;
+      type = mkFact "stylix";
       default = false;
       description = ''
-        A Stylix baked-theme fan-out exists on this host — the theme is
-        derived at build time and painted by nix. Set `mkDefault true` by the
-        lane that bakes it; a host that themes itself entirely at runtime
-        leaves it false.
-      '';
-    };
-
-    compositor.enable = mkOption {
-      type = types.bool;
-      default = false;
-      description = ''
-        A Wayland compositor is started by a lane on this host. Set
-        `mkDefault true` by the lane that starts it — a consumer that needs a
-        session but not a specific compositor reads this rather than naming
-        that lane.
-      '';
-    };
-
-    greeter.enable = mkOption {
-      type = types.bool;
-      default = false;
-      description = ''
-        A display-manager greeter comes up on this host's tty. Set
-        `mkDefault true` by the lane that brings it up. A host with no greeter
-        boots to the tty it lands on.
+        A fact: a Stylix baked-theme fan-out exists on this host — the theme is
+        derived at build time and painted by nix. True exactly when the `stylix`
+        dendrite is selected, which sets it. Set only by that dendrite; read it,
+        never set it. A host that themes itself entirely at runtime leaves the
+        dendrite unselected.
       '';
     };
 
@@ -804,259 +817,19 @@ in
       '';
     };
 
-    # ── Agent control plane ────────────────────────────────────────────────
-    mcp.enable = mkOption {
-      type = types.bool;
-      default = false;
-      description = ''
-        Enable the MCP façade. Off by default (house policy): agents spawn
-        `aoide mcp serve --stdio` per session. Network MCP is user-only and
-        never agent-enabled.
-      '';
-    };
-
-    # ── A2A door (CONTRACTS.md §6, v0) ────────────────────────────────────────
-    a2a = {
-      enable = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Enable the A2A (Agent2Agent) door. Off by default (house policy),
-          same as the MCP façade. Localhost/user-scoped; forwarded A2A
-          messages are untrusted data.
-        '';
-      };
-
-      bindAddress = mkOption {
-        type = types.str;
-        default = "127.0.0.1";
-        description = ''
-          The A2A HTTP bind address. Loopback by default; networked A2A is a
-          deliberate, user-only choice.
-        '';
-      };
-
-      port = mkOption {
-        type = types.port;
-        default = 8710;
-        description = "The A2A HTTP port.";
-      };
-
-      spawnAgent = mkOption {
-        type = types.str;
-        default = "";
-        description = ''
-          The command `a2a serve` conducts for an A2A-spawned task
-          (CONTRACTS.md §6, `message/send`'s spawn path). The A2A client
-          supplies only the prompt/message, NEVER the command — the
-          executable always comes from this option, set by the operator at
-          rebuild time (the admission). Empty (the default) disables
-          spawning entirely: `message/send` returns a structured error
-          instead of launching anything. A bare-word command must also
-          appear on the unit's PATH via `spawnPath` below — a systemd user
-          unit's default PATH carries none of the system profile.
-        '';
-      };
-
-      spawnPath = mkOption {
-        type = types.listOf types.package;
-        default = [ ];
-        description = ''
-          Packages placed on the aoide-a2a unit's PATH so `spawnAgent`
-          (and the conducted child it launches) can resolve by bare name.
-          A systemd user unit's default PATH is minimal (coreutils and
-          friends) and does not include /run/current-system/sw/bin — found
-          live when a door-summoned spawn on a headless host failed with
-          "failed to conduct `claude`: No such file or directory" while an
-          interactive shell resolved it fine. Same explicit-package rule
-          shellbridge and the secrets popup watcher already follow.
-        '';
-      };
-
-      tokenFile = mkOption {
-        type = types.str;
-        default = "";
-        description = ''
-          Path to a file holding the shared secret an inbound `message/send`
-          must present (`Authorization: Bearer <token>`) to be trusted
-          (CONTRACTS.md §6 amendment, 2026-08-18). A configured file that is
-          missing, unreadable or empty refuses every bearer check (the door
-          fails closed; it never reads as "no token"). Empty (the default) is
-          the fully-open behavior every prior release shipped: loopback
-          auto-delivers, Spawn is gated only by `spawnAgent` being set. Once
-          non-empty, TWO things change together, with no separate opt-out:
-          Spawn REQUIRES a valid token, and loopback STOPS being an implicit
-          trust signal (closing the gap where a reverse proxy or tunnel
-          makes a remote caller look loopback to the door). The file itself
-          is never read by nix — only its path crosses this option and the
-          `aoide-a2a` unit's environment; the secret is read off disk once,
-          at `a2a serve` launch.
-        '';
-      };
-
-      bearerSecret = mkOption {
-        type = types.str;
-        default = "";
-        description = ''
-          Name of a secret in the local `aoide secrets` broker the A2A door
-          expects as its inbound `Authorization: Bearer` token. Only the
-          NAME crosses this option and the `aoide-a2a` unit's environment
-          (`AOIDE_A2A_BEARER_SECRET`); the door resolves the value fresh on
-          every request through the broker socket (consumer `a2a-door`), and
-          a resolve failure fails closed. Takes precedence over `tokenFile`
-          when set. Empty (the default) leaves the door on the `tokenFile`
-          behavior. The unit's user must be able to reach the broker socket
-          (group `aoide-secrets-access`).
-        '';
-      };
-
-      discoveryAdvertise = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Force this instance's own LAN discovery advertisement on (P-P6 +
-          task #120, docs/architecture/PAIRING.md's "Discovery
-          (advertise-but-locked)" section): `a2a serve` sends a one-line
-          `{v, name, host, user}` UDP broadcast advertisement (name plus
-          its ssh hop claim — never a door URL, never a key or
-          fingerprint: rendezvous, not authentication) on a fixed port,
-          ~30s jittered cadence, for `aoide node discover`/`aoide
-          pair`'s hostname arm (and bare `aoide pair`) on the same LAN to
-          hear. Off by default, same house policy as every other A2A
-          knob above; the runtime switch beside this declarative force is
-          `aoide node advertise on|off`. Discovery only ever feeds `node
-          discover`'s table and `pair`'s hostname-target resolution;
-          the pairing ceremony above remains the ONLY thing that ever
-          writes a node record.
-        '';
-      };
-
-      # ── Pairing-ceremony popup (P-PV3, task #132) ─────────────────────────
-      pairingPopup = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Enable the `aoide-pair-watch.service` graphical-session user unit
-          (`aoide pair watch --popup`) — a typed-code entry dialog per
-          actionable pairing request, `lyra pair ask` when it resolves
-          (the same six-boxes-plus-dash surface `lyra secrets ask` renders),
-          `zenity --entry` otherwise. Off by default, same house policy as
-          the MCP façade/A2A door/usage poller/secrets broker: the unit is
-          graphical-session-gated exactly like `aoide-secrets-watch`
-          (`aoide.a2a.enable && aoide.sessionTarget ==
-          "graphical-session.target"`), but this
-          flag is the deliberate opt-in ON TOP of that gate — a host with
-          a2a on and a graphical session does NOT get the popup unless it
-          also sets this. It lives in the `a2a` family because it
-          is meaningless without the door (`aoide.a2a.enable` is part of
-          its gate). See `modules/nucleus/aoided.nix` for the unit and
-          CONTRACTS.md §6's "Pairing events feed" subsection for the
-          popup's own typed-code contract.
-        '';
-      };
-    };
-
-    # ── Mail adapter (H1, CONTRACTS.md §6 "aoide mail serve") ────────────────
-    mail.adapter = {
-      enable = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Run `aoide mail serve` as the `aoide-mail-adapter` user unit: the
-          mail-only listener (`aoide/mailDeposit`, `aoide/mailPoll`,
-          `aoide/binding` and the stripped AgentCard, no other method) a
-          TLS-terminating front points at. Off by default, same house policy
-          as the A2A door. Turn it on only on the relay of a mesh. It binds
-          127.0.0.1 and nothing else, and there is deliberately no bind
-          option beside `port`: the front (a Cloudflare Tunnel, a reverse
-          proxy) is a transport hop, and the A2A door is never fronted by one.
-        '';
-      };
-
-      port = mkOption {
-        type = types.port;
-        default = 8712;
-        description = "The adapter's loopback port: the one the front's ingress targets.";
-      };
-    };
-
-    # ── Usage widget + poller (opt-in, off by default) ───────────────────────
-    usage = {
-      enable = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Enable the claude.ai usage widget + poller (`aoide usage`, a
-          systemd.user timer running it on `aoide.usage.interval`). Off by
-          default, same house policy as the MCP façade and A2A door.
-        '';
-      };
-
-      interval = mkOption {
-        type = types.str;
-        default = "300s";
-        description = ''
-          Poller cadence (systemd `OnUnitActiveSec` duration) for `aoide
-          usage`, which writes `state/usage.json` (CONTRACTS.md §4): the
-          local token/cost rollup from this machine's own transcripts, plus
-          the live claude.ai block the unit spawns `curl` for. The widget
-          calls a document stale at three times this cadence.
-        '';
-      };
-    };
-
-    # ── Secrets broker (P-V4 of the secrets workstream, renamed from
-    # "vault" at P-V4b) ──────────────────────────────────────────────────
-    secrets = {
-      enable = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Deploy Aoide's secrets broker (`aoide secrets serve`) as a SYSTEM
-          service under its own uid (`aoide-secrets`), per the secrets
-          design's target topology: secrets home `/var/lib/aoide-secrets`
-          (0700, secrets-uid), socket `/run/aoide-secrets/secrets.sock`
-          (0660, group `aoide-secrets-access`) as the only door. Off by
-          default, same house policy as the MCP façade/A2A door/usage
-          poller above — see `modules/nucleus/secrets.nix` for the unit,
-          and `pkgs/aoide/crates/secrets/README.md` for the broker itself
-          (the binary is nix-independent; this option is deployment only).
-        '';
-      };
-
-      members = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        example = literalExpression ''[ "khoa" ]'';
-        description = ''
-          User names added to the `aoide-secrets-access` group — the
-          socket's group, so membership is what lets an ordinary
-          operator-uid agent connect to `/run/aoide-secrets/secrets.sock`
-          at all (the policy gate inside the broker still decides
-          per-secret/per-consumer after that). Empty by default:
-          `aoide.secrets.enable = true` alone grants nobody access until a
-          host names its operator here.
-        '';
-      };
-    };
-
     # ── Lyra paint binary (P-A8 of the binary-split workstream) ────────────
     lyra = {
       enable = mkOption {
-        type = types.bool;
+        type = mkFact "lyra";
         default = false;
         description = ''
-          Install the `lyra` paint/rice binary — `pkgs.aoide.rice`, the
-          separate output P-A8 split off the combined aoide/aoided/lyra
-          derivation so a headless closure never has to carry it. The fifth
-          of options.nix's enable facts: set `mkDefault true` by the lane
-          that paints, which is the one that knows its shell needs the
-          binary. Independently overridable — an explicit flag, not only the
-          lane's inference, for a host that wants lyra without a shell (an
-          operator's own `lyra rice compose`) or a shell without lyra. Every
-          unit that execs `lyra` (shellbridge, the dunst herald feed) gates
-          on this flag too, so flipping it off never leaves a unit pointed
-          at a missing binary.
+          A fact: the `lyra` paint/rice binary is installed — `pkgs.aoide.rice`,
+          the separate output P-A8 split off the combined aoide/aoided/lyra
+          derivation so a headless closure never has to carry it. True exactly
+          when the `lyra` dendrite is selected, which sets it. Set only by that
+          dendrite; read it, never set it. Every unit that execs `lyra`
+          (shellbridge, the dunst herald feed) gates on this fact too, so a host
+          without the dendrite never has a unit pointed at a missing binary.
         '';
       };
     };

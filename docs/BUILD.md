@@ -26,10 +26,13 @@ nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 every dendrite once by the name a host selects it with. `modules/nucleus/default.nix`
 names its own files, one line per file, in `LC_ALL=C` order. To add a capability, drop a
 file in the right layer and add its one line — the catalogue for a dendrite, that
-layer's own `default.nix` for a nucleus module:
+layer's own `default.nix` for a contract file:
 
-- `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
-- `modules/dendrites/` — opt-in features, guarded on a flag.
+- `modules/nucleus/` — the option contract, applies unconditionally (no `mkIf`):
+  options and assertions, nothing that configures the platform.
+- `modules/dendrites/` — opt-in features, guarded on a flag. What every host
+  carries (the daemon's units, the nix settings, the binaries, the command line)
+  is a dendrite too, a member of the `nucleus` aggregation.
 - a paint lane is a dendrite like any other (`compositor`, `greeter`, `stylix`,
   `lyra`) — see **Authoring a paint lane** below.
 
@@ -68,11 +71,12 @@ for what a host selected.
 ## The option contract (what you read)
 
 Declared in `modules/nucleus/options.nix`, evaluated per host. Read these; write
-none of them except your own dendrite flags (a paint lane sets its own fact).
+none of them. A paint lane sets its own fact by being selected, and a host writes
+no fact.
 
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
-| `aoide.enable`                 | bool                         | framework master switch |
+| `aoide.enable`                 | bool                         | core switch: set `true` by each nucleus member, not written by hand |
 | `aoide.song`                   | nullOr str (default `null`)  | the song this host performs; names a `song/songbook/<name>/`. Null — no song named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `song/stage/`, `song/declared/`, `state/`, `run/qml/`, composed `songbook/`; exported as `AOIDE_ROOT`. Core code default, nix-independent (L-C2, task #107) |
@@ -94,7 +98,7 @@ exec or spawn `lyra` —
 `modules/dendrites/quickshell.nix`'s `aoide-quickshell` unit (the QML it
 starts execs `lyra`), `modules/dendrites/lyra/default.nix`'s
 `aoide-rice-reload` unit (it runs `lyra reload`) — and
-`modules/nucleus/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
+`modules/dendrites/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
 `aoide.lyra.enable`, never the core-only units that exec plain
 `aoide` (a headless core carries no `pkgs.lyra-songbook` closure). Each unit
 spells it in its OWN `Environment=` as well as inheriting the login copy:
@@ -114,22 +118,21 @@ See `CONTRACTS.md §1` for the full note schema and fallback rules.
 
 ## Authoring a dendrite (Wave 1 — features)
 
-Guard `config` on your own flag. Carry your own dependencies (narrowest scope
-wins). Read no other module.
+Your body is unconditional: selection is the switch, so there is no flag.
+Carry your own dependencies (narrowest scope wins). Read no other module.
 
 ```nix
 # modules/dendrites/firefox.nix
-{ config, lib, ... }:
+{ ... }:
 {
-  options.aoide.firefox.enable = lib.mkEnableOption "firefox";
-  config = lib.mkIf config.aoide.firefox.enable {
+  config = {
     programs.firefox.enable = true;
   };
 }
 ```
 
-Enable it with one line in `hosts/yomi-strix/default.nix`:
-`aoide.firefox.enable = true;`. `hosts/` knows dendrites; dendrites never know
+Select it with one line in `hosts/yomi-strix/default.nix`:
+`habit.dendrites.firefox.enable = true;`. `hosts/` knows dendrites; dendrites never know
 hosts.
 
 ---
@@ -144,7 +147,7 @@ fallbacks yourself.
 
 ```nix
 # modules/dendrites/lyra/default.nix — a paint lane is a plain module: it
-# declares, sets the fact on selection, and guards the rest.
+# declares, sets the fact on selection, and renders the rest.
 { config, lib, ... }:
 let
   t = config.aoide.livery;
@@ -152,15 +155,13 @@ let
   barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
 {
-  config = lib.mkMerge [
-    { aoide.lyra.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.lyra.enable {
-      # Declare surface ownership — the stylix lane reads this and stands
-      # down for `bar`.
-      aoide.surfaces.bar.owner = "quickshell";
-      # … render the bar using barBg / t.palette.* …
-    })
-  ];
+  config = {
+    aoide.lyra.enable = true;
+    # Declare surface ownership — the stylix lane reads this and stands
+    # down for `bar`.
+    aoide.surfaces.bar.owner = "quickshell";
+    # … render the bar using barBg / t.palette.* …
+  };
 }
 ```
 

@@ -6,6 +6,11 @@
 # the quickshell lane, with no lyra anywhere in the evaluation (no rice binary,
 # no `songs/`, no shellbridge unit, no healthcheck).
 _: {
+  # The services the nucleus aggregation carries, by name: the daemon's units
+  # and the `aoide` binaries are what the absences below are read against.
+  habit.dendrites.aoided.enable = true;
+  habit.dendrites.aoide-packages.enable = true;
+
   habit.dendrites.quickshell.enable = true;
 
   habit.users.khoa = {

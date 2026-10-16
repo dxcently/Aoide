@@ -35,6 +35,6 @@ fn handle_mcp_serve(_inv: &Invocation) -> Outcome {
     )
     .with_data(json!({
         "hint": "run `lyra mcp serve --stdio` to serve; tools derive from the schema",
-        "toolCount": crate::dispatch::registry().commands().count(),
+        "toolCount": crate::dispatch::registry().commands().filter(|c| c.opens(aoide_protocol::audit::Door::Mcp)).count(),
     }))
 }

@@ -64,7 +64,6 @@ use super::common::{require_args, stage_error};
 use super::model::{load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile};
 use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
 use aoide_protocol::output::Outcome;
-use aoide_protocol::Door;
 use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use serde_json::{json, Value};
@@ -826,12 +825,6 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     };
     let json_mode = inv.flag_present("json");
     let follow = inv.flag_present("follow");
-    if follow && inv.door != Door::Cli {
-        return Outcome::usage(
-            cmd,
-            "--follow blocks until Ctrl-C; run it from a terminal (not over this door)",
-        );
-    }
 
     // `<id>` resolves exactly like `send --to`: the ONE
     // `aoide_storage::addr::resolve`, over this box's live roster plus its
@@ -1064,6 +1057,7 @@ fn follow_trace(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aoide_protocol::Door;
     use crate::graph::testutil::{unique_stage, EnvVars};
     use aoide_protocol::output::Status;
     use std::collections::BTreeMap;
@@ -1416,11 +1410,13 @@ mod tests {
         let _env = EnvVars::save(&env_keys());
         let root = fixture("trace-follow", "Aoide-follow", "eidolon", &[SETTLED], true);
 
+        let mut r = aoide_protocol::registry::Registry::new();
+        crate::commands::graph::register(&mut r);
         let mut inv = trace_invocation(&["Aoide-follow"], &[("follow", "true")]);
         inv.door = Door::Mcp;
-        let out = session_trace(&inv);
+        let out = r.get(&inv.path).expect("session trace is registered").invoke("aoide", &inv);
         assert_eq!(out.status, Status::Usage, "msg: {}", out.message);
-        assert!(out.message.contains("--follow blocks until Ctrl-C"), "{}", out.message);
+        assert!(out.message.contains("is not open to the mcp door"), "{}", out.message);
 
         let out = session_trace(&trace_invocation(&[], &[]));
         assert_eq!(out.status, Status::Usage);

@@ -21,7 +21,7 @@
   # owns the capability, so a host says what it runs in one place and needs no
   # separate `habit.dendrites.*` override to do it.
   habit.aggregation = {
-    base.enable = true;
+    nucleus.enable = true;
 
     workspace = {
       enable = true;

@@ -50,9 +50,9 @@ in
 # aoide.lyra.enable` — not on bare aoide.enable: everything in this file is
 # graphical-session machinery (the bridge serves the painted shell; the reap
 # units are wantedBy/partOf graphical-session.target and never fire headless).
-# Both facts are set `mkDefault true` by the lane that owns them, so an
-# unconfigured painting box is unchanged; this file reads the FACTS, never that
-# lane's own option (root AGENTS.md house rule 5). On a headless aoide box
+# `aoide.enable` is set by any nucleus member and `aoide.lyra.enable` by the
+# lyra dendrite; this file reads the FACTS, never that lane's own option (root
+# AGENTS.md house rule 5). On a headless aoide box
 # (aoide.enable + the doors only) these units would sit inert while their PATH
 # entries (quickshell, hyprland, hyprlock) drag the whole Qt/Wayland stack into
 # the closure — found live on sakaki, whose only aoide duty is the A2A door.

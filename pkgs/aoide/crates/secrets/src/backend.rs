@@ -1410,6 +1410,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn trims_exactly_one_trailing_newline() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("trim");
         write_backends(&home, "printf '%s\\n' {name}");
         assert_eq!(fetch_value(&home, "scratch", "stored-value").unwrap(), "stored-value");
@@ -1421,6 +1422,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn no_trailing_newline_is_untouched() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("notrim");
         write_backends(&home, "printf %s {name}");
         assert_eq!(fetch_value(&home, "scratch", "stored-value").unwrap(), "stored-value");
@@ -1434,6 +1436,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_double_trailing_newline_leaves_one_behind() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("doubletrim");
         write_backends(&home, "printf '%s\\n\\n' {name}");
         assert_eq!(fetch_value(&home, "scratch", "stored-value").unwrap(), "stored-value\n");
@@ -1445,6 +1448,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn key_substitutes_into_name_not_the_backend_name() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("key");
         write_backends(&home, "printf %s {name}");
         // The backend is looked up by "scratch"; the COMMAND runs with the
@@ -1455,6 +1459,7 @@ mod tests {
 
     #[test]
     fn unknown_backend_is_an_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("unknown");
         write_backends(&home, "printf %s {name}");
         assert!(fetch_value(&home, "nope", "x").is_err());
@@ -1463,6 +1468,7 @@ mod tests {
 
     #[test]
     fn a_failing_backend_command_is_an_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("fail");
         write_backends(&home, "false");
         assert!(fetch_value(&home, "scratch", "x").is_err());
@@ -1471,6 +1477,7 @@ mod tests {
 
     #[test]
     fn missing_backends_file_is_an_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("missingfile");
         assert!(fetch_value(&home, "scratch", "x").is_err());
         std::fs::remove_dir_all(&home).ok();
@@ -1480,6 +1487,7 @@ mod tests {
 
     #[test]
     fn a_failing_backends_stderr_never_appears_in_the_returned_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("stderrleak");
         write_backends(&home, "printf 'SENTINEL-STDERR-XYZ' 1>&2; exit 1");
         let err = fetch_value(&home, "scratch", "x").unwrap_err();
@@ -1495,6 +1503,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn key_with_a_space_round_trips_through_shell_quoting() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("space");
         write_backends(&home, "printf %s {name}");
         assert_eq!(fetch_value(&home, "scratch", "Work Email/gmail").unwrap(), "Work Email/gmail");
@@ -1506,6 +1515,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn key_with_an_embedded_single_quote_round_trips_through_shell_quoting() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("quote");
         write_backends(&home, "printf %s {name}");
         assert_eq!(fetch_value(&home, "scratch", "it's a secret").unwrap(), "it's a secret");
@@ -1529,6 +1539,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn home_placeholder_substitutes_the_secrets_home_path() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("homeplaceholder");
         write_backends(&home, "printf %s {home}");
         assert_eq!(fetch_value(&home, "scratch", "unused").unwrap(), home.to_string_lossy());
@@ -1540,6 +1551,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn home_placeholder_with_a_spaced_path_round_trips_through_shell_quoting() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let base = tmp_home("homespaced-base");
         let home = base.join("a home with spaces");
         std::fs::create_dir_all(&home).unwrap();
@@ -1553,6 +1565,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn name_and_home_placeholders_both_substitute_correctly_together() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("bothplaceholders");
         write_backends(&home, "printf '%s:%s' {home} {name}");
         assert_eq!(
@@ -1571,6 +1584,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_key_containing_the_literal_home_token_is_not_re_scanned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("literaltoken");
         write_backends(&home, "printf %s {name}");
         assert_eq!(fetch_value(&home, "scratch", "weird{home}key").unwrap(), "weird{home}key");
@@ -1584,6 +1598,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn has_value_is_true_when_the_get_template_succeeds() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("hasvalue-true");
         write_backends(&home, "printf %s {name}");
         assert!(has_value(&home, "scratch", "stored-value"));
@@ -1592,6 +1607,7 @@ mod tests {
 
     #[test]
     fn has_value_is_false_when_the_get_template_fails() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("hasvalue-false");
         write_backends(&home, "false");
         assert!(!has_value(&home, "scratch", "x"));
@@ -1600,6 +1616,7 @@ mod tests {
 
     #[test]
     fn has_value_is_false_on_an_unknown_backend() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("hasvalue-unknown");
         write_backends(&home, "printf %s {name}");
         assert!(!has_value(&home, "nope", "x"));
@@ -1611,6 +1628,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_seeded_file_backend_reports_no_value_until_one_is_stored() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("hasvalue-file");
         seed_default_backends(&home).unwrap();
         assert!(!has_value(&home, "file", "my-secret-key"), "a fresh file backend must report no stored value");
@@ -1631,6 +1649,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn store_value_writes_through_the_set_template_and_fetch_value_reads_it_back() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("storeroundtrip");
         let out = home.join("out.txt");
         write_backend_with_set(&home, &format!("cat {}", out.display()), &format!("cat > {}", out.display()));
@@ -1641,6 +1660,7 @@ mod tests {
 
     #[test]
     fn store_value_errors_cleanly_when_the_backend_has_no_set_template() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("nosettemplate");
         write_backends(&home, "printf %s {name}"); // get-only, no `set`
         let err = store_value(&home, "scratch", "k", "v").unwrap_err();
@@ -1650,6 +1670,7 @@ mod tests {
 
     #[test]
     fn store_value_errors_on_an_unknown_backend() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("storeunknown");
         write_backends(&home, "printf %s {name}");
         assert!(store_value(&home, "nope", "k", "v").is_err());
@@ -1658,6 +1679,7 @@ mod tests {
 
     #[test]
     fn store_value_never_leaks_the_value_into_a_failing_set_templates_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("storestderrleak");
         write_backend_with_set(&home, "printf %s {name}", "printf 'SENTINEL-STDERR-XYZ' 1>&2; exit 1");
         let err = store_value(&home, "scratch", "k", "the-value").unwrap_err();
@@ -1718,6 +1740,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_seeded_file_backend_writes_0600_files_under_a_0700_store_dir() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("filemodes");
         seed_default_backends(&home).unwrap();
         store_value(&home, "file", "my-secret-key", "the-stored-value").unwrap();
@@ -1745,6 +1768,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_successful_file_set_leaves_no_tmp_sibling_behind() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("file-set-no-tmp");
         seed_default_backends(&home).unwrap();
         store_value(&home, "file", "my-secret-key", "the-stored-value").unwrap();
@@ -1761,6 +1785,7 @@ mod tests {
     /// Same no-leftover proof for the `age` backend's `.age.tmp` sibling.
     #[test]
     fn a_successful_age_set_leaves_no_tmp_sibling_behind() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         if !age_tools_available() {
             eprintln!("skipping a_successful_age_set_leaves_no_tmp_sibling_behind: age/age-keygen not found on PATH");
             return;
@@ -1795,6 +1820,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_customized_stored_template_under_a_builtin_name_is_ignored_at_use_time() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("builtin-template-ignored");
         std::fs::create_dir_all(&home.join("store")).unwrap();
         std::fs::write(home.join("store").join("k"), "the-real-stored-value").unwrap();
@@ -1818,6 +1844,7 @@ mod tests {
     /// exactly as before.
     #[test]
     fn a_builtin_name_absent_from_backends_json_is_still_unknown() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("builtin-name-absent");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(backends_path(&home), br#"{"scratch":{"get":"echo hi"}}"#).unwrap();
@@ -1836,6 +1863,7 @@ mod tests {
 
     #[test]
     fn has_value_uses_the_has_template_when_present() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("has-template-present");
         // `get` would SUCCEED, but `has` says no — proving the `has`
         // template wins over the fallback whenever both are present.
@@ -1849,6 +1877,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn has_value_reports_true_via_a_has_template_even_when_get_would_fail() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("has-template-true-get-false");
         write_backend_with_has(&home, "false", "true");
         assert!(has_value(&home, "scratch", "x"), "a `has` template must be consulted, not the failing `get`");
@@ -1863,6 +1892,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn has_value_falls_back_to_the_get_probe_when_has_is_absent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("has-template-absent");
         write_backends(&home, "printf %s {name}"); // no `has` field at all
         assert!(has_value(&home, "scratch", "x"));
@@ -1896,6 +1926,7 @@ mod tests {
 
     #[test]
     fn age_identity_is_lazily_minted_on_first_call_and_locked_to_0600() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         if !age_tools_available() {
             eprintln!("skipping age_identity_is_lazily_minted_on_first_call_and_locked_to_0600: age/age-keygen not found on PATH");
             return;
@@ -1931,6 +1962,7 @@ mod tests {
     /// real `age` binary on `PATH`.
     #[test]
     fn mint_refuses_when_age_key_is_absent_but_values_holds_orphaned_ciphertext() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("age-mint-over-orphans");
         let values_dir = home.join("values");
         std::fs::create_dir_all(&values_dir).unwrap();
@@ -1950,6 +1982,7 @@ mod tests {
     /// values dir" regression.
     #[test]
     fn mint_proceeds_on_a_truly_fresh_home_with_no_orphaned_ciphertext() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         if !age_tools_available() {
             eprintln!(
                 "skipping mint_proceeds_on_a_truly_fresh_home_with_no_orphaned_ciphertext: age/age-keygen not found on PATH"
@@ -1996,6 +2029,7 @@ mod tests {
 
     #[test]
     fn the_seeded_age_backend_round_trips_a_value_through_a_real_age_binary() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         if !age_tools_available() {
             eprintln!("skipping the_seeded_age_backend_round_trips_a_value_through_a_real_age_binary: age/age-keygen not found on PATH");
             return;
@@ -2020,6 +2054,7 @@ mod tests {
 
     #[test]
     fn get_on_a_missing_age_identity_is_a_taught_error_and_never_mints() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("age-missing-identity");
         seed_default_backends(&home).unwrap();
         assert!(!home.join("age.key").exists());
@@ -2097,6 +2132,7 @@ mod tests {
     /// AHEAD of confirming `age` is actually a configured backend.
     #[test]
     fn get_on_an_age_policy_against_a_backends_json_missing_the_age_entry_names_the_true_cause() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("age-not-configured-get");
         std::fs::create_dir_all(&home).unwrap();
         // Pre-P-G1 shape: `file` only, no `age`, no `has` — exactly what a
@@ -2263,6 +2299,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn remove_builtin_value_removes_the_file_backends_value() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("remove-file-value");
         seed_default_backends(&home).unwrap();
         store_value(&home, "file", "k", "v").unwrap();
@@ -2276,6 +2313,7 @@ mod tests {
 
     #[test]
     fn remove_builtin_value_removes_the_age_backends_value() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         if !age_tools_available() {
             eprintln!("skipping remove_builtin_value_removes_the_age_backends_value: age/age-keygen not found on PATH");
             return;
@@ -2471,6 +2509,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fast_template_is_unaffected_by_the_default_timeout() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("fast-template-unaffected");
         write_backends(&home, "printf %s {name}");
         assert_eq!(fetch_value(&home, "scratch", "quick").unwrap(), "quick");
@@ -2568,6 +2607,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_native_windows_template_spawns_drains_and_exits() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("native-template");
         // No placeholder: the substitution quoting is a separate seam, and
         // this test is about the SPAWN, the drain and the exit.
@@ -2605,6 +2645,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_builtin_posix_preset_refuses_by_name_and_a_host_shaped_template_still_runs() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("preset-refusal");
         let doc = serde_json::json!({
             "file": { "get": "cat {home}/store/{name}" },

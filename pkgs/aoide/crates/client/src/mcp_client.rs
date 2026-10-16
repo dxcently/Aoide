@@ -40,10 +40,10 @@
 //! taught [`Outcome::error`] naming the two var names, never a silent
 //! degrade and never an invented credential.
 //!
-//! **Door gate.** All three commands are CLI-only, matching `aoide-secrets`'s
-//! blanket stance for its own command family (`crate::secrets::commands
-//! ::require_cli`, gating the WHOLE `secrets` group, not just its admin
-//! quartet): every Melete command here sends a live bearer token to an
+//! **Door gate.** All three commands are CLI-only, declared `doors:
+//! &[Door::Cli]` and refused by the registry's gate before any handler runs,
+//! matching `aoide-secrets`'s blanket stance for its own command family:
+//! every Melete command here sends a live bearer token to an
 //! external service and `call` can trigger real, potentially
 //! cost-incurring action (job triggers, schedule mutations, run control —
 //! Melete's own docs single these out as the one class of call it holds
@@ -126,20 +126,6 @@ fn resolve_config(cmd: &str) -> Result<MeleteConfig, Outcome> {
             "urlVar": MELETE_URL_VAR,
             "tokenVar": MELETE_TOKEN_VAR,
         }))),
-    }
-}
-
-/// Shared door gate for the whole `melete` family — see this module's doc
-/// for why the READ-only commands (`status`/`graph`) are gated identically to
-/// `call`, not just the consequential one.
-fn require_cli(inv: &Invocation, cmd: &str) -> Option<Outcome> {
-    match inv.door {
-        Door::Cli => None,
-        _ => Some(Outcome::usage(
-            cmd,
-            "melete commands send a live bearer token to an external service and can trigger \
-             real action; CLI-only — run this from a terminal (not over this door)",
-        )),
     }
 }
 
@@ -236,11 +222,8 @@ fn call(cmd: &str, cfg: &MeleteConfig, method: &str, params: Value) -> Result<Va
     }
 }
 
-fn handle_melete_status(inv: &Invocation) -> Outcome {
+fn handle_melete_status(_inv: &Invocation) -> Outcome {
     let cmd = "melete.status";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let cfg = match resolve_config(cmd) {
         Ok(c) => c,
         Err(out) => return out,
@@ -269,11 +252,8 @@ fn handle_melete_status(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reachable": true, "result": result }))
 }
 
-fn handle_melete_graph(inv: &Invocation) -> Outcome {
+fn handle_melete_graph(_inv: &Invocation) -> Outcome {
     let cmd = "melete.graph";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     let cfg = match resolve_config(cmd) {
         Ok(c) => c,
         Err(out) => return out,
@@ -303,9 +283,6 @@ fn handle_melete_graph(inv: &Invocation) -> Outcome {
 
 fn handle_melete_call(inv: &Invocation) -> Outcome {
     let cmd = "melete.call";
-    if let Some(hint) = require_cli(inv, cmd) {
-        return hint;
-    }
     const USAGE: &str = "usage: aoide melete call <tool> [--args <json>]";
     let tool = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(t) => t.to_string(),
@@ -342,6 +319,7 @@ pub fn register_melete(r: &mut Registry) {
         implemented: true,
         handler: handle_melete_status,
         examples: ["melete status"],
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["melete", "graph"],
@@ -352,6 +330,7 @@ pub fn register_melete(r: &mut Registry) {
         implemented: true,
         handler: handle_melete_graph,
         examples: ["melete graph"],
+        doors: &[Door::Cli],
     ));
     r.insert(cmd!(
         path: ["melete", "call"],
@@ -362,6 +341,7 @@ pub fn register_melete(r: &mut Registry) {
         implemented: true,
         handler: handle_melete_call,
         examples: ["melete call job_status --args '{\"run_id\":\"r-123\"}'"],
+        doors: &[Door::Cli],
     ));
 }
 
@@ -492,18 +472,19 @@ mod tests {
     fn every_melete_command_refuses_a_non_cli_door_without_touching_config() {
         let _g = env_guard();
         clear_melete_env(); // proves the gate runs BEFORE resolve_config too
+        let mut r = aoide_protocol::registry::Registry::new();
+        register_melete(&mut r);
+        let status_over = |door: Door, path: &[&str], args: &[&str]| {
+            let inv = Invocation { door, ..cli_inv(path, args, &[]) };
+            r.get(&inv.path).expect("registered").invoke("aoide", &inv).status
+        };
         for door in [Door::Mcp, Door::A2a, Door::Daemon] {
-            let status_inv = Invocation { door, ..cli_inv(&["melete", "status"], &[], &[]) };
-            let out = handle_melete_status(&status_inv);
-            assert_eq!(out.status, aoide_protocol::output::Status::Usage, "status over {door:?}");
-
-            let graph_inv = Invocation { door, ..cli_inv(&["melete", "graph"], &[], &[]) };
-            let out = handle_melete_graph(&graph_inv);
-            assert_eq!(out.status, aoide_protocol::output::Status::Usage, "graph over {door:?}");
-
-            let call_inv = Invocation { door, ..cli_inv(&["melete", "call"], &["job_status"], &[]) };
-            let out = handle_melete_call(&call_inv);
-            assert_eq!(out.status, aoide_protocol::output::Status::Usage, "call over {door:?}");
+            let status = status_over(door, &["melete", "status"], &[]);
+            assert_eq!(status, aoide_protocol::output::Status::Usage, "status over {door:?}");
+            let graph = status_over(door, &["melete", "graph"], &[]);
+            assert_eq!(graph, aoide_protocol::output::Status::Usage, "graph over {door:?}");
+            let call = status_over(door, &["melete", "call"], &["job_status"]);
+            assert_eq!(call, aoide_protocol::output::Status::Usage, "call over {door:?}");
         }
     }
 
@@ -641,16 +622,26 @@ mod tests {
         clear_melete_env();
     }
 
+    /// Restores `PATH` when dropped, so a panicking test cannot leave the shim
+    /// on the process-wide `PATH` for the tests queued behind `env_lock`.
+    #[cfg(unix)]
+    struct PathRestore(Option<String>);
+
+    #[cfg(unix)]
+    impl Drop for PathRestore {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
     #[cfg(unix)]
     fn with_curl_shim<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
-        let saved = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{}:{}", dir.display(), saved.clone().unwrap_or_default()));
-        let out = f();
-        match saved {
-            Some(p) => std::env::set_var("PATH", p),
-            None => std::env::remove_var("PATH"),
-        }
-        out
+        let _restore = PathRestore(std::env::var("PATH").ok());
+        std::env::set_var("PATH", format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default()));
+        f()
     }
 
     // cfg(unix): `#!/bin/sh` fake `curl` (see `write_curl_shim`'s note).

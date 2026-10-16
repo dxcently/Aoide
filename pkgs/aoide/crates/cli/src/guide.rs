@@ -29,15 +29,19 @@ Orient through four tiers, in order:
   Tier 1 — the CLI: `aoide <cmd>` is the complete capability surface; every
     command takes and emits `--json`; `aoide schema --json` is the full
     machine-readable command tree.
-  Tier 2 — stdio MCP: per-session, optional — `aoide mcp serve --stdio`.
+  Tier 2 — stdio MCP: per-session, optional — `aoide mcp serve --stdio`;
+    it lists only the commands that declare `mcp` (`doors` in
+    `schema --json`; absent = cli, daemon).
   Tier 3 — network MCP: enabled by the USER only, never by an agent.
 
 Conducting (aoide's headline): command another session with
   aoide send --id <id> [--submit] [--yes] -- <text>
-(held PENDING by default; --yes or an autogate policy delivers). The
-reciprocal also holds: a parent automatically hears the children it spawned —
-the daemon delivers ONE line off a child's own trace (settled, cancelled,
-asking, wrapping up, failing, silent), never prompted and never pending.
+(held PENDING by default; --yes or an autogate policy delivers). `--yes` is
+a terminal-only flag: over MCP a send delivers by autogate or waits pending.
+The reciprocal also holds: a parent automatically hears the children it
+spawned — the daemon delivers ONE line off a child's own trace (settled,
+cancelled, asking, wrapping up, failing, silent), never prompted and never
+pending.
 
 Command surface — every OPERATOR group this binary registered at boot, with
 its command count (a stub is registered but not yet implemented; hook-
@@ -112,8 +116,8 @@ forms: conducting, agent hooking, the rice loop). With no repo in view,
 /// `internal` commands (task #101 R1: hook-plumbing a
 /// harness drives, never a human typing it — `session start/phase/end/
 /// hook`) are skipped from this HUMAN listing entirely — they still appear
-/// in `schema --json`/the MCP tool list/the A2A AgentCard, since `internal`
-/// hides noise from a person, not capability from another door.
+/// in `schema --json`, since `internal` hides noise from a person, not
+/// capability from a door.
 pub fn render(r: &Registry) -> String {
     let sections = aoide_protocol::help::inventory(r);
     let total: usize = sections.iter().flat_map(|(_, heads)| heads).map(|(_, n, _)| n).sum();

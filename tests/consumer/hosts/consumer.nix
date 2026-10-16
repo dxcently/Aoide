@@ -7,6 +7,7 @@
 # the performer's widgets, so the borrow closure is exercised on a consumer's own
 # songbook rather than on Aoide's.
 _: {
+  habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
 
   habit.song.declared = "solo";

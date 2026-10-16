@@ -52,6 +52,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_secrets_ask,
         brief: "Show the code-entry dialog for one parked TOTP ask.",
+        doors: &[Door::Cli],
     ));
 }
 
@@ -79,9 +80,6 @@ pub const EXIT_INFRA_FAILURE: i32 = DIALOG_EXIT_INFRA_FAILURE;
 
 fn handle_secrets_ask(inv: &Invocation) -> Outcome {
     let cmd = "secrets.ask";
-    if inv.door != Door::Cli {
-        return Outcome::usage(cmd, "secrets ask is a desktop dialog -- CLI-only");
-    }
     let Some(secret) = inv.flags.get("secret").filter(|s| !s.is_empty()) else {
         return Outcome::usage(cmd, "secrets ask requires --secret <name>");
     };
@@ -162,12 +160,16 @@ mod tests {
 
     #[test]
     fn handle_secrets_ask_is_cli_only() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let i = inv(Door::Mcp, &[("secret", "t"), ("consumer", "m"), ("seconds", "1")]);
-        assert_eq!(handle_secrets_ask(&i).status, aoide_protocol::output::Status::Usage);
+        let out = crate::dispatch::registry().get(&i.path).expect("registered").invoke("lyra", &i);
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+        assert!(out.message.contains("is not open to the mcp door"), "{}", out.message);
     }
 
     #[test]
     fn handle_secrets_ask_requires_secret_consumer_and_seconds() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(handle_secrets_ask(&inv(Door::Cli, &[])).status, aoide_protocol::output::Status::Usage);
         assert_eq!(handle_secrets_ask(&inv(Door::Cli, &[("secret", "t")])).status, aoide_protocol::output::Status::Usage);
         assert_eq!(

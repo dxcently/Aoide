@@ -1961,6 +1961,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn put_reports_exists_then_replaced_true_through_a_real_broker() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!(
             "aoide-secrets-client-put-overwrite-{}-{}",
             std::process::id(),
@@ -2044,6 +2045,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn pending_approve_round_trips_through_a_real_broker_and_releases_to_the_original_caller() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!(
             "aoide-secrets-client-park-{}-{}",
             std::process::id(),
@@ -2200,6 +2202,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resolve_bounded_returns_the_value_on_a_granted_resolve() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!(
             "aoide-secrets-client-bounded-ok-{}-{}",
             std::process::id(),
@@ -2252,6 +2255,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resolve_bounded_never_parks_on_a_requiretotp_secret_with_no_code() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!(
             "aoide-secrets-client-bounded-parking-{}-{}",
             std::process::id(),

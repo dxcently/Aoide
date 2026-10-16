@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-10-08
+updated: 2026-10-12
 tags: [aoide, cli, rice, livery, song]
 ---
 
@@ -163,7 +163,7 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
   (`modules/dendrites/lyra/shellbridge.nix`'s shellbridge service,
   `modules/dendrites/quickshell.nix`'s `aoide-quickshell` and
   `modules/dendrites/lyra/default.nix`'s `aoide-rice-reload`) plus
-  `modules/nucleus/aoided.nix`'s `environment.sessionVariables` (gated on
+  `modules/dendrites/aoided.nix`'s `environment.sessionVariables` (gated on
   `aoide.lyra.enable`) — core-only units don't carry it.
 
 ### lyra rice list
@@ -345,7 +345,7 @@ lyra rice mode draft <name> [--json]
 ### lyra cover set
 
 ```
-lyra cover set <path|name|we:<id>> [--json]
+lyra cover set <path|name|we:<id>> [--position auto|tile|fill] [--json]
 lyra cover set --clear [--json]
 lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
 ```
@@ -361,7 +361,11 @@ lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
 - **Writes:** `song/stage/cover.json` — atomic, pretty
   `{"path": "<abs>", "kind": "static|video", "pick": true, "song": "<staged song>"}`
   (or `{"kind": "we", "weId": "<id>", …}` for a scene) + trailing newline, the
-  `song` field omitted only when nothing is staged (CONTRACTS.md §4). NOT
+  `song` field omitted only when nothing is staged (CONTRACTS.md §4). A still
+  also carries `"tile": true` when it tiles — `--position tile`, or no
+  `--position` (or `auto`) and a file name that carries `_tile`, in any case —
+  and `"position"` only when `--position tile` or `fill` forced it; the
+  wallpaper layer then repeats it at 1:1 instead of cropping it to fill. NOT
   symlink-routed in Draft mode (only `livery.json` is). `--clear` reverses it:
   the staged song gets its own default back — its derivable cover, else
   `cover.json` removed (the baked/palette fallback, plus the song's own live
@@ -370,8 +374,9 @@ lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
   is the step-aside image, or when the staged pick already names it. In Draft
   mode auto-mints a take (cause `"cover-set"`): `takes/NNNN.json` +
   `takes/head.json` under the routed draft, non-fatal on failure.
-- **Output:** data `{cover, coverJson, kind, pick, song, wallpaper, seam}`
-  (+ `take` when in Draft mode); with `--clear`, `{cleared, droppedPick,
+- **Output:** data `{cover, coverJson, kind, position, tile, pick, song,
+  wallpaper, seam}` (+ `take` when in Draft mode), `position` being the word
+  in force (`auto` when none was given); with `--clear`, `{cleared, droppedPick,
   cover, coverJson, coverStage, wallpaper}`; with `--from-skwd`, `{recorded,
   kind, identity, provider, song, …}` and `recorded: false` with `ignored` or
   `unchanged` for the no-op shapes. The Quickshell wallpaper surface
@@ -386,6 +391,9 @@ lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
   A path naming no existing file is `cover-not-found`, exit 1 — never stages
   a wallpaper that can't render. `--clear` with a `<path>` is
   `clear-takes-no-path`, exit 2 — the two spellings mean opposite things.
+  `--position` lays out a still only: with a video or a `we:<id>` scene it is
+  `position-not-a-still`, exit 2, and beside `--clear` or `--from-skwd` the
+  registry refuses it before anything runs.
   A cover applies only while its `song` matches the staged song; one naming
   another song is ignored, which is why a pick survives re-staging its own
   song (a bare `lyra rice stage`, the bar's RICE control, a declarative re-seed, a

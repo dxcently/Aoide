@@ -1618,6 +1618,7 @@ mod tests {
     }
     #[test]
     fn focus_address_matching_is_prefix_and_case_tolerant() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // hyprctl reports `0x…` lowercase; the stored windowAddress may differ
         // on case and on a present/absent `0x` prefix — all must match.
         let clients = vec![
@@ -1709,6 +1710,7 @@ mod tests {
     }
     #[test]
     fn client_workspace_lookup_reads_workspace_id_and_tolerates_address_form() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // `hyprctl clients -j` carries `workspace: { id, name }`; the lookup pulls
         // the numeric id for the matching window. Address match is 0x/case
         // tolerant, exactly like window_present (the stored addr may differ).
@@ -1829,6 +1831,7 @@ mod tests {
     }
     #[test]
     fn focus_window_rejects_an_empty_address_without_touching_hyprctl() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // The shared focus fn is called by the socket loop on arbitrary input;
         // an empty/blank address is a structured error, never a panic and never
         // a stray `hyprctl` dispatch.
@@ -1839,6 +1842,7 @@ mod tests {
     }
     #[test]
     fn focus_window_never_succeeds_for_a_nonexistent_window() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // A bogus address is never a live client, so the verify step fails —
         // either `window-not-found` (hyprctl present) or `hyprctl-unavailable`
         // (no compositor / hyprctl absent, e.g. the build sandbox). Both are

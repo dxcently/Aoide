@@ -20,13 +20,24 @@
 //! canvas (a screenshot, the live/static-joined item tree, and a
 //! scaffolding notes store). I1 added `icon.collections`, `icon.list`,
 //! `icon.resolve` (the pinned icon collections, resolved into the lane's own
-//! SVG tree). See `commands/mod.rs::all()` for the assembly
-//! order.
+//! SVG tree). `clipboard.delete`, `clipboard.clear` remove cliphist
+//! history. See `commands/mod.rs::all()` for the assembly order.
 
 pub use aoide_protocol::registry::*;
 
 #[cfg(test)]
 mod tests {
+    /// Finding 10: `apps publish` keeps the Daemon door it had before the door
+    /// policy. Only its `--run` flag is terminal-only.
+    #[test]
+    fn apps_publish_keeps_the_daemon_door_and_run_stays_terminal_only() {
+        let r = crate::commands::all();
+        let publish = r.get(&["apps".to_string(), "publish".to_string()]).expect("apps publish is registered");
+        assert!(publish.opens(aoide_protocol::audit::Door::Daemon), "apps publish keeps the Daemon door");
+        let run = publish.flags.iter().find(|f| f.name == "run").expect("the run flag");
+        assert_eq!(run.doors, &[aoide_protocol::audit::Door::Cli][..], "--run is terminal-only");
+    }
+
     #[test]
     fn every_command_carries_the_json_flag_and_exit_codes() {
         let r = crate::commands::all();
@@ -128,6 +139,8 @@ mod tests {
             "apps.list",
             "apps.publish",
             "apps.show",
+            "clipboard.clear",
+            "clipboard.delete",
             "cover.set",
             "cover.sync",
             "element.seed",
@@ -192,6 +205,54 @@ mod tests {
         expected.sort();
 
         assert_eq!(got, expected, "command path set drifted from lyra's golden snapshot");
+    }
+
+    /// Golden snapshot: the commands an MCP caller may list and call. Every
+    /// `doors` change updates this list in the same commit (crates/AGENTS.md).
+    #[test]
+    fn mcp_open_paths_match_the_golden_snapshot() {
+        let r = crate::commands::all();
+        let mut got: Vec<String> = r.commands().filter(|c| c.opens(aoide_protocol::audit::Door::Mcp)).map(|c| c.dotted()).collect();
+        got.sort();
+        let mut expected = vec![
+            "guide", "livery.lint", "livery.resolve", "preview.declare", "preview.notes", "preview.set",
+            "preview.tree", "reload", "rice.compose", "rice.declare", "rice.draft.list", "rice.lint",
+            "rice.list", "rice.mode.status", "rice.stage", "rice.take", "rice.take.diff", "rice.take.list",
+            "rice.take.mark", "schema",
+        ];
+        expected.sort();
+        assert_eq!(got, expected, "MCP-open set drifted from lyra's golden snapshot");
+    }
+
+    /// Every MCP-open command passes the door gate when given nothing.
+    #[test]
+    fn every_mcp_open_command_passes_the_door_gate() {
+        use aoide_protocol::audit::Door;
+        let r = crate::commands::all();
+        for c in r.commands().filter(|c| c.opens(Door::Mcp)) {
+            let mut inv = aoide_protocol::Invocation {
+                path: c.path.iter().map(|s| s.to_string()).collect(),
+                args: vec![],
+                flags: Default::default(),
+                door: Door::Mcp,
+            };
+            if let Err(refusal) = c.check("lyra", &mut inv) {
+                assert!(!refusal.what.contains("is not open to the mcp door"), "{}: {}", c.dotted(), refusal.what);
+            }
+        }
+    }
+
+    /// `mcp serve` reports the same count the MCP-open set has.
+    #[test]
+    fn mcp_serve_counts_only_the_mcp_open_commands() {
+        let inv = aoide_protocol::Invocation {
+            path: vec!["mcp".into(), "serve".into()],
+            args: vec![],
+            flags: Default::default(),
+            door: aoide_protocol::audit::Door::Cli,
+        };
+        let outcome = crate::dispatch::dispatch(&inv);
+        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 20, "{outcome:?}");
     }
 
     #[test]

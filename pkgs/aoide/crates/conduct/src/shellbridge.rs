@@ -2889,6 +2889,7 @@ mod tests {
 
     #[test]
     fn lock_is_started_by_the_compositor_never_as_this_units_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (prog, args) = PowerAction::Lock.command();
         assert_eq!((prog, args), ("hyprctl", &["dispatch", "exec", "hyprlock"][..]));
     }

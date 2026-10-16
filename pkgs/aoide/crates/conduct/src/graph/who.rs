@@ -98,7 +98,7 @@ use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::node_store::{Node, NodeCacheEntry};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 /// A roster-probe pull closure: given a node, return its live resolved graph
@@ -1179,10 +1179,29 @@ pub(super) struct Roster {
     pub(super) nodes: Vec<NodeView>,
 }
 
-pub(super) fn collect_roster(cmd: &str, pull: PullFn) -> Result<Roster, Outcome> {
-    let (p, s, h) = super::common::load_inputs(cmd)?;
+/// Gathers the roster. `scope` is [`super::send::read_scope`] for this read: an
+/// MCP read keeps only the sessions in its scope and probes no node, so no
+/// other node's rows, and no network call on its behalf, happen at all.
+pub(super) fn collect_roster(
+    cmd: &str,
+    pull: PullFn,
+    scope: &dyn Fn(&[SessionRecord]) -> Option<BTreeSet<String>>,
+) -> Result<Roster, Outcome> {
+    let (p, mut s, mut h) = super::common::load_inputs(cmd)?;
     let host = aoide_storage::display::local_host_name();
-    let nodes = aoide_storage::node_store::load_nodes();
+    let scoped = scope(&s.sessions);
+    if scoped.is_some() {
+        s.sessions.retain(|r| super::send::in_read_scope(&scoped, &r.session_id));
+        h.hooks.retain(|k| super::send::in_read_scope(&scoped, &k.session_id));
+        // A remote parent is an ancestor on another node: not the reader's to name.
+        for r in &mut s.sessions {
+            r.remote_parent = None;
+        }
+    }
+    let nodes = match scoped {
+        Some(_) => Vec::new(),
+        None => aoide_storage::node_store::load_nodes(),
+    };
     let local_node = build_local_node(&s.sessions, &h.hooks, &p.projects, &nodes, &host);
 
     let probed = probe_nodes(&nodes, pull);
@@ -1213,8 +1232,19 @@ pub(super) const NODE_PROBE_TIMEOUT_SECS: u64 = 2;
 /// without it, sessions group by PROJECT instead. `filter`/`--all` apply to
 /// either grouping, narrowing `nodes` BEFORE the host/project split.
 pub(super) fn session_roster_with(inv: &Invocation, pull: PullFn) -> Outcome {
+    session_roster_as(inv, pull, super::send::real_attested_sender)
+}
+
+/// [`session_roster_with`] with the caller's attested session injected, so a
+/// test names the caller instead of walking a live process ancestry.
+pub(super) fn session_roster_as(
+    inv: &Invocation,
+    pull: PullFn,
+    caller: impl Fn(&[SessionRecord]) -> Option<String> + Copy,
+) -> Outcome {
     let cmd = "session";
-    let Roster { host, projects, locals, mut nodes } = match collect_roster(cmd, pull) {
+    let scope = |sessions: &[SessionRecord]| super::send::read_scope(inv, sessions, caller);
+    let Roster { host, projects, locals, mut nodes } = match collect_roster(cmd, pull, &scope) {
         Ok(r) => r,
         Err(e) => return e,
     };
@@ -2183,6 +2213,71 @@ mod tests {
                 None => std::env::remove_var("AOIDE_STATE_DIR"),
             }
         }
+    }
+
+    #[test]
+    fn an_mcp_roster_shows_the_callers_subtree_and_probes_no_node() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        use crate::graph::model::{write_stage, SessionsFile};
+        use aoide_protocol::Door;
+        use aoide_storage::stage::sessions_path;
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("roster-mcp");
+        for sub in ["stage", "state", "state/mail", "state/sessions", "run"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+        let cwd = root.to_string_lossy().to_string();
+        let me = session("me-id", &cwd, "working", "2026-10-12T09:00:00Z", None);
+        let mut kid = session("kid-id", &cwd, "idle", "2026-10-12T09:01:00Z", Some("me-id"));
+        kid.attested_spawner = Some("me-id".into());
+        let sibling = session("sib-id", &cwd, "idle", "2026-10-12T09:02:00Z", None);
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![me, kid, sibling], ..Default::default() }).unwrap();
+
+        let mcp = Invocation { path: vec!["session".into()], args: vec![], flags: Default::default(), door: Door::Mcp };
+        let out = session_roster_as(&mcp, never_called_pull(), |_| Some("me-id".to_string()));
+        let text = out.data.as_ref().expect("data").to_string();
+        assert!(text.contains("me-id") && text.contains("kid-id"), "{text}");
+        assert!(!text.contains("sib-id"), "a sibling tree is not the caller's: {text}");
+        let unattested = session_roster_as(&mcp, never_called_pull(), |_| None);
+        assert!(!unattested.data.as_ref().expect("data").to_string().contains("kid-id"), "unattested sees nothing");
+    }
+
+    /// Finding 8 on the roster: over MCP no row names its remote parent, the
+    /// far ancestor on another node. The unscoped roster still does.
+    #[test]
+    fn an_mcp_roster_names_no_remote_parent() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        use crate::graph::model::{write_stage, SessionsFile};
+        use aoide_protocol::Door;
+        use aoide_storage::stage::sessions_path;
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("roster-mcp-remote-parent");
+        for sub in ["stage", "state", "state/mail", "state/sessions", "run"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+        let mut me = session("me-id", &root.to_string_lossy(), "working", "2026-10-12T09:00:00Z", None);
+        me.remote_parent = Some(aoide_storage::records::RemoteParent {
+            node: "far-node".into(),
+            key: String::new(),
+            session_id: "far-parent-id".into(),
+            extra: Default::default(),
+        });
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![me], ..Default::default() }).unwrap();
+
+        let mcp = Invocation { path: vec!["session".into()], args: vec![], flags: Default::default(), door: Door::Mcp };
+        let out = session_roster_as(&mcp, never_called_pull(), |_| Some("me-id".to_string()));
+        let text = out.data.as_ref().expect("data").to_string();
+        assert!(text.contains("me-id"), "{text}");
+        assert!(!text.contains("far-parent-id") && !text.contains("far-node"), "an MCP roster names no far parent: {text}");
+        let cli = Invocation { door: Door::Cli, ..mcp };
+        let full = session_roster_as(&cli, never_called_pull(), |_| None);
+        assert!(full.data.as_ref().expect("data").to_string().contains("far-parent-id"), "the CLI roster keeps it");
     }
 
     fn never_called_pull() -> PullFn {

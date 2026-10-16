@@ -313,8 +313,8 @@ pub const AOIDE_ONLY_HEADS: &[&str] = &[
     "soundcheck", "spawn", "update", "usage", "workspace",
 ];
 pub const LYRA_ONLY_HEADS: &[&str] = &[
-    "apps", "cover", "element", "herald", "icon", "livery", "preview", "quickshell", "reload", "rice", "screen",
-    "shellbridge",
+    "apps", "clipboard", "cover", "element", "herald", "icon", "livery", "preview", "quickshell", "reload", "rice",
+    "screen", "shellbridge",
 ];
 pub const SHARED_HEADS: &[&str] = &["guide", "mcp", "onboard", "pair", "schema", "secrets"];
 
@@ -1124,6 +1124,7 @@ mod tests {
 
     #[test]
     fn help_flag_prints_subcommand_usage_at_exit_zero() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "view", "--help"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Ok, "--help is informational, exit 0");
@@ -1134,6 +1135,7 @@ mod tests {
 
     #[test]
     fn unknown_flag_is_a_usage_error_naming_the_offender() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "view", "--bogus"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Usage, "unknown flag → exit 2");
@@ -1143,6 +1145,7 @@ mod tests {
 
     #[test]
     fn known_flags_still_parse() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let (inv, _) = parse(&argv(&["graph", "view", "--focus", "session:x"]), Door::Cli, "aoide", &reg).unwrap();
         assert_eq!(inv.path, vec!["graph", "view"]);
@@ -1158,6 +1161,7 @@ mod tests {
     /// spelling.
     #[test]
     fn a_flag_before_the_full_path_whose_value_collides_with_a_segment_fails_loudly() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "session", "--id", "start"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Usage, "ambiguous ordering → exit 2");
@@ -1175,6 +1179,7 @@ mod tests {
     /// extends `graph session start`, so `--id start` binds normally.
     #[test]
     fn the_colliding_value_after_the_full_path_still_binds_as_a_flag_value() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let (inv, _) = parse(&argv(&["graph", "session", "start", "--id", "start"]), Door::Cli, "aoide", &reg).unwrap();
         assert_eq!(inv.path, vec!["graph", "session", "start"]);
@@ -1188,6 +1193,7 @@ mod tests {
     /// and the bare path must still resolve to itself when nothing follows.
     #[test]
     fn a_bare_parent_path_and_a_longer_sibling_subcommand_coexist() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
 
         let (inv, _) = parse(&argv(&["graph", "link", "c1", "p1"]), Door::Cli, "aoide", &reg).unwrap();
@@ -1213,6 +1219,7 @@ mod tests {
     /// where leftover positionals must reject rather than pass through.
     #[test]
     fn an_unregistered_child_of_a_zero_arg_parent_is_a_loud_unknown_command() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "nonsense"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(
@@ -1231,6 +1238,7 @@ mod tests {
     /// knows, never the unknown word or the stray argument behind it.
     #[test]
     fn an_unknown_command_is_labelled_by_its_known_prefix_only() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "nonsense", &"ab".repeat(32)]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.command, "graph");
@@ -1246,6 +1254,7 @@ mod tests {
     /// zero-arg registry check must never fire for a command with `args`.
     #[test]
     fn a_command_declaring_positional_args_is_unaffected_by_the_zero_arg_check() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let (inv, _) = parse(&argv(&["graph", "project", "add", "aoide", "extra"]), Door::Cli, "aoide", &reg).unwrap();
         assert_eq!(inv.path, vec!["graph", "project", "add"]);
@@ -1259,6 +1268,7 @@ mod tests {
     /// rewrite untouched.
     #[test]
     fn node_rm_is_a_parser_level_alias_for_node_remove() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let (aliased, _) = parse(&argv(&["node", "rm", "alice"]), Door::Cli, "aoide", &reg).unwrap();
         let (canonical, _) = parse(&argv(&["node", "remove", "alice"]), Door::Cli, "aoide", &reg).unwrap();
@@ -1275,6 +1285,7 @@ mod tests {
     /// flag's type, so the parser must never let a bool consume a value token.
     #[test]
     fn a_bool_flag_before_positionals_never_swallows_the_next_token() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let (inv, _) = parse(
             &argv(&["node", "add", "--no-verify", "alice", "http://h:7466"]),
@@ -1292,6 +1303,7 @@ mod tests {
     /// between positionals binds bare either way, with every positional kept.
     #[test]
     fn a_bool_flag_at_the_end_or_between_positionals_binds_bare() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
 
         let (inv, _) = parse(
@@ -1320,6 +1332,7 @@ mod tests {
     /// stays a path segment, never the flag's value.
     #[test]
     fn a_bool_flag_before_the_path_is_complete_leaves_the_segment_alone() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let (inv, _) = parse(
             &argv(&["node", "--no-verify", "add", "alice", "http://h:7466"]),
@@ -1337,6 +1350,7 @@ mod tests {
     /// flag before the positionals still consumes exactly its one value.
     #[test]
     fn a_valued_flag_before_positionals_still_consumes_its_value() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let (inv, _) = parse(
             &argv(&["node", "add", "--via", "ssh://h:22", "alice", "http://h:7466"]),
@@ -1355,6 +1369,7 @@ mod tests {
     /// names both unambiguous spellings.
     #[test]
     fn a_flag_declared_bool_and_valued_by_sibling_commands_fails_loudly() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let mut r = Registry::new();
         let mk = |path: &'static [&'static str], ty: &'static str| Command {
             path,
@@ -1389,6 +1404,7 @@ mod tests {
 
     #[test]
     fn a_typo_gets_a_did_you_mean_suggestion() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "vie"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Usage);
@@ -1592,6 +1608,7 @@ mod tests {
 
     #[test]
     fn run_falls_through_to_dispatch_when_special_declines() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let code = run(&argv(&["graph", "view"]), Door::Cli, "aoide", &reg, noop, |_inv, _json| None);
         assert_eq!(code, exit::OK);
@@ -1599,6 +1616,7 @@ mod tests {
 
     #[test]
     fn run_short_circuits_when_special_claims_the_invocation() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let code = run(&argv(&["graph", "view"]), Door::Cli, "aoide", &reg, noop, |_inv, _json| Some(exit::NOT_IMPLEMENTED));
         assert_eq!(code, exit::NOT_IMPLEMENTED);
@@ -1623,6 +1641,7 @@ mod tests {
 
     #[test]
     fn group_help_prints_the_group_not_the_root_list() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "project", "--help"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Ok);
@@ -1633,6 +1652,7 @@ mod tests {
 
     #[test]
     fn a_command_that_is_also_a_group_lists_its_subcommands_under_its_own_usage() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "--help"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert!(err.message.starts_with("usage: aoide graph"), "{}", err.message);
@@ -1641,6 +1661,7 @@ mod tests {
 
     #[test]
     fn an_unknown_flag_gets_the_close_match_and_one_line_of_usage_not_the_help_block() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["graph", "view", "--focuss", "n1"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Usage);
@@ -1658,6 +1679,7 @@ mod tests {
 
     #[test]
     fn a_typo_in_a_group_segment_lands_on_the_real_path() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["grap", "view"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert!(err.message.contains("did you mean:\n  aoide graph view"), "{}", err.message);
@@ -1669,6 +1691,7 @@ mod tests {
 
     #[test]
     fn nothing_close_lists_the_valid_choices_at_the_point_it_went_wrong() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let deep = parse(&argv(&["graph", "nonsense", "extra"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert!(deep.message.contains("`graph` has: view, link, project, session"), "{}", deep.message);
@@ -1694,6 +1717,7 @@ mod tests {
 
     #[test]
     fn a_group_named_exactly_lists_itself_at_exit_zero_and_a_longer_miss_stays_a_usage_error() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let group = parse(&argv(&["graph", "project"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!((group.status, group.render(false).1), (Status::Ok, exit::OK));
@@ -1704,6 +1728,7 @@ mod tests {
 
     #[test]
     fn suggestions_are_bold_only_when_the_term_is_styled() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let styled = Term { style: Style::ON, width: 80 };
         let plain = parse_with(&argv(&["grap", "view"]), Door::Cli, "aoide", &reg, &Term { style: Style::OFF, width: 80 }).unwrap_err();
@@ -1725,6 +1750,7 @@ mod tests {
 
     #[test]
     fn a_head_the_other_binary_owns_says_where_to_run_it() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["rice", "stage", "dusk"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Usage);

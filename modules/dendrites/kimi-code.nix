@@ -2,9 +2,9 @@
 # coding agent, github.com/MoonshotAI/kimi-code).
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.kimi-code.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies (pkgs/kimi-code); reads no other module.
-#   - Enable with one line in hosts/ (see hosts/yomi-strix/default.nix).
+#   - Select with one line in hosts/ (see hosts/yomi-strix/default.nix).
 #
 # What this dendrite does:
 #   - Installs `kimi` (pkgs.kimi-code — an autoPatchelf'd upstream prebuilt
@@ -16,18 +16,13 @@
 #     out of this module's scope.
 
 {
-  config,
   lib,
   pkgs,
   ...
 }:
 {
-  options.aoide.kimi-code.enable = lib.mkEnableOption "the Kimi Code CLI (Moonshot AI's terminal coding agent)";
 
-  config = lib.mkMerge [
-    { aoide.kimi-code.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.kimi-code.enable {
-      environment.systemPackages = [ pkgs.kimi-code ];
-    })
-  ];
+  config = {
+    environment.systemPackages = [ pkgs.kimi-code ];
+  };
 }

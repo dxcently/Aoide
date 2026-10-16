@@ -1,10 +1,10 @@
 # modules/dendrites/melete.nix — the Melete AI harness service.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.melete.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads only its own aoide.melete.* options
 #     plus config.aoide.user / config.aoide.enable.
-#   - Enable with one line in hosts/: aoide.melete.enable = true;
+#   - Select with one line in hosts/: habit.dendrites.melete.enable = true;
 #
 # What this dendrite does (ported from dxflake modules/dendrites/melete.nix):
 #   - Seeds ~/.local/bin/melete from the pinned pkgs/melete launcher ONLY when
@@ -16,7 +16,7 @@
 #   - Runs the Melete harness as a systemd service, guarded by
 #     ConditionPathExists so it never crash-loops before deployment.
 #
-# Composition with modules/nucleus/melete-adapter.nix (NOT a duplicate):
+# Composition with modules/dendrites/melete-adapter.nix (NOT a duplicate):
 #   The nucleus adapter (aoide-melete-adapter.service) is the neutral-bus →
 #   Melete translation layer; it always runs when aoide.enable is set and only
 #   DISPATCHES jobs to Melete. THIS dendrite runs Melete ITSELF (the harness the
@@ -44,7 +44,6 @@ let
 in
 {
   options.aoide.melete = {
-    enable = lib.mkEnableOption "the Melete AI harness service";
 
     # ── Runtime seams (replace dxflake's sops-rendered build-time secret) ────
     binPath = lib.mkOption {
@@ -85,76 +84,73 @@ in
     };
   };
 
-  config = lib.mkMerge [
-    { aoide.melete.enable = lib.mkDefault true; }
-    (lib.mkIf cfg.enable {
-      # ── Reproducible baseline; self-update floats above it ───────────────────
-      # Seed cfg.binPath from the pinned launcher ONLY when the pin changes
-      # (stamp file). Between bumps the running binary is untouched, so Melete's
-      # self-update owns it and survives reboots.
-      system.activationScripts.meleteSeed = {
-        deps = [ "users" ];
-        text = ''
-          bindir="$(dirname ${lib.escapeShellArg cfg.binPath})"
-          bin=${lib.escapeShellArg cfg.binPath}
-          stamp="$bindir/.melete-pinned"
-          want="${pkgs.melete.version}"
-          if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ] || [ ! -e "$bin" ]; then
-            install -Dm755 ${pkgs.melete}/bin/melete "$bin"
-            printf '%s' "$want" > "$stamp"
-            chown -R ${user}:users "$bindir"
-          fi
-        '';
-      };
-
-      # ~/.local/bin is only on login shells' PATH via ~/.profile; add it to
-      # bashrc so Hyprland terminal emulators (non-login) pick it up too.
-      habit.home.programs.bash.bashrcExtra = ''
-        export PATH="$HOME/.local/bin:$PATH"
+  config = {
+    # ── Reproducible baseline; self-update floats above it ───────────────────
+    # Seed cfg.binPath from the pinned launcher ONLY when the pin changes
+    # (stamp file). Between bumps the running binary is untouched, so Melete's
+    # self-update owns it and survives reboots.
+    system.activationScripts.meleteSeed = {
+      deps = [ "users" ];
+      text = ''
+        bindir="$(dirname ${lib.escapeShellArg cfg.binPath})"
+        bin=${lib.escapeShellArg cfg.binPath}
+        stamp="$bindir/.melete-pinned"
+        want="${pkgs.melete.version}"
+        if [ "$(cat "$stamp" 2>/dev/null)" != "$want" ] || [ ! -e "$bin" ]; then
+          install -Dm755 ${pkgs.melete}/bin/melete "$bin"
+          printf '%s' "$want" > "$stamp"
+          chown -R ${user}:users "$bindir"
+        fi
       '';
+    };
 
-      # Let the aoide user restart melete.service without auth — the self-update
-      # swap renames the new binary into place, then restarts the unit.
-      security.polkit.extraConfig = ''
-        polkit.addRule(function(action, subject) {
-          if (action.id === "org.freedesktop.systemd1.manage-units" &&
-              action.lookup("unit") === "melete.service" &&
-              subject.user === "${user}") {
-            return polkit.Result.YES;
-          }
-        });
-      '';
+    # ~/.local/bin is only on login shells' PATH via ~/.profile; add it to
+    # bashrc so Hyprland terminal emulators (non-login) pick it up too.
+    habit.home.programs.bash.bashrcExtra = ''
+      export PATH="$HOME/.local/bin:$PATH"
+    '';
 
-      # The harness. ConditionPathExists guards against crash-looping on a host
-      # where the binary/config have not been deployed yet (clean failure — the
-      # unit simply stays inactive until deployment, which is the documented
-      # cold-host state when enabled without secrets/network).
-      systemd.services.melete = {
-        description = "Melete — Mneme's companion AI harness";
-        after = [ "network-online.target" ];
-        wants = [ "network-online.target" ];
-        wantedBy = [ "multi-user.target" ];
-        unitConfig.ConditionPathExists = [
-          cfg.binPath
-          cfg.configFile
+    # Let the aoide user restart melete.service without auth — the self-update
+    # swap renames the new binary into place, then restarts the unit.
+    security.polkit.extraConfig = ''
+      polkit.addRule(function(action, subject) {
+        if (action.id === "org.freedesktop.systemd1.manage-units" &&
+            action.lookup("unit") === "melete.service" &&
+            subject.user === "${user}") {
+          return polkit.Result.YES;
+        }
+      });
+    '';
+
+    # The harness. ConditionPathExists guards against crash-looping on a host
+    # where the binary/config have not been deployed yet (clean failure — the
+    # unit simply stays inactive until deployment, which is the documented
+    # cold-host state when enabled without secrets/network).
+    systemd.services.melete = {
+      description = "Melete — Mneme's companion AI harness";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      unitConfig.ConditionPathExists = [
+        cfg.binPath
+        cfg.configFile
+      ];
+      serviceConfig = {
+        Type = "simple";
+        User = user;
+        Environment = [
+          "HOME=${home}"
+          "PATH=${home}/.local/bin:${home}/.cargo/bin:/etc/profiles/per-user/${user}/bin:/run/current-system/sw/bin"
         ];
-        serviceConfig = {
-          Type = "simple";
-          User = user;
-          Environment = [
-            "HOME=${home}"
-            "PATH=${home}/.local/bin:${home}/.cargo/bin:/etc/profiles/per-user/${user}/bin:/run/current-system/sw/bin"
-          ];
-          EnvironmentFile = "-${cfg.envFile}";
-          WorkingDirectory = cfg.workingDirectory;
-          ExecStart = "${cfg.binPath} --config ${cfg.configFile} serve";
-          Restart = "on-failure";
-          RestartSec = 10;
-          CPUWeight = 200;
-          OOMScoreAdjust = -500;
-          TimeoutStopSec = "16min";
-        };
+        EnvironmentFile = "-${cfg.envFile}";
+        WorkingDirectory = cfg.workingDirectory;
+        ExecStart = "${cfg.binPath} --config ${cfg.configFile} serve";
+        Restart = "on-failure";
+        RestartSec = 10;
+        CPUWeight = 200;
+        OOMScoreAdjust = -500;
+        TimeoutStopSec = "16min";
       };
-    })
-  ];
+    };
+  };
 }

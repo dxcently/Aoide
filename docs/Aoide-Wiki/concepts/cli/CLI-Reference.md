@@ -109,6 +109,9 @@ start at [[aoide-cli]] and the group pages linked below.
 - [[Apps-Commands|Apps-Commands]] — the `lyra apps` group: `apps list/show/
   publish`, the installed desktop apps with icons resolved to files. State:
   `song/stage/apps.json`.
+- [[Clipboard-Commands|Clipboard-Commands]] — the `lyra clipboard` group:
+  `clipboard delete/clear`, one cliphist history entry or all of them, with
+  the launcher's cached thumbnails.
 
 ## Related
 

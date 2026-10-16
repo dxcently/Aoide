@@ -53,7 +53,8 @@ pub fn dispatch(inv: &Invocation) -> Outcome {
     let meta = registry().get(&inv.path);
 
     let outcome = match meta {
-        Some(m) if m.implemented => m.invoke("aoide", inv),
+        // A stub closed to this door is refused by the gate, never answered as a stub.
+        Some(m) if m.implemented || !m.opens(inv.door) => m.invoke("aoide", inv),
         Some(m) => Outcome::not_implemented(cmd.clone(), m.gated).with_data(serde_json::json!({
             "path": m.path,
             "args": inv.args,
@@ -177,6 +178,18 @@ mod tests {
         assert_eq!(out.render(false).1, crate::output::exit::NOT_IMPLEMENTED);
         assert!(out.gated, "content.approve is a gated command");
         assert_eq!(out.data.unwrap()["args"][0], "/tmp/dusk");
+    }
+
+    /// Finding 3: a stub closed to a door is refused at that door, the same way
+    /// a closed implemented command is. Only an open stub answers 64.
+    #[test]
+    fn a_stub_closed_to_a_door_is_refused_there_and_an_open_stub_answers_64() {
+        let mcp = Invocation { door: Door::Mcp, ..inv(&["content", "register"], &["/tmp/dusk"]) };
+        let out = dispatch(&mcp);
+        assert_eq!(out.status, Status::Usage, "{out:?}");
+        assert!(out.message.contains("is not open to the mcp door"), "{}", out.message);
+        let cli = dispatch(&inv(&["content", "register"], &["/tmp/dusk"]));
+        assert_eq!(cli.status, Status::NotImplemented, "{cli:?}");
     }
 
     #[test]

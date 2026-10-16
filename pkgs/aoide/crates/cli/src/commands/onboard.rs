@@ -50,18 +50,12 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_onboard,
         brief: "First boot: register the clone, wire harness hooks, print the guide.",
+        doors: &[Door::Cli],
     ));
 }
 
 fn handle_onboard(inv: &Invocation) -> Outcome {
     let cmd = "onboard";
-    if inv.door != Door::Cli {
-        return Outcome::usage(
-            cmd,
-            "onboard is an interactive install flow; run `aoide onboard` from a terminal (not over this door)",
-        );
-    }
-
     let quiet = inv.flag_present("json");
     let say = |s: &str| {
         if !quiet {
@@ -315,12 +309,15 @@ fn resolve_harnesses(inv: &Invocation) -> Result<Vec<&'static str>, Outcome> {
 fn run_hooks_install(agent: &str, door: Door) -> Outcome {
     let path = vec!["hooks".to_string(), "install".to_string()];
     match crate::dispatch::registry().get(&path) {
-        Some(entry) => (entry.handler)(&Invocation {
-            path,
-            args: vec![agent.to_string()],
-            flags: BTreeMap::new(),
-            door,
-        }),
+        Some(entry) => entry.invoke(
+            "aoide",
+            &Invocation {
+                path,
+                args: vec![agent.to_string()],
+                flags: BTreeMap::new(),
+                door,
+            },
+        ),
         None => Outcome::error("onboard", "hooks.install is not registered (unexpected)"),
     }
 }

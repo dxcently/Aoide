@@ -43,7 +43,8 @@
 //! nix anywhere in this path — a terminal emulator is a shell concern, never
 //! `lyra`'s.
 
-use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, unix_ts};
+use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, unix_ts, wrapped_harness};
+use aoide_protocol::agents::agent_profile;
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::common::stage_error;
 use super::pending::audit_pending;
@@ -180,8 +181,8 @@ pub fn build_conduct_args(
     }
     args.push("--agent".to_string());
     args.push(agent.to_string());
-    args.push("--id".to_string());
-    args.push(id.to_string());
+    // One token, so an id that starts with `-` is never re-read as a flag.
+    args.push(format!("--id={id}"));
     if let Some(parent) = parent {
         args.push("--parent".to_string());
         args.push(parent.to_string());
@@ -212,14 +213,27 @@ pub fn build_conduct_args(
     args
 }
 
+/// Is `path` a regular file once symlinks are followed? A stat, never a read:
+/// `@/dev/stdin`, `@/proc/self/fd/0` and `@/dev/fd/0` name the MCP server's own
+/// transport, and reading one blocks the JSON-RPC loop until EOF.
+fn is_regular_file(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file())
+}
+
 /// Read `--instructions`'s value in its three accepted forms: `@<path>` (the
-/// file's own bytes, read here and now), `-` (this process's stdin, to EOF)
-/// and anything else (the operator's literal text, verbatim — no shell, no
-/// expansion, no escaping). Every failure is a taught error; nothing is
-/// spawned on one. The bytes are carried verbatim: they are the operator's,
-/// and this path never appends environment, tokens or credentials to them.
-fn read_instructions(spec: &str) -> Result<String, String> {
+/// file's own bytes, read here and now), `-` (this process's stdin, to EOF;
+/// the CLI door only, since over MCP stdin is the protocol channel, and the
+/// caller refuses it before this runs) and anything else (the operator's
+/// literal text, verbatim — no shell, no expansion, no escaping). Every
+/// failure is a taught error; nothing is spawned on one. The bytes are
+/// carried verbatim: they are the operator's, and this path never appends
+/// environment, tokens or credentials to them. Over a door that is not the
+/// terminal, `@<path>` must be a regular file, judged before any read.
+fn read_instructions(spec: &str, door: Door) -> Result<String, String> {
     if let Some(path) = spec.strip_prefix('@') {
+        if door != Door::Cli && !is_regular_file(std::path::Path::new(path)) {
+            return Err(format!("`--instructions @{path}` is not a regular file, and this door reads only one"));
+        }
         std::fs::read_to_string(path).map_err(|e| format!("reading --instructions @{path}: {e}"))
     } else if spec == "-" {
         use std::io::Read as _;
@@ -684,9 +698,11 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
 ///
 /// Only the MCP door is judged here. It is attested the way the CLI is: a
 /// resolver that walks this process's ancestry to a sealed session. A caller
-/// with such a session launches, as that session's child, and its `--prompt`
-/// is a parent-to-child send. A caller with none has its whole spawn held in
-/// `pending.json` for a human; nothing launches. Every other door launches.
+/// with such a session launches a registered harness (`wrapped_harness`) as that
+/// session's child, and its `--prompt` is a parent-to-child send. Any other argv
+/// is held whole in `pending.json` for a human, as is any spawn from a caller with
+/// no sealed session. Nothing launches over MCP except a proven harness. Every
+/// other door launches.
 fn session_spawn_with(
     inv: &Invocation,
     resolve_spawner: impl Fn(&[super::model::SessionRecord]) -> Option<String>,
@@ -711,8 +727,24 @@ fn session_spawn_with(
             Fix::None("leave --parent off"),
         )
         .with_fields(json!({ "reason": "parent-not-attested", "parent": parent })),
+        // Finding 0: an MCP caller launches only a registered harness the launcher
+        // walk proves. Any other argv waits in pending.json, shown in full, for a
+        // human to approve from the terminal. It is never refused and never launched here.
+        None if !mcp_launch_is_bare(&inv.args) => hold_whole_spawn(inv),
         None => launch_session(inv, Some(&spawner)),
     }
+}
+
+/// Over MCP, a harness launches unheld only when its argv names it by a bare
+/// name. Every token up to the last one whose basename is the harness's launch
+/// token must be slash-free, so `/tmp/x/claude`, `./claude` and `env /tmp/x/claude`
+/// wait for a human, and bare `claude` resolves through the server's own PATH.
+/// Over-holds on purpose: a slash anywhere in the launcher prefix holds.
+fn mcp_launch_is_bare(argv: &[String]) -> bool {
+    let Some(name) = wrapped_harness(argv) else { return false };
+    let Some(launch) = agent_profile(name).and_then(|p| p.launch.first().copied()) else { return false };
+    let Some(last) = argv.iter().rposition(|a| command_basename(a) == launch) else { return false };
+    argv[..=last].iter().all(|a| !a.contains('/'))
 }
 
 /// The longest `--id` a spawn from a door that cannot approve may name.
@@ -726,6 +758,7 @@ const SPAWN_ID_MAX: usize = 128;
 /// so the queue refuses an entry that does not pass it on approval too.
 pub(in crate::graph) fn spawn_id_is_plain(id: &str) -> bool {
     !id.is_empty()
+        && !id.starts_with('-')
         && id.len() <= SPAWN_ID_MAX
         && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
         && !is_reserved_id(id)
@@ -752,22 +785,28 @@ pub(in crate::graph) fn spawn_id_in_use(id: &str) -> bool {
             .is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id && canonical_state(&s.state) != "done"))
 }
 
+/// Does a record on the roster, live or done, already carry `id`?
+fn names_a_record(id: &str) -> bool {
+    load_stage::<SessionsFile>(&sessions_path()).is_ok_and(|f| f.sessions.iter().any(|s| s.session_id == id))
+}
+
 /// The refusal of a spawn from the MCP door whose `--id` is not a plain id, or
-/// names a session that is live. Judged before the door decides to launch or hold,
+/// names an existing record. Judged before the door decides to launch or hold,
 /// so what is queued, and what an approver is shown, is already a legal id.
+/// Any record is refused, not only a live one: the child would re-parent it.
 fn refuse_spawn_id(inv: &Invocation) -> Option<Outcome> {
     let id = inv.flags.get("id")?;
     let (what, why, reason) = if !spawn_id_is_plain(id) {
         (
-            format!("spawn not launched: `--id` is not a plain id ({SPAWN_ID_MAX} characters of A-Z a-z 0-9 . _ : -)"),
+            format!("spawn not launched: `--id` is not a plain id ({SPAWN_ID_MAX} characters of A-Z a-z 0-9 . _ : -, not leading -)"),
             "a spawn's id is shown to the human who approves it and spelled into the child's socket path, \
              so a door that cannot approve may only name a plain one",
             "bad-id",
         )
-    } else if spawn_id_in_use(id) {
+    } else if names_a_record(id) || spawn_id_in_use(id) {
         (
-            format!("spawn not launched: `--id {id}` names a session that is live"),
-            "the child would take over that session's record and control socket",
+            format!("spawn not launched: `--id {id}` names an existing session"),
+            "the child would register under that record: it would take over its parent, its spawner and its control socket",
             "id-in-use",
         )
     } else {
@@ -835,6 +874,9 @@ fn pin_held_inputs(args: &[String], mut flags: BTreeMap<String, String>) -> Resu
             return Err("`--instructions -` reads the approver's stdin, which a held spawn cannot pin".to_string());
         }
         if let Some(path) = spec.strip_prefix('@') {
+            if !is_regular_file(std::path::Path::new(&absolute(path))) {
+                return Err(format!("`--instructions @{path}` is not a regular file, and a held spawn pins only one"));
+            }
             let text = std::fs::read_to_string(absolute(path))
                 .map_err(|e| format!("reading --instructions @{path} at hold time: {e}"))?;
             if text.starts_with('@') || text == "-" {
@@ -1006,7 +1048,13 @@ pub(in crate::graph) fn launch_session(inv: &Invocation, spawner: Option<&str>) 
         );
     }
     let instructions = match (task.as_deref(), inv.flags.get("instructions")) {
-        (Some(_), Some(spec)) => match read_instructions(spec) {
+        (Some(_), Some(spec)) if spec == "-" && inv.door != Door::Cli => {
+            return Outcome::usage(
+                cmd,
+                "`--instructions -` reads stdin, which over this door is the protocol channel; pass @<file> or the text",
+            )
+        }
+        (Some(_), Some(spec)) => match read_instructions(spec, inv.door) {
             Ok(text) => Some(text),
             Err(e) => {
                 return Outcome::usage(cmd, e)
@@ -1779,8 +1827,15 @@ mod tests {
              | {} session hook --agent claude; exec timeout 5 cat",
             built_aoide_bin().display()
         );
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("claude"), format!("#!/bin/sh\n{child_cmd}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _path = EnvVars::save(&["PATH"]);
+        std::env::set_var("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()));
         let out = session_spawn(&mcp_spawn(
-            &["sh", "-c", child_cmd.as_str()],
+            &["claude"],
             &[("id", id), ("agent", "claude"), ("prompt", "say pong")],
         ));
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
@@ -1964,8 +2019,12 @@ mod tests {
         assert!(!marker.exists(), "nothing launched");
         assert!(ghost.exists(), "the live socket was not unlinked");
 
+        // Finding 6: a done record's id is not free over MCP either. The
+        // record stays where it is, and a fresh id is still held.
         let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "finished")]), |_| None);
-        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "an id that is done is free: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "id-in-use", "a done record's id is not free: {}", out.message);
+        let out = session_spawn_with(&mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "fresh-id")]), |_| None);
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "a fresh id is free: {}", out.message);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2674,7 +2733,7 @@ mod tests {
                 "foot".to_string(),
                 "sh".to_string(),
                 "-c".to_string(),
-                "/usr/bin/aoide conduct --spawned --agent claude --id win-1 -- claude".to_string(),
+                "/usr/bin/aoide conduct --spawned --agent claude --id=win-1 -- claude".to_string(),
             ]
         );
     }
@@ -2811,5 +2870,216 @@ mod tests {
         assert!(over.message.contains(&format!("{} characters", TASK_MAX + 1)), "the refusal names the length: {}", over.message);
         let bad = task_slug_refusal("spawn", "s1", "Not A Slug").expect("a non-slug is refused");
         assert!(bad.message.contains("not a legal mailbox name"), "{}", bad.message);
+    }
+
+    /// `--instructions -` reads this process's stdin. Over MCP stdin IS the
+    /// JSON-RPC transport. An unattested caller is held before any read; an
+    /// attested one launches, so that path must refuse before it reads.
+    #[test]
+    fn instructions_from_stdin_is_refused_over_mcp_before_any_read() {
+        let flags = [("task".to_string(), "t1".to_string()), ("instructions".to_string(), "-".to_string())];
+        let inv = Invocation {
+            path: vec!["spawn".into()],
+            args: vec!["claude".into()],
+            flags: flags.into_iter().collect(),
+            door: Door::Mcp,
+        };
+        let out = session_spawn_with(&inv, |_| Some("parent-id".to_string()));
+        assert_eq!(out.status, Status::Usage, "{out:?}");
+        assert!(out.message.contains("stdin"), "{}", out.message);
+    }
+
+    /// Finding 6: over MCP a spawn may name no existing record, done or live.
+    /// Re-using a done sibling's id would re-parent it under the caller and
+    /// stamp the caller as its attested spawner, which pulls it into the
+    /// caller's read scope. The refusal leaves both edges where they were.
+    #[test]
+    fn an_mcp_spawn_refuses_the_id_of_a_done_sibling_and_keeps_its_edges() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-done-sibling");
+        let mut done = session("done-sib", &root.to_string_lossy(), "done", "2026-10-12T09:00:00Z", Some("old-parent"));
+        done.attested_spawner = Some("old-parent".into());
+        write_stage(&sessions_path(), &SessionsFile { sessions: vec![done], ..Default::default() }).unwrap();
+
+        let inv = mcp_spawn(&["true"], &[("id", "done-sib")]);
+        let out = session_spawn_with(&inv, |_| Some("me-id".to_string()));
+        assert_eq!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("id-in-use"), "{out:?}");
+
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|r| r.session_id == "done-sib").expect("the record is still there");
+        assert_eq!(rec.parent_session_id.as_deref(), Some("old-parent"), "the parent edge did not move");
+        assert_eq!(rec.attested_spawner.as_deref(), Some("old-parent"), "the spawner stamp did not move");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 15: an id that starts with `-` is read as a flag. Over MCP it is
+    /// a bad id, and the child's argv binds the id as one `--id=<id>` token so
+    /// a bare id can never be re-parsed as a flag.
+    #[test]
+    fn a_dash_led_id_is_a_bad_id_and_the_child_argv_binds_it_as_one_token() {
+        assert!(!spawn_id_is_plain("--headless"), "a leading dash is never a plain id");
+        let inv = mcp_spawn(&["true"], &[("id", "--headless")]);
+        let out = refuse_spawn_id(&inv).expect("a dash-led id is refused");
+        assert_eq!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("bad-id"), "{out:?}");
+
+        let argv = build_conduct_args(false, "claude", "--headless", None, None, None, None, None, &["true".to_string()]);
+        assert!(argv.iter().any(|a| a == "--id=--headless"), "{argv:?}");
+        assert!(!argv.iter().any(|a| a == "--headless"), "a bare id is never a token of its own: {argv:?}");
+    }
+
+    /// Finding 12: over a door that is not the terminal, `@<path>` reads only a
+    /// regular file. The stdin-shaped spellings, and a symlink to one, name the
+    /// MCP server's own transport, so each is refused by a stat before any read,
+    /// on the attested task path and on the hold path alike.
+    #[cfg(unix)]
+    #[test]
+    fn an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-instructions-regular");
+        let link = root.join("stdin-link");
+        std::os::unix::fs::symlink("/dev/stdin", &link).unwrap();
+        let link = link.to_string_lossy().into_owned();
+        let brief = root.join("brief.md");
+        std::fs::write(&brief, "BRIEF").unwrap();
+        let brief = brief.to_string_lossy().into_owned();
+
+        for spec in ["@/dev/stdin", "@/proc/self/fd/0", "@/dev/fd/0", &format!("@{link}")] {
+            let err = read_instructions(spec, Door::Mcp).expect_err(spec);
+            assert!(err.contains("not a regular file"), "{spec}: {err}");
+            let pinned = pin_held_inputs(&["true".to_string()], BTreeMap::from([("instructions".to_string(), spec.to_string())]));
+            assert!(pinned.is_err(), "the hold path refuses {spec} too");
+
+            let inv = mcp_spawn(&["claude"], &[("task", "t1"), ("instructions", spec)]);
+            let out = session_spawn_with(&inv, |_| Some("parent-id".to_string()));
+            assert_eq!(out.status, Status::Usage, "{spec}: {out:?}");
+            assert_eq!(out.data.as_ref().and_then(|d| d["reason"].as_str()), Some("bad-instructions"), "{spec}: {out:?}");
+        }
+        assert_eq!(read_instructions(&format!("@{brief}"), Door::Mcp).as_deref(), Ok("BRIEF"), "a regular file still reads");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 0: over MCP, an attested caller may launch only a registered
+    /// harness the launcher walk proves. Any other argv (a shell, `aoide` itself,
+    /// `env` running a shell, an interpreter) is held whole for a human, shown in
+    /// full, and never launched from the MCP door.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_spawn_of_a_non_harness_argv_is_held_and_never_launched() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-non-harness-held");
+        let marker = root.join("ran");
+        let touch = format!("touch {}", marker.display());
+        let cases: [Vec<&str>; 4] = [
+            vec!["/bin/sh"],
+            vec!["bash", "-c", "x"],
+            vec!["aoide", "config", "set", "k", "v"],
+            vec!["/usr/bin/env", "sh", "-c", touch.as_str()],
+        ];
+        for (n, argv) in cases.iter().enumerate() {
+            let id = format!("held-argv-{n}");
+            let out = session_spawn_with(&mcp_spawn(argv, &[("id", id.as_str())]), |_| Some("orch".to_string()));
+            assert_eq!(out.status, Status::Ok, "{argv:?}: {}", out.message);
+            let data = out.data.as_ref().expect("data");
+            assert_eq!(data["state"], "pending", "{argv:?}: {data}");
+            assert_eq!(data["launched"], false, "{argv:?}");
+        }
+        let held = held_spawns();
+        assert_eq!(held.len(), cases.len(), "every non-harness argv is held: {held:?}");
+        for (entry, argv) in held.iter().zip(cases.iter()) {
+            let spawn = entry.spawn.as_ref().expect("a held spawn");
+            assert_eq!(spawn.args, *argv, "the held entry carries the whole argv");
+            assert!(entry.text.contains(argv[0]), "the approver is shown the command: {}", entry.text);
+        }
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!marker.exists(), "nothing launched");
+        let roster: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+        assert!(roster.sessions.iter().all(|r| !r.session_id.starts_with("held-argv-")), "no session registered");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 0, the approval: a held non-harness spawn launches only through
+    /// the CLI approve path, the human's door.
+    #[cfg(unix)]
+    #[test]
+    fn a_held_non_harness_spawn_launches_only_through_the_cli_approve_path() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(SPAWN_ENV);
+        let root = spawn_stage("spawn-non-harness-approve");
+        let marker = root.join("ran");
+        let touch = format!("touch {}", marker.display());
+        let out = session_spawn_with(
+            &mcp_spawn(&["sh", "-c", touch.as_str()], &[("id", "approve-me")]),
+            |_| Some("orch".to_string()),
+        );
+        assert_eq!(out.data.as_ref().unwrap()["state"], "pending", "{out:?}");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!marker.exists(), "held, so not yet run");
+
+        let approve = crate::graph::pending::pending_approve(&Invocation {
+            path: vec!["session".into(), "pending".into(), "approve".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::new(),
+            door: Door::Cli,
+        });
+        assert_eq!(approve.status, Status::Ok, "{}", approve.message);
+        let deadline = Instant::now() + Duration::from_millis(4000);
+        while Instant::now() < deadline && !marker.exists() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(marker.exists(), "the approved spawn launched");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Finding 0, the recognised harness: an attested MCP spawn of a registered
+    /// harness launches as before, so it is never held. A fake `claude` on a
+    /// private PATH stands in for the real program.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_spawn_of_a_registered_harness_still_launches() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["PATH", "AOIDE_CONDUCT_SPAWN_EXE", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let root = spawn_stage("spawn-harness-launches");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("claude"), "#!/bin/sh\nsleep 2\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &bin);
+        let out = session_spawn_with(&mcp_spawn(&["claude"], &[("id", "harness-one")]), |_| Some("orch".to_string()));
+        assert_ne!(out.data.as_ref().and_then(|d| d["state"].as_str()), Some("pending"), "a registered harness is not held: {out:?}");
+        assert!(held_spawns().is_empty(), "nothing was queued");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Residual ruling: over MCP a harness launches unheld only by a bare name,
+    /// resolved through the server's own PATH. A path to a harness is held whole.
+    #[cfg(unix)]
+    #[test]
+    fn an_mcp_harness_named_by_path_is_held_and_bare_claude_launches() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["PATH", "AOIDE_CONDUCT_SPAWN_EXE", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let root = spawn_stage("spawn-harness-by-path");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("claude"), "#!/bin/sh\nsleep 2\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PATH", &bin);
+        let by_path = bin.join("claude").to_string_lossy().into_owned();
+        let cases: [Vec<&str>; 3] = [vec![by_path.as_str()], vec!["./claude"], vec!["/usr/bin/env", by_path.as_str()]];
+        for (n, argv) in cases.iter().enumerate() {
+            let id = format!("by-path-{n}");
+            let out = session_spawn_with(&mcp_spawn(argv, &[("id", id.as_str())]), |_| Some("orch".to_string()));
+            assert_eq!(out.status, Status::Ok, "{argv:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().and_then(|d| d["state"].as_str()), Some("pending"), "{argv:?}: {out:?}");
+        }
+        assert_eq!(held_spawns().len(), cases.len(), "each path-named harness is held");
+        let bare = session_spawn_with(&mcp_spawn(&["claude"], &[("id", "bare-claude")]), |_| Some("orch".to_string()));
+        assert_ne!(bare.data.as_ref().and_then(|d| d["state"].as_str()), Some("pending"), "bare claude launches: {bare:?}");
+        assert_eq!(held_spawns().len(), cases.len(), "bare claude queued nothing");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

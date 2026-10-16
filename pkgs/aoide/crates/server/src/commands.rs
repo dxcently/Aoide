@@ -39,16 +39,10 @@ use serde_json::json;
 /// that blocks a connection until Ctrl-C makes no sense over MCP/A2A,
 /// exactly the reasoning `secrets watch` already established for the same
 /// shape of command.
-fn handle_events_tail(inv: &Invocation) -> Outcome {
-    match inv.door {
-        Door::Cli => Outcome::ok("events.tail", "following aoided's own events feed").with_data(json!({
-            "eventsPath": crate::daemon::events_path(&crate::daemon::socket_path()).to_string_lossy(),
-        })),
-        _ => Outcome::usage(
-            "events.tail",
-            "events tail is a foreground follow that blocks until Ctrl-C; run it from a terminal (not over this door)",
-        ),
-    }
+fn handle_events_tail(_inv: &Invocation) -> Outcome {
+    Outcome::ok("events.tail", "following aoided's own events feed").with_data(json!({
+        "eventsPath": crate::daemon::events_path(&crate::daemon::socket_path()).to_string_lossy(),
+    }))
 }
 
 /// `a2a serve`'s handler. On the Cli door this is only ever reached via
@@ -58,19 +52,11 @@ fn handle_events_tail(inv: &Invocation) -> Outcome {
 /// actually raise the server.
 fn handle_a2a_serve(inv: &Invocation) -> Outcome {
     let (bind, port) = crate::a2a::resolve_bind_port(inv);
-    match inv.door {
-        Door::Cli => Outcome::ok(
-            "a2a.serve",
-            format!("raising the A2A server on http://{bind}:{port}/"),
-        )
-        .with_data(json!({ "interactive": true, "bind": bind, "port": port })),
-        _ => Outcome::ok(
-            "a2a.serve",
-            "a2a serve is a long-running server; run `aoide a2a serve` from a terminal \
-             or the aoide-a2a systemd unit (not over this door)",
-        )
-        .with_data(json!({ "interactive": true, "door": "non-cli" })),
-    }
+    Outcome::ok(
+        "a2a.serve",
+        format!("raising the A2A server on http://{bind}:{port}/"),
+    )
+    .with_data(json!({ "interactive": true, "bind": bind, "port": port }))
 }
 
 /// `mail serve`'s handler (H1) — `handle_a2a_serve`'s exact shape, one
@@ -80,19 +66,11 @@ fn handle_a2a_serve(inv: &Invocation) -> Outcome {
 /// raise the adapter.
 fn handle_mail_serve(inv: &Invocation) -> Outcome {
     let port = crate::a2a::resolve_mail_adapter_port(inv);
-    match inv.door {
-        Door::Cli => Outcome::ok(
-            "mail.serve",
-            format!("raising the mail adapter on http://127.0.0.1:{port}/ (loopback only)"),
-        )
-        .with_data(json!({ "interactive": true, "port": port })),
-        _ => Outcome::ok(
-            "mail.serve",
-            "mail serve is a long-running server; run `aoide mail serve` from a terminal or the \
-             aoide-mail-adapter systemd unit (not over this door)",
-        )
-        .with_data(json!({ "interactive": true, "door": "non-cli" })),
-    }
+    Outcome::ok(
+        "mail.serve",
+        format!("raising the mail adapter on http://127.0.0.1:{port}/ (loopback only)"),
+    )
+    .with_data(json!({ "interactive": true, "port": port }))
 }
 
 fn handle_daemon(inv: &Invocation) -> Outcome {
@@ -134,6 +112,7 @@ pub fn register_events(r: &mut Registry) {
         handler: handle_events_tail,
         examples: ["events tail", "events tail --class secret", "events tail --class secret,audit --json"],
         brief: "Follow aoided's own events feed.",
+        doors: &[Door::Cli],
     ));
 }
 
@@ -190,11 +169,18 @@ mod tests {
         }
     }
 
+    fn tail_over(door: Door) -> Status {
+        let mut r = Registry::new();
+        register_events(&mut r);
+        let inv = inv(door, &[]);
+        r.get(&inv.path).expect("registered").invoke("aoide", &inv).status
+    }
+
     #[test]
     fn events_tail_is_cli_only() {
-        assert_eq!(handle_events_tail(&inv(Door::Cli, &[])).status, Status::Ok);
-        assert_eq!(handle_events_tail(&inv(Door::Mcp, &[])).status, Status::Usage);
-        assert_eq!(handle_events_tail(&inv(Door::A2a, &[])).status, Status::Usage);
+        assert_eq!(tail_over(Door::Cli), Status::Ok);
+        assert_eq!(tail_over(Door::Mcp), Status::Usage);
+        assert_eq!(tail_over(Door::A2a), Status::Usage);
     }
 
     #[test]

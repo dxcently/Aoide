@@ -14,10 +14,19 @@
 //! MCP tool list must never reorder). Nothing outside those `register()`
 //! functions enumerates commands.
 
+use crate::audit::Door;
 use crate::invocation::Invocation;
 use crate::output::{Fix, Kind, Outcome, Refusal};
 use crate::suggest::{closest, lead};
 use serde::Serialize;
+
+/// The doors a command answers when it declares none: the terminal, and the
+/// aoided socket the terminal forwards through. The daemon hop carries no door
+/// on the wire, so it must be in the default (CONTRACTS.md §3, "doors").
+pub const CLI_DOORS: &[Door] = &[Door::Cli, Door::Daemon];
+fn is_cli_doors(d: &&'static [Door]) -> bool {
+    *d == CLI_DOORS
+}
 
 /// Contract versions (CONTRACTS.md "Versioning").
 pub const SCHEMA_VERSION: &str = "0";
@@ -89,6 +98,10 @@ pub struct Flag {
     /// Flags that may not be given together with this one.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub conflicts: &'static [&'static str],
+    /// The doors this flag may arrive through; empty = every door the command
+    /// opens. Additive (CONTRACTS.md §3), skipped when empty.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub doors: &'static [Door],
 }
 
 impl Flag {
@@ -102,6 +115,7 @@ impl Flag {
         default: "",
         values: &[],
         conflicts: &[],
+        doors: &[],
     };
 
     /// The `<placeholder>` a valued flag shows in a synopsis: its `value`,
@@ -170,6 +184,11 @@ pub struct Command {
     /// (never invoked) for stub commands — see `commands/stubs.rs`.
     #[serde(skip)]
     pub handler: fn(&Invocation) -> Outcome,
+    /// The doors that may call this command. A command closed to a door is
+    /// refused there before its handler runs. Additive (CONTRACTS.md §3):
+    /// skipped when it is [`CLI_DOORS`].
+    #[serde(skip_serializing_if = "is_cli_doors")]
+    pub doors: &'static [Door],
     /// Reserved for future conditional availability (e.g. env-gated
     /// commands); not yet consulted by `dispatch()`. Defaults to `|| true`.
     #[serde(skip)]
@@ -196,8 +215,14 @@ impl Command {
         brief: "",
         section: "",
         handler: blank_handler,
+        doors: CLI_DOORS,
         available: || true,
     };
+
+    /// Whether `door` may call this command.
+    pub fn opens(&self, door: Door) -> bool {
+        self.doors.contains(&door)
+    }
 
     /// The dotted path used as an MCP tool name, e.g. `rice.lint`.
     pub fn dotted(&self) -> String {
@@ -290,6 +315,27 @@ impl Command {
     /// fields and no required positional passes untouched. A stub is never
     /// checked: it answers 64 whatever it was given.
     pub fn check(&self, bin: &str, inv: &mut Invocation) -> Result<(), Refusal> {
+        let me = format!("{bin} {}", self.path.join(" "));
+        let door = format!("{:?}", inv.door).to_lowercase();
+        if !self.opens(inv.door) {
+            let open: Vec<String> = self.doors.iter().map(|d| format!("{d:?}").to_lowercase()).collect();
+            return Err(Refusal::new(
+                Kind::Usage,
+                format!("`{me}` is not open to the {door} door"),
+                format!("a command answers only the doors it declares; this one declares {}", open.join(", ")),
+                Fix::Run(self.fix_line(bin, inv)),
+            ));
+        }
+        for f in self.flags.iter().filter(|f| !f.doors.is_empty() && !f.doors.contains(&inv.door)) {
+            if inv.flag_present(f.name) {
+                return Err(Refusal::new(
+                    Kind::Usage,
+                    format!("`--{}` is not open to the {door} door", f.name),
+                    format!("`{me}` takes `--{}` only from a terminal", f.name),
+                    Fix::Run(self.fix_line(bin, inv)),
+                ));
+            }
+        }
         if !self.implemented {
             return Ok(());
         }
@@ -297,7 +343,6 @@ impl Command {
             inv.flags.entry(f.name.to_string()).or_insert_with(|| f.default.to_string());
         }
         let usage = |what: String, why: String, fix: String| Refusal::new(Kind::Usage, what, why, Fix::Run(fix));
-        let me = format!("{bin} {}", self.path.join(" "));
 
         // A blank positional is no positional: required arguments are satisfied
         // by the words that say something (an optional one may come first).
@@ -946,10 +991,142 @@ mod tests {
         );
     }
 
+    // ── Door gate (CONTRACTS.md §3, "doors") ─────────────────────────────
+
+    /// A handler that records it ran, in a flag the calling test owns.
+    macro_rules! runner {
+        ($flag:ident, $handler:ident) => {
+            static $flag: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            fn $handler(_: &Invocation) -> Outcome {
+                $flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                Outcome::ok("runs", "ran")
+            }
+        };
+    }
+    fn took(flag: &std::sync::atomic::AtomicBool) -> bool {
+        flag.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+    fn at(door: Door, path: &[&str], flags: &[(&str, &str)]) -> Invocation {
+        Invocation {
+            path: path.iter().map(|s| s.to_string()).collect(),
+            args: vec![],
+            flags: flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            door,
+        }
+    }
+
+    #[test]
+    fn a_command_with_no_doors_declared_refuses_mcp_and_a2a_before_its_handler_runs() {
+        runner!(RAN, runs);
+        let c = cmd!(path: ["shut", "down"], summary: "Shut.", args: [], flags: [], gated: false, implemented: true, handler: runs);
+        for door in [Door::Mcp, Door::A2a] {
+            let o = c.invoke("aoide", &at(door, &["shut", "down"], &[]));
+            assert_eq!(o.status, Status::Usage, "{door:?}");
+            assert!(o.message.contains("is not open to the"), "{}", o.message);
+            assert!(!took(&RAN), "{door:?} must not reach the handler");
+        }
+        for door in [Door::Cli, Door::Daemon] {
+            let o = c.invoke("aoide", &at(door, &["shut", "down"], &[]));
+            assert_eq!(o.status, Status::Ok, "{door:?}");
+            assert!(took(&RAN), "{door:?} runs the handler");
+        }
+    }
+
+    #[test]
+    fn a_command_that_declares_only_cli_refuses_the_daemon_hop() {
+        runner!(RAN, runs);
+        let c = cmd!(path: ["secret", "add"], summary: "Add.", args: [], flags: [], gated: false, implemented: true, handler: runs, doors: &[Door::Cli]);
+        let o = c.invoke("aoide", &at(Door::Daemon, &["secret", "add"], &[]));
+        assert_eq!(o.status, Status::Usage);
+        assert!(!took(&RAN));
+        assert_eq!(c.invoke("aoide", &at(Door::Cli, &["secret", "add"], &[])).status, Status::Ok);
+    }
+
+    #[test]
+    fn a_flag_closed_to_mcp_refuses_every_value_it_can_arrive_with_even_false() {
+        runner!(RAN, runs);
+        let c = cmd!(
+            path: ["send"], summary: "Send.", args: [],
+            flags: [flag!("yes", "bool", "Yes.", doors: CLI_DOORS), flag!("submit", "bool", "Submit.")],
+            gated: false, implemented: true, handler: runs,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        );
+        for value in ["true", "false"] {
+            let o = c.invoke("aoide", &at(Door::Mcp, &["send"], &[("yes", value)]));
+            assert_eq!(o.status, Status::Usage, "--yes {value} over mcp");
+            assert!(o.message.contains("`--yes` is not open to the mcp door"), "{}", o.message);
+            assert!(!took(&RAN));
+        }
+        assert_eq!(c.invoke("aoide", &at(Door::Mcp, &["send"], &[("submit", "true")])).status, Status::Ok);
+        assert!(took(&RAN));
+        assert_eq!(c.invoke("aoide", &at(Door::Cli, &["send"], &[("yes", "true")])).status, Status::Ok);
+        assert!(took(&RAN));
+    }
+
+    #[test]
+    fn doors_default_to_the_terminal_and_the_daemon_hop_and_serialize_only_when_declared() {
+        let plain = cmd!(path: ["plain"], summary: "Plain.", args: [], flags: [], gated: false, implemented: true, handler: noop);
+        assert!(plain.opens(Door::Cli) && plain.opens(Door::Daemon));
+        assert!(!plain.opens(Door::Mcp) && !plain.opens(Door::A2a));
+        let v = serde_json::to_value(&plain).unwrap();
+        assert!(v.get("doors").is_none(), "{v}");
+
+        let open = cmd!(
+            path: ["open"], summary: "Open.", args: [], flags: [], gated: false, implemented: true, handler: noop,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        );
+        assert!(open.opens(Door::Mcp) && !open.opens(Door::A2a));
+        let v = serde_json::to_value(&open).unwrap();
+        assert_eq!(v["doors"], serde_json::json!(["cli", "daemon", "mcp"]));
+
+        let f = serde_json::to_value(&flag!("x", "bool", "d")).unwrap();
+        assert!(f.get("doors").is_none(), "{f}");
+        let f = serde_json::to_value(&flag!("x", "bool", "d", doors: CLI_DOORS)).unwrap();
+        assert_eq!(f["doors"], serde_json::json!(["cli", "daemon"]));
+    }
+
     #[test]
     #[should_panic(expected = "which no command has")]
     fn a_layout_naming_a_head_nobody_registers_is_refused() {
         let mut r = Registry::new();
         r.arrange(Layout { tagline: "", sections: &[("S", &[("ghost", "")])] });
+    }
+
+    /// Finding 9: `Command::invoke` is the one gate. A production call through a
+    /// registered handler skips the door check and the value validation, so no
+    /// production source outside this file may name `handler)(`. The one call in
+    /// this file is `invoke` itself. Each file's production half is the text
+    /// before its first `#[cfg(test)]`, the split the a2a tripwire uses too.
+    #[test]
+    fn no_production_source_calls_a_registered_handler_directly() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("a crate's src is readable") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut files = Vec::new();
+        for krate in std::fs::read_dir(&crates).expect("the crates directory is readable") {
+            let src = krate.expect("a directory entry").path().join("src");
+            if src.is_dir() {
+                walk(&src, &mut files);
+            }
+        }
+        let mut offenders = Vec::new();
+        for file in files.iter().filter(|f| !f.ends_with("protocol/src/registry.rs")) {
+            let text = std::fs::read_to_string(file).expect("a source file is readable");
+            let production = text.split("#[cfg(test)]").next().unwrap_or_default();
+            for (n, line) in production.lines().enumerate() {
+                if line.contains("handler)(") {
+                    offenders.push(format!("{}:{}", file.display(), n + 1));
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "a handler is called without its gate: {offenders:?}");
     }
 }

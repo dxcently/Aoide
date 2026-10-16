@@ -34,7 +34,10 @@ a config file). Paint-side — ships in `lyra`, not core.
   (`stage_for_song`, `stage_song_default`, `stage_pick`, `staged_song`;
   CONTRACTS.md §4's cover.json entry). The rule that a cover applies only
   while its `song` matches the staged song is read-side — one rule, in
-  `AoideWallpaper.qml`.
+  `AoideWallpaper.qml`. `pick_tiles` decides whether a still pick tiles
+  (`cover set --position`, else a `_tile` file name); `stage_pick` writes the
+  answer as `tile`/`position`, and the reader paints `tile` under that same
+  read-side rule.
 - `wallpaper_provider` — the wallpaper provider's bridge: `provider()` (the
   host's provider, off the word the `lyra` lane publishes at
   `song/stage/wallpaper-provider`; absent means the shell's own layer),

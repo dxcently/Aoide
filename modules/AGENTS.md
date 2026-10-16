@@ -22,17 +22,20 @@ by deleting both, with no other file in the tree aware it existed.
 ## A dendrite is a plain module
 
 A dendrite file is an ordinary NixOS module (CONTRACTS.md §2). It declares
-`aoide.<name>.*`, sets that flag `lib.mkDefault true` and guards its config with
-`aoide.<name>.enable`; what it sets under `habit.home` is its home half. The
+`aoide.<name>.*` options its body reads, and its body is unconditional; what it
+sets under `habit.home` is its home half. The
 constructor imports the files of what a host selected, and only those.
 
-## Flags default off
+## Selection is the switch
 
-Every dendrite (and every paint feature behind a toggle) gates on its own
-`aoide.<name>.enable`, and that default is `false` unless the module is
-core plumbing discovered unconditionally (`modules/nucleus/*`, which has no
-`mkIf` guard by design — see `options.nix`'s header). A dendrite ships
-disabled; a host opts in with one line in `hosts/<host>/default.nix`.
+Selecting a dendrite is what switches it on. No dendrite declares an
+`aoide.<name>.enable` of its own, and every body is unconditional. The six
+catalogue dendrites that set the core switch (`aoide.enable`) do it in their
+bodies, so no host writes it. The paint facts (`aoide.{quickshell,lyra,stylix}.enable`)
+are set only by their owning dendrite (see `options.nix`'s header). The option
+contract in `modules/nucleus/*` has no `mkIf` guard by design. A host opts in with one line in
+`hosts/<host>/default.nix`, and deselects a member with
+`habit.dendrites.<name>.enable = false`.
 
 ## Flat option assignment
 
@@ -46,8 +49,9 @@ for this reason, so the linter does not fight the style.
 
 `modules/nucleus/default.nix` names every
 file in its own directory, one line per file, in `LC_ALL=C` order, and nothing
-from outside it — the core is nothing selectable, so its own
-directory is what names it. The dendrites have no such file: the catalogue is
+from outside it — the contract is nothing selectable, so its own
+directory is what names it. What a host may deselect is not in it: the
+services are catalogue entries, members of the `nucleus` aggregation. The dendrites have no such file: the catalogue is
 the only list of them, in the `LC_ALL=C` order it is written in. Nothing walks
 the dendrite tree: a name with no catalogue line is unreachable, which is what
 shelving means.
@@ -70,7 +74,7 @@ this is a code-review discipline, not a build failure.
 ## What needs a docs update in the same commit
 
 - The owning directory's `README.md`/`AGENTS.md` when a new dendrite
-  lands, a toggle's default changes, a dendrite's shape changes, or a
+  lands, an option's default changes, a dendrite's shape changes, or a
   read-whitelist entry is added.
 - `CONTRACTS.md` §2 when the dendrite shape itself moves.
 - Root `AGENTS.md` house rule 5 if the whitelist itself grows — that's the

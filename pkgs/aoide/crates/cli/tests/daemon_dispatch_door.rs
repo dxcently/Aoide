@@ -200,7 +200,7 @@ fn a_cli_only_secrets_admin_command_refuses_with_the_door_hint_and_mutates_nothi
 
     assert_eq!(outcome["status"], "usage", "{outcome}");
     let message = outcome["message"].as_str().unwrap_or_default();
-    assert!(message.contains("CLI-only"), "{outcome}");
+    assert!(message.contains("is not open to the daemon door"), "{outcome}");
     assert_eq!(outcome["command"], "secrets.add", "{outcome}");
 
     let after = std::fs::read(&policy_file).ok();
@@ -610,13 +610,12 @@ fn a_wire_supplied_door_pid_is_discarded_not_walked() {
     let _ = std::fs::remove_file(&audit_log);
 }
 
-/// `mcp.serve`/`a2a.serve` never start a server inside the daemon process —
-/// both handlers' non-Cli branch just reports how to raise the real thing,
-/// and `run_cli`'s special-cased launch path (the ONLY place either command
-/// actually blocks) is never reached from `serve_daemon`'s plain `dispatch`
-/// call.
+/// `mcp serve` answers the daemon door with how to raise the real server, and
+/// never starts one inside the daemon process. `a2a serve` declares the
+/// terminal alone, so the registry refuses it over the daemon door before its
+/// handler runs (`run_cli`'s launch path is the only place it blocks).
 #[test]
-fn mcp_serve_and_a2a_serve_return_their_non_cli_outcomes() {
+fn mcp_serve_and_a2a_serve_answer_the_daemon_door_as_they_always_did() {
     let (stream, socket_path, events_path) = start_daemon("servers");
     let mut writer = stream.try_clone().unwrap();
     let mut reader = BufReader::new(stream);
@@ -625,9 +624,10 @@ fn mcp_serve_and_a2a_serve_return_their_non_cli_outcomes() {
     assert_eq!(mcp_outcome["status"], "ok", "{mcp_outcome}");
     assert!(mcp_outcome["data"]["hint"].is_string(), "{mcp_outcome}");
 
+    // `a2a serve` was default-door before the door policy, so the Daemon hop
+    // still answers its Ok hint; only the terminal launches the listener.
     let a2a_outcome = send_dispatch(&mut writer, &mut reader, &["a2a", "serve"], &[], &[]);
     assert_eq!(a2a_outcome["status"], "ok", "{a2a_outcome}");
-    assert_eq!(a2a_outcome["data"]["door"], "non-cli", "{a2a_outcome}");
 
     cleanup(&socket_path, &events_path);
 }

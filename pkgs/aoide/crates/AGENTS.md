@@ -30,6 +30,11 @@ else. An external subcommand (task #138 — `aoide foo` falling through to
 (`aoide-protocol::registry::Command` is entirely `&'static`), so it never
 reaches `Registry::insert` and the golden never sees it.
 
+The MCP-open set has a second golden per app crate,
+`mcp_open_paths_match_the_golden_snapshot`. Every `doors:` line that opens a
+command to MCP updates that list in the same commit; a command is closed to
+MCP until its own `doors` says otherwise.
+
 ## No cross-crate copying
 
 Every crate born from the Phase 2–9 restructure carries a shim-discipline
@@ -48,6 +53,13 @@ deadlocks locally. Each domain crate that touches process-global env
 (delegating to `aoide-test-support::env_lock()` where it's a dev-dependency)
 so its tests serialize against each other without needing to coordinate
 across crates in the same process.
+
+A test that runs a PATH-resolved program (`curl`, `sh`, `age`, a `Command::new`
+with a bare name) holds `env_lock()` for its whole body, and so does any test
+that reads `PATH` through production code. `PATH` is process-wide: a sibling
+test that installs a shim, or blanks `PATH` to prove a tool is absent, would
+otherwise make this one run the wrong program. A new `PATH` shim restores
+`PATH` from a drop guard, so a panic cannot leave the shim for the next test.
 
 A test that replaces a real binary with a shell shim on `PATH` gives that
 shim the real one's stdin manners. `post_json` writes the request body
@@ -111,6 +123,19 @@ to its declarations the day it is registered.
   There is one matcher; never write a second edit distance.
 - `Outcome::usage`/`Outcome::error` remain for callers not yet migrated; new
   refusals use `refuse`.
+
+## Doors: declared, checked once
+
+A command's doors are DECLARED on its registry entry (`doors`, default
+`[Cli, Daemon]`), and a flag's on the flag (`doors`, default: every door its
+command opens). `Command::check` (`aoide-protocol::registry`) is the one gate:
+`dispatch()`, MCP `tools/call` and A2A all pass through it before a handler
+runs, and a refusal is the registry's (`Kind::Usage`, "is not open to the
+{door} door"), never the handler's. A handler reads `inv.door` only to answer
+an open door differently (`local_daemon`'s `Door::Daemon => None`), never to
+refuse one. MCP's `tools/list` and A2A's card list exactly what their door
+opens, so a command is closed to both until its entry says otherwise, and
+each app crate's `mcp_open_paths_match_the_golden_snapshot` pins that set.
 
 ## Listing layout
 

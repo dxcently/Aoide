@@ -288,7 +288,7 @@ A dendrite with one implementation needs no artificial provider layer:
 The example assumes `pkgs.codex` exists in the chosen package set. ChatGPT's
 desktop package is included only on supported platforms with an available
 package definition. dxflake owns this dendrite like Kimi; it does not require
-`aoide.openai.enable` or an Aoide service just to install OpenAI applications.
+selecting the Aoide `openai` dendrite or an Aoide service just to install OpenAI applications.
 
 A provider is exclusive within one selection scope. A compositor capability
 chooses Hyprland or Niri; a desktop aggregation composes compositor,

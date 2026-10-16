@@ -115,7 +115,7 @@ are what "is this install healthy" means.
 
 **The declared path is the nix module.** On an AoideOS host,
 `pkgs/aoide/module/aoided.nix` writes the systemd **user** unit
-(`systemd.user.services.aoided`), and `modules/nucleus/aoided.nix` anchors it to
+(`systemd.user.services.aoided`), and `modules/dendrites/aoided.nix` anchors it to
 `aoide.sessionTarget`. Below is the portable equivalent — the same binary, the
 same seams, no nix. `aoide daemon` is *not* it: that command runs the one-shot
 skeleton self-check (`daemon::run`) and exits, while `aoided` is the resident

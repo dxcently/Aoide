@@ -2184,6 +2184,7 @@ mod tests {
 
     #[test]
     fn unknown_secret_is_denied_with_a_clear_reason() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("unknown");
         seed(&home, &[]);
         let (granted, result) = gate_outcome_as_result(resolve_gate(&home, "nope", "m", None, NOW, None));
@@ -2236,6 +2237,7 @@ mod tests {
 
     #[test]
     fn consumer_not_in_the_list_is_denied() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("wrongconsumer");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.consumers = vec!["m".to_string()];
@@ -2248,6 +2250,7 @@ mod tests {
 
     #[test]
     fn empty_consumers_list_means_any_consumer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("anyconsumer");
         let p = Policy::new("t", "scratch", "stored-value");
         seed(&home, &[p]);
@@ -2265,6 +2268,7 @@ mod tests {
     /// its origin. The backend never runs.
     #[test]
     fn a_remote_origin_caller_is_refused_on_a_default_secret() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("origin-deny");
         seed(&home, &[Policy::new("t", "scratch", "stored-value")]);
         let (granted, result) = gate_outcome_as_result(resolve_gate(
@@ -2284,6 +2288,7 @@ mod tests {
     /// the TOTP branch, so with no TOTP gate the value releases normally.
     #[test]
     fn allow_remote_origin_on_admits_a_remote_origin_caller() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("origin-optin");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.allow_remote_origin = true;
@@ -2303,6 +2308,7 @@ mod tests {
     /// authenticate local ones) both resolve exactly as before P-ID4.
     #[test]
     fn local_origin_and_unidentified_callers_are_untouched_by_the_origin_gate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("origin-local");
         seed(&home, &[Policy::new("t", "scratch", "stored-value")]);
 
@@ -2326,6 +2332,7 @@ mod tests {
     /// (the refusal is immediate, never `NeedsTotp`).
     #[test]
     fn origin_gate_sits_after_consumers_and_before_totp() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("origin-order");
         let mut listed = Policy::new("t", "scratch", "k");
         listed.consumers = vec!["m".to_string()];
@@ -2462,6 +2469,7 @@ mod tests {
 
     #[test]
     fn require_totp_is_unresolvable_with_no_enrollment_on_this_host() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-noenroll");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.require_totp = true;
@@ -2475,6 +2483,7 @@ mod tests {
 
     #[test]
     fn a_granted_resolve_fetches_through_the_named_backend() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("granted");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.consumers = vec!["m".to_string()];
@@ -2510,6 +2519,7 @@ mod tests {
 
     #[test]
     fn enrolled_and_correct_code_is_granted_and_runs_the_backend() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-granted");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.consumers = vec!["m".to_string()];
@@ -2529,6 +2539,7 @@ mod tests {
     /// see the wire-level `wait_false_...` test below for that half).
     #[test]
     fn enrolled_with_no_code_needs_totp_a_park_candidate_not_an_immediate_denial() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-missingcode");
         let p = Policy::new("t", "scratch", "stored-value");
         seed_enrolled(&home, p);
@@ -2540,6 +2551,7 @@ mod tests {
 
     #[test]
     fn enrolled_with_the_wrong_code_is_denied() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-wrongcode");
         let p = Policy::new("t", "scratch", "stored-value");
         let secret = seed_enrolled(&home, p);
@@ -2556,6 +2568,7 @@ mod tests {
 
     #[test]
     fn a_malformed_totp_code_is_denied_without_panicking() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-malformed");
         let p = Policy::new("t", "scratch", "stored-value");
         seed_enrolled(&home, p);
@@ -2568,6 +2581,7 @@ mod tests {
 
     #[test]
     fn the_same_code_used_twice_is_denied_the_second_time_replay() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-replay");
         // Empty consumers list = any consumer — so BOTH calls clear the
         // authorization check, isolating the replay/ledger behavior this
@@ -2598,6 +2612,7 @@ mod tests {
     /// only state connecting the two calls is the file on disk.
     #[test]
     fn a_spent_code_stays_spent_across_a_simulated_broker_restart() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-restart");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.consumers = vec!["m".to_string()];
@@ -2627,6 +2642,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn totp_denial_paths_never_invoke_the_backend() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("totp-marker");
         let marker = home.join("backend-invoked-marker");
         let mut p = Policy::new("t", "scratch", "stored-value");
@@ -2678,6 +2694,7 @@ mod tests {
     /// broker gate with no `totp` field on the wire at all.
     #[test]
     fn automation_open_and_listed_consumer_resolves_without_a_totp_code() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("automation-open");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.require_totp = true;
@@ -2699,6 +2716,7 @@ mod tests {
     /// denial is the "no TOTP enrollment" one).
     #[test]
     fn automation_open_but_unlisted_consumer_is_still_gated() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("automation-unlisted");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.require_totp = true;
@@ -2717,6 +2735,7 @@ mod tests {
     /// listed had it been open.
     #[test]
     fn automation_disabled_is_gated_exactly_like_before_this_field_existed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("automation-closed");
         let mut p = Policy::new("t", "scratch", "stored-value");
         p.require_totp = true;
@@ -2749,6 +2768,7 @@ mod tests {
 
     #[test]
     fn malformed_json_gets_a_reply_not_a_dropped_connection() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("malformed");
         let reply = handle_line(&home, &home.join("events.jsonl"), "not json at all", &ParkRegistry::new(), &mut Vec::new(), None);
         assert_eq!(reply["ok"], false);
@@ -2758,6 +2778,7 @@ mod tests {
 
     #[test]
     fn missing_op_is_a_clear_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("missingop");
         let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"secret":"t","consumer":"m"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
         assert_eq!(reply["ok"], false);
@@ -2767,6 +2788,7 @@ mod tests {
 
     #[test]
     fn unknown_op_is_a_clear_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("unknownop");
         let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"explode"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
         assert_eq!(reply["ok"], false);
@@ -2780,6 +2802,7 @@ mod tests {
     /// echoed back and no state written anywhere.
     #[test]
     fn status_of_a_fresh_home_is_an_empty_inventory_not_an_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("status-fresh");
         let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"status"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
         assert_eq!(reply["ok"], true, "{reply}");
@@ -2796,6 +2819,7 @@ mod tests {
     /// keep `policy.json`'s own order.
     #[test]
     fn status_reports_policy_metadata_field_by_field_and_never_the_backend_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("status-rows");
         let mut first = Policy::new("db-prod", "age", "SENTINEL-BACKEND-KEY");
         first.require_totp = true;
@@ -2838,6 +2862,7 @@ mod tests {
     /// the backend lock, and the reason it needs no such lock at all.)
     #[test]
     fn status_runs_no_backend_template_at_all() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("status-no-probe");
         let get_marker = home.join("get-ran");
         let has_marker = home.join("has-ran");
@@ -2869,6 +2894,7 @@ mod tests {
     /// \"SENTINEL\"…"), which is exactly why the refusal is generic.
     #[test]
     fn status_refuses_a_corrupt_policy_file_without_echoing_its_contents() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("status-corrupt");
         std::fs::write(crate::store::policy_path(&home), br#"[{"name":"SENTINEL-CREDENTIAL","requireTotp":"nope"}]"#).unwrap();
 
@@ -2884,6 +2910,7 @@ mod tests {
 
     #[test]
     fn resolve_with_missing_fields_is_malformed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("missingfields");
         let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"resolve","secret":"t"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
         assert_eq!(reply["ok"], false);
@@ -3370,6 +3397,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_full_put_overwrite_cycle_round_trips_through_handle_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("put-overwrite-wire");
         let out = home.join("out.txt");
         let p = Policy::new("t", "scratch", "k");
@@ -3404,6 +3432,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_absent_overwrite_field_behaves_exactly_like_false() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("put-overwrite-absent");
         let out = home.join("out.txt");
         let p = Policy::new("t", "scratch", "k");
@@ -3452,6 +3481,7 @@ mod tests {
     /// carries the same words the CLI's refusal does.
     #[test]
     fn a_wire_put_of_an_empty_or_blank_value_is_refused_and_stores_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("put-empty");
         crate::store::save_policies(&home, &[Policy::new("t", "scratch", "k")]).unwrap();
         for blank in ["", "\n", "  \t\n"] {
@@ -3522,6 +3552,7 @@ mod tests {
 
     #[test]
     fn put_with_a_missing_secret_field_is_malformed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("put-missingfields");
         let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","value":"x"}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(reply["ok"], false);
@@ -4112,6 +4143,7 @@ mod tests {
     /// redirection needed.
     #[test]
     fn pending_list_never_contains_a_value() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("pending-list");
         let parked = ParkRegistry::new();
 
@@ -4136,6 +4168,7 @@ mod tests {
     /// stamped value otherwise).
     #[test]
     fn pending_list_carries_the_stamped_peer_uid() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("pending-peer-uid");
         let parked = ParkRegistry::new();
 
@@ -4290,6 +4323,7 @@ mod tests {
     /// can't slip through on a lucky run.
     #[test]
     fn concurrent_resolve_with_the_same_code_never_grants_twice() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         for i in 0..20 {
             let home = tmp_home(&format!("race-resolve-{i}"));
             let mut p = Policy::new("t", "scratch", "stored-value");
@@ -4962,6 +4996,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn resolve_still_succeeds_when_the_events_feed_path_is_unwritable() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         if crate::home::running_as_root() {
             return;
         }

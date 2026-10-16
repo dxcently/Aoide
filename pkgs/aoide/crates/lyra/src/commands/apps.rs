@@ -66,7 +66,8 @@ pub fn register(r: &mut Registry) {
         flags: [flag!(
             "run",
             "bool",
-            "Keep song/stage/apps.json current until stopped: re-check every 2 s, rewrite only on change."
+            "Keep song/stage/apps.json current until stopped: re-check every 2 s, rewrite only on change.",
+            doors: &[Door::Cli]
         )],
         gated: false,
         implemented: true,
@@ -100,15 +101,6 @@ fn handle_show(inv: &Invocation) -> Outcome {
 
 fn handle_publish(inv: &Invocation) -> Outcome {
     let cmd = "apps.publish";
-    if inv.flag_present("run") && inv.door != Door::Cli {
-        return Outcome::refuse(
-            cmd,
-            Kind::Usage,
-            "`lyra apps publish --run` is CLI-only",
-            "it never returns, so over another door it would hold the call open forever",
-            Fix::Run("lyra apps publish".into()),
-        );
-    }
     let env = Env::from_process();
     let path = aoide_storage::fs::stage_dir().join(FILE);
     if inv.flag_present("run") {
@@ -647,8 +639,9 @@ mod tests {
             flags: BTreeMap::from([("run".to_string(), "true".to_string())]),
             door,
         };
-        let o = handle_publish(&inv(Door::Mcp));
+        let i = inv(Door::Mcp);
+        let o = crate::dispatch::registry().get(&i.path).expect("registered").invoke("lyra", &i);
         assert_eq!(o.status, Status::Usage);
-        assert!(o.message.contains("CLI-only"), "{}", o.message);
+        assert!(o.message.contains("is not open to the mcp door"), "{}", o.message);
     }
 }

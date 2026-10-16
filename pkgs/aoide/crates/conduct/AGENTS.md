@@ -142,6 +142,34 @@ in the message.
   `the_a2a_door_parks_for_the_parent_a_resolver_would_name_and_the_cli_delivers`
   and, through the real resolver,
   `the_real_resolver_attests_an_mcp_send_by_the_callers_sealed_ancestor`.
+- **An MCP read is clipped to the caller's own subtree.** `read_scope`
+  (`graph/send.rs`) gives the set the caller may see: its attested session
+  (`real_attested_sender`, never a claimed id) and every session under it by
+  `attested_parent_of` edges. `in_read_scope` tests membership. An unattested
+  caller gets the empty set and sees nothing. Off MCP the scope is `None` and
+  nothing is clipped. A forged `parent` without the spawn stamp adds nothing.
+  Each MCP reader cuts to the scope in its own way:
+  - The roster (`collect_roster`) and `session find` (`load_index`) keep the
+    scoped rows, name no remote parent (an ancestor on another node), and
+    carry no mail facts: a mailbox can be shared with a sibling outside the
+    scope, and mail read stays closed until it is scoped by the mailbox
+    registry.
+  - The graph (`view_as`) keeps the scoped sessions and hooks, and draws only
+    the projects a scoped session resolves to, with no path, root or host. It
+    folds no mesh node (no url, no far-node cache) and names no remote parent.
+    `build_graph_as` and `render_as` take the `reveal` switch that does this.
+  - `session watch` (`session_watch_as`) cuts its candidates to the scope
+    before it resolves, so an out-of-scope id, tail or petname refuses with
+    the text an unknown id gets, and never appears in an ambiguity list. A
+    `node/<query>` target is refused the same way, with no fetch.
+  Pinned by `an_mcp_caller_sees_its_own_attested_subtree_and_no_sibling_or_forged_child`,
+  `an_unattested_mcp_caller_sees_no_session_at_all`,
+  `an_mcp_find_row_carries_no_mail_from_a_mailbox_shared_with_a_sibling`,
+  `an_mcp_find_row_names_no_remote_parent`,
+  `an_mcp_roster_shows_the_callers_subtree_and_probes_no_node`,
+  `an_mcp_graph_names_no_project_path_node_url_or_far_cache_outside_the_scope`,
+  `an_mcp_watch_refuses_a_sibling_run_by_id_tail_or_petname_as_unknown` and
+  `an_mcp_watch_refuses_a_remote_target_as_unknown_and_never_fetches`.
 - **A door that cannot approve never moves a parent edge and never launches
   a command of its own choosing.** The attested rules read the unsealed
   `parentSessionId`, so rewriting it IS approving. Every path that sets it is
@@ -170,6 +198,17 @@ in the message.
   sealed session the whole spawn is held with `hold_whole` under the shared
   `mcp` source, its id fixed so the approved launch registers under the one the
   caller was told, and `pending approve` replays it with the approver's door.
+  An attested MCP spawn whose argv `wrapped_harness` does not recognise as a
+  registered harness, or whose harness is named by a path (`/tmp/x/claude`,
+  `./claude`, `env /tmp/x/claude`; `mcp_launch_is_bare`), is held whole the same
+  way, shown as its full escaped argv (a shell, `aoide`/`lyra`, `env sh`, an
+  interpreter, any unknown program). Only a bare harness name launches.
+  It is never refused outright and never launched by the MCP call; only
+  `pending approve` from a human door launches it. The accepted residual: a
+  recognised harness is an agent with its own shell, so a launched MCP spawn can
+  steer its own child the way Melete's `steer_run` does. `wrapped_harness` proves
+  the walked name (`claude`, `kimi`, `pi`, `eidolon`), not the file behind it, so
+  a file named `claude` anywhere passes; pinning a path is the open decision.
   `session_resurrect_with` is the same judgement for `resurrect`, because it
   too starts processes: attested, it revives; a door that cannot approve with
   no sealed caller (always the A2A door, which is never asked) holds
@@ -237,20 +276,28 @@ in the message.
   passes `PendingSpawn::is_known`. A held resurrect's `shown` plan is checked
   by `resurrect::approved_selection` before the take, so a ledger that moved
   since the hold refuses without consuming the entry. Hold-time pins: a held
-  spawn's `cwd` and a relative argv[0] are absolute, an `@file` is inlined, and
-  `--instructions -` is refused (`reason: unpinnable-input`). The one unpinned
+  spawn's `cwd` and a relative argv[0] are absolute, an `@file` is inlined
+  when it is a regular file (a stat that follows symlinks, so `@/dev/stdin`
+  and its kin are refused before any read), and `--instructions -` is refused
+  (`reason: unpinnable-input`). The one unpinned
   input is a bare argv[0], resolved through the approver's `PATH`. Pinned by
   `deny_with_a_stale_fingerprint_takes_nothing_and_the_listed_one_takes_its_entry`,
   `approve_refuses_a_held_spawn_that_no_hold_would_queue_and_keeps_it`,
   `a_held_resurrect_refuses_to_launch_a_plan_its_approver_was_not_shown`,
-  `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`
-  and `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin`.
+  `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`,
+  `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin` and
+  `an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read`.
 - **Spawn ids are distinct per call and never a socket that answers.**
   A minted id carries a process-wide counter, since the clock is seconds
   (`spawn_id`). `spawn_id_in_use` is a `connect` probe, so a socket file nothing
-  listens on does not hold an explicit `--id`. Pinned by
-  `two_holds_in_one_second_get_distinct_ids_and_both_queue` and
-  `a_stale_socket_file_does_not_hold_an_explicit_id`.
+  listens on does not hold an explicit `--id`. Over MCP an `--id` may name no
+  existing record at all, live or done (`refuse_spawn_id`, `reason:
+  id-in-use`), and a leading `-` is never a plain id. The child's argv binds
+  the id as one `--id=<id>` token. Pinned by
+  `two_holds_in_one_second_get_distinct_ids_and_both_queue`,
+  `a_stale_socket_file_does_not_hold_an_explicit_id`,
+  `an_mcp_spawn_refuses_the_id_of_a_done_sibling_and_keeps_its_edges` and
+  `a_dash_led_id_is_a_bad_id_and_the_child_argv_binds_it_as_one_token`.
 - **A parked send's source is derived by its door, never read off the caller.**
   `pending_origin` (`graph/send.rs`) is the one place an entry's `from` is
   chosen: the A2A door's own `--from` (`node:<name>` or `addr:<address>`, set

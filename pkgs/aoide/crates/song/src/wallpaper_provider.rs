@@ -358,7 +358,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         stage_song(&stage, "cadenza");
 
-        cover::stage_pick(std::path::Path::new("/tmp/clip.mp4"), Some("cadenza")).unwrap();
+        cover::stage_pick(std::path::Path::new("/tmp/clip.mp4"), Some("cadenza"), None).unwrap();
         assert_eq!(
             applying_pick(),
             Some((cover::KIND_VIDEO.to_string(), "/tmp/clip.mp4".to_string()))

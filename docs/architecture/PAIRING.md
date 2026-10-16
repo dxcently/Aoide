@@ -540,7 +540,7 @@ the full count-site checklist (git show 9c2d05c).
   Deployed behind a NEW flag, `aoide.a2a.pairingPopup` (default false) —
   the unit's desktop gate is unchanged, this flag is the deliberate
   opt-in on top of it (the gate is `aoide.a2a.enable && aoide.a2a.pairingPopup`),
-  modules' own "flags default off" house rule.
+  off by default.
 - **Task #135 P3' — the one-command collapse (M, "the command set can just
   be `aoide pair`").** `node.pair`, `node.pair.approve`, `node.pair.
   reject`, `node.pair.watch`, and `node.pending` DIE outright — hard

@@ -30,7 +30,8 @@ Orient through four tiers — 0: onboarding (this file + `docs/agent/README.md`
 3: network MCP, user-enabled only. The tier map lives in
 `docs/Aoide-Wiki/concepts/orchestration/Agent-Interface.md`; `aoide guide`
 prints it at runtime, and `aoide schema --json` / `lyra schema --json` is the
-machine-readable backstop at any tier.
+machine-readable backstop at any tier. MCP and A2A see only the commands that
+declare them; `schema --json` shows each command's `doors`.
 
 **Conducting — commanding other sessions (aoide's headline).** Every terminal
 is a conductable, tracked session; command another with `aoide send
@@ -75,16 +76,19 @@ and the staging/declarative/draft modes:
    `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
-   stylix,compositor,greeter}.enable`, `aoide.quickshell.config`,
-   `aoide.wallpaper.provider`) are declared
-   once in `modules/nucleus` and set by the lane that owns them;
+   stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`) are
+   declared once in `modules/nucleus`. An enable fact is set only by its owner:
+   the one dendrite that owns it sets it `true`, it is true exactly when that
+   dendrite is selected, and a host write that takes effect fails eval
+   (`modules/nucleus/options.nix`'s `mkFact`). A host's `mkDefault` that the
+   owner outranks is dropped without error and cannot change the value;
    `aoide.sessionTarget` is the same seam declared in the core module
    (`pkgs/aoide/module/options.nix`) and set by the lane that paints a
    session. This is a documented convention backed by code review; the
    selection tests prove unselected dendrites and songs are never read, and no
    automated coupling check exists yet.
-6. **Every operation flows through `aoided`:** one policy surface, one gate,
-   one audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`). Both doors
+6. **Every operation flows through `aoided`:** one policy surface, one gate
+   (`Command::check`, which also refuses a door a command does not declare), one audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`). Both doors
    inherit it.
 7. **Everything is a plugin.** A capability enters as ONE file (or one
    directory, when it needs more than one file) at a conventional path, and
@@ -143,8 +147,8 @@ pkgs/aoide/crates/AGENTS.md        (cross-crate: registry order, golden
                                      discipline, no cross-crate copying,
                                      per-crate tests only)
   pkgs/aoide/crates/<crate>/{README,AGENTS}.md   (this crate only)
-modules/AGENTS.md                  (cross-module: flags default off,
-                                     aggregate discipline, "_"-prefix shelving)
+modules/AGENTS.md                  (cross-module: the catalogue, aggregate
+                                     discipline, "_"-prefix shelving)
   modules/{nucleus,dendrites,aggregations,overrides}/{README,AGENTS}.md  (this dir only)
 ```
 

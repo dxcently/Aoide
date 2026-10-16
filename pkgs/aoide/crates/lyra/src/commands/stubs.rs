@@ -16,6 +16,7 @@ use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{arg, cmd, Registry};
 use serde_json::json;
+use aoide_protocol::Door;
 
 /// Never invoked — `dispatch()` returns the not-implemented envelope itself
 /// for any command with `implemented: false`, without calling `handler`.
@@ -36,6 +37,7 @@ pub fn register_rice_late(r: &mut Registry) {
         implemented: true,
         handler: handle_rice_declare,
         examples: ["rice declare moonlight"],
+        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["rice", "transpose"],

@@ -60,6 +60,7 @@ pub type DispatchFn = fn(&Invocation) -> Outcome;
 pub fn tool_list(registry: &Registry) -> Value {
     let tools: Vec<Tool> = registry
         .commands()
+        .filter(|c| c.opens(Door::Mcp))
         .map(|c| {
             let mut properties: BTreeMap<String, ToolProperty> = BTreeMap::new();
             let mut required: Vec<String> = Vec::new();
@@ -73,7 +74,7 @@ pub fn tool_list(registry: &Registry) -> Value {
                     required.push(a.name.to_string());
                 }
             }
-            for f in c.flags {
+            for f in c.flags.iter().filter(|f| f.doors.is_empty() || f.doors.contains(&Door::Mcp)) {
                 properties.insert(
                     f.name.to_string(),
                     ToolProperty { kind: json_type(f.ty).to_string(), description: f.description.to_string() },
@@ -105,7 +106,10 @@ fn json_type(ty: &str) -> &'static str {
 }
 
 /// Build an [`Invocation`] from an MCP `tools/call` (tool name + arguments).
-fn invocation_from_call(name: &str, arguments: &Value, registry: &Registry) -> Option<Invocation> {
+/// `None` when the registry names no such tool. `Some(Err)` is a usage refusal
+/// of the arguments, made before any command runs: a bool flag takes JSON
+/// `true` or `false` (see [`bool_flag_value`]).
+fn invocation_from_call(name: &str, arguments: &Value, registry: &Registry) -> Option<Result<Invocation, Outcome>> {
     let cmd = registry.commands().find(|c| c.dotted() == name)?;
     let path: Vec<String> = cmd.path.iter().map(|s| s.to_string()).collect();
 
@@ -119,20 +123,44 @@ fn invocation_from_call(name: &str, arguments: &Value, registry: &Registry) -> O
                 args.push(value_to_string(v));
             }
         }
-        // Flags by name.
+        // Flags by name. A JSON `false` is flag-absent, for every flag.
         for f in cmd.flags {
-            if let Some(v) = obj.get(f.name) {
-                flags.insert(f.name.to_string(), value_to_string(v));
-            }
+            let Some(v) = obj.get(f.name) else { continue };
+            let value = if f.ty == "bool" {
+                match bool_flag_value(v) {
+                    Ok(Some(on)) => on,
+                    Ok(None) => continue,
+                    Err(why) => return Some(Err(Outcome::usage(cmd.dotted(), format!("`--{}` {why}", f.name)))),
+                }
+            } else if *v == Value::Bool(false) {
+                continue;
+            } else {
+                value_to_string(v)
+            };
+            flags.insert(f.name.to_string(), value);
         }
     }
 
-    Some(Invocation {
+    Some(Ok(Invocation {
         path,
         args,
         flags,
         door: Door::Mcp,
-    })
+    }))
+}
+
+/// A bool flag's value off the MCP wire: `Some("true")` for JSON `true`, `None`
+/// for the falsy spellings that read as absent, and the reason for refusing any
+/// other value. A stringified `"true"` is refused rather than read as ON, so
+/// the flag's meaning never rests on a guess about the caller's spelling.
+fn bool_flag_value(v: &Value) -> Result<Option<String>, String> {
+    match v {
+        Value::Bool(true) => Ok(Some("true".to_string())),
+        Value::Bool(false) | Value::Null => Ok(None),
+        Value::String(s) if matches!(s.as_str(), "false" | "0" | "") => Ok(None),
+        Value::Number(n) if n.as_f64() == Some(0.0) => Ok(None),
+        other => Err(format!("takes JSON `true` or `false`, not {other}")),
+    }
 }
 
 /// `pub(crate)` (not `pub`) so [`crate::daemon`]'s own `dispatch` op
@@ -176,8 +204,11 @@ fn handle(req: &Value, registry: &Registry, dispatch: DispatchFn) -> Option<Valu
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
             match invocation_from_call(name, &arguments, registry) {
-                Some(inv) => {
-                    let outcome = dispatch(&inv);
+                Some(parsed) => {
+                    let outcome = match parsed {
+                        Ok(inv) => dispatch(&inv),
+                        Err(refusal) => refusal,
+                    };
                     let text = serde_json::to_string_pretty(&outcome).unwrap_or_default();
                     let result = ToolCallResult {
                         content: vec![ToolCallContent { kind: "text".to_string(), text }],
@@ -422,6 +453,7 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp],
             ..Command::BLANK
         });
         r.insert(Command {
@@ -436,27 +468,77 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+            ..Command::BLANK
+        });
+        r.insert(Command {
+            path: &["closed", "one"],
+            summary: "closed to mcp",
+            args: &[],
+            flags: &[],
+            gated: false,
+            implemented: true,
+            internal: false,
+            exit_codes: (),
+            examples: &[],
+            handler: fake_handler,
+            available: || true,
             ..Command::BLANK
         });
         r
     }
 
+    /// One tool per MCP-open command, and no tool for a command closed to MCP.
     #[test]
-    fn tool_list_is_derived_one_to_one_from_the_registry() {
+    fn tool_list_is_one_to_one_with_the_mcp_open_set() {
         let registry = fixture_registry();
         let tools = tool_list(&registry);
         let arr = tools["tools"].as_array().unwrap();
-        assert_eq!(arr.len(), registry.commands().count());
-        // Every command name appears as a tool name, and the gate surfaces.
-        let names: std::collections::HashSet<String> = arr
-            .iter()
-            .map(|t| t["name"].as_str().unwrap().to_string())
-            .collect();
-        for c in registry.commands() {
-            assert!(names.contains(&c.dotted()), "tool missing for {}", c.dotted());
-        }
+        let names: Vec<&str> = arr.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["foo.bar", "guide"]);
+        assert!(!names.contains(&"closed.one"));
         let bar = arr.iter().find(|t| t["name"] == "foo.bar").unwrap();
         assert_eq!(bar["annotations"]["gated"], true);
+    }
+
+    /// A flag closed to MCP is not advertised, and the open flag still is.
+    #[test]
+    fn tool_list_hides_the_flags_closed_to_mcp() {
+        use aoide_protocol::registry::{arg, cmd, flag, CLI_DOORS};
+        let mut r = Registry::new();
+        r.insert(cmd!(
+            path: ["send"],
+            summary: "Send.",
+            args: [arg!("text", "string", true, "Text.")],
+            flags: [
+                flag!("yes", "bool", "Yes.", doors: CLI_DOORS),
+                flag!("submit", "bool", "Submit.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        ));
+        let tools = tool_list(&r);
+        let props = tools["tools"][0]["inputSchema"]["properties"].as_object().unwrap();
+        assert!(props.contains_key("submit"), "{props:?}");
+        assert!(!props.contains_key("yes"), "{props:?}");
+    }
+
+    /// `tools/call` on a command closed to MCP is refused through the registry:
+    /// `isError` is set, the taught line names the door, and the handler never runs.
+    #[test]
+    fn tools_call_on_a_closed_command_is_refused_and_its_handler_never_runs() {
+        let req = json!({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": { "name": "closed.one", "arguments": {} }
+        });
+        static FIXTURE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+        let registry = FIXTURE.get_or_init(fixture_registry);
+        let resp = handle(&req, registry, |inv| FIXTURE.get().unwrap().get(&inv.path).unwrap().invoke("aoide", inv)).unwrap();
+        assert_eq!(resp["result"]["isError"], true, "{resp}");
+        let outcome: Value = serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert!(outcome["message"].as_str().unwrap().contains("is not open to the mcp door"), "{outcome}");
     }
 
     /// Ruling 3: a flag declared `required` (and not defaulted) is in the
@@ -477,7 +559,8 @@ mod tests {
             ],
             gated: false,
             implemented: true,
-            handler: fake_handler
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
         ));
         let tools = tool_list(&r);
         let required: Vec<&str> = tools["tools"][0]["inputSchema"]["required"]
@@ -487,6 +570,86 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(required, ["name", "key"]);
+    }
+
+    /// A JSON `false` is flag-absent for every flag, not only `send --yes`. A
+    /// `true` on the other bool still arrives.
+    /// Findings 13 and 14: a bool flag reads JSON `true` as ON. JSON `false`,
+    /// `"false"`, `"0"`, `0`, `""` and `null` read as absent, and every other
+    /// value is a usage refusal that names the flag, so no falsy spelling turns
+    /// a flag on and no stringified truth is taken on trust. The four flags are
+    /// the bool flags the MCP door opens today: `send --submit`, `spawn
+    /// --windowed` and `--undying`, `session find --all`.
+    #[test]
+    fn a_bool_flag_reads_only_json_true_and_refuses_every_other_value_by_name() {
+        use aoide_protocol::registry::{cmd, flag};
+        let mut r = Registry::new();
+        r.insert(cmd!(
+            path: ["thing", "go"],
+            summary: "Go.",
+            args: [],
+            flags: [
+                flag!("submit", "bool", "Submit."),
+                flag!("windowed", "bool", "Window."),
+                flag!("undying", "bool", "Stay."),
+                flag!("all", "bool", "Everything."),
+                flag!("text", "string", "Text.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        ));
+        let absent = [json!(false), json!("false"), json!("0"), json!(0), json!(0.0), json!(""), Value::Null];
+        let refused = [json!("true"), json!("yes"), json!(1), json!(2.5), json!([]), json!({})];
+        for name in ["submit", "windowed", "undying", "all"] {
+            for v in &absent {
+                let inv = invocation_from_call("thing.go", &json!({ name: v }), &r)
+                    .expect("the tool exists")
+                    .unwrap_or_else(|e| panic!("`{name}` = {v} is absent, not refused: {e:?}"));
+                assert!(!inv.flags.contains_key(name), "`{name}` = {v} must read as absent: {:?}", inv.flags);
+            }
+            let on = invocation_from_call("thing.go", &json!({ name: true }), &r).unwrap().unwrap();
+            assert_eq!(on.flags.get(name).map(String::as_str), Some("true"), "`{name}` = true is ON");
+            for v in &refused {
+                let err = invocation_from_call("thing.go", &json!({ name: v }), &r)
+                    .expect("the tool exists")
+                    .expect_err(&format!("`{name}` = {v} is not a bool"));
+                assert_eq!(err.status, Status::Usage, "{err:?}");
+                assert!(err.message.contains(&format!("`--{name}`")), "the refusal names the flag: {}", err.message);
+                assert!(err.message.contains("true") && err.message.contains("false"), "{}", err.message);
+            }
+        }
+        let text = invocation_from_call("thing.go", &json!({ "text": "false" }), &r).unwrap().unwrap();
+        assert_eq!(text.flags.get("text").map(String::as_str), Some("false"), "a string flag keeps its own spelling");
+    }
+
+    #[test]
+    fn a_false_bool_argument_is_flag_absent_for_every_flag() {
+        use aoide_protocol::registry::{cmd, flag};
+        let mut r = Registry::new();
+        r.insert(cmd!(
+            path: ["thing", "go"],
+            summary: "Go.",
+            args: [],
+            flags: [
+                flag!("yes", "bool", "Approve."),
+                flag!("undying", "bool", "Stay.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: fake_handler,
+            doors: &[Door::Cli, Door::Daemon, Door::Mcp]
+        ));
+        let inv = invocation_from_call(
+            "thing.go",
+            &json!({ "yes": false, "undying": true }),
+            &r,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!inv.flags.contains_key("yes"), "{:?}", inv.flags);
+        assert_eq!(inv.flags.get("undying").map(String::as_str), Some("true"));
     }
 
     #[test]
@@ -588,20 +751,24 @@ mod tests {
         )
         .unwrap();
 
-        let sent = tools_call("send", json!({ "text": "run it", "id": id, "submit": true, "yes": true }));
+        // Without `--yes` the send parks: the MCP door cannot approve it.
+        let sent = tools_call("send", json!({ "text": "run it", "id": id, "submit": true }));
         assert_eq!(sent["data"]["state"], "pending", "{sent}");
-        assert_eq!(sent["data"]["approvalRefused"], true, "{sent}");
-        assert!(
-            sent["message"].as_str().unwrap().contains(aoide_conduct::graph::DOOR_CANNOT_APPROVE),
-            "{sent}"
-        );
+        assert_eq!(sent["data"]["gate"], "pending", "{sent}");
         assert!(
             matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
             "a refused approval reaches nothing"
         );
 
+        // `yes` is closed to MCP: the registry refuses it before the handler.
+        let forced = tools_call("send", json!({ "text": "run it", "id": id, "yes": true }));
+        assert_eq!(forced["status"], "usage", "{forced}");
+        assert!(forced["message"].as_str().unwrap().contains("`--yes` is not open to the mcp door"), "{forced}");
+
+        // `session pending approve` is closed to MCP: refused, the entry stays held.
         let approved = tools_call("session.pending.approve", json!({ "id": "0" }));
-        assert_eq!(approved["data"]["reason"], "door-cannot-approve", "{approved}");
+        assert_eq!(approved["status"], "usage", "{approved}");
+        assert!(approved["message"].as_str().unwrap().contains("is not open to the mcp door"), "{approved}");
         let raw: Value = serde_json::from_str(&std::fs::read_to_string(aoide_conduct::graph::pending_path()).unwrap()).unwrap();
         assert_eq!(raw["pending"].as_array().unwrap().len(), 1, "the entry stays held");
 

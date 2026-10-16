@@ -10,7 +10,7 @@ secrets serve`/`exec`/`add`/`rm`/`grant`/`revoke`, registered into
 live, plus the backend-preset docs below. P-V4 was deployment:
 `broker::bind_socket` chmods the socket to `0660` on bind, and the
 "Deployment" section below covers both the nix module
-(`modules/nucleus/secrets.nix`) and the non-nix install path. **P-V4c
+(`modules/dendrites/aoide-secrets.nix`) and the non-nix install path. **P-V4c
 (this commit) is the backend build-out**: a built-in `file` backend
 (plain `0600` files under the secrets home, expressed entirely through the
 template mechanism — see "Backend presets" below), a `{home}` template
@@ -234,7 +234,7 @@ already-policied secret. Anyone else is refused with the taught line
 `sudo -u aoide-secrets aoide secrets put <name> …`, the refusal is audited,
 and the store is untouched. `put` carries NO `consumer` field and is NEVER
 gated by `requireTotp` (deliberate): `secrets put` is CLI-only
-(`commands::handle_secrets_put`'s `require_cli` gate, same as the
+(`commands::handle_secrets_put`'s the door gate gate, same as the
 policy-admin quartet) and runs as the secrets uid's own operator (`sudo -u
 aoide-secrets aoide secrets put …`, same admin-command precedent as
 `add`/`grant` — "Admin commands" below) — there is no separate agent-facing "consumer" identity to
@@ -863,7 +863,7 @@ while a crate lock is held (see below).
 
 **Why a third destination, and why it lives beside the socket rather than
 under the operator's home.** The deployed broker unit runs with
-`ProtectHome=true` (`modules/nucleus/secrets.nix`) — its best-effort mirror
+`ProtectHome=true` (`modules/dendrites/aoide-secrets.nix`) — its best-effort mirror
 into `~/Aoide/log` silently fails there, so `secrets watch` (below) received
 ZERO event lines in the field and fell back to its 30s pending-reconcile
 tick for every popup (found live on yomi-strix, 2026-08-23). A path beside
@@ -1039,7 +1039,7 @@ In practice this trails the broker's own write by at most one 1s poll tick.
 wall-clock delta itself. **Never in this shape, ever: a secret value** —
 same rule as every other wire/log shape in this crate.
 
-`aoide secrets watch` is CLI-only (`require_cli`, same door gate as
+`aoide secrets watch` is CLI-only (the door gate, same door gate as
 `pending`/`approve`/`dismiss`) but NOT an admin/euid command — it touches no
 `policy.json`, only the broker-owned events feed (read-only, P-G4, task #77
 — see "Broker notifications" above) and the broker's in-memory registry
@@ -1302,7 +1302,7 @@ secret (base32): <base32>
   promises not to.
 - The URI + base32 secret print DIRECTLY to stdout, never through the
   `Outcome` envelope (this crate's `AGENTS.md`) — `commands::
-  handle_secrets_enroll` only gates the door (CLI-only, same `require_cli`
+  handle_secrets_enroll` only gates the door (CLI-only, same the door gate
   as the CRUD quartet) and records the launch with a secret-free
   `Outcome`; the real work is `enroll::run`, called from `aoide-cli`'s
   `special` hook exactly the way `secrets serve`/`exec` already are
@@ -1503,7 +1503,7 @@ operator -> aoide secrets migrate db-prod --backend age
 a `put` already runs under, so a migrate racing a live `put`/`exec` against
 the same secret through a concurrently-running broker now serializes
 behind that lock instead of racing it. Only when NO daemon is listening
-does it fall back to the direct-home path — `require_cli` +
+does it fall back to the direct-home path — the door gate +
 `require_admin_identity` gate it before anything touches `policy.json`,
 same euid-ownership refusal (root explicitly included) the whole
 CRUD/`set-totp`/`automate`/`expose` quartet-plus already holds, reading/
@@ -1594,7 +1594,7 @@ secrets exist, and what are their policies?** It is the read seam the
 broker never had — `resolve` reads a VALUE by name, `pending` lists parked
 asks, and nothing enumerated `policy.json`. The command is operator-side
 over the socket exactly like `put`/`exec`/`pending` (`commands::
-handle_secrets_status`: CLI-only via `require_cli`, deliberately NOT the
+handle_secrets_status`: CLI-only via the door gate, deliberately NOT the
 `require_admin_identity` euid guard — it writes nothing, and the operator
 uid that runs it is usually not the uid that could read the secrets home
 anyway).
@@ -1706,10 +1706,10 @@ making the broker process's effective group `aoide-secrets-access` so every
 file it creates (the socket included) inherits that gid — is deployment's
 job, not this crate's: the code sets mode bits, deployment sets identity.
 
-### The nix module (`modules/nucleus/secrets.nix`)
+### The nix module (`modules/dendrites/aoide-secrets.nix`)
 
-For an Aoide-managed NixOS host: `aoide.secrets.enable = true;` (default
-`false`) provisions the `aoide-secrets`/`aoide-secrets-access` groups, the
+For an Aoide-managed NixOS host, selecting the `aoide-secrets` dendrite (a
+nucleus member, so every nucleus host has it) provisions the `aoide-secrets`/`aoide-secrets-access` groups, the
 `aoide-secrets` system user (no login shell, home `/var/lib/aoide-secrets`,
 `createHome = false` — `StateDirectory` below owns it instead), and a
 SYSTEM `aoide-secrets-serve.service` (`Type = "simple"` — `secrets serve` blocks
@@ -1718,8 +1718,8 @@ forever, so this is right from day one, no oneshot detour; anchored to
 `StateDirectory = "aoide-secrets"` (`0700`), `RuntimeDirectory = "aoide-secrets"`
 (`0750`), and `AOIDE_SECRETS_HOME`/`AOIDE_SECRETS_SOCKET` set explicitly.
 `aoide.secrets.members` (default `[]`) is the list of user names added to
-`aoide-secrets-access` — enable alone grants nobody access until a host names
-its operator here. No sudo rule is shipped; admin commands run as the secrets
+`aoide-secrets-access` — the dendrite alone grants nobody access until a host
+names its operator here. No sudo rule is shipped; admin commands run as the secrets
 user by hand (below). The service's `path` also carries `bash`+`coreutils`
 (sh/cat/mkdir/install for the built-in `file` backend's own templates — a
 systemd unit's default `PATH` carries no `sh`, so an un-hardened unit can
@@ -1772,7 +1772,7 @@ the nix module's `PATH` the same way `bash`/`coreutils` were absent before
 the fix documented two paragraphs up. Since `age` is now `secrets add`'s
 DEFAULT backend, a fresh nix-deployed broker will fail every `age`-backed
 `get`/`set`/mint with the taught "`age`/`age-keygen` CLI on PATH" error
-(`backend::missing_age_binary_hint`) until `modules/nucleus/secrets.nix`'s
+(`backend::missing_age_binary_hint`) until `modules/dendrites/aoide-secrets.nix`'s
 `path` gains `pkgs.age` in a follow-up commit — the SAME fix shape the
 `bash`/`coreutils`/`qrencode` additions above already are, just not yet
 made for this new default.
@@ -2309,14 +2309,14 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   `serve`/`exec`/`enroll` are door-hint handlers (the real work happens in
   `cli`'s `special` hook, same pattern as `a2a serve`/`conductor`); `add`/
   `rm`/`grant`/`revoke`/`set-totp`/`automate`/`expose` are policy-CRUD
-  handlers gated the same way (`require_cli`) — a non-CLI door (MCP/A2A/
+  handlers gated the same way (the door gate) — a non-CLI door (MCP/A2A/
   Daemon) gets the door-hint `Outcome` before `policy.json`/`totp.secret` is
   ever touched, closing off a self-escalation path (`secrets grant <secret>
   <itself>`, or a hostile re-enrollment, from an already-connected agent).
   Those same seven, plus `migrate`, route through `admin_dispatch` (task
   #79) — the broker socket FIRST, `require_admin_identity` (P-V4f) gating
   the direct-write fallback ONLY (reached ONLY when nothing is listening,
-  `client::AdminError::NoSocket`) right after `require_cli` — the wrong
+  `client::AdminError::NoSocket`) right after the door gate — the wrong
   effective uid gets refused before the file is ever touched either way,
   see "Admin commands" and "Admin mutations over the socket" above. **`add`'s `--backend` flag is
   now OPTIONAL, defaulting to `age` when omitted (P-G1, task #70, DEFAULT
@@ -2324,7 +2324,7 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   explicit `--backend` still wins, and an ALREADY-recorded policy's
   `backend` field is never touched by this flip, only what a brand-new
   `add` records. `put` (P-V4c) is gated
-  the SAME way (`require_cli`) but is NOT special-cased like `exec`/
+  the SAME way (the door gate) but is NOT special-cased like `exec`/
   `enroll` — see `commands.rs`'s own module doc for why its wire reply
   carrying no value at all makes that unnecessary. `set-totp` (P-V4e)
   follows `put`'s shape too — a plain handler, no wire, no value. `automate`/
@@ -2332,11 +2332,11 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   wire op of their own (both only edit `policy.json`, the same file
   `resolve`/`put` already read), same idempotent "unchanged" reporting.
   `pending`/`approve`/`dismiss` (P-N2, appended newest, LAST in
-  `register()`) are `require_cli`-only like `put` — deliberately NOT
+  `register()`) are the door gate-only like `put` — deliberately NOT
   `require_admin_identity`-gated, since they never touch `policy.json`,
   only the broker's in-memory `ParkRegistry` over the socket, the same
   operator-side-but-not-admin-side distinction `put`/`exec` already draw.
-  `status` joins that same operator-side group (CLI-only via `require_cli`,
+  `status` joins that same operator-side group (CLI-only via the door gate,
   NOT `require_admin_identity`-gated): the value-free inventory read, over
   the broker's own `status` op, with no direct-home fallback and no
   locally-fabricated rows.

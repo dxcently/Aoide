@@ -2,9 +2,9 @@
 # assistant, pkgs/claude-code: nixpkgs' recipe pinned ahead).
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - Guarded on aoide.claude-code.enable (default false — shipped but off).
+#   - Selection is the switch: no enable flag; the body runs when habit selects it.
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (see hosts/yomi-strix/default.nix).
+#   - Select with one line in hosts/ (see hosts/yomi-strix/default.nix).
 #
 # Split out of devtools.nix (2026-08-02): a tool graduates to its own dendrite
 # the moment a host needs to toggle it independently of the rest of the
@@ -20,19 +20,14 @@
 #     doesn't care where the binary comes from.
 
 {
-  config,
   lib,
   pkgs,
   ...
 }:
 {
-  options.aoide.claude-code.enable = lib.mkEnableOption "the Claude Code CLI (agentic AI coding assistant)";
 
-  config = lib.mkMerge [
-    { aoide.claude-code.enable = lib.mkDefault true; }
-    (lib.mkIf config.aoide.claude-code.enable {
-      nixpkgs.config.allowUnfree = true;
-      environment.systemPackages = [ pkgs.claude-code ];
-    })
-  ];
+  config = {
+    nixpkgs.config.allowUnfree = true;
+    environment.systemPackages = [ pkgs.claude-code ];
+  };
 }

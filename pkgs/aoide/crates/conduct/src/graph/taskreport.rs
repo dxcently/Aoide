@@ -497,7 +497,7 @@ fn file_report(rec: &SessionRecord, slug: &str, mailbox: &str) -> Result<Option<
         flags,
         door: Door::Daemon,
     };
-    let outcome: Outcome = (command.handler)(&inv);
+    let outcome: Outcome = command.invoke("aoide", &inv);
     if outcome.status != Status::Ok {
         return Err(format!("mail.send refused: {}", outcome.message));
     }

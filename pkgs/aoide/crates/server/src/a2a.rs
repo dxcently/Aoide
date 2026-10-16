@@ -184,7 +184,7 @@ const MAIL_ADAPTER_AUDIT_TAG: &str = "mail-adapter";
 
 /// Resolve the bind address + port for `a2a serve`: `--bind`/`--port` flags →
 /// `AOIDE_A2A_BIND`/`AOIDE_A2A_PORT` env (set by the `aoide-a2a` systemd unit,
-/// `modules/nucleus/aoided.nix`) → the loopback defaults
+/// `modules/dendrites/aoided.nix`) → the loopback defaults
 /// (`aoide.a2a.bindAddress`/`aoide.a2a.port`, `127.0.0.1`/`8710`).
 pub fn resolve_bind_port(inv: &Invocation) -> (String, u16) {
     let bind = inv
@@ -221,7 +221,7 @@ pub fn resolve_mail_adapter_port(inv: &Invocation) -> u16 {
 /// Resolve `aoide.a2a.spawnAgent`: the command `message/send`'s SPAWN path
 /// conducts for a client that names no known session (or explicitly asks to
 /// spawn). `--spawn-agent` flag → `AOIDE_A2A_SPAWN_AGENT` env (set by the
-/// `aoide-a2a` systemd unit, `modules/nucleus/aoided.nix`) → default `""`
+/// `aoide-a2a` systemd unit, `modules/dendrites/aoided.nix`) → default `""`
 /// (empty = spawning disabled — [`decide_send_action`] returns a structured
 /// error rather than launching anything). The client NEVER supplies this
 /// command — only the operator, via the rebuild-gated nix option
@@ -547,8 +547,8 @@ pub fn agent_card_from_commands<'a>(
     bind: &str,
     port: u16,
 ) -> Value {
-    let skills: Vec<AgentSkill> = commands
-        .filter(|c| c.implemented)
+    let mut skills: Vec<AgentSkill> = commands
+        .filter(|c| c.implemented && c.opens(Door::A2a))
         .map(|c| {
             let dotted = c.dotted();
             let top_level = c.path.first().copied().unwrap_or("");
@@ -560,6 +560,20 @@ pub fn agent_card_from_commands<'a>(
             }
         })
         .collect();
+    // A2A runs no registry command, so no command opens to its door. The two
+    // things `message/send` reaches are described here by hand instead: the
+    // session inject and the harness spawn, neither through the registry.
+    for (name, description) in [
+        ("send", "Inject a message into a conducted session. It is held for approval unless the caller is that session's attested parent or sibling."),
+        ("spawn", "Start a conducted agent session from the configured harness, with the message as its first prompt."),
+    ] {
+        skills.push(AgentSkill {
+            id: name.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+            tags: vec![name.to_string()],
+        });
+    }
 
     let card = AgentCard {
         name: Some("aoide".to_string()),
@@ -6603,11 +6617,26 @@ mod tests {
 
     // (a) AgentCard generation from a small fake schema.
     #[test]
-    fn agent_card_only_advertises_implemented_commands_as_skills() {
+    fn agent_card_only_advertises_implemented_commands_that_open_to_a2a() {
         let mut r = Registry::new();
         r.insert(Command {
             path: &["foo", "bar"],
             summary: "does a thing",
+            args: &[],
+            flags: &[],
+            gated: false,
+            implemented: true,
+            internal: false,
+            exit_codes: (),
+            examples: &[],
+            handler: fake_handler,
+            available: || true,
+            doors: &[Door::Cli, Door::Daemon, Door::A2a],
+            ..aoide_protocol::registry::Command::BLANK
+        });
+        r.insert(Command {
+            path: &["foo", "closed"],
+            summary: "implemented, but closed to a2a",
             args: &[],
             flags: &[],
             gated: false,
@@ -6640,9 +6669,12 @@ mod tests {
         assert_eq!(card["url"], "http://127.0.0.1:8710/");
         assert_eq!(card["capabilities"]["streaming"], true);
 
+        // The registry's open commands first (only `foo.bar`: `foo.closed` is
+        // closed to A2A and `foo.stub` is not implemented), then the two the
+        // card describes itself, since A2A opens no registry door.
         let skills = card["skills"].as_array().unwrap();
-        assert_eq!(skills.len(), 1, "only the implemented command becomes a skill");
-        assert_eq!(skills[0]["id"], "foo.bar");
+        let ids: Vec<&str> = skills.iter().map(|s| s["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["foo.bar", "send", "spawn"], "{ids:?}");
         assert_eq!(skills[0]["name"], "foo.bar");
         assert_eq!(skills[0]["description"], "does a thing");
         assert_eq!(skills[0]["tags"][0], "foo");
@@ -6651,6 +6683,20 @@ mod tests {
         // shape as the pure `agent_card_from_commands` it wraps.
         let card2 = agent_card(&r, "127.0.0.1", 8710);
         assert_eq!(card2, card);
+    }
+
+    /// A2A runs no registry command and starts no spawn through one: its
+    /// `message/send` routes straight to `session_send` and the harness spawn
+    /// (CONTRACTS.md §6). This is a tripwire over the production half of this
+    /// file: a call into the registry gate, or into the conduct spawn that a
+    /// registry command would reach, means a path has started running commands
+    /// the A2A door never declared.
+    #[test]
+    fn a2a_runs_no_registry_command() {
+        let production = include_str!("a2a.rs").split("#[cfg(test)]").next().unwrap();
+        for reach in [".invoke(", "dispatch(", "handler)(", "session_spawn", "launch_session"] {
+            assert!(!production.contains(reach), "a2a.rs must not reach `{reach}`: A2A runs no registry command");
+        }
     }
 
     // (b) canonical_state -> TaskState mapping, incl. needs_sudo precedence.
@@ -7525,8 +7571,7 @@ mod tests {
                 "--headless",
                 "--agent",
                 "claude",
-                "--id",
-                "a2a-11-1790",
+                "--id=a2a-11-1790",
                 "--",
                 "claude",
                 "--dangerously-skip-permissions",
@@ -7542,8 +7587,7 @@ mod tests {
                 "--headless",
                 "--agent",
                 "claude",
-                "--id",
-                "a2a-11-1791",
+                "--id=a2a-11-1791",
                 "--task",
                 "fix-flaky",
                 "--",
@@ -17395,6 +17439,7 @@ mod tests {
                 examples: &[],
                 available: || true,
                 handler: fake_handler,
+                doors: &[Door::Cli, Door::Daemon, Door::Mcp, Door::A2a],
                 ..aoide_protocol::registry::Command::BLANK
             });
         }

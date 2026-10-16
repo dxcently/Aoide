@@ -141,8 +141,8 @@
 - **Every `melete` command is `Door::Cli`-only, not just `melete call` (M2,
   task #14) — match `aoide-secrets`' BLANKET family gate, not its
   per-command one.** `aoide-secrets` gates its entire command family
-  `Door::Cli`-only (`require_cli`, called from nearly every one of its
-  handlers, including read-only ones like `secrets pending`) because its
+  `Door::Cli`-only (`doors: &[Door::Cli]` on every entry, read-only ones like
+  `secrets pending` included) because its
   whole surface touches secret material; `melete`'s whole surface sends a
   live bearer token outward and can trigger real action, the same risk
   class, so `handle_melete_status`/`handle_melete_graph` gate identically
@@ -1001,7 +1001,7 @@
   #14's whole point: immune to Melete's own tool-list drift). Only a tool
   worth a FIRST-CLASS command (its own parsed args, its own state-dir write —
   `melete graph`'s own shape) earns a new `cmd!` entry in `mcp_client.rs`,
-  built the same `resolve_config` → `require_cli` → `mcp_client::call`
+  built the same `resolve_config` → the door gate → `mcp_client::call`
   pipeline the existing three already share.
 - **A new session-write handler that should route through the daemon**
   calls `daemon::daemon_dispatch(inv)` as its own first line and returns
