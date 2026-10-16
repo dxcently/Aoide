@@ -912,6 +912,16 @@ fn create_box_unlocked(name: &str) -> Result<bool, String> {
     Ok(true)
 }
 
+/// The box a daemon creates when it starts, so a far letter to the conductor
+/// files from the first deposit. It is the one role box that is not a session.
+pub const CONDUCTOR_BOX: &str = "conductor";
+
+/// Creates the boxes a daemon owns at start: [`CONDUCTOR_BOX`]. A local act, so a
+/// far deposit to a name no local act created is still refused.
+pub fn ensure_auto_boxes() -> Result<(), String> {
+    box_add(CONDUCTOR_BOX).map(|_| ())
+}
+
 /// `mail box add <name>`: creates the box `name`, empty, if it is absent, so a
 /// far letter to it can file. Returns whether this call created it.
 pub fn box_add(name: &str) -> Result<bool, String> {
@@ -4456,6 +4466,26 @@ mod tests {
         let lines = std::fs::read_to_string(&log).unwrap();
         assert!(lines.contains("removing mailbox `bob`"), "the first line: {lines}");
         assert!(lines.contains("failed") && lines.contains("`bob`"), "the second line says it failed: {lines}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A daemon start makes the conductor's box, and a far letter files into it,
+    /// while a far letter to a name no local act created is refused.
+    #[test]
+    fn the_daemon_start_makes_the_conductor_box_and_no_far_name() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("auto-boxes");
+        ensure_auto_boxes().unwrap();
+        assert!(box_exists(CONDUCTOR_BOX));
+        let alice = key_on_record("alice-host");
+        assert!(matches!(
+            deposit(signed_from("alice-host", CONDUCTOR_BOX, ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap(),
+            DepositOutcome::Filed { .. }
+        ));
+        assert_eq!(
+            deposit(signed_from("alice-host", "ghost", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap(),
+            DepositOutcome::UnknownBox
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

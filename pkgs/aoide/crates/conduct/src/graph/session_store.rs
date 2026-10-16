@@ -492,6 +492,11 @@ fn do_session_start_inner(
         pid,
         &now,
     );
+    // Tracking a session gives it its mailbox, once, on its first start. A name
+    // the grammar refuses has no box, and the start is not refused for it.
+    if inserted {
+        let _ = aoide_storage::mail::box_add(id);
+    }
     // The hook chain lands in this same locked write, and only where
     // `ancestry_may_move` allows (see that fn): a record anchored to a live pid of
     // its own keeps its chain.
@@ -3412,6 +3417,29 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+    /// The first start of a session tracks it, and tracking gives it its mailbox:
+    /// a local act, so the session's own name files from its first deposit. A
+    /// name no session started is still an absent box, and a far letter to it is
+    /// refused.
+    #[test]
+    fn a_session_start_gives_the_session_its_box() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = unique_stage("sess-box");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+
+        let out = session_start(&flag_invocation(
+            &["session", "start"],
+            &[("id", "box-sess-1"), ("agent", "claude"), ("cwd", "/w")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert!(aoide_storage::mail::box_exists("box-sess-1"), "the session's box exists");
+        assert!(!aoide_storage::mail::box_exists("ghost-sess"), "a name no session started has no box");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
     #[test]
     fn session_start_refuses_a_cyclic_parent() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

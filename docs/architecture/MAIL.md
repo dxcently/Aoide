@@ -487,7 +487,9 @@ gaps are harmless.
   the bytes' destination, so it is named in `filed` and offered no more);
   the origin keeps its own copy and re-sends it on retry. A local send to
   `self/<name>` and `aoide mail box add <name>` create the box, and so does
-  enrolling a reader in it. Reading a box that does not exist changes
+  enrolling a reader in it. A session's first start makes its own box, and
+  `aoided` makes `conductor` when it starts, so both are there before any far
+  letter names them. Reading a box that does not exist changes
   nothing. Only `letter` and `receipt` are
   filed; any other kind is `not-correspondence`.
 - `from.node` is asserted by the origin signature. `from.name` is the

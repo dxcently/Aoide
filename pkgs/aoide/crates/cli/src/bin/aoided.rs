@@ -122,6 +122,10 @@ fn main() {
         eprintln!("aoided: {e}");
         std::process::exit(1);
     }
+    if let Err(e) = aoide_storage::mail::ensure_auto_boxes() {
+        eprintln!("aoided: {e}");
+        std::process::exit(1);
+    }
 
     let log = audit_log.unwrap_or_else(daemon::default_audit_log);
     let socket = daemon::socket_path();

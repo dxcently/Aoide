@@ -323,6 +323,11 @@ in the message.
 
 ## Invariants
 
+- **Tracking a session gives it its mailbox.** The first insert of a record
+  in `do_session_start_inner` (`upsert_session` reports it) calls
+  `mail::box_add(id)`, a local act, best effort: a name the grammar refuses
+  has no box and the start is not refused for it. A far letter to a name no
+  local act created is still refused.
 - **The hook door never moves a live record's pid and never trusts a payload
   pid it cannot vouch for.** `vouched_payload_pid` keeps a payload `pid` only
   if it is the hook process or one of its `/proc` ancestors (`hook_pid` is the
