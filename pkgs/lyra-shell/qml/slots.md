@@ -52,7 +52,9 @@ Every slot below is hosted by one of three anchors:
   authenticates and launches the session. That tree is the face's
   `AOIDE_ROOT`, and it carries the song's `icons/` at the same
   `song/songbook/<owner>/icons` a face reads in the session, so a face
-  loads its icons by one path in both places.
+  loads its icons by one path in both places. Its song folder carries a
+  `qmldir` naming the song's uppercase helpers as types, as lyra's tree
+  does, so a face uses the same helper types in both places too.
 
   Both faces run inside their host's own process — the session shell, or
   the greeter's — with that process's rights: QML has no sandbox. That a

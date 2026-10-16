@@ -7,7 +7,10 @@
 #     greeter. greetd runs `cage` as its greeter user, and in it Quickshell on
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
 #     tree's `shell.qml`, `LiveryState`/`StagingEngine` beside it, the face's
-#     song folder from the shipped songbook (`pkgs.lyra-songbook`), that
+#     song folder from the shipped songbook (`pkgs.lyra-songbook`) with a
+#     `qmldir` naming its uppercase helpers as types (the face loads by a
+#     `qs:` URL, where a sibling file is no type otherwise — lyra's tree
+#     writes the same), that
 #     song's `icons/` (when it has one) at `song/songbook/<owner>/icons` —
 #     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
 #     session too — the dress as `song/stage/livery.json`, and
@@ -102,6 +105,11 @@ let
     cp ${pkgs.lyra-shell}/share/lyra/qml/GreeterHost.qml "$q/shell.qml"
     song=${pkgs.lyra-songbook}/share/lyra/songbook/${face.owner}
     cp -r "$song/widgets/." "$q/songs/${face.owner}/"
+    for h in "$song/widgets/"[A-Z]*.qml; do
+      [ -e "$h" ] || continue
+      t=$(basename "$h" .qml)
+      printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$q/songs/${face.owner}/qmldir"
+    done
     if [ -d "$song/icons" ]; then
       mkdir -p "$out/song/songbook/${face.owner}"
       cp -r "$song/icons" "$out/song/songbook/${face.owner}/icons"

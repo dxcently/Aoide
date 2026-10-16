@@ -8,7 +8,8 @@
 # quickshell, lyra):
 #
 #   face   declares `aubade`, which ships `widgets/greeter.qml`,
-#          `widgets/lockscreen.qml` and an `icons/` its greeter face loads:
+#          `widgets/lockscreen.qml`, an uppercase helper type its greeter
+#          face uses (`AubadeCard.qml`) and an `icons/` that face loads:
 #          greetd + the Quickshell greeter at boot, and `lyra lock` locks
 #          through the shell's LockHost.
 #   plain  declares `plainsong`, which ships no face: ly at boot, and
@@ -266,6 +267,11 @@ pkgs.testers.runNixOSTest {
         # reads under AOIDE_ROOT.
         said = greeter_log(face)
         assert "[fixture] greeter icon loaded" in said, said
+        # The face's helper type resolved through the tree's qmldir: the face
+        # itself loaded and reported ready, not the host's floor.
+        assert "is not a type" not in said, said
+        assert "[fixture] greeter face ready" in said, said
+        assert "the face did not report ready" not in said, said
 
     with subtest("face: the greeter refuses a wrong password, and switch user starts over"):
         face.send_chars("bram\n")

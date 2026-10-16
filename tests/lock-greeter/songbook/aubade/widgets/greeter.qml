@@ -1,7 +1,8 @@
 // The fixture greeter face: an account field while none is chosen, then one
 // password field for the chosen account; Escape goes back to choosing
 // (switch user). The host's message and a failure count, all through `auth`.
-// An icon from the song's own icons/, by the path a face uses in the session.
+// An icon from the song's own icons/, by the path a face uses in the session,
+// and a helper type (AubadeCard) from its own folder.
 import QtQuick
 import Quickshell
 
@@ -29,10 +30,8 @@ Rectangle {
             onStatusChanged: if (status === Image.Ready) console.log("[fixture] greeter icon loaded")
         }
 
-        Text {
+        AubadeCard {
             text: "AUBADE GREETER FACE"
-            color: "#f1faee"
-            font.pixelSize: 30
         }
 
         Text {
@@ -81,5 +80,6 @@ Rectangle {
     Component.onCompleted: {
         field.forceActiveFocus()
         face.auth.ready = true
+        console.log("[fixture] greeter face ready")
     }
 }
