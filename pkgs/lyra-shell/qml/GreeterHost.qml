@@ -94,7 +94,12 @@ ShellRoot {
     // created on that `stateChanged` takes the stray `success` as its own.
     // After any cancel (switch user, and the one Quickshell sends itself
     // after a refused password) the next conversation therefore starts
-    // `settle` later, once the reply has been read.
+    // `settle` later, once the reply has been read. The settle is UX only: the
+    // real protection is greetd's own refusal to start an unauthenticated
+    // session (greetd 0.10.3, greetd/src/context.rs:295 answers start_session
+    // "session is not ready" unless the worker reported Success, which
+    // greetd/src/session/worker.rs:129-137 sends only after pam.authenticate
+    // and acct_mgmt pass).
     Timer {
         id: settle
         interval: 300
