@@ -3217,12 +3217,16 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
+            "AOIDE_AUDIT_LOG",
             "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-retire-readers");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        // The dead-box reap audits before it deletes, so the log must be
+        // writable here; the build sandbox's home is not.
+        std::env::set_var("AOIDE_AUDIT_LOG", stage.join("log"));
         let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-retire-readers-xdg");
 
         let mut dead = hook_only("dead-1", "idle");
