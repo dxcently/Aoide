@@ -115,8 +115,10 @@ start at [[aoide-cli]] and the group pages linked below.
 - `lyra lock` — the one lock entry (`SUPER+ESCAPE`, the power menu, the `lock`
   alias): the running shell's `LockHost` in the staged song's face when that
   song dresses the `lockscreen` slot, confirmed by the compositor within 5 s,
-  else hyprlock. `lyra lock hint yes|no` sets logind's `LockedHint`, which the
-  lock host calls on lock and unlock.
+  else hyprlock, which clears a `LockedHint` a dead shell lock left at `yes`.
+  `lyra lock hint yes|no` sets logind's `LockedHint`, which the lock host
+  calls on lock and unlock; bare `lyra lock hint` reads it, which the lock
+  host does at start to take back a lock its crashed predecessor held.
 
 ## Related
 

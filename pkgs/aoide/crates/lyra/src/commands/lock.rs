@@ -49,7 +49,7 @@ const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["lock"],
-        summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s); every other song, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf.",
+        summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s); every other song, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
         args: [],
         flags: [],
         gated: false,
@@ -61,14 +61,14 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["lock", "hint"],
-        summary: "Set logind's LockedHint on the session a lock covers ($XDG_SESSION_ID, else the user's display session). The shell's lock host calls it on lock and unlock, so locked-state readers see a shell lock.",
-        args: [arg!("state", "string", true, "`yes` (locked) or `no` (unlocked).", values: &["yes", "no"])],
+        summary: "Set, or with no state read, logind's LockedHint on the session a lock covers ($XDG_SESSION_ID, else the user's display session). The shell's lock host sets it on lock and unlock, so locked-state readers see a shell lock, and reads it when it starts, to take back a lock its crashed predecessor held.",
+        args: [arg!("state", "string", false, "`yes` (locked) or `no` (unlocked); omitted, the current hint is read.", values: &["yes", "no"])],
         flags: [],
         gated: false,
         implemented: true,
         handler: handle_hint,
-        examples: ["lock hint yes", "lock hint no --json"],
-        brief: "Set logind's LockedHint for this session.",
+        examples: ["lock hint yes", "lock hint no --json", "lock hint --json"],
+        brief: "Set or read logind's LockedHint for this session.",
         doors: &[Door::Cli],
     ));
 }
@@ -98,6 +98,7 @@ fn handle_lock(_inv: &Invocation) -> Outcome {
                 "pid": pid,
                 "song": song,
                 "shellRefused": shell_refused,
+                "hintCleared": clear_stale_hint(),
             }))
         }
         Err(detail) => Outcome::refuse(
@@ -114,7 +115,6 @@ fn handle_lock(_inv: &Invocation) -> Outcome {
 
 fn handle_hint(inv: &Invocation) -> Outcome {
     let cmd = "lock.hint";
-    let locked = inv.args.first().is_some_and(|s| s == "yes");
     let Some(session) = aoide_protocol::dialog::lock_session_id() else {
         return Outcome::refuse(
             cmd,
@@ -125,18 +125,64 @@ fn handle_hint(inv: &Invocation) -> Outcome {
         )
         .with_fields(json!({ "reason": "no-session" }));
     };
-    let path = format!("/org/freedesktop/login1/session/{}", bus_label(&session));
+    let Some(state) = inv.args.first().filter(|s| !s.trim().is_empty()) else {
+        return match read_hint(&session) {
+            Some(locked) => Outcome::ok(cmd, format!("LockedHint={} on session {session}", yes_no(locked)))
+                .with_data(json!({ "session": session, "lockedHint": locked })),
+            None => Outcome::refuse(cmd, Kind::Failed, "LockedHint was not read", "loginctl did not answer for the session", Fix::Run(format!("loginctl show-session {session} -p LockedHint")))
+                .with_fields(json!({ "reason": "logind-unread", "session": session })),
+        };
+    };
+    let locked = state == "yes";
+    match set_hint(&session, locked) {
+        Ok(()) => Outcome::ok(cmd, format!("LockedHint={} on session {session}", yes_no(locked)))
+            .with_data(json!({ "session": session, "lockedHint": locked })),
+        Err(detail) => hint_failed(cmd, detail),
+    }
+}
+
+fn yes_no(b: bool) -> &'static str {
+    if b {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+fn read_hint(session: &str) -> Option<bool> {
+    let o = Command::new("loginctl")
+        .args(["show-session", session, "-p", "LockedHint", "--value"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    Some(String::from_utf8_lossy(&o.stdout).trim() == "yes")
+}
+
+fn set_hint(session: &str, locked: bool) -> Result<(), String> {
+    let path = format!("/org/freedesktop/login1/session/{}", bus_label(session));
     let out = Command::new("busctl")
         .args(["call", "org.freedesktop.login1", &path, "org.freedesktop.login1.Session", "SetLockedHint", "b"])
         .arg(if locked { "true" } else { "false" })
         .stdin(Stdio::null())
         .output();
     match out {
-        Ok(o) if o.status.success() => Outcome::ok(cmd, format!("LockedHint={} on session {session}", if locked { "yes" } else { "no" }))
-            .with_data(json!({ "session": session, "lockedHint": locked })),
-        Ok(o) => hint_failed(cmd, String::from_utf8_lossy(&o.stderr).trim().to_string()),
-        Err(e) => hint_failed(cmd, format!("spawn busctl: {e}")),
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+        Err(e) => Err(format!("spawn busctl: {e}")),
     }
+}
+
+/// LockedHint marks the SHELL's lock only; hyprlock sets none and is seen by
+/// its process. A `yes` still standing when hyprlock takes the screen is a
+/// shell lock that died, so it is cleared — after hyprlock holds the screen,
+/// never before: a cleared hint is what stops a restarted shell from taking
+/// the lock back. Best effort; whether it was cleared is reported.
+fn clear_stale_hint() -> bool {
+    aoide_protocol::dialog::lock_session_id()
+        .filter(|s| read_hint(s) == Some(true))
+        .is_some_and(|s| set_hint(&s, false).is_ok())
 }
 
 fn hint_failed(cmd: &str, detail: String) -> Outcome {
@@ -334,7 +380,10 @@ echo "$*" >> "$here/busctl.log"
     const LOGINCTL: &str = r#"#!/bin/sh
 here="${0%/bin/loginctl}"
 echo "$*" >> "$here/loginctl.log"
-case "$1" in show-user) echo 3 ;; esac
+case "$1" in
+show-user) echo 3 ;;
+show-session) if [ -e "$here/lh-yes" ]; then echo yes; else echo no; fi ;;
+esac
 "#;
 
     impl Rig {
@@ -507,6 +556,51 @@ case "$1" in show-user) echo 3 ;; esac
         let o = handle_hint(&inv(&["lock", "hint"], &["no"]));
         assert_eq!(o.status, Status::Ok, "{o:?}");
         assert!(rig.log("busctl").ends_with("/org/freedesktop/login1/session/c2 org.freedesktop.login1.Session SetLockedHint b false\n"));
+    }
+
+    #[test]
+    fn hint_with_no_state_reads_the_session_hint() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-hint-read");
+        let o = handle_hint(&inv(&["lock", "hint"], &[]));
+        assert_eq!(o.status, Status::Ok, "{o:?}");
+        assert_eq!(data(&o)["lockedHint"], false);
+        rig.touch("lh-yes");
+        let o = handle_hint(&inv(&["lock", "hint"], &[]));
+        assert_eq!(data(&o)["lockedHint"], true);
+        assert!(rig.log("loginctl").contains("show-session 3 -p LockedHint --value"), "{}", rig.log("loginctl"));
+        assert_eq!(rig.log("busctl"), "", "a read sets nothing");
+    }
+
+    #[test]
+    fn a_fallback_to_hyprlock_clears_a_stale_hint_and_leaves_a_clear_one_alone() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-hint-stale");
+        rig.stage("barcarolle", FACE);
+        rig.touch("qs-dead");
+        rig.touch("lh-yes");
+        let o = handle_lock(&inv(&["lock"], &[]));
+        assert_eq!(data(&o)["locker"], "hyprlock", "{o:?}");
+        assert_eq!(data(&o)["hintCleared"], true);
+        assert!(rig.log("busctl").ends_with("SetLockedHint b false\n"), "{}", rig.log("busctl"));
+
+        let rig = Rig::new("lock-hint-clear");
+        rig.stage("barcarolle", FACE);
+        rig.touch("qs-dead");
+        let o = handle_lock(&inv(&["lock"], &[]));
+        assert_eq!(data(&o)["hintCleared"], false);
+        assert_eq!(rig.log("busctl"), "");
+    }
+
+    #[test]
+    fn a_hyprlock_that_fails_leaves_the_hint_standing() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let rig = Rig::new("lock-hint-hlfail");
+        rig.touch("hl-fail");
+        rig.touch("lh-yes");
+        let o = handle_lock(&inv(&["lock"], &[]));
+        assert_eq!(o.status, Status::Error, "{o:?}");
+        assert_eq!(rig.log("busctl"), "", "the compositor may still hold a dead shell's lock");
     }
 
     #[test]

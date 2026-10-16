@@ -401,7 +401,7 @@ are core `aoide` identity, root `AGENTS.md`).
   `cliphist` on `PATH`. The bridge `AoideClipboard.qml`'s `deleteById`/`clear`
   run. docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md has the commands
   and their `data.reason` codes.
-- `commands::lock` — `lock` and `lock hint yes|no`, the one lock entry
+- `commands::lock` — `lock` and `lock hint [yes|no]`, the one lock entry
   (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
   staged song whose OWN manifest entry carries `lockscreen` is locked by the
   running shell: `quickshell -p run/qml/shell.qml ipc call lock lock`, then
@@ -409,9 +409,14 @@ are core `aoide` identity, root `AGENTS.md`).
   the lock) inside 5 s. A song with no face, and a shell that is down, has
   no lock host, hangs or never confirms, runs `hyprlock` in its own process
   group; a hyprlock that exits within 500 ms is a failure (`hyprlock-failed`,
-  exit 1), never a lock. `lock hint` sets logind's `LockedHint` with
-  `busctl` on `aoide_protocol::dialog::lock_session_id()`'s session, which
-  `LockHost.qml` (pkgs/lyra-shell/qml) calls on lock and unlock.
+  exit 1), never a lock. `LockedHint` marks the shell's lock only: hyprlock
+  sets none (locked-state readers see it by its process), so once hyprlock
+  holds the screen a hint still at `yes` — a dead shell lock — is cleared
+  (`hintCleared`). `lock hint yes|no` sets logind's `LockedHint` with
+  `busctl` on `aoide_protocol::dialog::lock_session_id()`'s session, and
+  bare `lock hint` reads it with `loginctl`; `LockHost.qml`
+  (pkgs/lyra-shell/qml) sets it on lock and unlock and reads it at start,
+  re-locking on `yes`.
 
 ## What it consumes
 

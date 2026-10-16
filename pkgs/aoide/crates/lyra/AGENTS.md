@@ -360,7 +360,10 @@
 - **`lyra lock` never reports a lock it did not get, and its tests never
   reach a real locker.** The shell counts only after `ipc call lock secure`
   answers `true`; anything short of that falls through to hyprlock, and a
-  hyprlock that exits inside the settle window is a refusal. The face is
+  hyprlock that exits inside the settle window is a refusal. A stale
+  `LockedHint` is cleared only after hyprlock holds the screen: a failed
+  hyprlock leaves it standing, because the restarted shell re-locks on it.
+  The face is
   decided by the staged song's OWN manifest entry: never the baseline song,
   so a song without a face is a hyprlock song. The command is run by the
   compositor or a terminal, never as the child of a NoNewPrivileges unit
