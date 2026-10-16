@@ -4970,7 +4970,8 @@ serve` door unit, and the CLI all resolve the same directory.
 
 ```
 boxes/<name>.log   append-only, one entry per line: a letter's box
-boxes/_legacy.log  letters whose name the grammar refuses
+boxes/_legacy.log  letters whose name the grammar refuses, and migrated lines
+                   their own box had no room for
 receipts.log       receipts, rotated to receipts.log.1 at 4 MiB
 cursors.json    { "<name>": { "<reader>": { "seq": n, "rung": n } } }
 seq             the last sequence number issued (written before its line)
@@ -5117,8 +5118,11 @@ other's mail. `mail show <msgid>` prints one entry without touching any
 cursor; `mail mark --for <name>` advances the caller's mark the same way,
 without printing; `mail rm --older-than <Nd|Nh>` is the only pruning, and
 dedup memory goes with the line, so a pruned letter re-offered later is filed
-again, unread (forgetting re-delivers; it never loses). Keep-all otherwise: no
-cap, no fold.
+again, unread (forgetting re-delivers; it never loses). The store is capped:
+a box holds 16 MiB, one origin key a quarter of one and a quarter of the store,
+and all boxes 240 MiB
+(MAIL.md §Store, "Caps and compaction"). A capped refusal is `box-full` and
+files nothing; compaction drops only lines every reader has read.
 
 On first open by any command (read or write), a legacy `inbox.json`
 migrates field-by-field into typed `receipt` entries under the same lock
@@ -9474,11 +9478,14 @@ stop that ping-ponging forever). A rejected envelope answers instead:
 ```
 
 — `"unverified-origin"` replacing `"bad-msgid"` when no key on record verifies
-the origin signature, and `"not-correspondence"` (P-CHARTER) when the envelope's
-`type` is `charter`: a charter is applied from a sealed container's own payload,
-never filed as correspondence. `reason` is exactly the token MAIL.md §Transit
-names for each of these among its `refused` reasons; the rest of that list —
-`no-route`, `down`, `unknown-mesh`, `zone-violation` — belongs to the transit
+the origin signature, and `"not-correspondence"` when the envelope's `type` is
+neither `letter` nor `receipt` (a `charter` is applied from a sealed container's
+own payload, never filed as correspondence). A letter to a name with no box on
+this node answers `"unknown-box"`, with a fixed detail that names no box; the
+sender parks it (MAIL.md §Addressing), and a hub that handed the container over
+releases its custody of it (MAIL.md §Wire). `reason` is exactly the token
+MAIL.md §Transit names for each of these among its `refused` reasons; the rest
+of that list — `no-route`, `down`, `unknown-mesh`, `zone-violation` — belongs to the transit
 lane and to a sealed charter container's own zone check, below, not to this one.
 **Two of those words are LINK states on the sender's side — `down` and
 `config-invalid` — and never park anything**: the entry stays live and retries
@@ -9580,14 +9587,18 @@ the drain owns those, and offering one here would double-drive it from two
 callers). Nothing else rides the answer: no flavor, no tries, no route, and
 no marker that a batch was ever handed over.
 
-**A poll writes one thing, and it is the caller's own acknowledgement.** The
+**A poll writes only the caller's own word.** The
 request may carry `filed` — the msgids the poller filed out of its previous poll
 of this node — and the hub retires its own `transit` custody of exactly those
 (`outbox::retire_acknowledged`) BEFORE it offers, which is why an entry whose
-response was lost is offered again rather than retired into silence. Nothing
-else is written: no `tries` stamp, no `last_polled_at`, no "already handed over"
-bookmark — which is exactly why a re-poll before the ack hands the same
-envelopes over again, and why a `letter` entry still leaves the spool only when
+response was lost is offered again rather than retired into silence. The request
+may also carry `deferred` — the msgids it was handed and did not settle — and
+each of the caller's own entries it names takes a `tries` stamp and a
+`deferred:` outcome, which holds it out of the next offers for its window
+(`outbox::defer_named`). Nothing else is written: no `last_polled_at`, no
+"already handed over" bookmark — which is exactly why a re-poll before the ack
+hands the same envelopes over again (unless it deferred them), and why a
+`letter` entry still leaves the spool only when
 the far end's ordinary receipt retires it (a `letter` filed by the poller mints
 a receipt exactly as a deposit would; an ack is an envelope, so the poller's own
 next drain carries it back) or through `aoide mail outbox rm <msgid>`. The

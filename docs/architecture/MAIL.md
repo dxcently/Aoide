@@ -66,8 +66,10 @@ FidoNet node could.
    member — the one noun for it in code, config, wire, and docs; "edge"
    names a verified pairing between two nodes. The name is free text
    (FidoNet's `toUserName`): the envelope routes to the node, the node
-   files the letter under the name. **No mailbox registry** — a mailbox
-   exists by being named in a `to` or read by name.
+   files the letter under the name. **A box exists only where a local act
+   made it**: `aoide mail box add`, enrolling a reader, a local send to
+   `self/<name>`. A far letter to a name with no box is refused
+   `unknown-box` and creates nothing (see §Addressing).
 4. **Filing, not secrecy — on the node.** Every agent on a node is the
    same unix user; any intra-host lock would be fiction. A name says who a
    letter is *for*, never who may read it. FidoNet netmail was
@@ -118,11 +120,15 @@ FidoNet node could.
     `aoide/mailDeposit` and `aoide/mailPoll` beside the pairing methods.
     One door, one inspection, separate windows; gate/no-gate never
     depends on payload shape.
-14. **Flood control is Fido-pure: dedup + excommunication.** No quotas,
-    no eviction, no auto-expiry. The `msgid` seen-set drops repeats; a
-    flooding node is declared `down`. Accepted exposure: between flood
-    start and the User's `down` gesture, disk absorbs it. The audit log's
-    one line per deposit, with origin, is the detection.
+14. **Flood control: dedup, caps, and excommunication.** The box is the
+    dedup memory, so a repeat is dropped. The store is capped (§Store): a
+    letter over 256 KiB is `too-large`; a box holds 16 MiB; one origin key
+    holds a quarter of a box and a quarter of the store; all boxes together
+    hold 240 MiB. A full box
+    answers `box-full` and files nothing, so the sender keeps and retries.
+    Nothing is evicted and nothing expires: the caps refuse, and only a
+    read letter is ever reclaimed. A flooding node is declared `down`. The
+    audit log's one line per deposit, with origin, is the detection.
 15. **Declared node status: `hold` and `down`.** In the mesh config,
     per node. `hold` queues at the sender silently; `down` refuses fast
     and stops routing to/from that node. The UNREACHABLE-vocabulary
@@ -262,9 +268,11 @@ file):
 
 ```
 boxes/<name>.log   one entry per line, append-only: a letter's box
-boxes/_legacy.log  letters whose name the grammar refuses (grandfathered)
+boxes/_legacy.log  letters whose name the grammar refuses (grandfathered), and
+                   migrated lines their own box had no room for
 receipts.log       receipts, rotated to receipts.log.1 at 4 MiB
 cursors.json       { "<name>": { "<reader>": { "seq", "rung" } } }
+session-boxes.json { "<name>": <dead: bool> }, one per session box
 seq                the last sequence number issued, ASCII decimal, written
                    before the line it numbers
 ```
@@ -338,8 +346,29 @@ An entry is an envelope plus local facts:
   each other, which is the honest floor: nothing distinguishes them. A
   respawned session is a new reader and sees the name from the
   beginning, the way an NNTP client with no `.newsrc` does: re-delivery
-  is the safe direction, and silent loss is not. The reader set is also
-  what the doorbell rings.
+  is the safe direction, and silent loss is not. A reader whose session
+  has left the roster is retired: each reaper pass, in the same lock hold
+  as the roster it reads, drops every reader key that names no session on
+  it. The pseudo-reader is never retired. The reader set is also what the
+  doorbell rings. A roster the reaper cannot read (`sessions.json` absent or
+  unparseable) retires nothing, since an absent file is not an empty roster.
+- **A read by any enrolled reader counts as delivered.** Compaction removes
+  a line only when every enrolled reader of its box has read it. A reader
+  that joins later starts with an unread mark and sees whatever the box still
+  holds; letters compacted away before it joined are gone for it.
+- **Dead boxes.** A session's box is recorded in `session-boxes.json` when the
+  session's first insert makes it. Every reaper pass marks each recorded box
+  from the roster it has just written: dead when its session is no longer on
+  the roster, live when it is. So a session that never read is reaped like any
+  other, and the roster is the only liveness input. A box is also dead when
+  every reader key it had was retired, which leaves its reader map empty. A far
+  letter to a dead box is refused `unknown-box`, and the origin keeps it. Each
+  reaper pass deletes a dead box that holds no letter, with its cursor key and
+  its record, after an audit line. A dead box that still holds mail stays,
+  refuses far letters, and drops none of its letters until they are gone. A
+  session that starts again marks its box live and re-creates it if it was
+  reaped. The role box `conductor` is never dead, and a `mail box add` box is
+  not recorded, so the roster does not mark it.
 - Each mark also carries `rung`: the doorbell latch, the highest arming
   `seq` this reader has already been rung for. A reader arms again only
   once its own read catches up to `rung`; omitted from `cursors.json`
@@ -370,6 +399,57 @@ under its existing `env_lock`, and every storage test that touches mail
 uses it — closing the path by which a fixture once wrote fixture rows
 into the live inbox.
 
+### Caps and compaction
+
+The store is bounded by four caps, all `const`s in `storage/src/mail.rs`:
+
+| Cap | Value | Measured as | Refusal |
+|---|---|---|---|
+| Letter | 256 KiB | the envelope, serialized | `too-large`, at the mint and at the door |
+| Box | 16 MiB | the box file, after the append | `box-full` |
+| Quarter | 4 MiB | the bytes one verified origin key holds in the box | `box-full` |
+| Key share | 60 MiB | the bytes one verified origin key holds across every box | `box-full` |
+| Store | 240 MiB | every box file together | `box-full` |
+
+Receipts, the containers gate and the re-ack record are not capped by these;
+they rotate at their own caps (§Security model). A letter signed by this box's
+own identity key has no quarter, only the box and store caps, whichever hop
+brought it. Every other letter is held to the quarter of its verified origin
+key, and to a quarter of the store across every box (the key share), so a key
+that signs under two node names shares both, a key that fills many boxes is
+held to the store's quarter, and a hop's name never exempts a letter. The key
+share reads every box file on each far deposit, so its cost is the store's
+size, bounded by the store cap.
+
+A capped refusal first compacts. A box or quarter refusal compacts its box; a
+store refusal compacts every box. Compaction drops a line only when every
+reader of its box has read it: the floor is the lowest reader mark, zero when
+a box has no readers, so an unread letter is never reclaimed. A dead session's
+mark stops holding the floor down once the reaper retires it. A refused flood
+against a box nobody has read rewrites nothing. A full box refuses before
+anything is written and before any ack is owed, so the sender keeps the
+letter and retries.
+
+**Lock-hold bounds.** A read or write of one box holds the stage lock for that
+box's size, at most 16 MiB. Some operations read every box and the receipts
+under the lock, so they hold it for the store's size, at most 240 MiB plus the
+two receipt generations: `show`, `unread_for`, `names_with_unread`,
+`read_all_names`, `read_base`, `rm_older_than`, and the one-shot migrations. A
+far deposit opens every box for its key share (see above), so it holds the lock
+for the store's size too, and its cost scales with the number of boxes as well
+as with the letter's own box. A dead-box pass (`reap_dead_boxes`) and the
+reader retirement beside it read the boxes they delete, under the same lock.
+
+A migrated line is capped like any other. Its box takes it when it has room;
+a line the box has no room for is parked in `_legacy`, and a line that fits
+neither stays in `base.jsonl.migrated`, which the migration keeps and which
+no reader reads. Each migration writes one audit line that gives the unfiled
+count it left in `base.jsonl.migrated`, and says so on stderr.
+
+Compaction is the reason a box's seq list can have gaps. A reader's mark still
+means "read through this seq", and export and mailview order by seq, so the
+gaps are harmless.
+
 ## Addressing and filing
 
 `aoide mail send --to <node>/<name> [--hold] -- <text>`:
@@ -378,9 +458,10 @@ into the live inbox.
   this box's own node name (`display::local_host_name()`) when the
   envelope is minted, so the literal never enters a header — a letter
   filed locally is the same bytes it would be on the wire. `<name>`
-  satisfies the node-name grammar (`^[a-z0-9][a-z0-9-]*$`,
-  `valid_node_name`) or the filing is refused before anything is
-  written — never clamped, never rewritten.
+  satisfies `valid_box_name`: the node-name grammar
+  (`^[a-z0-9][a-z0-9-]*$`), at most 63 bytes, and not a DOS device name
+  (`con`, `nul`, `com0`-`com9`, `lpt0`-`lpt9`), on every OS. The filing is
+  refused before anything is written — never clamped, never rewritten.
 - **`--hold` needs a node destination.** It spools the entry with the
   `hold` flavor — a drain never dials it, and it leaves only when that
   node polls (`aoide/mailPoll`). A `self/<name>` filing is local and
@@ -399,7 +480,9 @@ into the live inbox.
   mailbox can hold several runs' letters — the RUN is the sender's session id,
   and a letter whose sender is not the run being watched is shown as an earlier
   (or unrelated) run, never merged into that run's report. This adds no
-  addressing form, no store, and no delivery rule.
+  addressing form, no store, and no delivery rule. A far spawn the charter
+  allows (`may_spawn`) makes its child's box as a local act, when the child's
+  session starts. A refused far spawn starts nothing and creates no box file.
 - **A task run's two mailboxes stay apart.** `self/<slug>` is the CHILD's own
   inbox: only the letters sent TO the subagent, read against the child's own
   cursor. The wrapper's end-of-run report goes to a REPORT mailbox instead —
@@ -415,11 +498,28 @@ into the live inbox.
   record, the route from the mesh declaration. **The agent never sees a
   transport line.** `self/<name>` files locally and rings the doorbell;
   it is how a session leaves a note for a role on its own box.
-- Arrival files under `to.name`, whether or not any session by that
-  name exists or ever will. No bounce for unknown names: the mailbox
-  exists because the letter named it. Bare `aoide mail` therefore always
-  prints the names that have unread mail — a mis-typed name is visible
-  there, not lost.
+- Arrival files under `to.name` when that box exists. A far letter to a
+  name with no box is answered `refused` with reason `unknown-box` and the
+  fixed detail `no mailbox of that name is on this node; nothing was filed
+  or acknowledged`. The detail names no box, but the word is itself a
+  probe: a relay that sends letters learns which names have a box from
+  which ones come back `unknown-box` and which come back filed or
+  acknowledged. Nothing in the answer can hide that, so it is accepted,
+  not prevented. The sender parks the letter, and it is released by
+  `aoide mail outbox retry` once the box exists. A hub that handed the
+  container over releases its custody of it (`unknown-box` is a verdict on
+  the bytes' destination, so it is named in `filed` and offered no more);
+  the origin keeps its own copy and re-sends it on retry. A local send to
+  `self/<name>` and `aoide mail box add <name>` create the box, and so does
+  enrolling a reader in it. Every roster insert makes its session's box, once,
+  as a local act: a session start, a session the eidolon or codex-app
+  reconcile tracks, and a subagent. A session that starts again after its box
+  was reaped gets the box back the same way. `aoided` makes `conductor` when it
+  starts, so both are there before any far letter names them. A far letter to
+  a dead box is refused the same way (§Store), and a start that cannot make its
+  box does not fail: the name is then simply unknown until a local act makes
+  it. Reading a box that does not exist changes nothing. Only `letter` and
+  `receipt` are filed; any other kind is `not-correspondence`.
 - `from.node` is asserted by the origin signature. `from.name` is the
   sending session's petname taken from `AOIDE_SESSION_ID`/`--from`,
   **attribution only** — any same-uid process can claim any name, as
@@ -493,7 +593,8 @@ door's audit name whitelist gains both names so they never log as bare
      relayed.
   Receipts (acks) are envelopes deposited through the same method — one
   routing path for everything, so acks traverse hubs for free.
-- **`aoide/mailPoll`** `{ node, filed? }` → `{ envelopes[], containers[] }`.
+- **`aoide/mailPoll`** `{ node, filed?, deferred? }` → `{ envelopes[],
+  containers[] }`.
   The caller asks
   "anything waiting for me?" and receives every outbox entry spooled
   toward the caller's node — all `hold` ones, and `now` ones whose own
@@ -510,7 +611,8 @@ door's audit name whitelist gains both names so they never log as bare
   refusals of the bytes themselves). A container refused for a reason of the
   poller's own state (its disk, its config, its charter, its box being full:
   `local-io`, `config-unreadable`, `no-charter-in-force`, `box-full`, and the
-  rest of that class) is never named: its custody is kept and it is offered
+  rest of that class) is never named in `filed`: its custody is kept, and it is
+  named in `deferred` (below), so the hub waits its window before it is offered
   again. The hub retires
   its own custody of the named msgids (its spool entry, and only that)
   before it offers
@@ -523,7 +625,21 @@ door's audit name whitelist gains both names so they never log as bare
   refused container leaves the hub before the next offer, so it never blocks
   the poll behind it. A container held back by the poller's own state stays,
   and a backlog of those can fill the `POLL_BATCH_CAP` window until the state
-  clears; that is the price of keeping custody for it. **One poll of a node runs at a time** (the `.poll` flock, tried and
+  clears; that is the price of keeping custody for it. **`deferred` is the
+  poller's word on what it was handed and did not settle.** It carries the
+  msgids of the last answered poll that the poller neither filed, dedup'd, nor
+  refused for good (a box-full letter, a container held back by its own state, a
+  plaintext letter it could not take): at most fifty, and only well-formed
+  msgids (lowercase 64-hex) are read, anything else is dropped. The hub defers
+  those of its OWN spool entries for this caller
+  (`aoide_storage::outbox::defer_named`): each is tried once more and waits its
+  window (`deferral_due`) before it is handed again, so fifty unfileable letters
+  at the head of the spool cannot fill every batch. It defers no other node's
+  entry, and it never ends a container's custody. An old hub never reads the
+  key, so its answer is unchanged. The poller replaces its stored list with what
+  the answered poll left unfiled; a poll that got no answer keeps the old list
+  for the next ask. **One poll of a node runs at a time** (the `.poll` flock,
+  tried and
   never waited for): two overlapping asks would both read `filed` before either
   recorded it, be handed the same letter, and mint two receipts for it — which
   the relay refuses as a different body for one msgid. The second ask answers
@@ -1447,12 +1563,11 @@ paired node that merely misbehaves.
 - **Floods** are visible (one audit line per deposit, with origin) and
   bounded only by disk until `down`. A hub amplifies roughly threefold
   per letter — outbox copy, returning ack — and the boxes, receipts and
-  outbox directories grow unbounded by ruling (receipts rotate at 4 MiB,
-  and each box is a capped log of its own). The
+  outbox directories grow with the mail that is accepted. The boxes are
+  capped (§Store), receipts rotate at 4 MiB, and a full box refuses. The
   doorbell latch keeps a flood off the pty; the audit log and the disk
   are where it is felt, and `node allow … message off` is the same-
-  minute answer. Quotas are addable at the door later without any
-  schema change; they are deliberately not in v1.
+  minute answer.
 - **Same-uid honesty**: nothing here is a secret from a local process —
   not the mailbase, not the outbox, not `from.name`, not an epoch key.
 - **Several operators, several meshes.** Filing-not-secrecy is an
@@ -1471,6 +1586,8 @@ aoide mail send --to <node>/<name> [--hold] -- <text>
 aoide mail read [--for <name>] [--all-names] [--reread] [--transit]   print + advance cursor
 aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
+aoide mail box add <name>                                create an empty mailbox so far mail to it can file (idempotent; CLI only)
+aoide mail box rm <name> [--force]                       remove a mailbox, its letters and its reader marks; refused while unread, audited first, and a failed removal is audited again (CLI only; `_legacy` by its own name)
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the boxes (dedup goes with them)
@@ -1727,10 +1844,10 @@ needs chiyo lit and the mesh declarations deployed in the ruled order.
 
 ## Kill-list
 
-- No mailbox registry, no `mailbox create` — a box exists by being
-  named (User ruling).
-- No quotas, no eviction, no auto-expiry — dedup + `down` are the whole
-  flood story in v1 (User ruling; quotas remain addable at the door).
+- No mailbox registry in the sense of a list of allowed names: a box is
+  a file a local act created, and a far deposit never creates one.
+- No eviction, no auto-expiry. The caps (decision 14, §Store) refuse a
+  full box; they never drop a letter that is unread.
 - No public flag and no public board — every board has members and an
   epoch key.
 - No plaintext letter or post in transit — every letter that leaves its

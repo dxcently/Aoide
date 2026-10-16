@@ -957,13 +957,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the method once the config returns. Everything else keeps `-32007`, and the
   method is never dispatched with an unresolved caller
   (`mail_unloadable_declaration`'s own doc has the shape).
-  **`mail_poll` writes nothing at all.** Its whole body is
+  **`mail_poll` writes only the caller's own `deferred` stamps.** Its whole body
+  is
   `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a
-  self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. No
-  `tries` stamp, no bookmark, no "already handed over" flag may be added
-  here: the re-poll-before-ack idempotence comes from handing the SAME set
-  over again, and the entry retires only through a valid ack or `mail
+  self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. The
+  hand-over writes nothing. The one write is `outbox::defer_named` on the
+  `deferred` list the caller names: a `tries` stamp and a `deferred:` outcome on
+  ITS OWN entries, which holds them out of the window and nothing else. No
+  bookmark and no "already handed over" flag may be added here: the
+  re-poll-before-ack idempotence comes from handing the SAME set over again, and
+  the entry retires only through a valid ack or `mail
   outbox rm`, exactly as a pushed deposit's would. The answer is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP`; that bound is what keeps a big
   spool draining (the poller's acks retire the batch it took) and what

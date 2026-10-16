@@ -3014,6 +3014,52 @@ fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Pat
     }
 }
 
+/// The answer to one deposit, the same whichever door took it: a plaintext
+/// `mailDeposit` and the destination of a sealed container both answer through
+/// here. Every refusal names its word and a fixed detail; none names a box.
+fn deposit_answer(outcome: &aoide_storage::mail::DepositOutcome, from_node: &str) -> Value {
+    use aoide_storage::mail::DepositOutcome;
+    match outcome {
+        DepositOutcome::Filed { msgid, .. } => json!({ "status": "accepted", "msgid": msgid }),
+        DepositOutcome::Duplicate { .. } => json!({ "status": "duplicate" }),
+        DepositOutcome::BadMsgid => json!({
+            "status": "refused",
+            "reason": "bad-msgid",
+            "detail": "envelope msgid does not match the recomputed value",
+        }),
+        DepositOutcome::MalformedAck => json!({
+            "status": "refused",
+            "reason": "bad-msgid",
+            "detail": "receipt text is not exactly one msgid: it names no letter",
+        }),
+        DepositOutcome::UnverifiedOrigin => json!({
+            "status": "refused",
+            "reason": "unverified-origin",
+            "detail": format!("no key on record for `{from_node}` verifies this envelope's origin signature"),
+        }),
+        DepositOutcome::NotCorrespondence => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
+            "detail": "only a letter or a receipt is filed; a `charter` is applied from a sealed container",
+        }),
+        DepositOutcome::UnknownBox => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_UNKNOWN_BOX,
+            "detail": aoide_storage::mail::UNKNOWN_BOX_DETAIL,
+        }),
+        DepositOutcome::TooLarge => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_TOO_LARGE,
+            "detail": aoide_storage::mail::TOO_LARGE_DETAIL,
+        }),
+        DepositOutcome::BoxFull => json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_BOX_FULL,
+            "detail": aoide_storage::mail::BOX_FULL_DETAIL,
+        }),
+    }
+}
+
 /// `aoide/mailDeposit` (P-M2): `{envelope: <the sealed Envelope, exactly as
 /// aoide_storage::mail::Envelope serializes>}`. The declarations are read FIRST
 /// (once per request, `config-invalid` on an unloadable set), then the caller's
@@ -3166,7 +3212,10 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         aoide_storage::mail::DepositOutcome::BadMsgid
         | aoide_storage::mail::DepositOutcome::MalformedAck
         | aoide_storage::mail::DepositOutcome::UnverifiedOrigin
-        | aoide_storage::mail::DepositOutcome::NotCorrespondence => "invalid",
+        | aoide_storage::mail::DepositOutcome::NotCorrespondence
+        | aoide_storage::mail::DepositOutcome::UnknownBox
+        | aoide_storage::mail::DepositOutcome::TooLarge => "invalid",
+        aoide_storage::mail::DepositOutcome::BoxFull => "refused",
         _ => "ok",
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
@@ -3179,33 +3228,7 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     // answer.
     aoide_conduct::mail_bridge::settle_deposit(&envelope, &outcome);
 
-    match &outcome {
-        aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => Ok(json!({ "status": "accepted", "msgid": msgid })),
-        aoide_storage::mail::DepositOutcome::Duplicate { .. } => Ok(json!({ "status": "duplicate" })),
-        aoide_storage::mail::DepositOutcome::BadMsgid => Ok(json!({
-            "status": "refused",
-            "reason": "bad-msgid",
-            "detail": "envelope msgid does not match the recomputed value",
-        })),
-        aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
-            "status": "refused",
-            "reason": "bad-msgid",
-            "detail": "receipt text is not exactly one msgid: it names no letter",
-        })),
-        aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
-            "status": "refused",
-            "reason": "unverified-origin",
-            "detail": format!(
-                "no key on record for `{}` verifies this envelope's origin signature",
-                envelope.header.from.node
-            ),
-        })),
-        aoide_storage::mail::DepositOutcome::NotCorrespondence => Ok(json!({
-            "status": "refused",
-            "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
-            "detail": "a `charter` envelope is applied from a sealed container; this one arrived as plaintext, with nothing to apply",
-        })),
-    }
+    Ok(deposit_answer(&outcome, &envelope.header.from.node))
 }
 
 // ── `aoide/mailPoll` (messaging plan P-M3, CONTRACTS.md §6) ────────────────
@@ -3351,6 +3374,26 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     }
     let poller = ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default();
 
+    // What the poller says it was handed and did NOT file (its box was full, or
+    // it could not take the bytes yet). Each msgid that is a well-formed msgid
+    // defers that entry in THIS poller's own spool, so it is not offered again at
+    // the head of every batch; an old hub never reads the key (MAIL.md §Wire).
+    let deferred: Vec<String> = params
+        .get("deferred")
+        .and_then(Value::as_array)
+        .map(|list| {
+            let mut seen = std::collections::HashSet::new();
+            list.iter()
+                .filter_map(Value::as_str)
+                .filter(|text| aoide_storage::mail::is_msgid(text))
+                .filter(|text| seen.insert(*text))
+                .take(aoide_storage::outbox::DEFERRED_LIST_CAP)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    aoide_storage::outbox::defer_named(&poller, &deferred)
+        .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     let payloads = aoide_storage::outbox::poll_payloads(&poller)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     // The acknowledgements land FIRST, so what this answer offers is what the
@@ -3743,32 +3786,7 @@ fn deposit_sealed(
             let filed = aoide_storage::mail::deposit((*envelope).clone(), &hop_name)
                 .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
             aoide_conduct::mail_bridge::settle_deposit(&envelope, &filed);
-            match &filed {
-                aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => {
-                    Ok(json!({ "status": "accepted", "msgid": msgid }))
-                }
-                aoide_storage::mail::DepositOutcome::Duplicate { .. } => Ok(json!({ "status": "duplicate" })),
-                aoide_storage::mail::DepositOutcome::BadMsgid => Ok(json!({
-                    "status": "refused",
-                    "reason": "bad-msgid",
-                    "detail": "envelope msgid does not match the recomputed value",
-                })),
-                aoide_storage::mail::DepositOutcome::MalformedAck => Ok(json!({
-                    "status": "refused",
-                    "reason": "bad-msgid",
-                    "detail": "receipt text is not exactly one msgid: it names no letter",
-                })),
-                aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
-                    "status": "refused",
-                    "reason": "unverified-origin",
-                    "detail": "the inner envelope's origin signature does not verify",
-                })),
-                aoide_storage::mail::DepositOutcome::NotCorrespondence => Ok(json!({
-                    "status": "refused",
-                    "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
-                    "detail": "the opened envelope claims a `charter` kind, which is applied from a container's own payload and never filed",
-                })),
-            }
+            Ok(deposit_answer(&filed, &envelope.header.from.node))
         }
     }
 }
@@ -7477,6 +7495,26 @@ mod tests {
             SendAction::Spawn { agent_cmd: "claude".to_string() },
             "routes to Spawn with `do_spawn`'s prompt arg equal to `prompt` above (\"status check please\")"
         );
+    }
+
+    /// **A refused far spawn creates no box.** A spawn the charter allows makes
+    /// its child's box as a local act (MAIL.md, "Store"); a spawn refused before
+    /// anything starts names no box and writes no box file for its task slug.
+    #[test]
+    fn a_refused_far_spawn_creates_no_box_file() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("spawn-refused-box");
+        act_as(&root, "here");
+
+        let audit_log = root.join("log");
+        let refused = do_spawn("bash -lc claude", "hi", &audit_log, "peer", "", None, Some("far-task"));
+        assert!(refused.is_err(), "a shell spawn agent is refused before anything starts");
+        assert!(!aoide_storage::mail::box_exists("far-task"), "no box for the refused spawn's slug");
+        assert!(!aoide_storage::mail::box_path("far-task").exists(), "and no box file");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     /// P-RSA S10 review, L10 + M2's door half: the two refusals that must fire
@@ -15190,6 +15228,7 @@ mod tests {
         act_as(&root, "here");
 
         let origin_name = setup_verifiable_origin(&["message"]);
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hello from the wire").unwrap();
         assert_eq!(envelope.header.from.node, origin_name);
 
@@ -15312,6 +15351,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hello twice").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -15342,6 +15382,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -15386,6 +15427,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -15425,6 +15467,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
+        aoide_storage::mail::box_add("conductor").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
@@ -15589,6 +15632,214 @@ mod tests {
         );
         assert!(!poll_admitted(None, &grant, "box-b"), "no verified signature resolution at all");
         assert!(!poll_admitted(sig("box-b"), &Grant::none(), "box-b"), "and no grant to speak with either");
+    }
+
+    /// **A poller's `deferred` list defers the entries it names, in its own
+    /// spool and nowhere else.** The poller was handed a container and did not
+    /// file it (its box is full), so it names it; the hub defers that entry for
+    /// this poller only, and another node's entry for the same msgid is untouched.
+    #[test]
+    fn a_hub_defers_only_the_callers_own_entries() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-own");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container.clone()))
+            .unwrap();
+        aoide_storage::outbox::write_entry("box-c", &aoide_storage::outbox::OutboxEntry::transit_held(container))
+            .unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        mail_poll(&json!({ "node": "box-b", "deferred": [msgid] }), &ctx).unwrap();
+
+        let own = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(own.len(), 1, "{own:?}");
+        assert_eq!(own[0].tries, 1, "named: the hub defers it for this poller");
+        assert!(own[0].last_outcome.starts_with("deferred:"), "{}", own[0].last_outcome);
+        let other = aoide_storage::outbox::list_entries("box-c").unwrap();
+        assert_eq!(other[0].tries, 0, "another node's entry for the same msgid is not deferred");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **Fifty deferred entries never take a poll's batch.** The poller names
+    /// the fifty it could not file; they wait their window, so the one fresh
+    /// letter behind them is the whole answer. Without the deferral the first
+    /// fifty fill the batch and the fresh letter waits for the next poll, and
+    /// the next, for as long as the wall stands.
+    #[test]
+    fn a_wall_of_deferred_poll_entries_never_starves_a_fresh_letter() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-wall");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        let seal = |text: &str| {
+            let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", text).unwrap();
+            aoide_storage::seal::seal_envelope(&envelope, &binding, "", "", "box-b", "box-b", &now).unwrap()
+        };
+        let mut wall = Vec::new();
+        for i in 0..50 {
+            let container = seal(&format!("wall {i}"));
+            wall.push(container.msgid.clone());
+            aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container))
+                .unwrap();
+        }
+        let fresh = seal("the fresh one");
+        let fresh_msgid = fresh.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(fresh)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let answer = mail_poll(&json!({ "node": "box-b", "deferred": wall }), &ctx).unwrap();
+        let offered: Vec<String> = answer["containers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c["msgid"].as_str().map(str::to_string))
+            .collect();
+        assert_eq!(offered, vec![fresh_msgid], "the deferred fifty take no slot; the fresh letter is offered");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **The `deferred` key is additive.** An old hub reads its params with
+    /// `get` and never looks at the key, so a poll that carries it must answer
+    /// exactly what the same poll without it answers. Names a msgid this hub
+    /// does not hold, so the list changes nothing it could not already see.
+    /// (This guards a compatibility property, so it passes before the fix too.)
+    #[test]
+    fn an_old_hub_ignores_the_deferred_list() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-old-hub");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let plain = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        let with_key = mail_poll(&json!({ "node": "box-b", "deferred": ["0".repeat(64)] }), &ctx).unwrap();
+        assert_eq!(plain["containers"], with_key["containers"], "the key changes nothing unnamed");
+        assert_eq!(with_key["containers"][0]["msgid"], json!(msgid));
+        assert_eq!(aoide_storage::outbox::list_entries("box-b").unwrap()[0].tries, 0);
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **Junk in the `deferred` list is dropped, and a valid msgid beside it
+    /// still counts.** A non-hex text never names a spool file, so a `../` or a
+    /// capital is not a path and not a msgid; the lowercase hex msgid next to it
+    /// is deferred as usual.
+    #[test]
+    fn a_deferred_list_with_a_non_hex_msgid_is_ignored() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-junk");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let junk = json!(["../escape", msgid.to_uppercase(), 7, msgid]);
+        mail_poll(&json!({ "node": "box-b", "deferred": junk }), &ctx).unwrap();
+
+        let own = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(own.len(), 1, "{own:?}");
+        assert_eq!(own[0].tries, 1, "the valid msgid is deferred; the junk names nothing");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **One msgid named fifty times is deferred once.** The list is deduplicated
+    /// before the cap, so a repeated name neither takes fifty batch-sized steps
+    /// nor counts as fifty tries.
+    #[test]
+    fn one_msgid_repeated_fifty_times_is_deferred_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-repeat");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        mail_poll(&json!({ "node": "box-b", "deferred": vec![msgid; 50] }), &ctx).unwrap();
+
+        let own = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(own.len(), 1, "{own:?}");
+        assert_eq!(own[0].tries, 1, "fifty copies of one msgid are one deferral");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     /// The poll's own acknowledgement, at the door: a `transit` entry held for
@@ -17587,6 +17838,7 @@ mod tests {
         let origin_name = setup_verifiable_origin(&["message"]);
 
         let audit_log = root.join("log");
+        aoide_storage::mail::box_add("bob").unwrap();
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "bob", "hi").unwrap();
         let params = json!({ "envelope": envelope });
 
@@ -17611,6 +17863,33 @@ mod tests {
         let filed = mail_deposit(&params, &door).expect("the direct lane still accepts a plaintext envelope");
         assert_eq!(filed["status"], "accepted", "{filed}");
         assert_eq!(aoide_storage::mail::read_base().unwrap().len(), 1, "the direct lane filed it");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// A letter to a name with no box answers `unknown-box` with the fixed
+    /// detail, which names no box; nothing is filed and no box is created.
+    #[test]
+    fn an_unknown_box_answers_unknown_box_and_names_no_box() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("unknown-box");
+        act_as(&root, "here");
+        let origin_name = setup_verifiable_origin(&["message"]);
+
+        let audit_log = root.join("log");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "carol", "hi").unwrap();
+        let params = json!({ "envelope": envelope });
+        let door = mail_deposit_ctx(&audit_log, Some(&origin_name));
+        let refused = mail_deposit(&params, &door).expect("a refusal is a result, not a JSON-RPC error");
+
+        assert_eq!(refused["status"], "refused", "{refused}");
+        assert_eq!(refused["reason"], "unknown-box", "{refused}");
+        assert_eq!(refused["detail"], aoide_storage::mail::UNKNOWN_BOX_DETAIL, "{refused}");
+        assert!(!refused.to_string().contains("carol"), "the answer names no box: {refused}");
+        assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing is filed");
+        assert!(!aoide_storage::mail::box_path("carol").exists(), "a far deposit created a box");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }

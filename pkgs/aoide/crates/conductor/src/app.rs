@@ -5052,15 +5052,13 @@ impl App {
 /// matters since the `stop`/`stopped` vocabulary was split off `done`: a
 /// `stopped` session finished its TURN and is still very much alive, so it must
 /// stay in the `live` count.
-/// The one shape a mailbox name takes on the wire, `^[a-z0-9][a-z0-9-]*$`
-/// (CONTRACTS.md §5 — the slug predicate every mailbox and task name shares),
-/// checked before a far petname becomes a `node/petname` address: a name
-/// carrying a comma or a slash would fan a letter out to recipients the
-/// operator never picked.
+/// The one shape a mailbox name takes on the wire, checked before a far
+/// petname becomes a `node/petname` address: a name carrying a comma or a slash
+/// would fan a letter out to recipients the operator never picked. The grammar
+/// is storage's ([`aoide_storage::mail::valid_box_name`]), so a name is a
+/// mailbox here exactly when a box can be created for it.
 pub fn is_mailbox_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    aoide_storage::mail::valid_box_name(name)
 }
 
 pub fn is_terminal(rec: &SessionRecord) -> bool {
@@ -5349,6 +5347,21 @@ fn dist2(r: u8, g: u8, b: u8, r2: u8, g2: u8, b2: u8) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    /// The conductor's petname check and storage's box grammar are one rule:
+    /// a name the conductor takes as a mailbox is a name storage will create.
+    #[test]
+    fn conductor_and_storage_share_one_name_rule() {
+        for name in ["misty-comet", "Misty", "", "con", "nul", "com1", "a/b", "a,b", &"a".repeat(63), &"a".repeat(64)] {
+            assert_eq!(
+                super::is_mailbox_name(name),
+                aoide_storage::mail::valid_box_name(name),
+                "{name:?} is judged differently by the conductor and storage"
+            );
+        }
+        assert!(!super::is_mailbox_name("con"), "a device name is not a mailbox");
+        assert!(!super::is_mailbox_name(&"a".repeat(64)), "64 bytes is past the box cap");
+    }
+
     #[test]
     fn ledger_only_session_appears_under_past_without_entering_live_graph() {
         let project = graph::Project {

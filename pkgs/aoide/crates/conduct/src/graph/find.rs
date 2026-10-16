@@ -3540,6 +3540,7 @@ mod tests {
             received_at: "2026-10-12T10:00:00Z".into(),
             kind: mail::ENTRY_TYPE_LETTER.into(),
             via: "self".into(),
+            origin: String::new(),
             envelope: mail::Envelope {
                 header: mail::Header {
                     version: "1".into(),

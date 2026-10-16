@@ -4914,3 +4914,20 @@ pkgs/aoide/crates/storage/src/mail.rs, pkgs/aoide/crates/server/src/a2a.rs,
 pkgs/aoide/crates/client/src/mail_wire.rs, pkgs/aoide/crates/client/src/commands.rs,
 pkgs/aoide/crates/storage/AGENTS.md, docs/architecture/MAIL.md, CONTRACTS.md,
 docs/Aoide-Wiki/ingest/log.md
+
+## [2026-10-16] change | the reaper retires dead sessions' mail readers
+
+Each reap pass drops every mail reader key that names no session on the
+roster, keeping the pseudo-reader, so a dead session's mark no longer pins its
+box's compaction floor. It runs in the same stage-lock hold as `reap_inner`,
+right after it, not outside the lock as the mail-bounds design's S7 said: that
+premise (`try_stage_lock` is not re-entrant) is false, since both stage-lock
+functions run a nested call directly on the thread that holds the lock. One
+hold makes the roster read and the cursors rewrite atomic, so a session that
+registers and reads between them cannot lose its fresh mark, and the work is
+one small `cursors.json` rewrite. Compaction stays with the next refused
+deposit. The `with_lock` doc that said the lock never nests is corrected.
+
+Pages touched: pkgs/aoide/crates/storage/src/mail.rs,
+pkgs/aoide/crates/conduct/src/reap.rs, pkgs/aoide/crates/conduct/README.md,
+docs/architecture/MAIL.md, docs/Aoide-Wiki/ingest/log.md

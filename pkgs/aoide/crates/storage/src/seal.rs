@@ -2688,6 +2688,7 @@ mod container_tests {
 
         // …and it files through the same machinery a local letter does,
         // which is the slice's own acceptance wording.
+        mail::box_add("bob").unwrap();
         let filed = mail::deposit((**opened).clone(), "self").unwrap();
         assert!(matches!(filed, mail::DepositOutcome::Filed { .. }), "{filed:?}");
         let base = mail::read_base().unwrap();
@@ -2823,6 +2824,7 @@ mod container_tests {
 
         // Filed. The destination keeps no gate record, so the container opens
         // again and its box answers: a duplicate that is a letter, so an ack is owed.
+        mail::box_add("bob").unwrap();
         let filed = mail::deposit(envelope.clone(), "self").unwrap();
         assert!(matches!(filed, mail::DepositOutcome::Filed { .. }), "{filed:?}");
         assert!(matches!(deposit_container(&container).unwrap(), ContainerOutcome::Opened { .. }));
@@ -2876,6 +2878,7 @@ mod container_tests {
         };
         // The crash: the letter FILED (base + seen) but the gate's own record
         // was never written.
+        mail::box_add("bob").unwrap();
         let _ = mail::deposit(envelope.clone(), "self").unwrap();
 
         // The retry re-opens once — it is not recorded — and the filing is
@@ -3755,6 +3758,7 @@ mod review_fix_tests {
         let ContainerOutcome::Opened { envelope: opened, .. } = deposit_container(&container).unwrap() else {
             panic!("opens");
         };
+        mail::box_add("bob").unwrap();
         assert!(matches!(
             mail::deposit((*opened).clone(), "self").unwrap(),
             mail::DepositOutcome::Filed { .. }

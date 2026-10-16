@@ -1118,8 +1118,24 @@ pub fn reap(inv: &Invocation) -> Outcome {
         Some((addrs, owners)) => (Some(addrs), Some(owners)),
         None => (None, None),
     };
-    let (mut outcome, tunnel_candidates, gone_remote) =
-        aoide_storage::fs::with_stage_lock(move || reap_inner(inv, gathered_addrs, window_owners));
+    let ((mut outcome, tunnel_candidates, gone_remote), retired_readers) =
+        aoide_storage::fs::with_stage_lock(move || {
+            let reaped = reap_inner(inv, gathered_addrs, window_owners);
+            (reaped, retire_mail_readers())
+        });
+    if !retired_readers.is_empty() {
+        outcome.message = format!(
+            "{}; retired {} mail reader mark(s)",
+            outcome.message,
+            retired_readers.len()
+        );
+        if let Some(data) = outcome.data.as_mut() {
+            data["retiredReaders"] = json!(retired_readers
+                .iter()
+                .map(|(name, reader)| format!("{name}/{reader}"))
+                .collect::<Vec<_>>());
+        }
+    }
     // Finish the ssh tunnel sweep OUTSIDE the stage lock — `reap_inner` only
     // GATHERED the candidates under it (`orphan_tunnel_candidates`); this is
     // the KILL half (`sweep_orphan_tunnels`'s own doc has the full reasoning
@@ -1429,6 +1445,38 @@ fn refresh_codex_titles() -> Vec<String> {
         changed
     })
 }
+/// Retires the mail reader keys of sessions no longer on the roster
+/// (`aoide_storage::mail::retire_readers`), then deletes the dead boxes that
+/// are empty (`aoide_storage::mail::reap_dead_boxes`). Both run in the SAME
+/// stage-lock hold as `reap_inner`, right after it, and nothing runs without
+/// that hold: the lock is the precondition, so an unlocked caller retires
+/// nothing. The roster it reads is the one that pass just wrote (or left alone,
+/// on a quiet pass), and no session can register and enrol a reader between
+/// that read and the cursors rewrite, so a fresh reader is never retired. A
+/// roster that is absent or unreadable retires nothing: an absent file is not
+/// an empty roster, and every live reader would be lost with it. A mail store
+/// that refuses costs this pass only its retirement.
+fn retire_mail_readers() -> Vec<(String, String)> {
+    if !aoide_storage::fs::stage_lock_held() {
+        return Vec::new();
+    }
+    let Ok(raw) = std::fs::read_to_string(sessions_path()) else {
+        return Vec::new();
+    };
+    let Ok(s_file) = serde_json::from_str::<SessionsFile>(&raw) else {
+        return Vec::new();
+    };
+    let live: HashSet<&str> = s_file.sessions.iter().map(|s| s.session_id.as_str()).collect();
+    let retired = aoide_storage::mail::retire_readers(&live).unwrap_or_else(|e| {
+        eprintln!("[aoide/reap] mail reader retirement skipped: {e}");
+        Vec::new()
+    });
+    if let Err(e) = aoide_storage::mail::reap_dead_boxes() {
+        eprintln!("[aoide/reap] dead mailbox reap skipped: {e}");
+    }
+    retired
+}
+
 /// Returns the sweep's `Outcome`, the ssh tunnel candidates gathered under
 /// the stage lock (`orphan_tunnel_candidates`) — this function never kills or
 /// unlinks any of them itself, `reap` (the only caller) finishes that work
@@ -3156,6 +3204,134 @@ mod tests {
         let mine: Vec<_> = lines.iter().filter(|l| l.session_id == "dead-1").collect();
         assert_eq!(mine.len(), 1, "exactly one ledger line, never two: {lines:?}");
         assert!(!mine[0].ended_at.is_empty());
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A session the reap takes off the roster leaves every mailbox it read on
+    /// the same pass; a live session's mark stays, and a name left with no
+    /// reader is dead, so the same pass reaps it when it holds no mail.
+    #[test]
+    fn a_reaped_sessions_reader_key_leaves_every_box() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-retire-readers");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-retire-readers-xdg");
+
+        let mut dead = hook_only("dead-1", "idle");
+        dead.started_at = "2000-01-01T00:00:00Z".into(); // a pre-boot ghost: a real reap
+        dead.cwd = "/nonexistent/pre-boot-ghost".into();
+        let mut live = hook_only("live-1", "idle");
+        live.cwd = "/nonexistent/nowhere".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![dead, live] })
+            .unwrap();
+        let mut hooks = Vec::new();
+        upsert_hook(&mut hooks, "live-1", "idle", &now_iso_utc());
+        write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
+        for (name, reader) in [("bob", "dead-1"), ("carol", "dead-1"), ("bob", "live-1")] {
+            aoide_storage::mail::enrol_reader(name, reader).unwrap();
+        }
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.unwrap();
+        assert_eq!(data["reaped"], json!(["dead-1"]));
+        assert_eq!(data["retiredReaders"], json!(["bob/dead-1", "carol/dead-1"]));
+        let raw = std::fs::read_to_string(aoide_storage::mail::cursors_path()).unwrap();
+        let cursors: aoide_storage::mail::Cursors = serde_json::from_str(&raw).unwrap();
+        assert_eq!(cursors.keys().collect::<Vec<_>>(), vec!["bob"], "carol's box went dead with its only reader, holds no mail, and is reaped with its key");
+        assert_eq!(cursors["bob"].keys().collect::<Vec<_>>(), vec!["live-1"]);
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Retirement under a roster it cannot read retires nothing: an absent
+    /// `sessions.json` is not an empty roster, so the live readers stay enrolled.
+    #[test]
+    fn retirement_retires_nothing_when_the_roster_is_absent_or_unreadable() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("reap-retire-no-roster");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-retire-no-roster-xdg");
+        aoide_storage::mail::enrol_reader("bob", "live-3").unwrap();
+
+        let absent = aoide_storage::fs::with_stage_lock(retire_mail_readers);
+        assert!(absent.is_empty(), "no sessions.json: nothing is retired, got {absent:?}");
+        std::fs::write(sessions_path(), "{ not json").unwrap();
+        let unreadable = aoide_storage::fs::with_stage_lock(retire_mail_readers);
+        assert!(unreadable.is_empty(), "an unreadable roster: nothing is retired, got {unreadable:?}");
+        let raw = std::fs::read_to_string(aoide_storage::mail::cursors_path()).unwrap();
+        assert!(raw.contains("live-3"), "the live reader's key is kept: {raw}");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Retirement outside reap's stage-lock hold retires nothing and does not
+    /// panic: the lock is the precondition, not a debug check.
+    #[test]
+    fn retirement_without_the_stage_lock_retires_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("reap-retire-unlocked");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-retire-unlocked-xdg");
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![] }).unwrap();
+        aoide_storage::mail::enrol_reader("bob", "gone-4").unwrap();
+
+        assert!(retire_mail_readers().is_empty(), "no lock held: nothing is retired");
+        let raw = std::fs::read_to_string(aoide_storage::mail::cursors_path()).unwrap();
+        assert!(raw.contains("gone-4"), "the reader is kept: {raw}");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// Retirement runs inside reap's own stage-lock hold (without it, it retires
+    /// nothing, see the test above), and the hold is re-entrant, so the reap completes rather
+    /// than waiting on itself. The reap runs on its own thread with a deadline, so
+    /// a deadlock fails the test instead of hanging it, and the lock is released
+    /// once the reap returns.
+    #[test]
+    fn reader_retirement_neither_deadlocks_nor_runs_unlocked() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-retire-lock");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-retire-lock-xdg");
+
+        let mut dead = hook_only("dead-2", "idle");
+        dead.started_at = "2000-01-01T00:00:00Z".into();
+        dead.cwd = "/nonexistent/pre-boot-ghost".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![dead] }).unwrap();
+        aoide_storage::mail::enrol_reader("dana", "dead-2").unwrap();
+        let inv = crate::graph::testutil::invocation(&["session", "reap"], &[]);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let out = reap(&inv);
+            let _ = tx.send((out.status, out.data));
+        });
+        let (status, data) = rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("reap returned: retirement did not deadlock on its own lock");
+        assert_eq!(status, aoide_protocol::output::Status::Ok);
+        assert_eq!(data.unwrap()["retiredReaders"], json!(["dana/dead-2"]));
+        assert!(!aoide_storage::fs::stage_lock_held(), "the test thread holds nothing after reap");
 
         let _ = std::fs::remove_dir_all(&stage);
     }

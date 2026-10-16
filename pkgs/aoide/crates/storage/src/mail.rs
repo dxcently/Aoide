@@ -117,7 +117,7 @@ use crate::stage::{load_stage, write_stage};
 use crate::time::{now_iso_utc, parse_iso_utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
 /// The canonical header's `version` field for this phase. Bumps only if the
@@ -138,6 +138,13 @@ pub const REFUSAL_NOT_CORRESPONDENCE: &str = "not-correspondence";
 /// box's state, not the letter's bytes. The sender defers and keeps the letter,
 /// and a poller keeps the hub's custody of the container.
 pub const REFUSAL_BOX_FULL: &str = "box-full";
+/// A letter names a box this node does not have. Nothing is filed or acked,
+/// and the sender parks the letter: it is a fact about the name, not a verdict
+/// on the bytes, and the answer names no box ([`UNKNOWN_BOX_DETAIL`]).
+pub const REFUSAL_UNKNOWN_BOX: &str = "unknown-box";
+/// The fixed detail every `unknown-box` answer carries. It names no box, so a
+/// relay or a hostile sender learns nothing about which names exist.
+pub const UNKNOWN_BOX_DETAIL: &str = "no mailbox of that name is on this node; nothing was filed or acknowledged";
 /// `Header.kind`/`Entry.kind`'s value for a `charter` letter (P-CHARTER) — a signed
 /// charter travelling as mail. Unlike a letter and a receipt this kind is never
 /// FILED: the enclosed charter is applied to `state/mesh/`, and the letter's local
@@ -219,6 +226,11 @@ pub struct Entry {
     /// The hop that deposited it; always `"self"` in P-M1 — there is no
     /// other hop yet.
     pub via: String,
+    /// The verified origin key the letter was deposited under, for the sender's
+    /// quarter ([`Caps`]). Empty for a local letter and a migrated line, which
+    /// have no quarter, and skipped when empty, so those lines are unchanged.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub origin: String,
     pub envelope: Envelope,
 }
 
@@ -281,6 +293,77 @@ pub const ROTATE_AT: u64 = 4 * 1024 * 1024;
 /// The longest box name, the DNS label limit, so a 64-hex board id is never a
 /// box name.
 pub const BOX_NAME_MAX: usize = 63;
+
+/// The largest envelope a letter may serialize to. A letter over it is refused
+/// `too-large` at the mint and at the door, before any box is read.
+pub const LETTER_MAX: usize = 256 * 1024;
+/// The most a single box file may hold, measured after the append.
+pub const BOX_MAX: u64 = 16 * 1024 * 1024;
+/// The most all box files together may hold. With the two rotating logs at
+/// [`ROTATE_AT`] each, all mail stays under 256 MiB by construction.
+pub const BOXES_MAX: u64 = 240 * 1024 * 1024;
+
+/// The caps a deposit is admitted under. [`CAPS`] is the store's own; a test
+/// passes a small one through [`deposit_within`] and [`fit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Caps {
+    pub box_max: u64,
+    pub boxes_max: u64,
+}
+
+pub const CAPS: Caps = Caps { box_max: BOX_MAX, boxes_max: BOXES_MAX };
+
+/// Which cap refused a line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Full {
+    /// The target box would exceed `box_max`.
+    Box,
+    /// The sender's share of the target box would exceed a quarter of `box_max`.
+    Origin,
+    /// The sender's share of every box would exceed a quarter of `boxes_max`.
+    OriginTotal,
+    /// All boxes together would exceed `boxes_max`.
+    Total,
+}
+
+/// The bytes one verified origin key holds: in the target box, and across every
+/// box together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Held {
+    pub in_box: u64,
+    pub in_store: u64,
+}
+
+/// Admits one line of `line_len` bytes to a box of `box_len`, given the bytes
+/// the sender holds (`held`, `None` for a local letter, which has no quarter),
+/// and all boxes' bytes (`boxes_len`). Pure: the store's policy is this one
+/// comparison chain.
+pub fn admit(caps: Caps, box_len: u64, held: Option<Held>, boxes_len: u64, line_len: u64) -> Result<(), Full> {
+    if box_len + line_len > caps.box_max {
+        return Err(Full::Box);
+    }
+    if let Some(held) = held {
+        if held.in_box + line_len > caps.box_max / 4 {
+            return Err(Full::Origin);
+        }
+        if held.in_store + line_len > caps.boxes_max / 4 {
+            return Err(Full::OriginTotal);
+        }
+    }
+    if boxes_len + line_len > caps.boxes_max {
+        return Err(Full::Total);
+    }
+    Ok(())
+}
+
+/// Refusal word for a letter the target box has no room for. Nothing is filed
+/// or acknowledged, and the sender defers the letter and keeps it.
+/// (`REFUSAL_BOX_FULL` is declared above.)
+pub const REFUSAL_TOO_LARGE: &str = "too-large";
+/// The fixed detail a `too-large` answer carries.
+pub const TOO_LARGE_DETAIL: &str = "the letter is over 256 KiB serialized; nothing was filed; send less text";
+/// The fixed detail a `box-full` answer carries. It names no box.
+pub const BOX_FULL_DETAIL: &str = "a mailbox on this node is full; nothing was filed or acknowledged; keep the letter and retry";
 
 /// The counter's value, `None` while no counter has been written yet.
 fn read_counter() -> Result<Option<u64>, String> {
@@ -448,14 +531,12 @@ fn seal(header: &Header, text: &str, kp: &identity::Keypair) -> (String, String)
 /// Fail-closed choke point EVERY mail operation, read or write, funnels
 /// through exactly once at its own top level: takes the shared stage lock
 /// ([`crate::fs::try_stage_lock`]), runs [`migrate_if_needed`], then `f`.
-/// **Never call this from inside a function that is itself only ever
-/// reached through `with_lock`** — `try_stage_lock` opens a fresh fd per
-/// call and never nests, unlike `with_stage_lock`, which runs a nested call
-/// on the thread that already holds it (`fs.rs`): nesting this one deadlocks
-/// a real second acquisition and merely
-/// double-locks/unlocks in the best case. Every raw helper below
-/// (`read_entries_unlocked`, `append_base_line`, `next_seq`, …) is written
-/// assuming its caller already holds this lock.
+/// `try_stage_lock` is re-entrant on its thread, so a caller already inside
+/// `with_stage_lock` (the reaper's [`retire_readers`]) runs this in that same
+/// hold. Every raw helper below (`read_entries_unlocked`, `append_base_line`,
+/// `next_seq`, …) is written assuming its caller already holds this lock, and
+/// never calls `with_lock` itself: the migrations at its top are not meant to
+/// run twice in one operation.
 fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     match crate::fs::try_stage_lock(move || {
         ensure_mail_dir()?;
@@ -484,6 +565,73 @@ fn ensure_mail_dir() -> Result<(), String> {
 /// and archived raw. The archive is never read. Transit lines are not entries,
 /// so they stay in the archive.
 fn migrate_base_if_needed() -> Result<(), String> {
+    migrate_base_within(CAPS)
+}
+
+/// The bytes a migration has put in each box and in the store, so each migrated
+/// line is admitted from memory: a per-line `measure` would read the store once
+/// for every line.
+struct MigrationBudget {
+    boxes: BTreeMap<PathBuf, u64>,
+    total: u64,
+}
+
+impl MigrationBudget {
+    fn load() -> Result<Self, String> {
+        let mut budget = MigrationBudget { boxes: BTreeMap::new(), total: 0 };
+        for path in box_paths()? {
+            let len = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+            budget.boxes.insert(path, len);
+            budget.total += len;
+        }
+        Ok(budget)
+    }
+
+    fn admits(&self, caps: Caps, path: &std::path::Path, line_len: u64) -> bool {
+        let box_len = self.boxes.get(path).copied().unwrap_or(0);
+        admit(caps, box_len, None, self.total, line_len).is_ok()
+    }
+
+    fn add(&mut self, path: &std::path::Path, line_len: u64) {
+        *self.boxes.entry(path.to_path_buf()).or_insert(0) += line_len;
+        self.total += line_len;
+    }
+}
+
+/// Files one migrated line under `caps`, and says where it went. A migrated line
+/// has no origin, so only the box and store caps apply to it. A line its own box
+/// has no room for is parked in `_legacy`, which is counted in the store and read
+/// by no box reader, so it is kept but not shown. Returns whether the line was
+/// filed; one that fits neither stays in the archive the migration keeps, and
+/// the migration says so on stderr and in its audit line.
+fn file_migrated(entry: &Entry, caps: Caps, budget: &mut MigrationBudget) -> Result<bool, String> {
+    if entry.kind == ENTRY_TYPE_RECEIPT {
+        append_entry(entry)?;
+        return Ok(true);
+    }
+    let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+    let line_len = line.len() as u64 + 1;
+    let own = box_path(&entry.envelope.header.to.name);
+    if budget.admits(caps, &own, line_len) {
+        append_entry(entry)?;
+        budget.add(&own, line_len);
+        return Ok(true);
+    }
+    let legacy = legacy_box_path();
+    if budget.admits(caps, &legacy, line_len) {
+        feed::append_line(&legacy, line.as_bytes()).map_err(|e| format!("{}: {e}", legacy.display()))?;
+        budget.add(&legacy, line_len);
+        return Ok(true);
+    }
+    eprintln!(
+        "[aoide/mail] migration: no room for a line to `{}` in its box or in _legacy; it stays in base.jsonl.migrated",
+        entry.envelope.header.to.name
+    );
+    Ok(false)
+}
+
+/// [`migrate_base_if_needed`] under `caps`. A test passes a small one.
+fn migrate_base_within(caps: Caps) -> Result<(), String> {
     let base = base_path();
     if !base.exists() {
         return Ok(());
@@ -492,17 +640,36 @@ fn migrate_base_if_needed() -> Result<(), String> {
     let late = archive.exists();
     let lines = feed::read_lines(&base).map_err(|e| format!("{}: {e}", base.display()))?;
     let mut filed = Filed::load()?;
+    let mut budget = MigrationBudget::load()?;
+    let mut unfiled = 0usize;
     for line in &lines {
-        let Ok(mut entry) = serde_json::from_slice::<Entry>(line) else { continue };
+        let Ok(mut entry) = serde_json::from_slice::<Entry>(line) else {
+            unfiled += 1;
+            continue;
+        };
         if filed.holds(&entry) {
             continue;
         }
         if late {
             entry.seq = next_seq()?;
         }
-        append_entry(&entry)?;
-        filed.add(&entry);
+        if file_migrated(&entry, caps, &mut budget)? {
+            filed.add(&entry);
+        } else {
+            unfiled += 1;
+        }
     }
+    // One audit line per migration, written before the archive is, so a line
+    // that cannot be audited leaves base.jsonl in place for the next try.
+    aoide_protocol::audit::audit(
+        &aoide_protocol::audit::default_audit_log(),
+        aoide_protocol::Door::Cli,
+        aoide_protocol::audit::EventClass::Audit,
+        "mail.migrate",
+        "ok",
+        &format!("migration of base.jsonl: {} lines, unfiled {unfiled}, kept in base.jsonl.migrated", lines.len()),
+    )
+    .map_err(|e| format!("the audit log cannot be written, so the migration waits: {e}"))?;
     if late {
         for line in &lines {
             feed::append_line(&archive, line).map_err(|e| format!("{}: {e}", archive.display()))?;
@@ -606,6 +773,7 @@ fn migrate_if_needed() -> Result<(), String> {
             received_at: row.received_at.clone(),
             kind: ENTRY_TYPE_RECEIPT.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope,
         };
         append_entry(&entry)?;
@@ -730,9 +898,175 @@ fn receipt_generations() -> [PathBuf; 2] {
 /// refuses. Its name starts with `_`, which the grammar never does.
 const LEGACY_BOX: &str = "_legacy";
 
-/// A box name the grammar accepts: a node name, at most [`BOX_NAME_MAX`] bytes.
+/// A box name the grammar accepts: a node name, at most [`BOX_NAME_MAX`] bytes,
+/// and not a DOS device name. One rule on every OS: a box file must be
+/// creatable on Windows too, so `con.log` is refused here, not there.
 pub fn valid_box_name(name: &str) -> bool {
-    crate::node_store::valid_node_name(name) && name.len() <= BOX_NAME_MAX
+    crate::node_store::valid_node_name(name) && name.len() <= BOX_NAME_MAX && !is_device_name(name)
+}
+
+/// `con`, `prn`, `aux`, `nul`, and `com0`..`com9`, `lpt0`..`lpt9`.
+fn is_device_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    matches!(name, "con" | "prn" | "aux" | "nul")
+        || (bytes.len() == 4 && (name.starts_with("com") || name.starts_with("lpt")) && bytes[3].is_ascii_digit())
+}
+
+/// Whether `name`'s box exists. A box exists only because a local act created
+/// it ([`box_add`], [`enrol_reader`], [`file_letter`]), never because a far
+/// deposit named it.
+pub fn box_exists(name: &str) -> bool {
+    valid_box_name(name) && box_path(name).exists()
+}
+
+/// Creates `name`'s box file, owner-only and empty, if it does not exist.
+/// Returns whether it created it. Raw — assumes the caller holds the lock.
+fn create_box_unlocked(name: &str) -> Result<bool, String> {
+    let path = box_path(name);
+    if path.exists() {
+        return Ok(false);
+    }
+    ensure_mail_dir()?;
+    crate::fs::ensure_write_dir(&boxes_dir()).map_err(|e| format!("{}: {e}", boxes_dir().display()))?;
+    feed::ensure_log(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(true)
+}
+
+/// The box a daemon creates when it starts, so a far letter to the conductor
+/// files from the first deposit. It is the one role box that is not a session.
+pub const CONDUCTOR_BOX: &str = "conductor";
+
+/// Creates the boxes a daemon owns at start: [`CONDUCTOR_BOX`]. A local act, so a
+/// far deposit to a name no local act created is still refused.
+pub fn ensure_auto_boxes() -> Result<(), String> {
+    box_add(CONDUCTOR_BOX).map(|_| ())
+}
+
+/// The session boxes this store knows, and whether each is dead: a box is
+/// recorded when its session's first insert makes it (`ensure_session_box`), and
+/// `retire_readers` marks it dead when the roster it is handed no longer names
+/// its session, and live again when the roster does (MAIL.md "Store").
+pub type SessionBoxes = BTreeMap<String, bool>;
+
+pub fn session_boxes_path() -> PathBuf {
+    mail_dir().join("session-boxes.json")
+}
+
+fn load_session_boxes() -> Result<SessionBoxes, String> {
+    match std::fs::read(session_boxes_path()) {
+        Ok(raw) => serde_json::from_slice(&raw).map_err(|e| format!("{}: {e}", session_boxes_path().display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(SessionBoxes::new()),
+        Err(e) => Err(format!("{}: {e}", session_boxes_path().display())),
+    }
+}
+
+fn save_session_boxes(boxes: &SessionBoxes) -> Result<(), String> {
+    let body = serde_json::to_vec(boxes).map_err(|e| e.to_string())?;
+    atomic_write_private(&session_boxes_path(), &body).map_err(|e| format!("{}: {e}", session_boxes_path().display()))
+}
+
+/// The one rule for a dead box (MAIL.md "Store"). A box is dead when its name is
+/// a session box the roster has gone without, or when every reader key it had was
+/// retired (its reader map is empty). A name a pseudo-reader still holds is not
+/// empty, a name nothing recorded and nothing read has neither mark, and the role
+/// box `conductor` is never dead.
+fn is_dead(name: &str, cursors: &Cursors, sessions: &SessionBoxes) -> bool {
+    name != CONDUCTOR_BOX
+        && (sessions.get(name) == Some(&true) || cursors.get(name).is_some_and(BTreeMap::is_empty))
+}
+
+/// Whether a far letter may file to `name`: the box exists and is not dead.
+fn box_accepts(name: &str, cursors: &Cursors, sessions: &SessionBoxes) -> bool {
+    box_exists(name) && !is_dead(name, cursors, sessions)
+}
+
+/// Reap's half of a dead box's life (MAIL.md "Store"): deletes every dead box
+/// that holds no letter, with its cursor key, and audits each deletion before it
+/// happens. A dead box that still holds mail stays, dead, until its letters are
+/// gone. Returns the names it deleted. Runs under the stage lock.
+pub fn reap_dead_boxes() -> Result<Vec<String>, String> {
+    if !cursors_path().exists() && !session_boxes_path().exists() {
+        return Ok(Vec::new());
+    }
+    with_lock(|| {
+        let mut cursors = load_cursors()?;
+        let mut sessions = load_session_boxes()?;
+        let names: BTreeSet<String> = cursors.keys().chain(sessions.keys()).cloned().collect();
+        let dead: Vec<String> = names.into_iter().filter(|name| is_dead(name, &cursors, &sessions)).collect();
+        let mut removed = Vec::new();
+        let mut failure = Ok(());
+        for name in dead {
+            match reap_dead_box(&name) {
+                Ok(true) => {
+                    cursors.remove(&name);
+                    sessions.remove(&name);
+                    removed.push(name);
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    failure = Err(e);
+                    break;
+                }
+            }
+        }
+        if !removed.is_empty() {
+            save_cursors(&cursors)?;
+            save_session_boxes(&sessions)?;
+        }
+        failure.map(|()| removed)
+    })
+}
+
+/// Deletes one dead box's file if it holds no letter, after its audit line.
+/// `Ok(false)` when it holds mail and stays.
+fn reap_dead_box(name: &str) -> Result<bool, String> {
+    let path = box_path(name);
+    if path.exists() {
+        if !box_lines(&path)?.is_empty() {
+            return Ok(false);
+        }
+        aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.box.reap",
+            "ok",
+            &format!("reaping dead mailbox `{name}`: its session is gone and it holds no letters"),
+        )
+        .map_err(|e| format!("the audit log cannot be written, so the mailbox is kept: {e}"))?;
+        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(true)
+}
+
+/// Gives a session its mailbox on every roster insert, a local act like
+/// [`box_add`], and records it as a live session box, so an insert after a reap
+/// brings the box back. Best effort: a name the grammar refuses has no box and
+/// no record, and the insert is not refused for it.
+pub fn ensure_session_box(session_id: &str) {
+    if !valid_box_name(session_id) {
+        return;
+    }
+    let name = session_id.to_string();
+    let recorded = with_lock(move || {
+        create_box_unlocked(&name)?;
+        let mut sessions = load_session_boxes()?;
+        sessions.insert(name, false);
+        save_session_boxes(&sessions)
+    });
+    if let Err(e) = recorded {
+        eprintln!("[aoide/mail] session box `{session_id}` not recorded: {e}");
+    }
+}
+
+/// `mail box add <name>`: creates the box `name`, empty, if it is absent, so a
+/// far letter to it can file. Returns whether this call created it.
+pub fn box_add(name: &str) -> Result<bool, String> {
+    if !valid_box_name(name) {
+        return Err(format!("invalid mailbox name `{name}`: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name"));
+    }
+    let name = name.to_string();
+    with_lock(move || create_box_unlocked(&name))
 }
 
 /// The legacy box file: letters whose name the grammar refuses.
@@ -768,6 +1102,151 @@ pub fn box_paths() -> Result<Vec<PathBuf>, String> {
     }
     out.sort();
     Ok(out)
+}
+
+/// One line of a box as it sits on disk: its bytes without the newline, and the
+/// entry it parses to (`None` for a line that does not parse, which is kept).
+struct BoxLine {
+    raw: Vec<u8>,
+    entry: Option<Entry>,
+}
+
+impl BoxLine {
+    /// The bytes this line takes on disk, its newline included.
+    fn bytes(&self) -> u64 {
+        self.raw.len() as u64 + 1
+    }
+}
+
+/// Every line of one box file, in order. A missing file is no lines.
+fn box_lines(path: &std::path::Path) -> Result<Vec<BoxLine>, String> {
+    let raw = feed::read_lines(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(raw.into_iter().map(|raw| BoxLine { entry: serde_json::from_slice(&raw).ok(), raw }).collect())
+}
+
+/// The total bytes of every box file, from `stat` alone.
+fn boxes_bytes() -> Result<u64, String> {
+    let mut total = 0u64;
+    for path in box_paths()? {
+        total += std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+    }
+    Ok(total)
+}
+
+/// The floor of `name`: the lowest mark among its readers, so every line at or
+/// below it has been read by every reader. Zero when the name has no readers,
+/// so nothing unread is ever reclaimed.
+fn floor_of(cursors: &Cursors, name: &str) -> u64 {
+    cursors.get(name).and_then(|readers| readers.values().map(|m| m.seq).min()).unwrap_or(0)
+}
+
+/// Rewrites one box without the lines every reader has read (at or below their
+/// box's floor). A line that does not parse is kept. Writes nothing when no
+/// line is reclaimable: the first parseable line's seq is checked first, so a
+/// refused flood against an unread box costs one read and no write. Returns
+/// whether it rewrote the box. Raw — assumes the caller holds the lock.
+fn compact_unlocked(path: &std::path::Path, cursors: &Cursors) -> Result<bool, String> {
+    let lines = box_lines(path)?;
+    let reclaimable = |e: &Entry| e.seq <= floor_of(cursors, &e.envelope.header.to.name);
+    let Some(first) = lines.iter().find_map(|l| l.entry.as_ref()) else {
+        return Ok(false);
+    };
+    if !reclaimable(first) {
+        return Ok(false);
+    }
+    let kept: Vec<&BoxLine> = lines.iter().filter(|l| l.entry.as_ref().is_none_or(|e| !reclaimable(e))).collect();
+    if kept.len() == lines.len() {
+        return Ok(false);
+    }
+    let mut body = Vec::new();
+    for line in kept {
+        body.extend_from_slice(&line.raw);
+        body.push(b'\n');
+    }
+    atomic_write_private(path, &body).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(true)
+}
+
+/// [`compact_unlocked`] over every box file, in name order.
+fn compact_every_box(cursors: &Cursors) -> Result<(), String> {
+    for path in box_paths()? {
+        compact_unlocked(&path, cursors)?;
+    }
+    Ok(())
+}
+
+/// The bytes [`admit`] reads for a line to `target` under `origin`: the target
+/// box's length, the sender's bytes in it (`None` when there is no quarter),
+/// and every box's total. Raw — assumes the caller holds the lock.
+fn measure(target: &std::path::Path, origin: Option<&str>) -> Result<(u64, Option<Held>, u64), String> {
+    let box_len = match std::fs::metadata(target) {
+        Ok(m) => m.len(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(e) => return Err(format!("{}: {e}", target.display())),
+    };
+    let Some(key) = origin else {
+        return Ok((box_len, None, boxes_bytes()?));
+    };
+    // The key's share of every box: one read of each box file, so a deposit
+    // costs the store's size, bounded by the store cap (MAIL.md "Caps").
+    let (mut in_box, mut in_store, mut boxes_len) = (0u64, 0u64, 0u64);
+    for path in box_paths()? {
+        boxes_len += std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?.len();
+        let held: u64 = box_lines(&path)?
+            .iter()
+            .filter(|l| l.entry.as_ref().is_some_and(|e| e.origin == key))
+            .map(BoxLine::bytes)
+            .sum();
+        in_store += held;
+        if path == target {
+            in_box = held;
+        }
+    }
+    Ok((box_len, Some(Held { in_box, in_store }), boxes_len))
+}
+
+/// Whether one line of `line_len` bytes fits `target` under `caps`, compacting
+/// first when a cap refuses it. A box-level or quarter refusal compacts the
+/// target; a total refusal, box-wide or per key, then compacts every box.
+/// Returns `false` when the line still does not fit. Raw — assumes the caller
+/// holds the lock.
+fn fit(caps: Caps, target: &std::path::Path, origin: Option<&str>, line_len: u64) -> Result<bool, String> {
+    let check = |target: &std::path::Path| -> Result<Result<(), Full>, String> {
+        let (box_len, held, boxes_len) = measure(target, origin)?;
+        Ok(admit(caps, box_len, held, boxes_len, line_len))
+    };
+    if check(target)?.is_ok() {
+        return Ok(true);
+    }
+    let cursors = load_cursors()?;
+    compact_unlocked(target, &cursors)?;
+    match check(target)? {
+        Ok(()) => Ok(true),
+        Err(Full::Total | Full::OriginTotal) => {
+            compact_every_box(&cursors)?;
+            Ok(check(target)?.is_ok())
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// The bytes one entry takes as a line, newline included, if it were filed now
+/// with `origin`. Serialized with the seq [`peek_next_seq`] names.
+fn line_bytes(envelope: &Envelope, via: &str, origin: &str) -> Result<u64, String> {
+    let entry = Entry {
+        seq: peek_next_seq()?,
+        received_at: now_iso_utc(),
+        kind: envelope.header.kind.clone(),
+        via: via.to_string(),
+        origin: origin.to_string(),
+        envelope: envelope.clone(),
+    };
+    Ok(serde_json::to_vec(&entry).map_err(|e| e.to_string())?.len() as u64 + 1)
+}
+
+/// The serialized size of an envelope, as a letter's cap measures it.
+fn envelope_len(envelope: &Envelope) -> usize {
+    serde_json::to_vec(envelope).map_or(usize::MAX, |v| v.len())
 }
 
 /// Every correspondence entry on disk, in one global `seq` order: every box,
@@ -897,6 +1376,16 @@ fn base_tail_seq_unlocked() -> Result<u64, String> {
 /// leaves a gap and never a reuse. A counter at `u64::MAX` is refused, never
 /// wrapped. Raw — assumes the caller already holds the lock.
 fn next_seq() -> Result<u64, String> {
+    let seq = peek_next_seq()?;
+    let path = seq_path();
+    ensure_mail_dir()?;
+    atomic_write_private(&path, format!("{seq}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(seq)
+}
+
+/// The seq [`next_seq`] would issue, written nowhere. A caller sizes a line
+/// with it before it commits to filing. Raw — assumes the caller holds the lock.
+fn peek_next_seq() -> Result<u64, String> {
     let path = seq_path();
     let counter = match std::fs::read_to_string(&path) {
         Ok(raw) => raw
@@ -906,13 +1395,10 @@ fn next_seq() -> Result<u64, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => seq_floor()?,
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    let seq = counter
+    counter
         .max(base_tail_seq_unlocked()?)
         .checked_add(1)
-        .ok_or_else(|| format!("{}: the sequence counter is u64::MAX; fix: remove the line numbered {} under state/mail/", path.display(), u64::MAX))?;
-    ensure_mail_dir()?;
-    atomic_write_private(&path, format!("{seq}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(seq)
+        .ok_or_else(|| format!("{}: the sequence counter is u64::MAX; fix: remove the line numbered {} under state/mail/", path.display(), u64::MAX))
 }
 
 /// The floor a missing counter starts from: the highest seq of any line, or of
@@ -1083,11 +1569,20 @@ fn file_entry(kind: &str, from: Address, to: Address, text: &str, via: &str) -> 
     };
     let (sig, msgid) = seal(&header, text, &kp);
     let envelope = Envelope { header, text: text.to_string(), sig, msgid: msgid.clone() };
+    if kind == ENTRY_TYPE_LETTER {
+        // A local letter has no quarter, but it has the box and store caps.
+        check_letter_size(&envelope)?;
+        let target = box_path(&envelope.header.to.name);
+        if !fit(CAPS, &target, None, line_bytes(&envelope, via, "")?)? {
+            return Err(box_full_teaching(&envelope.header.to.name));
+        }
+    }
     let entry = Entry {
         seq: next_seq()?,
         received_at: now_iso_utc(),
         kind: kind.to_string(),
         via: via.to_string(),
+        origin: String::new(),
         envelope,
     };
     append_entry(&entry)?;
@@ -1102,16 +1597,36 @@ fn file_entry(kind: &str, from: Address, to: Address, text: &str, via: &str) -> 
 /// envelope itself — the door already resolved this by key before calling
 /// here). Raw — called only from inside [`with_lock`]'s closure
 /// ([`deposit`]'s own).
-fn file_received_entry(envelope: Envelope, via: &str) -> Result<Entry, String> {
+fn file_received_entry(envelope: Envelope, via: &str, origin: &str) -> Result<Entry, String> {
     let entry = Entry {
         seq: next_seq()?,
         received_at: now_iso_utc(),
         kind: envelope.header.kind.clone(),
         via: via.to_string(),
+        origin: origin.to_string(),
         envelope,
     };
     append_entry(&entry)?;
     Ok(entry)
+}
+
+/// A letter over [`LETTER_MAX`] serialized is refused at the mint and at the door.
+fn check_letter_size(envelope: &Envelope) -> Result<(), String> {
+    let len = envelope_len(envelope);
+    if len > LETTER_MAX {
+        return Err(format!(
+            "the letter is {len} bytes serialized, over the {LETTER_MAX}-byte cap; send less text, or split it across letters"
+        ));
+    }
+    Ok(())
+}
+
+/// The error a local send to a full box returns: what is full, and the two
+/// ways out of it.
+fn box_full_teaching(name: &str) -> String {
+    format!(
+        "mailbox `{name}` cannot take this letter: its box or the mail store is full. Read it with `aoide mail read --for {name}`, or remove it with `aoide mail box rm {name} --force`, then send again"
+    )
 }
 
 /// File one delivery receipt — `mail::file_receipt`, the direct replacement
@@ -1148,14 +1663,18 @@ fn local_receipt_text(text: &str) -> String {
 /// this box's own name (P-M2's `--to` resolution happens one layer up, in
 /// the command handler). Always `via: "self"`.
 pub fn file_letter(from_name: &str, to_name: &str, text: &str) -> Result<Entry, String> {
-    if !crate::node_store::valid_node_name(to_name) {
-        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
+    if !valid_box_name(to_name) {
+        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name".to_string());
     }
     let node = display::local_node_name();
     let from_addr = Address { node: node.clone(), name: from_name.to_string() };
     let to_addr = Address { node, name: to_name.to_string() };
     let text = text.to_string();
-    with_lock(move || file_entry(ENTRY_TYPE_LETTER, from_addr, to_addr, &text, "self"))
+    let box_name = to_name.to_string();
+    with_lock(move || {
+        create_box_unlocked(&box_name)?;
+        file_entry(ENTRY_TYPE_LETTER, from_addr, to_addr, &text, "self")
+    })
 }
 
 /// File a letter ADDRESSED TO A REMOTE NODE — mints and signs exactly like
@@ -1256,7 +1775,11 @@ fn mint_kind_from(
         origin_mesh: mesh.to_string(),
     };
     let (sig, msgid) = seal(&header, text, &kp);
-    Ok(Envelope { header, text: text.to_string(), sig, msgid })
+    let envelope = Envelope { header, text: text.to_string(), sig, msgid };
+    if kind == ENTRY_TYPE_LETTER {
+        check_letter_size(&envelope)?;
+    }
+    Ok(envelope)
 }
 
 /// The mesh a letter or ack to `node` is minted in when the caller names
@@ -1361,25 +1884,31 @@ pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envel
 /// SEALED lane calls [`verify_origin_signature_in`] with the set its own deposit
 /// already loaded, so the container's two halves cannot read two different sets.
 pub fn verify_origin_signature(envelope: &Envelope) -> bool {
-    let Ok(set) = crate::routing::declarations() else {
-        // A set that will not load names nobody: nothing verifies.
-        return false;
-    };
-    verify_origin_signature_in(envelope, &set)
+    verified_origin_key(envelope).is_some()
+}
+
+/// The key that verifies `envelope`'s origin signature, the one a deposit is
+/// quartered under. `None` when no key on record for `from.node` in its mesh
+/// verifies it, or when the declarations will not load.
+pub fn verified_origin_key(envelope: &Envelope) -> Option<String> {
+    let set = crate::routing::declarations().ok()?;
+    verified_origin_key_in(envelope, &set)
 }
 
 /// [`verify_origin_signature`] over a declaration set the caller already holds —
 /// what a SEALED deposit uses, so one deposit reads the declarations once and
 /// its two signature checks cannot disagree about which set they read.
 pub fn verify_origin_signature_in(envelope: &Envelope, set: &[crate::routing::Loaded]) -> bool {
-    let Some(pubkey_hex) = crate::routing::key_in(set, &envelope.header.origin_mesh, &envelope.header.from.node)
-    else {
-        return false;
-    };
+    verified_origin_key_in(envelope, set).is_some()
+}
+
+/// [`verified_origin_key`] over a declaration set the caller already holds.
+pub fn verified_origin_key_in(envelope: &Envelope, set: &[crate::routing::Loaded]) -> Option<String> {
+    let pubkey_hex = crate::routing::key_in(set, &envelope.header.origin_mesh, &envelope.header.from.node)?;
     let mut sig_input = canonical_header_bytes(&envelope.header);
     sig_input.push(0u8);
     sig_input.extend_from_slice(envelope.text.as_bytes());
-    crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig)
+    crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig).then_some(pubkey_hex)
 }
 
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
@@ -1405,9 +1934,20 @@ pub enum DepositOutcome {
     MalformedAck,
     /// [`verify_origin_signature`] returned `false`.
     UnverifiedOrigin,
-    /// A `charter` envelope arrived as plaintext ([`REFUSAL_NOT_CORRESPONDENCE`])
-    /// — a kind that is applied from a sealed container and never filed.
+    /// A kind other than `letter` or `receipt` arrived as plaintext: a `charter`
+    /// is applied from a sealed container and never filed; any other kind is
+    /// not correspondence ([`REFUSAL_NOT_CORRESPONDENCE`]).
     NotCorrespondence,
+    /// A letter to a name with no box on this node, or to a dead box ([`is_dead`]:
+    /// its every reader was retired). Nothing is filed and no box is created: a
+    /// far deposit never creates one ([`REFUSAL_UNKNOWN_BOX`]), and the origin
+    /// keeps its copy.
+    UnknownBox,
+    /// A letter over [`LETTER_MAX`] serialized. Nothing is read or filed.
+    TooLarge,
+    /// The box has no room for this letter under one of [`admit`]'s caps, even
+    /// after compaction. Nothing is filed or acknowledged ([`REFUSAL_BOX_FULL`]).
+    BoxFull,
 }
 
 // L2 (the branch review): there was a `Refused { reason, detail }` variant
@@ -1435,6 +1975,11 @@ pub fn filed_kind(msgid: &str) -> Option<String> {
 /// (contrast the OUTBOX drain, which must never hold this lock across an
 /// ssh dial). `via` is the hop's resolved name (`ctx.signed_caller`).
 pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> {
+    deposit_within(envelope, via, CAPS)
+}
+
+/// [`deposit`] under `caps`. A test passes a small one; the store's own is [`CAPS`].
+pub(crate) fn deposit_within(envelope: Envelope, via: &str, caps: Caps) -> Result<DepositOutcome, String> {
     with_lock(move || {
         let Some(recomputed) = compute_msgid(&envelope.header, &envelope.text, &envelope.sig) else {
             return Ok(DepositOutcome::BadMsgid);
@@ -1442,22 +1987,20 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         if recomputed != envelope.msgid {
             return Ok(DepositOutcome::BadMsgid);
         }
-        if !verify_origin_signature(&envelope) {
+        let Some(origin) = verified_origin_key(&envelope) else {
             return Ok(DepositOutcome::UnverifiedOrigin);
-        }
-        // A `charter` envelope is APPLIED from the sealed container it arrives
-        // in, never filed: the container's payload is the charter, and a
-        // plaintext envelope claiming this kind has no charter in it at all.
-        // Filing it would put a letter in a mailbox whose whole content is a
-        // claim about itself — so it is refused, with its own word, before the
-        // dedup read or any write.
-        if envelope.header.kind == ENTRY_TYPE_CHARTER {
+        };
+        // Only a letter and a receipt are filed. A `charter` is APPLIED from the
+        // sealed container it arrives in, never filed, and any other kind is not
+        // correspondence at all. Refused before the dedup read or any write.
+        let kind = envelope.header.kind.as_str();
+        if kind != ENTRY_TYPE_LETTER && kind != ENTRY_TYPE_RECEIPT {
             return Ok(DepositOutcome::NotCorrespondence);
         }
         // A receipt names the one letter it acknowledges, and nothing else. A
         // verified signer's receipt whose text is anything but one msgid names
         // no letter this box can retire, so it is refused as a bad msgid.
-        if envelope.header.kind == ENTRY_TYPE_RECEIPT && !is_msgid(&envelope.text) {
+        if kind == ENTRY_TYPE_RECEIPT && !is_msgid(&envelope.text) {
             return Ok(DepositOutcome::MalformedAck);
         }
         // A receipt files only for a letter this box still holds, addressed to the
@@ -1466,7 +2009,7 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         // filed and nothing is owed, so the sender retires its copy instead of
         // parking it. This bounds the receipts to the letters this box has sent: a
         // flood of distinct msgids is refused before any write.
-        if envelope.header.kind == ENTRY_TYPE_RECEIPT {
+        if kind == ENTRY_TYPE_RECEIPT {
             if crate::outbox::spooled_letter_sender(&envelope.text)?.as_deref() != Some(envelope.header.to.node.as_str()) {
                 return Ok(DepositOutcome::Duplicate { filed_letter: false });
             }
@@ -1476,19 +2019,44 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
             if read_receipt_keys_unlocked()?.contains(&receipt_key(&envelope)) {
                 return Ok(DepositOutcome::Duplicate { filed_letter: false });
             }
-        } else {
-            // A letter's msgid covers its `to.name`, so the one box it routes to is the
-            // only place a re-offer can already be filed. Its box is the memory.
-            let target = route(&envelope.header.kind, &envelope.header.to.name);
-            if let Some(found) = read_file_entries(&target)?.into_iter().find(|e| e.envelope.msgid == envelope.msgid) {
-                return Ok(DepositOutcome::Duplicate { filed_letter: found.kind == ENTRY_TYPE_LETTER });
-            }
+            let kind = kind.to_string();
+            let msgid = envelope.msgid.clone();
+            file_received_entry(envelope, via, &origin)?;
+            return Ok(DepositOutcome::Filed { msgid, kind });
         }
-        let kind = envelope.header.kind.clone();
+        // A letter: the size cap first, then the box must exist, then the box is
+        // the dedup memory, then the caps. None of it writes until it fits.
+        if envelope_len(&envelope) > LETTER_MAX {
+            return Ok(DepositOutcome::TooLarge);
+        }
+        if !box_accepts(&envelope.header.to.name, &load_cursors()?, &load_session_boxes()?) {
+            return Ok(DepositOutcome::UnknownBox);
+        }
+        let target = box_path(&envelope.header.to.name);
+        if let Some(found) = box_lines(&target)?
+            .into_iter()
+            .filter_map(|l| l.entry)
+            .find(|e| e.envelope.msgid == envelope.msgid)
+        {
+            return Ok(DepositOutcome::Duplicate { filed_letter: found.kind == ENTRY_TYPE_LETTER });
+        }
+        // The quarter is the verified origin key's, and only this box's own key
+        // has none: a hop's name never decides it.
+        let quarter = (!is_own_key(&origin)).then_some(origin.as_str());
+        if !fit(caps, &target, quarter, line_bytes(&envelope, via, quarter.unwrap_or(""))?)? {
+            return Ok(DepositOutcome::BoxFull);
+        }
+        let kind = kind.to_string();
         let msgid = envelope.msgid.clone();
-        file_received_entry(envelope, via)?;
+        file_received_entry(envelope, via, quarter.unwrap_or(""))?;
         Ok(DepositOutcome::Filed { msgid, kind })
     })
+}
+
+/// Whether `key` is this box's own identity key, the one key a letter has no
+/// quarter under. A missing identity is no own key, so the quarter applies.
+fn is_own_key(key: &str) -> bool {
+    identity::load_existing().ok().flatten().is_some_and(|kp| kp.info().pubkey_hex == key)
 }
 
 /// One mailbox's correspondence entries, read under the lock: the file a letter
@@ -1585,6 +2153,9 @@ pub fn read_for(name: &str, reread: bool, reader_session: Option<&str>) -> Resul
     let name = name.to_string();
     let reader_session = reader_session.map(|s| s.to_string());
     with_lock(move || {
+        if !box_path(&name).exists() {
+            return Ok(Vec::new());
+        }
         let entries = read_file_entries(&box_path(&name))?;
         let mut cursors = load_cursors()?;
         let reader = reader_id(&name, reader_session.as_deref());
@@ -1653,7 +2224,10 @@ pub fn mark(name: &str, reader_session: Option<&str>) -> Result<u64, String> {
     let name = name.to_string();
     let reader_session = reader_session.map(|s| s.to_string());
     with_lock(move || {
-        let entries = read_entries_unlocked()?;
+        if !box_path(&name).exists() {
+            return Ok(0);
+        }
+        let entries = read_file_entries(&box_path(&name))?;
         let max_seq = entries
             .iter()
             .filter(|e| e.envelope.header.to.name == name)
@@ -1835,8 +2409,8 @@ pub fn armed_names_for_reader(reader: &str) -> Result<Vec<(String, u64)>, String
 /// name` (the pseudo-reader is never enrolled — it is not a target) and an
 /// invalid `name`; writes nothing in either case.
 pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
-    if !crate::node_store::valid_node_name(name) {
-        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
+    if !valid_box_name(name) {
+        return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name".to_string());
     }
     if reader == name {
         return Err(format!("{reader}: the pseudo-reader is never enrolled"));
@@ -1844,10 +2418,59 @@ pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
     let name = name.to_string();
     let reader = reader.to_string();
     with_lock(move || {
+        create_box_unlocked(&name)?;
         let mut cursors = load_cursors()?;
         cursors.entry(name).or_default().entry(reader).or_default();
         save_cursors(&cursors)?;
         Ok(())
+    })
+}
+
+/// Retires every reader key that is neither a session in `live` nor its name's
+/// own pseudo-reader (MAIL.md "Store"). A name left with no reader keeps an
+/// empty reader map, which is what makes its box dead ([`is_dead`]): a far
+/// letter to it is refused, and [`reap_dead_boxes`] may delete it once it is
+/// empty. A dead reader's mark no longer holds its box's floor down, so the
+/// box's read lines become reclaimable on the next compaction. Writes
+/// `cursors.json` only when a key leaves, and touches nothing when there is no
+/// `cursors.json`, so the reaper never creates a mail store. Returns the retired
+/// `(name, reader)` pairs, in name order.
+pub fn retire_readers(live: &std::collections::HashSet<&str>) -> Result<Vec<(String, String)>, String> {
+    if !cursors_path().exists() && !session_boxes_path().exists() {
+        return Ok(Vec::new());
+    }
+    with_lock(|| {
+        let mut retired = Vec::new();
+        if cursors_path().exists() {
+            let mut cursors = load_cursors()?;
+            for (name, readers) in cursors.iter_mut() {
+                readers.retain(|reader, _| {
+                    let keep = reader == name || live.contains(reader.as_str());
+                    if !keep {
+                        retired.push((name.clone(), reader.clone()));
+                    }
+                    keep
+                });
+            }
+            if !retired.is_empty() {
+                save_cursors(&cursors)?;
+            }
+        }
+        // The roster decides each session box's liveness, and nothing else does:
+        // a box whose session is not on the roster is dead, one that is, is live.
+        let mut sessions = load_session_boxes()?;
+        let mut changed = false;
+        for (name, dead) in sessions.iter_mut() {
+            let now_dead = !live.contains(name.as_str());
+            if *dead != now_dead {
+                *dead = now_dead;
+                changed = true;
+            }
+        }
+        if changed {
+            save_session_boxes(&sessions)?;
+        }
+        Ok(retired)
     })
 }
 
@@ -1872,6 +2495,71 @@ pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
 /// locked, the ring is refused rather than run unlocked.
 pub fn with_ring_lock<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     crate::fs::lock_path(mail_dir().join(".ring.lock"), f)
+}
+
+/// What `mail box rm` removed: the letters in the box's log and the reader
+/// marks under its name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoxRemoval {
+    pub entries: usize,
+    pub readers: usize,
+}
+
+/// `mail box rm <name> [--force]`: removes the box's log and its cursor keys.
+/// `_legacy` is removable by its own name, the one refused name that is.
+/// Refused while any letter in the box is unread by its readers (every reader
+/// on the name, the pseudo-reader included, since a role box is read under its
+/// own name) or while nobody has read it and it holds mail, unless `force`. The
+/// removal is written to the audit log first, and an audit line that cannot be
+/// written stops it: no box is removed without its line. A name with no box is
+/// refused, and nothing is created.
+pub fn box_rm(name: &str, force: bool) -> Result<BoxRemoval, String> {
+    if name != LEGACY_BOX && !valid_box_name(name) {
+        return Err(format!("invalid mailbox name `{name}`: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name"));
+    }
+    let name = name.to_string();
+    with_lock(move || {
+        let path = box_path(&name);
+        if !path.exists() {
+            return Err(format!("no mailbox named `{name}`"));
+        }
+        let entries = read_file_entries(&path)?;
+        let mut cursors = load_cursors()?;
+        let readers = cursors.get(&name).cloned().unwrap_or_default();
+        let top = entries.iter().map(|e| e.seq).max().unwrap_or(0);
+        let unread = if readers.is_empty() { !entries.is_empty() } else { readers.values().any(|m| m.seq < top) };
+        if unread && !force {
+            return Err(format!(
+                "mailbox `{name}` holds mail no reader has read; read it first, or pass --force to remove it with its unread letters"
+            ));
+        }
+        let removal = BoxRemoval { entries: entries.len(), readers: readers.len() };
+        aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.box.rm",
+            "ok",
+            &format!("removing mailbox `{name}`: {} letters, {} reader marks, force={force}", removal.entries, removal.readers),
+        )
+        .map_err(|e| format!("the audit log cannot be written, so the mailbox is kept: {e}"))?;
+        if let Err(e) = std::fs::remove_file(&path) {
+            // The audit line above already says the removal began: this one says it
+            // did not finish, so the log never reads as removed when it is not.
+            let _ = aoide_protocol::audit::audit(
+                &aoide_protocol::audit::default_audit_log(),
+                aoide_protocol::Door::Cli,
+                aoide_protocol::audit::EventClass::Audit,
+                "mail.box.rm",
+                "failed",
+                &format!("removal of mailbox `{name}` failed after its audit line: {e}"),
+            );
+            return Err(format!("{}: {e}", path.display()));
+        }
+        cursors.remove(&name);
+        save_cursors(&cursors)?;
+        Ok(removal)
+    })
 }
 
 /// `mail rm --older-than <Nd|Nh>`: the only pruning (MAIL.md "Store",
@@ -2010,6 +2698,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_LETTER.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope: Envelope { header: h, text: text.to_string(), sig, msgid },
         }
     }
@@ -2636,6 +3325,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_RECEIPT.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope: Envelope { header: receipt_header, text, sig, msgid },
         };
         let transit = r#"{"seq":2,"receivedAt":"2026-09-06T00:00:00Z","type":"transit","via":"self","digest":"d","next":"n","mesh":"","held":false}"#;
@@ -2703,6 +3393,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("redeposit");
         let alice = alice_on_record();
+        box_add("bob").unwrap();
         let letter = alice_letter("hello", &alice);
 
         assert!(matches!(deposit(letter.clone(), "alice-host").unwrap(), DepositOutcome::Filed { .. }));
@@ -2729,6 +3420,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_LETTER.to_string(),
             via: "alice-host".to_string(),
+            origin: String::new(),
             envelope: letter.clone(),
         };
         append_entry(&entry).unwrap();
@@ -3110,6 +3802,7 @@ mod tests {
             received_at: "2026-08-21T00:00:00Z".to_string(),
             kind: ENTRY_TYPE_RECEIPT.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope: Envelope { header: row1_header, text: "first".to_string(), sig, msgid: row1_msgid.clone() },
         };
         std::fs::write(base_path(), format!("{}\n", serde_json::to_string(&row1_entry).unwrap())).unwrap();
@@ -3257,7 +3950,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("ring-rearm");
 
-        read_for("bob", false, Some("sess-1")).unwrap(); // enrols sess-1, seq 0
+        enrol_reader("bob", "sess-1").unwrap(); // enrols sess-1, seq 0
         file_letter("alice", "bob", "one").unwrap(); // seq 1, arming
         let t1 = ring_targets("bob").unwrap();
         assert_eq!(t1.armed, vec![("sess-1".to_string(), 1)], "an unread letter arms");
@@ -3449,7 +4142,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("ring-receipt-never-arms");
 
-        read_for("bob", false, Some("sess-1")).unwrap();
+        enrol_reader("bob", "sess-1").unwrap();
         file_receipt("x", "bob", "t").unwrap();
 
         let t = ring_targets("bob").unwrap();
@@ -3467,8 +4160,8 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("armed-names-for-reader");
 
-        read_for("bob", false, Some("sess-1")).unwrap();
-        read_for("carol", false, Some("sess-1")).unwrap();
+        enrol_reader("bob", "sess-1").unwrap();
+        enrol_reader("carol", "sess-1").unwrap();
         file_letter("alice", "bob", "one").unwrap(); // arms bob for sess-1; carol gets nothing new
 
         let armed = armed_names_for_reader("sess-1").unwrap();
@@ -3509,6 +4202,7 @@ mod tests {
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_LETTER.to_string(),
             via: "self".to_string(),
+            origin: String::new(),
             envelope,
         };
         std::fs::create_dir_all(mail_dir()).unwrap();
@@ -3690,6 +4384,888 @@ mod tests {
         let e = &got[0].envelope;
         assert_eq!(compute_msgid(&e.header, &e.text, &e.sig).as_deref(), Some(e.msgid.as_str()), "the digest text is what is signed");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A letter from `alice-host` to `to` of `kind`, signed by `alice` (on
+    /// record, see [`alice_on_record`]): what a far node deposits.
+    fn signed_from_alice(to: &str, kind: &str, text: &str, alice: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", to, kind, "2026-09-06T00:00:00Z");
+        h.from.node = "alice-host".to_string();
+        let (sig, msgid) = seal(&h, text, alice);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// A far deposit to a box nobody created is refused `unknown-box`: it
+    /// creates no box file and no cursor.
+    #[test]
+    fn a_far_deposit_to_an_unknown_box_is_refused_and_creates_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-unknown-box");
+        let alice = alice_on_record();
+        let outcome = deposit(signed_from_alice("carol", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::UnknownBox);
+        assert!(!box_path("carol").exists(), "a far deposit created a box");
+        assert!(load_cursors().unwrap().get("carol").is_none(), "a far deposit wrote a cursor");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The local act that creates a box lets the same far letter file.
+    #[test]
+    fn mail_box_add_then_the_deposit_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-box-add");
+        let alice = alice_on_record();
+        assert!(box_add("carol").unwrap(), "the first add creates the box");
+        assert!(!box_add("carol").unwrap(), "a second add finds it and writes nothing");
+        assert!(box_path("carol").exists());
+        let outcome = deposit(signed_from_alice("carol", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap();
+        assert!(matches!(outcome, DepositOutcome::Filed { .. }), "{outcome:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reserved device names and names past 63 bytes are refused on every OS,
+    /// by the one grammar, and `box add` refuses them before it writes.
+    #[test]
+    fn reserved_and_overlong_names_are_refused_on_every_os() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-reserved");
+        for name in ["con", "nul", "prn", "aux", "com0", "com1", "lpt9", &"a".repeat(64)] {
+            assert!(!valid_box_name(name), "{name} must be refused");
+            assert!(box_add(name).is_err(), "box add must refuse {name}");
+            assert!(!box_path(name).exists(), "{name} wrote a box");
+        }
+        assert!(valid_box_name(&"a".repeat(63)), "63 bytes is the limit");
+        assert!(valid_box_name("carol"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only a letter is correspondence a box holds: any other kind is
+    /// `not-correspondence`, filed nowhere.
+    #[test]
+    fn a_far_post_kind_is_not_correspondence() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-post");
+        let alice = alice_on_record();
+        box_add("carol").unwrap();
+        let outcome = deposit(signed_from_alice("carol", "post", "hi", &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::NotCorrespondence);
+        assert!(read_file_entries(&box_path("carol")).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reading a box nobody created writes no cursor, and never creates the box.
+    #[test]
+    fn a_read_of_an_absent_box_writes_no_cursor() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-absent-read");
+        assert!(read_for("ghost", true, None).unwrap().is_empty());
+        assert_eq!(mark("ghost", None).unwrap(), 0);
+        assert!(load_cursors().unwrap().get("ghost").is_none(), "a read of an absent box wrote a cursor");
+        assert!(!box_path("ghost").exists(), "a read created the box");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Enrolling a reader creates the box it reads, so a far letter can land.
+    #[test]
+    fn enrolling_a_reader_creates_its_box() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s5-enrol-box");
+        enrol_reader("carol", "sess-1").unwrap();
+        assert!(box_path("carol").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `box rm` refuses a box with unread mail, and removes nothing, unless
+    /// `--force` is passed. A reader's pseudo-reader counts too: a role box is
+    /// read by unconducted terminals under its own name.
+    #[test]
+    fn box_rm_refuses_unread_mail_without_force_and_removes_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-refuse");
+        file_letter("alice", "bob", "unread").unwrap();
+        let before = std::fs::read(box_path("bob")).unwrap();
+
+        assert!(box_rm("bob", false).is_err(), "unread mail must refuse");
+        assert_eq!(std::fs::read(box_path("bob")).unwrap(), before, "a refusal changed the box");
+
+        enrol_reader("bob", "sess-1").unwrap();
+        assert!(box_rm("bob", false).is_err(), "a reader behind the top letter must refuse");
+        assert!(box_path("bob").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Once every reader has read through the top letter, `box rm` removes the
+    /// box's log and its cursor keys, and nothing else's.
+    #[test]
+    fn box_rm_of_a_read_box_removes_its_log_and_its_cursor_keys() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-read");
+        file_letter("alice", "bob", "one").unwrap();
+        enrol_reader("bob", "sess-1").unwrap();
+        read_for("bob", false, Some("sess-1")).unwrap();
+        file_letter("alice", "carol", "kept").unwrap();
+        enrol_reader("carol", "sess-2").unwrap();
+
+        let removed = box_rm("bob", false).unwrap();
+        assert_eq!(removed, BoxRemoval { entries: 1, readers: 1 });
+        assert!(!box_path("bob").exists(), "the box's log is gone");
+        let cursors = load_cursors().unwrap();
+        assert!(cursors.get("bob").is_none(), "the box's cursor keys are gone");
+        assert!(cursors.get("carol").is_some_and(|c| c.contains_key("sess-2")), "another box's keys stay");
+        assert!(box_path("carol").exists(), "another box stays");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `--force` removes unread letters too, which is the explicit lever.
+    #[test]
+    fn box_rm_force_removes_unread_letters() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-force");
+        file_letter("alice", "bob", "unread").unwrap();
+        assert_eq!(box_rm("bob", true).unwrap(), BoxRemoval { entries: 1, readers: 0 });
+        assert!(!box_path("bob").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The removal is audited, and an audit that cannot be written stops it: a
+    /// box is never removed without the line that says so.
+    #[test]
+    fn box_rm_is_audited_and_does_not_remove_what_it_cannot_audit() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-audit");
+        file_letter("alice", "bob", "one").unwrap();
+
+        let log = aoide_protocol::audit::default_audit_log();
+        std::fs::create_dir_all(&log).unwrap();
+        assert!(box_rm("bob", true).is_err(), "no audit line, no removal");
+        assert!(box_path("bob").exists(), "the box stays when its audit cannot be written");
+
+        std::fs::remove_dir_all(&log).unwrap();
+        box_rm("bob", true).unwrap();
+        let line = std::fs::read_to_string(&log).unwrap();
+        assert!(line.contains("mail.box.rm") && line.contains("bob"), "{line}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A migrated base cannot push a box past its cap: a line its box has no room
+    /// for is parked in `_legacy`, and one that fits neither stays in the archive.
+    #[test]
+    fn a_migrated_box_never_grows_past_box_max() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7b-migrate-cap");
+        let proto = letter_entry("bob", 0, &"x".repeat(1000));
+        let caps = small_caps(20_000);
+        let mut body = String::new();
+        for i in 0..60u64 {
+            let mut e = proto.clone();
+            e.seq = i + 1;
+            e.envelope.msgid = format!("{:064x}", i + 1);
+            body.push_str(&serde_json::to_string(&e).unwrap());
+            body.push('\n');
+        }
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        std::fs::write(base_path(), body).unwrap();
+
+        // `with_lock` would migrate under the store's own caps first, so the test
+        // takes the same lock and runs the migration under the small ones.
+        crate::fs::try_stage_lock(|| {
+            ensure_mail_dir()?;
+            migrate_base_within(caps)
+        })
+        .unwrap()
+        .unwrap();
+        let bob = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(bob <= caps.box_max, "the migrated box holds {bob} bytes, past the cap");
+        let parked = std::fs::metadata(legacy_box_path()).map(|m| m.len()).unwrap_or(0);
+        assert!(parked > 0, "the overflow is parked in _legacy");
+        let live = read_entries_unlocked().unwrap().len();
+        assert!(live < 60, "the caps refuse some lines: {live} filed");
+        let archived = std::fs::read_to_string(mail_dir().join("base.jsonl.migrated")).unwrap().lines().count();
+        assert_eq!(archived, 60, "every line the migration could not file is still in the archive");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `_legacy` is removable by its own name, the one name the grammar refuses
+    /// that `box rm` accepts; every other refused name stays refused.
+    #[test]
+    fn box_rm_removes_the_legacy_box_by_its_own_name() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7b-legacy-rm");
+        append_entry(&letter_entry("Bad Name", 1, "grandfathered")).unwrap();
+        assert!(legacy_box_path().exists());
+        assert_eq!(box_rm(LEGACY_BOX, true).unwrap(), BoxRemoval { entries: 1, readers: 0 });
+        assert!(!legacy_box_path().exists(), "the legacy box is gone");
+        assert!(box_rm("Bad Name", true).is_err(), "any other refused name stays refused");
+        assert!(box_add(LEGACY_BOX).is_err(), "and the legacy box is never created by add");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A removal that fails after its audit line writes a second line that says
+    /// so: the log never shows a box removed that is still there.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_box_removal_writes_a_second_audit_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7b-rm-failed");
+        file_letter("alice", "bob", "one").unwrap();
+        let log = aoide_protocol::audit::default_audit_log();
+        let boxes = boxes_dir();
+        std::fs::set_permissions(&boxes, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = box_rm("bob", true);
+        std::fs::set_permissions(&boxes, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err(), "the removal fails");
+        assert!(box_path("bob").exists(), "the box is still there");
+        let lines = std::fs::read_to_string(&log).unwrap();
+        assert!(lines.contains("removing mailbox `bob`"), "the first line: {lines}");
+        assert!(lines.contains("failed") && lines.contains("`bob`"), "the second line says it failed: {lines}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A daemon start makes the conductor's box, and a far letter files into it,
+    /// while a far letter to a name no local act created is refused.
+    #[test]
+    fn the_daemon_start_makes_the_conductor_box_and_no_far_name() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("auto-boxes");
+        ensure_auto_boxes().unwrap();
+        assert!(box_exists(CONDUCTOR_BOX));
+        let alice = key_on_record("alice-host");
+        assert!(matches!(
+            deposit(signed_from("alice-host", CONDUCTOR_BOX, ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap(),
+            DepositOutcome::Filed { .. }
+        ));
+        assert_eq!(
+            deposit(signed_from("alice-host", "ghost", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap(),
+            DepositOutcome::UnknownBox
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The refusal details are fixed text that names no box, so an answer cannot
+    /// say which boxes exist: a box's name is in none of them.
+    #[test]
+    fn the_refusal_detail_never_names_the_box() {
+        for name in ["bob", "zebra-9"] {
+            for detail in [BOX_FULL_DETAIL, UNKNOWN_BOX_DETAIL, TOO_LARGE_DETAIL] {
+                assert!(!detail.contains(name), "{detail} names {name}");
+            }
+        }
+    }
+
+    /// A box nobody created is not there to remove, and nothing is created.
+    #[test]
+    fn box_rm_of_an_absent_box_is_refused_and_creates_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-absent");
+        assert!(box_rm("ghost", true).is_err());
+        assert!(!box_path("ghost").exists());
+        assert!(box_rm("con", true).is_err(), "a name the grammar refuses is refused");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A signed envelope from `node` to `to` of `kind`, signed by `kp` (on record
+    /// for `node`, see [`key_on_record`]): what a far node deposits.
+    fn signed_from(node: &str, to: &str, kind: &str, text: &str, kp: &identity::Keypair) -> Envelope {
+        let mut h = header("alice", to, kind, "2026-09-06T00:00:00Z");
+        h.from.node = node.to_string();
+        let (sig, msgid) = seal(&h, text, kp);
+        Envelope { header: h, text: text.to_string(), sig, msgid }
+    }
+
+    /// A fresh key on record for `node`, so its letters verify.
+    fn key_on_record(node: &str) -> identity::Keypair {
+        let kp = identity::mint_ephemeral().unwrap();
+        same_key_on_record(node, &kp);
+        kp
+    }
+
+    /// `kp` on record for `node`, which may be a second name for one key.
+    fn same_key_on_record(node: &str, kp: &identity::Keypair) {
+        let mut nodes = crate::node_store::load_nodes();
+        crate::node_store::upsert_paired_node(
+            &mut nodes,
+            node,
+            "https://far",
+            &kp.info().pubkey_hex,
+            "2026-09-06T00:00:00Z",
+            &["message".to_string()],
+            "home",
+        );
+        crate::node_store::save_nodes(&nodes).unwrap();
+    }
+
+    /// Pads `name`'s box file to exactly [`BOX_MAX`] with lines that do not parse:
+    /// a full box, with no letters for compaction to reclaim.
+    fn fill_box_to_the_cap(name: &str) {
+        std::fs::create_dir_all(boxes_dir()).unwrap();
+        let line = format!("{}\n", "x".repeat(1023));
+        std::fs::write(box_path(name), line.repeat((BOX_MAX / 1024) as usize)).unwrap();
+        assert_eq!(std::fs::metadata(box_path(name)).unwrap().len(), BOX_MAX);
+    }
+
+    fn small_caps(box_max: u64) -> Caps {
+        Caps { box_max, boxes_max: u64::MAX / 2 }
+    }
+
+    #[test]
+    fn admit_refuses_a_line_past_the_box_cap() {
+        assert_eq!(admit(CAPS, BOX_MAX - 10, None, 0, 10), Ok(()));
+        assert_eq!(admit(CAPS, BOX_MAX - 9, None, 0, 10), Err(Full::Box));
+    }
+
+    #[test]
+    fn admit_refuses_past_a_quarter_of_the_box_for_one_origin() {
+        let quarter = BOX_MAX / 4;
+        let held = |in_box| Some(Held { in_box, in_store: 0 });
+        assert_eq!(admit(CAPS, 0, held(quarter - 10), 0, 10), Ok(()));
+        assert_eq!(admit(CAPS, 0, held(quarter - 9), 0, 10), Err(Full::Origin));
+    }
+
+    #[test]
+    fn admit_refuses_past_a_quarter_of_the_store_for_one_origin() {
+        let quarter = BOXES_MAX / 4;
+        let held = |in_store| Some(Held { in_box: 0, in_store });
+        assert_eq!(admit(CAPS, 0, held(quarter - 10), 0, 10), Ok(()));
+        assert_eq!(admit(CAPS, 0, held(quarter - 9), 0, 10), Err(Full::OriginTotal));
+    }
+
+    #[test]
+    fn admit_refuses_past_the_store_total() {
+        assert_eq!(admit(CAPS, 0, None, BOXES_MAX - 10, 10), Ok(()));
+        assert_eq!(admit(CAPS, 0, None, BOXES_MAX - 9, 10), Err(Full::Total));
+    }
+
+    #[test]
+    fn admit_exempts_a_local_letter_from_the_quarter() {
+        let quarter = BOX_MAX / 4;
+        assert_eq!(admit(CAPS, 0, None, 0, quarter + 1), Ok(()), "a local letter has no quarter, only the box cap");
+    }
+
+    /// A letter over 256 KiB serialized is refused at the mint and at the door,
+    /// and the door reads no box first.
+    #[test]
+    fn a_letter_over_256k_is_refused_too_large_at_mint_and_at_the_door() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-too-large");
+        let big = "a".repeat(300_000);
+        let me = crate::display::local_node_name();
+        let minted = mint_outbound_letter("alice", &me, "bob", &big);
+        assert!(minted.is_err(), "the mint refuses an over-cap letter");
+        assert!(minted.unwrap_err().contains("over the 262144-byte cap"));
+
+        let alice = key_on_record("alice-host");
+        let outcome = deposit(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &big, &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::TooLarge);
+        assert!(!box_path("bob").exists(), "an over-cap letter creates and reads no box");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A full box refuses `box-full` before any line is written: the box is
+    /// byte-for-byte unchanged, and the letter is not `Filed`, so no ack is owed
+    /// (the ack is spooled only on `Filed`, `client::mail_wire::settle_deposit`).
+    #[test]
+    fn a_full_box_refuses_box_full_before_filing_and_before_any_ack() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-box-full");
+        box_add("bob").unwrap();
+        fill_box_to_the_cap("bob");
+        let before = std::fs::read(box_path("bob")).unwrap();
+        let alice = key_on_record("alice-host");
+
+        let outcome = deposit(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "hi", &alice), "sakaki").unwrap();
+        assert_eq!(outcome, DepositOutcome::BoxFull);
+        assert_eq!(std::fs::read(box_path("bob")).unwrap(), before, "a full box took a line");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One origin key may hold a quarter of a box. Past it, that key is refused
+    /// `box-full` while the box itself still has room, and another key still files
+    /// into the same box.
+    #[test]
+    fn one_origin_key_is_held_to_a_quarter_while_another_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-quarter");
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        let bob_host = key_on_record("bob-host");
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 50 {
+            let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("alice {filed}"), &alice);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(filed >= 2, "a quarter holds more than one letter: {filed}");
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(len < caps.box_max, "the refusal came from the quarter, not the box: {len} bytes");
+        assert!(matches!(
+            deposit_within(signed_from("bob-host", "bob", ENTRY_TYPE_LETTER, "bob", &bob_host), "sakaki", caps).unwrap(),
+            DepositOutcome::Filed { .. }
+        ), "another key files into the same box");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hop's name is never a reason to skip the quarter. A far letter whose
+    /// hop is named `self` is held to its origin's quarter like any other, and
+    /// the box holds no more than a quarter of the far key's bytes.
+    #[test]
+    fn a_far_hop_named_self_is_held_to_the_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s9-hop-self");
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 50 {
+            let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("alice {filed}"), &alice);
+            match deposit_within(letter, "self", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(len <= caps.box_max / 4, "a far hop named self took {len} bytes past the quarter");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// This box's own signed letter is exempt from the quarter whatever hop
+    /// brought it, so the box fills to its cap, not to a quarter.
+    #[test]
+    fn a_letter_this_box_signed_is_exempt_from_the_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s9-own-key");
+        box_add("bob").unwrap();
+        let me = crate::display::local_node_name();
+        let (own, _) = identity::load_or_mint().unwrap();
+        same_key_on_record(&me, &own);
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 200 {
+            let letter = signed_from(&me, "bob", ENTRY_TYPE_LETTER, &format!("mine {filed}"), &own);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        assert!(len > caps.box_max / 4, "its own letters are not held to the quarter: {len} bytes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One origin key may hold a quarter of the STORE across every box, not only
+    /// a quarter of each box: a key that fills sixty boxes in turn is refused once
+    /// it holds the store's quarter, and the store keeps room for another key.
+    #[test]
+    fn one_key_filling_sixty_boxes_is_held_to_a_quarter_of_the_store() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-store-quarter");
+        let names: Vec<String> = (0..60).map(|i| format!("b{i:02}")).collect();
+        for name in &names {
+            box_add(name).unwrap();
+        }
+        let alice = key_on_record("alice-host");
+        let bob = key_on_record("bob-host");
+        let caps = Caps { box_max: 20_000, boxes_max: 40_000 };
+
+        let mut refused = false;
+        'fill: for round in 0..3 {
+            for name in &names {
+                let letter = signed_from("alice-host", name, ENTRY_TYPE_LETTER, &format!("alice {round}"), &alice);
+                match deposit_within(letter, "sakaki", caps).unwrap() {
+                    DepositOutcome::Filed { .. } => {}
+                    DepositOutcome::BoxFull => {
+                        refused = true;
+                        break 'fill;
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+        }
+        assert!(refused, "one key was never refused");
+        let total: u64 = box_paths().unwrap().iter().map(|p| std::fs::metadata(p).unwrap().len()).sum();
+        assert!(total <= caps.boxes_max / 4, "one key held {total} bytes of the store");
+        assert!(matches!(
+            deposit_within(signed_from("bob-host", "b00", ENTRY_TYPE_LETTER, "bob", &bob), "sakaki", caps).unwrap(),
+            DepositOutcome::Filed { .. }
+        ), "another key still files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The store quarter is the verified key's: one key under two node names
+    /// shares it, so the second name is refused where it would otherwise file.
+    #[test]
+    fn one_key_under_two_names_shares_the_store_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-store-quarter-two-names");
+        let spread = ["b00", "b01", "b02", "b03"];
+        for name in spread.iter().chain(["b10"].iter()) {
+            box_add(name).unwrap();
+        }
+        let alice = key_on_record("alice-host");
+        same_key_on_record("alice-two", &alice);
+        let caps = Caps { box_max: 20_000, boxes_max: 40_000 };
+
+        // Spread over four boxes, so each box's own quarter stays clear and the
+        // store's quarter is what refuses.
+        let mut filed = 0;
+        for round in 0..200 {
+            let letter = signed_from("alice-host", spread[round % spread.len()], ENTRY_TYPE_LETTER, &format!("one {round}"), &alice);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(filed >= 2, "the first name files: {filed}");
+        assert_eq!(
+            deposit_within(signed_from("alice-two", "b10", ENTRY_TYPE_LETTER, "two", &alice), "sakaki", caps).unwrap(),
+            DepositOutcome::BoxFull,
+            "the second name shares the first name's store quarter"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The quarter is the verified key's, not the name's: one key that signs
+    /// under two node names is one sender, so it shares one quarter.
+    #[test]
+    fn one_key_under_two_mesh_names_gets_one_quarter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-one-key");
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        same_key_on_record("alice-two", &alice);
+        let caps = small_caps(20_000);
+
+        let mut filed = 0;
+        while filed < 50 {
+            let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("one {filed}"), &alice);
+            match deposit_within(letter, "sakaki", caps).unwrap() {
+                DepositOutcome::Filed { .. } => filed += 1,
+                DepositOutcome::BoxFull => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(filed >= 2, "the first name files: {filed}");
+        assert_eq!(
+            deposit_within(signed_from("alice-two", "bob", ENTRY_TYPE_LETTER, "two", &alice), "sakaki", caps).unwrap(),
+            DepositOutcome::BoxFull,
+            "the second name shares the first name's quarter"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Compaction removes only the lines every reader of their box has read.
+    #[test]
+    fn compaction_reclaims_only_lines_every_reader_has_read() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-compact");
+        for text in ["one", "two", "three"] {
+            file_letter("alice", "bob", text).unwrap();
+        }
+        enrol_reader("bob", "r1").unwrap();
+        let mut cursors = load_cursors().unwrap();
+        cursors.get_mut("bob").unwrap().get_mut("r1").unwrap().seq = 2;
+        save_cursors(&cursors).unwrap();
+
+        assert!(compact_unlocked(&box_path("bob"), &load_cursors().unwrap()).unwrap(), "two lines are read");
+        let left: Vec<u64> = box_lines(&box_path("bob")).unwrap().iter().filter_map(|l| l.entry.as_ref()).map(|e| e.seq).collect();
+        assert_eq!(left, vec![3], "only the unread line remains, and it keeps its seq");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Under pressure, an unread letter is never reclaimed: with no reader past it
+    /// the floor is zero, and the flood is refused instead.
+    #[test]
+    fn an_unread_letter_survives_compaction_under_pressure() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-unread-survives");
+        let alice = key_on_record("alice-host");
+        box_add("bob").unwrap();
+        enrol_reader("bob", "r1").unwrap();
+        assert!(matches!(
+            deposit_within(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "unread", &alice), "sakaki", small_caps(1 << 20)).unwrap(),
+            DepositOutcome::Filed { .. }
+        ));
+        let len = std::fs::metadata(box_path("bob")).unwrap().len();
+        let tight = small_caps(len + 10);
+        let flood = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "flood", &alice);
+        assert_eq!(deposit_within(flood, "sakaki", tight).unwrap(), DepositOutcome::BoxFull);
+        let kept: Vec<u64> = box_lines(&box_path("bob")).unwrap().iter().filter_map(|l| l.entry.as_ref()).map(|e| e.seq).collect();
+        assert_eq!(kept, vec![1], "the unread letter is still there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The store cap reclaims read lines from other boxes before it refuses: a
+    /// letter that would not fit beside carol's read mail fits once carol's read
+    /// mail is compacted.
+    #[test]
+    fn the_boxes_cap_compacts_other_boxes_before_refusing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-total");
+        // Carol's lines are longer than the letter, so three of them outweigh it.
+        for text in ["1", "2", "3"] {
+            file_letter("alice", "carol", &format!("{text}{}", "c".repeat(200))).unwrap();
+        }
+        enrol_reader("carol", "r").unwrap();
+        read_for("carol", false, Some("r")).unwrap();
+        let carol_len = std::fs::metadata(box_path("carol")).unwrap().len();
+        box_add("bob").unwrap();
+        let alice = key_on_record("alice-host");
+        let letter = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "fits after carol", &alice);
+        // The store is four of the letter's lines: the letter fits its own store
+        // quarter, and the store is full only while carol's read mail is in it.
+        let line = line_bytes(&letter, "sakaki", &alice.info().pubkey_hex).unwrap();
+        assert!(carol_len > 3 * line, "carol's three lines outweigh the letter: {carol_len} vs {line}");
+        let caps = Caps { box_max: 1 << 20, boxes_max: 4 * line };
+        assert!(matches!(
+            deposit_within(letter, "sakaki", caps).unwrap(),
+            DepositOutcome::Filed { .. }
+        ), "carol's read mail is reclaimed, so the store has room");
+        assert!(box_lines(&box_path("carol")).unwrap().is_empty(), "carol's read lines were compacted");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A refused flood against a box nobody has read rewrites nothing: the box
+    /// keeps its inode and its mtime, because nothing is reclaimable.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_flood_rewrites_nothing_when_nothing_is_read() {
+        use std::os::unix::fs::MetadataExt;
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-no-rewrite");
+        let alice = key_on_record("alice-host");
+        box_add("bob").unwrap();
+        enrol_reader("bob", "r1").unwrap();
+        assert!(matches!(
+            deposit_within(signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "first", &alice), "sakaki", small_caps(1 << 20)).unwrap(),
+            DepositOutcome::Filed { .. }
+        ));
+        let before = std::fs::metadata(box_path("bob")).unwrap();
+        let tight = small_caps(before.len() + 10);
+        for i in 0..5 {
+            let flood = signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, &format!("flood {i}"), &alice);
+            assert_eq!(deposit_within(flood, "sakaki", tight).unwrap(), DepositOutcome::BoxFull);
+        }
+        let after = std::fs::metadata(box_path("bob")).unwrap();
+        assert_eq!(after.ino(), before.ino(), "the box was replaced");
+        assert_eq!(after.len(), before.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A local send to a full box returns the way out, not a bare refusal.
+    #[test]
+    fn local_send_to_a_full_box_teaches_the_fix() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s6-teach");
+        box_add("bob").unwrap();
+        fill_box_to_the_cap("bob");
+        let err = file_letter("alice", "bob", "hi").unwrap_err();
+        assert!(err.contains("aoide mail read --for bob") && err.contains("aoide mail box rm bob --force"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reaping retires a dead session's reader key and keeps the pseudo-reader,
+    /// the key equal to its box's name, which no session owns.
+    #[test]
+    fn pseudo_readers_are_kept() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7-pseudo");
+        file_letter("alice", "bob", "hi").unwrap();
+        read_for("bob", false, None).unwrap();
+        enrol_reader("bob", "dead").unwrap();
+
+        let retired = retire_readers(&std::collections::HashSet::new()).unwrap();
+        assert_eq!(retired, vec![("bob".to_string(), "dead".to_string())]);
+        let readers: Vec<String> = load_cursors().unwrap()["bob"].keys().cloned().collect();
+        assert_eq!(readers, vec!["bob".to_string()], "the pseudo-reader keeps its mark");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A dead reader that never read pins its box at floor zero, so a deposit is
+    /// refused. Once reaping retires it, the live reader's mark is the floor and
+    /// the same deposit compacts the read letters away and files.
+    #[test]
+    fn a_box_pinned_by_a_dead_reader_compacts_after_reap() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("s7-pinned");
+        let alice = key_on_record("alice-host");
+        box_add("bob").unwrap();
+        enrol_reader("bob", "live").unwrap();
+        enrol_reader("bob", "dead").unwrap();
+        // Local letters carry no quarter, so eight of them fill the box past
+        // anything a far sender's quarter would refuse on its own.
+        for i in 0..8 {
+            file_letter("carol", "bob", &format!("read {i}")).unwrap();
+        }
+        read_for("bob", false, Some("live")).unwrap();
+        let tight = small_caps(std::fs::metadata(box_path("bob")).unwrap().len() + 10);
+        let next = || signed_from("alice-host", "bob", ENTRY_TYPE_LETTER, "next", &alice);
+        assert_eq!(deposit_within(next(), "sakaki", tight).unwrap(), DepositOutcome::BoxFull, "the dead reader pins the box");
+
+        retire_readers(&["live"].into_iter().collect()).unwrap();
+        assert!(matches!(deposit_within(next(), "sakaki", tight).unwrap(), DepositOutcome::Filed { .. }));
+        let left: Vec<String> =
+            box_lines(&box_path("bob")).unwrap().iter().filter_map(|l| l.entry.as_ref()).map(|e| e.envelope.text.clone()).collect();
+        assert_eq!(left, vec!["next".to_string()], "the read letters were compacted away");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A box whose every reader was retired is dead: a far letter to it is
+    /// refused `unknown-box` and the origin keeps it. A box no reader ever
+    /// touched, and a box a pseudo-reader still holds, are not dead.
+    #[test]
+    fn a_far_deposit_to_a_dead_box_is_refused_and_a_live_box_still_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("dead-box-deposit");
+        let alice = key_on_record("alice-host");
+        box_add("erin").unwrap();
+        enrol_reader("erin", "gone").unwrap();
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let to_erin = signed_from("alice-host", "erin", ENTRY_TYPE_LETTER, "hello?", &alice);
+        assert_eq!(deposit(to_erin, "sakaki").unwrap(), DepositOutcome::UnknownBox, "a dead box refuses");
+
+        box_add("frank").unwrap();
+        let to_frank = signed_from("alice-host", "frank", ENTRY_TYPE_LETTER, "untouched", &alice);
+        assert!(matches!(deposit(to_frank, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "a box no reader touched files");
+
+        box_add("gina").unwrap();
+        read_for("gina", false, None).unwrap();
+        enrol_reader("gina", "gone").unwrap();
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let to_gina = signed_from("alice-host", "gina", ENTRY_TYPE_LETTER, "pseudo", &alice);
+        assert!(matches!(deposit(to_gina, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "a pseudo-reader keeps its box alive");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reap deletes a dead box once it holds no letter, and says so in the audit
+    /// log. A dead box that still holds mail stays, and a resurrected session's
+    /// box is created again from its first deposit.
+    #[test]
+    fn reap_deletes_an_empty_dead_box_audited_and_keeps_one_holding_mail() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("dead-box-reap");
+        let alice = key_on_record("alice-host");
+        box_add("erin").unwrap();
+        enrol_reader("erin", "gone").unwrap();
+        box_add("hank").unwrap();
+        file_letter("alice", "hank", "mail stays").unwrap();
+        enrol_reader("hank", "gone").unwrap();
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+
+        assert_eq!(reap_dead_boxes().unwrap(), vec!["erin".to_string()], "only the empty dead box goes");
+        assert!(!box_path("erin").exists(), "the empty dead box is deleted");
+        assert!(box_path("hank").exists(), "a dead box holding mail stays");
+        assert!(!load_cursors().unwrap().contains_key("erin"), "its cursor key goes with it");
+        let line = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap();
+        assert!(line.contains("mail.box.reap") && line.contains("erin"), "{line}");
+
+        ensure_session_box("erin");
+        ensure_session_box("not a name");
+        assert!(box_exists("erin"), "a resurrected session gets its box back");
+        assert!(!box_exists("not a name"), "a name the grammar refuses has no box, and no error");
+        let to_erin = signed_from("alice-host", "erin", ENTRY_TYPE_LETTER, "back", &alice);
+        assert!(matches!(deposit(to_erin, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "the new box files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A migration writes one audit line that says how many lines it left
+    /// unfiled in the archive. A line that fits no box is that count.
+    #[test]
+    fn a_migration_audits_the_unfiled_count_it_leaves_in_the_archive() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("migrate-audit");
+        let small = serde_json::to_string(&letter_entry("bob", 1, "fits")).unwrap();
+        let big = serde_json::to_string(&letter_entry("bob", 2, &"x".repeat(2000))).unwrap();
+        write_base(&[small, big]);
+
+        migrate_base_within(small_caps(1000)).unwrap();
+        assert!(mail_dir().join("base.jsonl.migrated").exists(), "the base is archived");
+        let line = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap();
+        assert!(line.contains("mail.migrate") && line.contains("unfiled 1"), "{line}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A session that never read is still reaped: its box is dead, a far letter
+    /// to it is refused, and the reap deletes the empty box with an audit line.
+    #[test]
+    fn a_reaped_session_that_never_read_is_dead_and_its_empty_box_is_reaped() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-never-read");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-a");
+        assert!(box_exists("sess-a"), "the session's box exists from its first insert");
+
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let far = signed_from("alice-host", "sess-a", ENTRY_TYPE_LETTER, "late", &alice);
+        assert_eq!(deposit(far, "sakaki").unwrap(), DepositOutcome::UnknownBox, "a reaped session's box refuses");
+
+        assert_eq!(reap_dead_boxes().unwrap(), vec!["sess-a".to_string()], "the empty dead box is reaped");
+        assert!(!box_path("sess-a").exists(), "its file is gone");
+        let line = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap();
+        assert!(line.contains("mail.box.reap") && line.contains("sess-a"), "{line}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A live session that never read still files: the roster, not a read, says
+    /// whether its box is dead.
+    #[test]
+    fn a_live_session_that_never_read_still_files() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-live");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-b");
+
+        retire_readers(&["sess-b"].into_iter().collect()).unwrap();
+        let far = signed_from("alice-host", "sess-b", ENTRY_TYPE_LETTER, "hello", &alice);
+        assert!(matches!(deposit(far, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "a live session's box files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A re-inserted session gets a live box back: after a reap deleted it, the
+    /// same far letter files again.
+    #[test]
+    fn a_reinserted_session_files_again_after_its_box_was_reaped() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-reinsert");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-c");
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        assert_eq!(reap_dead_boxes().unwrap(), vec!["sess-c".to_string()]);
+
+        ensure_session_box("sess-c");
+        let far = signed_from("alice-host", "sess-c", ENTRY_TYPE_LETTER, "back", &alice);
+        assert!(matches!(deposit(far, "sakaki").unwrap(), DepositOutcome::Filed { .. }), "the re-inserted session files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A reaped session's box that still holds mail stays, refuses far letters,
+    /// and the reap drops none of its letters.
+    #[test]
+    fn a_reaped_session_box_holding_mail_stays_and_drops_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("session-box-holds-mail");
+        let alice = key_on_record("alice-host");
+        ensure_session_box("sess-d");
+        file_letter("alice", "sess-d", "keep me").unwrap();
+
+        retire_readers(&std::collections::HashSet::new()).unwrap();
+        let far = signed_from("alice-host", "sess-d", ENTRY_TYPE_LETTER, "late", &alice);
+        assert_eq!(deposit(far, "sakaki").unwrap(), DepositOutcome::UnknownBox, "a dead box with mail still refuses");
+        assert_eq!(reap_dead_boxes().unwrap(), Vec::<String>::new(), "a box holding mail is not reaped");
+        let texts: Vec<String> =
+            read_file_entries(&box_path("sess-d")).unwrap().into_iter().map(|e| e.envelope.text).collect();
+        assert_eq!(texts, vec!["keep me".to_string()], "no letter is dropped");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

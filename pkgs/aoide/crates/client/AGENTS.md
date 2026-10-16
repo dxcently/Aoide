@@ -715,6 +715,20 @@
   custody). Every outcome that files nothing is named in `refused` and audited
   by `refuse_container` or `refuse_envelope`, and the `DepositOutcome` match in
   `poll_through` has no catch-all.
+- **Custody follows the refusal word (`refusal_clears_on_retry`).** A hub
+  keeps a container it cannot file now and may file later: `box-full` and the
+  local-state words (charter, config, disk). A refusal that is a fact about the
+  container, such as `unknown-box`, `too-large` or a bad signature, releases
+  custody, and the origin keeps its own copy and re-sends it on retry. The
+  keep list is the one `matches!` in that function, and any word not in it
+  releases custody.
+- **The poll names what it was handed and did not settle (`deferred`).**
+  `poll_through` replaces the stored list (`outbox::record_deferred`) with every
+  msgid the answer handed over that is neither in `filed_pending` nor a settled
+  plaintext letter, and sends the stored list as `deferred` on the next ask.
+  Only an answered poll replaces it. A hub defers its own entries for that list
+  (`defer_named`). The list is a wait, not a custody word: it never ends a
+  container's custody, which stays `record_filed`'s alone.
 - **Every mail answer is verified before it is read.** `post_signed` is the one
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a

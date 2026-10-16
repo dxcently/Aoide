@@ -234,6 +234,12 @@ pub fn append_line(path: &Path, line: &[u8]) -> std::io::Result<()> {
     file.sync_all()
 }
 
+/// Creates `path` owner-only and empty if it does not exist, and leaves it
+/// alone if it does. The same create as [`append_line`]'s, without a write.
+pub fn ensure_log(path: &Path) -> std::io::Result<()> {
+    open_log(path).map(drop)
+}
+
 fn open_log(path: &Path) -> std::io::Result<File> {
     #[cfg(unix)]
     {

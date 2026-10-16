@@ -104,6 +104,20 @@ fn parse(argv: &[String]) -> Result<Launch, Outcome> {
     })
 }
 
+/// The daemon's own mailboxes, made at start (`mail::ensure_auto_boxes`). A
+/// failure is logged and the daemon runs on: it is not a reason to refuse every
+/// other door, and a missing box only refuses far letters to that one name.
+/// Returns whether the boxes were made.
+fn start_auto_boxes(ensure: impl FnOnce() -> Result<(), String>) -> bool {
+    match ensure() {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("aoided: mailboxes not created, continuing without them: {e}");
+            false
+        }
+    }
+}
+
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let audit_log = match parse(&argv) {
@@ -122,6 +136,7 @@ fn main() {
         eprintln!("aoided: {e}");
         std::process::exit(1);
     }
+    start_auto_boxes(aoide_storage::mail::ensure_auto_boxes);
 
     let log = audit_log.unwrap_or_else(daemon::default_audit_log);
     let socket = daemon::socket_path();
@@ -170,6 +185,15 @@ mod tests {
         let (text, code) = parse(&argv(&["--audit-log=/x"])).unwrap_err().render(false);
         assert_eq!(code, 2);
         assert!(text.contains("aoided --audit-log /x"), "{text}");
+    }
+
+    /// A failed conductor box is logged, and the daemon starts anyway: the
+    /// session path already treats its own box as best effort, and a missing
+    /// box only refuses far letters to that one name, which the origin keeps.
+    #[test]
+    fn a_failed_auto_box_start_is_logged_and_the_daemon_still_starts() {
+        assert!(!start_auto_boxes(|| Err("state is read-only".to_string())), "the failure is reported");
+        assert!(start_auto_boxes(|| Ok(())), "a clean start reports success");
     }
 
     #[test]

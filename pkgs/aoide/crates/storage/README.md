@@ -748,6 +748,20 @@ by decision — no embedded database yet
   export and the audit views). Bare `mail` and `--all-names` use the boxes only.
   Keep-all: `mail rm --older-than` is the only pruning, and it takes the dedup
   memory with the line (a pruned letter re-offered is filed again).
+  A box is created by a local act only (`box_add`, `enrol_reader`,
+  `file_letter`, `ensure_session_box` at every roster insert); a far letter to
+  an absent or dead box is `UnknownBox`. A session box is dead when the roster
+  no longer names its session (`session-boxes.json`, marked by
+  `retire_readers`); a name whose reader map is empty is dead too (`is_dead`).
+  `reap_dead_boxes` deletes the empty dead boxes.
+  `valid_box_name` (grammar, at most 63 bytes, not a DOS device name) is the
+  one name rule. A letter is admitted under `CAPS` (`admit`): a box holds
+  16 MiB, one verified origin key a quarter of it and a quarter of the store,
+  all boxes 240 MiB, and a
+  letter is at most 256 KiB serialized. A refusal compacts first, dropping
+  only lines every reader has read (`compact_unlocked`). `box_rm` removes a box's log and its cursor keys, refused
+  while any reader has unread letters unless forced, and audited before the
+  removal (a box whose audit cannot be written is kept).
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
@@ -801,6 +815,11 @@ by decision — no embedded database yet
   `^[a-z0-9][a-z0-9-]*$` (`node_store::valid_node_name`) before taking
   the lock — validated, never clamped; a letter already on disk under an
   off-grammar name from before this rule stays filed and readable.
+
+  `fs::stage_lock_held()` answers one question for the calling thread: does
+  it hold `.stage.lock` now, by a `with_stage_lock` or `try_stage_lock` that
+  took the flock. A step whose correctness needs the lock checks it and does
+  nothing without it. Reap's reader retirement is the one caller that does.
 
   P-M5a-2 adds `with_ring_lock` — a dedicated `.ring.lock` file in
   `mail_dir()`, `flock`ed by `fs::lock_path` (the same primitive

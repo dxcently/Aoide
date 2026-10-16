@@ -4938,8 +4938,32 @@ pub fn register_mail(r: &mut Registry) {
         brief: "Move a mailbox's cursor to its latest entry, printing nothing.",
     ));
     r.insert(cmd!(
+        path: ["mail", "box", "add"],
+        summary: "Create an empty mailbox on this node, so a far letter to it can file. A far deposit to a name with no box is refused `unknown-box`: a box exists only because a local act created it. Idempotent: an existing box is left as it is.",
+        args: [arg!("name", "string", true, "The mailbox name: lowercase letters, digits and hyphens, at most 63 bytes, not a device name (con, nul, com0-9, lpt0-9).")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_box_add,
+        examples: ["mail box add conductor"],
+        brief: "Create an empty mailbox so far mail to it can file.",
+        doors: &[Door::Cli],
+    ));
+    r.insert(cmd!(
+        path: ["mail", "box", "rm"],
+        summary: "Remove a mailbox on this node: its letters and its reader marks. Refused while any letter in it is unread by its readers, unless --force, which removes the unread letters too. The removal is audited before it happens.",
+        args: [arg!("name", "string", true, "The mailbox name, as `mail box add` took it.")],
+        flags: [flag!("force", "bool", "Remove the box even while it holds letters no reader has read. Those letters are gone.")],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_box_rm,
+        examples: ["mail box rm conductor", "mail box rm conductor --force"],
+        brief: "Remove a mailbox, its letters and its reader marks.",
+        doors: &[Door::Cli],
+    ));
+    r.insert(cmd!(
         path: ["mail", "rm"],
-        summary: "Prune base.jsonl entries older than the given age. The only pruning there is — seen.jsonl (dedup memory) is never touched, so a pruned letter re-offered later is still recognised as a duplicate.",
+        summary: "Prune entries older than the given age from every mailbox and the receipt log. The only pruning there is. Survivors keep their seq, so cursors stay valid; a pruned letter re-offered later is filed again, since the box is the dedup memory.",
         args: [],
         flags: [flag!("older-than", "string", "Age threshold, <N>d or <N>h (e.g. 30d, 12h).", value: "age", required: true)],
         gated: false,
@@ -5800,6 +5824,60 @@ fn handle_mail_mark(inv: &Invocation) -> Outcome {
     }
 }
 
+/// `aoide mail box add <name> [--json]`: creates the box `name` if it is absent.
+fn handle_mail_box_add(inv: &Invocation) -> Outcome {
+    let cmd = "mail.box.add";
+    let name = inv.args[0].trim();
+    match aoide_storage::mail::box_add(name) {
+        Ok(true) => Outcome::ok(cmd, format!("created mailbox {name}"))
+            .changed(vec![format!("state/mail/boxes/{name}.log: created, empty")])
+            .with_data(json!({ "name": name, "created": true })),
+        Ok(false) => Outcome::ok(cmd, format!("mailbox {name} already exists"))
+            .with_data(json!({ "name": name, "created": false })),
+        Err(e) if e.starts_with("invalid mailbox name") => Outcome::refuse(
+            cmd,
+            Kind::Usage,
+            format!("`{name}` is not a mailbox name"),
+            "a mailbox name is lowercase letters, digits and hyphens, at most 63 bytes, and not a device name",
+            Fix::None("choose another name"),
+        ),
+        Err(e) => teach::store_failed(cmd, "state/mail/boxes", &e),
+    }
+}
+
+/// `aoide mail box rm <name> [--force] [--json]`: removes a mailbox.
+fn handle_mail_box_rm(inv: &Invocation) -> Outcome {
+    let cmd = "mail.box.rm";
+    let name = inv.args[0].trim();
+    match aoide_storage::mail::box_rm(name, inv.flag_present("force")) {
+        Ok(removal) => Outcome::ok(cmd, format!("removed mailbox {name}"))
+            .changed(vec![format!("state/mail/boxes/{name}.log: removed ({} letters)", removal.entries)])
+            .with_data(json!({ "name": name, "letters": removal.entries, "readers": removal.readers })),
+        Err(e) if e.starts_with("invalid mailbox name") => Outcome::refuse(
+            cmd,
+            Kind::Usage,
+            format!("`{name}` is not a mailbox name"),
+            "a mailbox name is lowercase letters, digits and hyphens, at most 63 bytes, and not a device name",
+            Fix::None("choose the name the box was created with"),
+        ),
+        Err(e) if e.starts_with("no mailbox") => Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("no mailbox named `{name}`"),
+            "`mail box add` creates one; a name nobody created has nothing to remove",
+            Fix::None("check the name"),
+        ),
+        Err(e) if e.contains("holds mail no reader has read") => Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            e,
+            "read the box first, or pass --force to remove it with its unread letters",
+            Fix::None("read the box, then remove it"),
+        ),
+        Err(e) => teach::store_failed(cmd, "state/mail/boxes", &e),
+    }
+}
+
 /// `aoide mail rm --older-than <Nd|Nh> [--json]`.
 fn handle_mail_rm(inv: &Invocation) -> Outcome {
     let cmd = "mail.rm";
@@ -5821,7 +5899,7 @@ fn handle_mail_rm(inv: &Invocation) -> Outcome {
     };
     match aoide_storage::mail::rm_older_than(secs) {
         Ok(n) => Outcome::ok(cmd, format!("{n} entr{} pruned", if n == 1 { "y" } else { "ies" }))
-            .changed(vec![format!("state/mail/base.jsonl: {n} entries pruned")])
+            .changed(vec![format!("state/mail: {n} entries pruned")])
             .with_data(json!({ "pruned": n })),
         Err(e) => teach::store_failed(cmd, "state/mail", &e),
     }
@@ -10523,6 +10601,7 @@ mod tests {
         // STAY spooled for the assertion below.
         let me = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        aoide_storage::mail::box_add("conductor").unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "held for a quiet box").unwrap();
         let letter_msgid = letter.msgid.clone();
         let (listener, port, hits) = spawn_fixed_answer_door(poll_answer_for(&letter));
@@ -11241,6 +11320,7 @@ mod tests {
             received_at: "2026-01-01T00:00:00Z".into(),
             kind: aoide_storage::mail::ENTRY_TYPE_LETTER.into(),
             via: "self".into(),
+            origin: String::new(),
             envelope: aoide_storage::mail::Envelope {
                 header,
                 text: text.into(),

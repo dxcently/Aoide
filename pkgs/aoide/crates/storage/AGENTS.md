@@ -95,7 +95,35 @@
   `aoide mesh join --operator` as the trust-entry step.
 - **A `charter` kind is never filed, in either lane.** The container path
   applies it; `mail::deposit` refuses a PLAINTEXT envelope with that kind
-  (`not-correspondence`), because it carries no charter at all.
+  (`not-correspondence`), because it carries no charter at all. `deposit`
+  files only `letter` and `receipt`; every other kind is `not-correspondence`.
+- **A far deposit never creates a box.** A letter to a name with no box is
+  `UnknownBox` (`unknown-box`), before any read or write. A box is created
+  only by a local act: `box_add` (`mail box add`), `enrol_reader`, and
+  `file_letter`, and by a roster insert through `ensure_session_box`
+  (`session start`, the eidolon and codex-app reconciles, subagents).
+  `valid_box_name` is the one name rule, and the conductor's petname check
+  calls it.
+- **A dead box refuses a far letter, by one rule.** `is_dead` is the only
+  definition: a session box the roster has gone without (`session-boxes.json`,
+  written by `ensure_session_box` and marked by `retire_readers` from the roster
+  it is handed), or a name whose reader map is empty, and never `conductor`.
+  `box_accepts` is `box_exists && !is_dead`, and the far deposit calls it.
+  `reap_dead_boxes` deletes a dead box that holds no letter, with its cursor key
+  and record, after its audit line. Keep the empty reader entry: dropping it
+  would revive the box. Liveness comes from the roster only, never from a read,
+  so a session that never read is still reaped. A `box add` box is not recorded.
+- **Every letter is admitted by `admit()` before a line is written.** The
+  caps are `CAPS` (a box 16 MiB, a quarter of it per verified origin key, a
+  quarter of the store per verified origin key, all boxes 240 MiB), and a
+  letter over `LETTER_MAX` (256 KiB serialized) is
+  `too-large` before any box is read. A refusal compacts first: a box or
+  quarter refusal compacts its box, a store refusal compacts every box. A
+  line is dropped only when every reader of its box has read it (the floor
+  is the lowest reader mark, zero with no readers), so an unread letter is
+  never reclaimed. Compaction writes nothing when nothing is reclaimable. A
+  full box answers `box-full` before anything is written. Tests reach the
+  caps through `deposit_within` and `fit`, never by writing 240 MiB.
 - **The charter arm's zone check reads SIGNED values only.** The mesh the
   carrier's own envelope signed (`ctx.origin_mesh`) is compared against the
   mesh inside the operator's signature input, and a disagreement is refused
@@ -143,8 +171,10 @@
 - **`outbox::poll_payloads` is a poll's only hand-over point, and it returns
   pairs.** The container rides beside its envelope so the door can hand a
   sealed entry over as a container and NO plaintext, while an entry spooled
-  before the destination published a binding still appears as an envelope. A
-  poll is still a pure read: nothing is marked, moved or counted.
+  before the destination published a binding still appears as an envelope. The
+  hand-over is a pure read: nothing is marked, moved or counted. The one write a
+  poll makes on the hub is `defer_named`, which stamps only the caller's own
+  entries it names in `deferred` (MAIL.md §Wire).
 
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
@@ -884,6 +914,11 @@
   — latching first and writing second would strand a reader that a crash
   or a failed write never actually reached, silent and unrung until the
   next unrelated letter arrives.
+- **`fs::stage_lock_held()` says whether THIS thread holds `.stage.lock`
+  right now** (true inside a `with_stage_lock` or `try_stage_lock` that took
+  the flock). A step that needs the lock as its precondition checks it and
+  does nothing without it, never a `debug_assert`: reap's reader retirement
+  (`conduct::reap`) is the example, and an unlocked call retires nothing.
 - **`fs::try_stage_lock` is fail-closed AND re-entrant on its thread.** A
   nested call under a held `.stage.lock` (from `with_stage_lock` or another
   `try_stage_lock`) runs its closure directly; a fresh `flock` on a second fd

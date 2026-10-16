@@ -1328,7 +1328,8 @@ fn relay_proves_charter_key(node: &Node, mesh: &str) -> Result<(), String> {
 }
 
 /// Whether a container refusal can clear on a later poll. Such a refusal is a
-/// fact about THIS box's own state (its config, its charter, its disk), so the
+/// fact about THIS box's own state (its config, its charter, its disk, the
+/// boxes it has), so the
 /// hub keeps custody and offers the container again. Every other refusal is a
 /// fact about the container: its bytes, its chain, or a key it names. The same
 /// bytes are refused the same way on every re-offer, so custody is released
@@ -1443,6 +1444,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
     // acknowledgement recorded in between, which the hub has not seen yet and
     // which must survive to the next poll.
     let acknowledged = aoide_storage::outbox::filed_pending(node_name).unwrap_or_default();
+    let deferred_sent = aoide_storage::outbox::deferred_pending(node_name).unwrap_or_default();
     let params = json!({
         "node": aoide_storage::display::local_node_name(),
         // What THIS box filed out of its previous poll of this node: the
@@ -1451,6 +1453,10 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         // hand-over cannot be the acknowledgement, and anything not yet named
         // here is offered again.
         "filed": acknowledged.clone(),
+        // What THIS box was handed by the last answered poll and did not file:
+        // the hub defers those entries for this caller (`outbox::defer_named`).
+        // Replaced only by an answer, so a lost one carries the list again.
+        "deferred": deferred_sent,
     });
     let result = match post_signed(&node, "aoide/mailPoll", params, Some(&mesh)) {
         SignedCall::Result(result) => result,
@@ -1479,6 +1485,11 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
     // mesh-asymmetric pair used to answer "polled 1 node(s): 0 filed" with no
     // error at all, and the operator had nothing to act on.
     let mut refused: Vec<String> = Vec::new();
+    // Every msgid the answer handed over, and the plaintext letters that settled
+    // here (filed or dedup'd). A plaintext letter is not the hub's custody, so it
+    // is never in `filed_pending`; `settled` is how it counts as done.
+    let mut handed: Vec<String> = Vec::new();
+    let mut settled: Vec<String> = Vec::new();
 
     // Sealed containers first: each is verified and opened by
     // `seal::deposit_container`, then handed to the SAME `mail::deposit`
@@ -1488,6 +1499,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         let Ok(container) = serde_json::from_value::<aoide_storage::seal::Container>(container.clone()) else {
             continue;
         };
+        handed.push(container.msgid.clone());
         // The far end's `msgid`, as every audit line below names it: a refused
         // container proved nothing about its own, and a log is read by a person.
         let msgid = foreign_words(&container.msgid, LINE_MAX);
@@ -1533,6 +1545,9 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                     aoide_storage::mail::DepositOutcome::NotCorrespondence => {
                         Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
                     }
+                    aoide_storage::mail::DepositOutcome::UnknownBox => Some(aoide_storage::mail::REFUSAL_UNKNOWN_BOX),
+                    aoide_storage::mail::DepositOutcome::TooLarge => Some(aoide_storage::mail::REFUSAL_TOO_LARGE),
+                    aoide_storage::mail::DepositOutcome::BoxFull => Some(aoide_storage::mail::REFUSAL_BOX_FULL),
                 };
                 if let Some(word) = refusal {
                     settle_deposit(&envelope, &filed_outcome);
@@ -1669,6 +1684,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
 
     for envelope in result.get("envelopes").and_then(Value::as_array).into_iter().flatten() {
         let Ok(envelope) = serde_json::from_value::<Envelope>(envelope.clone()) else { continue };
+        handed.push(envelope.msgid.clone());
         let outcome = match aoide_storage::mail::deposit(envelope.clone(), node_name) {
             Ok(outcome) => outcome,
             Err(e) => {
@@ -1685,6 +1701,9 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
             aoide_storage::mail::DepositOutcome::NotCorrespondence => {
                 Some(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE)
             }
+            aoide_storage::mail::DepositOutcome::UnknownBox => Some(aoide_storage::mail::REFUSAL_UNKNOWN_BOX),
+            aoide_storage::mail::DepositOutcome::TooLarge => Some(aoide_storage::mail::REFUSAL_TOO_LARGE),
+            aoide_storage::mail::DepositOutcome::BoxFull => Some(aoide_storage::mail::REFUSAL_BOX_FULL),
         };
         if let Some(word) = refusal {
             // A plaintext letter is not the hub's custody (it retires by ack, not
@@ -1693,6 +1712,12 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         }
         if matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
             filed += 1;
+        }
+        if matches!(
+            outcome,
+            aoide_storage::mail::DepositOutcome::Filed { .. } | aoide_storage::mail::DepositOutcome::Duplicate { .. }
+        ) {
+            settled.push(envelope.msgid.clone());
         }
         settle_deposit(&envelope, &outcome);
     }
@@ -1730,6 +1755,17 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
     }
     // The container ids and the words in `refused` are the far end's, and a
     // container that failed its check proved nothing about its own `msgid`.
+    // Named for the next poll: every letter this answer handed over that is
+    // still not filed, dedup'd or refused for good. Replaced whole, so an answer
+    // that files nothing new still says what is unfiled.
+    let filed_now = aoide_storage::outbox::filed_pending(node_name).unwrap_or_default();
+    let mut unfiled: Vec<String> = Vec::new();
+    for msgid in handed {
+        if !filed_now.contains(&msgid) && !settled.contains(&msgid) && !unfiled.contains(&msgid) {
+            unfiled.push(msgid);
+        }
+    }
+    let _ = aoide_storage::outbox::record_deferred(node_name, &unfiled);
     let refused = refused.iter().map(|line| foreign_words(line, LINE_MAX)).collect();
     Ok(PollOutcome { filed, refused, withheld, node_refused: None, busy: false })
 }
@@ -4330,6 +4366,8 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("poll-held-off");
         let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        aoide_storage::mail::box_add("conductor").unwrap();
         let waiting = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "waiting for its receipt").unwrap();
         aoide_storage::outbox::write_entry("relay", &OutboxEntry::fresh(waiting.clone())).unwrap();
         let receipt = aoide_storage::mail::mint_ack(
@@ -4541,6 +4579,7 @@ mod tests {
         let (_env, dir) = root("poll-on-contact-files");
 
         let me = register_local_origin();
+        aoide_storage::mail::box_add("conductor").unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "relayed to me").unwrap();
         let letter_msgid = letter.msgid.clone();
         let (listener, port, log) =
@@ -4578,6 +4617,7 @@ mod tests {
         let (_env, dir) = root("poll-repoll-idempotent");
 
         let me = register_local_origin();
+        aoide_storage::mail::box_add("conductor").unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "once only").unwrap();
         let letter_msgid = letter.msgid.clone();
         let (listener, port, _log) =
@@ -4606,6 +4646,7 @@ mod tests {
         let (_env, dir) = root("poll-overlap");
 
         let me = register_local_origin();
+        aoide_storage::mail::box_add("conductor").unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "filed once").unwrap();
         let (listener, port, _log) =
             recording_door(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#, poll_answer(&[letter]));
@@ -5097,9 +5138,9 @@ mod tests {
         register_local_origin();
         let binding = aoide_storage::seal::publish_binding().unwrap();
         let now = aoide_storage::time::now_iso_utc();
+        aoide_storage::mail::box_add("bob").unwrap();
         for i in 0..51 {
-            let letter =
-                aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", &format!("refused {i}")).unwrap();
+            let letter = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", &format!("refused {i}")).unwrap();
             let container = aoide_storage::seal::seal_envelope(
                 &letter,
                 &binding,
@@ -5140,6 +5181,113 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **Refused unknown-box containers never starve a fresh letter.** The hub
+    /// holds 50 containers to a box this node does not have, so each is refused
+    /// `unknown-box`. The first poll is offered all 50; the hub releases them on
+    /// the next poll's `filed` list, so the valid letter behind them files. With
+    /// the box kept as custody, every poll offers the same 50 and it never does.
+    #[test]
+    fn fifty_refused_unknown_box_containers_never_starve_a_fresh_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unknown-box-custody");
+
+        let me = register_local_origin();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        aoide_storage::mail::box_add("bob").unwrap();
+        for i in 0..50 {
+            // Minted as the relay, to a box this node does not have, so the
+            // chain ends at this node and the refusal is `unknown-box`.
+            let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+            std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+            let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "ghost", &format!("unknown {i}"));
+            match saved {
+                Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+                None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+            }
+            let letter = letter.unwrap();
+            let mesh = letter.header.origin_mesh.clone();
+            let container = aoide_storage::seal::seal_envelope(&letter, &binding, &mesh, &mesh, &me, &me, &now).unwrap();
+            let mut entry = OutboxEntry::transit_held(container);
+            entry.envelope.header.minted_at = format!("2020-01-01T00:{:02}:{:02}Z", i / 60, i % 60);
+            aoide_storage::outbox::write_entry("relay", &entry).unwrap();
+        }
+        let valid = aoide_storage::mail::mint_outbound_letter("alice", "relay", "bob", "the fresh one").unwrap();
+        let valid_msgid = valid.msgid.clone();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::held(valid)).unwrap();
+
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+
+        let first = poll_node("relay", None).unwrap();
+        assert_eq!(first.refused.len(), 50, "the first poll is offered the 50 oldest: {:?}", first.refused);
+        assert!(first.refused.iter().all(|r| r.ends_with("unknown-box")), "{:?}", first.refused);
+        let second = poll_node("relay", None).unwrap();
+        assert_eq!(second.filed, 1, "the fresh letter files on the second poll: {second:?}");
+        assert!(aoide_storage::mail::show(&valid_msgid).unwrap().is_some());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Every container this poller is handed and does not file is named for
+    /// the next poll.** The hub's letter is refused `box-full` here (this box has
+    /// no room), so the hub keeps custody. The next poll carries the msgid in
+    /// `deferred`, and the hub can defer that entry instead of offering it at the
+    /// head of every batch.
+    #[test]
+    fn a_poller_names_every_unfiled_handover_as_deferred() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-names-deferred");
+
+        let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        let line = format!("{}\n", "x".repeat(1023));
+        std::fs::write(
+            aoide_storage::mail::box_path("bob"),
+            line.repeat((aoide_storage::mail::BOX_MAX / 1024) as usize),
+        )
+        .unwrap();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "no room");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &letter,
+            &binding,
+            &mesh,
+            &mesh,
+            &me,
+            &me,
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container)).unwrap();
+
+        let (_listener, port, seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+
+        let first = poll_node("relay", None).unwrap();
+        assert_eq!(first.filed, 0, "a full box files nothing: {first:?}");
+        poll_node("relay", None).unwrap();
+        let polls = recorded(&seen);
+        let second = polls.last().expect("two polls were made");
+        let named: Vec<&str> = second["params"]["deferred"]
+            .as_array()
+            .map(|list| list.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        assert!(named.contains(&msgid.as_str()), "the second poll names the unfiled letter: {second}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
     /// **A refusal of this box's own state keeps the hub's custody.** The
     /// container is valid and opens, but this box cannot write its own base, so
     /// the deposit fails for a local reason. The hub is not told, and offers the
@@ -5154,6 +5302,7 @@ mod tests {
         // container's chain ends at the poller and the container opens here.
         let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
         std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        aoide_storage::mail::box_add("bob").unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "held by a local fault");
         match saved {
             Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
@@ -5172,6 +5321,7 @@ mod tests {
         register_polled_relay(port);
         // The box this letter files into is a directory, so the append fails
         // for a reason of its own state, not of the container.
+        std::fs::remove_file(aoide_storage::mail::box_path("bob")).unwrap();
         std::fs::create_dir_all(aoide_storage::mail::box_path("bob")).unwrap();
 
         let first = poll_node("relay", None).unwrap();
@@ -5188,6 +5338,7 @@ mod tests {
         assert_eq!(aoide_storage::outbox::list_entries("relay").unwrap().len(), 1, "the hub still holds it");
 
         std::fs::remove_dir_all(aoide_storage::mail::box_path("bob")).unwrap();
+        aoide_storage::mail::box_add("bob").unwrap();
         let second = poll_node("relay", None).unwrap();
         assert_eq!(second.filed, 1, "the next poll offers it again and it files: {second:?}");
         assert!(aoide_storage::mail::show(&msgid).unwrap().is_some());
@@ -5992,6 +6143,21 @@ mod tests {
         assert!(!refusal_clears_on_retry(aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE));
     }
 
+    /// An `unknown-box` answer parks the letter at the sender, and a hub releases
+    /// its custody: the bytes are refused the same way on every re-offer, and the
+    /// origin keeps its own retry copy, so a box created later is reached by the
+    /// origin's `outbox retry`, not by the hub holding the letter forever.
+    #[test]
+    fn an_unknown_box_parks_at_the_sender_and_releases_the_hubs_custody() {
+        assert!(!refusal_clears_on_retry(aoide_storage::mail::REFUSAL_UNKNOWN_BOX));
+        let answer = json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_UNKNOWN_BOX,
+            "detail": aoide_storage::mail::UNKNOWN_BOX_DETAIL,
+        });
+        assert!(matches!(classify_deposit_response(&answer), DepositAttempt::Refused(_)), "parks, never defers");
+    }
+
     /// A `box-full` answer on one letter defers that letter alone: the link is
     /// not backed off, the other letter to the same node is still delivered in
     /// the same pass, and nothing is parked.
@@ -6085,6 +6251,7 @@ mod tests {
     fn container_from_relay(me: &str) -> (String, aoide_storage::seal::Container) {
         let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
         std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        aoide_storage::mail::box_add("bob").unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", me, "bob", "held for the destination");
         match saved {
             Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
@@ -6165,6 +6332,33 @@ mod tests {
             before,
             "a re-offer inside the hour sends no second ack"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A box-full refusal owes no ack: nothing is filed, `settle_deposit` spools
+    /// nothing, and neither node's outbox holds an entry for the letter.
+    #[test]
+    fn a_box_full_refusal_spools_no_ack() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-full-no-ack");
+
+        let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        // Unparseable lines fill the box to its cap and compaction keeps them.
+        let line = format!("{}\n", "x".repeat(1023));
+        std::fs::write(
+            aoide_storage::mail::box_path("bob"),
+            line.repeat((aoide_storage::mail::BOX_MAX / 1024) as usize),
+        )
+        .unwrap();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "no room").unwrap();
+        let outcome = aoide_storage::mail::deposit(letter.clone(), "relay").unwrap();
+        assert_eq!(outcome, aoide_storage::mail::DepositOutcome::BoxFull);
+        settle_deposit(&letter, &outcome);
+
+        assert!(aoide_storage::outbox::list_entries(&me).unwrap().is_empty(), "no ack for a letter not filed");
+        assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

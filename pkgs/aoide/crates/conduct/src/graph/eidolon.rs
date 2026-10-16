@@ -372,6 +372,7 @@ pub(crate) fn reconcile_eidolon_sessions(
                 petname: Some(petname),
                 ..Default::default()
             });
+            aoide_storage::mail::ensure_session_box(id);
             changed = true;
         }
     }
@@ -1041,6 +1042,23 @@ mod tests {
             second[0].petname, petname_after_first,
             "rescan must never re-mint a petname"
         );
+    }
+
+    /// A session this reconcile inserts gets its mailbox on that first insert, the
+    /// same local act a session start makes, so a far letter to it files at once.
+    #[test]
+    fn a_new_eidolon_session_gets_its_box_on_first_insert() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = crate::graph::testutil::unique_stage("eidolon-box");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        let scan = PresenceScan::Observed(vec![presence("user-0002", 4343, "/home/khoa", false, true)]);
+
+        let (out, changed) = reconcile_eidolon_sessions(vec![], &scan, no_ancestry);
+        assert!(changed);
+        assert!(aoide_storage::mail::box_exists(&out[0].session_id), "the inserted session has its box");
+        let _ = std::fs::remove_dir_all(&stage);
     }
 
     #[test]
