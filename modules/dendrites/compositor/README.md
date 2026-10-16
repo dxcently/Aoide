@@ -34,9 +34,13 @@ modules/dendrites/compositor/
   `.scrollingMonitor`) stay a host-facing surface, which is why the catalogue
   keeps the name `hyprland` for this file while the look is reached through
   `compositor`.
-- **`modules/dendrites/greeter.nix` — the greeter.** `ly` on tty1,
-  authenticating through PAM and launching that same Hyprland session, plus the
+- **`modules/dendrites/greeter.nix` — the greeter.** When the declared song
+  ships `widgets/greeter.qml` (`aoide.songbook.greeter`), greetd running
+  `cage` + Quickshell as its greeter user on a store tree (the lane's
+  `GreeterHost.qml`, the face from the shipped songbook, the dress, the session
+  command); otherwise `ly` on tty1 with the livery's colours, plus the
   `systemd.services.display-manager.wantedBy` line the nixpkgs ly module omits.
+  Either way it authenticates before it launches that same Hyprland session.
   It is a separate lane because a host can want the compositor without a
   display-manager greeter; selecting it is the switch.
 

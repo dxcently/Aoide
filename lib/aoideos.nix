@@ -192,6 +192,7 @@ in
             };
             aoide.song = song.declared;
             aoide.songbook.builtIn = songbook.builtIn song;
+            aoide.songbook.greeter = songbook.greeter song;
           }
         ];
 

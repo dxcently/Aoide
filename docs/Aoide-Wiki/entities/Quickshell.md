@@ -166,14 +166,19 @@ unacknowledged, and slides fully in on a 6 px hot-edge hover or on `SUPER+G`,
 an in-process Hyprland global shortcut the panel itself registers
 (`aoide:dock`), not a CLI command).
 
-Four are registry-only, with no QML anywhere in the repo:
+The rest are registry-only or painted only by a song that ships the face:
 
-- **`osd`**, **`lockscreen`**, **`greeter`** — each is a stand-down
-  declaration against [[Stylix]] (`aoide.surfaces.<name>.owner =
-  "quickshell"` tells Stylix not to theme its own equivalent target) with no
-  lane or song QML implementing the surface. greetd launches Hyprland
-  directly as a stub session command; the Quickshell greeter's greetd IPC
-  session is unbuilt.
+- **`osd`** — a stand-down declaration against [[Stylix]]
+  (`aoide.surfaces.<name>.owner = "quickshell"` tells Stylix not to theme its
+  own equivalent target) with no lane or song QML implementing the surface.
+- **`lockscreen`**, **`greeter`** — painted only by a song that ships the face
+  (`widgets/lockscreen.qml`, `widgets/greeter.qml`). The lock is the shell's
+  `LockHost.qml` (one session lock and one PAM conversation, the face inside,
+  a plain password field under it), entered by `lyra lock`; a song without a
+  face locks with hyprlock. The greeter is the declared song's face in greetd
+  + cage + Quickshell (`GreeterHost.qml`, greetd's IPC for the login); a
+  declared song without one logs in through ly. `pkgs/lyra-shell/qml/slots.md`
+  holds both contracts.
 - **`sessionGraph`** — declared but has no QML body: the standalone DAG
   overlay this surface once named is no longer part of the QML tree.
   bare `aoide graph`/`--json` and the `aoide conductor` TUI are the DAG's

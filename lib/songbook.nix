@@ -414,6 +414,16 @@ let
       close (lib.unique (lib.optional (sel.declared != null) sel.declared ++ sel.available))
     );
 
+  # The declared song's greeter face: its own manifest record for the
+  # `greeter` slot (`{ owner, file }`, a borrow naming its lender), or null
+  # when the declared song dresses no greeter. The greeter is chosen before the
+  # system is built, so this is read at eval time from the songbook itself,
+  # and it is a fact about the selection like `builtIn`
+  # (`aoide.songbook.greeter`). Only the DECLARED song counts: the login
+  # screen is part of the build, never of what a user later stages.
+  greeter =
+    sel: if sel.declared == null then null else songMeta.${sel.declared}.manifest.greeter or null;
+
   # The modules a built-in song contributes: its `rice.nix`, and nothing else.
   # An unselected song's file is never imported, which is what makes a
   # discovered-but-unselected song inert (tests/selection proves it with a
@@ -437,6 +447,7 @@ in
     selectionModule
     check
     builtIn
+    greeter
     songModules
     packagesFor
     borrow

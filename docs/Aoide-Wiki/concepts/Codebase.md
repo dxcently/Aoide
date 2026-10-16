@@ -140,14 +140,14 @@ replica. It asserts: `multi-user.target` reached; `aoide` on
 PATH with `schema --json` reporting a non-zero command count (the golden
 snapshot in `crates/cli/src/registry.rs` owns the exact figure; the boot
 test only proves the surface is there) and `guide` exiting
-0; greetd enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
+0; the display manager (ly) enabled (a Hyprland respawn loop on the virtual GPU is tolerated);
 linger active with the `aoided` user unit finishing
 `Result=success` (the skeleton binaries seed state and exit 0); stage files
 seeded at `schemaVersion` 0; and a `project add → graph` round-trip landing
 `graph.json` (every stage mutation restages it automatically, so there is no
 separate emit step to round-trip through). The test node trims the stylix,
 quickshell and lyra lanes and names no song
-(headless closure cost; the compositor stays for greetd). The script runs in
+(headless closure cost; the compositor stays for the greeter). The script runs in
 about 16 s of wall clock: `nix build .#checks.x86_64-linux.vm-boot -L`. It
 also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
 fallback agree on the same stage path.
@@ -215,10 +215,10 @@ and trimmed to essentials:
 **Runs live.** A [[Rebuild-Gate]] switch runs as a detached `systemd-run`
 unit (`nix-env --profile` set + `switch-to-configuration switch`) and
 activates in about 8 s. The prior dxflake generation stays in the
-systemd-boot menu, so rollback is one boot-menu pick away. Live: greetd
-active, the Hyprland session entry present, NetworkManager, zram, and the
+systemd-boot menu, so rollback is one boot-menu pick away. Live: the
+display manager active, the Hyprland session entry present, NetworkManager, zram, and the
 Strix Halo amdgpu params all in effect; `aoide` + git on PATH
-and flakes enabled. The graphical session (greetd → Hyprland → Quickshell)
+and flakes enabled. The graphical session (greeter → Hyprland → Quickshell)
 runs as the daily desktop — bar, dock, gadgets, launcher, notifications, and
 wallpaper all live in one process.
 

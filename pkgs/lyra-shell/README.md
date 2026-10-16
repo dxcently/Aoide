@@ -6,16 +6,17 @@ a shell. Nothing here runs, and no config is named here.
 
 ```
 pkgs/lyra-shell/              →   ${pkgs.lyra-shell}/share/lyra/
-  qml/        31 .qml + slots.md      qml/
+  qml/        32 .qml + slots.md      qml/
   icons/      catalog.json, selection.json, iconoir/, LICENSE-*   icons/
   preview/fixtures/{one,many,…}/      preview/fixtures/…
 ```
 
-One copy of the tree, two consumers:
+One copy of the tree, three consumers:
 
 | consumer | what it takes | how |
 |---|---|---|
 | the lyra lane's build (today's consumer) | `qml/` | `cp -r ${pkgs.lyra-shell}/share/lyra/qml/. "$out/qml/"`, then the manifest/registry/surfaces and the songs' widgets land beside it |
+| the greeter lane's build (`modules/dendrites/greeter.nix`) | `qml/GreeterHost.qml`, `LiveryState.qml`, `StagingEngine.qml` | copied into the greeter's store tree, `GreeterHost.qml` as its `shell.qml` |
 | `lyra preview` (`pkgs/aoide/crates/lyra/src/commands/preview.rs`) | `qml/`, `icons/`, `preview/fixtures/` | joins `aoide_storage::fs::LYRA_SHELL_SRC` onto the checkout (`$AOIDE_FLAKE_ROOT`, default `~/.aoide/Aoide`) — a preview root is copies of the checkout's own files, never symlinks into it |
 
 The Rust side reads the CHECKOUT, not this store path: `lyra preview` runs on

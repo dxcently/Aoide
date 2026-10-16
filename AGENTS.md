@@ -72,7 +72,8 @@ and the staging/declarative/draft modes:
    skip derivation for them), the core scalars every lane stands on
    (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.user`), the song
    selection (`aoide.song`, and the derived `aoide.songbook.builtIn` — what
-   this host BUILT IN, from its own song selection), and its own
+   this host BUILT IN, from its own song selection — and
+   `aoide.songbook.greeter`, the declared song's greeter face), and its own
    `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,

@@ -520,6 +520,28 @@ in
       '';
     };
 
+    # The declared song's greeter face — a fact about the selection, derived
+    # and set by the same hook as `builtIn` (`lib/aoideos.nix`, over
+    # `lib/songbook.nix`'s `greeter`) and never hand-set. The greeter lane
+    # reads it to choose between a song-painted Quickshell greeter and ly,
+    # and to find the face's files in the shipped songbook.
+    songbook.greeter = mkOption {
+      type = types.nullOr (types.attrsOf types.str);
+      default = null;
+      example = {
+        owner = "barcarolle";
+        file = "greeter.qml";
+      };
+      description = ''
+        The declared song's `greeter` slot record, `{ owner, file }`: the
+        song whose `widgets/` holds the face (the declared song itself, or
+        the song it borrows the slot from) and the file's name there. `null`
+        when the declared song ships no greeter face, or no song is
+        declared. Derived from the host record's song selection; a host
+        never sets it.
+      '';
+    };
+
     # ── Livery seam (v0 schema) — the ONLY thing paint lanes read ─────────
     livery = mkOption {
       description = ''

@@ -20,7 +20,8 @@ running desktop — the performance. **livery** is the one seam where they meet.
 
 `nix flake check` is green, both packages build, the stack boots
 headless in the `vm-boot` QEMU check, and yomi-strix runs it as its daily
-graphical session. Live now: greetd → Hyprland → Quickshell (bar, dock,
+graphical session. Live now: a greeter (ly, or greetd with the declared song's
+Quickshell face) → Hyprland → Quickshell (bar, dock,
 gadgets, launcher, notifications, wallpaper — all one process, see
 [[Quickshell]]), NetworkManager, zram, the Strix Halo amdgpu params, the aoide
 binaries + git on PATH, flakes enabled; the previous [[dxflake]] generation
@@ -140,7 +141,7 @@ the implemented/stubbed ladder.
 | [[livery]]         | `aoide.livery` (palette + component tiers)   | `song/stage/livery.json`; baked dendrites + Stylix   | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `state/stage/` (conducting) + `song/stage/` (rice); `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
 | [[Quickshell]]       | `state/stage/*.json` (sessions/hooks/graph/herald) + `song/stage/*.json` (livery/mode)  | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
-| [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented (greetd stubbed)               |
+| [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented                                |
 | [[Stylix]]           | base16 synthesized from the v0 palette         | themed config for every nix app                     | implemented (stands down on owned surfaces) |
 
 ## The livery seam in detail — one source, two fan-outs, zero drift
@@ -195,7 +196,8 @@ The baked side is carried by three paint dendrites, all real:
   overlay ([[Session-Graph]]).
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
   the home-manager layer owns `hyprland.conf` with livery baked at build and
-  live-patched via `hyprctl` during rehearsal; greetd is stubbed.
+  live-patched via `hyprctl` during rehearsal. The greeter lane logs in
+  through ly, or through greetd with the declared song's Quickshell face.
 - **stylix** — [[Stylix]]; a base16 scheme synthesized from the v0 palette,
   with colliding targets stood down on **both** the NixOS and home-manager
   layers for every Quickshell-owned surface.

@@ -30,6 +30,11 @@ Every slot below is hosted by one of three anchors:
   whenever the face is absent or fails to load. Authentication, the lock
   itself and logind's `LockedHint` stay in the host; the face paints and
   answers only through the `auth` extra. `lyra lock` is its only entry.
+  Its login twin, `GreeterHost.qml`, hosts the `greeter` face the same way
+  (the face from the DECLARED song only, the floor under it), but as the
+  entry point of its own shell: the greeter lane builds a store tree with it
+  as `shell.qml` and runs it as greetd's greeter in cage, where greetd's IPC
+  authenticates and launches the session.
 
 Both anchor kinds resolve through the SAME baseline-fallback chain
 (`StagingEngine.resolveSong`, CONTRACTS.md §5): the active song's own file if
@@ -133,6 +138,7 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 | `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime songbook's songs, back to declarative, then the draft rows, which a song's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a song may dress it with its own body (cadenza and fugue do) |
 | `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml`; `lyra lock` locks through it (`ipc call lock lock`) when the staged song's own manifest entry has this slot, else runs hyprlock | `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()` | the host's floor password field: no baseline song is ever borrowed, so a song without a face is a hyprlock song |
+| `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED song ships this slot (`aoide.songbook.greeter`); a song that ships none logs in through ly | `livery`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)` | the host's floor user + password fields |
 | `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface, over the staged cover image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active song>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the cover image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `cover set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
@@ -155,7 +161,8 @@ which of those it expects to be persistently mapped, by namespace, in
 `run/qml/songs/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
 Surfaces summoned on demand — `powermenu`/`launcher`/`switcher` here, plus the OSD
 and `*Preview` surfaces — are deliberately **not** declared. The lock screen is no
-layer surface at all: it is a session-lock surface the session-lock host owns.
+layer surface at all: it is a session-lock surface the session-lock host owns,
+and the greeter runs before any session, in its own compositor.
 
 A slot is added to this table **only once a real anchor (`WidgetSlot` or
 `SurfaceSlot`) is wired for it** — matching CONTRACTS.md §5's "what IS
