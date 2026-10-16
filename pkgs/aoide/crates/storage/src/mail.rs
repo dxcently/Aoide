@@ -1938,6 +1938,58 @@ pub fn with_ring_lock<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     crate::fs::lock_path(mail_dir().join(".ring.lock"), f)
 }
 
+/// What `mail box rm` removed: the letters in the box's log and the reader
+/// marks under its name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoxRemoval {
+    pub entries: usize,
+    pub readers: usize,
+}
+
+/// `mail box rm <name> [--force]`: removes the box's log and its cursor keys.
+/// Refused while any letter in the box is unread by its readers (every reader
+/// on the name, the pseudo-reader included, since a role box is read under its
+/// own name) or while nobody has read it and it holds mail, unless `force`. The
+/// removal is written to the audit log first, and an audit line that cannot be
+/// written stops it: no box is removed without its line. A name with no box is
+/// refused, and nothing is created.
+pub fn box_rm(name: &str, force: bool) -> Result<BoxRemoval, String> {
+    if !valid_box_name(name) {
+        return Err(format!("invalid mailbox name `{name}`: must match ^[a-z0-9][a-z0-9-]*$, at most 63 bytes, and not a device name"));
+    }
+    let name = name.to_string();
+    with_lock(move || {
+        let path = box_path(&name);
+        if !path.exists() {
+            return Err(format!("no mailbox named `{name}`"));
+        }
+        let entries = read_file_entries(&path)?;
+        let mut cursors = load_cursors()?;
+        let readers = cursors.get(&name).cloned().unwrap_or_default();
+        let top = entries.iter().map(|e| e.seq).max().unwrap_or(0);
+        let unread = if readers.is_empty() { !entries.is_empty() } else { readers.values().any(|m| m.seq < top) };
+        if unread && !force {
+            return Err(format!(
+                "mailbox `{name}` holds mail no reader has read; read it first, or pass --force to remove it with its unread letters"
+            ));
+        }
+        let removal = BoxRemoval { entries: entries.len(), readers: readers.len() };
+        aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.box.rm",
+            "ok",
+            &format!("removing mailbox `{name}`: {} letters, {} reader marks, force={force}", removal.entries, removal.readers),
+        )
+        .map_err(|e| format!("the audit log cannot be written, so the mailbox is kept: {e}"))?;
+        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        cursors.remove(&name);
+        save_cursors(&cursors)?;
+        Ok(removal)
+    })
+}
+
 /// `mail rm --older-than <Nd|Nh>`: the only pruning (MAIL.md "Store",
 /// "Keep-all"). Rewrites `base.jsonl` atomically with the survivors,
 /// preserving each one's original `seq` — never renumbers, so a reader's
@@ -3844,6 +3896,89 @@ mod tests {
         let (_env, dir) = root("s5-enrol-box");
         enrol_reader("carol", "sess-1").unwrap();
         assert!(box_path("carol").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `box rm` refuses a box with unread mail, and removes nothing, unless
+    /// `--force` is passed. A reader's pseudo-reader counts too: a role box is
+    /// read by unconducted terminals under its own name.
+    #[test]
+    fn box_rm_refuses_unread_mail_without_force_and_removes_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-refuse");
+        file_letter("alice", "bob", "unread").unwrap();
+        let before = std::fs::read(box_path("bob")).unwrap();
+
+        assert!(box_rm("bob", false).is_err(), "unread mail must refuse");
+        assert_eq!(std::fs::read(box_path("bob")).unwrap(), before, "a refusal changed the box");
+
+        enrol_reader("bob", "sess-1").unwrap();
+        assert!(box_rm("bob", false).is_err(), "a reader behind the top letter must refuse");
+        assert!(box_path("bob").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Once every reader has read through the top letter, `box rm` removes the
+    /// box's log and its cursor keys, and nothing else's.
+    #[test]
+    fn box_rm_of_a_read_box_removes_its_log_and_its_cursor_keys() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-read");
+        file_letter("alice", "bob", "one").unwrap();
+        enrol_reader("bob", "sess-1").unwrap();
+        read_for("bob", false, Some("sess-1")).unwrap();
+        file_letter("alice", "carol", "kept").unwrap();
+        enrol_reader("carol", "sess-2").unwrap();
+
+        let removed = box_rm("bob", false).unwrap();
+        assert_eq!(removed, BoxRemoval { entries: 1, readers: 1 });
+        assert!(!box_path("bob").exists(), "the box's log is gone");
+        let cursors = load_cursors().unwrap();
+        assert!(cursors.get("bob").is_none(), "the box's cursor keys are gone");
+        assert!(cursors.get("carol").is_some_and(|c| c.contains_key("sess-2")), "another box's keys stay");
+        assert!(box_path("carol").exists(), "another box stays");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `--force` removes unread letters too, which is the explicit lever.
+    #[test]
+    fn box_rm_force_removes_unread_letters() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-force");
+        file_letter("alice", "bob", "unread").unwrap();
+        assert_eq!(box_rm("bob", true).unwrap(), BoxRemoval { entries: 1, readers: 0 });
+        assert!(!box_path("bob").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The removal is audited, and an audit that cannot be written stops it: a
+    /// box is never removed without the line that says so.
+    #[test]
+    fn box_rm_is_audited_and_does_not_remove_what_it_cannot_audit() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-audit");
+        file_letter("alice", "bob", "one").unwrap();
+
+        let log = aoide_protocol::audit::default_audit_log();
+        std::fs::create_dir_all(&log).unwrap();
+        assert!(box_rm("bob", true).is_err(), "no audit line, no removal");
+        assert!(box_path("bob").exists(), "the box stays when its audit cannot be written");
+
+        std::fs::remove_dir_all(&log).unwrap();
+        box_rm("bob", true).unwrap();
+        let line = std::fs::read_to_string(&log).unwrap();
+        assert!(line.contains("mail.box.rm") && line.contains("bob"), "{line}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A box nobody created is not there to remove, and nothing is created.
+    #[test]
+    fn box_rm_of_an_absent_box_is_refused_and_creates_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("box-rm-absent");
+        assert!(box_rm("ghost", true).is_err());
+        assert!(!box_path("ghost").exists());
+        assert!(box_rm("con", true).is_err(), "a name the grammar refuses is refused");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

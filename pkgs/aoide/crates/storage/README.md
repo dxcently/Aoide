@@ -751,7 +751,9 @@ by decision — no embedded database yet
   A box is created by a local act only (`box_add`, `enrol_reader`,
   `file_letter`); a far letter to an absent box is `UnknownBox`, and
   `valid_box_name` (grammar, at most 63 bytes, not a DOS device name) is the
-  one name rule.
+  one name rule. `box_rm` removes a box's log and its cursor keys, refused
+  while any reader has unread letters unless forced, and audited before the
+  removal (a box whose audit cannot be written is kept).
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key

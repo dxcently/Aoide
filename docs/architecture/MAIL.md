@@ -1480,6 +1480,7 @@ aoide mail read [--for <name>] [--all-names] [--reread] [--transit]   print + ad
 aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
 aoide mail box add <name>                                create an empty mailbox so far mail to it can file (idempotent; CLI only)
+aoide mail box rm <name> [--force]                       remove a mailbox, its letters and its reader marks; refused while unread, audited first (CLI only)
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the boxes (dedup goes with them)
