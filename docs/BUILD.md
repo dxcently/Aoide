@@ -352,6 +352,9 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   (AGENTS.md's "core is nix-independent" claim, CONTRACTS.md §"Core is
   nix-independent").
 - `vm-boot` — headless NixOS boot of the whole stack (`tests/vm-boot.nix`).
+- `vm-lock-greeter` — the login screen and the screen lock on a graphical VM
+  (`tests/vm-lock-greeter.nix`): the Quickshell greeter and LockHost for a
+  song that ships faces, ly and hyprlock for one that does not.
 - `portability` — `packages.aoide-static`'s `aoide`/`aoided` carry zero
   `PT_INTERP` segments, bake in no real `/nix/store/<hash>-…` path, and run
   `schema --json` / `guide` with no nix on PATH (`tests/portability.nix`).

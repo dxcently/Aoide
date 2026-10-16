@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "0",
+  "palette": {
+    "bg": "#14141e",
+    "fg": "#e6e6f0",
+    "accent": "#5c9cff",
+    "urgent": "#ff5c7c"
+  }
+}

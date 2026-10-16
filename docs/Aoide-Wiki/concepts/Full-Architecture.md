@@ -451,6 +451,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │                    pkgs.nix / songbook.nix (discovery) · options.nix (aoideOptions) ·
 │                    checks.nix (surface-ownership · song-runtime-untracked · song-shape …)
 ├── tests/           non-cargo tests: vm-boot.nix (headless QEMU boot check) ·
+│                    vm-lock-greeter.nix (graphical greeter + lock check) ·
 │                    portability.nix (static-artifact check) · distrobox.md (manual)
 ├── modules/         the snowflake — the catalogue names what is selectable
 │   ├── nucleus/     options.nix (THE paint contract) · aoided · secrets · melete-adapter

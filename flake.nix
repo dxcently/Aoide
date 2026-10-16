@@ -373,6 +373,10 @@
           # greeter enabled, aoided + shellbridge user services active, graph
           # commands pass).  Requires KVM on the build host.
           vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
+          # The login screen and the screen lock on a graphical VM: the
+          # Quickshell greeter and LockHost for a song that ships faces, ly and
+          # hyprlock for one that does not. Requires KVM on the build host.
+          vm-lock-greeter = import ./tests/vm-lock-greeter.nix { inherit pkgs inputs lib; };
           # Static artifact is genuinely portable — zero PT_INTERP segments,
           # no baked-in /nix/store path, schema/guide run with no nix on
           # PATH (see lib/checks.nix's Check 8 and tests/portability.nix).

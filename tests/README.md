@@ -8,6 +8,15 @@ this directory holds
 what those checks actually test.
 
 - `vm-boot.nix` — headless NixOS boot test, wired as `checks.<system>.vm-boot`.
+- `vm-lock-greeter.nix` — graphical NixOS test of the login screen and the
+  screen lock, wired as `checks.<system>.vm-lock-greeter`. Two machines built
+  by the real constructor over the fixture songbook in `lock-greeter/songbook/`:
+  `aubade` ships a `greeter.qml` and a `lockscreen.qml` face (greetd with the
+  Quickshell greeter, `lyra lock` through the shell's LockHost), `plainsong`
+  ships none (ly, and `lyra lock` runs hyprlock). It types passwords at the
+  greeter and the lock, follows logind's `LockedHint`, kills the shell while
+  locked, and swaps in `lock-greeter/broken-lockscreen.qml` to prove the floor.
+  Screenshots land in the driver's output directory. Requires KVM.
 - `portability.nix` — asserts `packages.aoide-static` is genuinely free of
   nix, wired as `checks.<system>.portability` (`lib/checks.nix` Check 8).
 - `inventory.sh` — `tests/inventory.sh <flakeref> <host>`, the per-host

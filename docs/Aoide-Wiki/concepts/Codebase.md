@@ -42,7 +42,8 @@ Outputs, all tolerant of empty layers so eval stays robust:
   `discovery`, `phantom-commands`, `nix-independence`, `portability`,
   `nix-lint`, `livery-fanout`, `generator-offline`, `generator-relocatable`),
   one auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
-  headless boot test (below).
+  headless boot test (below) and the `vm-lock-greeter` graphical login and
+  lock test (`tests/vm-lock-greeter.nix`).
 - `devShells.default` — Rust (cargo/rustc/clippy/rust-analyzer) + nix
   tooling (nixfmt/nil/deadnix/statix).
 - `formatter` — nixfmt.
@@ -347,6 +348,7 @@ nix build .#aoide                                # the package
 nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 cargo test -p aoide-cli                                # per-crate only — see below
 nix build .#checks.x86_64-linux.vm-boot -L             # headless QEMU boot test
+nix build .#checks.x86_64-linux.vm-lock-greeter -L     # graphical login + lock test
 ```
 
 **Per-crate tests only.** `cargo test -p <crate>`, never `cargo test
