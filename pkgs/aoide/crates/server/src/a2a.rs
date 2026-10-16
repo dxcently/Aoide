@@ -3382,9 +3382,11 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         .get("deferred")
         .and_then(Value::as_array)
         .map(|list| {
+            let mut seen = std::collections::HashSet::new();
             list.iter()
                 .filter_map(Value::as_str)
                 .filter(|text| aoide_storage::mail::is_msgid(text))
+                .filter(|text| seen.insert(*text))
                 .take(aoide_storage::outbox::DEFERRED_LIST_CAP)
                 .map(str::to_string)
                 .collect()
@@ -7493,6 +7495,26 @@ mod tests {
             SendAction::Spawn { agent_cmd: "claude".to_string() },
             "routes to Spawn with `do_spawn`'s prompt arg equal to `prompt` above (\"status check please\")"
         );
+    }
+
+    /// **A refused far spawn creates no box.** A spawn the charter allows makes
+    /// its child's box as a local act (MAIL.md, "Store"); a spawn refused before
+    /// anything starts names no box and writes no box file for its task slug.
+    #[test]
+    fn a_refused_far_spawn_creates_no_box_file() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("spawn-refused-box");
+        act_as(&root, "here");
+
+        let audit_log = root.join("log");
+        let refused = do_spawn("bash -lc claude", "hi", &audit_log, "peer", "", None, Some("far-task"));
+        assert!(refused.is_err(), "a shell spawn agent is refused before anything starts");
+        assert!(!aoide_storage::mail::box_exists("far-task"), "no box for the refused spawn's slug");
+        assert!(!aoide_storage::mail::box_path("far-task").exists(), "and no box file");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     /// P-RSA S10 review, L10 + M2's door half: the two refusals that must fire
@@ -15778,6 +15800,44 @@ mod tests {
         let own = aoide_storage::outbox::list_entries("box-b").unwrap();
         assert_eq!(own.len(), 1, "{own:?}");
         assert_eq!(own[0].tries, 1, "the valid msgid is deferred; the junk names nothing");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **One msgid named fifty times is deferred once.** The list is deduplicated
+    /// before the cap, so a repeated name neither takes fifty batch-sized steps
+    /// nor counts as fifty tries.
+    #[test]
+    fn one_msgid_repeated_fifty_times_is_deferred_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-defer-repeat");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            "box-b",
+            "box-b",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        mail_poll(&json!({ "node": "box-b", "deferred": vec![msgid; 50] }), &ctx).unwrap();
+
+        let own = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(own.len(), 1, "{own:?}");
+        assert_eq!(own[0].tries, 1, "fifty copies of one msgid are one deferral");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
