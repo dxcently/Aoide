@@ -158,6 +158,9 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        # The host file the RICE menu's Declare row rewrites
+        # (`ricedeclare` → `lyra rice declare <song> --host`).
+        "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
         # This unit execs `lyra shellbridge --run` (below) — the ONE unit in
         # this file whose process actually reads `AOIDE_SONG_TEMPLATES`
         # (`aoide-song::widgets`, `lyra`-only). `aoide-graph-reap` further

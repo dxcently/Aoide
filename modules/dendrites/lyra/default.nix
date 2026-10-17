@@ -8,7 +8,8 @@
 # structure, the surfaces and identity — nothing else (root AGENTS.md house
 # rule 5). Here: `aoide.livery` (palette + component tiers), `aoide.surfaces`
 # (the registry it declares its own surfaces in), `aoide.arrangement`, the
-# core scalars (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.user`),
+# core scalars (`aoide.enable`, `aoide.root`, `aoide.checkout`,
+# `aoide.hostConfig`, `aoide.user`),
 # the song selection (`aoide.song`) and the derived fact
 # `aoide.songbook.builtIn` (the songs this host builds in — what this lane's
 # deployed manifest, widget copy, installed packages, shipped templates and seed

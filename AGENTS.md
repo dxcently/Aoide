@@ -70,7 +70,8 @@ and the staging/declarative/draft modes:
    brings into existence), `aoide.surfaces` (the render-surface ownership
    registry: a dendrite declares the surfaces it owns; `stylix` reads it to
    skip derivation for them), the core scalars every lane stands on
-   (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.user`), the song
+   (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
+   `aoide.user`), the song
    selection (`aoide.song`, and the derived `aoide.songbook.builtIn` — what
    this host BUILT IN, from its own song selection — and
    `aoide.songbook.greeter`, the declared song's greeter face), and its own
