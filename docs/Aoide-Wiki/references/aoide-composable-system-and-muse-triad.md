@@ -78,7 +78,7 @@ Host + user select aggregates, available songs and default
                  └─ packages / assets / required capabilities
                            ↓
                   Available built bundles
-                 Sonata · Fugue · Nocturne
+                 Sonata · Cadenza · Nocturne
                            ↓
                   Lyra activation coordinator
                  ├─ declared: configured default

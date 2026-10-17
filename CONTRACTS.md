@@ -2188,7 +2188,7 @@ staging writes; never an error.
   "mode": "draft",
   "song": "sonata",
   "draft": "neon-night",
-  "stagingSong": "etude",
+  "stagingSong": "cadenza",
   "since": "2026-08-14T00:00:00Z"
 }
 ```
@@ -7145,7 +7145,7 @@ set of "flavor" surfaces — committed files, not nix options:
   back-to-declarative row, then the draft rows (a body may leave the drafts
   out when its song offers them on another surface of its own, as barcarolle's
   Start menu does) — and nothing switches until a row is chosen. A borrowed bar brings its lender's body with
-  it (quodlibet takes fugue's `ricemode` with fugue's `bar`).
+  it (a song that borrows `ricemode` and `bar` from another song wears both with it).
 - **Playbook:** `song/songbook/update-playbook.md`.
 
 **Additive (2026-08-14) — baseline-fallback resolution:**
@@ -7293,11 +7293,12 @@ two primitives. A declared slot with no actual `widgets/<slot>.qml` body
 (`[aoide/surfaceslot]` / `[aoide/songgadgets]`) instead of throwing —
 declaring a TYPE with no body is inert, not an error.
 
-`song/songbook/etude/` is the worked, real example: its body declares one
-`kind = "surface"` entry (`demo`), proving the whole pipeline —
+`song/songbook/nocturne/` is the worked, real example: its body declares one
+`kind = "dock"` entry (`vigil`), proving the whole pipeline —
 nix option → build-time `registry.json` walk → `rice lint` → `rice
-stage` hot-sync → `SongSurfaces.qml` render — end to end. No
-committed song declares a `kind = "dock"` entry yet.
+stage` hot-sync → `SongGadgets.qml` render — end to end. No committed song
+declares a `kind = "surface"` entry today; a surface is declared in any song's
+own `rice.nix` the same way and hosted by `SongSurfaces.qml`.
 
 ### Expected paint — `run/qml/songs/surfaces.json`
 

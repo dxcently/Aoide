@@ -7,8 +7,9 @@
 // which song's manifest entry provides each slot, and which song's directory
 // the body actually lives under — e.g. `{ "sonata": { "calendar": { "owner":
 // "sonata", "file": "calendar.qml" } } }`. A record's `owner` usually equals
-// its own song key, but need not: quodlibet borrows fugue's `bar` and
-// `herald`, so `quodlibet.bar.owner == "fugue"`. Because provenance is
+// its own song key, but need not: a song that borrows a slot from another
+// song's shelf names that lender as the owner, so `{ "borrower": { "bar":
+// { "owner": "lender" } } }` is a borrowed `bar`. Because provenance is
 // recorded per-record, resolving a borrow is a direct lookup rather than a
 // fallback-chain walk — and a borrowed body still receives the BORROWING
 // song's livery, since palette arrives as an injected prop (below) and is
@@ -122,7 +123,7 @@ QtObject {
     // Resolved URL for <song>'s <slot> widget — only meaningful when has()
     // is true; callers gate on that first. Reads the slot's OWNER out of
     // <song>'s manifest entry — usually <song> itself, but a borrow names a
-    // different song (quodlibet's `bar` is owned by fugue) — to find
+    // different song (a borrowed `bar` is owned by its lender) — to find
     // which song's copied songs/<owner>/ directory the body physically
     // lives under, and the entry's `file` for the body's basename there.
     function source(song, slot) {

@@ -55,21 +55,17 @@ ShellRoot {
 
         // ── a slot absent everywhere resolves to "" ─────────────────────────
         harness.check("has() false for a slot no song provides",
-            harness.engine.has("etude", "nonexistent-slot"), false)
+            harness.engine.has("nocturne", "nonexistent-slot"), false)
         harness.check("resolveSong() \"\" for a slot absent from the active song AND the baseline",
-            harness.engine.resolveSong("etude", "nonexistent-slot"), "")
+            harness.engine.resolveSong("nocturne", "nonexistent-slot"), "")
 
         // ── a song whose map is fully inherited resolves identically to
         // today's baseline floor ────────────────────────────────────────────
         // A sonata-only slot is one no OTHER song OWNS — generalised (not
-        // hardcoded to etude/fugue/nocturne) so the next song added to the
-        // songbook cannot silently hollow this assertion out. This checks
-        // OWNERSHIP, not mere key presence: quodlibet's manifest carries a
-        // key for 12 of these 14 slots too, but as a BORROW whose `owner` is
-        // still "sonata" — a key-presence-only test (`!m[s][slot]`) would
-        // wrongly exclude every one of those 12 the moment quodlibet exists,
-        // collapsing the set to empty. `bar`/`herald` correctly drop out
-        // because fugue genuinely OWNS them.
+        // hardcoded to nocturne) so the next song added to the songbook cannot
+        // silently hollow this assertion out. This checks OWNERSHIP, not mere
+        // key presence: a record a song borrows carries its lender's owner, so
+        // a key-presence-only test would wrongly exclude it.
         var sonataOnlySlots = Object.keys(m.sonata).filter(function (slot) {
             return Object.keys(m).filter(function (s) { return s !== "sonata" })
                 .every(function (s) { return !m[s][slot] || m[s][slot].owner !== s })
@@ -79,23 +75,20 @@ ShellRoot {
         var inheritedOk = true
         for (var i = 0; i < sonataOnlySlots.length; i++) {
             var slot = sonataOnlySlots[i]
-            var resolved = harness.engine.resolveSong("etude", slot)
+            var resolved = harness.engine.resolveSong("nocturne", slot)
             if (resolved !== "sonata") {
                 inheritedOk = false
                 console.log("  MISMATCH:", slot, "resolved to", JSON.stringify(resolved), "expected \"sonata\"")
             }
         }
-        harness.check("etude (fully inherited for these slots) resolves every sonata-only slot to the baseline",
+        harness.check("nocturne (fully inherited for these slots) resolves every sonata-only slot to the baseline",
             inheritedOk, true)
 
-        // ── all 32 slots across the 5 songs resolve, source() honouring owner ──
+        // ── every declared slot resolves, source() honouring owner ───────────
         // Ground truth read from the REAL BUILT manifest's own `owner` field
-        // per record, not assumed to equal the song name — quodlibet exists
-        // in this songbook now, and 2 of its 14 entries name fugue. This is
-        // what makes the loop pass for a genuine borrow AND stay honest for
-        // a self-owned slot: resolveSong(song, slot) always returns the
-        // BORROWER (song), but source(song, slot) must resolve under the
-        // OWNER's directory and file, per the manifest record itself.
+        // per record, not assumed to equal the song name. resolveSong(song, slot)
+        // always returns the BORROWER (song), but source(song, slot) must
+        // resolve under the OWNER's directory and file, per the manifest record.
         var songs = Object.keys(m)
         var slotCount = 0
         var allOk = true
@@ -119,46 +112,16 @@ ShellRoot {
                 }
             }
         }
-        harness.check("real built manifest declares exactly 32 slots across 5 songs",
-            slotCount, 32)
-        harness.check("all 32 declared slots resolve to their own song (resolveSong) and their record's owner (source)",
+        harness.check("real built manifest declares exactly 36 slots across 4 songs",
+            slotCount, 36)
+        harness.check("all 36 declared slots resolve to their own song (resolveSong) and their record's owner (source)",
             allOk, true)
 
-        // ── the real borrow (Rice B) ─────────────────────────────────────────
-        // quodlibet owns none of its 14 slots — 12 come from sonata, 2
-        // (bar, herald) from fugue. No synthesis needed: this is the first
-        // real cross-song borrow in the committed songbook.
-        var q = m.quodlibet
-        var qSlots = Object.keys(q)
-        harness.check("quodlibet declares 14 slots", qSlots.length, 14)
-        harness.check("quodlibet owns none of them",
-            qSlots.filter(function (s) { return q[s].owner === "quodlibet" }).length, 0)
-        harness.check("12 borrowed from sonata",
-            qSlots.filter(function (s) { return q[s].owner === "sonata" }).length, 12)
-        harness.check("2 borrowed from fugue",
-            qSlots.filter(function (s) { return q[s].owner === "fugue" }).length, 2)
-
-        // has() true for the BORROWER's key — this is what separates a real
-        // borrow from "quodlibet declares nothing and every lookup falls
-        // through to sonata".
-        harness.check("has() true on the borrower for a fugue-owned slot",
-            harness.engine.has("quodlibet", "bar"), true)
-        harness.check("resolveSong stays on the borrower, never the owner",
-            harness.engine.resolveSong("quodlibet", "bar"), "quodlibet")
-
-        // THE assertion. If quodlibet had no entry, resolveSong would answer
-        // "sonata" and source would answer songs/sonata/bar.qml —
-        // indistinguishable from a silent no-op. Only a real borrow produces
-        // songs/fugue/bar.qml.
-        harness.check("source() crosses to fugue for the fugue-owned bar",
-            harness.engine.source("quodlibet", "bar"),
-            Qt.resolvedUrl("songs/fugue/bar.qml"))
-        harness.check("source() crosses to fugue for the fugue-owned herald",
-            harness.engine.source("quodlibet", "herald"),
-            Qt.resolvedUrl("songs/fugue/herald.qml"))
-        harness.check("source() crosses to sonata for a sonata-owned slot",
-            harness.engine.source("quodlibet", "calendar"),
-            Qt.resolvedUrl("songs/sonata/calendar.qml"))
+        // The cross-song borrow is not exercised here: no committed song borrows
+        // a slot (the manifest above has every owner equal to its song). The
+        // borrow path is proved by tests/selection/songbook-borrow and by the
+        // consumer's merged host in tests/consumer, whose manifest names Aoide's
+        // sonata as the owner of the borrowed slots.
 
         console.log("=== HARNESS RESULT:",
             harness.failures === 0 ? ("PASS (" + harness.total + " assertions)") : ("FAIL — " + harness.failures + "/" + harness.total + " assertions failed"),

@@ -1298,7 +1298,7 @@ ShellRoot {
     // The canvas wears the palette it is previewing. Every colour below is a
     // MIX of `paletteBg` and `paletteFg` (or the accent/urgent roles verbatim),
     // never a fixed hex — so the rail tracks a light livery (sonata) and a dark
-    // one (fugue) with no branch and no theme table, and a livery whose own
+    // one with no branch and no theme table, and a livery whose own
     // contrast is broken is visibly broken in the instrument panel too, with
     // nowhere to hide. The ONLY literals left in this file are the
     // checkerboard's two neutral greys, which exist precisely to be

@@ -12,8 +12,8 @@
 #
 # Merge happens BEFORE borrow resolution: every song is copied into one
 # directory first, so a song may borrow a slot from a song that came from
-# another book (quodlibet borrowing sonata across books is the case this exists
-# for). A song name that two books define is a refusal, not a choice: the throw
+# another book (a consumer's song borrowing Aoide's sonata across books is the
+# case this exists for: tests/consumer's `encore`). A song name that two books define is a refusal, not a choice: the throw
 # names the song and every book that defines it, the same posture habit's
 # `mergeRegistries` takes for a name two registries share.
 #
@@ -50,7 +50,7 @@ let
     b:
     map (name: {
       inherit name;
-      book = b.book;
+      inherit (b) book;
     }) b.names
   ) perBook;
 

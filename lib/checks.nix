@@ -1010,9 +1010,8 @@ let
   # reaches it; a songbook without sonata's record has no floor to resolve to.
   #
   # `manifest` is `songbookLib.manifestAttrs`, which names each song's bar by
-  # its owner: a borrowed bar (quodlibet's is fugue's) is read once, under its
-  # owner, and a song with no `bar` entry (etude, nocturne) renders sonata's,
-  # which sonata's own entry covers. Only the committed songbook is read, so a
+  # its owner: a borrowed bar is read once, under its owner, and a song with no
+  # `bar` entry (nocturne) renders sonata's, which sonata's own entry covers. Only the committed songbook is read, so a
   # song that exists only in the runtime songbook is judged when `rice declare`
   # copies it into the checkout.
   barRicemode =

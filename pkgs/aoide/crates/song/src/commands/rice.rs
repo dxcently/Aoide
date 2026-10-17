@@ -2566,28 +2566,38 @@ mod tests {
     #[test]
     #[ignore = "real `nix eval` of the committed songbook — no flake checkout/network/`nix` in \
                 the nix package build's sandboxed checkPhase; run with --ignored"]
-    fn stage_regenerates_the_registry_from_the_real_songbook_across_widget_kinds() {
+    fn stage_regenerates_the_registry_from_the_real_songbook() {
         // C4/W3: `registry.json` no longer reads THIS song's local
         // `livery.json` at all — it comes entirely from nix's eval of the
         // committed songbook, same as `manifest.json`. So this test doesn't
         // author a fixture `.widgets` block; it stages an arbitrary real
-        // song and checks that every OTHER real song's registry entry
-        // — across both widget kinds the schema carries — comes out
-        // correct: etude's `demo` (surface, with namespace/shortcut/blur)
-        // and nocturne's `vigil` (dock, with `order`).
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        // song and checks that every OTHER real song's registry entry comes
+        // out correct: nocturne's `vigil` (dock, with `order`), and
+        // barcarolle's empty entry (a song that declares no widget types).
+        // Run with `AOIDE_SONG_TEMPLATES=<lyra-songbook>/share/lyra/songbook`:
+        // the shipped songbook is both the templates and the machine's own
+        // songbook (symlinked in below), so the generator evaluates the real
+        // committed folders and no fixture stands in for it.
+        let templates = aoide_storage::fs::song_templates_dir()
+            .expect("run with AOIDE_SONG_TEMPLATES=<lyra-songbook>/share/lyra/songbook");
+        let _g = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR]);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _real = crate::commands::test_support::require_the_real_songbook_path();
         let (root, stage, run_qml) = widget_sync_tmp("stage-registry-real-kinds");
-        let song = root.join("aoide").join("song").join("songbook").join("etude");
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::os::unix::fs::symlink(&templates, root.join("aoide").join("song").join("songbook"))
+            .unwrap();
         std::fs::create_dir_all(&run_qml).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        let out = handle_rice_stage(&inv(&["rice", "stage"], &["etude"]));
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["nocturne"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
-            out.changed.iter().any(|c| c.ends_with("run/qml/songs/registry.json")),
+            out.changed
+                .iter()
+                .any(|c| c.ends_with("run/qml/songs/registry.json")),
             "registry.json write is reported changed: {:?}",
             out.changed
         );
@@ -2596,23 +2606,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            registry["etude"],
-            json!({ "demo": {
-                "kind": "surface",
-                "namespace": "aoide-etude-demo",
-                "layer": "overlay",
-                "shortcut": "aoide:etude-demo",
-                "blur": true,
-            } }),
-            "surface-kind entry, full field set: {registry:?}"
-        );
-        assert_eq!(
             registry["nocturne"],
             json!({ "vigil": { "kind": "dock", "order": 0 } }),
             "dock-kind entry with `order`: {registry:?}"
         );
-        assert_eq!(registry["fugue"], json!({}), "fugue declares no widget types: {registry:?}");
-        assert_eq!(out.data.as_ref().unwrap()["registry"], "synced `etude`'s widget-type registry entry");
+        assert_eq!(
+            registry["barcarolle"],
+            json!({}),
+            "barcarolle declares no widget types: {registry:?}"
+        );
+        assert_eq!(
+            out.data.as_ref().unwrap()["registry"],
+            "synced `nocturne`'s widget-type registry entry"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

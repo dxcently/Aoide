@@ -20,7 +20,7 @@ lyra preview conductor                       # sonata's conductor.qml, fixture `
 lyra preview terminals --fixture long-text   # another slot, another fixture set
 lyra preview /home/khoa/Aoide/song/songbook/sonata/widgets/conductor.qml
 lyra preview set --width 280 --anchor br --viewport portrait --zoom 1
-lyra preview set --livery fugue           # any song, `live`, a livery file, or a base16 scheme
+lyra preview set --livery cadenza           # any song, `live`, a livery file, or a base16 scheme
 lyra preview declare                         # the previewed body + palette become the checkout song's
 lyra preview shot --what widget --out /tmp/w.png  # the widget alone at 1:1 (also: screen, canvas, element)
 lyra preview tree --at 120,40               # the live element under a point, with its file:line

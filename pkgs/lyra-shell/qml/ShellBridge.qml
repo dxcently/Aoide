@@ -210,7 +210,7 @@ QtObject {
     // minting and every refusal.
     //
     //   bridge.riceMenu(cb)                   // what the menu lists
-    //   bridge.riceMode("stage", "fugue")     // stage that runtime song
+    //   bridge.riceMode("stage", "nocturne")  // stage that runtime song
     //   bridge.riceMode("declarative")        // lock back to the declared song
     //   bridge.riceDraft("enter", "draft-2")  // route the stage into a draft
     //   bridge.riceDraft("new")               // mint the next draft-<n>, enter it

@@ -162,7 +162,7 @@ let
   # ── Songbook manifest + registry, typed (W3a/W3b), generated once (C4) ──
   # `manifest.json`/`registry.json` source from eval-time nix: a `_widgets/`
   # shelf when present (sonata today) is authoritative and runs through
-  # `composeSong`; a shelf-less song (fugue, etude, nocturne today)
+  # `composeSong`; a shelf-less song (barcarolle, cadenza, nocturne today)
   # synthesizes straight from a `widgets/` directory scan, with the registry
   # falling back to `livery.json`'s `.widgets // {}`. `manifest.json`'s SHAPE
   # is the owner map (`{ "<slot>": { "owner": "...", "file": "..." } }`,

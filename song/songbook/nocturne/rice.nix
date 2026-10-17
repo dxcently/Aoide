@@ -6,7 +6,7 @@
 # through to sonata's OWN committed widget bodies wholesale (identical
 # structure/layout/text, only the palette differs). Scaffolded via `aoide
 # rice compose nocturne --from sonata`, then hand-edited: `rice compose` has
-# no template for `aoide.arrangement` (same gap etude's own header notes) —
+# no template for `aoide.arrangement` —
 # this block is authored directly, matching the shape `rice lint`
 # (`livery/schema.rs`) validates. Name deliberately avoids "moonlight-sonata"
 # — that name is reserved for a separate, real future design-song; nocturne
@@ -32,8 +32,8 @@
       config = lib.mkDefault {
         # ── Palette tier — deep navy/indigo night, pale moonlight-silver accent ──
         # Deliberately dark and distinct from BOTH sonata's light marble register
-        # and etude's violet demo palette, so the two throwaway songs never read
-        # as the same thing if khoa flips between them later.
+        # and any other throwaway palette, so the two never read as the same
+        # thing if khoa flips between them later.
         aoide.livery.palette = {
           bg = "#0a0e27"; # deep navy/indigo night ground
           fg = "#e8ecf7"; # near-white cool ivory ink — high contrast on navy

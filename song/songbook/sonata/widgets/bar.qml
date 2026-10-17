@@ -61,7 +61,7 @@
 // not a literal — sonata's own bar.fg (#2f2a33) sits near-black on the
 // marble page, so this reads the same as the old #000000 did here, but a
 // song that borrows this widget carries its own bar foreground with it
-// (fugue's bar.fg is null, falling through to paletteFg, its bone-white
+// (a borrowing song whose bar.fg is null falls through to paletteFg, bone-white
 // #e4e6eb — the staff stays legible on graphite instead of vanishing). The
 // TEXT ink is the song's umber (livery.paletteFg #423420) drawn CLEAN — the
 // old white legibility outline is dropped, since dark text on the opaque

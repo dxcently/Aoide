@@ -66,8 +66,8 @@ files in as bodies, and only the performed one is imported ([[Self-Ricing]],
 [[Snowflake-Anatomy]]). Songs committed today: `cadenza` (the phosphor key, a
 dark green-CRT console — the song **yomi-strix performs**), `sonata` (the
 shipped standard, a light Greek key with no cover: a marble ground baked from
-`palette.bg`), and the songs the songbook also carries — `etude`, `fugue`,
-`nocturne`, `quodlibet`. Each folder
+`palette.bg`), and the songs the songbook also carries — `barcarolle` (the
+Windows 7 Aero glass), `nocturne`. Each folder
 holds:
 
 | Subfolder/file | Holds |

@@ -108,10 +108,10 @@ let
 
   isSlotFile = name: type: type == "regular" && builtins.match "[a-z0-9].*\\.qml" name != null;
 
-  # Per song: `_widgets/` shelf present (sonata, fugue, quodlibet today) — the
+  # Per song: `_widgets/` shelf present (sonata today) — the
   # shelf is authoritative, run through `composeSong`, cross-checked against the
   # `widgets/` directory scan both directions (a stray `.qml` with no record, or
-  # a record naming a file that doesn't exist). No shelf (cadenza, etude,
+  # a record naming a file that doesn't exist). No shelf (barcarolle, cadenza,
   # nocturne today) — synthesize straight from the scan: owner is always the
   # song itself, `file` is always "<slot>.qml"; the registry falls back to
   # `livery.json`'s `.widgets // {}`, unjudged. See
@@ -120,7 +120,7 @@ let
   # computation itself needs.
   #
   # A shelf record's `owner` need not be `name`: a composition may borrow a
-  # slot from another song's shelf (`sonataWidgets // { bar = fugueWidgets.bar;
+  # slot from another song's shelf (`sonataWidgets // { bar = lenderWidgets.bar;
   # }`, the documented idiom). The existence check below is therefore
   # OWNER-RELATIVE, not composing-song-relative: a borrowed record's `file`
   # is resolved under the OWNER's `widgets/` directory, because that is
