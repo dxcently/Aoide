@@ -30,7 +30,6 @@ songUnknownName                     throws  'nope' is not in the songbook; disco
 songAvailableUnknown                throws  'nope2' is not in the songbook; discovered: alpha, landmine, noshelf
 songNoRice                          throws  song noshelf has no rice.nix
 songStrayEnabled                    throws  song aggregation lender is enabled, but habit.song.declared = "borrower"
-songHomeless                        throws  habit.song.users names alice, which has no home
 songNameClash                       throws  share a name with an aggregation
 songDeclaredBuilds                  ok      1
 songEscapeClean                     ok      ""

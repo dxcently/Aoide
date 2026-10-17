@@ -79,7 +79,7 @@
       # One songbook per host: the consumer's own (`./songs`), or Aoide's
       # through the `songbookRoot` export. The song hook is one call: it answers
       # the registry, the selection and the platform modules for the songbook it
-      # is handed, and the `users` it attaches are this consumer's own person.
+      # is handed.
       mkHost =
         name: songbookDir:
         let
@@ -87,10 +87,7 @@
             inherit lib;
             songbook = songbookDir;
           };
-          song = songs.hook {
-            inherit registry;
-            users = [ "fixture" ];
-          };
+          song = songs.hook { inherit registry; };
         in
         composition.mkNixosHost {
           inherit nixpkgs system;

@@ -53,12 +53,11 @@ let
     songbook = songbookRoot;
   };
 
-  # The song hook over the fixture songbook (lib/songbook.nix), with this
-  # VM's one person. The three songs bring their own paint: each body selects
-  # the ten vibeos providers and the lyra renderer, so the host names none of them.
+  # The song hook over the fixture songbook (lib/songbook.nix). The three songs
+  # bring their own paint: each body selects the ten vibeos providers and the
+  # lyra renderer, so the host names none of them.
   hook = songbook.hook {
     registry = import ../modules;
-    users = [ "khoa" ];
   };
 
   hostFor = song: {

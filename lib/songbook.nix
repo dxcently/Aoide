@@ -315,23 +315,19 @@ let
   #                     folder. Its body is the aggregation body: `system` and
   #                     `home` halves, each with its `members`, `providers` and
   #                     `module`. habit imports the body only when it is selected.
-  #   selectionModules  `habit.song.{declared, available, users}`, and, for the
-  #                     declared song only, the enables that select its
-  #                     aggregation for the host (`habit.aggregation.<n>`) and for
-  #                     each user in `song.users` (`habit.users.<u>.aggregation`).
+  #   selectionModules  `habit.song.{declared, available}`, and, for the declared
+  #                     song only, the enable that selects its aggregation for the
+  #                     host (`habit.aggregation.<n>.enable`). Its home half reaches
+  #                     every Home Manager user the host has (habit v0.5.0); a user
+  #                     who should not perform it opts out per aggregation.
   #   extraModulesFor   the checks, then the `_module.args` a body reads (`song`,
   #                     `borrow`, `songbook`) and the facts the paint lanes read.
   #
-  # `users` is a PARAMETER, never read from `config`: a selection module that
-  # read `config.users` would recurse into the `habit.users` it writes. The
-  # caller names its people (`lib/aoideos.nix` passes the host's user).
-  #
-  # The reads, exhaustively: `habit.song.*`, `habit.aggregation.<song>` and
-  # `habit.users.<u>.{home,aggregation}`. Never a `rice.*` option, and never a
-  # body but the selected one. The checks are the list `extraModulesFor` returns,
+  # The reads, exhaustively: `habit.song.*` and `habit.aggregation.<song>`. Never
+  # a `rice.*` option, and never a body but the selected one. The checks are the list `extraModulesFor` returns,
   # so a bad selection throws on the spine before any module is imported.
   hook =
-    { registry, users }:
+    { registry }:
     let
       songbookDir = songbook;
 
@@ -363,30 +359,13 @@ let
                 `declared ∪ available`, closed under borrows.
               '';
             };
-            users = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = users;
-              description = ''
-                The people whose Home Manager configuration takes the declared
-                song's home half (the renderer, and the rice's own settings). Each
-                must have `habit.users.<u>.home.enable = true`.
-              '';
-            };
           };
 
-          config = lib.mkIf (config.song.declared != null) (
-            let
-              enables = lib.genAttrs riceNames (name: {
-                enable = lib.mkIf (config.song.declared == name) true;
-              });
-            in
-            {
-              aggregation = enables;
-              users = lib.genAttrs config.song.users (_: {
-                aggregation = enables;
-              });
-            }
-          );
+          config = lib.mkIf (config.song.declared != null) {
+            aggregation = lib.genAttrs riceNames (name: {
+              enable = lib.mkIf (config.song.declared == name) true;
+            });
+          };
         };
 
       describe =
@@ -403,15 +382,8 @@ let
           selected = lib.unique (lib.optional (song.declared != null) song.declared ++ song.available);
           unknown = lib.filter (n: !(builtins.elem n songNames)) selected;
           noRice = lib.filter (n: !(builtins.elem n riceNames)) selected;
-          enabled =
-            lib.filter (n: sel.aggregation.${n}.enable) riceNames
-            ++ lib.concatMap (u: lib.filter (n: sel.users.${u}.aggregation.${n}.enable) riceNames) (
-              builtins.attrNames sel.users
-            );
-          stray = lib.unique (lib.filter (n: n != song.declared) enabled);
-          homeless = lib.filter (u: !sel.users.${u}.home.enable) (
-            lib.optionals (song.declared != null) song.users
-          );
+          enabled = lib.filter (n: sel.aggregation.${n}.enable) riceNames;
+          stray = lib.filter (n: n != song.declared) enabled;
         in
         lib.throwIf (unknown != [ ])
           (
@@ -425,12 +397,7 @@ let
                   "song aggregation ${lib.concatStringsSep ", " stray} is enabled, but ${describe sel}:"
                   + " a host performs one song, so select only the declared one"
                 )
-                (
-                  lib.throwIf (homeless != [ ]) (
-                    "habit.song.users names ${lib.concatStringsSep ", " homeless}, which has no home:"
-                    + " set habit.users.<u>.home.enable = true for each, or drop it from habit.song.users"
-                  ) [ ]
-                )
+                [ ]
             )
           );
     in

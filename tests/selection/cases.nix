@@ -77,13 +77,13 @@ rec {
   # constructor's gate pass does, and `extraModulesFor` is the constructor's
   # second answer, so each case runs the real checks, not a copy of them.
   hookOver =
-    dir: users:
+    dir:
     (import ../../lib/songbook.nix {
       inherit lib;
       songbook = dir;
     }).hook
       {
-        inherit registry users;
+        inherit registry;
       };
 
   songbook = import ../../lib/songbook.nix {
@@ -107,10 +107,9 @@ rec {
   # body, and the landmine's file is not read.
   songLandmineUnread =
     let
-      h = hookOver ./songbook [ ];
+      h = hookOver ./songbook;
       sel = selectedOver h {
         song.declared = "alpha";
-        users.alice.home.enable = true;
       };
     in
     "${builtins.toString (builtins.length (h.extraModulesFor sel))}:${lib.boolToString (builtins.elem "landmine" songbook.songNames)}";
@@ -121,19 +120,19 @@ rec {
   # claim, for songs.
   songLandmineFires =
     let
-      h = hookOver ./songbook [ ];
+      h = hookOver ./songbook;
     in
     builtins.length (h.extraModulesFor (selectedOver h { song.declared = "landmine"; }));
 
   songUnknownName =
     let
-      h = hookOver ./songbook [ ];
+      h = hookOver ./songbook;
     in
     builtins.length (h.extraModulesFor (selectedOver h { song.declared = "nope"; }));
 
   songAvailableUnknown =
     let
-      h = hookOver ./songbook [ ];
+      h = hookOver ./songbook;
     in
     builtins.length (h.extraModulesFor (selectedOver h { song.available = [ "nope2" ]; }));
 
@@ -141,14 +140,14 @@ rec {
   # right to see a song being written, a host is not allowed to perform one.
   songNoRice =
     let
-      h = hookOver ./songbook [ ];
+      h = hookOver ./songbook;
     in
     builtins.length (h.extraModulesFor (selectedOver h { song.declared = "noshelf"; }));
 
   # A second song's aggregation enabled by hand is refused by name, not merged.
   songStrayEnabled =
     let
-      h = hookOver ./songbook-borrow [ ];
+      h = hookOver ./songbook-borrow;
     in
     builtins.length (
       h.extraModulesFor (
@@ -159,25 +158,16 @@ rec {
       )
     );
 
-  # A user the song names with no home is refused in the friendly words, before
-  # the raw "definition used but not defined" the platform would give.
-  songHomeless =
-    let
-      h = hookOver ./songbook [ "alice" ];
-    in
-    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "alpha"; }));
-
   # A song folder named like an aggregation is refused when the hook is read.
-  songNameClash = builtins.attrNames (hookOver ./songbook-clash [ ]).registry.aggregations;
+  songNameClash = builtins.attrNames (hookOver ./songbook-clash).registry.aggregations;
 
   # The positive reading: a declared song with its home builds the one module
   # the hook owns (the `_module.args` and the facts), and no other.
   songDeclaredBuilds =
     let
-      h = hookOver ./songbook [ "alice" ];
+      h = hookOver ./songbook;
       sel = selectedOver h {
         song.declared = "alpha";
-        users.alice.home.enable = true;
       };
     in
     builtins.length (h.extraModulesFor sel);

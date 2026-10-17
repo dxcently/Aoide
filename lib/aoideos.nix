@@ -53,13 +53,10 @@ let
   };
 
   # The song hook, over the registry this flake's hosts share: each committed
-  # song is an aggregation, the declared one is selected, and its checks run
-  # in the constructor's gate pass. `users` is the one person this flake's
-  # hosts name (`username`); a host that performs a song attaches that user's
-  # home (`habit.users.<u>.home.enable`), and nothing else about songs is named here.
+  # song is an aggregation, the declared one is selected on the host, and its
+  # checks run in the constructor's gate pass.
   hook = songbook.hook {
     registry = import ../modules;
-    users = [ username ];
   };
 
   # Every immediate child directory of `hosts/` holding a `default.nix`, minus

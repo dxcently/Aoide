@@ -6852,33 +6852,29 @@ and the choice of who plays each part.**
 
 ### Selection — the host module
 
-A host names its songs in its own module, under three `habit.song` keys. The
+A host names its songs in its own module, under two `habit.song` keys. The
 constructor reads them in the gate pass, before any module graph exists, and
 `lib/songbook.nix`'s `hook` answers habit's three song hooks from them:
 
 ```
-hosts/<host>/default.nix                      lib/songbook.nix  hook { registry, users }
-─────────────────────────────                 ─────────────────────────────────────────
+hosts/<host>/default.nix                      lib/songbook.nix  hook { registry }
+─────────────────────────────                 ───────────────────────────────────
 habit.song.declared = "sonata";   ──┬──────►  aggregations.<song> = song/songbook/<song>/rice.nix
 habit.song.available = [ ];       ──┼──────►  built-in set (declared ∪ available, closed under borrows)
-habit.song.users = [ "<u>" ];     ──┘         habit.users.<u>.aggregation.<declared>.enable
-                                  ──────────►  habit.aggregation.<declared>.enable
+                                  ──┴──────►  habit.aggregation.<declared>.enable   (host only)
                                   ──────────►  extraModulesFor: checks, then song/borrow/songbook,
                                                aoide.song, aoide.songbook.{builtIn,greeter}
 ```
 
 - **`declared`** is the song this host PERFORMS. It becomes the platform fact
-  `aoide.song` and selects that song's body as an aggregation: the host's
-  `system` half, and the `home` half of every user in `song.users`. Only the
-  declared song's body is ever imported.
+  `aoide.song` and selects that song's body as an aggregation on the host: the
+  `system` half, and the `home` half for every Home Manager user the host has
+  (habit v0.5.0: a host-selected group's home half reaches each user). Only the
+  declared song's body is ever imported. A user who should not perform it opts
+  out per aggregation: `habit.users.<u>.aggregation.<song>.enable = false;`.
 - **`available`** is what the host builds in but does not perform: staged live
   without a rebuild, livery not active. Its folder ships (widgets, templates,
   packages, `builtin.json`), its body is never read.
-- **`users`** is the people whose Home Manager configuration takes the
-  declared song's home half (the renderer and the rice's own settings). Its
-  default is the one person the constructor was given (`lib/aoideos.nix`
-  passes the host's user). It is a PARAMETER of the hook, never a read of
-  `config.users`: a selection that read the users it writes would recurse.
 - **`song/songbook/<song>/`** is a song only if it holds a `rice.nix`. A folder
   without one is discovered (the manifest is right to see a song being
   written) and can never be selected.
@@ -6891,7 +6887,6 @@ it was given:
 | an unknown name in `declared` or `available` | `'<n>' is not in the songbook; discovered: …` |
 | a selected song with no `rice.nix` | `song <n> has no rice.nix` |
 | a second song's aggregation enabled by hand (exclusivity) | `song aggregation <n> is enabled, but habit.song.declared = …` |
-| a `users` entry with no home | `habit.song.users names <u>, which has no home` |
 | a song folder named like an aggregation (name collision) | `… share a name with an aggregation` |
 
 A host that names no song performs none: `aoide.song` is null, no body is
@@ -6930,7 +6925,7 @@ as data and imports only what it selects. Its shape:
     };
   };
   home = {
-    members = [ "lyra" ];         # the rice renderer, for each user in `song.users`
+    members = [ "lyra" ];         # the rice renderer, for each user the host has
     module = { rice.hyprland.conf = ./hyprland.conf; };
   };
 }

@@ -133,7 +133,7 @@ in {
   aOptOut = a.inv.dendrites ? examplebar;
   aGroupMember = a.inv.dendrites ? exampletool;
   aUserDendrites = builtins.length (builtins.attrNames a.inv.users.exampleuser.dendrites);
-  aUserAggregation = a.inv.users.exampleuser.aggregation;
+  aUserWorkspace = builtins.elem \"workspace\" a.inv.users.exampleuser.aggregation;
   bCompositor = b.inv.dendrites.compositor.provider;
   bNotifications = b.inv.dendrites ? notifications;
   bHomeManager = b.inv.users.exampleuser.home;
@@ -179,7 +179,7 @@ else
   check "enable = false beats group membership"   "false"    "$(g aOptOut)"
   check "group membership reaches the host"       "true"     "$(g aGroupMember)"
   check "user scope gets its own dendrites"      "3"        "$(g aUserDendrites)"
-  check "user selects the group's home half"      "workspace" "$(g 'aUserAggregation[0]')"
+  check "user selects the group's home half"      "true" "$(g aUserWorkspace)"
   # Second host, same vocabulary, different answers. niri and the landmine
   # aggregation sit right beside what these two selected and stay unread — the
   # resolution above would have thrown on import otherwise.

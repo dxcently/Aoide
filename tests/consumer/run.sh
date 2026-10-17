@@ -130,7 +130,7 @@ expr="
       (flake.lib.songbook {
         lib = flake.inputs.nixpkgs.lib;
         songbook = flake.songbookRoot;
-      }).hook { inherit registry; users = [ ]; };
+      }).hook { inherit registry; };
     collision = {
       merged = (builtins.tryEval (hookOver { aggregations = flake.rices; }).registry).success;
       bare = (builtins.tryEval (hookOver { aggregations = { }; }).registry).success;
