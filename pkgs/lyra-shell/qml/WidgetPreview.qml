@@ -284,13 +284,16 @@ ShellRoot {
         // The Declare row's gesture — same signature and callback contract as
         // ShellBridge.riceDeclare, answered ASYNCHRONOUSLY so the alert's
         // pending state renders. Nothing is declared: the canvas answers a
-        // success, or the control file's `declareStub` ("refused" | "differs").
+        // success, or the control file's `declareStub` ("refused" | "differs" |
+        // "late", the bridge's own timeout answer).
         function riceDeclare(name, callback) {
             canvas.log("bridge.riceDeclare " + JSON.stringify({ name: "" + name }))
             if (!callback) return
             var how = canvas.controlDoc.declareStub || ""
             Qt.callLater(function () {
-                if (how === "refused")
+                if (how === "late")
+                    callback({ ok: false, stub: true, reason: "no-reply", message: "no reply from shellbridge" })
+                else if (how === "refused")
                     callback({ ok: false, stub: true, reason: "not-built-in",
                                message: "`" + name + "` is not in the songbook preview builds from: this build carries " + canvas.songName })
                 else

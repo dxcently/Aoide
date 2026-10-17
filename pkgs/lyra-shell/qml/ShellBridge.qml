@@ -102,9 +102,10 @@ QtObject {
     // failed, and carries the CLI outcome's `data` verbatim when there is
     // one — a kill names the terminal and pid it stops there). Each call gets its
     // own throwaway socket, like sendCommand, and no line is ever replayed. A
-    // reply that does not arrive within replyTimeoutMs fires cb({ ok: false, … })
-    // once and the socket is destroyed. A timed-out action may still have
-    // executed; the caller re-reads the roster, it never re-sends.
+    // reply that does not arrive within replyTimeoutMs fires cb({ ok: false,
+    // reason: "no-reply", … }) once and the socket is destroyed. A timed-out
+    // action may still have executed, so `no-reply` never means refused; the
+    // caller re-reads the roster, it never re-sends.
     readonly property int replyTimeoutMs: 5000
 
     function sessionAction(sessionId, action, fields, callback) {
@@ -248,8 +249,10 @@ QtObject {
     // false when the host already declares it, `stagedDiffers` true when the
     // staged copy holds edits the rebuild will not carry, null when unknown —
     // or { ok: false, reason, message } with the CLI's refusal (not-built-in,
-    // staged-draft, host-line-count, …) or no-client. A name that is not one
-    // argv token is never sent, and the callback answers that itself.
+    // staged-draft, host-line-count, …), no-client, or no-reply — the declare
+    // outlived replyTimeoutMs and may still land, so a surface says to check
+    // the host file, never "not declared". A name that is not a song name is
+    // never sent, and the callback answers that itself.
     function riceMenu(callback) {
         _ask({ cmd: "ricemenu" }, callback,
              { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
@@ -263,7 +266,7 @@ QtObject {
     }
 
     function riceDeclare(name, callback) {
-        if (typeof name !== "string" || name.length === 0 || /\s/.test(name) || name.charAt(0) === "-") {
+        if (typeof name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(name)) {
             if (callback)
                 callback({ ok: false, reason: "invalid-name", message: "no song to declare" })
             return
@@ -311,7 +314,7 @@ QtObject {
             property Timer deadline: Timer {
                 interval: root.replyTimeoutMs
                 repeat: false
-                onTriggered: conn.finish({ ok: false, message: "no reply from shellbridge" })
+                onTriggered: conn.finish({ ok: false, reason: "no-reply", message: "no reply from shellbridge" })
             }
 
             parser: SplitParser {
