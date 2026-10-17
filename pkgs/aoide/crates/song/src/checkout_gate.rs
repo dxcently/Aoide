@@ -28,13 +28,22 @@ pub fn check_folder(checkout: &Path, folder: &str) -> Result<(), Blocked> {
     if !git::installed() {
         return Err(Blocked::GitMissing);
     }
-    if git::toplevel(checkout).is_err() {
+    if !is_repo_top(checkout) {
         return Err(Blocked::NotARepo);
     }
     match git::status_under(checkout, folder) {
         Ok(lines) if lines.is_empty() => Ok(()),
         Ok(lines) => Err(Blocked::Dirty(lines)),
         Err(e) => Err(Blocked::StatusFailed(e)),
+    }
+}
+
+/// `git rev-parse --show-toplevel` answers for any folder inside a repository,
+/// so the checkout is a repository only when its own folder is that top.
+fn is_repo_top(checkout: &Path) -> bool {
+    match (git::toplevel(checkout), checkout.canonicalize()) {
+        (Ok(top), Ok(own)) => top.canonicalize().is_ok_and(|top| top == own),
+        _ => false,
     }
 }
 
@@ -150,6 +159,18 @@ mod tests {
         std::fs::create_dir_all(root.join("song/songbook/dusk")).unwrap();
         assert_eq!(check_folder(&root, "song/songbook/dusk"), Err(Blocked::NotARepo));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_checkout_nested_in_another_repository_is_refused() {
+        let outer = repo_with_dusk("gate-nested");
+        let nested = outer.join("nonrepo");
+        std::fs::create_dir_all(nested.join("song/songbook/dusk")).unwrap();
+        std::fs::write(nested.join("song/songbook/dusk/livery.json"), "{}").unwrap();
+        git_in(&outer, &["add", "-A"]);
+        git_in(&outer, &["commit", "-qm", "nested"]);
+        assert_eq!(check_folder(&nested, "song/songbook/dusk"), Err(Blocked::NotARepo));
+        let _ = std::fs::remove_dir_all(&outer);
     }
 
     #[test]
