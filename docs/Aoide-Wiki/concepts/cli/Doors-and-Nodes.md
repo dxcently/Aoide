@@ -169,8 +169,13 @@ lyra shellbridge [--run] [--json]
   list --json`, then `lyra rice draft list <song> --json` when the mode names a
   song, under one 4 s budget, and answers one line, the list's `{mode, song,
   draft, stagingSong, declared, songs}` plus `{draftsSong, drafts: [{name,
-  savedAt, current}]}`, or `{ok:false, reason, message}`; it takes no fields, so
-  it has no gate to fail), `refreshusage` (detached re-exec
+  savedAt, current}]}` and this machine's `host`, or `{ok:false, reason, message}`; it takes no fields, so
+  it has no gate to fail), `ricedeclare` (the menu's Declare row, ANSWERED on
+  its connection: `name` is one argv token, it re-execs `lyra rice declare
+  <name> --host --json` — which rewrites the host config's declared-song line
+  and never rebuilds — and answers `{ok:true, message, name, host, changed,
+  stagedDiffers}` or `{ok:false, reason, message}`; the audit line is
+  `ricedeclare action host: <ok|failed>`, never a song), `refreshusage` (detached re-exec
   `usage --json`; the gadget picks up the `state/usage.json` write itself),
   `rechecksessions` (detached re-exec `session reap --announce --json`),
   `heraldpush` / `heraldverdict` / `heralddismiss` (the ledger; a verdict

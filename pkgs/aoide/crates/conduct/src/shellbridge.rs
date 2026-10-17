@@ -202,6 +202,13 @@ pub enum BridgeCommand {
     /// rules are [`RiceDraftAction`]'s; the plan, in `rice` argv, is
     /// [`rice_draft_plan`]. See [`dispatch_rice_draft`].
     RiceDraft { action: RiceDraftAction },
+    /// `{ "cmd": "ricedeclare", "name": "<song>" }` — the menu's Declare row:
+    /// make `name` the song this host performs on its next rebuild. Answered
+    /// on this connection like [`Self::RiceMenu`], because the outcome is a
+    /// balloon the surface paints, never a toast. The name rules are
+    /// [`Self::RiceDraft`]'s `enter`; every rule about WHICH song may be
+    /// declared is the CLI's. See [`dispatch_rice_declare`].
+    RiceDeclare { name: String },
 }
 
 /// The two things a `ricemode` line can ask for. A closed set: an unknown or
@@ -507,6 +514,10 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
         "ricemode" => RiceModeAction::from_wire(&v).map(|action| BridgeCommand::RiceMode { action }),
         "ricemenu" => Some(BridgeCommand::RiceMenu),
         "ricedraft" => RiceDraftAction::from_wire(&v).map(|action| BridgeCommand::RiceDraft { action }),
+        "ricedeclare" => {
+            let name = v.get("name")?.as_str()?;
+            safe_session_id(name).then(|| BridgeCommand::RiceDeclare { name: name.to_string() })
+        }
         "refreshusage" => Some(BridgeCommand::RefreshUsage),
         "rechecksessions" => Some(BridgeCommand::RecheckSessions),
         "heraldpush" => {
@@ -642,7 +653,7 @@ fn notify(message: &str) {
     }
 }
 
-// ── the RICE menu (`ricemenu`, `ricedraft`) ───────────────────────────────
+// ── the RICE menu (`ricemenu`, `ricedraft`, `ricedeclare`) ─────────────────
 
 /// Pure plan: the `lyra` argv, in order and without `--json`, that one
 /// `ricedraft` action takes in this mode, or the taught refusal that ends it.
@@ -746,6 +757,40 @@ fn dispatch_rice_draft(action: &RiceDraftAction) -> Result<String, (String, bool
     Ok(said)
 }
 
+/// Run ONE `ricedeclare`: `lyra rice declare <name> --host --json`, waited
+/// for like every mutation here (one per human gesture), and read into the
+/// reply [`rice_declare_reply`] shapes.
+fn dispatch_rice_declare(name: &str) -> Value {
+    let argv: Vec<String> = ["rice", "declare", name, "--host"].iter().map(|w| w.to_string()).collect();
+    let (ok, message, data) = run_rice_step(&argv);
+    rice_declare_reply(ok, message, data)
+}
+
+/// Pure: the one line a `ricedeclare` answers with. Success carries the CLI's
+/// own message and `name`, `host`, `changed`, `stagedDiffers` from its data; a
+/// refusal carries `reason` (the CLI's, else `cli-failed`) and a `message` that
+/// is the refusal's what and why, so the balloon can say both.
+fn rice_declare_reply(ok: bool, message: String, data: Option<Value>) -> Value {
+    let data = data.unwrap_or(Value::Null);
+    let field = |key: &str| data.get(key).cloned().unwrap_or(Value::Null);
+    if ok {
+        return json!({
+            "ok": true,
+            "message": message,
+            "name": field("name"),
+            "host": field("host"),
+            "changed": field("changed"),
+            "stagedDiffers": field("stagedDiffers"),
+        });
+    }
+    let message = match data.pointer("/refusal/why").and_then(Value::as_str) {
+        Some(why) if !why.is_empty() => format!("{message}: {why}"),
+        _ => message,
+    };
+    let reason = data.get("reason").and_then(Value::as_str).unwrap_or("cli-failed");
+    json!({ "ok": false, "reason": reason, "message": message })
+}
+
 /// Pure decision: which song's drafts the menu lists, from the marker. The
 /// menu's `enter` and `new` from `Declarative` unlock through a bare `rice
 /// mode stage`, which lands on the remembered `stagingSong` — so that is the
@@ -790,7 +835,8 @@ fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Result<Value, V
 
 /// Dispatch ONE read-only menu query: `lyra rice list --json` under
 /// [`RICE_MENU_TIMEOUT`], its `data` (`mode`, `song`, `draft`, `stagingSong`,
-/// `declared`, `songs`) passed through verbatim, then — when
+/// `declared`, `songs`) passed through verbatim with this machine's `host`
+/// name beside it (the name the Declare row's alert speaks), then — when
 /// [`drafts_song`] names a song for the marker — `lyra rice draft list <song>
 /// --json` with the budget the first child left, projected to `draftsSong`
 /// and `drafts: [{name, savedAt, current}]`. No song means `drafts: []` and
@@ -828,6 +874,7 @@ fn dispatch_rice_menu() -> Value {
             .collect();
     }
     answer.insert("ok".to_string(), Value::Bool(true));
+    answer.insert("host".to_string(), json!(aoide_storage::display::os_hostname()));
     answer.insert("draftsSong".to_string(), json!(song));
     answer.insert("drafts".to_string(), Value::Array(drafts));
     Value::Object(answer)
@@ -2530,6 +2577,35 @@ fn handle_conn(stream: UnixStream) {
                 };
                 audit_bridge_action("ricedraft", action.as_str(), event, outcome);
             }
+            // The Declare row: answered on this connection and run on its OWN
+            // thread like the menu's read, because the surface paints the
+            // answer. A gesture, so every outcome is audited — naming the
+            // outcome and nothing else, never the song.
+            Some(BridgeCommand::RiceDeclare { name }) => {
+                let Some(mut reply) = reply.take() else {
+                    let _ = daemon::audit(
+                        &daemon::default_audit_log(),
+                        daemon::Door::Daemon,
+                        daemon::EventClass::Audit,
+                        "shellbridge",
+                        "ricedeclare-noreply",
+                        "ricedeclare: no reply channel; not dispatched",
+                    );
+                    return;
+                };
+                std::thread::spawn(move || {
+                    use std::io::Write;
+                    let answer = dispatch_rice_declare(&name);
+                    let (event, outcome) = if answer.get("ok").and_then(Value::as_bool) == Some(true) {
+                        ("ricedeclare", "ok")
+                    } else {
+                        ("ricedeclare-failed", "failed")
+                    };
+                    audit_bridge_action("ricedeclare", "host", event, outcome);
+                    let _ = writeln!(reply, "{answer}");
+                });
+                return;
+            }
             // The menu's read: answered on this connection and run on its OWN
             // thread, like `sessiontrace`, because it re-execs the CLI under a
             // bound. No reply channel means the query does not run at all.
@@ -3546,6 +3622,11 @@ case "$2 $3" in
     printf '{"status":"error","message":"no song staged","data":{"reason":"x"}}\n'; exit 1
   fi
   printf '{"status":"ok","message":"2 draft(s)","data":{"drafts":[{"song":"%s","name":"draft-1","savedAt":"2026-01-01T00:00:00Z","current":false},{"song":"%s","name":"draft-2","savedAt":null,"current":true}],"scope":"%s"}}\n' "$4" "$4" "$4" ;;
+"declare "*)
+  if [ -f "$here/refuse-declare" ]; then
+    printf '{"status":"error","message":"`%s` is not in the songbook box builds from","data":{"reason":"not-built-in","refusal":{"kind":"refused","what":"`%s` is not in the songbook box builds from","why":"this build carries sonata","fix":{"set":"x"}}}}\n' "$3" "$3"; exit 1
+  fi
+  printf '{"status":"ok","message":"declared `%s`; takes effect on the next rebuild.","data":{"name":"%s","host":"box","hostConfig":"/h/default.nix","previous":"sonata","changed":true,"stagedDiffers":true}}\n' "$3" "$3" ;;
 "mode draft")
   if [ -f "$here/refuse-draft" ]; then
     printf '{"status":"error","message":"no song is currently staged","data":{"reason":"no-resolvable-song"}}\n'; exit 1
@@ -3688,6 +3769,7 @@ esac
                 "stagingSong": "cadenza",
                 "declared": "sonata",
                 "songs": [{ "name": "cadenza", "ok": true }, { "name": "sonata", "ok": true }],
+                "host": aoide_storage::display::os_hostname(),
                 "draftsSong": "cadenza",
                 "drafts": [
                     { "name": "draft-1", "savedAt": "2026-01-01T00:00:00Z", "current": false },
@@ -3705,6 +3787,62 @@ esac
             json!({ "ok": false, "reason": "cli-failed", "message": "no song staged" })
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parse_command_takes_a_ricedeclare_with_one_usable_name() {
+        assert_eq!(
+            parse_command(r#"{"cmd":"ricedeclare","name":"barcarolle"}"#),
+            Some(BridgeCommand::RiceDeclare { name: "barcarolle".to_string() })
+        );
+        for line in [
+            r#"{"cmd":"ricedeclare"}"#,
+            r#"{"cmd":"ricedeclare","name":""}"#,
+            r#"{"cmd":"ricedeclare","name":"-x"}"#,
+            r#"{"cmd":"ricedeclare","name":"a b"}"#,
+            r#"{"cmd":"ricedeclare","name":7}"#,
+        ] {
+            assert_eq!(parse_command(line), None, "{line}");
+        }
+    }
+
+    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
+    #[cfg(unix)]
+    #[test]
+    fn dispatch_rice_declare_runs_the_host_declare_and_answers_both_outcomes() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = stub_rice_bin("shellbridge-declare", r#"{"mode":"staging","song":"barcarolle"}"#);
+        assert_eq!(
+            dispatch_rice_declare("barcarolle"),
+            json!({
+                "ok": true,
+                "message": "declared `barcarolle`; takes effect on the next rebuild.",
+                "name": "barcarolle",
+                "host": "box",
+                "changed": true,
+                "stagedDiffers": true,
+            })
+        );
+        assert_eq!(stub_argv_log(&root), ["rice declare barcarolle --host --json"]);
+
+        std::fs::write(root.join("refuse-declare"), "").unwrap();
+        assert_eq!(
+            dispatch_rice_declare("fugue"),
+            json!({
+                "ok": false,
+                "reason": "not-built-in",
+                "message": "`fugue` is not in the songbook box builds from: this build carries sonata",
+            })
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_declare_with_no_envelope_is_a_cli_failure() {
+        assert_eq!(
+            rice_declare_reply(false, "spawning `lyra rice declare`: not found".to_string(), None),
+            json!({ "ok": false, "reason": "cli-failed", "message": "spawning `lyra rice declare`: not found" })
+        );
     }
 
     /// GATED on Unix with its reason (see [`stub_rice_bin`]).

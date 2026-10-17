@@ -782,8 +782,11 @@ in the message.
   `rice list` data passes through verbatim, a child that did not answer is a
   refusal and never an empty list, and a failed `rice list` starts no second
   child. `ricemode` takes `stage` + one argv-token `name` or a bare
-  `declarative` (the CLI resolves the declared twin — never an env song here),
-  and no audit line of any of the three verbs carries a draft or a song name.
+  `declarative` (the CLI resolves the declared twin — never an env song here).
+  `ricedeclare` takes one argv-token `name` and nothing else: which song a host
+  may declare, and the host file it rewrites, are the CLI's (`lyra rice
+  declare --host`), never checked here. No audit line of any of the four verbs
+  carries a draft or a song name.
 
 - **`session bind` assigns continuity, never authority.** Keep the operation
   daemon-owned and local-only; no missing-daemon fallback. It does not load
@@ -2958,7 +2961,7 @@ in the message.
   the `question` and `needsSudo` fields in `CONTRACTS.md` §4.
 - A change to shellbridge's replying verbs — the
   `sessionaction`/`projectaction`/`workspaceaction` whitelists and reply
-  shapes, the `sessiontrace`/`ricemenu` reads — or to the fire-and-forget
+  shapes, the `sessiontrace`/`ricemenu` reads, the `ricedeclare` answer — or to the fire-and-forget
   `ricemode`/`ricedraft` sets updates `ShellBridge.qml`'s protocol comment
   (`pkgs/lyra-shell/qml/ShellBridge.qml`, which names the verbs it answers) and
   `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same commit.

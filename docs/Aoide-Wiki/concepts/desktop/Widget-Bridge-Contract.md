@@ -270,15 +270,16 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    `send` injection, acknowledged session actions (the session-menu's
    `undying`/`project`/`kill`/`createproject`/`editproject` calls), the bar's
    `workspaceaction` bind and unbind, the read-only `sessiontrace` query
-   above, and the RICE menu's three verbs — the read `ricemenu`, the switch
-   `ricemode` (`stage <name>`/`declarative`) and the gesture `ricedraft`
-   (`enter`/`new`/`save`/`drop`) — nothing else leaves QML. A new
+   above, and the RICE menu's four verbs — the read `ricemenu`, the switch
+   `ricemode` (`stage <name>`/`declarative`), the gesture `ricedraft`
+   (`enter`/`new`/`save`/`drop`) and the answered `ricedeclare <song>` (the
+   host performs it on the next rebuild) — nothing else leaves QML. A new
    verb is one of two shapes: a READ answers on its own connection, with the
    daemon's bound under the client's reply timeout; an ACTION is
    fire-and-forget, and its outcome is a toast the daemon fires — a widget
    never parks on it and re-reads the stage files to see what changed. (The
-   acknowledged session, project and workspace actions are the exception: they
-   answer.)
+   acknowledged session, project and workspace actions, and `ricedeclare`, are
+   the exception: they answer.)
 5. **Colour only from [[livery]]**; hard corners; the music-glyph state contract
    (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the

@@ -989,9 +989,9 @@ stripping one, and a held spawn shows as its whole command.
   (nothing parsed to echo) — and a malformed line that NAMES this verb is
   ANSWERED with that refusal rather than dropped, the same rule
   `sessiontrace` holds: one rule for every parked caller.
-  The other two replying commands are the READS, `sessiontrace` and
-  `ricemenu` (both below); every other socket command, `ricemode` and
-  `ricedraft` among them, stays fire-and-forget.
+  The other replying commands are the READS, `sessiontrace` and `ricemenu`,
+  and the RICE menu's `ricedeclare` (all below); every other socket command,
+  `ricemode` and `ricedraft` among them, stays fire-and-forget.
 - `commands` — this crate's CLI commands, registered from one `register()`
   call (`conduct/src/commands/graph.rs`, still that file's name
   post-cutover) — the `graph` family narrowed at task #101 R1 to the bare
@@ -1068,9 +1068,9 @@ stripping one, and a held spawn shows as its whole command.
   DISCARDED (`no-answer`) rather than answered from partially. Audits refuse,
   never every poll: one line per second per card is not a human gesture, and the
   audit line carries no argument values.
-- **The RICE menu's three verbs over the bridge (`shellbridge.rs::RiceMenu`,
-  `RiceMode`, `RiceDraft`).** Any click on the bar's RICE cell opens the one
-  menu; nothing switches until a row is chosen. All three re-exec the sibling
+- **The RICE menu's four verbs over the bridge (`shellbridge.rs::RiceMenu`,
+  `RiceMode`, `RiceDraft`, `RiceDeclare`).** Any click on the bar's RICE cell opens the one
+  menu; nothing switches until a row is chosen. All four re-exec the sibling
   `lyra` (`daemon::bin::rice_bin()`): `rice` lives there and conduct never
   depends on the song crate, so the name regexes, the minting and every refusal
   stay the CLI's.
@@ -1078,7 +1078,7 @@ stripping one, and a held spawn shows as its whole command.
   thread like `sessiontrace`: `dispatch_rice_menu` runs `rice list --json`
   under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and
   passes its `data` through (`mode`, `song`, `draft`, `stagingSong`,
-  `declared`, `songs`); then, when `drafts_song` names a song from the mode
+  `declared`, `songs`) with this machine's `host` name beside it; then, when `drafts_song` names a song from the mode
   marker (`stagingSong` first while declarative is locked, since an unlock
   lands there; `song` first otherwise), runs `rice draft list <song> --json`
   with the budget left. The answer adds `draftsSong` and `drafts:
@@ -1114,6 +1114,17 @@ stripping one, and a held spawn shows as its whole command.
   that does not exist yet, and the bridge cannot tell. The audit line is one
   per action (`ricedraft action <enter|new|save|drop>: <ok|partial|failed>`) and carries
   neither a draft nor a song name.
+  `{"cmd":"ricedeclare","name":"<song>"}` is the Declare row, ANSWERED on its
+  own connection and thread like `ricemenu` because the surface paints the
+  outcome as a balloon: `name` is one argv token (anything else is dropped
+  with no reply), and `dispatch_rice_declare` runs `lyra rice declare <name>
+  --host --json`, unbounded like every mutation, which rewrites the host
+  config's `habit.song.declared` line and never rebuilds. `rice_declare_reply`
+  answers `{ok:true, message, name, host, changed, stagedDiffers}` or
+  `{ok:false, reason, message}`, the message carrying the refusal's what and
+  why, `reason` the CLI's own (`not-built-in`, `staged-draft`,
+  `host-line-count`, …) or `cli-failed`. The audit line is `ricedeclare action
+  host: <ok|failed>`, never a song.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE
   shared call both `session_store.rs::do_session_end_inner` (a clean

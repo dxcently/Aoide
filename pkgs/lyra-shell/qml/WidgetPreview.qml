@@ -206,9 +206,9 @@ ShellRoot {
     // The stub bridge — every method the songbook widgets call today, each
     // only logging. Confirmed against `grep -rn 'bridge\.' song/songbook/*/
     // widgets/`: sendCommand, focusSession, recheckSessions, riceMode,
-    // refreshUsage, sessionAction. `focusWindow` and the menu's `riceMenu`
-    // and `riceDraft` are on ShellBridge but no committed widget calls them
-    // yet; they are stubbed anyway so a widget that starts calling one on this
+    // refreshUsage, sessionAction. `focusWindow` and the menu's `riceMenu`,
+    // `riceDraft` and `riceDeclare` are on ShellBridge but no committed widget
+    // calls them yet; they are stubbed anyway so a widget that starts calling one on this
     // canvas gets a log line, not a crash.
     property QtObject bridgeStub: QtObject {
         function focusSession(sessionId) {
@@ -263,6 +263,7 @@ ShellRoot {
                            draft: null,
                            stagingSong: canvas.songName,
                            declared: null,
+                           host: "preview",
                            songs: [{ name: canvas.songName, ok: true }],
                            draftsSong: canvas.songName,
                            drafts: canvas.controlDoc.drafts
@@ -279,6 +280,24 @@ ShellRoot {
             if ((action === "enter" || action === "drop") && typeof name === "string" && name.length > 0)
                 wanted.name = name
             canvas.log("bridge.riceDraft " + JSON.stringify(wanted))
+        }
+        // The Declare row's gesture — same signature and callback contract as
+        // ShellBridge.riceDeclare, answered ASYNCHRONOUSLY so the alert's
+        // pending state renders. Nothing is declared: the canvas answers a
+        // success, or the control file's `declareStub` ("refused" | "differs").
+        function riceDeclare(name, callback) {
+            canvas.log("bridge.riceDeclare " + JSON.stringify({ name: "" + name }))
+            if (!callback) return
+            var how = canvas.controlDoc.declareStub || ""
+            Qt.callLater(function () {
+                if (how === "refused")
+                    callback({ ok: false, stub: true, reason: "not-built-in",
+                               message: "`" + name + "` is not in the songbook preview builds from: this build carries " + canvas.songName })
+                else
+                    callback({ ok: true, stub: true, name: "" + name, host: "preview", changed: true,
+                               stagedDiffers: how === "differs",
+                               message: "declared `" + name + "` as preview's song; takes effect on the next rebuild." })
+            })
         }
         // The trace query stub — same signature and callback contract as
         // ShellBridge.traceSession, answering canned steps ASYNCHRONOUSLY

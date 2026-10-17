@@ -9,7 +9,7 @@
 // "cmd" field and payload fields. The socket path is the shellbridge default:
 // $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
 // Every command is fire-and-forget except "sessionaction", "projectaction",
-// "workspaceaction", "sessiontrace" and "ricemenu", which are answered with
+// "workspaceaction", "sessiontrace", "ricemenu" and "ricedeclare", which are answered with
 // one JSON line on the same connection, which then closes.
 //
 // Communication discipline: this is the ONLY outbound channel from QML.
@@ -215,6 +215,7 @@ QtObject {
     //   bridge.riceDraft("new")               // mint the next draft-<n>, enter it
     //   bridge.riceDraft("save")              // snapshot the stage as a draft
     //   bridge.riceDraft("drop", "draft-2")   // delete a saved draft
+    //   bridge.riceDeclare("barcarolle", cb)  // the host performs it next rebuild
     //
     // `riceMenu` answers like traceSession: `cb` EXACTLY ONCE, on its own
     // throwaway socket, no replay, the daemon's children bounded
@@ -238,6 +239,17 @@ QtObject {
     // stage into a name that does not exist yet, so a stale row comes back as a
     // copy, not a refusal. `drop` of a missing draft or of the draft in force is
     // the CLI's refusal, toasted. Only `enter` and `drop` take a name.
+    //
+    // The menu's answer also carries `host`, this machine's name, for the
+    // Declare row to speak. `riceDeclare` answers like riceMenu, `cb` EXACTLY
+    // ONCE: the daemon runs `lyra rice declare <name> --host`, which rewrites the
+    // host config's `habit.song.declared` line and never rebuilds. The answer
+    // is { ok: true, message, name, host, changed, stagedDiffers } — `changed`
+    // false when the host already declares it, `stagedDiffers` true when the
+    // staged copy holds edits the rebuild will not carry, null when unknown —
+    // or { ok: false, reason, message } with the CLI's refusal (not-built-in,
+    // staged-draft, host-line-count, …) or no-client. A name that is not one
+    // argv token is never sent, and the callback answers that itself.
     function riceMenu(callback) {
         _ask({ cmd: "ricemenu" }, callback,
              { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
@@ -248,6 +260,16 @@ QtObject {
         if (action === "stage" && typeof name === "string" && name.length > 0)
             wanted.name = name
         sendCommand(wanted)
+    }
+
+    function riceDeclare(name, callback) {
+        if (typeof name !== "string" || name.length === 0 || /\s/.test(name) || name.charAt(0) === "-") {
+            if (callback)
+                callback({ ok: false, reason: "invalid-name", message: "no song to declare" })
+            return
+        }
+        _ask({ cmd: "ricedeclare", name: name }, callback,
+             { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
     }
 
     function riceDraft(action, name) {

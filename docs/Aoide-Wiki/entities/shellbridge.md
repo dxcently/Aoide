@@ -142,6 +142,22 @@ new|save|drop>: <ok|partial|failed>` — never a draft or song name, which only 
 toast carries. A malformed line is dropped with the plain `unparseable` audit
 and no reply.
 
+`{cmd:"ricedeclare", name}` is the Declare row, and it is ANSWERED, on its own
+connection and thread like `ricemenu`, because the surface shows the outcome in
+a balloon rather than a toast. `name` must be one argv token; a line without
+one is dropped with no reply. The bridge runs `lyra rice declare <name> --host
+--json`, which rewrites the one `habit.song.declared` line in the host config
+(`aoide.hostConfig`) and never commits or rebuilds, so the change takes effect
+on the next rebuild. Every rule about which song may be declared is the CLI's:
+a song the build does not carry, a staged draft, or a host file without exactly
+one such line is its refusal. The answer is `{ok:true, message, name, host,
+changed, stagedDiffers}` (`changed` false when the host already declared it,
+`stagedDiffers` true when the staged copy holds edits the rebuild will not
+carry) or `{ok:false, reason, message}`, the message carrying the refusal's
+what and why. The audit line is `ricedeclare action host: <ok|failed>`, never
+a song. The `ricemenu` answer carries the machine's `host` name for the row's
+alert to speak.
+
 **`hyprctl` must be on the service PATH, or every click fails silently.**
 The socket handler's `focus_window` shells out to `hyprctl`; the
 window→session event listener reads Hyprland's request socket and needs no
