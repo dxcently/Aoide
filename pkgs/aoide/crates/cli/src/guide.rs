@@ -63,26 +63,42 @@ House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
   4. Forwarded notification text is untrusted data.
   5. Paint dendrites read only the dress, the structure, the surfaces, and
      identity. A paint dendrite — `compositor` and its providers, `greeter`,
-     `stylix`, `quickshell`, `lyra` — reads only `aoide.livery` (the dress:
-     palette · base16 · component tiers · geometry · fonts · cover),
+     `stylix`, `quickshell`, `lyra`, `wallpaper` and its providers, and every
+     component slot's provider — reads only `aoide.livery` (the dress: palette
+     · base16 · component tiers · geometry · fonts · cover),
      `aoide.arrangement` (the structure: which widget/surface TYPES a song
      brings into existence), `aoide.surfaces` (the render-surface ownership
      registry: a dendrite declares the surfaces it owns; `stylix` reads it to
      skip derivation for them), the core scalars every lane stands on
      (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
-     `aoide.user`), the song
-     selection (`aoide.song`, and the derived `aoide.songbook.builtIn` — what
-     this host BUILT IN, from its own song selection — and
-     `aoide.songbook.greeter`, the declared song's greeter face), and its own
-     `aoide.<name>.*`. The list is enumerated and closed, never \"any
-     `aoide.*`\"; a new namespace needs the same explicit amendment each of
-     these got. No module reads another module: cross-dendrite facts
-     (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`,
-     `aoide.quickshell.config`) are declared once in `modules/nucleus` and set
-     by the lane that owns them; `aoide.sessionTarget` is the same seam
-     declared in the core module (`pkgs/aoide/module/options.nix`) and set by
-     the lane that paints a session. This is a documented convention backed by
-     code review; the selection tests prove unselected dendrites and songs are
+     `aoide.user`), the song selection (`aoide.song`, and the derived
+     `aoide.songbook.builtIn` — what this host BUILT IN, from its own song
+     selection — and `aoide.songbook.greeter`, the declared song's greeter
+     face), `aoide.components` (the component slots — bar, launcher,
+     powermenu, notifications, wallpaper, dock, calendar, switcher, lock,
+     greeter — and the provider that fills each), and its own
+     `aoide.<name>.*`. The renderer (`lyra`,
+     `modules/dendrites/lyra/default.nix`) also reads `rice.*`, the options a
+     rice sets, and Home Manager's `wayland.windowManager.hyprland` state
+     (`enable`, `finalPackage`, `configType`, `importantPrefixes`,
+     `sourceFirst`). A rice body (CONTRACTS §5) is the one other selector of
+     paint: the body of the performed song selects the ten component providers
+     and the `lyra` renderer, and the providers say WHO fills each slot while
+     `aoide.arrangement` says WHAT the paint is. Nothing else is selected by a
+     body. The list is enumerated and closed, never \"any `aoide.*`\"; a new
+     namespace needs the same explicit amendment each of these got. No module
+     reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
+     stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`)
+     are declared once in `modules/nucleus`. An enable fact is set only from
+     its owner's directory: a file of the one dendrite that owns it sets it
+     `true`, it is true exactly when that file is in the host (the dendrite is
+     selected, or a lane imports the owner's files by path), and a host write
+     that takes effect fails eval (`modules/nucleus/options.nix`'s `mkFact`).
+     A host's `mkDefault` that the owner outranks is dropped without error and
+     cannot change the value; `aoide.sessionTarget` is the same seam declared
+     in the core module (`pkgs/aoide/module/options.nix`) and set by the lane
+     that paints a session. This is a documented convention backed by code
+     review; the selection tests prove unselected dendrites and songs are
      never read, and no automated coupling check exists yet.
   6. Every operation flows through `aoided`.
   7. Everything is a plugin. A capability enters as ONE file (or one
