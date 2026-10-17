@@ -5,8 +5,9 @@
 #
 #   livery-leak/  a hyprland.conf that sets a livery-owned key fails; a clean one passes.
 #   module-leak/  a rice module value outside lib.mkDefault fails, and so does a
-#                 write to wayland.windowManager.hyprland.settings; a rice that
-#                 wraps its values, and keeps rice.hyprland beside them, passes.
+#                 write to any wayland.windowManager.hyprland.* key, even under
+#                 lib.mkDefault; a rice that wraps its values, and keeps
+#                 rice.hyprland beside them, passes.
 #
 #   ./tests/song-shape/run.sh
 set -uo pipefail
@@ -40,6 +41,8 @@ out=$(check module-leak plain)
 if [[ $out == *"song plain's system.module sets aoide.livery.polarity outside lib.mkDefault"* ]]; then echo "ok    plain: unwrapped value refused"; else echo "FAIL  plain: $out"; fail=1; fi
 out=$(check module-leak settings)
 if [[ $out == *"song settings's home.module writes wayland.windowManager.hyprland.settings"* ]]; then echo "ok    settings: base settings write refused"; else echo "FAIL  settings: $out"; fail=1; fi
+out=$(check module-leak extra)
+if [[ $out == *"song extra's home.module writes wayland.windowManager.hyprland.extraConfig"* ]]; then echo "ok    extra: base extraConfig write refused under mkDefault"; else echo "FAIL  extra: $out"; fail=1; fi
 out=$(check module-leak wrapped)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    wrapped: mkDefault values and rice.hyprland pass"; else echo "FAIL  wrapped: $out"; fail=1; fi
 exit $fail

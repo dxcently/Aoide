@@ -301,21 +301,15 @@ let
               lib.intersectLists [ "imports" "options" ] (builtins.attrNames raw);
           leaves = leavesOf 100 [ ] (raw.config or raw);
           shown = path: lib.concatStringsSep "." path;
-          isSettings =
-            l:
-            lib.take 4 l.path == [
-              "wayland"
-              "windowManager"
-              "hyprland"
-              "settings"
-            ];
+          baseHyprland =
+            lib.filter (l: lib.take 3 l.path == [ "wayland" "windowManager" "hyprland" ]) leaves;
           unwrapped = lib.filter (l: l.prio != 1000 && lib.head l.path != "rice") leaves;
         in
         if extraKeys != [ ] then
           [ "${where} declares ${lib.concatStringsSep ", " extraKeys}; a rice module only sets values" ]
-        else if lib.any isSettings leaves then
+        else if baseHyprland != [ ] then
           [
-            "${where} writes wayland.windowManager.hyprland.settings; a rice's hyprland keys are rice.hyprland.settings (CONTRACTS.md §5)"
+            "${where} writes ${shown (lib.take 4 (lib.head baseHyprland).path)}; a rice's hyprland keys are rice.hyprland.* (CONTRACTS.md §5)"
           ]
         else if unwrapped != [ ] then
           [

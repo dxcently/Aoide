@@ -6873,10 +6873,13 @@ habit.song.available = [ ];       ──┼──────►  built-in set (
 
 - **`declared`** is the song this host PERFORMS. It becomes the platform fact
   `aoide.song` and selects that song's body as an aggregation on the host: the
-  `system` half, and the `home` half for every Home Manager user the host has
-  (habit v0.5.0: a host-selected group's home half reaches each user). Only the
-  declared song's body is ever imported. A user who should not perform it opts
-  out per aggregation: `habit.users.<u>.aggregation.<song>.enable = false;`.
+  `system` half, and the `home` half for every Home Manager user with
+  `home.enable = true` (habit v0.5.0: a host-selected group's home half reaches
+  each such user, as if it had selected the group). On a host with more than one
+  such user, every one of them performs the home half unless it opts out; that
+  is the v0.5.0 reach, not a per-user choice this song makes. Only the declared
+  song's body is ever imported. A user who should not perform it opts out per
+  aggregation: `habit.users.<u>.aggregation.<song>.enable = false;`.
 - **`available`** is what the host builds in but does not perform: staged live
   without a rebuild, livery not active. Its folder ships (widgets, templates,
   packages, `builtin.json`), its body is never read.
@@ -6950,14 +6953,17 @@ as data and imports only what it selects. Its shape:
   one exception is `rice.hyprland.*`, the rice's own options, which may sit in
   the same `config`. A module with nothing but `rice.hyprland.*` may stay a bare
   attrset, which is how every `home.module` is written.
-  `wayland.windowManager.hyprland.settings` is refused in a rice outright: the
-  rice's hyprland keys are `rice.hyprland.settings` (§7).
+  Any `wayland.windowManager.hyprland.*` key is refused in a rice outright,
+  whatever its priority: the rice's hyprland keys are `rice.hyprland.*` (§7).
 - **Who wins**, strongest first (§7 has the mechanism):
   1. the host's `rice.hyprland.host` / `hostConf` (sourced last);
   2. the host's plain values;
   3. a user's opt-out (`habit.users.<u>.aggregation.<song>.enable = false`);
   4. the rice: `rice.hyprland.*`, and its `mkDefault` values;
-  5. group and dendrite defaults.
+  5. group and dendrite values. The lint reads only the rice, so a plain group
+     or dendrite write outranks it, and rank 4 holds over 5 only where that
+     value is `mkDefault` too. No `modules/` file plain-writes `aoide.livery` or
+     `aoide.arrangement` today.
 - The **ten component slots** are `bar`, `launcher`, `powermenu`,
   `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock` and
   `greeter`. Each is filled by its `vibeos` provider: the Quickshell component
@@ -7009,7 +7015,7 @@ committed songbook.
 - no `.nix` carries a `../` path literal in its text (`escapingNixFiles`);
 - every value a body's `system` or `home` module sets, other than
   `rice.hyprland.*`, is at priority 1000 (`lib.mkDefault`), and no module writes
-  `wayland.windowManager.hyprland.settings`. The check calls each module with the
+  any `wayland.windowManager.hyprland.*` key. The check calls each module with the
   arguments a rice is handed and reads each value's priority from its override
   wrapper. It refuses a module that declares `imports` or `options`, so the walk
   sees every value the module can set.

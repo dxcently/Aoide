@@ -318,8 +318,9 @@ let
   #   selectionModules  `habit.song.{declared, available}`, and, for the declared
   #                     song only, the enable that selects its aggregation for the
   #                     host (`habit.aggregation.<n>.enable`). Its home half reaches
-  #                     every Home Manager user the host has (habit v0.5.0); a user
-  #                     who should not perform it opts out per aggregation.
+  #                     every Home Manager user with `home.enable = true` (habit
+  #                     v0.5.0); a user who should not perform it opts out per
+  #                     aggregation.
   #   extraModulesFor   the checks, then the `_module.args` a body reads (`song`,
   #                     `borrow`, `songbook`) and the facts the paint lanes read.
   #
