@@ -7000,6 +7000,15 @@ never refuses for git: it declares, and adds a `warning` field and an
 `uncommitted` list when the folder is dirty, since the rebuild builds the
 committed songbook.
 
+**Old shape, no copy.** The copy also refuses when the staged `rice.nix` is
+not a v1 body: a body is a plain attrset, so its first code character is `{`
+and that brace closes the file. A `{ lib, config, … }:` function header (the
+old shape, which `checks.song-shape` rejects as "not an attrset") is refused
+with `reason: old-song-shape`, naming the file. The fix is
+`lyra rice refresh <song>`, which brings the repo's `rice.nix` in when the
+machine never edited it; otherwise the file is rewritten as a body. `--host`
+does not read the body.
+
 ### Enforcement
 
 `checks.song-shape` asserts six things about every discovered song:

@@ -7,7 +7,9 @@
 //! Three answers refuse, each naming the folder it judged: git not installed,
 //! the checkout not a git repository, and uncommitted changes under the folder
 //! (tracked edits and untracked files alike). `--host` never refuses; it reads
-//! [`dirty_lines`] and reports the same changes as a warning.
+//! [`dirty_lines`] and reports the same changes as a warning. A fourth refusal,
+//! [`is_old_song_shape`], is the copy's other guard: a staged `rice.nix` still
+//! in the old function-module shape would break the checkout's build.
 
 use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_storage::git;
@@ -54,6 +56,40 @@ pub fn dirty_lines(checkout: &Path, folder: &str) -> Vec<String> {
         Err(Blocked::Dirty(lines)) => lines,
         _ => Vec::new(),
     }
+}
+
+/// True when a staged `rice.nix` is NOT a song shape v1 body (CONTRACTS.md
+/// §5): the body is a plain attrset, its first code character is `{`, and that
+/// brace's match ends the file. The old shape opens with a function header,
+/// `{ lib, config, ... }:`, whose first brace is followed by `:`; that is what
+/// `lib/checks.nix` refuses as "not an attrset". Full-line `#` comments are
+/// skipped first, and braces are counted raw, so a brace inside a string or an
+/// inline comment can miscount. A miscount only ever refuses (a body that never
+/// closes, or closes too early, reads as old), never copies an old file.
+pub fn is_old_song_shape(rice: &str) -> bool {
+    let code: String = rice
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let code = code.trim_start();
+    if !code.starts_with('{') {
+        return true;
+    }
+    let mut depth = 0usize;
+    for (i, c) in code.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return code[i + 1..].trim_start().starts_with(':');
+                }
+            }
+            _ => {}
+        }
+    }
+    true
 }
 
 impl Blocked {
@@ -171,6 +207,25 @@ mod tests {
         git_in(&outer, &["commit", "-qm", "nested"]);
         assert_eq!(check_folder(&nested, "song/songbook/dusk"), Err(Blocked::NotARepo));
         let _ = std::fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn a_plain_attrset_body_is_the_v1_shape() {
+        let body = "# song/songbook/dusk/rice.nix\n{\n  system = {\n    module = { lib, song, ... }: {\n      config = lib.mkDefault { };\n    };\n  };\n}\n";
+        assert!(!is_old_song_shape(body));
+    }
+
+    #[test]
+    fn a_function_header_is_the_old_shape() {
+        let old = "{\n  lib,\n  config,\n  song,\n  borrow,\n  ...\n}:\nlet\n  widgets = borrow \"dusk\";\nin\n{\n  config = lib.mkIf (config.aoide.song == \"dusk\") { };\n}\n";
+        assert!(is_old_song_shape(old));
+        assert!(is_old_song_shape("{ ... }: { }\n"));
+    }
+
+    #[test]
+    fn a_file_that_is_not_an_attrset_is_the_old_shape() {
+        assert!(is_old_song_shape("let x = 1; in { }\n"));
+        assert!(is_old_song_shape(""));
     }
 
     #[test]

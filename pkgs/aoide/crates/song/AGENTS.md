@@ -50,7 +50,9 @@
   the song, not the machine's undo history and scratch, so it copies through
   `copy_tree_atomic` with the list and keeps no tree copy of its own. The copy
   runs only after `checkout_gate::check_folder` finds git clean under that
-  song folder; a new copy path takes the same gate, and `--host` takes
+  song folder, and `is_old_song_shape` (the staged `rice.nix` must be a v1
+  body, not a `{ … }:` function header) before any byte moves; a new copy path
+  takes both guards, and `--host` takes
   `dirty_lines` for its warning and never a refusal. A name
   added to the list changes both §7.5's comparison and what a declare leaves
   behind.

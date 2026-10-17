@@ -124,7 +124,9 @@ a config file). Paint-side — ships in `lyra`, not core.
   `check_folder` answers git-missing, not-a-repo, or dirty (the `git status
   --porcelain` lines under the song folder), and `dirty_lines` is the warning
   `--host` reads. Git history is the archive, so a copy over an uncommitted
-  edit is refused, and the refusal names the folder.
+  edit is refused, and the refusal names the folder. `is_old_song_shape` is the
+  copy's second refusal: a staged `rice.nix` in the old function-module shape
+  (its first brace followed by `:`) is refused before anything is copied.
 - `host_declare` — `lyra rice declare <song> --host`'s engine
   (`declare_on_host`, called from lyra's `rice declare` handler): rewrites the
   one live `habit.song.declared` line in `aoide_storage::fs::host_config()`

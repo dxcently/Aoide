@@ -571,7 +571,9 @@ lyra rice declare <name> [--json]
   `invalid-name`, `no-composed-song` (nothing at the source — the message
   says to run `lyra rice compose <name>` first), `no-checkout` (no checkout
   at `$AOIDE_FLAKE_ROOT`), `copy-failed` (the message names the path that
-  failed).
+  failed). Refused `old-song-shape` when the staged `rice.nix` is still the old
+  function-module shape: the message names the file and says to run
+  `lyra rice refresh <name>`, and nothing is copied (CONTRACTS.md §5).
 
 ### lyra rice declare --host
 
