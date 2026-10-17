@@ -31,7 +31,12 @@
       greeter = "vibeos";
     };
     module =
-      { song, borrow, ... }:
+      {
+        song,
+        borrow,
+        lib,
+        ...
+      }:
       let
         # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
         # plain function per slot, rolled up and bound to owner "sonata" by
@@ -43,107 +48,109 @@
         widgets = borrow "sonata";
       in
       {
-        aoide.arrangement.widgets = (song.composeSong widgets).arrangement.widgets;
+        config = lib.mkDefault {
+          aoide.arrangement.widgets = (song.composeSong widgets).arrangement.widgets;
 
-        # ── Expected paint — the three surfaces sonata keeps mapped ────────────
-        # bar/wallpaper are one mapped layer surface PER enabled output (each is a
-        # `Variants` delegate over Quickshell.screens in shell.qml); dock is a
-        # single column, wherever it lands. These declare an EXPECTATION and
-        # instantiate nothing: all three are shell-owned windows hardcoded in the
-        # shell — never `arrangement.widgets` entries, which would stand up a
-        # second copy of each.
-        #
-        # Declaration is for PERSISTENTLY mapped surfaces ONLY. Everything else in
-        # this shell — launcher, osd, lockscreen, greeter, the `*Preview` surfaces,
-        # and any declared flavor widget — is summoned on demand and must NOT be
-        # declared, or a consumer would read a CLOSED surface as a lost one.
-        aoide.arrangement.surfaces = {
-          bar.perMonitor = true; # aoide-bar — one bar per output (shell.qml Variants)
-          wallpaper.perMonitor = true; # aoide-wallpaper — one per output (same)
-          dock.perMonitor = false; # aoide-dock — one column, single
-        };
+          # ── Expected paint — the three surfaces sonata keeps mapped ────────────
+          # bar/wallpaper are one mapped layer surface PER enabled output (each is a
+          # `Variants` delegate over Quickshell.screens in shell.qml); dock is a
+          # single column, wherever it lands. These declare an EXPECTATION and
+          # instantiate nothing: all three are shell-owned windows hardcoded in the
+          # shell — never `arrangement.widgets` entries, which would stand up a
+          # second copy of each.
+          #
+          # Declaration is for PERSISTENTLY mapped surfaces ONLY. Everything else in
+          # this shell — launcher, osd, lockscreen, greeter, the `*Preview` surfaces,
+          # and any declared flavor widget — is summoned on demand and must NOT be
+          # declared, or a consumer would read a CLOSED surface as a lost one.
+          aoide.arrangement.surfaces = {
+            bar.perMonitor = true; # aoide-bar — one bar per output (shell.qml Variants)
+            wallpaper.perMonitor = true; # aoide-wallpaper — one per output (same)
+            dock.perMonitor = false; # aoide-dock — one column, single
+          };
 
-        # ── Palette tier (base16 mapping — the Greek marble register) ───────────
-        aoide.livery.palette = {
-          bg = "#f2ebde"; # pale warm marble ground            (base00)
-          fg = "#2f2a33"; # plum-charcoal ink                  (base05)
-          accent = "#a07414"; # deep Attic GOLD — the chrome accent (base0A)
-          urgent = "#b0472f"; # terracotta                     (base08)
-          # The one-hot trace colour — TRUE laurel leaf-green, the single blaze the
-          # grammar reserves for the hot/traced element (matches base0B below). Gold
-          # is now the chrome accent; THIS green blazes on the one traced row (the
-          # DAG/TERMINALS trace link) — kept 71° off gold so it never muddies. The
-          # aegean blue (base0D) steps back to a PREVIEW/INFO role (workspace preview
-          # ring, links), NOT active-state chrome. null → accent.
-          hot = "#4e8b45"; # true laurel leaf-green            (base0B)
-        };
+          # ── Palette tier (base16 mapping — the Greek marble register) ───────────
+          aoide.livery.palette = {
+            bg = "#f2ebde"; # pale warm marble ground            (base00)
+            fg = "#2f2a33"; # plum-charcoal ink                  (base05)
+            accent = "#a07414"; # deep Attic GOLD — the chrome accent (base0A)
+            urgent = "#b0472f"; # terracotta                     (base08)
+            # The one-hot trace colour — TRUE laurel leaf-green, the single blaze the
+            # grammar reserves for the hot/traced element (matches base0B below). Gold
+            # is now the chrome accent; THIS green blazes on the one traced row (the
+            # DAG/TERMINALS trace link) — kept 71° off gold so it never muddies. The
+            # aegean blue (base0D) steps back to a PREVIEW/INFO role (workspace preview
+            # ring, links), NOT active-state chrome. null → accent.
+            hot = "#4e8b45"; # true laurel leaf-green            (base0B)
+          };
 
-        # ── Polarity — the register the ramp reads as (CONTRACTS.md §1) ─────────
-        # Beside the palette, because a palette brings its polarity: a pale marble
-        # ground is read as LIGHT, and the stylix lane hands this value to
-        # `stylix.polarity` so every Stylix-managed target (GTK/Qt, terminal,
-        # editors) reads it as one register. Baked only: no emitter carries it and
-        # staging does not apply it, so flipping it is a rebuild, not a stage.
-        aoide.livery.polarity = "light";
+          # ── Polarity — the register the ramp reads as (CONTRACTS.md §1) ─────────
+          # Beside the palette, because a palette brings its polarity: a pale marble
+          # ground is read as LIGHT, and the stylix lane hands this value to
+          # `stylix.polarity` so every Stylix-managed target (GTK/Qt, terminal,
+          # editors) reads it as one register. Baked only: no emitter carries it and
+          # staging does not apply it, so flipping it is a rebuild, not a stage.
+          aoide.livery.polarity = "light";
 
-        # ── Base16 tier — the Greek marble palette ──────────────────────────────
-        # Keyed region-by-region in the Greek key: a warm marble ramp (00–07, from
-        # pale sunlit stone down to a plum-charcoal ink) with an accent set drawn
-        # from a temple's materials — terracotta clay, clay-orange, Attic gold,
-        # laurel green, bronze-verdigris, aegean blue, Tyrian/amethyst purple, and
-        # a deep bronze. Slots follow the base16 standard.
-        aoide.livery.base16 = {
-          base00 = "#f2ebde"; # lightest bg — pale warm marble (sunlit stone)
-          base01 = "#e8dfcc"; # lighter bg (status) — marble in soft shade
-          base02 = "#dacdb2"; # selection — aged/weathered marble
-          base03 = "#a99a82"; # comments — weathered-stone grey-tan (recedes)
-          base04 = "#6d6250"; # dark fg — stone-slate midtone
-          base05 = "#2f2a33"; # default fg — plum-charcoal ink
-          base06 = "#211d26"; # light fg (deeper ink) — obsidian plum
-          base07 = "#14111a"; # brightest — near-black ink
-          base08 = "#b0472f"; # red    — terracotta (urgent)
-          base09 = "#c06a35"; # orange — clay / kiln-fired orange
-          base0A = "#a07414"; # yellow — deep Attic gold (unified with the chrome accent)
-          base0B = "#4e8b45"; # green  — true laurel leaf-green (one-hot trace)
-          base0C = "#3f867e"; # cyan   — bronze verdigris (structural outlines)
-          base0D = "#345f81"; # blue   — aegean deep-blue (preview/info role, not chrome accent)
-          base0E = "#6f4373"; # magenta— Tyrian / murex purple (project volumes)
-          base0F = "#8a5a34"; # brown  — deep bronze / clay
-        };
+          # ── Base16 tier — the Greek marble palette ──────────────────────────────
+          # Keyed region-by-region in the Greek key: a warm marble ramp (00–07, from
+          # pale sunlit stone down to a plum-charcoal ink) with an accent set drawn
+          # from a temple's materials — terracotta clay, clay-orange, Attic gold,
+          # laurel green, bronze-verdigris, aegean blue, Tyrian/amethyst purple, and
+          # a deep bronze. Slots follow the base16 standard.
+          aoide.livery.base16 = {
+            base00 = "#f2ebde"; # lightest bg — pale warm marble (sunlit stone)
+            base01 = "#e8dfcc"; # lighter bg (status) — marble in soft shade
+            base02 = "#dacdb2"; # selection — aged/weathered marble
+            base03 = "#a99a82"; # comments — weathered-stone grey-tan (recedes)
+            base04 = "#6d6250"; # dark fg — stone-slate midtone
+            base05 = "#2f2a33"; # default fg — plum-charcoal ink
+            base06 = "#211d26"; # light fg (deeper ink) — obsidian plum
+            base07 = "#14111a"; # brightest — near-black ink
+            base08 = "#b0472f"; # red    — terracotta (urgent)
+            base09 = "#c06a35"; # orange — clay / kiln-fired orange
+            base0A = "#a07414"; # yellow — deep Attic gold (unified with the chrome accent)
+            base0B = "#4e8b45"; # green  — true laurel leaf-green (one-hot trace)
+            base0C = "#3f867e"; # cyan   — bronze verdigris (structural outlines)
+            base0D = "#345f81"; # blue   — aegean deep-blue (preview/info role, not chrome accent)
+            base0E = "#6f4373"; # magenta— Tyrian / murex purple (project volumes)
+            base0F = "#8a5a34"; # brown  — deep bronze / clay
+          };
 
-        # ── Component tier (v0) ────────────────────────────────────────────────
-        # null → fall back to palette; the key does the work (no hidden overrides
-        # to undo before a transposition).
-        aoide.livery.bar = {
-          bg = null;
-          fg = null;
-          accent = null;
-        };
-        aoide.livery.notif = {
-          bg = null;
-          fg = null;
-          urgent = null;
-        };
-        # Window frames: the active hairline is base0A Attic gold — the same
-        # chrome accent the bar and gadget wireframe outlines wear — so the
-        # focused window reads as the "live" one. The inactive frame steps back
-        # to base0C bronze-verdigris, a cool blue-teal that recedes without
-        # vanishing into the ground. The window key stays a component-tier note
-        # the song owns.
-        aoide.livery.window = {
-          border = "#a07414"; # base0A Attic gold — active (= palette.accent)
-          borderInactive = "#3f867e"; # base0C bronze-verdigris — inactive (cool teal)
-        };
+          # ── Component tier (v0) ────────────────────────────────────────────────
+          # null → fall back to palette; the key does the work (no hidden overrides
+          # to undo before a transposition).
+          aoide.livery.bar = {
+            bg = null;
+            fg = null;
+            accent = null;
+          };
+          aoide.livery.notif = {
+            bg = null;
+            fg = null;
+            urgent = null;
+          };
+          # Window frames: the active hairline is base0A Attic gold — the same
+          # chrome accent the bar and gadget wireframe outlines wear — so the
+          # focused window reads as the "live" one. The inactive frame steps back
+          # to base0C bronze-verdigris, a cool blue-teal that recedes without
+          # vanishing into the ground. The window key stays a component-tier note
+          # the song owns.
+          aoide.livery.window = {
+            border = "#a07414"; # base0A Attic gold — active (= palette.accent)
+            borderInactive = "#3f867e"; # base0C bronze-verdigris — inactive (cool teal)
+          };
 
-        # ── Cover-art note ─────────────────────────────────────────────────────
-        # null → the stylix lane bakes a DETERMINISTIC bright-marble solid from
-        # palette.bg (#f2ebde) — the same null-wallpaper-to-solid mechanism the
-        # stylix lane applies to any song with no cover note. The retired
-        # covers/yuki-sonata.png reference is dropped: sonata's colours fit the
-        # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
-        # live; the song's DEFAULT ground is a clean bright marble field, which keeps
-        # the light-polarity contrast valid under the now-more-transparent bar.
-        aoide.livery.wallpaper = null;
+          # ── Cover-art note ─────────────────────────────────────────────────────
+          # null → the stylix lane bakes a DETERMINISTIC bright-marble solid from
+          # palette.bg (#f2ebde) — the same null-wallpaper-to-solid mechanism the
+          # stylix lane applies to any song with no cover note. The retired
+          # covers/yuki-sonata.png reference is dropped: sonata's colours fit the
+          # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
+          # live; the song's DEFAULT ground is a clean bright marble field, which keeps
+          # the light-polarity contrast valid under the now-more-transparent bar.
+          aoide.livery.wallpaper = null;
+        };
       };
   };
   home = {

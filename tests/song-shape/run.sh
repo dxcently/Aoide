@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# song-shape's livery check, against fixture songbooks (the real songbook is
-# the flake's own `song-shape` check). A fixture song that sets a livery-owned
-# key in its hyprland.conf must fail AND name the file; a clean one must pass.
+# song-shape's fixture checks, against fixture songbooks (the real songbook is
+# the flake's own `song-shape` check). Each fixture song must pass or fail as
+# named, and a failure must name the song and the rule it broke.
+#
+#   livery-leak/  a hyprland.conf that sets a livery-owned key fails; a clean one passes.
+#   module-leak/  a rice module value outside lib.mkDefault fails, and so does a
+#                 write to wayland.windowManager.hyprland.settings; a rice that
+#                 wraps its values, and keeps rice.hyprland beside them, passes.
 #
 #   ./tests/song-shape/run.sh
 set -uo pipefail
@@ -11,22 +16,30 @@ rev=$(jq -r '.nodes.nixpkgs.locked.rev' "$root/flake.lock")
 lib="(builtins.getFlake \"github:nixos/nixpkgs/$rev\").lib"
 
 check() {
-  local song=$1
+  local dir=$1 song=$2
   nix eval --impure --raw --expr "
     let
       lib = $lib;
       checks = import $root/lib/checks.nix { inherit lib; pkgs = { runCommand = _: _: _: \"ok\"; }; };
     in checks.songShape {
-      songbook = $PWD/livery-leak;
+      songbook = $PWD/$dir;
       songNames = [ \"$song\" ];
       strayNixFiles = [ ];
       escapingNixFiles = [ ];
+      borrow = _: throw \"the fixtures borrow nothing\";
     }" 2>&1
 }
 
 fail=0
-out=$(check leaky)
+out=$(check livery-leak leaky)
 if [[ $out == *"livery-owned key"*"leaky"* ]]; then echo "ok    leaky: blur dotted key refused"; else echo "FAIL  leaky: $out"; fail=1; fi
-out=$(check clean)
+out=$(check livery-leak clean)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    clean: passes"; else echo "FAIL  clean: $out"; fail=1; fi
+
+out=$(check module-leak plain)
+if [[ $out == *"song plain's system.module sets aoide.livery.polarity outside lib.mkDefault"* ]]; then echo "ok    plain: unwrapped value refused"; else echo "FAIL  plain: $out"; fail=1; fi
+out=$(check module-leak settings)
+if [[ $out == *"song settings's home.module writes wayland.windowManager.hyprland.settings"* ]]; then echo "ok    settings: base settings write refused"; else echo "FAIL  settings: $out"; fail=1; fi
+out=$(check module-leak wrapped)
+if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    wrapped: mkDefault values and rice.hyprland pass"; else echo "FAIL  wrapped: $out"; fail=1; fi
 exit $fail

@@ -392,12 +392,10 @@ let
           )
           (
             lib.throwIf (noRice != [ ]) "song ${lib.concatStringsSep ", " noRice} has no rice.nix" (
-              lib.throwIf (stray != [ ])
-                (
-                  "song aggregation ${lib.concatStringsSep ", " stray} is enabled, but ${describe sel}:"
-                  + " a host performs one song, so select only the declared one"
-                )
-                [ ]
+              lib.throwIf (stray != [ ]) (
+                "song aggregation ${lib.concatStringsSep ", " stray} is enabled, but ${describe sel}:"
+                + " a host performs one song, so select only the declared one"
+              ) [ ]
             )
           );
     in

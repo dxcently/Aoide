@@ -6920,8 +6920,10 @@ as data and imports only what it selects. Its shape:
       lock = "vibeos";
       greeter = "vibeos";
     };
-    module = { song, borrow, ... }: {   # WHAT the paint is: livery, arrangement
-      aoide.livery.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
+    module = { lib, song, borrow, ... }: {   # WHAT the paint is: livery, arrangement
+      config = lib.mkDefault {
+        aoide.livery.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
+      };
     };
   };
   home = {
@@ -6936,6 +6938,21 @@ as data and imports only what it selects. Its shape:
   else, naming the file). `providers` implies the member it names is selected.
 - `module` is a module: its arguments are the module system's, plus `song` and
   `borrow` (below). Name only what the module uses and keep the `...`.
+- **Every value a rice module sets is under `lib.mkDefault`**, once for the
+  whole module: `config = lib.mkDefault { … };`. The module system pushes that
+  priority down to each leaf, so a rice is a default: a host's plain value
+  outranks it, and the order the group's modules land in decides nothing. The
+  one exception is `rice.hyprland.*`, the rice's own options, which may sit in
+  the same `config`. A module with nothing but `rice.hyprland.*` may stay a bare
+  attrset, which is how every `home.module` is written.
+  `wayland.windowManager.hyprland.settings` is refused in a rice outright: the
+  rice's hyprland keys are `rice.hyprland.settings` (§7).
+- **Who wins**, strongest first (§7 has the mechanism):
+  1. the host's `rice.hyprland.host` / `hostConf` (sourced last);
+  2. the host's plain values;
+  3. a user's opt-out (`habit.users.<u>.aggregation.<song>.enable = false`);
+  4. the rice: `rice.hyprland.*`, and its `mkDefault` values;
+  5. group and dendrite defaults.
 - The **ten component slots** are `bar`, `launcher`, `powermenu`,
   `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock` and
   `greeter`. Each is filled by its `vibeos` provider: the Quickshell component
@@ -6962,7 +6979,7 @@ the check.
 
 ### Enforcement
 
-`checks.song-shape` asserts five things about every discovered song:
+`checks.song-shape` asserts six things about every discovered song:
 
 - it carries its body (`rice.nix`), its `livery.json` and its `hyprland.conf`
   (which may be empty);
@@ -6972,11 +6989,18 @@ the check.
 - no `.nix` outside `rice.nix` and its `_widgets/` shelf (`strayNixFiles`),
   which would join the module merge silently and could set arbitrary host
   options;
-- no `.nix` carries a `../` path literal in its text (`escapingNixFiles`).
+- no `.nix` carries a `../` path literal in its text (`escapingNixFiles`);
+- every value a body's `system` or `home` module sets, other than
+  `rice.hyprland.*`, is at priority 1000 (`lib.mkDefault`), and no module writes
+  `wayland.windowManager.hyprland.settings`. The check calls each module with the
+  arguments a rice is handed and reads each value's priority from its override
+  wrapper. It refuses a module that declares `imports` or `options`, so the walk
+  sees every value the module can set.
 
 The **full** "only sets `aoide.livery`" invariant is a documented convention:
-isolated per-module option-diffing is disproportionate, so `tests/selection` and
-code review back it.
+the priority half above is checked, the option set is not. Per-module
+option-diffing is disproportionate, so `tests/song-shape/run.sh` (fixtures that
+fail without the check) and `tests/selection` back the rest.
 
 `checks.bar-ricemode` asserts the bar's half of the rice-mode control (see
 "Per-song flavor widgets"): the literal `slot: "ricemode"` is in the body of

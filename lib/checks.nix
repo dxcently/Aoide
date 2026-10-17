@@ -19,9 +19,10 @@
 #
 #   3. song-shape — a committed song under song/songbook/<name>/ carries its
 #      body (`rice.nix`), its `livery.json` and its `hyprland.conf`, the body
-#      is the aggregation shape, and the `hyprland.conf` keeps the livery's
-#      keys out. No `.nix` anywhere else: an extra module in a song folder
-#      would join the merge silently and could set arbitrary host options.
+#      is the aggregation shape, the `hyprland.conf` keeps the livery's keys
+#      out, and a rice's module values sit under lib.mkDefault. No `.nix`
+#      anywhere else: an extra module in a song folder would join the merge
+#      silently and could set arbitrary host options.
 #
 #   4. fmt — `nixfmt --check` over every `.nix` file in the flake's own
 #      COMMITTED source (flake.nix's declared `formatter`, run by nothing
@@ -155,19 +156,25 @@ let
   #   - `hyprland.conf` carries no key the LIVERY owns (gaps, rounding, borders,
   #     blur, colours). The livery renders those into the same rice, so a second
   #     writer would race it: the rice file keeps binds, layout and animations;
+  #   - every value a rice module sets, other than `rice.hyprland.*`, is under
+  #     lib.mkDefault, and no module writes wayland.windowManager.hyprland.settings
+  #     (`moduleProblemList`, below);
   #   - no stray `.nix` joins the module merge, and no `.nix` names a path out of
   #     its own folder (`strayNixFiles`, `escapingNixFiles`).
   #
-  # The body and the hyprland.conf reads are the only ones here that look inside
-  # a file, and both are text or attrset-shape reads, never a module evaluation.
+  # The body, the hyprland.conf and the rice modules are the reads here that look
+  # inside a file. A module is CALLED, and its values are walked for their
+  # priority only: attrset shape and `_type` tags are forced, a leaf value is not.
   songShape =
     {
       songbook,
       songNames,
       strayNixFiles,
       escapingNixFiles,
+      borrow,
     }:
     let
+      songLib = import ./song.nix { inherit lib; };
       bodyKeys = [
         "description"
         "system"
@@ -239,6 +246,103 @@ let
       leaking = builtins.filter (
         name: builtins.pathExists (songbook + "/${name}/hyprland.conf") && liveryLeaks name != [ ]
       ) songNames;
+
+      # ── A rice module sets its values under lib.mkDefault ─────────────────────
+      # CONTRACTS.md §5, "The body". A rice is a default for its slots and its
+      # paint: a host's plain value outranks it, and a rice's plain value would
+      # outrank the host's mkDefault. So every value a rice module sets, other than
+      # `rice.hyprland.*` (the rice's own options, sourced after the base), is
+      # priority 1000, and `wayland.windowManager.hyprland.settings` is refused
+      # outright: the rice's hyprland keys go through `rice.hyprland`, where the
+      # livery and the host can see them.
+      #
+      # The walk reads each value's shape and its priority from the override
+      # wrapper it carries. A list or a string is never forced past its shape, and
+      # an attrset is opened only to find its own leaves, so a `pkgs` attribute
+      # inside a list costs nothing even under the fixture's stub package set.
+      moduleOffer = {
+        inherit lib pkgs;
+        config = { };
+        options = { };
+        modulesPath = "";
+        song = songLib;
+        inherit borrow;
+      };
+      tagged = v: builtins.isAttrs v && builtins.hasAttr "_type" v;
+      leavesOf =
+        prio: path: v:
+        if tagged v && v._type == "override" then
+          leavesOf v.priority path v.content
+        else if tagged v && v._type == "merge" then
+          lib.concatMap (leavesOf prio path) v.contents
+        else if
+          builtins.isAttrs v && !(tagged v) && !(builtins.hasAttr "type" v && v.type == "derivation")
+        then
+          lib.concatLists (lib.mapAttrsToList (k: x: leavesOf prio (path ++ [ k ]) x) v)
+        else
+          [
+            {
+              inherit path prio;
+            }
+          ];
+      moduleProblems =
+        name: half: module:
+        let
+          raw =
+            if builtins.isFunction module then
+              module (lib.intersectAttrs (builtins.functionArgs module) moduleOffer)
+            else
+              module;
+          where = "song ${name}'s ${half}.module";
+          extraKeys =
+            if raw ? config then
+              lib.subtractLists [ "config" ] (builtins.attrNames raw)
+            else
+              lib.intersectLists [ "imports" "options" ] (builtins.attrNames raw);
+          leaves = leavesOf 100 [ ] (if raw ? config then raw.config else raw);
+          shown = path: lib.concatStringsSep "." path;
+          isSettings =
+            l:
+            lib.take 4 l.path == [
+              "wayland"
+              "windowManager"
+              "hyprland"
+              "settings"
+            ];
+          unwrapped = lib.filter (l: l.prio != 1000 && lib.head l.path != "rice") leaves;
+        in
+        if extraKeys != [ ] then
+          [ "${where} declares ${lib.concatStringsSep ", " extraKeys}; a rice module only sets values" ]
+        else if lib.any isSettings leaves then
+          [
+            "${where} writes wayland.windowManager.hyprland.settings; a rice's hyprland keys are rice.hyprland.settings (CONTRACTS.md §5)"
+          ]
+        else if unwrapped != [ ] then
+          [
+            "${where} sets ${shown (lib.head unwrapped).path} outside lib.mkDefault; wrap the module's values in `config = lib.mkDefault { … };` (rice.hyprland.* excepted)"
+          ]
+        else
+          [ ];
+      moduleProblemList = lib.concatMap (
+        name:
+        if !(builtins.elem name badBodies) && builtins.pathExists (songbook + "/${name}/rice.nix") then
+          let
+            body = import (songbook + "/${name}/rice.nix");
+          in
+          lib.concatMap
+            (
+              half:
+              lib.optionals (body ? ${half} && body.${half} ? module) (
+                moduleProblems name half body.${half}.module
+              )
+            )
+            [
+              "system"
+              "home"
+            ]
+        else
+          [ ]
+      ) songNames;
     in
     assertCheck "song-shape"
       (
@@ -247,6 +351,7 @@ let
         && escapingNixFiles == [ ]
         && badBodies == [ ]
         && leaking == [ ]
+        && moduleProblemList == [ ]
       )
       "songbook shape is wrong — ${
         if strayNixFiles != [ ] then
@@ -257,6 +362,8 @@ let
           "rice.nix is not a body (system/home halves, CONTRACTS.md §5) in: ${builtins.toString badBodies}: ${bodyProblem (builtins.head badBodies)}"
         else if leaking != [ ] then
           "hyprland.conf sets a livery-owned key (gaps, rounding, borders, blur, colours) in: ${builtins.toString leaking}"
+        else if moduleProblemList != [ ] then
+          builtins.head moduleProblemList
         else
           "no rice.nix, livery.json or hyprland.conf in: ${builtins.toString incomplete}"
       }";

@@ -352,7 +352,7 @@
           # the walker is gone). What a host builds in is the host's selection,
           # not this check's business.
           song-shape = checks.songShape {
-            inherit (songbookLib) songNames strayNixFiles escapingNixFiles;
+            inherit (songbookLib) songNames strayNixFiles escapingNixFiles borrow;
             songbook = ./song/songbook;
           };
           # Every bar body embeds the shared `ricemode` slot and sonata carries

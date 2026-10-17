@@ -23,26 +23,28 @@
       lock = "vibeos";
       greeter = "vibeos";
     };
-    module = _: {
-      # ── Palette tier — a trivial, distinct override (not designed) ──────────
-      aoide.livery.palette = {
-        bg = "#12121c";
-        fg = "#e6e6f0";
-        accent = "#7c5cff";
-        urgent = "#ff5c7c";
-      };
+    module = { lib, ... }: {
+      config = lib.mkDefault {
+        # ── Palette tier — a trivial, distinct override (not designed) ──────────
+        aoide.livery.palette = {
+          bg = "#12121c";
+          fg = "#e6e6f0";
+          accent = "#7c5cff";
+          urgent = "#ff5c7c";
+        };
 
-      # ── Arrangement — declares one brand-new surface-kind widget type ───────
-      # Proves the Phase 1-5 registry pipeline end-to-end: this walks into
-      # registry.json (build-time walk + `rice stage` hot-sync) and the
-      # compositor lane's layerrules; song/songbook/etude/widgets/demo.qml is
-      # the widget body.
-      aoide.arrangement.widgets.demo = {
-        kind = "surface";
-        namespace = "aoide-etude-demo";
-        layer = "overlay";
-        shortcut = "aoide:etude-demo";
-        blur = true;
+        # ── Arrangement — declares one brand-new surface-kind widget type ───────
+        # Proves the Phase 1-5 registry pipeline end-to-end: this walks into
+        # registry.json (build-time walk + `rice stage` hot-sync) and the
+        # compositor lane's layerrules; song/songbook/etude/widgets/demo.qml is
+        # the widget body.
+        aoide.arrangement.widgets.demo = {
+          kind = "surface";
+          namespace = "aoide-etude-demo";
+          layer = "overlay";
+          shortcut = "aoide:etude-demo";
+          blur = true;
+        };
       };
     };
   };

@@ -14,15 +14,16 @@ for a new song is the same:
 1. Write `rice.nix` as the body in the shape `song/songbook/sonata/rice.nix` has
    (or `pkgs/aoide/crates/song` scaffolds with `aoide rice compose`).
 2. Put the palette, polarity, window and geometry in `system.module`, under
-   `aoide.livery`. Nothing else in the `module` but `aoide.livery` and
-   `aoide.arrangement`.
+   `aoide.livery`, all inside one `config = lib.mkDefault { … };`. Nothing else
+   in the `module` but `aoide.livery` and `aoide.arrangement`.
 3. Keep the ten providers in `system.providers` as `"vibeos"` (or a provider a
    consumer adds). Keep `home.members = [ "lyra" ]`.
 4. Write `hyprland.conf` beside it: the binds, unbinds, layout and animations.
    An empty file (a header only) is valid. The gaps, rounding, borders, blur
    and colours are the livery's: `checks.song-shape` refuses them in this file.
-5. Name the song's module arguments by what they are: `song` and `borrow`, and
-   `lib` or `pkgs` only when used. `{ song, ... }:` is the usual shape.
+5. Name the song's module arguments by what they are: `lib` (for `lib.mkDefault`),
+   `song` and `borrow`, and `pkgs` only when used. `{ lib, ... }:` is the usual
+   shape for a module that sets only livery.
 6. Remove any self-gate: a body is read only when its song is performed, so
    `config.aoide.song == "<name>"` has no place in it.
 7. Run `checks.song-shape` (`nix build .#checks.x86_64-linux.song-shape`) and

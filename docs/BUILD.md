@@ -208,9 +208,12 @@ and imports only the one the host performs.
       lock = "vibeos";
       greeter = "vibeos";
     };
-    module = {
-      aoide.livery.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
-      # component tier (bar/notif/window) — null falls back to palette
+    module = { lib, ... }: {
+      # every value the module sets is a default: lib.mkDefault, once for all
+      config = lib.mkDefault {
+        aoide.livery.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
+        # component tier (bar/notif/window) — null falls back to palette
+      };
     };
   };
   home = {
