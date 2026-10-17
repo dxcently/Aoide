@@ -211,7 +211,7 @@ let
       # Keys the livery owns, as hyprlang writes them: `key = …` beside any
       # `general:`/`decoration:` prefix or inside a block, and the block heads
       # themselves. A comment line never counts.
-      liveryKey = "(gaps_in|gaps_out|gaps_workspaces|rounding|border_size|col\\.[A-Za-z_0-9]+)[[:space:]]*=.*";
+      liveryKey = "(gaps_in|gaps_out|gaps_workspaces|rounding|border_size|col\\.[A-Za-z_0-9]+|blur:[A-Za-z_]+)[[:space:]]*=.*";
       liveryBlock = "(general|decoration|blur)[[:space:]]*\\{.*";
       liveryLine =
         line:
