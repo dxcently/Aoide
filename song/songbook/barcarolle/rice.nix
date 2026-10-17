@@ -96,8 +96,10 @@
         };
 
         # ── Cover art ───────────────────────────────────────────────────────────
-        # null → bakes a solid teal field from palette.bg
-        aoide.livery.wallpaper = null;
+        # The desktop picture (cover/barcarolle-desktop.jpg). Stylix bakes it,
+        # the seed publishes it as the declared cover, and a staged rice finds
+        # the same file in the song's own cover/ folder (CONTRACTS.md §4).
+        aoide.livery.wallpaper = ./cover/barcarolle-desktop.jpg;
       };
     };
   };

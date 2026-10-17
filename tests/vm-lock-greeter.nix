@@ -10,7 +10,8 @@
 #
 #   face   declares `aubade`, which ships `widgets/greeter.qml`,
 #          `widgets/lockscreen.qml`, an uppercase helper type its greeter
-#          face uses (`AubadeCard.qml`) and an `icons/` that face loads:
+#          face uses (`AubadeCard.qml`), an `icons/` that face loads and a
+#          `cover/` whose logon picture is the greeter's background:
 #          greetd + the Quickshell greeter at boot, and `lyra lock` locks
 #          through the shell's LockHost.
 #   plain  declares `plainsong`, which ships no face: ly at boot, and
@@ -255,6 +256,12 @@ pkgs.testers.runNixOSTest {
         assert "is not a type" not in said, said
         assert "[fixture] greeter face ready" in said, said
         assert "the face did not report ready" not in said, said
+        # The song's cover/ folder rode into the greeter tree, and the logon
+        # picture it names is the background stage/cover.json points the face at.
+        tree = face.succeed("ps -u greeter -o args= | grep -o '/nix/store/[^ ]*-aoide-greeter-tree' | head -n1").strip()
+        cover = json.loads(face.succeed(f"cat {tree}/song/stage/cover.json"))
+        assert cover == {"path": f"{tree}/song/songbook/aubade/cover/aubade-logon.png", "song": "aubade"}, cover
+        face.succeed(f"test -s {cover['path']}")
 
     with subtest("face: the greeter refuses a wrong password, and switch user starts over"):
         face.send_chars("bram\n")

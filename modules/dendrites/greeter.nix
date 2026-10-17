@@ -20,7 +20,10 @@
 #     writes the same), that
 #     song's `icons/` (when it has one) at `song/songbook/<owner>/icons` —
 #     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
-#     session too — the dress as `song/stage/livery.json`, and
+#     session too — its `cover/` folder at `song/songbook/<owner>/cover`,
+#     with `song/stage/cover.json` naming the logon picture
+#     (`<owner>-logon.<ext>`) as the face's background when it ships one,
+#     the dress as `song/stage/livery.json`, and
 #     `session.json`: the display manager's
 #     session wrapper (`services.displayManager.sessionData.wrapper`, the
 #     one ly runs — it sources the profile and evaluates the Exec line with
@@ -120,6 +123,23 @@ let
     if [ -d "$song/icons" ]; then
       mkdir -p "$out/song/songbook/${face.owner}"
       cp -r "$song/icons" "$out/song/songbook/${face.owner}/icons"
+    fi
+    # The face's cover folder, whole, at the same `song/songbook/<owner>/` path
+    # the session reads it from. Its logon picture (`<owner>-logon.<ext>`), when
+    # it ships one, is the background the logon face draws: `stage/cover.json`
+    # names it in the one shape every surface reads a cover by, stamped with the
+    # declared song the way the seed stamps its default.
+    if [ -d "$song/cover" ]; then
+      mkdir -p "$out/song/songbook/${face.owner}"
+      cp -r "$song/cover" "$out/song/songbook/${face.owner}/cover"
+      for ext in webp png jpg jpeg; do
+        logon="$out/song/songbook/${face.owner}/cover/${face.owner}-logon.$ext"
+        if [ -f "$logon" ]; then
+          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.aoide.song} '{path: $p, song: $s}' \
+            > "$out/song/stage/cover.json"
+          break
+        fi
+      done
     fi
     cp ${manifest} "$q/songs/manifest.json"
     echo '{}' > "$q/songs/registry.json"

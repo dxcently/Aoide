@@ -1939,9 +1939,10 @@ anything else is IGNORED: the layer falls back to the baked/palette default
 above, and the staged song's own board may draw. A cover with NO `song` field
 is legacy, written before writers stamped it, and applies as before. This is
 what carries a pick across a rebuild — the activation seed rewrites
-`stage/livery.json`'s `song` to the declared song and leaves `cover.json`
-alone, so a pick for the declared song still applies and one for a different
-song is hidden. When `stage/mode.json` names a staged or drafted song,
+`stage/livery.json`'s `song` to the declared song and publishes the declared
+song's own cover as the default (below) unless a pick for the declared song
+already stands, so a pick for the declared song still applies and one for a
+different song is hidden. When `stage/mode.json` names a staged or drafted song,
 `lyra reload` puts it back after the seed and the pick applies again: staging
 stages it again, and `stage_for_song` keeps a pick stamped for that same song;
 a draft is re-routed, and the `cover.json` nobody touched names the song that
@@ -1958,7 +1959,7 @@ Writers, and the exact shape each leaves:
 
 | Writer | Effect on `stage/cover.json` |
 | --- | --- |
-| `lyra rice stage <song>` | the song's derivable cover (`song/covers/<song>.{webp,png,jpg,jpeg}`, first match in that order) as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`) |
+| `lyra rice stage <song>` | the song's derivable cover — its own desktop picture `song/songbook/<song>/cover/<song>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `song/covers/<song>.{webp,png,jpg,jpeg}` — as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`) |
 | `lyra cover set <path\|name> [--position auto\|tile\|fill]` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape — plus, for a still, `"position"` when `--position tile` or `fill` forced it and `"tile": true` when it tiles. `--position` with a video or a `we:<id>` token is a usage refusal (`position-not-a-still`, exit 2) that writes nothing, and the registry refuses it beside `--clear` or `--from-skwd` |
 | `lyra cover set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "song": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
 | `lyra cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `song/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
@@ -1966,7 +1967,8 @@ Writers, and the exact shape each leaves:
 | `lyra rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `livery.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
 | `lyra rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song`, `position` and `tile` and all; a take with no cover removes whatever stands |
 | `lyra rice draft save <name>` | a verbatim copy into `song/songbook/<song>/drafts/<name>/cover.json` (§4's drafts entry; never a routing target) |
-| the lyra lane's `home.activation.aoideSeedStage` | NOTHING. It reseeds `stage/livery.json` and never touches `cover.json`; the read-side rule above is what keeps a pick off another song |
+| the lyra lane's `home.activation.aoideSeedStage` | when the declared song sets `aoide.livery.wallpaper`, `{"path": <that store path>, "song": <declared>}` — the declared song's own picture as the default — unless `cover.json` is already a pick stamped for the declared song, which is left byte-identical. With no `aoide.livery.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another song |
+| the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/song/songbook/<owner>/cover/<owner>-logon.{webp,png,jpg,jpeg}, "song": <declared>}` when the face's song ships a logon picture (`cover/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `cover/` folder rides along whole |
 
 `stage_for_song` — the one implementation of the stage half, shared by
 `rice stage` and the mode re-pins — keeps a standing pick iff

@@ -111,23 +111,30 @@ pub fn parse_scene_token(arg: &str) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// The stem of a song's own desktop picture, inside its `cover/` folder:
+/// `cover/<name>-desktop.<ext>`. The declared `aoide.livery.wallpaper` names
+/// the same file at build time, so the seed and a staged rice agree on it.
+pub const DESKTOP_COVER_STEM: &str = "desktop";
+
 /// Derive a physical cover-art file for a song, or `None` when none exists.
 ///
-/// v0 notes carry no runtime cover field (the schema is palette-closed; the
-/// build-time `aoide.livery.wallpaper` is a nix path, not a song/ runtime read),
-/// so a cover is only ever staged when one is physically present. Covers live
-/// in the shared library `song/covers/` — one dir any song (or other consumer)
-/// draws from — so the derivable name is `<name>.<ext>` there (a bare
-/// `cover.<ext>` would be ambiguous in a shared dir).
+/// Two places, in order. The song's own picture — `songbook/<name>/cover/
+/// <name>-desktop.<ext>`, the runtime copy of the folder the song ships — wins;
+/// then the shared library `song/covers/<name>.<ext>`, one dir any song (or
+/// other consumer) draws from. A bare `cover.<ext>` would be ambiguous in the
+/// shared dir, so both names carry the song's name.
 pub fn derive_cover(name: &str) -> Option<PathBuf> {
+    let own = aoide_storage::fs::songbook_dir(name).join("cover");
     let covers = aoide_storage::fs::song_dir().join("covers");
-    for ext in COVER_EXTS {
-        let p = covers.join(format!("{name}.{ext}"));
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
+    COVER_EXTS
+        .iter()
+        .map(|ext| own.join(format!("{name}-{DESKTOP_COVER_STEM}.{ext}")))
+        .chain(
+            COVER_EXTS
+                .iter()
+                .map(|ext| covers.join(format!("{name}.{ext}"))),
+        )
+        .find(|p| p.is_file())
 }
 
 /// The lock picture a song ships: `lockscreen.<ext>` at the root of its own
@@ -396,6 +403,31 @@ mod tests {
 
         assert_eq!(derive_cover("dusk"), Some(covers.join("dusk.png")));
         assert_eq!(derive_cover("nope"), None);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn derive_cover_prefers_the_songs_own_desktop_picture_over_the_shared_library() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = std::env::temp_dir().join(format!("aoide-song-own-cover-{}", std::process::id()));
+        let stage = root.join("stage");
+        let own = root.join("songbook").join("barcarolle").join("cover");
+        let covers = root.join("covers");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::create_dir_all(&covers).unwrap();
+        std::fs::write(covers.join("barcarolle.png"), b"\x89PNG shared").unwrap();
+        // The logon picture is the greeter's, never the desktop default.
+        std::fs::write(own.join("barcarolle-logon.jpg"), b"logon").unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        // Only the logon picture in the song's cover/: the shared library wins.
+        assert_eq!(derive_cover("barcarolle"), Some(covers.join("barcarolle.png")));
+
+        std::fs::write(own.join("barcarolle-desktop.jpg"), b"desktop").unwrap();
+        assert_eq!(derive_cover("barcarolle"), Some(own.join("barcarolle-desktop.jpg")));
 
         let _ = std::fs::remove_dir_all(&root);
     }

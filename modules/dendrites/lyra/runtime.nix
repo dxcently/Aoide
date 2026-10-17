@@ -270,9 +270,21 @@ let
     provider=$(mktemp "${config.aoide.root}/song/stage/.wallpaper-provider.XXXXXX")
     printf '%s\n' ${lib.escapeShellArg config.aoide.wallpaper.provider} > "$provider"
     mv -f "$provider" "${config.aoide.root}/song/stage/wallpaper-provider"
-    # No cover.json handling here: a cover carries the song it was staged
-    # for, and the layer ignores one that names a song other than the
-    # staged one (CONTRACTS.md §4) — so reseeding the declared song is enough.
+    # The declared song's own cover, as the default (CONTRACTS.md §4): the
+    # picture `aoide.livery.wallpaper` names, published as `stage/cover.json`
+    # the way `rice stage` writes a default. A pick the user made for THIS song
+    # is left standing; any other cover is replaced, exactly as a stage of the
+    # declared song would replace it. A song with no picture leaves the file
+    # alone: the layer ignores a cover that names another song.
+    ${lib.optionalString (config.aoide.livery.wallpaper != null) ''
+      if ! ${pkgs.jq}/bin/jq -e --arg s "${config.aoide.song}" \
+          '.pick == true and .song == $s' "${config.aoide.root}/song/stage/cover.json" >/dev/null 2>&1; then
+        ctmp=$(mktemp "${config.aoide.root}/song/stage/.cover.json.XXXXXX")
+        ${pkgs.jq}/bin/jq -n --arg p "${config.aoide.livery.wallpaper}" --arg s "${config.aoide.song}" \
+          '{path: $p, song: $s}' > "$ctmp"
+        mv -f "$ctmp" "${config.aoide.root}/song/stage/cover.json"
+      fi
+    ''}
     # The declared song's terminal opacity, as a one-line kitty fragment
     # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
     # colours, and kitty's last-include-wins keeps a live stage authoritative
