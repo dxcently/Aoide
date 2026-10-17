@@ -237,7 +237,7 @@ is a provider capability (`modules/dendrites/wallpaper/`) with two alternatives
 today — `quickshell`, the shell's own `aoide-wallpaper` layer, which draws the
 song's own default and the user's picks, and `skwd-wall`, an external provider
 that draws picks on its own surface. A host picks one with
-`aggregation.aoideos.wallpaper.provider`, and the chosen provider file names
+`habit.dendrites.wallpaper.provider`, and the chosen provider file names
 itself in the fact `aoide.wallpaper.provider`; `lyra` publishes that one word to
 the runtime as `song/stage/wallpaper-provider`, which both the CLI
 (`wallpaper_provider::provider`) and `LiveryState.qml` read — absent means the

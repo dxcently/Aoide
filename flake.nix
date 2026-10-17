@@ -24,7 +24,7 @@
     };
 
     # skwd-wall — the external wallpaper provider a host can choose
-    # (`aggregation.aoideos.wallpaper.provider = "skwd-wall"`), consumed by the
+    # (`habit.dendrites.wallpaper.provider = "skwd-wall"`), consumed by the
     # provider file that installs it
     # (`modules/dendrites/wallpaper/skwd-wall.nix`): the picker, the control
     # daemon and the paper renderer. NOT the suite `default` (it drags the

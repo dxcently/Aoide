@@ -24,7 +24,7 @@ the semantic-search lens and its model pack.
 It is one alternative of the `wallpaper` capability
 (`modules/dendrites/wallpaper/`), the way Hyprland is one alternative of the
 `compositor`. A host picks it with
-`aggregation.aoideos.wallpaper.provider = "skwd-wall"`; the provider file that
+`habit.dendrites.wallpaper.provider = "skwd-wall"`; the provider file that
 answers installs the packages, runs one `skwd-walld` user service of its own
 (never the upstream NixOS module, which installs the whole suite and defines a
 second unit of the same name), and enforces the engine config keys Aoide owns

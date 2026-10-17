@@ -853,7 +853,7 @@ in
     # ── Who paints a song's wallpaper — the capability's fact ──────────────
     # Not an `enable`: this capability ALWAYS has an answer (the shell's own
     # layer is the default), and a host picks between alternatives exactly the
-    # way it picks its compositor (`aggregation.aoideos.wallpaper.provider`).
+    # way it picks its compositor (`habit.dendrites.wallpaper.provider`).
     # The name is therefore the fact, and it stays a plain string on purpose:
     # the alternatives live in the registry
     # (`modules/dendrites/wallpaper/default.nix`) where adding one is one file
