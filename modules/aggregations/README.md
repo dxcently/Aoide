@@ -33,9 +33,11 @@ contract: the daemon and its units, the secrets broker, the nix settings, the
 `aoide` binaries and the command line, plus the stateVersion
 the deleted `hosts/common` used to hold), `desktop` (a graphical session's
 platform: audio, clipboard, notifications, screenshots, network, a browser),
-`agents` (the coding agents a workstation runs) and `aoideos` (the desktop
-itself: compositor, hyprland, quickshell, lyra, stylix, and the ten component
-slots from bar to greeter, each filled by its `vibeos` provider).
+`agents` (the coding agents a workstation runs) and `aoideos` (the desktop's
+floor: the compositor, hyprland and stylix). The paint is not a member: the
+performed song's own body brings the ten component slots from bar to greeter,
+each filled by its `vibeos` provider, and the quickshell and lyra runtime with
+them.
 
 `nucleus` is the repo's floor by convention: an aggregation any host can
 deselect a member of. What must be present on a host that selects nothing is not
