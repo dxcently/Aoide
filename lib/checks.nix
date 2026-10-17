@@ -301,8 +301,14 @@ let
               lib.intersectLists [ "imports" "options" ] (builtins.attrNames raw);
           leaves = leavesOf 100 [ ] (raw.config or raw);
           shown = path: lib.concatStringsSep "." path;
-          baseHyprland =
-            lib.filter (l: lib.take 3 l.path == [ "wayland" "windowManager" "hyprland" ]) leaves;
+          baseHyprland = lib.filter (
+            l:
+            lib.take 3 l.path == [
+              "wayland"
+              "windowManager"
+              "hyprland"
+            ]
+          ) leaves;
           unwrapped = lib.filter (l: l.prio != 1000 && lib.head l.path != "rice") leaves;
         in
         if extraKeys != [ ] then
