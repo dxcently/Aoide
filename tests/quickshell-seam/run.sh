@@ -139,14 +139,14 @@ fi
 
 # ── test-song-without-lyra: the eval that must fail ──────────────────────────
 if evalf songWithoutLyra "$tmp/song.err" >/dev/null; then
-  printf '%-46s FAIL (evaluated cleanly)\n' "song without lyra is refused"
+  printf '%-46s FAIL (evaluated cleanly)\n' "song without the vibeos runtime is refused"
   fail=$((fail+1))
-elif grep -qF -- 'needs the lyra dendrite' "$tmp/song.err"; then
-  printf '%-46s PASS  (%s)\n' "song without lyra is refused" \
-    "$(tr -d '\n' < "$tmp/song.err" | grep -o -m1 -- 'aoide.song = "sonata" needs the lyra dendrite: select [^"]*')"
+elif grep -qF -- 'needs the vibeos runtime' "$tmp/song.err"; then
+  printf '%-46s PASS  (%s)\n' "song without the vibeos runtime is refused" \
+    "$(tr -d '\n' < "$tmp/song.err" | grep -o -m1 -- 'aoide.song = "sonata" needs the vibeos runtime: pick [^"]*')"
   pass=$((pass+1))
 else
-  printf '%-46s FAIL (wrong error)\n' "song without lyra is refused"
+  printf '%-46s FAIL (wrong error)\n' "song without the vibeos runtime is refused"
   grep -v '^ *$' "$tmp/song.err" | tail -8 | sed 's/^/    | /'
   fail=$((fail+1))
 fi
