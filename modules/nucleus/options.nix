@@ -470,8 +470,8 @@ in
     # The song (rice) this host performs. A song is host-agnostic: ANY host in
     # the fleet replays any committed song by naming it here — one line, no
     # other edits. The shipped standard is song "sonata"; committed songs live
-    # under song/songbook/<name>/ and self-gate on `aoide.song == "<name>"`
-    # (the same selection discipline as a dendrite — see CONTRACTS.md §5).
+    # under song/songbook/<name>/ as bodies that the selected song alone brings
+    # in (the same selection discipline as a dendrite — see CONTRACTS.md §5).
     #
     # The VENUE (host) decides its instruments (dendrites, hardware);
     # the SONG carries only the livery (palette + component tiers). A song must
@@ -486,9 +486,8 @@ in
         the livery fan-out swaps with zero other edits. Null (the default)
         means no song is named: a paint lane reads this null and deploys
         nothing — no QML tree, no seeded stage, no rice restart — rather than
-        an empty surface, and every song's own rice.nix stays inert
-        (its self-gate `config.aoide.song == "<name>"` is never true against
-        null). Naming a song is what puts a shell tree under the runtime root;
+        an empty surface, and no song's body is imported. Naming a song is what
+        puts a shell tree under the runtime root;
         a host that brings its own config directory still runs a shell on it
         (`aoide.quickshell.config`), song or no song. A host wanting the
         desktop names its song explicitly, e.g.

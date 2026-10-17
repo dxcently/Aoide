@@ -46,9 +46,10 @@ darwin constructor to answer it.
 - **A group's member is turned off the ordinary way** —
   `habit.dendrites.kitty.enable = false` outranks the group's `mkDefault`.
 - **The song** is named here (`habit.song.declared = "sonata";`), and the songs
-  a host may switch to are `habit.song.available`. Both are keys of the
-  `habit` submodule, which `lib/aoideos.nix` adds through `selectionModules`
-  (`lib/songbook.nix`), so selection resolves them with everything else.
+  a host may switch to are `habit.song.available`. The keys are `habit`'s, added
+  by the song hook (`lib/songbook.nix`'s `hook`, which `lib/aoideos.nix` calls),
+  so selection resolves them with everything else. The declared song's body is
+  an aggregation the same hook registers, and it brings the paint.
 
 ## What a host may read
 

@@ -62,8 +62,7 @@ A song is SELECTED, not walked: a host module names what it performs
 (`habit.song.declared`) and what it keeps built in to stage without a rebuild
 (`habit.song.available`); `lib/songbook.nix` finds `song/songbook/<song>/` by one
 typed scan and `lib/aoideos.nix` wires exactly the selected songs' `rice.nix`
-files in, each guarding itself with
-`lib.mkIf (config.aoide.song == "<name>")` ([[Self-Ricing]],
+files in as bodies, and only the performed one is imported ([[Self-Ricing]],
 [[Snowflake-Anatomy]]). Songs committed today: `cadenza` (the phosphor key, a
 dark green-CRT console — the song **yomi-strix performs**), `sonata` (the
 shipped standard, a light Greek key with no cover: a marble ground baked from
@@ -73,7 +72,7 @@ holds:
 
 | Subfolder/file | Holds |
 |---|---|
-| `rice.nix` | pure nix: sets `aoide.livery.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.arrangement.*` under the `aoide.song` guard. **No** host options, no lane toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
+| `rice.nix` | a body (`system`: the ten vibeos providers and a `module` setting `aoide.livery.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.arrangement.*`; `home`: the `lyra` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
 | `livery.json` | the song's resolved livery values — the [[livery]] schema: `palette`, `polarity`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here — a convention, not a gate: the schema never walks a document's top-level keys, so a stray copy would pass `rice lint` and ride the activation seed into the stage file unread. |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |

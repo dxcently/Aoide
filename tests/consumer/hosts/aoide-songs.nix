@@ -9,6 +9,13 @@ _: {
   habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
 
+  # The songs bring the greeter, and the greeter needs a session to log into:
+  # this fixture names the compositor that is that session.
+  habit.dendrites.compositor = {
+    enable = true;
+    provider = "hyprland";
+  };
+
   habit.song.declared = "sonata";
 
   habit.users.fixture = {

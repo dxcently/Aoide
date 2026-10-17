@@ -11,84 +11,98 @@
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
 # All livery values are literal nix expressions (no song/ runtime reads).
 {
-  lib,
-  config,
-  song,
-  borrow,
-  ...
-}:
-let
-  # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
-  # plain function per slot (`bar`, `herald`, `ricemode`), rolled up and bound
-  # to owner "fugue" by `_widgets/default.nix`. `composeSong` validates the
-  # records and folds them into `arrangement.widgets` (empty today: all three
-  # leave `kind` unset, so none is a declared registry entry — see each file
-  # for why). Adding this shelf is what lets another song's composition
-  # borrow fugue's `bar`/`herald`/`ricemode` bodies: `mkWidget` binds
-  # `owner` from its caller, so an `owner = "fugue"` record can only be minted
-  # from a fugue-owned roll-up.
-  # Its OWN shelf, through the name-keyed door any other song would use:
-  # `borrow` is the one place a shelf is opened (CONTRACTS.md §5), so the sheet
-  # a song hands `composeSong` is the sheet `lib/songbook.nix` rolled up, with
-  # the injected arguments already in it.
-  widgets = borrow "fugue";
-in
-{
-  config = lib.mkIf (config.aoide.song == "fugue") {
-
-    aoide.arrangement.widgets = (song.composeSong widgets).arrangement.widgets;
-
-    # ── Palette tier — graphite/teal/lime, cool and flat ────────────────────
-    aoide.livery.palette = {
-      bg = "#0d0f12"; # graphite black, cool-cast          (base00)
-      fg = "#e4e6eb"; # bone white                         (base05)
-      accent = "#3ddbd9"; # signal teal — the chrome        (base0C)
-      urgent = "#ff5f56"; # alarm red-orange                (base08)
-      hot = "#c6f135"; # acid lime — the one-hot trace       (base0B)
+  system = {
+    providers = {
+      bar = "vibeos";
+      launcher = "vibeos";
+      powermenu = "vibeos";
+      notifications = "vibeos";
+      wallpaper = "vibeos";
+      dock = "vibeos";
+      calendar = "vibeos";
+      switcher = "vibeos";
+      lock = "vibeos";
+      greeter = "vibeos";
     };
+    module =
+      { song, borrow, ... }:
+      let
+        # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
+        # plain function per slot (`bar`, `herald`, `ricemode`), rolled up and bound
+        # to owner "fugue" by `_widgets/default.nix`. `composeSong` validates the
+        # records and folds them into `arrangement.widgets` (empty today: all three
+        # leave `kind` unset, so none is a declared registry entry — see each file
+        # for why). Adding this shelf is what lets another song's composition
+        # borrow fugue's `bar`/`herald`/`ricemode` bodies: `mkWidget` binds
+        # `owner` from its caller, so an `owner = "fugue"` record can only be minted
+        # from a fugue-owned roll-up.
+        # Its OWN shelf, through the name-keyed door any other song would use:
+        # `borrow` is the one place a shelf is opened (CONTRACTS.md §5), so the sheet
+        # a song hands `composeSong` is the sheet `lib/songbook.nix` rolled up, with
+        # the injected arguments already in it.
+        widgets = borrow "fugue";
+      in
+      {
+        aoide.arrangement.widgets = (song.composeSong widgets).arrangement.widgets;
 
-    # ── Base16 tier — full sixteen, closed and all-or-nothing ───────────────
-    aoide.livery.base16 = {
-      base00 = "#0d0f12"; # graphite black (bg)
-      base01 = "#14171c"; # panel
-      base02 = "#1e232a"; # selection / hairlines
-      base03 = "#414a55"; # muted steel (comments)
-      base04 = "#6f7b88"; # caption steel
-      base05 = "#e4e6eb"; # bone (fg)
-      base06 = "#f0f2f5"; # bright bone
-      base07 = "#ffffff"; # white
-      base08 = "#ff5f56"; # red    — alarm
-      base09 = "#ff9f45"; # orange — amber signal
-      base0A = "#ffd23f"; # yellow — caution
-      base0B = "#c6f135"; # green  — acid lime (hot)
-      base0C = "#3ddbd9"; # cyan   — signal teal (= accent)
-      base0D = "#4d9fff"; # blue   — info / preview
-      base0E = "#c77dff"; # magenta — violet
-      base0F = "#ff7eb6"; # rose
-    };
+        # ── Palette tier — graphite/teal/lime, cool and flat ────────────────────
+        aoide.livery.palette = {
+          bg = "#0d0f12"; # graphite black, cool-cast          (base00)
+          fg = "#e4e6eb"; # bone white                         (base05)
+          accent = "#3ddbd9"; # signal teal — the chrome        (base0C)
+          urgent = "#ff5f56"; # alarm red-orange                (base08)
+          hot = "#c6f135"; # acid lime — the one-hot trace       (base0B)
+        };
 
-    # ── Component tier (v0) ──────────────────────────────────────────────────
-    # null → fall back to palette; the key does the work.
-    aoide.livery.bar = {
-      bg = null;
-      fg = null;
-      accent = null;
-    };
-    aoide.livery.notif = {
-      bg = null;
-      fg = null;
-      urgent = null;
-    };
-    # Active hairline = accent teal (the "live" chrome); inactive recedes to
-    # base02 (selection/hairline steel) without vanishing into the graphite.
-    aoide.livery.window = {
-      border = "#3ddbd9"; # accent
-      borderInactive = "#1e232a"; # base02
-    };
+        # ── Base16 tier — full sixteen, closed and all-or-nothing ───────────────
+        aoide.livery.base16 = {
+          base00 = "#0d0f12"; # graphite black (bg)
+          base01 = "#14171c"; # panel
+          base02 = "#1e232a"; # selection / hairlines
+          base03 = "#414a55"; # muted steel (comments)
+          base04 = "#6f7b88"; # caption steel
+          base05 = "#e4e6eb"; # bone (fg)
+          base06 = "#f0f2f5"; # bright bone
+          base07 = "#ffffff"; # white
+          base08 = "#ff5f56"; # red    — alarm
+          base09 = "#ff9f45"; # orange — amber signal
+          base0A = "#ffd23f"; # yellow — caution
+          base0B = "#c6f135"; # green  — acid lime (hot)
+          base0C = "#3ddbd9"; # cyan   — signal teal (= accent)
+          base0D = "#4d9fff"; # blue   — info / preview
+          base0E = "#c77dff"; # magenta — violet
+          base0F = "#ff7eb6"; # rose
+        };
 
-    # ── Cover-art note ────────────────────────────────────────────────────────
-    # null → the stylix lane bakes a deterministic graphite solid from
-    # palette.bg, same mechanism sonata uses.
-    aoide.livery.wallpaper = null;
+        # ── Component tier (v0) ──────────────────────────────────────────────────
+        # null → fall back to palette; the key does the work.
+        aoide.livery.bar = {
+          bg = null;
+          fg = null;
+          accent = null;
+        };
+        aoide.livery.notif = {
+          bg = null;
+          fg = null;
+          urgent = null;
+        };
+        # Active hairline = accent teal (the "live" chrome); inactive recedes to
+        # base02 (selection/hairline steel) without vanishing into the graphite.
+        aoide.livery.window = {
+          border = "#3ddbd9"; # accent
+          borderInactive = "#1e232a"; # base02
+        };
+
+        # ── Cover-art note ────────────────────────────────────────────────────────
+        # null → the stylix lane bakes a deterministic graphite solid from
+        # palette.bg, same mechanism sonata uses.
+        aoide.livery.wallpaper = null;
+      };
+  };
+  home = {
+    members = [ "lyra" ];
+    module = {
+      rice.hyprland.conf = ./hyprland.conf;
+    };
   };
 }

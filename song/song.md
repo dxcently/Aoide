@@ -14,7 +14,8 @@ song/
 │   │                              (sonata, the shipped baseline, is upstream-owned + evolving, like
 │   │                              nucleus/dendrites; every OTHER song is clone-owned, never adopted-over)
 │   ├── <name>/                  one song per folder, e.g. sonata (found by one typed scan, built in only when a host selects it)
-│   │   ├── rice.nix                pure nix: sets ONLY aoide.livery.*, guarded by aoide.song == "<name>"
+│   │   ├── rice.nix                the song's body: system (ten vibeos providers + livery) and home (lyra, hyprland.conf)
+│   │   ├── hyprland.conf           the song's binds, unbinds, layout and animations (no livery keys)
 │   │   ├── livery.json             this song's resolved livery values
 │   │   ├── palette/                (planned) transpose keys — variants `rice transpose` swaps among
 │   │   ├── sounds/                 (planned) notification + system sounds (chimes dimension)
@@ -44,8 +45,8 @@ inside that song's `songbook/<name>/` — never a new top-level `song/` dir
 
 ```
 songbook/<song>/rice.nix
-   sets ONLY aoide.livery.{palette,base16,bar,notif,window,wallpaper}
-   guarded: lib.mkIf (config.aoide.song == "<song>")
+   a body: system.module sets ONLY aoide.livery.{palette,base16,bar,notif,window,wallpaper}
+   selected by habit.song.declared = "<song>" (no guard: only the performed body is read)
         │
         │  nix build / rebuild bakes the guarded song's livery
         ▼

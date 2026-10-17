@@ -19,19 +19,20 @@
 }:
 {
   assertions = [
-    # A song is a QML tree painted by lyra, so naming one without the lyra lane
-    # is a host that says "perform this rice" and brings no performer: lyra is
-    # what builds the config from the song's widgets, deploys it, seeds the
-    # stage and installs the rice binary. The failure would otherwise be silent
-    # — every committed `rice.nix` self-gates on its own name, the other lanes
-    # stay inert, and the host boots with no surface at all.
-    #
-    # The fix is a selection, not a flag on this option: `aoide.song` is the
-    # derived FACT (a host's `habit.song.declared` produces it), so the thing
-    # to change is which lane the host takes.
+    # A built-in song is a QML tree painted by the vibeos runtime, and lyra
+    # is the runtime's flag: a song whose body brings no runtime would leave the
+    # host with a config nothing paints. A performed song's body selects its
+    # providers, so this holds by construction; the check catches a host that
+    # overrides the providers away. `builtIn` covers the available songs too,
+    # because a staged song is only ever painted by the same runtime.
     {
-      assertion = config.aoide.song == null || config.aoide.lyra.enable;
-      message = "aoide.song = \"${config.aoide.song}\" needs the vibeos runtime: pick a vibeos component provider (habit.aggregation.aoideos names all ten) on this host";
+      assertion =
+        (config.aoide.song == null && config.aoide.songbook.builtIn == [ ]) || config.aoide.lyra.enable;
+      message =
+        if config.aoide.song != null then
+          "aoide.song = \"${config.aoide.song}\" needs the vibeos runtime: pick a vibeos component provider on this host (or name no song)"
+        else
+          "built-in song(s) ${lib.concatStringsSep ", " config.aoide.songbook.builtIn} need the vibeos runtime: pick a vibeos component provider on this host (or name no song)";
     }
 
     # The three paint facts are set only by their owners (options.nix's mkFact).

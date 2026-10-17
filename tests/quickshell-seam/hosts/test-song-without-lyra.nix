@@ -1,12 +1,12 @@
 # tests/quickshell-seam/hosts/test-song-without-lyra.nix — a song with no
 # performer.
 #
-# `aoide.song` is a FACT derived from the host's `habit.song.declared`: it says
-# "perform this rice". A host that says so and takes no `lyra` lane has nothing
-# to build the QML from, deploy it, seed the stage or restart — the failure is
-# silent everywhere else (every `rice.nix` self-gates on its own name, and no
-# other lane reads the song), so the platform asserts on it. This fixture is the
-# eval that must FAIL: one host, one selection, and the platform assertion's own
+# `aoide.song` is a FACT: it says "perform this rice". A host that says so and
+# takes no vibeos runtime has nothing to build the QML from, deploy it, seed the
+# stage or restart — the failure is silent everywhere else (the body that would
+# have brought the runtime is never imported for a hand-set fact, and no other
+# lane reads the song), so the platform asserts on it. This fixture is the eval
+# that must FAIL: one host, one hand-set fact, and the platform assertion's own
 # bytes as the evidence.
 _: {
   # The services the nucleus aggregation carries, by name: the daemon's units

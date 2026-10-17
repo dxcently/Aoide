@@ -138,8 +138,9 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
 - **Writes:** exactly four files under the runtime root's
   `song/songbook/<name>/` (never the templates dir — compose TO always
   lands in the host songbook), all atomic:
-  `rice.nix` (self-gating skeleton copying `--from`'s palette/window/geometry
-  into `aoide.livery.*` under `config.aoide.song == "<name>"`),
+  `rice.nix` (a body copying `--from`'s palette/window/geometry into
+  `aoide.livery.*`, with the ten vibeos providers and the `lyra` renderer),
+  `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
   `livery.json` (verbatim mirror of `--from`'s), `design/intent.md`
   (honest-empty template), `widgets/.gitkeep`.
 - **Output:** data `{name, from, nextSteps: [...]}`.

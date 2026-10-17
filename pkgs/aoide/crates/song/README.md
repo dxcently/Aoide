@@ -36,7 +36,8 @@ a config file). Paint-side — ships in `lyra`, not core.
   song's own `hyprland.conf`, or to the empty staging file when it has none.
   The declarative arm of `lyra reload` (`reload.rs`) reloads the compositor's
   config through `live::reload_config`, and no rice file otherwise.
-- `compose` — the pure `rice compose` scaffolding/rendering engine.
+- `compose` — the pure `rice compose` scaffolding engine: the song body
+  (`rice.nix`, CONTRACTS §5 v1) and the `hyprland.conf` header it starts from.
 - `cover` — cover-art derivation + resolution, and `stage/cover.json`'s
   writers, which stamp the staged song into every file they write
   (`stage_for_song`, `stage_song_default`, `stage_pick`, `staged_song`;

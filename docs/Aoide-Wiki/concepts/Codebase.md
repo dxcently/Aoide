@@ -93,9 +93,9 @@ reference `pkgs.aoide` / `pkgs.lyra-shell` … without drift — and wires the t
 song hooks (`selectionModules` puts `habit.song.declared`/`habit.song.available` on the host
 module; `extraModulesFor` turns the selection into the built-in songs'
 `rice.nix` files and the `aoide.song`/`aoide.songbook.builtIn` facts). Each
-song's `rice.nix` guards itself with
-`lib.mkIf (config.aoide.song == "<name>")`, so a host performs the one song it
-declares and builds in the ones it lists (see [[Song-Vocabulary#Replay — any song, any host]]).
+song's `rice.nix` is a body: habit imports the performed song's body and no
+other, so a host performs the one song it declares and builds in the ones it
+lists (see [[Song-Vocabulary#Replay — any song, any host]]).
 
 **`lib/songbook.nix`** is the songbook generator and its discovery (the one
 generator two callers share: the lyra lane's build-time `manifest.json`/
@@ -121,10 +121,12 @@ discipline, written to throw legibly at eval time on a violation:
   can never come to depend on ephemeral runtime state. `stage/` stays non-load-
   bearing structurally. This boundary is about runtime dirs only; committed
   `song/songbook/**` is versioned score and is legitimately read at eval.
-- **`song-shape`** — three assertions on the committed songbook: no stray `.nix`
-  outside a song's `rice.nix`/`_widgets/`, no `../` path literal in a song's
-  `.nix` text, and every song carrying both `rice.nix` and `livery.json`
-  (the host-agnostic song discipline, `CONTRACTS.md §5`).
+- **`song-shape`** — the assertions on the committed songbook: each `rice.nix`
+  is a body of the aggregation shape, every song carries `rice.nix`,
+  `livery.json` and `hyprland.conf`, `hyprland.conf` holds no livery-owned key,
+  no stray `.nix` sits outside a song's `rice.nix`/`_widgets/`, and no `../` path
+  literal appears in a song's `.nix` text (the host-agnostic song discipline,
+  `CONTRACTS.md §5`).
 
 Alongside these, `flake.nix` auto-generates a `pkg-<name>` check per discovered
 package (from `lib/pkgs.nix`) so every package builds under `nix flake check`.
@@ -180,9 +182,8 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.song` (`nullOr str`, default `null`) — which song this host performs.
   Null performs no song: the paint lanes read the null and deploy nothing (no
   QML tree, no shell service). Set once in `hosts/<host>/default.nix` (and
-  `habit.song.available` with it, for what the host keeps built in); each
-  song's `rice.nix` guards itself
-  with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
+  `habit.song.available` with it, for what the host keeps built in); the
+  performed song's body is the only one imported. See [[Song-Vocabulary#Replay — any song, any host]].
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
   `window.*` (each `nullOr` hex, `null` → palette), the additive-optional tiers

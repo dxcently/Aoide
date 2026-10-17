@@ -68,20 +68,35 @@ pub const GEOMETRY_KEYS: &[&str] = &[
 /// The window (border-colour) component tier's fixed key set.
 pub const WINDOW_KEYS: &[&str] = &["border", "borderInactive"];
 
-/// Render one `rice.nix` for `rice compose`: a self-gating skeleton copying
-/// `notes`' palette/window/geometry into `aoide.livery.<tier>` under
-/// `config.aoide.song == "<name>"` — the same shape as every committed song
-/// (CONTRACTS.md §5). `had_geometry`/`had_window` distinguish "copied from
-/// `from`" from "`from` set no opinion here, this is a fill template" in the
-/// leading comment of each block, so a reader never mistakes an all-null
-/// template for an intentional all-null override.
+/// The ten component slots a song's body selects, each filled by its `vibeos`
+/// provider (CONTRACTS.md §5). A scaffolded song names all ten, as every
+/// committed one does: a song that paints a desktop paints all of it.
+pub const VIBEOS_SLOTS: &[&str] = &[
+    "bar",
+    "launcher",
+    "powermenu",
+    "notifications",
+    "wallpaper",
+    "dock",
+    "calendar",
+    "switcher",
+    "lock",
+    "greeter",
+];
+
+/// Render one `rice.nix` for `rice compose`: a song body (CONTRACTS.md §5,
+/// song shape v1) — the `system` half selects the ten `vibeos` providers and
+/// sets the livery copied from `notes` (palette, polarity, window, geometry),
+/// the `home` half selects the `lyra` renderer and names this song's
+/// `hyprland.conf`. `from` is named in each block's comment, so a reader
+/// tells an inherited value from a null fill template.
 pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     let palette_lines = notes
         .get("palette")
         .and_then(Value::as_object)
         .map(|p| {
             p.iter()
-                .map(|(k, v)| format!("      \"{k}\" = {};\n", nix_scalar(v)))
+                .map(|(k, v)| format!("        \"{k}\" = {};\n", nix_scalar(v)))
                 .collect::<String>()
         })
         .unwrap_or_default();
@@ -106,7 +121,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     };
 
     let window_obj = notes.get("window").and_then(Value::as_object);
-    let window_lines = nix_fixed_fields(window_obj, WINDOW_KEYS, "      ");
+    let window_lines = nix_fixed_fields(window_obj, WINDOW_KEYS, "        ");
     let window_comment = if window_obj.is_some() {
         format!("inherited from song \"{from}\"")
     } else {
@@ -114,7 +129,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     };
 
     let geometry_obj = notes.get("geometry").and_then(Value::as_object);
-    let geometry_lines = nix_fixed_fields(geometry_obj, GEOMETRY_KEYS, "      ");
+    let geometry_lines = nix_fixed_fields(geometry_obj, GEOMETRY_KEYS, "        ");
     let geometry_comment = if geometry_obj.is_some() {
         format!("inherited from song \"{from}\"")
     } else {
@@ -124,41 +139,61 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
         )
     };
 
+    let providers: String = VIBEOS_SLOTS
+        .iter()
+        .map(|slot| format!("      {slot} = \"vibeos\";\n"))
+        .collect();
+
     let mut s = String::new();
     s.push_str(&format!(
         "# song/songbook/{name}/rice.nix — scaffolded via `aoide rice compose` from song \"{from}\".\n"
     ));
     s.push_str("#\n");
-    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.\n");
-    s.push_str("# All livery values are literal nix expressions (no song/ runtime reads).\n");
-    s.push_str("{ lib, config, ... }:\n");
+    s.push_str("# A body (CONTRACTS.md §5): habit reads it only when this song is performed\n");
+    s.push_str("# or built in. The `system` half selects the paint; the `home` half the renderer.\n");
+    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): the song sets ONLY aoide.livery\n");
+    s.push_str("# and aoide.arrangement; its literal values are no reads of song/ or of config.\n");
     s.push_str("{\n");
-    s.push_str(&format!(
-        "  config = lib.mkIf (config.aoide.song == \"{name}\") {{\n"
-    ));
+    s.push_str("  system = {\n");
+    s.push_str("    providers = {\n");
+    s.push_str(&providers);
+    s.push_str("    };\n");
+    s.push_str("    module = _: {\n");
 
-    s.push_str("\n    aoide.livery.palette = {\n");
+    s.push_str("      aoide.livery.palette = {\n");
     s.push_str(&palette_lines);
-    s.push_str("    };\n");
+    s.push_str("      };\n");
 
-    s.push_str(&format!("\n    # polarity: light | dark — {polarity_comment}\n"));
-    s.push_str(&format!(
-        "    aoide.livery.polarity = \"{polarity}\";\n"
-    ));
+    s.push_str(&format!("\n      # polarity: light | dark — {polarity_comment}\n"));
+    s.push_str(&format!("      aoide.livery.polarity = \"{polarity}\";\n"));
 
-    s.push_str(&format!("\n    # {window_comment}\n"));
-    s.push_str("    aoide.livery.window = {\n");
+    s.push_str(&format!("\n      # {window_comment}\n"));
+    s.push_str("      aoide.livery.window = {\n");
     s.push_str(&window_lines);
-    s.push_str("    };\n");
+    s.push_str("      };\n");
 
-    s.push_str(&format!("\n    # {geometry_comment}\n"));
-    s.push_str("    aoide.livery.geometry = {\n");
+    s.push_str(&format!("\n      # {geometry_comment}\n"));
+    s.push_str("      aoide.livery.geometry = {\n");
     s.push_str(&geometry_lines);
-    s.push_str("    };\n");
+    s.push_str("      };\n");
 
+    s.push_str("    };\n");
+    s.push_str("  };\n");
+    s.push_str("  home = {\n");
+    s.push_str("    members = [ \"lyra\" ];\n");
+    s.push_str("    module = { rice.hyprland.conf = ./hyprland.conf; };\n");
     s.push_str("  };\n");
     s.push_str("}\n");
     s
+}
+
+/// The `hyprland.conf` a scaffolded song starts from when `--from` ships none:
+/// a header and no keys (`rice.hyprland.conf`, CONTRACTS.md §5). The binds stay
+/// in `behaviour.nix`, so an empty file is the honest start.
+pub fn render_hyprland_conf(name: &str) -> String {
+    format!(
+        "# song/songbook/{name}/hyprland.conf — the song's own binds, unbinds, layout and animations. No keys yet: behaviour.nix keeps the binds.\n"
+    )
 }
 
 /// Render `design/intent.md` for `rice compose`: honest-empty — no

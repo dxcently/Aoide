@@ -69,7 +69,7 @@ aoide.song = "sonata";
 Songs are SELECTED, not walked: the host module names what it performs
 (`habit.song.declared`) and what it keeps built in to stage without a rebuild
 (`habit.song.available`), and `lib/aoideos.nix` wires exactly those songs in. Each song's
-`rice.nix` guards itself with `lib.mkIf (config.aoide.song == "<name>")`, so only
+`rice.nix` is a body that habit imports only when its song is performed, so only
 one song activates per host. Committing a song to the clone makes it available to
 select — a host performs it once its record names it, and can stage one it never
 built in when that song's nix and packages are present.

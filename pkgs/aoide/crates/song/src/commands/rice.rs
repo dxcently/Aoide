@@ -1024,12 +1024,14 @@ pub(crate) fn seed_songbook_from_templates(name: &str) -> Result<Option<PathBuf>
 /// song's notes.
 ///
 /// Writes ONLY inside `song/songbook/<name>/` (house rule 1): `rice.nix` (a
-/// self-gating skeleton — the sole `.nix` file, satisfying `checks.song-shape`),
+/// body — the `system` half's ten vibeos providers and the livery, the `home`
+/// half's `lyra` renderer; the sole `.nix` file, satisfying `checks.song-shape`),
+/// `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
 /// `livery.json` (a mirror of `--from`'s, INCLUDING any geometry block, so
 /// `aoide rice stage <name>` renders + live-applies immediately),
 /// `design/intent.md` (honest-empty — no fabricated rationale), and
-/// `widgets/.gitkeep` (no per-song widgets yet). No `hypr/` dir: geometry
-/// lives in the livery tier, not a build fragment.
+/// `widgets/.gitkeep` (no per-song widgets yet). Geometry lives in the livery
+/// tier; the hyprlang file carries only binds, layout and animations.
 fn handle_rice_compose(inv: &Invocation) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
@@ -1137,8 +1139,12 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
     let rice_nix = crate::compose::render_rice_nix(&name, &from, &from_parsed);
     let intent_md = crate::compose::render_intent_md(&name, &from);
 
-    let writes: [(PathBuf, String); 4] = [
+    let hypr_conf = std::fs::read_to_string(from_notes_path.with_file_name("hyprland.conf"))
+        .unwrap_or_else(|_| crate::compose::render_hyprland_conf(&name));
+
+    let writes: [(PathBuf, String); 5] = [
         (target.join("rice.nix"), rice_nix),
+        (target.join("hyprland.conf"), hypr_conf),
         (target.join("livery.json"), raw_notes.clone()),
         (target.join("design").join("intent.md"), intent_md),
         (target.join("widgets").join(".gitkeep"), String::new()),
@@ -3882,10 +3888,11 @@ mod tests {
 
         let out = handle_rice_compose(&inv(&["rice", "compose"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert_eq!(out.changed.len(), 4);
+        assert_eq!(out.changed.len(), 5);
 
         let target = root.join("songbook").join("moonlight");
         assert!(target.join("rice.nix").is_file());
+        assert!(target.join("hyprland.conf").is_file());
         assert!(target.join("livery.json").is_file());
         assert!(target.join("design").join("intent.md").is_file());
         assert!(target.join("widgets").join(".gitkeep").is_file());
@@ -3894,7 +3901,11 @@ mod tests {
         assert!(!target.join("hypr").exists());
 
         let rice_nix = std::fs::read_to_string(target.join("rice.nix")).unwrap();
-        assert!(rice_nix.contains("config.aoide.song == \"moonlight\""));
+        assert!(rice_nix.contains("bar = \"vibeos\";"), "the system half selects the paint: {rice_nix}");
+        assert!(rice_nix.contains("members = [ \"lyra\" ];"), "the home half selects the renderer");
+        assert!(!rice_nix.contains("config.aoide.song"), "a body is never self-gated: {rice_nix}");
+        let hypr = std::fs::read_to_string(target.join("hyprland.conf")).unwrap();
+        assert!(hypr.contains("No keys yet"), "no --from hyprland.conf: the header is written: {hypr}");
         assert!(rice_nix.contains("\"#0b1021\""), "palette bg copied: {rice_nix}");
         assert!(rice_nix.contains("border = null;"), "no window in `from` → null template");
         assert!(rice_nix.contains("gapsOut = null;"), "no geometry in `from` → null template");

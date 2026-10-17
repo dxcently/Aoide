@@ -231,9 +231,9 @@ declared one.
 
 ## How it composes
 
-Naming no song performs no song: `aoide.song` defaults to null, every committed
-`rice.nix` self-gates on `config.aoide.song == "<name>"`, and this lane's
-deploy/seed/restart half is gated the same way — so a host that names nothing
+Naming no song performs no song: `aoide.song` defaults to null, no song's body
+is imported, and this lane's deploy/seed/restart half is gated on the performed
+song — so a host that names nothing
 gets no QML tree and nothing deployed, rather than an empty surface. The shell
 service itself is the `quickshell` lane's and rides the config directory
 instead: it starts on whatever directory was named, so a host with its own

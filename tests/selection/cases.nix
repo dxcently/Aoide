@@ -29,6 +29,7 @@ let
 in
 rec {
   # The aoideos group resolves to its members, with the providers it names.
+  # The paint is the song's, so the floor names the compositor and the theme.
   realRegistryResolvesAoideos =
     let
       selection = selectionOf { aggregation.aoideos.enable = true; };
@@ -67,12 +68,24 @@ rec {
     in
     builtins.concatStringsSep "," inv.aggregation;
 
-  # ── Songs: discovery and selection (lib/songbook.nix) ──────────────────────
-  # The songbook the constructor validates a host's selection against, over a fixture
-  # with the shapes the real one holds: a plain song, a song whose `rice.nix` is
-  # a landmine, a folder with no `rice.nix`, a `_`-shelved folder, and a stray
-  # non-`.nix` file. Discovery names songs and nothing else; a selection decides
-  # which modules exist; an illegal one fails naming what it was given.
+  # ── Songs: discovery and selection (lib/songbook.nix's hook) ──────────────
+  # The hook over the fixture songbook, composed through habit exactly as
+  # `lib/aoideos.nix` composes the real one: a song is an aggregation whose body
+  # habit reads only when it is selected. Discovery names songs and nothing else;
+  # a selection decides which bodies are imported; an illegal one fails naming
+  # what it was given. `selectionOf` evaluates the host's `habit` the way the
+  # constructor's gate pass does, and `extraModulesFor` is the constructor's
+  # second answer, so each case runs the real checks, not a copy of them.
+  hookOver =
+    dir: users:
+    (import ../../lib/songbook.nix {
+      inherit lib;
+      songbook = dir;
+    }).hook
+      {
+        inherit registry users;
+      };
+
   songbook = import ../../lib/songbook.nix {
     inherit lib;
     songbook = ./songbook;
@@ -80,75 +93,94 @@ rec {
 
   songDiscovery = builtins.concatStringsSep " " songbook.songNames;
 
-  # The landmine is discovered and NEVER imported: the module list a selection
-  # produces names one file, and it is not the landmine's.
+  # Selects `habit` over a hook's registry and returns the resolved selection.
+  selectedOver =
+    h: habit:
+    composition.evalSelection {
+      inherit (h) registry selectionModules;
+      host = {
+        inherit habit;
+      };
+    };
+
+  # The landmine is discovered and NEVER imported: selecting `alpha` names one
+  # body, and the landmine's file is not read.
   songLandmineUnread =
     let
-      built = songbook.songModules {
-        declared = "alpha";
-        available = [ ];
+      h = hookOver ./songbook [ ];
+      sel = selectedOver h {
+        song.declared = "alpha";
+        users.alice.home.enable = true;
       };
     in
-    "${builtins.toString (builtins.length built)}:${lib.boolToString (builtins.elem "landmine" songbook.songNames)}:${
-      lib.boolToString (builtins.all (m: lib.hasSuffix "/alpha/rice.nix" (toString m)) built)
-    }";
+    "${builtins.toString (builtins.length (h.extraModulesFor sel))}:${lib.boolToString (builtins.elem "landmine" songbook.songNames)}";
 
   # …and the SAME file throws the moment it is selected. Paired with the case
   # above, this is "an unselected song's file is never read" made executable
   # rather than asserted — root AGENTS.md house rule 7's removable-without-a-trace
   # claim, for songs.
-  songLandmineFires = import (
-    builtins.head (
-      songbook.songModules {
-        declared = "landmine";
-        available = [ ];
-      }
-    )
-  );
+  songLandmineFires =
+    let
+      h = hookOver ./songbook [ ];
+    in
+    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "landmine"; }));
 
-  songUnknownName = songbook.check {
-    song = {
-      declared = "nope";
-      available = [ ];
-    };
-    lyra = true;
-  };
+  songUnknownName =
+    let
+      h = hookOver ./songbook [ ];
+    in
+    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "nope"; }));
 
-  songAvailableUnknown = songbook.check {
-    song = {
-      declared = null;
-      available = [ "nope2" ];
-    };
-    lyra = true;
-  };
+  songAvailableUnknown =
+    let
+      h = hookOver ./songbook [ ];
+    in
+    builtins.length (h.extraModulesFor (selectedOver h { song.available = [ "nope2" ]; }));
 
   # A discovered folder with no `rice.nix` can never be selected: the manifest is
   # right to see a song being written, a host is not allowed to perform one.
-  songNoRice = songbook.check {
-    song = {
-      declared = "noshelf";
-      available = [ ];
-    };
-    lyra = true;
-  };
+  songNoRice =
+    let
+      h = hookOver ./songbook [ ];
+    in
+    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "noshelf"; }));
 
-  # A song with no performer, refused in the field the record actually set —
-  # `declared` when it exists, `available` when it does not.
-  songWithoutLyra = songbook.check {
-    song = {
-      declared = "alpha";
-      available = [ ];
-    };
-    lyra = false;
-  };
+  # A second song's aggregation enabled by hand is refused by name, not merged.
+  songStrayEnabled =
+    let
+      h = hookOver ./songbook-borrow [ ];
+    in
+    builtins.length (
+      h.extraModulesFor (
+        selectedOver h {
+          song.declared = "borrower";
+          aggregation.lender.enable = true;
+        }
+      )
+    );
 
-  songAvailableWithoutLyra = songbook.check {
-    song = {
-      declared = null;
-      available = [ "alpha" ];
-    };
-    lyra = false;
-  };
+  # A user the song names with no home is refused in the friendly words, before
+  # the raw "definition used but not defined" the platform would give.
+  songHomeless =
+    let
+      h = hookOver ./songbook [ "alice" ];
+    in
+    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "alpha"; }));
+
+  # A song folder named like an aggregation is refused when the hook is read.
+  songNameClash = builtins.attrNames (hookOver ./songbook-clash [ ]).registry.aggregations;
+
+  # The positive reading: a declared song with its home builds the one module
+  # the hook owns (the `_module.args` and the facts), and no other.
+  songDeclaredBuilds =
+    let
+      h = hookOver ./songbook [ "alice" ];
+      sel = selectedOver h {
+        song.declared = "alpha";
+        users.alice.home.enable = true;
+      };
+    in
+    builtins.length (h.extraModulesFor sel);
 
   # ── A song names nothing outside its folder (CONTRACTS.md §5) ──────────────
   # Paired: the fixture songbook the cases above use has no escaping `.nix`, and

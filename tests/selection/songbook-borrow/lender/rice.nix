@@ -1,9 +1,8 @@
-# tests/selection/songbook-borrow/lender/rice.nix — the song whose widget bodies
-# get borrowed. Minimal on purpose: the borrow cases are about OWNERSHIP, not
-# about what a song paints.
-{ lib, config, ... }:
+# tests/selection/songbook-borrow/lender/rice.nix — a song body for the borrow cases.
+#
+# Minimal on purpose: the borrow cases are about OWNERSHIP, not about what a song paints.
 {
-  config = lib.mkIf (config.aoide.song == "lender") {
+  system.module = _: {
     aoide.livery.palette.bg = "#000000";
   };
 }

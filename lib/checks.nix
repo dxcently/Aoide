@@ -18,9 +18,10 @@
 #      check is what fails if one is ever committed or left behind.
 #
 #   3. song-shape — a committed song under song/songbook/<name>/ carries its
-#      `rice.nix` and its `livery.json`, and no `.nix` anywhere else: an extra
-#      module in a song folder would join the merge silently and could set
-#      arbitrary host options.
+#      body (`rice.nix`), its `livery.json` and its `hyprland.conf`, the body
+#      is the aggregation shape, and the `hyprland.conf` keeps the livery's
+#      keys out. No `.nix` anywhere else: an extra module in a song folder
+#      would join the merge silently and could set arbitrary host options.
 #
 #   4. fmt — `nixfmt --check` over every `.nix` file in the flake's own
 #      COMMITTED source (flake.nix's declared `formatter`, run by nothing
@@ -141,29 +142,24 @@ let
       present == [ ]
     ) "song/ holds gitignored runtime state in the source tree: ${builtins.toString present}";
 
-  # ── Check 3: song shape (host-agnostic discipline) ─────────────────────────
-  # A committed song under song/songbook/<name>/ carries ONLY notes: its
-  # rice.nix sets aoide.notes (palette + component tiers) and — later —
-  # cover/chime references inside song/. It must NEVER set host options
-  # (monitors, hardware, services) or enable dendrites: the VENUE (host)
-  # decides its instruments, the SONG carries only the notes (CONTRACTS.md §5).
+  # ── Check 3: song shape (CONTRACTS.md §5, song shape v1) ───────────────────
+  # A committed song under song/songbook/<name>/ is a folder of notes and one
+  # body. Four things are checked, each because a failure is silent elsewhere:
   #
-  # A cheap STRUCTURAL slice of that discipline is enforced here: every walked
-  # songbook path is a file named `rice.nix` (the song's module entry). This
-  # catches stray `.nix` in a song folder that would silently join the module
-  # merge and could set arbitrary host options.
+  #   - `rice.nix` is an attrset of `system` and/or `home` halves, and a half
+  #     takes only `members`, `providers` and `module` (habit's readBody refuses
+  #     anything else, but only for a SELECTED song; this runs for every song);
+  #   - `livery.json` and `hyprland.conf` exist. `hyprland.conf` may be empty,
+  #     and the staging engine links to a staging-owned empty file when a song
+  #     ships none, so a song with no binds never keeps the previous one's;
+  #   - `hyprland.conf` carries no key the LIVERY owns (gaps, rounding, borders,
+  #     blur, colours). The livery renders those into the same rice, so a second
+  #     writer would race it: the rice file keeps binds, layout and animations;
+  #   - no stray `.nix` joins the module merge, and no `.nix` names a path out of
+  #     its own folder (`strayNixFiles`, `escapingNixFiles`).
   #
-  # TODO(song-shape v1): the full "only defines aoide.notes" invariant needs
-  # per-module isolated eval + option-definition diffing — disproportionate for
-  # v0. Until then the invariant is a DOCUMENTED CONVENTION (CONTRACTS.md §5 /
-  # docs/BUILD.md), backed by this structural gate and code review.
-  # Joins that convention: a song must never set `aoide.livery.override.*`
-  # (CONTRACTS.md §5) — the override tier is HOST-set only.
-  #
-  # The walk is `lib/songbook.nix`'s `strayNixFiles` (builtins.readDir, `_widgets/`
-  # pruned by name), not a filesystem walker: the check has to keep working now
-  # that the walker is gone, and it has to agree with the discovery a host
-  # selection is validated against.
+  # The body and the hyprland.conf reads are the only ones here that look inside
+  # a file, and both are text or attrset-shape reads, never a module evaluation.
   songShape =
     {
       songbook,
@@ -172,20 +168,97 @@ let
       escapingNixFiles,
     }:
     let
+      bodyKeys = [
+        "description"
+        "system"
+        "home"
+      ];
+      halfKeys = [
+        "members"
+        "providers"
+        "module"
+      ];
+      bodyProblem =
+        name:
+        let
+          body = import (songbook + "/${name}/rice.nix");
+          halves = lib.filter (h: body ? ${h}) [
+            "system"
+            "home"
+          ];
+        in
+        if !(builtins.isAttrs body) then
+          "not an attrset"
+        else if lib.subtractLists bodyKeys (builtins.attrNames body) != [ ] then
+          "unknown field(s) ${builtins.toString (lib.subtractLists bodyKeys (builtins.attrNames body))}"
+        else if halves == [ ] then
+          "neither a system nor a home half"
+        else
+          lib.findFirst (p: p != null) null (
+            map (
+              h:
+              if !(builtins.isAttrs body.${h}) then
+                "`${h}` is not an attrset"
+              else if lib.subtractLists halfKeys (builtins.attrNames body.${h}) != [ ] then
+                "`${h}` has unknown field(s) ${
+                  builtins.toString (lib.subtractLists halfKeys (builtins.attrNames body.${h}))
+                }"
+              else
+                null
+            ) halves
+          );
+
+      # Keys the livery owns, as hyprlang writes them: `key = …` beside any
+      # `general:`/`decoration:` prefix or inside a block, and the block heads
+      # themselves. A comment line never counts.
+      liveryKey = "(gaps_in|gaps_out|gaps_workspaces|rounding|border_size|col\\.[A-Za-z_0-9]+)[[:space:]]*=.*";
+      liveryBlock = "(general|decoration|blur)[[:space:]]*\\{.*";
+      liveryLine =
+        line:
+        builtins.match "[[:space:]]*#.*" line == null
+        && (
+          builtins.match "(.*[[:space:]{;:])?${liveryKey}" line != null
+          || builtins.match "(.*[[:space:]{;:])?${liveryBlock}" line != null
+        );
+      liveryLeaks =
+        name:
+        let
+          file = songbook + "/${name}/hyprland.conf";
+        in
+        lib.filter liveryLine (lib.splitString "\n" (builtins.readFile file));
+
       incomplete = builtins.filter (
         name:
         !(builtins.pathExists (songbook + "/${name}/rice.nix"))
         || !(builtins.pathExists (songbook + "/${name}/livery.json"))
+        || !(builtins.pathExists (songbook + "/${name}/hyprland.conf"))
+      ) songNames;
+      badBodies = builtins.filter (
+        name: builtins.pathExists (songbook + "/${name}/rice.nix") && bodyProblem name != null
+      ) songNames;
+      leaking = builtins.filter (
+        name: builtins.pathExists (songbook + "/${name}/hyprland.conf") && liveryLeaks name != [ ]
       ) songNames;
     in
-    assertCheck "song-shape" (strayNixFiles == [ ] && incomplete == [ ] && escapingNixFiles == [ ])
+    assertCheck "song-shape"
+      (
+        strayNixFiles == [ ]
+        && incomplete == [ ]
+        && escapingNixFiles == [ ]
+        && badBodies == [ ]
+        && leaking == [ ]
+      )
       "songbook shape is wrong — ${
         if strayNixFiles != [ ] then
           "stray .nix outside rice.nix/_widgets/: ${builtins.toString strayNixFiles}"
         else if escapingNixFiles != [ ] then
           "a song's `.nix` TEXT carries a `../` path literal (CONTRACTS.md §5): ${builtins.toString escapingNixFiles}"
+        else if badBodies != [ ] then
+          "rice.nix is not a body (system/home halves, CONTRACTS.md §5) in: ${builtins.toString badBodies}: ${bodyProblem (builtins.head badBodies)}"
+        else if leaking != [ ] then
+          "hyprland.conf sets a livery-owned key (gaps, rounding, borders, blur, colours) in: ${builtins.toString leaking}"
         else
-          "no rice.nix or no livery.json in: ${builtins.toString incomplete}"
+          "no rice.nix, livery.json or hyprland.conf in: ${builtins.toString incomplete}"
       }";
 
   # ── Check 4: nixfmt --check over the committed source ──────────────────────

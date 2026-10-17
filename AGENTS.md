@@ -82,7 +82,11 @@ and the staging/declarative/draft modes:
    (`lyra`, `modules/dendrites/lyra/default.nix`) also reads `rice.*`, the
    options a rice sets, and Home Manager's `wayland.windowManager.hyprland`
    state (`enable`, `finalPackage`, `configType`, `importantPrefixes`,
-   `sourceFirst`). The list is enumerated and closed, never "any `aoide.*`";
+   `sourceFirst`). A rice body (CONTRACTS §5) is the one other selector of
+   paint: the body of the performed song selects the ten component providers
+   and the `lyra` renderer, and the providers say WHO fills each slot while
+   `aoide.arrangement` says WHAT the paint is. Nothing else is selected by a body.
+   The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
    stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`) are

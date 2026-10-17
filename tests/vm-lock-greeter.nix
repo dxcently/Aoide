@@ -3,9 +3,10 @@
 #
 # Two machines, each assembled through the real constructor (habit's
 # `composition.mkNixosModules`, as lib/aoideos.nix does) over the fixture
-# songbook in `tests/lock-greeter/songbook/`, with the paint lanes selected
-# (compositor with its hyprland provider, the hyprland behaviour lane, greeter,
-# lock, powermenu, quickshell, lyra):
+# songbook in `tests/lock-greeter/songbook/`, with the compositor and its hyprland
+# behaviour lane selected by the host. Each song's body brings the paint (the
+# greeter, lock, powermenu and the rest of the ten vibeos providers, and the lyra
+# renderer), so the host names none of them:
 #
 #   face   declares `aubade`, which ships `widgets/greeter.qml`,
 #          `widgets/lockscreen.qml`, an uppercase helper type its greeter
@@ -20,9 +21,8 @@
 # `face` carries a second account, so its greeter has a choice to make and a
 # user to switch away from.
 #
-# The song hook is this file's own copy of lib/aoideos.nix's, over the fixture
-# songbook instead of the committed one (the same wiring tests/consumer does
-# for its own songbook).
+# The song hook is lib/songbook.nix's, over the fixture songbook instead of the
+# committed one (the same one call tests/consumer makes for its own songbook).
 #
 # Screenshots land in the driver's output directory (`$out` under
 # `nix build`, `-o` when the driver runs on its own).
@@ -53,6 +53,14 @@ let
     songbook = songbookRoot;
   };
 
+  # The song hook over the fixture songbook (lib/songbook.nix), with this
+  # VM's one person. The three songs bring their own paint: each body selects
+  # the ten vibeos providers and the lyra renderer, so the host names none of them.
+  hook = songbook.hook {
+    registry = import ../modules;
+    users = [ "khoa" ];
+  };
+
   hostFor = song: {
     _file = toString ./vm-lock-greeter.nix;
 
@@ -62,24 +70,6 @@ let
     };
     # The behaviour lane: the SUPER+ESCAPE bind and the session-lock restore.
     habit.dendrites.hyprland.enable = true;
-    habit.dendrites.greeter = {
-      enable = true;
-      provider = "vibeos";
-    };
-    # The lock component: LockHost.qml, its `aoide-lock` PAM service and the
-    # hyprlock fallback a faceless song locks with.
-    habit.dendrites.lock = {
-      enable = true;
-      provider = "vibeos";
-    };
-    # The powermenu component: the shell instantiates only the selected
-    # components, and the desktop subtest reads aubade's powermenu log line.
-    habit.dendrites.powermenu = {
-      enable = true;
-      provider = "vibeos";
-    };
-    habit.dendrites.quickshell.enable = true;
-    habit.dendrites.lyra.enable = true;
 
     habit.dendrites.aoide-nix.enable = true;
     habit.dendrites.aoide-packages.enable = true;
@@ -97,32 +87,11 @@ let
     song:
     composition.mkNixosModules {
       hostName = "vm-${song}";
-      registry = import ../modules;
+      inherit (hook) registry selectionModules extraModulesFor;
       host = hostFor song;
       extraModules = [ aoideos.nucleusModule ];
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       overlays = [ overlay ];
-      selectionModules = [ songbook.selectionModule ];
-      extraModulesFor =
-        sel:
-        let
-          checked = songbook.check {
-            inherit (sel) song;
-            lyra = sel.dendrites.lyra.enable;
-          };
-        in
-        songbook.songModules checked
-        ++ [
-          {
-            _module.args = {
-              inherit (songbook) song borrow;
-              songbook = songbookRoot;
-            };
-            aoide.song = checked.declared;
-            aoide.songbook.builtIn = songbook.builtIn checked;
-            aoide.songbook.greeter = songbook.greeter checked;
-          }
-        ];
       specialArgs = {
         username = "khoa";
       };

@@ -74,8 +74,7 @@ composed song from the runtime root into it, less its top-level `takes/` and
 `drafts/`, which stay behind.
 
 `lyra rice compose <name> [--from <song>] [--force] [--json]` scaffolds a new song directly into the runtime songbook — the starting point of the rice loop above:
-`song/songbook/<name>/rice.nix` (a self-gating `lib.mkIf (config.aoide.song
-== "<name>")` block copying the `palette`/`window`/`geometry` tiers from
+`song/songbook/<name>/rice.nix` (a body, which habit imports only when its song is performed, CONTRACTS §5; its `system.module` copies the `palette`/`window`/`geometry` tiers from
 `--from`, defaulting to `sonata` — the only `.nix` file the scaffold
 writes, satisfying the song-shape check), a `livery.json` mirror of the
 same values, an honest-empty `design/intent.md` pointing at the widget-slot

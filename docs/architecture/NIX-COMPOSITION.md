@@ -623,7 +623,9 @@ to declared restores the declared bundle without deleting draft source.
 Declaring promotes authored source to a songbook entry, not generated runtime
 files. Host selection of that default is NOT a separate source change any more:
 a host names the songs it builds in in its own module (`habit.song.declared` /
-`habit.song.available`), the constructor imports exactly those `rice.nix` files, and
+`habit.song.available`). The song hook registers each `rice.nix` as an
+aggregation, habit imports only the DECLARED song's body (it brings the paint:
+the ten component providers and the renderer), and
 `declared ∪ available` — the built-in set, published as
 `aoide.songbook.builtIn` — decides the widgets copied into the deployed tree,
 the packages installed, the folders `pkgs/lyra-songbook` ships for that host,

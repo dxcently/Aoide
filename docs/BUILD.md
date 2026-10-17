@@ -186,40 +186,58 @@ dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
 Drop a folder under `song/songbook/<name>/` and select it in the host module
-(`habit.song.declared`, or `habit.song.available` to keep it built in to stage): one typed
-scan finds `song/songbook/<name>/rice.nix` and the constructor wires the selected
-songs in, so there is no import
-list to edit. The song's `rice.nix` self-gates on `aoide.song`:
+(`habit.song.declared`, or `habit.song.available` to keep it built in to stage):
+one typed scan finds `song/songbook/<name>/rice.nix`, and the song hook
+(`lib/songbook.nix`'s `hook`) registers it as an aggregation, so there is no
+import list to edit. The song's `rice.nix` is a BODY: habit reads it as data,
+and imports only the one the host performs.
 
 ```nix
 # song/songbook/moonlight/rice.nix
-{ lib, config, ... }:
 {
-  config = lib.mkIf (config.aoide.song == "moonlight") {
-    aoide.livery.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
-    # component tier (bar/notif/window) — null falls back to palette
+  system = {
+    providers = {
+      bar = "vibeos";
+      launcher = "vibeos";
+      powermenu = "vibeos";
+      notifications = "vibeos";
+      wallpaper = "vibeos";
+      dock = "vibeos";
+      calendar = "vibeos";
+      switcher = "vibeos";
+      lock = "vibeos";
+      greeter = "vibeos";
+    };
+    module = {
+      aoide.livery.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
+      # component tier (bar/notif/window) — null falls back to palette
+    };
+  };
+  home = {
+    members = [ "lyra" ];
+    module = { rice.hyprland.conf = ./hyprland.conf; };
   };
 }
 ```
 
-Replay it on any host with **one line** in `hosts/<host>/default.nix`:
-`aoide.song = "moonlight";`. `aoide.song` defaults to null — naming no song
-performs no song: a host with the lyra lane enabled but no song named
-gets no deployed QML and no shell service, not an empty surface (options.nix).
-Every committed song's `rice.nix` self-gates on an equality check against
-`aoide.song`, so a null host leaves every song's `config` inert. Name a song
-explicitly to get a desktop — `aoide.song = "sonata";` for the shipped
+Naming it performs it on one line in `hosts/<host>/default.nix`:
+`habit.song.declared = "moonlight";`. Naming no song performs no song: a host
+with no song named gets no deployed QML and no shell service, not an empty
+surface, and no song's body is imported (`aoide.song` is null). Name a song
+explicitly to get a desktop, `habit.song.declared = "sonata";` for the shipped
 standard (`song/songbook/sonata/rice.nix`).
 
-**Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.livery` (and,
-later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
-hardware, services) and NEVER enables paint lanes or dendrites — those are the
-Note values are literal nix; a song never reads `song/` runtime paths. The
-`song/songbook/**` tree is versioned score (not a runtime dir), so reading it
-does not violate `checks.song-runtime-untracked`. `checks.song-shape` asserts
-three things about it: no stray `.nix` outside a song's `rice.nix`/`_widgets/`,
-no `../` path literal in a song's `.nix` text, and every song carrying both
-`rice.nix` and `livery.json`.
+**Host-agnostic rules (CONTRACTS.md §5):** a song's `system.module` sets ONLY
+`aoide.livery` and `aoide.arrangement`, and its body selects only the paint: the
+ten component providers and the `lyra` renderer. It NEVER selects host
+capabilities (monitors, hardware, services, people). Note values are literal
+nix; a song never reads `song/` runtime paths. The `song/songbook/**` tree is
+versioned score (not a runtime dir), so reading it does not violate
+`checks.song-runtime-untracked`. `checks.song-shape` asserts the body's shape,
+that each song carries `rice.nix`, `livery.json` and `hyprland.conf`, that
+`hyprland.conf` holds no livery-owned key, that no stray `.nix` sits outside a
+song's `rice.nix`/`_widgets/`, and that no `../` path literal appears in a
+song's `.nix` text.
 
 ---
 

@@ -6830,242 +6830,120 @@ about "broker-owned" is permanent, only "not yet a cross-crate contract".
 
 ---
 
-## 5. Song shape — **v0**
+## 5. Song shape — **v1**
 
 A **song** (rice) is a committed, **host-agnostic** score. The design thesis:
 a song is host-agnostic; ANY host in the fleet performs it by naming it, and
 the performance adapts to that host's specifics and its enabled dendrite
-set. The **venue (host) decides its instruments; the song carries only the
-notes.**
+set. The **venue (host) decides its instruments; the song carries the notes
+and the choice of who plays each part.**
 
 ### Selection — the host module
 
-A host names its songs in its own module, under two `habit` keys
-(`lib/songbook.nix`'s `selectionModule`, handed to the constructor as
-`selectionModules` and read in the gate pass — before any module graph exists,
-so a bad name fails before anything is built):
+A host names its songs in its own module, under three `habit.song` keys. The
+constructor reads them in the gate pass, before any module graph exists, and
+`lib/songbook.nix`'s `hook` answers habit's three song hooks from them:
 
-```nix
-# hosts/<host>/default.nix
-habit.song.declared = "sonata";   # the song this host performs
-habit.song.available = [ ];       # built in, stageable live, not performed
+```
+hosts/<host>/default.nix                      lib/songbook.nix  hook { registry, users }
+─────────────────────────────                 ─────────────────────────────────────────
+habit.song.declared = "sonata";   ──┬──────►  aggregations.<song> = song/songbook/<song>/rice.nix
+habit.song.available = [ ];       ──┼──────►  built-in set (declared ∪ available, closed under borrows)
+habit.song.users = [ "<u>" ];     ──┘         habit.users.<u>.aggregation.<declared>.enable
+                                  ──────────►  habit.aggregation.<declared>.enable
+                                  ──────────►  extraModulesFor: checks, then song/borrow/songbook,
+                                               aoide.song, aoide.songbook.{builtIn,greeter}
 ```
 
-`declared` becomes the platform fact `aoide.song`; `declared ∪ available` is
-the built-in set, published as `aoide.songbook.builtIn`. **Built in** means five
-things: the song's `rice.nix` is imported, its `widgets/` are copied into the
-deployed shell tree, the package names its widget records declare
-(`composeSong`) are installed, its folder ships in `pkgs/lyra-songbook` (this
-host's copy holds only its built-ins), and it is recorded in
-`share/lyra/songbook/builtin.json` as `{ declared, songs, packages }`.
+- **`declared`** is the song this host PERFORMS. It becomes the platform fact
+  `aoide.song` and selects that song's body as an aggregation: the host's
+  `system` half, and the `home` half of every user in `song.users`. Only the
+  declared song's body is ever imported.
+- **`available`** is what the host builds in but does not perform: staged live
+  without a rebuild, livery not active. Its folder ships (widgets, templates,
+  packages, `builtin.json`), its body is never read.
+- **`users`** is the people whose Home Manager configuration takes the
+  declared song's home half (the renderer and the rice's own settings). Its
+  default is the one person the constructor was given (`lib/aoideos.nix`
+  passes the host's user). It is a PARAMETER of the hook, never a read of
+  `config.users`: a selection that read the users it writes would recurse.
+- **`song/songbook/<song>/`** is a song only if it holds a `rice.nix`. A folder
+  without one is discovered (the manifest is right to see a song being
+  written) and can never be selected.
 
-Naming no song performs no song: `aoide.song` is null, and every committed
-song's `rice.nix` self-gates on `config.aoide.song == "<name>"`, which is never
-true against null — so a host that names nothing imports no song and gets no
-song's config, and the paint lanes (which read the active song to bake and
-deploy) activate only when a song IS named: no QML tree, no shell service
-otherwise, not an empty surface. A song selected with no `lyra` lane is refused
-by name — `habit.song.declared = "<n>" needs the lyra dendrite: select
-aggregations.aoideos (or dendrites.lyra) on this host` — because a song is QML
-painted by lyra, and every `rice.nix` self-gates on a name nothing else reads.
+The hook's checks run before the module list is assembled, and each names what
+it was given:
+
+| Check | Refusal |
+|---|---|
+| an unknown name in `declared` or `available` | `'<n>' is not in the songbook; discovered: …` |
+| a selected song with no `rice.nix` | `song <n> has no rice.nix` |
+| a second song's aggregation enabled by hand (exclusivity) | `song aggregation <n> is enabled, but habit.song.declared = …` |
+| a `users` entry with no home | `habit.song.users names <u>, which has no home` |
+| a song folder named like an aggregation (name collision) | `… share a name with an aggregation` |
+
+A host that names no song performs none: `aoide.song` is null, no body is
+imported, no paint lane is selected by a song, and the rice renderer comes
+only with a song (or with a vibeos provider, which brings the runtime). The
+platform asserts that a built-in song is painted by the vibeos runtime
+(`modules/nucleus/assertions.nix`), so a host that overrides the providers
+away is refused by name.
+
 `sonata` is the shipped standard, the guaranteed-present baseline every fleet
 member can opt into by name.
-**Renamed (2026-08-14):** the shipped standard song was `default`;
-`song/songbook/default/` is now retired outright (its Pantheon design
-grammar relocated to
-`docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`, its recorded
-aesthetic distilled into `song/songbook/learnings.md` — the rest is
-git-recoverable history, not deleted knowledge). No shape change, no version
-bump: every "shipped baseline" reference in this section simply names
-`sonata` now. Full dated entry: `docs/Aoide-Wiki/ingest/log.md`.
 
-### Declaring a song from the machine
+### The body
 
-`lyra rice declare <song> --host` is how a running machine names the song its
-next rebuild performs, without anyone opening the host file. It rewrites the
-one `habit.song.declared = "<name>";` line in the file `aoide.hostConfig` names
-(default `<aoide.checkout>/hosts/<networking.hostName>/default.nix`, exported
-as `AOIDE_HOST_CONFIG` beside `AOIDE_FLAKE_ROOT`; core code spells the same
-default when the variable is unset). The rules:
-
-- The line occurs EXACTLY once, as nixfmt writes it: indentation, blanks around
-  `=` and before `;`, nothing after the `;`. Zero or several is a refusal
-  (`host-line-count`) naming the file and the count; a commented-out line, a
-  line that starts inside a `/* … */` comment or a `''…''` / `"…"` string, a
-  `lib.mkDefault`, an attrset form or a trailing comment is not the line.
-- The matcher is line-based and parses no Nix. It cannot see an override set
-  elsewhere — an `mkForce` in another module, a second file the host imports —
-  so a success says what the host file now names, not what the next rebuild
-  performs; check the rebuild (`nix eval` of the host's `habit.song.declared`)
-  when the host composes its song from more than this one line.
-- `<song>` is in this build's `builtin.json` `songs` — the songbook the host
-  builds from — and its own `rice.nix` ships beside it in the templates. A song
-  only in the machine's songbook is refused (`not-built-in`), with the fix of
-  adding it to `habit.song.available` and rebuilding first; a song the build
-  carries only as a lender of widgets is refused (`no-rice-nix`), since
-  `lib/songbook.nix` will not declare a song without one; so is a staged draft
-  (`staged-draft`), which is not a song.
-- Only the bytes between the quotes change, written to a temp file in the same
-  directory, created with the file's mode, and renamed over the file, then the
-  directory synced. A file whose size, mtime or inode moved between the read
-  and the last re-stat before the rename is refused (`host-config-changed`)
-  and the other edit kept; run the declare again. The check narrows the window
-  for overwriting a concurrent edit to the gap between that re-stat and the
-  rename; it does not close it. No git, no rebuild (house rule 2); a host that already
-  declares `<song>` is a no-op success (`changed: false`).
-- `data.stagedDiffers` is true when the machine copy's `livery.json` or
-  `widgets/` differ by hash from the shipped copy: the rebuild builds the
-  songbook version, not the live edits. Null when the shipped copy cannot be
-  read.
-
-The `--host` flag opens the CLI door only, since it changes what the next
-rebuild performs; the bar's Declare row reaches it through the shellbridge's
-`ricedeclare`, which re-execs the CLI.
-
-### The songbook belongs to the machine
-
-`~/.aoide/song/songbook` is the MACHINE's own: its built-in songs plus whatever
-it made itself. It is never a link to the repo, and a rebuild never rewrites
-what it holds. The lyra lane's activation step `aoideSeedSongbook` copies a
-built-in song folder in only when the machine has none (left writable by its
-owner; a folder already there with anything lacking owner-write gets that mode
-back and nothing else). What the repo changes afterwards reaches the machine
-through `lyra rice refresh [<name>]` (no name: every song in the shipped
-`builtin.json`), a three-way rule per file over S (shipped), M (machine) and R
-(the hash recorded by the last refresh, `song/declared/songbook/<song>.json`,
-§4):
-
-```
-S present, M = S                  in-sync          record S
-S present, M != S, R = M          stale            replace with S, record S
-S present, M != S, R != M         edited           keep
-S present, M != S, no R           unrecorded       keep
-S present, M absent, no R         new              add, record S
-S present, M absent, R            machine-deleted  stays absent
-S absent,  M present, R = M       gone             delete, prune empty folders, drop R
-S absent,  M present, R != M      edited           keep, drop R
-S absent,  M present, no R        machine-only     untouched
-```
-
-So the repo's changes reach every file the machine never edited; an edited or
-unrecorded file is kept and reported; a file the machine deleted is not re-added;
-a file gone upstream goes only if unedited. Top-level `takes/` and `drafts/`,
-machine-only files and symlinks are never touched, and so `sonata/takes/`,
-`sonata/drafts/` and hand-edited `design/` notes survive (root `AGENTS.md`
-rule 10 — staging never waits on the declared build, and is always the last
-song staged).
-
-First run: a machine seeded before the record existed has none, so every file
-that differs from the shipped one reads `unrecorded` and is kept; unchanged
-files are recorded and the next refresh is exact. To take the shipped copy
-whole, the user moves the machine's folder aside: refresh then seeds it afresh
-and records it. `lyra rice refresh --check` writes nothing and reports each
-file's state and the action refresh would take.
-
-When a song is both built in and present in the machine songbook, the MACHINE
-copy wins for staging: it is the one the user can edit without a rebuild.
-
-### Self-registration (dendrite discipline)
-
-Committed songs live under `song/songbook/<name>/rice.nix`. `lib/songbook.nix`
-`discover`s them — one typed scan, an immediate child directory, `_`-prefixed
-entries shelved — and the constructor imports the `rice.nix` of the songs a host
-BUILT IN (its record's `declared ∪ available`), so **adding a song is a new
-folder — never an edit to an import list**, and an unselected song's file is
-never read at all (a landmine song proves it in `tests/selection`). A
-discovered folder with no `rice.nix` is still discovered — the manifest is right
-to see a song being written — but it can never be selected: naming it throws
-`song <n> has no rice.nix`.
-
-Each song's `rice.nix` **self-gates** on `config.aoide.song`:
+`song/songbook/<name>/rice.nix` is an ATTRSET, never a function: habit reads it
+as data and imports only what it selects. Its shape:
 
 ```nix
 # song/songbook/<name>/rice.nix
-{ lib, config, ... }:
 {
-  config = lib.mkIf (config.aoide.song == "<name>") {
-    aoide.livery.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
-    # component tier (bar/notif/window) — null falls back to palette
+  system = {
+    providers = {                 # WHO fills each component slot (habit's provider sets)
+      bar = "vibeos";
+      launcher = "vibeos";
+      powermenu = "vibeos";
+      notifications = "vibeos";
+      wallpaper = "vibeos";
+      dock = "vibeos";
+      calendar = "vibeos";
+      switcher = "vibeos";
+      lock = "vibeos";
+      greeter = "vibeos";
+    };
+    module = { song, borrow, ... }: {   # WHAT the paint is: livery, arrangement
+      aoide.livery.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
+    };
+  };
+  home = {
+    members = [ "lyra" ];         # the rice renderer, for each user in `song.users`
+    module = { rice.hyprland.conf = ./hyprland.conf; };
   };
 }
 ```
 
-### Rules (host-agnostic discipline)
-
-- A song sets **ONLY `aoide.livery`** (palette + component tiers) and
-  **`aoide.arrangement`** (declared widget/surface types) and — later —
-  cover/chime references inside `song/`.
-- A song **NEVER** sets host options (monitors, hardware, services) and
-  **NEVER** enables paint lanes or dendrites. Those are the venue's decision.
-- All note values are **literal nix** — a song never reads `song/` runtime
-  paths (`stage/` · `auditions/`), same as the standard.
-- Shelving/subfolders follow the walker rules (a `/_` path is skipped).
-- The HOST may additionally set `aoide.livery.override.*` (§1, override tier)
-  to recolour the song it performs — venue paint over the song's notes, in
-  the same one-line register as `aoide.song`. It never edits the songbook. A
-  song must **NEVER** set `aoide.livery.override.*` (a song overriding itself
-  is meaningless and forbidden — same documented-convention rank as the
-  "only defines `aoide.livery`" invariant, `TODO(song-shape v1)` in
-  `lib/checks.nix`).
-
-### The shelf, and the two injected arguments
-
-A song is a SELF-CONTAINED folder: its `.nix` files name nothing outside
-`song/songbook/<song>/`. The two things a song genuinely needs from elsewhere
-arrive as ARGUMENTS, injected at the two sites that evaluate a song:
-
-- **`<song>/rice.nix`** is imported by the module system (the constructor's
-  hook), so it receives them as module args: `_module.args.song` and
-  `_module.args.borrow`.
-- **`<song>/_widgets/default.nix`** is imported by `lib/songbook.nix`'s
-  `borrow`, so it receives them as ordinary function arguments. That function is
-  also the ONE place a shelf is opened, which is why the generator, the
-  `packages` a lane installs and the lane's `builtin.json` all see the same
-  roll-up.
-
-- **`song`** is the `lib/song.nix` API (`composeSong`, `mkWidget`, …) — the thing
-  a `rice.nix` used to reach for with `../../../lib/song.nix`.
-- **`borrow`** is `name → that song's _widgets/, rolled up with the same two
-  arguments`. It is the one cross-song idiom (`lib/song.nix`'s header): a
-  composition that dresses a slot with another song's body borrows it BY NAME —
-  `borrow "sonata" // { inherit (borrow "fugue") bar herald; }`. An unknown name,
-  or a song with no `_widgets/` shelf, throws a message naming the discovered set.
-- **`songbook`** is the directory those songs were discovered in, injected the
-  same way (`_module.args.songbook`, set by the same hook that sets `song` and
-  `borrow`). It exists so the lane that PAINTS a host's built-in songs — which
-  copies their folders, resolves their `packages` and builds the shipped
-  templates — never names a repository path: a consumer's host performs from
-  its own songbook or from Aoide's, which the root flake exports as the path
-  `songbookRoot` (`lib/songbook.nix` takes the directory, `pkgs/lyra-songbook`
-  takes it as an argument). One directory per host; there is no union of two.
-  A `rice.nix` itself never reads it.
-- **A borrow JOINS the built-in set.** The songs a host builds in are closed
-  under the owners its records name: a host that declares quodlibet alone builds
-  in `fugue` and `sonata` as well, because quodlibet's records borrow slots from
-  both. That is not a convenience — a record names its body by `owner`, the
-  deployed tree resolves `songs/<owner>/<file>`, and a lender that is not on disk
-  makes the borrower's slot render nothing. So the widget copy, the shipped
-  templates, the packages installed, the machine songbook seed and
-  `builtin.json` all carry the lenders, and a lender becomes stageable on that
-  host. There is no separate field for it: the closure is what
-  `habit.song.declared ∪ habit.song.available` would have said if the host had written the
-  lenders out by hand.
-- **A `.nix` under a song folder carries no `../` path literal.** The rule is  about the TEXT, and that is what `checks.song-shape` scans
-  (`escapingNixFiles`): the escape SHAPE the injected arguments replaced, caught
-  whether or not it would resolve — including one written inside a comment, which
-  is the price of a scan that does not have to evaluate a song to judge it.
-- **Signatures.** A `rice.nix` declares `{ lib, config, song, borrow, ... }:`;
-  a shelf's `default.nix` declares `{ lib, song, borrow, ... }:`. Both keep
-  `...`: a file that wants only one of the two names it (`{ borrow, ... }:`),
-  and a third argument later does not break every song at once. A `rice.nix`
-  may ALSO take the module system's **`pkgs`**, needed when the tier it sets
-  names a package (`fonts.monospace.package`, §1's font tier) — `pkgs` is the
-  one argument a real `nixosSystem` supplies that a bare `evalModules` does not
-  (`lib/options.nix`'s header). Every site that EVALUATES a song's `rice.nix`
-  is the module system: the offline generator, the songbook manifest and the
-  runtime staging path read a song's files without evaluating them
-  (`lib/songbook.nix`), so taking `pkgs` does not narrow what a repo-less host
-  can do. A `_widgets/` shelf does not take it — `borrow` is its entry point.
+- A body takes only `description`, `system` and `home`. A half takes only
+  `members`, `providers` and `module` (habit's `readBody` refuses anything
+  else, naming the file). `providers` implies the member it names is selected.
+- `module` is a module: its arguments are the module system's, plus `song` and
+  `borrow` (below). Name only what the module uses and keep the `...`.
+- The **ten component slots** are `bar`, `launcher`, `powermenu`,
+  `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock` and
+  `greeter`. Each is filled by its `vibeos` provider: the Quickshell component
+  on Aoide's bridges, which brings the vibeos runtime by path
+  (`modules/dendrites/lyra/README.md`). A consumer names another provider for
+  a slot in its own selection (a plain write outranks the body's default,
+  `habit.dendrites.wallpaper.provider = "skwd-wall"`).
+- **Providers say WHO; `aoide.arrangement` says WHAT.** A body's arrangement
+  declares the surface and widget types it brings into existence; its
+  providers choose the implementation of each slot. The two never overlap.
+- `hyprland.conf` is the song's own hyprlang file (binds, unbinds, layout and
+  animations only). It is the `home` half's `rice.hyprland.conf`, carried into
+  stages as-is (§4, `song/declared/rice.conf`).
+- `rice.hyprland.settings` (a Nix attrset of the same keys) is an optional
+  BUILD-only half: rendered LAST into the declared rice, never staged.
 
 ### The songbook is versioned score, not runtime
 
@@ -7077,15 +6955,21 @@ the check.
 
 ### Enforcement
 
-`checks.song-shape` structurally asserts three things about every discovered
-song: it carries its `rice.nix` and its `livery.json`; it holds no `.nix` outside
-`rice.nix` and its `_widgets/` shelf (`strayNixFiles`, which would join the
-module merge silently and could set arbitrary host options); and no `.nix` in it
-has text carrying a `../` path literal (`escapingNixFiles` — a scan of the text,
-not a resolution, per "The shelf, and the two injected arguments" above). The
-**full** "only defines `aoide.livery`" invariant is a documented convention here
-(isolated per-module option-diffing is disproportionate for v0; see the
-`TODO(song-shape v1)` in `lib/checks.nix`).
+`checks.song-shape` asserts five things about every discovered song:
+
+- it carries its body (`rice.nix`), its `livery.json` and its `hyprland.conf`
+  (which may be empty);
+- the body has the shape above: only `description`, `system` and `home`, and a
+  half takes only `members`, `providers` and `module`;
+- `hyprland.conf` sets no livery-owned key (the table above);
+- no `.nix` outside `rice.nix` and its `_widgets/` shelf (`strayNixFiles`),
+  which would join the module merge silently and could set arbitrary host
+  options;
+- no `.nix` carries a `../` path literal in its text (`escapingNixFiles`).
+
+The **full** "only sets `aoide.livery`" invariant is a documented convention:
+isolated per-module option-diffing is disproportionate, so `tests/selection` and
+code review back it.
 
 `checks.bar-ricemode` asserts the bar's half of the rice-mode control (see
 "Per-song flavor widgets"): the literal `slot: "ricemode"` is in the body of
@@ -7096,8 +6980,9 @@ songbook, so a song that exists only in the runtime songbook is judged when
 `rice declare` copies it into the checkout. That the bodies keep the gestures is
 a documented convention backed by code review.
 
-**Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
-and `livery.json` from v0 to v1 with the livery schema (§1).
+**Migration to v1:** `song/songbook/update-playbook.md` ("Song bodies (v0 to
+v1)") is the step list: rewrite each `rice.nix` as a body, add its
+`hyprland.conf`, and drop the self-gate.
 
 ### The lock picture
 
@@ -7171,7 +7056,8 @@ set of "flavor" surfaces — committed files, not nix options:
   (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. the bar slot's `shared`)
   — **never** nix `config.*`. This does not loosen the song-shape rule above:
-  a song's `rice.nix` still sets **ONLY** `aoide.livery` — widgets are
+  a song's body still sets **ONLY** `aoide.livery` and `aoide.arrangement` in
+  its `module` — widgets are
   committed QML files carried by the build, not nix options, and a widget is
   structurally incapable of reaching host/lane options through this surface.
 - **The rice-mode control is one slot, and every bar embeds it.** A bar body
@@ -7332,8 +7218,8 @@ two primitives. A declared slot with no actual `widgets/<slot>.qml` body
 (`[aoide/surfaceslot]` / `[aoide/songgadgets]`) instead of throwing —
 declaring a TYPE with no body is inert, not an error.
 
-`song/songbook/etude/` is the worked, real example: its `rice.nix` declares
-one `kind = "surface"` entry (`demo`), proving the whole pipeline —
+`song/songbook/etude/` is the worked, real example: its body declares one
+`kind = "surface"` entry (`demo`), proving the whole pipeline —
 nix option → build-time `registry.json` walk → `rice lint` → `rice
 stage` hot-sync → `SongSurfaces.qml` render — end to end. No
 committed song declares a `kind = "dock"` entry yet.
@@ -7367,8 +7253,8 @@ song's statement, not a hardcoded list.
 `manifest.json`/`registry.json` beside it: those describe the whole
 songbook because `rice preview` can switch songs at runtime, whereas an
 expectation is about what the **active song** should have mapped right now —
-and the option it comes from already is that, since a song's `rice.nix`
-self-gates on `config.aoide.song`. So one object, whose keys are the
+and the option it comes from already is that, since the active song is the
+one body the host selected. So one object, whose keys are the
 **resolved layer-shell namespaces** (`aoide-<slot>`, the same derivation
 `widgetType.namespace` applies when null), so a consumer compares them
 directly against the compositor's layer list and derives nothing of its own:

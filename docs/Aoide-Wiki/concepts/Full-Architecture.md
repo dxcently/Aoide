@@ -251,9 +251,9 @@ default `null` — naming no song performs no song) is the song a host
 performs, and a host SELECTS its songs (`habit.song.declared` is what it performs,
 `habit.song.available` what it builds in to stage without a rebuild);
 `lib/songbook.nix` finds `song/songbook/<song>/` by one typed scan and
-`lib/aoideos.nix` builds exactly the selected songs in, so a committed song
-self-registers and self-gates on `config.aoide.song == "<name>"` — the same
-discipline as a dendrite. The shipped standard is song `"sonata"` at
+`lib/songbook.nix`'s hook registers each song as an aggregation, and habit
+imports exactly the performed song's body, so a committed song self-registers
+and is selected by name — the same discipline as a dendrite. The shipped standard is song `"sonata"` at
 `song/songbook/sonata/` — upstream-owned and evolving, exactly like any
 other upstream-owned tree (nucleus, dendrites): upstream MAY still update or
 iterate on it. Every OTHER song — anything composed via `rice compose`

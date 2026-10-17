@@ -3,26 +3,40 @@
 Referenced by `CONTRACTS.md` §5. Practical steps for authoring/updating a
 song — its livery, plus the slots the staging engine resolves for it.
 
-## Livery (`livery.json` / `rice.nix`)
+## Song bodies (v0 to v1: `rice.nix` as a body)
 
-A song's `rice.nix` self-gates on `config.aoide.song == "<name>"` and sets
-**only** `aoide.livery` (palette + component tiers, optionally `wallpaper`).
-See an existing song (`song/songbook/sonata/rice.nix`,
-`song/songbook/sonata/rice.nix`) for the shape. `livery.json` alongside it is
-the same values as a hand/agent-maintained JSON file — kept in sync with
-`rice.nix`, not derived from it.
+A song's `rice.nix` is an attrset, the body the constructor reads as data:
+`system` (the paint: the ten `vibeos` providers and the `module` of livery and
+arrangement) and `home` (the `lyra` renderer and `rice.hyprland.conf`). This is
+the migration of a v0 song (`CONTRACTS.md` §5, "Enforcement"), and the step list
+for a new song is the same:
+
+1. Write `rice.nix` as the body in the shape `song/songbook/sonata/rice.nix` has
+   (or `pkgs/aoide/crates/song` scaffolds with `aoide rice compose`).
+2. Put the palette, polarity, window and geometry in `system.module`, under
+   `aoide.livery`. Nothing else in the `module` but `aoide.livery` and
+   `aoide.arrangement`.
+3. Keep the ten providers in `system.providers` as `"vibeos"` (or a provider a
+   consumer adds). Keep `home.members = [ "lyra" ]`.
+4. Write `hyprland.conf` beside it: the binds, unbinds, layout and animations.
+   An empty file (a header only) is valid. The gaps, rounding, borders, blur
+   and colours are the livery's: `checks.song-shape` refuses them in this file.
+5. Name the song's module arguments by what they are: `song` and `borrow`, and
+   `lib` or `pkgs` only when used. `{ song, ... }:` is the usual shape.
+6. Remove any self-gate: a body is read only when its song is performed, so
+   `config.aoide.song == "<name>"` has no place in it.
+7. Run `checks.song-shape` (`nix build .#checks.x86_64-linux.song-shape`) and
+   `tests/selection/run.sh`.
+
+The `livery.json` beside the body is the same values as a hand- or agent-
+maintained JSON file, kept in sync with `system.module`, not derived from it.
 
 A song's `rice.nix` is handed two things by ARGUMENT and never by a path
 (`CONTRACTS.md` §5): `song` — the `lib/song.nix` API — and `borrow`, where
 `borrow "sonata"` is sonata's rolled-up `_widgets/` (the one cross-song idiom).
-So the signature is `{ lib, config, song, borrow, ... }:`, and a shelf's
-`_widgets/default.nix` is `{ lib, song, borrow, ... }:`; name only what the file
-uses and keep the `...`. A `rice.nix` may ALSO take the module system's `pkgs`
-when the tier it sets names a package (`{ lib, config, song, borrow, pkgs, ... }`,
-as `cadenza/rice.nix` does for `fonts.monospace.package`): only a real
-`nixosSystem` supplies it, and every site that evaluates a `rice.nix` is one.
-A `../` path literal in any `.nix` under a song folder
-breaks every machine whose songbook is not this checkout — which is what
+A shelf's `_widgets/default.nix` is `{ lib, song, borrow, ... }:`, and takes
+only the arguments it uses. A `../` path literal in any `.nix` under a song
+folder breaks every machine whose songbook is not this checkout — which is what
 `pkgs/lyra-songbook`, `aoideSeedSongbook` and the offline generator assume — and
 `checks.song-shape` scans for it.
 

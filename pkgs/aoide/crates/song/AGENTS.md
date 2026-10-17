@@ -226,6 +226,13 @@
   produces byte-identical output with and without it. `rice compose` copies the
   field into a scaffolded `rice.nix` (`aoide.livery.polarity`), defaulting to
   `schema::POLARITY_DEFAULT` when the source notes carry none.
+- **`compose::render_rice_nix` emits a song body (CONTRACTS §5, v1).** The
+  scaffold is an attrset with a `system` half (the ten `vibeos` providers,
+  `VIBEOS_SLOTS`, and a `module` of livery) and a `home` half (`lyra`, and
+  `rice.hyprland.conf = ./hyprland.conf`). `rice compose` writes the
+  `hyprland.conf` of `--from` when it ships one, else `render_hyprland_conf`'s
+  header with no keys. Any change to the body shape is a §5 change: the test
+  `compose_*` in `commands/rice.rs` pins the emitted names.
 - **`live::apply_live` resets, then overlays.** It runs `hyprctl reload
   config-only` as its own best-effort call, then the keyword batches
   (`live::hyprctl_calls` is the pure order), so a field a song has no

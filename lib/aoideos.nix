@@ -20,13 +20,12 @@
 # platform import list is assembled from the result. Nothing below imports a
 # dendrite file, and a capability the host did not select is never read.
 #
-# The songs are the two hooks. `selectionModules` puts `habit.song.declared` /
-# `habit.song.available` on the host module, so the gate pass can read a selection
-# the constructor has never heard of; `extraModulesFor` turns that selection into
-# the platform modules — the built-in songs' `rice.nix` files, and the
-# `aoide.song` / `aoide.songbook.builtIn` facts the paint lanes read. Both are
-# generic hooks (habit's composition names no song), and this is the only site
-# that wires them; `lib/songbook.nix` is the only site that says what they mean.
+# The songs are one hook. `lib/songbook.nix`'s `hook` answers habit's three
+# song hooks: each committed `rice.nix` is an aggregation body (the registry
+# half), `habit.song.*` is the selection (the selection-module half), and the
+# checks plus the facts the paint lanes read are the platform half. Habit names
+# no song; this is the only site that wires the hook; `lib/songbook.nix` is the
+# only site that says what it means.
 {
   inputs,
   lib,
@@ -51,6 +50,16 @@ let
   songbook = import ./songbook.nix {
     inherit lib;
     songbook = songbookRoot;
+  };
+
+  # The song hook, over the registry this flake's hosts share: each committed
+  # song is an aggregation, the declared one is selected, and its checks run
+  # in the constructor's gate pass. `users` is the one person this flake's
+  # hosts name (`username`); a host that performs a song attaches that user's
+  # home (`habit.users.<u>.home.enable`), and nothing else about songs is named here.
+  hook = songbook.hook {
+    registry = import ../modules;
+    users = [ username ];
   };
 
   # Every immediate child directory of `hosts/` holding a `default.nix`, minus
@@ -146,7 +155,7 @@ in
       # a typo, and it fails by name instead of applying nowhere.
       knownHosts = hostNames;
 
-      registry = import ../modules;
+      inherit (hook) registry selectionModules extraModulesFor;
       host = ../hosts/${name};
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       overlays = [ overlay ];
@@ -154,47 +163,6 @@ in
       # The nucleus module: the option contract every host carries, selected by no
       # one. The services are the `nucleus` aggregation's, which a host selects.
       extraModules = [ nucleusModule ];
-
-      # The song fields a host module may set, and nothing else about songs.
-      selectionModules = [ songbook.selectionModule ];
-
-      # What that selection MEANS: first the checks (a song name the songbook
-      # does not hold, a song folder with no `rice.nix`, a song with no
-      # performer — all refused here, before the platform list is assembled),
-      # then the built-in songs' `rice.nix` files (declared ∪ available, and
-      # nothing else), then the facts they are read through. A host that names no
-      # song contributes no song module and sets `aoide.song` null, which every
-      # `rice.nix` self-gate reads as "not me".
-      extraModulesFor =
-        sel:
-        let
-          song = songbook.check {
-            inherit (sel) song;
-            lyra = sel.dendrites.lyra.enable;
-          };
-        in
-        songbook.songModules song
-        ++ [
-          {
-            # The two arguments every `rice.nix` reads (CONTRACTS §5): the
-            # `lib/song.nix` API, and the name-keyed borrow. A module may define
-            # `_module.args`, and nothing else on this host defines these names —
-            # they are how a song gets what it needs by ARGUMENT instead of by a
-            # `../` path out of its own folder.
-            _module.args = {
-              inherit (songbook) song borrow;
-              # …and the directory they were discovered in, for the lane that
-              # paints a host's built-in songs: a consumer's songbook may be its
-              # own tree's or this one's, so the lyra lane reads this instead of
-              # naming a repository path of Aoide's own (`lib/songbook.nix`'s own
-              # root).
-              songbook = songbookRoot;
-            };
-            aoide.song = song.declared;
-            aoide.songbook.builtIn = songbook.builtIn song;
-            aoide.songbook.greeter = songbook.greeter song;
-          }
-        ];
 
       # `system` is threaded to the modules rather than to `nixosSystem`: a host
       # module states its own platform (`nixpkgs.hostPlatform`), because the

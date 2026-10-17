@@ -20,17 +20,19 @@ habit="(builtins.getFlake \"github:dxcently/habit/$habitRev\")"
 
 # case                              expect  substring the error must contain
 cases=$(cat <<'EOF'
-realRegistryResolvesAoideos         ok      "bar,calendar,compositor,dock,greeter,hyprland,launcher,lock,lyra,notifications,powermenu,quickshell,stylix,switcher,wallpaper:hyprland"
-realRegistryDendritesImport        ok      true
+realRegistryResolvesAoideos         ok      "compositor,hyprland,stylix:hyprland"
+realRegistryDendritesImport         ok      true
 realRegistryInventory               ok      "agents,aoideos,desktop,nucleus"
 songDiscovery                       ok      "alpha landmine noshelf"
-songLandmineUnread                  ok      "1:true:true"
+songLandmineUnread                  ok      "1:true"
 songLandmineFires                   throws  songbook landmine: an unselected song's rice.nix was imported
 songUnknownName                     throws  'nope' is not in the songbook; discovered: alpha, landmine, noshelf
 songAvailableUnknown                throws  'nope2' is not in the songbook; discovered: alpha, landmine, noshelf
 songNoRice                          throws  song noshelf has no rice.nix
-songWithoutLyra                     throws  habit.song.declared = "alpha" needs the lyra dendrite: select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host
-songAvailableWithoutLyra            throws  habit.song.available = ["alpha"] needs the lyra dendrite: select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host
+songStrayEnabled                    throws  song aggregation lender is enabled, but habit.song.declared = "borrower"
+songHomeless                        throws  habit.song.users names alice, which has no home
+songNameClash                       throws  share a name with an aggregation
+songDeclaredBuilds                  ok      1
 songEscapeClean                     ok      ""
 songEscapeFound                     ok      "escaper/rice.nix"
 songBorrowClosure                   ok      "borrower lender"

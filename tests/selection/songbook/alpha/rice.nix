@@ -1,11 +1,10 @@
-# tests/selection/songbook/alpha/rice.nix — a plain song, for the songbook cases.
+# tests/selection/songbook/alpha/rice.nix — a plain song body, for the songbook cases.
 #
-# The shape the real songbook has: one module per song, self-gating on its own
-# name. It configures nothing — these cases are about DISCOVERY and SELECTION,
-# not about what a song paints.
-{ lib, config, ... }:
+# The shape every committed rice.nix has (CONTRACTS.md §5): one attrset with a
+# `system` and a `home` half, read only when the song is selected. It configures
+# nothing — these cases are about DISCOVERY and SELECTION, not about what a song paints.
 {
-  config = lib.mkIf (config.aoide.song == "alpha") {
+  system.module = _: {
     aoide.livery.palette.bg = "#000000";
   };
 }

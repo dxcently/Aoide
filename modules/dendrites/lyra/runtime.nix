@@ -195,8 +195,8 @@ let
   # the two files above: those describe the whole songbook because
   # `rice preview` can switch songs at runtime, while an expectation is about
   # what the ACTIVE song should have mapped right now — and
-  # `config.aoide.arrangement.surfaces` already IS that (the song's rice.nix
-  # self-gates on `config.aoide.song`). `song` names which song's declaration
+  # `config.aoide.arrangement.surfaces` already IS that (only the performed
+  # song's body is imported). `song` names which song's declaration
   # this is; the keys are the RESOLVED layer-shell namespaces (`aoide-<slot>`
   # — the same derivation `widgetType.namespace` applies when null), so the
   # consumer compares them directly against the compositor's layer list and
@@ -339,8 +339,8 @@ let
   # song's `livery.json` (`.widgets // {}`) for a shelf-less song, or
   # `composeSong`'s own `arrangement.widgets` for a shelf-present one — never
   # from any nix OPTION: `config.aoide.arrangement.widgets` (Phase 1) only
-  # exists for the ACTIVE song at eval time (a song's rice.nix self-gates on
-  # `config.aoide.song == "<name>"`), so cross-song data has to come from
+  # exists for the ACTIVE song at eval time (only the performed song's body is
+  # imported), so cross-song data has to come from
   # committed FILES. Every committed song gets an entry — `{}` when the song
   # has no `livery.json`/no `.widgets` key, or (shelf-present) no declared
   # widget — never an error, never a skipped song. The shelf-less path stays

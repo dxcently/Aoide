@@ -566,7 +566,7 @@ What a consumer's flake writes, in the shapes the outputs are:
 | consumer's reach-in (before) | replacement export | produced by |
 |---|---|---|
 | `inputs.aoide + "/modules/default.nix"` | `nixosModules.nucleus` + `nixosModules.<name>` per catalogue entry; `lib.catalogue` for bulk use | S10 |
-| five `song/songbook/*/rice.nix` | `lib.songbook.{discover,selectionModule,songModules}` passed to `lib.composition`'s `selectionModules` / `extraModulesFor`, over `songbookRoot` when the host performs Aoide's songs | S8 (exported S10) |
+| five `song/songbook/*/rice.nix` | `lib.songbook.hook { registry, users }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `songbookRoot` when the host performs Aoide's songs | S8 (exported S10) |
 | an `import` of `lib/pkgs.nix` for the overlay | `overlays.default` | S10 |
 | `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.lyra`, `.lyra-shell`, `.lyra-songbook`) | exists / S3 |
 | `import … "/lib/livery.nix"` `.resolve` | `lib.livery.resolve` | S10 |
@@ -627,8 +627,8 @@ evaluation, not a style choice:
 A consumer performs from one songbook DIRECTORY per host: Aoide's own, exported
 as `songbookRoot`, or one in the CONSUMER's tree. `lib.songbook` takes the
 directory (`songbook ? …`); the consumer passes the same value, once, into the
-songs hook it writes for `extraModulesFor` (`_module.args.songbook`, beside
-`song` and `borrow`); and the dendrite that paints the built-in songs and
+song hook it calls (`lib.songbook.hook`, which sets `_module.args.songbook`
+beside `song` and `borrow`); and the dendrite that paints the built-in songs and
 `pkgs/lyra-songbook` take it as an argument instead of naming a path in this
 repo. A host that performs Aoide's `sonata` therefore writes
 `songbook = aoide.songbookRoot` in both places and `habit.song.declared = "sonata"` in

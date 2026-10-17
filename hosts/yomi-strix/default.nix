@@ -11,7 +11,8 @@
 {
   # ── Aggregations ───────────────────────────────────────────────────────────
   # nucleus is the floor; desktop is the session's platform; agents is the coding
-  # agents a workstation runs; aoideos is the desktop itself, songs included.
+  # agents a workstation runs; aoideos is the desktop's floor. The paint is the
+  # performed song's, selected below.
   habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
   habit.aggregation.agents.enable = true;
@@ -30,16 +31,17 @@
   habit.dendrites.aoide-secrets.enable = true;
 
   # ── Who paints a wallpaper pick ────────────────────────────────────────────
-  # The compositor line's twin: the aggregation ships the shell's own layer as
-  # the setter, and this host names the external engine instead. The engine's
-  # lane is what makes that real (packages, daemon, config), and the runtime
-  # reads the resulting fact to decide whose picks the stage file records.
-  habit.aggregation.aoideos.wallpaper.provider = "skwd-wall";
+  # The compositor line's twin: the performed song ships the shell's own layer
+  # (`vibeos`) as the setter, and this host names the external engine instead.
+  # A plain write here outranks the song's default. The engine's lane is what
+  # makes that real (packages, daemon, config), and the runtime reads the
+  # resulting fact to decide whose picks the stage file records.
+  habit.dendrites.wallpaper.provider = "skwd-wall";
 
   # ── Songs ──────────────────────────────────────────────────────────────────
-  # `habit.song.declared` is the song this host PERFORMS — it becomes the fact
-  # `aoide.song`, which every `rice.nix` self-gates on. `available` is what it
-  # builds in to STAGE without a rebuild but does not perform.
+  # `habit.song.declared` is the song this host PERFORMS: it becomes the fact
+  # `aoide.song` and selects that song's body. `available` is what it builds in
+  # to STAGE without a rebuild but does not perform.
   #
   # yomi performs barcarolle: Windows 7 Aero rebuilt on the AoideOS slots — a
   # glass superbar whose buttons are Hyprland workspaces, the Start menu and its

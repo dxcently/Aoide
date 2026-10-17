@@ -14,38 +14,56 @@
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery
 # and aoide.arrangement. All values are literal nix (no song/ runtime reads).
-{ lib, config, ... }:
 {
-  config = lib.mkIf (config.aoide.song == "nocturne") {
-
-    # ── Palette tier — deep navy/indigo night, pale moonlight-silver accent ──
-    # Deliberately dark and distinct from BOTH sonata's light marble register
-    # and etude's violet demo palette, so the two throwaway songs never read
-    # as the same thing if khoa flips between them later.
-    aoide.livery.palette = {
-      bg = "#0a0e27"; # deep navy/indigo night ground
-      fg = "#e8ecf7"; # near-white cool ivory ink — high contrast on navy
-      accent = "#9fb8e0"; # pale moonlight-silver-blue chrome
-      urgent = "#e2607a"; # rose-red, readable against navy
+  system = {
+    providers = {
+      bar = "vibeos";
+      launcher = "vibeos";
+      powermenu = "vibeos";
+      notifications = "vibeos";
+      wallpaper = "vibeos";
+      dock = "vibeos";
+      calendar = "vibeos";
+      switcher = "vibeos";
+      lock = "vibeos";
+      greeter = "vibeos";
     };
+    module = _: {
+      # ── Palette tier — deep navy/indigo night, pale moonlight-silver accent ──
+      # Deliberately dark and distinct from BOTH sonata's light marble register
+      # and etude's violet demo palette, so the two throwaway songs never read
+      # as the same thing if khoa flips between them later.
+      aoide.livery.palette = {
+        bg = "#0a0e27"; # deep navy/indigo night ground
+        fg = "#e8ecf7"; # near-white cool ivory ink — high contrast on navy
+        accent = "#9fb8e0"; # pale moonlight-silver-blue chrome
+        urgent = "#e2607a"; # rose-red, readable against navy
+      };
 
-    # Window frames follow the palette (border = accent, borderInactive = bg)
-    # — written explicit here so the resolved value is self-evident, same
-    # style sonata's own rice.nix uses.
-    aoide.livery.window = {
-      border = "#9fb8e0";
-      borderInactive = "#0a0e27";
+      # Window frames follow the palette (border = accent, borderInactive = bg)
+      # — written explicit here so the resolved value is self-evident, same
+      # style sonata's own rice.nix uses.
+      aoide.livery.window = {
+        border = "#9fb8e0";
+        borderInactive = "#0a0e27";
+      };
+
+      # ── Arrangement — declares ONE brand-new dock-kind widget type ──────────
+      # Phase 12's actual technical proof: the "dock" kind mounts as an Item
+      # into AoidePanel's gadget column (SongGadgets.qml), alongside the six
+      # shipped gadgets and herald-center. `order = 0` is the only sort key
+      # among declared dock entries; the widget body lives at
+      # song/songbook/nocturne/widgets/vigil.qml, same convention as any slot.
+      aoide.arrangement.widgets.vigil = {
+        kind = "dock";
+        order = 0;
+      };
     };
-
-    # ── Arrangement — declares ONE brand-new dock-kind widget type ──────────
-    # Phase 12's actual technical proof: the "dock" kind mounts as an Item
-    # into AoidePanel's gadget column (SongGadgets.qml), alongside the six
-    # shipped gadgets and herald-center. `order = 0` is the only sort key
-    # among declared dock entries; the widget body lives at
-    # song/songbook/nocturne/widgets/vigil.qml, same convention as any slot.
-    aoide.arrangement.widgets.vigil = {
-      kind = "dock";
-      order = 0;
+  };
+  home = {
+    members = [ "lyra" ];
+    module = {
+      rice.hyprland.conf = ./hyprland.conf;
     };
   };
 }

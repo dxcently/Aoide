@@ -3,13 +3,14 @@
 #
 # THREE callers, one file, so nothing here can drift from anything else:
 #
-#   - `lib/aoideos.nix`, the constructor — `discover` names the songs,
-#     `selectionModule` puts `habit.song.declared` / `habit.song.available`
-#     on the host module, and `songModules` / `builtIn` turn that selection into the
-#     platform's modules and facts.
-#   - `modules/dendrites/lyra/runtime.nix`'s `quickshellConfig` derivation
-#     imports this at BUILD time to emit `manifest.json`/`registry.json` into
-#     the deployed QML tree — over the host's BUILT-IN songs only.
+#   - `lib/aoideos.nix`, the constructor — `hook` answers the three hooks habit's
+#     composition takes for songs: the registry (each song is an aggregation),
+#     the selection fields (`habit.song.*`) and the platform modules and facts
+#     the selection means. `discover` names the songs; `builtIn` and `greeter`
+#     are the facts a selection carries.
+#   - `pkgs/lyra-songbook`'s generator (`nix/manifest.nix`), which imports a COPY
+#     of this file at BUILD time to emit `manifest.json`/`registry.json` into the
+#     deployed QML tree — over the host's BUILT-IN songs only.
 #   - The `songbookManifest` flake output (flake.nix) wraps this so
 #     `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval
 #     --json` and regenerate both files WHOLE at RUNTIME, no rebuild — the
@@ -297,88 +298,163 @@ let
     })
   ) songNames;
 
-  # ── Selection ───────────────────────────────────────────────────────────────
-  # `habit.song.declared` and `habit.song.available` are HOST fields: whether a
-  # song's `rice.nix` is imported is decided in the selection pass, before any
-  # platform evaluation, and only the host module's `habit.*` keys are read that early
-  # (docs/architecture/NIX-COMPOSITION.md, "Selection before platform
-  # evaluation"). A user-level selection could be added later, additively; there
-  # is no such thing today.
+  # ── The song hook ───────────────────────────────────────────────────────────
+  # One function, three answers, one per hook the constructor takes
+  # (`lib/composition.nix`): a song IS an aggregation, so the hook is what makes
+  # a `rice.nix` selectable at all.
   #
-  # `declared` is the song the host performs — it becomes the platform fact
-  # `aoide.song`. `available` is the songs this host can STAGE without a rebuild
-  # but does not perform: they are built in (imported, copied, installed) and
-  # their livery is not the active one.
+  #   registry          the caller's registry, with every discovered song that
+  #                     has a `rice.nix` added to `aggregations`, named by its
+  #                     folder. Its body is the aggregation body: `system` and
+  #                     `home` halves, each with its `members`, `providers` and
+  #                     `module`. habit imports the body only when it is selected.
+  #   selectionModules  `habit.song.{declared, available, users}`, and, for the
+  #                     declared song only, the enables that select its
+  #                     aggregation for the host (`habit.aggregation.<n>`) and for
+  #                     each user in `song.users` (`habit.users.<u>.aggregation`).
+  #   extraModulesFor   the checks, then the `_module.args` a body reads (`song`,
+  #                     `borrow`, `songbook`) and the facts the paint lanes read.
   #
-  # Both are checked HERE, in the gate pass, because a typo is cheaper to catch
-  # before a module graph exists than after: an unknown name fails naming the
-  # songs that DO exist, and a name that exists but has no `rice.nix` fails
-  # saying so (the folder is still discovered — it may be a song being written,
-  # and the manifest is right to see it).
-  selectionModule = {
-    options.song = {
-      declared = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        example = "sonata";
-        description = ''
-          The song this host performs. A committed song name (a folder under
-          `song/songbook/<name>/`); null means no song is named. It becomes the
-          platform fact `aoide.song`, which every `rice.nix` self-gates on.
-        '';
-      };
-      available = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
-        example = [ "cadenza" ];
-        description = ''
-          Songs this host builds in but does not perform: staged without a
-          rebuild, livery not active. The built-in set is `declared ∪
-          available`.
-        '';
-      };
-    };
-  };
-
-  # ── The gate-pass checks ────────────────────────────────────────────────────
-  # Run by the constructor's hook before the platform module list is assembled,
-  # which is as early as the selection exists: a bad song name, a song with no
-  # `rice.nix`, and a song with no performer are all typos or mistakes in the
-  # host's selection, and all three are cheaper to catch before a module graph exists
-  # than after.
+  # `users` is a PARAMETER, never read from `config`: a selection module that
+  # read `config.users` would recurse into the `habit.users` it writes. The
+  # caller names its people (`lib/aoideos.nix` passes the host's user).
   #
-  # A `throw`, not an assertion hung on the selection config: the gate pass is a
-  # bare `evalModules` that the constructor reads attribute by attribute, so an
-  # `assertions` definition there would sit unchecked.
-  #
-  # `lyra` is an ARGUMENT rather than a read, because this file knows the
-  # songbook and not the dendrite tree: the caller passes the fact from its own
-  # selection (`sel.dendrites.lyra.enable`).
-  check =
-    { song, lyra }:
+  # The reads, exhaustively: `habit.song.*`, `habit.aggregation.<song>` and
+  # `habit.users.<u>.{home,aggregation}`. Never a `rice.*` option, and never a
+  # body but the selected one. The checks are the list `extraModulesFor` returns,
+  # so a bad selection throws on the spine before any module is imported.
+  hook =
+    { registry, users }:
     let
-      selected = lib.unique (lib.optional (song.declared != null) song.declared ++ song.available);
-      unknown = lib.filter (n: !(builtins.elem n songNames)) selected;
-      noRice = lib.filter (n: !(builtins.pathExists (songbook + "/${n}/rice.nix"))) selected;
-      named =
-        if song.declared != null then
-          "habit.song.declared = \"${song.declared}\""
+      songbookDir = songbook;
+      riceNames = lib.filter (name: builtins.pathExists (songbook + "/${name}/rice.nix")) songNames;
+      rices = lib.genAttrs riceNames (name: songbook + "/${name}/rice.nix");
+
+      clashing = lib.intersectLists riceNames (builtins.attrNames registry.aggregations);
+
+      selectionModule =
+        { config, ... }:
+        {
+          options.song = {
+            declared = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = "sonata";
+              description = ''
+                The song this host performs. A committed song name (a folder under
+                `song/songbook/<name>/` with a `rice.nix`); null means no song is
+                named. It becomes the platform fact `aoide.song`, and its body is
+                the one aggregation the host selects.
+              '';
+            };
+            available = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [ "cadenza" ];
+              description = ''
+                Songs this host builds in but does not perform: staged without a
+                rebuild, livery not active. Their bodies are never imported; their
+                widgets and templates are shipped. The built-in set is
+                `declared ∪ available`, closed under borrows.
+              '';
+            };
+            users = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = users;
+              description = ''
+                The people whose Home Manager configuration takes the declared
+                song's home half (the renderer, and the rice's own settings). Each
+                must have `habit.users.<u>.home.enable = true`.
+              '';
+            };
+          };
+
+          config = lib.mkIf (config.song.declared != null) (
+            let
+              enables = lib.genAttrs riceNames (name: {
+                enable = lib.mkIf (config.song.declared == name) true;
+              });
+            in
+            {
+              aggregation = enables;
+              users = lib.genAttrs config.song.users (_: {
+                aggregation = enables;
+              });
+            }
+          );
+        };
+
+      describe =
+        sel:
+        if sel.song.declared == null then
+          "no habit.song.declared"
         else
-          "habit.song.available = ${builtins.toJSON song.available}";
+          "habit.song.declared = \"${sel.song.declared}\"";
+
+      check =
+        sel:
+        let
+          inherit (sel) song;
+          selected = lib.unique (lib.optional (song.declared != null) song.declared ++ song.available);
+          unknown = lib.filter (n: !(builtins.elem n songNames)) selected;
+          noRice = lib.filter (n: !(builtins.elem n riceNames)) selected;
+          enabled =
+            lib.filter (n: sel.aggregation.${n}.enable) riceNames
+            ++ lib.concatMap (u: lib.filter (n: sel.users.${u}.aggregation.${n}.enable) riceNames) (
+              builtins.attrNames sel.users
+            );
+          stray = lib.unique (lib.filter (n: n != song.declared) enabled);
+          homeless = lib.filter (u: !sel.users.${u}.home.enable) (
+            lib.optionals (song.declared != null) song.users
+          );
+        in
+        lib.throwIf (unknown != [ ])
+          (
+            "song: ${lib.concatStringsSep ", " (map (n: "'${n}'") unknown)}"
+            + " is not in the songbook; discovered: ${lib.concatStringsSep ", " songNames}"
+          )
+          (
+            lib.throwIf (noRice != [ ]) "song ${lib.concatStringsSep ", " noRice} has no rice.nix" (
+              lib.throwIf (stray != [ ])
+                (
+                  "song aggregation ${lib.concatStringsSep ", " stray} is enabled, but ${describe sel}:"
+                  + " a host performs one song, so select only the declared one"
+                )
+                (
+                  lib.throwIf (homeless != [ ]) (
+                    "habit.song.users names ${lib.concatStringsSep ", " homeless}, which has no home:"
+                    + " set habit.users.<u>.home.enable = true for each, or drop it from habit.song.users"
+                  ) [ ]
+                )
+            )
+          );
     in
-    lib.throwIf (unknown != [ ])
+    lib.throwIf (clashing != [ ])
       (
-        "song: ${lib.concatStringsSep ", " (map (n: "'${n}'") unknown)}"
-        + " is not in the songbook; discovered: ${lib.concatStringsSep ", " songNames}"
+        "song(s) ${lib.concatStringsSep ", " clashing} share a name with an aggregation;"
+        + " rename the song folder"
       )
-      (
-        lib.throwIf (noRice != [ ]) "song ${lib.concatStringsSep ", " noRice} has no rice.nix" (
-          lib.throwIf (selected != [ ] && !lyra) (
-            "${named} needs the lyra dendrite:"
-            + " select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host"
-          ) song
-        )
-      );
+      {
+        registry = registry // {
+          aggregations = registry.aggregations // rices;
+        };
+        selectionModules = [ selectionModule ];
+        extraModulesFor =
+          sel:
+          check sel
+          ++ [
+            {
+              _module.args = {
+                inherit borrow;
+                song = songLib;
+                songbook = songbookDir;
+              };
+              aoide.song = sel.song.declared;
+              aoide.songbook.builtIn = builtIn sel.song;
+              aoide.songbook.greeter = greeter sel.song;
+            }
+          ];
+      };
 
   # ── The built-in set, closed under borrows ──────────────────────────────────
   # What a host performs, what it can stage live, and — for every song in that
@@ -424,12 +500,6 @@ let
   greeter =
     sel: if sel.declared == null then null else songMeta.${sel.declared}.manifest.greeter or null;
 
-  # The modules a built-in song contributes: its `rice.nix`, and nothing else.
-  # An unselected song's file is never imported, which is what makes a
-  # discovered-but-unselected song inert (tests/selection proves it with a
-  # landmine).
-  songModules = sel: map (name: songbook + "/${name}/rice.nix") (builtIn sel);
-
   # The package names the built-in songs' widgets declare (`lib/song.nix`'s
   # `composeSong`), resolved by the caller against its own `pkgs`. Takes the
   # NAMES, not a selection: the lane that installs them reads the fact
@@ -444,11 +514,9 @@ in
     songMeta
     strayNixFiles
     escapingNixFiles
-    selectionModule
-    check
+    hook
     builtIn
     greeter
-    songModules
     packagesFor
     borrow
     ;

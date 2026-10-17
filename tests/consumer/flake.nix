@@ -55,51 +55,30 @@
       };
 
       # One songbook per host: the consumer's own (`./songs`), or Aoide's
-      # through the `songbookRoot` export.
+      # through the `songbookRoot` export. The song hook is one call: it answers
+      # the registry, the selection and the platform modules for the songbook it
+      # is handed, and the `users` it attaches are this consumer's own person.
       mkHost =
         name: songbookDir:
         let
-          songbook = aoide.lib.songbook {
+          songs = aoide.lib.songbook {
             inherit lib;
             songbook = songbookDir;
+          };
+          song = songs.hook {
+            inherit registry;
+            users = [ "fixture" ];
           };
         in
         composition.mkNixosHost {
           inherit nixpkgs system;
           hostName = name;
           knownHosts = [ name ];
-          inherit registry;
+          inherit (song) registry selectionModules extraModulesFor;
           extraModules = [ aoide.nixosModules.nucleus ];
           host = ./hosts + "/${name}.nix";
           homeManagerModule = home-manager.nixosModules.home-manager;
           overlays = [ aoide.overlays.default ];
-          # The song contract, wired exactly as §12 says a consumer wires it:
-          # `selectionModule` puts the two host-module fields in the gate pass,
-          # `songModules` turns the selection into `rice.nix` imports, and the
-          # built-in set becomes the facts the paint lanes read.
-          selectionModules = [ songbook.selectionModule ];
-          extraModulesFor =
-            sel:
-            let
-              song = songbook.check {
-                inherit (sel) song;
-                lyra = sel.dendrites.lyra.enable;
-              };
-            in
-            songbook.songModules song
-            ++ [
-              {
-                _module.args = {
-                  inherit (songbook) song borrow;
-                  # The directory the selection was validated against: the lyra
-                  # dendrite reads the root from here rather than naming one.
-                  songbook = songbookDir;
-                };
-                aoide.song = song.declared;
-                aoide.songbook.builtIn = songbook.builtIn song;
-                aoide.songbook.greeter = songbook.greeter song;
-              }
-            ];
           specialArgs = {
             username = "fixture";
           };
