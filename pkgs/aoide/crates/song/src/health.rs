@@ -72,7 +72,18 @@
 //! namespaces against what is actually mapped, per monitor where the
 //! declaration says per-monitor; when it is absent, unreadable, or names no
 //! surface at all, nothing is declared and the old total count decides,
-//! unchanged. The empty case matters: the lane publishes the file on every
+//! unchanged.
+//!
+//! A song declares surfaces for the components it dresses, but the host
+//! decides which components exist: the shell instantiates a component anchor
+//! only when its slot is in `run/qml/components.json` (CONTRACTS.md §4). So
+//! the declared set is intersected with that file's slots first — a song that
+//! declares `dock` on a host without the dock component does not report the
+//! dock lost. A surface key is its slot's name (`aoide-<slot>`), so the
+//! intersection matches the two directly. When the file is absent or not an
+//! object nothing is intersected, as before it existed; when the
+//! intersection leaves nothing, the song declared something but the host
+//! selected none of it, and there is nothing to assert. The empty case matters: the lane publishes the file on every
 //! host, so a song that declares nothing ships `{"surfaces": {}}`, and that
 //! must be the old check — not a check with nothing to assert, which would
 //! read a blank desktop as healthy on exactly the hosts that never opted in.
@@ -297,8 +308,32 @@ pub(crate) fn parse_expectation(v: &Value) -> Option<BTreeMap<String, bool>> {
 /// be a check with nothing to fail — a blank desktop read as healthy — on
 /// precisely the hosts that never opted into the declared check, which is
 /// the inverse of "a host that declares nothing keeps today's behaviour".
-pub(crate) fn asserted_expectation(published: Option<&Value>) -> Option<BTreeMap<String, bool>> {
-    published.and_then(parse_expectation).filter(|exp| !exp.is_empty())
+///
+/// `components` is the published `run/qml/components.json`. When it is an
+/// object, only the namespaces whose slot (`aoide-<slot>`) is one of its keys
+/// stay: the shell never instantiates an unselected component, so its
+/// surface is never expected. A declaration the intersection empties stays
+/// `Some(empty)`, which [`surfaces_fall_short`] never fails: the song did
+/// declare, so the total count is not the right fallback for it.
+pub(crate) fn asserted_expectation(
+    published: Option<&Value>,
+    components: Option<&Value>,
+) -> Option<BTreeMap<String, bool>> {
+    let exp = published.and_then(parse_expectation).filter(|exp| !exp.is_empty())?;
+    let Some(selected) = components.and_then(selected_components) else {
+        return Some(exp);
+    };
+    Some(
+        exp.into_iter()
+            .filter(|(ns, _)| ns.strip_prefix("aoide-").is_some_and(|slot| selected.contains(slot)))
+            .collect(),
+    )
+}
+
+/// Pure: the component slots `run/qml/components.json` names (its keys), or
+/// `None` when it is not an object.
+pub(crate) fn selected_components(v: &Value) -> Option<BTreeSet<String>> {
+    Some(v.as_object()?.keys().cloned().collect())
 }
 
 /// Pure: how many REAL outputs are worth demanding a surface on, from
@@ -647,13 +682,23 @@ fn hyprctl_json(subcommand: &str) -> Value {
 /// state, and a host that never published one must keep working, never report
 /// unhealthy for the absence of a file nothing in this crate writes.
 ///
-/// The one impure function here — it reads the filesystem — and deliberately
-/// the only one: everything it hands to [`parse_expectation`] and
-/// [`surfaces_fall_short`] is a plain [`Value`] so the judgement itself stays
-/// unit-testable against literal fixtures.
+/// One of the two impure readers here, with [`published_components`]: they
+/// read the filesystem, and everything they hand to [`asserted_expectation`]
+/// and [`surfaces_fall_short`] is a plain [`Value`] so the judgement itself
+/// stays unit-testable against literal fixtures.
 fn published_surfaces() -> Option<Value> {
-    let path = aoide_storage::fs::run_qml_dir().join("songs").join("surfaces.json");
-    let bytes = std::fs::read(&path).ok()?;
+    published_json(&aoide_storage::fs::run_qml_dir().join("songs").join("surfaces.json"))
+}
+
+/// The selected components, `run/qml/components.json` (CONTRACTS.md §4),
+/// at the top of the deployed tree beside `shell.qml`. Every failure mode is
+/// `None`, which [`asserted_expectation`] reads as "intersect nothing".
+fn published_components() -> Option<Value> {
+    published_json(&aoide_storage::fs::run_qml_dir().join("components.json"))
+}
+
+fn published_json(path: &std::path::Path) -> Option<Value> {
+    let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -730,7 +775,8 @@ pub fn run_healthcheck() -> HealthOutcome {
     // opted out of, and keeps the check it had.
     let layers = hyprctl_json("layers");
     let published = published_surfaces();
-    let bad = match asserted_expectation(published.as_ref()) {
+    let components = published_components();
+    let bad = match asserted_expectation(published.as_ref(), components.as_ref()) {
         Some(exp) => surfaces_fall_short(&exp, &layers, &hyprctl_json("monitors")),
         None => shell_has_zero_layers(&layers),
     };
@@ -931,21 +977,68 @@ mod tests {
     #[test]
     fn an_empty_published_declaration_is_nothing_to_assert() {
         let published = json!({ "song": "etude", "surfaces": {} });
-        assert_eq!(asserted_expectation(Some(&published)), None);
+        assert_eq!(asserted_expectation(Some(&published), None), None);
     }
 
     #[test]
     fn nothing_published_is_nothing_to_assert() {
-        assert_eq!(asserted_expectation(None), None);
+        assert_eq!(asserted_expectation(None, None), None);
         let malformed = json!({ "song": "etude" });
-        assert_eq!(asserted_expectation(Some(&malformed)), None);
+        assert_eq!(asserted_expectation(Some(&malformed), None), None);
     }
 
     #[test]
     fn a_populated_declaration_is_asserted() {
         let published = json!({ "song": "sonata", "surfaces": { "aoide-bar": { "perMonitor": true } } });
-        let exp = asserted_expectation(Some(&published)).unwrap();
+        let exp = asserted_expectation(Some(&published), None).unwrap();
         assert_eq!(exp.get("aoide-bar"), Some(&true));
+    }
+
+    // ── the component intersection ────────────────────────────────────────
+    fn components(slots: &[&str]) -> Value {
+        Value::Object(slots.iter().map(|s| (s.to_string(), json!({ "provider": "vibeos", "actions": {} }))).collect())
+    }
+
+    #[test]
+    fn a_declared_dock_without_the_dock_component_is_not_expected() {
+        let exp = asserted_expectation(Some(&sonata_expectation()), Some(&components(&["bar", "wallpaper"]))).unwrap();
+        assert_eq!(exp.keys().collect::<Vec<_>>(), ["aoide-bar", "aoide-wallpaper"]);
+        // Mapped bar and wallpaper on both heads, no dock anywhere: healthy.
+        let layers = json!({
+            "DP-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } },
+            "HDMI-A-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } }
+        });
+        assert!(!surfaces_fall_short(&exp, &layers, &two_real_monitors()));
+    }
+
+    #[test]
+    fn a_selected_component_missing_its_surface_still_falls_short() {
+        let exp = asserted_expectation(Some(&sonata_expectation()), Some(&components(&["bar", "wallpaper", "dock"]))).unwrap();
+        let layers = json!({
+            "DP-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } },
+            "HDMI-A-1": { "levels": { "0": [{ "namespace": "aoide-wallpaper" }], "2": [{ "namespace": "aoide-bar" }] } }
+        });
+        assert!(surfaces_fall_short(&exp, &layers, &two_real_monitors()));
+    }
+
+    #[test]
+    fn without_components_json_the_declaration_is_asserted_unchanged() {
+        let whole = asserted_expectation(Some(&sonata_expectation()), None).unwrap();
+        assert_eq!(whole, parse_expectation(&sonata_expectation()).unwrap());
+        assert_eq!(asserted_expectation(Some(&sonata_expectation()), Some(&json!(["bar"]))), Some(whole));
+    }
+
+    #[test]
+    fn a_declaration_the_host_selected_none_of_asserts_nothing_and_never_falls_short() {
+        let exp = asserted_expectation(Some(&sonata_expectation()), Some(&components(&["launcher"]))).unwrap();
+        assert!(exp.is_empty());
+        assert!(!surfaces_fall_short(&exp, &json!({}), &two_real_monitors()));
+    }
+
+    #[test]
+    fn components_never_turn_an_empty_declaration_into_an_assertion() {
+        let published = json!({ "song": "etude", "surfaces": {} });
+        assert_eq!(asserted_expectation(Some(&published), Some(&components(&["bar"]))), None);
     }
 
     // A hand-written or forward-compatible entry omitting the flag reads as

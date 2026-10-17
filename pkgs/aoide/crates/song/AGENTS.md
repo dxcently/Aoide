@@ -359,10 +359,16 @@
   is excluded from BOTH the demand and the coverage; counting it in one and
   not the other is an off-by-one that fires on every blackout. Keep the
   predicate functions pure (`&Value` in, data out, no filesystem, no shell)
-  with `published_surfaces` the single impure reader — that split is what
-  makes the judgement unit-testable and is why an absent or malformed
-  published file must read as "no expectation declared", never as an
-  unhealthy desktop. **An EMPTY published declaration is the same case,
+  with `published_surfaces` and `published_components` the only impure
+  readers — that split is what makes the judgement unit-testable and is why
+  an absent or malformed published file must read as "no expectation
+  declared" (or, for `components.json`, "intersect nothing"), never as an
+  unhealthy desktop. **The declared set is intersected with the selected
+  components before it is asserted** (`asserted_expectation`): the shell
+  never instantiates an unselected component, so its surface is never
+  expected; a declaration the intersection empties is `Some(empty)` and
+  never falls short, while a declaration that was empty to begin with still
+  reaches `shell_has_zero_layers`. **An EMPTY published declaration is the same case,
   folded by `asserted_expectation`, not by the parser**: the lane publishes
   the file on every host, so `{"surfaces": {}}` is what every non-declaring
   song ships, and it must reach `shell_has_zero_layers` — routing it to

@@ -2026,6 +2026,14 @@ syncs only under `run/qml/songs/`, so no stage, draft or back ever changes
 it, and house rule 10 (staging restores the staged song) does not cover it.
 A rebuild is the only writer.
 
+Two readers. `shell.qml` reads it once at load and instantiates a component
+anchor only when its slot is a key; an absent or unreadable file is the empty
+set, so nothing is instantiated (`pkgs/lyra-shell/qml/slots.md`, "The
+component gate"). The healthcheck (`crates/song/src/health.rs`) intersects
+the surfaces `run/qml/songs/surfaces.json` declares (§5) with its keys, so a
+declared surface whose component the host did not select is never reported
+lost; there an absent or non-object file intersects nothing.
+
 ### `song/declared/livery.json` — **v0**
 
 The DECLARED song's notes: the active song's committed `livery.json` with the
@@ -7337,6 +7345,11 @@ than inventing one, the same tolerate-missing stance `registry.json` and the
 stage files hold. The empty case is the common one, since every
 non-declaring song publishes it: a check with nothing to assert would read a
 blank desktop as healthy on precisely the hosts that never opted in.
+A declared namespace is asserted only when its slot is a selected component
+(`run/qml/components.json`, §4): the shell never instantiates an unselected
+component, so a song's `dock` on a host without the dock component is not a
+loss. A declaration that intersection empties asserts nothing, rather than
+falling back to the total count.
 This is a build-time statement of intent, not stage state: nothing writes it
 at runtime, and it is not a `lyra rice stage` hot-sync target
 (`manifest.json`/`registry.json` are).

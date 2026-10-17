@@ -7,9 +7,12 @@
 // its default QGuiApplication mode. Costs a restart to take effect; no other
 // behavior difference observed on this rig.
 //
-// Entry point for the Quickshell session. Instantiates all surface widgets
-// and wires the shared livery loader (LiveryState) so every widget hot-reloads
-// from song/stage/livery.json when it changes.
+// Entry point for the Quickshell session. Instantiates the infrastructure
+// (livery, bridge, staging engine, IPC, clipboard, ledger, SongSurfaces)
+// unconditionally and each component anchor only when its slot is in
+// `components.json` (the component gate below), and wires the shared livery
+// loader (LiveryState) so every widget hot-reloads from song/stage/livery.json
+// when it changes.
 //
 // Communication discipline (CONTRACTS.md / entities/Quickshell):
 //   - Reads state files from song/stage/ (LiveryState watches livery.json).
@@ -47,12 +50,42 @@ ShellRoot {
     // property and settle at undefined — silently, exactly like the livery
     // case above, with the loud symptom landing one layer down ("Cannot read
     // property 'songName' of undefined" from WidgetSlot's own resolver). Ids
-    // nothing collides with (`shared`, `powermenuSlot`, `dockSlot`) still
+    // nothing collides with (`shared`, `clipboard`, `ledger`) still
     // resolve. Every root singleton a delegate reaches gets a handle for that
     // reason.
     readonly property var liveryRef: livery
     readonly property var bridgeRef: bridge
     readonly property var stagingRef: stagingEngine
+
+    // ── The component gate (slots.md, CONTRACTS.md §4 components.json) ────
+    // Which component slots this host filled, read once from the
+    // `components.json` the build writes beside this file. A component anchor
+    // below is instantiated only when `has(<slot>)`; an absent or unreadable
+    // file is the empty set, so nothing is instantiated (fail closed). The
+    // file is build data, rewritten only by a rebuild, so it is not watched.
+    property FileView componentsFile: FileView {
+        path: Quickshell.shellPath("components.json")
+        blockLoading: true
+        printErrors: false
+        onLoadFailed: console.warn("[aoide/shell] components.json unreadable: no component is instantiated")
+    }
+    readonly property var components: {
+        try {
+            var v = JSON.parse(componentsFile.text())
+            return (v && typeof v === "object" && !Array.isArray(v)) ? v : ({})
+        } catch (e) {
+            return ({})
+        }
+    }
+    function has(slot) {
+        return Object.prototype.hasOwnProperty.call(shellRoot.components, slot)
+    }
+
+    // A gated anchor's live body, or null while its component is not
+    // instantiated: what the bar and the wallpaper picker are handed.
+    readonly property var powermenuItem: powermenuGate.item ? powermenuGate.item.item : null
+    readonly property var dockItem: dockGate.item ? dockGate.item.body : null
+    readonly property var launcherItem: launcherGate.item ? launcherGate.item.item : null
 
     // ── Shared singletons (one instance for the whole session) ─────────────
     LiveryState { id: livery }
@@ -129,7 +162,7 @@ ShellRoot {
     // a single value on the song. Per-output DIFFERENT covers would need a
     // per-screen cover map in the livery schema; deliberately not invented here.
     Variants {
-        model: Quickshell.screens
+        model: shellRoot.has("wallpaper") ? Quickshell.screens : []
 
         PanelWindow {
             id: wallpaperWin
@@ -173,7 +206,7 @@ ShellRoot {
     // delegate is rebuilt from the new Quickshell.screens list and re-homes
     // itself. `screen: modelData` pins each instance to its own output.
     Variants {
-        model: Quickshell.screens
+        model: shellRoot.has("bar") ? Quickshell.screens : []
 
         PanelWindow {
             id: barWin
@@ -204,14 +237,12 @@ ShellRoot {
                 // anchor's own required stagingEngine above) because the loaded
                 // bar widget needs its own handle to resolve its embedded
                 // calendar WidgetSlot — two separate reads of the same
-                // singleton, not a conflict. `powermenu` is the powermenu
-                // slot's live item (declared below with the overlay surfaces —
-                // QML resolves id references regardless of order, the
-                // clipboard→launcher precedent).
+                // singleton, not a conflict. `powermenu` and `dock` are those
+                // slots' live items, null when the component is not selected.
                 extraProps: ({
                     shared: shared,
-                    powermenu: powermenuSlot.item,
-                    dock: dockSlot.item,
+                    powermenu: shellRoot.powermenuItem,
+                    dock: shellRoot.dockItem,
                     stagingEngine: shellRoot.stagingRef
                 })
             }
@@ -231,31 +262,48 @@ ShellRoot {
     // shortcut registered here, dispatching into whatever `.item` the slot
     // resolves — the same pattern SongSurfaces uses for a declared widget's
     // own shortcut.
-    SurfaceSlot {
-        id: dockSlot
-        slot: "dock"
-        livery: livery
-        bridge: bridge
-        stagingEngine: stagingEngine
-        // SurfaceSlot's fixed contract forwards only livery+bridge to the
-        // loaded body; `shared` and `stagingEngine` are threaded as extras
-        // because dock.qml's own embedded WidgetSlot gadgets (conductor,
-        // terminals, …) need both to resolve and render their own column —
-        // the same two-reads-of-one-singleton idiom barSlot uses above.
-        extraProps: ({ shared: shared, stagingEngine: stagingEngine })
-    }
-    GlobalShortcut {
-        appid: "aoide"
-        name: "dock"
-        description: "Summon the Aoide center-left codex dock"
-        onPressed: {
-            var item = dockSlot.item
-            if (item && item.toggle) item.toggle()
+    //
+    // Gated like every component anchor: the slot and its shortcut live in one
+    // Scope the gate creates only when `dock` is selected. Inside a gate the
+    // root ids `livery`/`bridge`/`stagingEngine` are shadowed by the anchor's
+    // own properties of those names (the delegate hazard above), so the
+    // anchor reads the root handles.
+    LazyLoader {
+        id: dockGate
+        active: shellRoot.has("dock")
+
+        Scope {
+            readonly property var body: dockSlot.item
+
+            SurfaceSlot {
+                id: dockSlot
+                slot: "dock"
+                livery: shellRoot.liveryRef
+                bridge: shellRoot.bridgeRef
+                stagingEngine: shellRoot.stagingRef
+                // SurfaceSlot's fixed contract forwards only livery+bridge to the
+                // loaded body; `shared` and `stagingEngine` are threaded as extras
+                // because dock.qml's own embedded WidgetSlot gadgets (conductor,
+                // terminals, …) need both to resolve and render their own column —
+                // the same two-reads-of-one-singleton idiom barSlot uses above.
+                extraProps: ({ shared: shared, stagingEngine: shellRoot.stagingRef })
+            }
+            GlobalShortcut {
+                appid: "aoide"
+                name: "dock"
+                description: "Summon the Aoide center-left codex dock"
+                onPressed: {
+                    var item = dockSlot.item
+                    if (item && item.toggle) item.toggle()
+                }
+            }
         }
     }
 
     // ── Overlay surfaces — each owns its own PanelWindow internally, wired
-    // to livery/bridge only. Hidden/dormant until summoned/triggered.
+    // to livery/bridge only. Hidden/dormant until summoned/triggered, and
+    // each behind its component's gate (`launcher`, `powermenu`, `wallpaper`
+    // for the picker, `switcher`, `notifications` for herald).
     //   - launcher (SurfaceSlot) : SUPER+Space launcher (bridge-toggled),
     //                              song/songbook/sonata/widgets/launcher.qml
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
@@ -282,30 +330,41 @@ ShellRoot {
     // live handle, resolved through the baseline chain (sonata is the
     // floor, so `.item` is only null if sonata itself somehow lacks the
     // file — shouldn't happen once these slots are populated).
-    SurfaceSlot {
-        id: powermenuSlot
-        slot: "powermenu"
-        livery: livery
-        bridge: bridge
-        stagingEngine: stagingEngine
+    LazyLoader {
+        id: powermenuGate
+        active: shellRoot.has("powermenu")
+
+        SurfaceSlot {
+            slot: "powermenu"
+            livery: shellRoot.liveryRef
+            bridge: shellRoot.bridgeRef
+            stagingEngine: shellRoot.stagingRef
+        }
     }
-    SurfaceSlot {
-        id: launcherSlot
-        slot: "launcher"
-        livery: livery
-        bridge: bridge
-        stagingEngine: stagingEngine
-        extraProps: ({ clipboard: clipboard, ledger: ledger })
+    LazyLoader {
+        id: launcherGate
+        active: shellRoot.has("launcher")
+
+        SurfaceSlot {
+            slot: "launcher"
+            livery: shellRoot.liveryRef
+            bridge: shellRoot.bridgeRef
+            stagingEngine: shellRoot.stagingRef
+            extraProps: ({ clipboard: clipboard, ledger: ledger })
+        }
     }
-    // herald: the notification popup (see the overlay-surfaces note above) —
-    // the slot's PanelWindow watches state/stage/herald.json and stays dormant
-    // while the ledger is empty.
-    SurfaceSlot {
-        id: heraldSlot
-        slot: "herald"
-        livery: livery
-        bridge: bridge
-        stagingEngine: stagingEngine
+    // herald: the notification popup (see the overlay-surfaces note above),
+    // the `notifications` component — the slot's PanelWindow watches
+    // state/stage/herald.json and stays dormant while the ledger is empty.
+    LazyLoader {
+        active: shellRoot.has("notifications")
+
+        SurfaceSlot {
+            slot: "herald"
+            livery: shellRoot.liveryRef
+            bridge: shellRoot.bridgeRef
+            stagingEngine: shellRoot.stagingRef
+        }
     }
     // The declared widget-type registry's runtime half (CONTRACTS.md §5;
     // aoide.arrangement.widgets, registry.json): hosts one SurfaceSlot per
@@ -318,36 +377,55 @@ ShellRoot {
         stagingEngine: stagingEngine
     }
     // aoide:wallpaper: the launcher's own Desktop Pictures when its body has
-    // `openPictures()`, else the plain picker (AoideWallpaperPicker.qml).
-    AoideWallpaperPicker { livery: livery; launcher: launcherSlot.item }
+    // `openPictures()` (null while `launcher` is not selected), else the plain
+    // picker (AoideWallpaperPicker.qml). Part of the `wallpaper` component.
+    LazyLoader {
+        active: shellRoot.has("wallpaper")
+
+        AoideWallpaperPicker {
+            livery: shellRoot.liveryRef
+            launcher: shellRoot.launcherItem
+        }
+    }
 
     // The session lock (LockHost.qml): one WlSessionLock + PamContext, the
     // active song's own `lockscreen.qml` face on every screen, and the floor
-    // field under it. `lyra lock` is its only entry (`ipc call lock lock`).
-    LockHost {
-        livery: livery
-        stagingEngine: stagingEngine
+    // field under it. `lyra lock` is its only entry (`ipc call lock lock`),
+    // so a host without the `lock` component has no `lock` IPC target.
+    LazyLoader {
+        active: shellRoot.has("lock")
+
+        LockHost {
+            livery: shellRoot.liveryRef
+            stagingEngine: shellRoot.stagingRef
+        }
     }
 
     // aoide:switcher: the one registration; it toggles whichever body the
     // `switcher` slot holds — the active song's widgets/switcher.qml, else
     // sonata's, else the plain AoideSwitcher below (the floor). Not bound
     // here: the venue binds a combo to it.
-    SurfaceSlot {
-        id: switcherSlot
-        slot: "switcher"
-        livery: livery
-        bridge: bridge
-        stagingEngine: stagingEngine
-        fallback: Component { AoideSwitcher {} }
-    }
-    GlobalShortcut {
-        appid: "aoide"
-        name: "switcher"
-        description: "Summon the Aoide window switcher"
-        onPressed: {
-            var item = switcherSlot.item
-            if (item && item.toggle) item.toggle()
+    LazyLoader {
+        active: shellRoot.has("switcher")
+
+        Scope {
+            SurfaceSlot {
+                id: switcherSlot
+                slot: "switcher"
+                livery: shellRoot.liveryRef
+                bridge: shellRoot.bridgeRef
+                stagingEngine: shellRoot.stagingRef
+                fallback: Component { AoideSwitcher {} }
+            }
+            GlobalShortcut {
+                appid: "aoide"
+                name: "switcher"
+                description: "Summon the Aoide window switcher"
+                onPressed: {
+                    var item = switcherSlot.item
+                    if (item && item.toggle) item.toggle()
+                }
+            }
         }
     }
 }

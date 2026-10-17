@@ -103,7 +103,12 @@ a config file). Paint-side — ships in `lyra`, not core.
   absent, unreadable, or EMPTY declaration (the lane publishes the file on
   every host, so every non-declaring song ships `{"surfaces": {}}`) means no
   expectation is declared and `shell_has_zero_layers` — the older total
-  `aoide-*` count — decides exactly as before. A total count cannot see a
+  `aoide-*` count — decides exactly as before. A declared set is first
+  intersected with the slots of `run/qml/components.json` (`CONTRACTS.md
+  §4`), because the shell instantiates only the selected components: a song
+  that declares a `dock` surface on a host without the dock component does
+  not report it lost. An absent or non-object `components.json` intersects
+  nothing. A total count cannot see a
   PARTIAL loss (the wallpaper recovering while the bar and dock stay bound
   to a dead output is the incident that motivated the declared set), and a
   declared set cannot exist on a host where another shell owns a surface,
