@@ -3,12 +3,12 @@
 **Song:** sonata
 **Read before:** writing any new `widgets/*.qml`, or redesigning an existing one.
 
-> **2026-08-16:** `widgets/notifications.qml` (the per-popup card cited
-> throughout as the stele exemplar) is retired — dunst owns notification
-> delivery now and the herald lives on as `widgets/herald-center.qml`, the
-> dock's notification center, which carries the SAME grammar (Tuscan stele, ❧
-> crown, rust signature). Read `herald-center.qml` wherever this file says
-> `notifications.qml`; the grammar analysis below stands unchanged.
+> `widgets/notifications.qml` (the per-popup card cited throughout as the stele
+> exemplar) is retired: dunst owns notification delivery, and the herald lives
+> on as `widgets/herald-center.qml`, the dock's notification center, which
+> carries the SAME grammar (Tuscan stele, ❧ crown, rust signature). Read
+> `herald-center.qml` wherever this file says `notifications.qml`; the grammar
+> analysis below stands unchanged.
 
 The other three files in this folder tell you what is *available*
 (`greek-grammar.md`), how the machinery *works* (`widget-structure.md`), and
@@ -121,8 +121,7 @@ ROLE doing a job once — aegean for an information layer, murex for one stele's
 signature, terracotta for one urgent state.
 
 `bar.qml` is the deliberate exception: its accent count nearly matches its ink
-count because khoa directed the window title and volume cell to be primary-hue
-ink. That is a documented direction in the file's own header, not a licence to
+count because the window title and volume cell are primary-hue ink by direction. That is a documented direction in the file's own header, not a licence to
 spread colour elsewhere.
 
 **The rule to author by:** decide up front which single element is the live/
@@ -207,8 +206,7 @@ tied to a live read — never free decoration (`kaomojiFor()` in
 ## 6. The two ways this goes wrong
 
 Both are documented failures, on this desktop, in one sitting: three separate
-redesigns of ONE bar popout (the system tray) were each rejected on sight by
-khoa on 2026-08-15, and the popout body was then removed from `bar.qml`
+redesigns of ONE bar popout (the system tray) were each rejected on sight, and the popout body was then removed from `bar.qml`
 entirely, leaving only the toggle and a comment. The three misses were not
 random — they were two failure modes, one of them twice.
 
@@ -236,7 +234,7 @@ frieze is two flat rules 4px apart.
   tell is that every one of them settles something and says what it cost —
   ORDER (no ornament frieze, and why that is the identity), SIGNATURE (the one
   accentSpread slot no other surface claims), CROWN (a stand-in where no clef
-  fits), NO ICONS (dated, dropped, with what replaced them). None of it argues
+  fits), NO ICONS (the icon row was dropped, with what replaced it). None of it argues
   that the concept is legitimate.
 - Never invent a second layout system. There is one: `Column`/`Row`/`Item`
   with explicit `width: parent.width` and anchors between siblings.
@@ -246,7 +244,7 @@ frieze is two flat rules 4px apart.
 *What it looked like, twice:* (i) bare SNI icons in a `Flow`, one 1px rule,
 one footnote that only appeared on hover; (ii) one row per item with an
 icon, a name, a dim detail line and a per-row rule.
-*Verdict:* "looks exactly like how it was" — and, asked directly, khoa chose
+*Verdict:* "looks exactly like how it was" — and, asked directly, the owner chose
 "too plain, needs real character". The third, richer attempt still drew
 "nothing like the other widgets on the system".
 
@@ -443,8 +441,7 @@ Song-side (`song/songbook/sonata/widgets/AudioColonnade.qml`), not the shell's
 QML — but it is the live precedent for **a bar popout body**, so a new
 popout should be read against it rather than against the bar itself.
 
-- Hosted BARE through `StelePopout` (khoa, 2026-07-31 standing direction: new
-  bar widgets converge their outer panel on the stele family, not
+- Hosted BARE through `StelePopout` (standing direction: new bar widgets converge their outer panel on the stele family, not
   `GadgetFrame` — wrapping a self-framed stele in a frame double-frames it).
 - Declares `width: 268` and `implicitHeight: stele.height + 5`; the host sizes
   itself from those two numbers.

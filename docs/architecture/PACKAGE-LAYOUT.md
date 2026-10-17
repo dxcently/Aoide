@@ -573,7 +573,7 @@ What a consumer's flake writes, in the shapes the outputs are:
 | consumer's reach-in (before) | replacement export | produced by |
 |---|---|---|
 | `inputs.aoide + "/modules/default.nix"` | `nixosModules.nucleus` + `nixosModules.<name>` per catalogue entry; `lib.catalogue` for bulk use | S10 |
-| five `song/songbook/*/rice.nix` | `lib.songbook.hook { registry }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `songbookRoot` when the host performs Aoide's songs | S8 (exported S10) |
+| five `song/songbook/*/rice.nix` | `lib.songbook.hook { registry }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `songbookRoot` when the host performs Aoide's songs. There is no shim for the removed `selectionModule`, `check` and `songModules` exports: a consumer takes the hook | S8 (exported S10) |
 | an `import` of `lib/pkgs.nix` for the overlay | `overlays.default` | S10 |
 | `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.lyra`, `.lyra-shell`, `.lyra-songbook`) | exists / S3 |
 | `import … "/lib/livery.nix"` `.resolve` | `lib.livery.resolve` | S10 |

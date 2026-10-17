@@ -1,292 +1,167 @@
 // CalendarStele.qml — sonata/Greek-marble "calendar" flavor widget: the COMPOSITE
 // order carried on a PAPYRUS SCROLL — a self-framed stele that unrolls.
 //
-// khoa, 2026-08-15 (round seven): the nav row was over-subscribed and the
-// expanded year was under-sized — the mode control moves to a band that
-// fits it, and the year's mini-grids grow to the compact grid's own
-// proportions.
+// ── Two modes on one sheet ──────────────────────────────────────────────────
 //
-// ── Round-seven additions ───────────────────────────────────────────────
+// A compact month view and an expanded lunisolar year share one sheet. The
+// compact sheet is 256 wide; the expanded window is 615 × 784 and its body is
+// laid out on the same grid. The toggle morphs between them: both rollers
+// lengthen and the two body layers slide under the sheet's clip, so the change
+// reads as material feeding through the rolls, not a reflow.
 //
-// THE TOGGLE LEAVES THE NAV ROW (overturns round six's placement AND its
-// bracket-tag form; reason below). Measured on this font stack with
-// TextMetrics, not estimated — Noto Serif 14 DemiBold: "September" 76.95,
-// "November" 74.28, "December" 72.30; "2026" 31.63; "[ ἔτος ⌄ ]" 60.00 at
-// JetBrainsMono NF 10. The compact nav row is 232 wide (256 sheet − 2×12).
-// TEXT ALONE is 77 + 32 + 60 = 169 of that — 73% — leaving 63px for four
-// arrow wrappers and every gap between three groups. At the shipped sizes
-// monthCluster reached x≈111 while the parent-centered toggle spanned
-// 86–146: 25px of overlapping PAINT, and their MouseAreas (−3 on the name,
-// −5 on the toggle) overlapped by 33px, so a click near the seam was
-// ambiguous — the next-month ‹ was drawn entirely UNDER the toggle (live
-// capture). No arrangement of three groups clears 232: centered-in-the-gap
-// wants 76 and the gap is 55; tightening both clusters AND right-anchoring
-// the toggle still lands ~21px over. So the row now keeps only what it is
-// FOR — month paging left, year paging right, 55px of clear air between
-// them at the worst name — and the mode control takes the answer line's
-// void, which was 60% empty in compact and emptier still in the year.
+// The expanded year is the Attic civil calendar made layout. Its frame is the
+// solar year, 3×4 Gregorian month blocks, and its content is lunar. Each block
+// marks its computed noumenia day(s) with an aegean box (holoBlue, the
+// information role) and inscribes the Attic month that begins there. The labels
+// roll over at the real lunations, so Ποσειδεών β′ appears in embolismic years
+// and Ἑκατομβαιών lands mid-summer. The footer tally reads the Metonic position
+// ("meton N of 19 · 12/13 months"). The compact grid carries the same noumenia
+// box on its big cells.
+//   Moon arithmetic is mean-lunation (Meeus: JDE 2451550.09766 + 29.530588861k):
+//   day-level, within ±1 day of the true phase (11 of 12 lunations of 2026 exact).
+//   A rice widget, not an ephemeris. The solstice is approximated as June 21, and
+//   noumeniai are dated in UTC.
+//   The toggle is the ἔτος ⌄ / μήν ⌃ chip beside the answer line, or the bottom
+//   roller itself, the rod you pull to unroll more. A click on a month block in
+//   the expanded year jumps the compact view to that month.
 //
-// IT IS NOW A DRAWN CHIP, not a [ token ]. Right-anchored as bare text it
-// stacked under [ fasti ] as a second mono bracket label in the same hue
-// (captured, rejected); the fix is SHAPE, not another position — a 62×20
-// hairline box, radius 0, clay border 0.55 → 0.9 with a 0.16 clay fill on
-// hover: notifications.qml's action-button idiom. [ token ] stays the
-// grammar for a TAG (identity, no hit region); a control gets a pressable
-// edge. Cost: the answer line 12 → 20, so the chip's hit box (62×20,
-// MouseArea −5 → 72×30) is no smaller than the old bare text's 70×30 —
-// chromeH 148 → 156 with it, the ONE compact number this round moves, and
-// it moves for the hit target. The fixed chip width also means the
-// ἔτος/μήν swap no longer changes the control's footprint mid-morph.
+// ── Layout ──────────────────────────────────────────────────────────────────
 //
-// THE EXPANDED YEAR SCALES UP (by direction — "the indv months are too
-// small"). 7–8px type was below reading size. One coherent step, taken by
-// moving the mini grid ONTO the compact grid's proportions rather than
-// inventing new ones:
-//     cell 15×11 → 22×16     numeral 8 → 11      phase mark 7 → 8
-//     rail 12w/7px → 16w/9px                     block 124×97 → 177×137
-//     Gregorian 11 → 13      Attic 9 → 11        memento 8 → 10
-//     block gap 8 → 12       row gap 6 → 8       block inner spacing 2 → 3
-//     expandedSheetW 412 → 579      expandedBodyH 424 → 596
-//     expandedWinW  448 → 615       expandedWinH  586 → 784
-// 615×784 hangs off the clock cell well inside 1920×1080 against the bar's
-// 36px reserve (live-verified: layer surface at 40,40 measuring 621×792,
-// nothing clipped). Compact is untouched by this half — 256/130 stand.
+// The compact nav row is 232 wide (256 sheet − 2×12). It holds month paging on
+// the left and year paging on the right, with 55 px of clear air between them at
+// the widest month name. The toggle does not share that row; it is a drawn chip
+// in the answer line, 62×20, a hairline box with radius 0 and a clay border that
+// fills faintly on hover (notifications.qml's action-button idiom). A tag, such as
+// [ token ], marks identity and takes no hit region; a control has a pressable edge.
+// The chip's width is fixed, so the ἔτος/μήν swap does not move the footprint.
 //
-// NUMERALS RETURN TO CENTER (retires round four's left-anchoring, which was
-// forced by the 15×11 cell and is no longer true at 22×16). With an 8px
-// moon the mini cell is the compact 26×17 / 12 / 9 recipe to within a
-// pixel, and centering is precisely what makes a corner moon read: kept
-// left-anchored at the new width, the moon drifts to the middle of its own
-// cell and lands nearer the NEXT day's numeral than its own (captured, then
-// fixed). Round four's note is retired, not merely stale.
+// Expanded cells are 22×16, numerals 11, phase marks 8, the week rail 16 wide with
+// 9 px numerals, blocks 177×137, Gregorian month names 13, Attic names 11, the
+// memento 10, block gap 12, row gap 8 and block inner spacing 3. Numerals sit
+// CENTERED: at this size with an 8 px moon, centring keeps a corner moon nearer
+// its own numeral than the next day's.
 //
-// khoa, 2026-08-13 (round six, same day, retained): the chrome turns with the
-// material — controls that pointed sideways at a sheet that moves
-// vertically now point along the roll.
+// Sizing discipline: implicitWidth and implicitHeight are constants within a mode.
+// Paging never resizes the window, and the open-unfurl animates painted heights
+// only. The toggle is the one sanctioned window resize; it steps the window, and
+// every visible surface (sheet, rollers, content) animates as paint.
 //
-// ── Round-six additions ─────────────────────────────────────────────────
+// ── Paging and the grids ────────────────────────────────────────────────────
 //
-// GUILLEMETS ROTATED, NOT REPLACED. The nav arrows were ‹ ›/« » — designed
-// when paging swapped in place, horizontal glyphs over now-vertical
-// motion. Recon over the alternatives (all render-tested at size): native
-// serif wedges ˄ ˅ are modifier-letter small, superscript-floating — weak
-// targets; the CJK vertical forms ︿ ﹀ ︽ ︾ are the true vertical
-// guillemets but arrive sans-weight and full-width via Noto Sans CJK
-// fallback, overwhelming the serif line. So the SAME glyphs rotate 90°:
-// identical strokes, identical single=month/double=year and clay/hover
-// distinction, zero new fallback dependence — the guillemets simply
-// turned with the material. PREV POINTS UP (earlier days are wound into
-// the top roller — and wheel-up already pages backward), next points
-// down. Rotated Texts ride fixed wrapper Items, because a rotated Text's
-// layout box does not rotate with it.
+// Paging unscrolls. Every paging gesture (‹ ›, « », the three wheels, and the
+// month and year home-clicks) routes through page(delta), which turns the data
+// swap into material motion on the same body-layer slide the mode morph uses:
+// grabToImage snapshots the body's current face into pageGhost (one Image, with
+// no second model), the data swaps beneath it, and one pageShift slide moves the
+// ghost and the live layer in lockstep through bodyRegion's clip. Forward pulls
+// new days up from the bottom roll; backward rolls them down from the top. The
+// motion is 220 ms OutCubic and painted only; the window never moves. Re-paging
+// mid-slide swaps data under the running motion, so a fast wheel reads as fast
+// scrolling. Paging during a morph, or after a failed grab, falls back to an
+// instant swap. The expanded block-click keeps its direct jump, because the mode
+// morph is that transition's own motion.
 //
-// THE TOGGLE TAG HINTS ITS DIRECTION: [ ἔτος ⌄ ] unrolls downward,
-// [ μήν ⌃ ] rolls back up — mono wedges U+2303/2304, native in
-// JetBrainsMono NF. [ROUND SEVEN: the wedges and their direction hold, but
-// the tag left this row for the answer line and became a drawn chip — the
-// row could not hold three groups. See the round-seven block above.]
-// The bottom roller stays the wordless handle. The
-// rest of the chrome was audited and left alone: the wheels are
-// invisible, the block-click's motion is the mode morph, the tally's
-// "wound ±" is temporal not spatial, and the rollers/frieze/𝄂 are
-// physics and ornament, not controls.
+// The compact grid is Sunday-first, with an ISO 8601 week gutter. The Greek
+// weekday names are Sunday-first ordinals (Δευτέρα/Τρίτη/Τετάρτη/Πέμπτη are the
+// "2nd/3rd/4th/5th day", Κυριακή being day one), so a Monday-first grid would
+// contradict the letters heading it. Each row is numbered by its Thursday's ISO
+// week, which is self-consistent because ISO 8601 defines a week's number as its
+// Thursday's week. On a Sunday-first row that covers six of seven days, and only
+// the leading Sunday belongs to the prior ISO week. The numbers are dim caption
+// ink; the row holding today sits a step brighter.
 //
-// khoa, 2026-08-13 (round five, same day, retained): paging learns what
-// the toggle already knew — a scroll MOVES. Month and year paging now
-// unscroll vertically instead of swapping in place.
+// The expanded mini-grids carry the same week rail at mini scale, silenced by
+// opacity rather than `visible:` (the Row keeps its slot) on rows with no day of
+// the month. The memento mori row lives inside the expanded body layer, so it
+// exists only in the year. Its phrase sits in the answer-line italic at the lower
+// left, and the counter, "N days · M weeks left" in dim clay, answers it at the
+// lower right. The counter reads the real today (root.now, to Dec 31), not the
+// browsed year: a memento counts your days, not the scroll's. The closing 𝄂 rule
+// stays an empty stave, and the Metonic tally is unchanged.
 //
-// ── Round-five additions ────────────────────────────────────────────────
+// ── Phase marks ─────────────────────────────────────────────────────────────
 //
-// PAGING = UNSCROLLING. Every paging gesture (‹ ›, « », all three wheels,
-// the month/year home-clicks) routes through page(delta), which turns the
-// data swap into material motion on the SAME body-layer slide idiom as
-// the mode morph: grabToImage snapshots the body's current face into
-// pageGhost (one Image — no duplicated delegates, no second model), the
-// data swaps beneath it, and a single pageShift slide moves ghost and
-// live layer in lockstep through bodyRegion's clip — forward in time
-// pulls new days up from the bottom roll, backward rolls them down from
-// the top, matching the hung-rotulus physics of the open-unfurl. 220ms
-// OutCubic, painted motion only — the window never moves (sizing
-// discipline untouched). Re-paging mid-slide swaps data under the running
-// motion (a fast wheel reads as fast scrolling, never queues); paging
-// mid-morph or a failed grab degrades to the old instant swap. The
-// expanded block-click keeps its direct jump — the mode morph is that
-// transition's motion.
+// PHASE GLYPHS (U+1F311–1F318, EMOJI presentation) are a sanctioned colour
+// exception. The moon emoji are absent from all three declared faces (fc-list
+// verified), so bare they fall back to Noto Color Emoji, which is fixed-colour and
+// deaf to `color:`. The text presentation (+U+FE0E) resolves to DejaVu Sans
+// monochrome instead, which recolours in livery.* ink and stays legible at 9 px.
+// That monochrome set (aegean, ink-is-shadow polarity) is the documented fallback
+// should colour emoji ever leave the rig. The phase marks are the one glyph family
+// outside the livery.* roles, and the exception is scoped to that family.
 //
-// khoa, 2026-08-13 (round four, same day, retained): the expanded year
-// grows a spine and a memento — numerals return beside the moons, ISO
-// weeks rail every mini-grid, and the closing barline counts what
-// remains of the year.
+// EIGHTHS. monthPhases() divides each lunation at k + q/8, for q 0..7: new,
+// waxing crescent, first quarter, waxing gibbous, full, waning gibbous, last
+// quarter, waning crescent. It uses the same Meeus mean lattice, so q0 lands
+// exactly where the Attic months open. The honesty is the noumeniai's: the
+// intermediate eighths are midpoints of mean anomaly, not almanac events, and they
+// claim day-level accuracy only.
 //
-// ── Round-four additions ────────────────────────────────────────────────
+// PLACEMENT. A mark lands about every 3.7 days (roughly eight a month). In the
+// compact grid (26×17 cells) each phase day carries its emoji in the cell's
+// top-right corner, and the numeral keeps its role ink, since a tinted numeral
+// would drown the Sunday rubric. The noumenia is the new moon, so it gets no
+// separate box; its mark shows the phase. In the expanded mini-grids (22×16) the
+// emoji replaces the numeral on phase days, because corner marks do not fit at
+// that size, and the grid position still dates it. Today's laurel outranks a phase
+// mark in both modes.
 //
-// NUMERAL + MOON TOGETHER (expanded). Round three's replace-the-numeral
-// treatment is retired by direction: every mini-cell keeps its day number
-// and phase days carry the emoji as a 7px top-right corner mark — the
-// compact grid's almanac idiom at mini scale. At 15×11 the two only
-// coexist off-axis, so mini-grid numerals sit LEFT-ANCHORED (column
-// alignment held; a centered digit puts its shoulder under the moon).
-// [ROUND SEVEN: retired. The cell is 22×16 with an 8px moon now, and at
-// that size left-anchoring is what breaks the read — numerals are centered
-// again. See the round-seven block above.]
+// ── Composition ─────────────────────────────────────────────────────────────
 //
-// WEEK RAIL (expanded). Each month block gains the compact gutter's ISO
-// weeks — dim mono numerals down a 12px rail, numbered by each row's
-// Thursday (same Sunday-first apology as round two), silenced by opacity
-// (never `visible:` — the Row must hold the slot) on rows carrying no day
-// of the month. Costs width: expandedSheetW 390 → 412, block spacing
-// 14 → 8 — the one geometry move this round; the toggle still steps
-// between per-mode constants, discipline intact.
+// ORDER COMPOSITE: the volute order (voluta = "rolled", the scroll in stone).
+// SIGNATURE clay `livery.base09` is the RUBRIC, the red-ochre ink of the fasti.
+// base09 is also worn by AudioColonnade and UsageGadget, and that collision is
+// still open for adjudication. CROWN 𝄴, 24 px. KALENDAE at 15 px with loose
+// tracking, answered by a small italic ἡμερολόγιον (the AoidePanel bilingual
+// inscription idiom, AOIDE ⁄ ᾠδή). FRIEZE: a Vitruvian wave-scroll. RUBRIC: Sunday Κ
+// and the Sunday numerals in clay. LAUREL: today's cell only. Π, the order mark,
+// stays dormant, like Α Β Γ Δ Θ Ω before it.
 //
-// MEMENTO MORI (expanded only, by direction — the memento belongs to the
-// year laid out whole, not the working month). Two DISTINCT pieces, not a
-// sentence: the phrase "memento mori" in the ἡμερολόγιον answer-line
-// italic at the year's lower left, answered across the line by the
-// counter — "N days · M weeks left", mono figures in dim clay — at the
-// lower right. The row lives INSIDE the expanded body layer (not the
-// chrome), so it arrives and leaves with the year morph for free and
-// cannot exist in compact; expandedBodyH 406 → 424 pays for it. Counted
-// from the REAL today (root.now → Dec 31), not the browsed year — a
-// memento reads your days, not the scroll's. The closing 𝄂 rule stays an
-// empty stave; the Metonic tally stays untouched.
+// The rollers carry an UMBILICUS, the axle rod and end knob (cornua) that a real
+// scroll is wound onto, protruding past the spiral ends. The chrome turns with the
+// material: the guillemets are rotated, not replaced. Earlier days are wound into
+// the top roller and wheel-up pages backward, so the prev arrow points up and the
+// next arrow points down. The ‹ › glyphs and their rotated copies ride fixed wrapper
+// Items, because a rotated Text's layout box does not rotate with it. The ἔτος ⌄
+// and μήν ⌃ wedges (U+2303/2304, native in JetBrainsMono NF) point the way the
+// material will go. The bottom roller stays the wordless handle. The wheels are
+// invisible, the block-click's motion is the mode morph, the tally's "wound ±"
+// is temporal rather than spatial, and the rollers and frieze are physics and
+// ornament, not controls.
 //
-// khoa, 2026-08-13 (round three, same day, retained): the moon appears — all
-// EIGHT phases, drawn from the SAME mean-lunation lattice the Attic year
-// already runs on, inscribed as the real color moon-phase emoji.
+// ── Surface and host ────────────────────────────────────────────────────────
 //
-// ── Round-three additions ───────────────────────────────────────────────
+// A self-framed stele, hosted bare through StelePopout, with no GadgetFrame. Under
+// a GadgetFrame the surface had two captions and two closures, and the glass lost
+// the numerals over dark windows. The injected-prop contract is `livery` and
+// `bridge` (bridge unused). Qt's Window.visible attached never flips under
+// quickshell's proxy windows, so QsWindow.window.visible is the real open and
+// close edge. The popout sits on its own layer surface, in the "aoide-calendar"
+// layer namespace, which escapes aoide-bar's blur_popups rule. The host's left pin
+// (StelePopout anchorEdges and anchorGravity, set by AoideBar) keeps the popup in
+// place through the two window steps.
 //
-// PHASE GLYPHS (U+1F311–1F318, EMOJI presentation — a SANCTIONED COLOR
-// EXCEPTION). The first pass chose text presentation (+U+FE0E): the moon
-// emoji are absent from all three declared faces (fc-list verified), bare
-// they fall back to Noto Color Emoji — fixed-color, deaf to `color:` —
-// while FE0E resolves them to DejaVu Sans monochrome, which recolors in
-// livery.* ink and stays legible at 9px (all render-verified side-by-side,
-// including against ●◐○◑ and the Nerd Font PUA weather moons). The owner
-// then overrode, explicitly: real emoji. So the phase marks are the ONE
-// glyph family wearing fixed color outside the livery.* roles — scoped
-// strictly to this family, everything else on the sheet still inks from
-// livery.*. Should color emoji ever leave the rig, the FE0E monochrome set
-// (aegean, ink-is-shadow polarity) is the documented fallback.
+// The sheet is fully opaque papyrus: a flat paletteBg fill, matching every other
+// stele in the family. The day grid's numerals must not compete with whatever sits
+// behind the popup. The cast shadow is drawn as the visible L only (the right and
+// bottom strips), so it never tints the sheet's transparent surroundings.
 //
-// EIGHTHS. monthPhases() divides each lunation at k + q/8, q 0..7 — new,
-// waxing crescent, first quarter, waxing gibbous, full, waning gibbous,
-// last quarter, waning crescent — the same Meeus mean lattice, so q0
-// still lands exactly where the Attic months open, and the same ±1-day
-// honesty as the noumeniai (the intermediate eighths are midpoints of
-// mean anomaly, not almanac events; day-level is all they claim).
-//
-// PLACEMENT. A mark lands roughly every 3.7 days (~8 a month). Compact
-// grid (26×17 cells): every phase day carries the emoji in the cell's
-// top-right corner; the numeral KEEPS its role ink — with 8 phases a
-// tinted numeral would drown the Sunday rubric, the emoji alone is the
-// mark, and the round-two noumenia box stays retired (noumenia IS the new
-// moon; the mark now shows the phase). Expanded mini-grids (15×11 cells):
-// the emoji REPLACES the numeral on phase days (grid position still dates
-// it; corner marks don't fit at that size). Today's laurel outranks a
-// phase mark in both modes, as it outranked the box.
-//
-// khoa, 2026-08-13 (round two, same day, retained): the scroll learns to unroll FURTHER —
-// a compact month view and an expanded LUNISOLAR year view share one sheet.
-// Round-one architecture unchanged: self-framed stele hosted bare via
-// StelePopout (the 2026-07-31 standing direction; GadgetFrame's bay retired
-// for this popout, Π order-mark dormant like Α Β Γ Δ Θ Ω before it).
-//
-// The order (held; see round-one header block below for the full account):
-//   · ORDER COMPOSITE — the volute order; voluta = "rolled", the scroll in
-//     stone. · SIGNATURE clay `livery.base09` as the RUBRIC (red-ochre ink of
-//     the fasti; the "unclaimed slot" claim stays DEAD — AudioColonnade and
-//     UsageGadget also wear base09, collision still open for adjudication).
-//     · CROWN 𝄴. · FRIEZE Vitruvian wave-scroll. · RUBRIC Sunday Κ + Sunday
-//     numerals in clay. · LAUREL today's cell only.
-//
-// ── Round-two additions ─────────────────────────────────────────────────
-//
-// WEEK NUMBERS (compact grid gutter). ISO 8601 numbering — BUT the grid stays
-// Sunday-first: the Greek weekday names themselves are Sunday-first ordinals
-// (Δευτέρα/Τρίτη/Τετάρτη/Πέμπτη = "2nd/3rd/4th/5th day", Κυριακή being day
-// one), so a Monday-first grid would contradict the very letters heading it.
-// Each row is numbered by its THURSDAY's ISO week — self-consistent, since
-// ISO 8601 defines a week's number AS its Thursday's week; on a Sunday-first
-// row that covers 6 of 7 days (only the leading Sunday belongs to the prior
-// ISO week). Dim caption ink; the row holding today sits a step brighter.
-//
-// GRANDER. Larger stele (sheet 244→256 wide, day cells 24×16→26×17, margins
-// 12), crown 𝄴 grown to 24px, KALENDAE at 15px/looser tracking answered by a
-// small italic ἡμερολόγιον (the AoidePanel "AOIDE ⁄ ᾠδή" bilingual-inscription
-// idiom), and the rollers gain their UMBILICUS: the axle rod + end knob
-// (cornua) real scrolls wound onto, protruding past the spiral ends.
-//
-// THE EXPANDED LUNISOLAR YEAR (toggle). The Attic civil calendar was
-// lunisolar: 12 lunar months beginning at each noumenia (new-moon day), the
-// year opening at the first new moon after the summer solstice, kept against
-// the sun by intercalating a second Poseideon (Ποσειδεών β′) in embolismic
-// years — regularized by Meton of Athens' 19-year cycle (432 BC), whose
-// "golden number" survives in the computus. The expanded sheet is that
-// structure made layout: a SOLAR frame (3×4 Gregorian month blocks) carrying
-// LUNAR content — each block marks its computed noumenia day(s) with an
-// aegean box (holoBlue = the information role; the moon over the Aegean) and
-// inscribes the Attic month that BEGINS there (computed, not decorative: the
-// labels roll over at the real lunations, Ποσειδεών β′ appears of its own
-// accord in embolismic years, and Ἑκατομβαιών lands mid-summer). The footer
-// tally reads the Metonic position ("meton N of 19 · 12/13 months").
-// Compact mode carries the same noumenia box on its big grid.
-//   Moon arithmetic is MEAN-LUNATION (Meeus: JDE 2451550.09766 + 29.530588861k)
-//   — day-level, ±1 day vs true phase (verified against the 2026 lunations:
-//   11 of 12 exact, Aug one day late). A rice widget, not an ephemeris.
-//   Solstice approximated June 21. Noumenia dated in UTC.
-//   Toggle affordances: the [ ἔτος ]/[ μήν ] tag centered in the nav row, or
-//   grab the BOTTOM ROLLER itself (the rod you'd pull to unroll more).
-//   Clicking a month block in the expanded year jumps the compact view to it.
+// ── The morph and the window ────────────────────────────────────────────────
 //
 // BOTH ROLLERS ANIMATE on the toggle, and the content moves with them. One
-// `modeFrac` drives the whole morph through the SAME pipeline as the open-
-// unfurl: sheet width and target height interpolate (both rollers visibly
-// lengthen; the bottom one travels), and the two body layers slide/fade
-// under the sheet's clip — compact rising into the top roll as the year
-// unrolls in beneath it, reversed on re-roll — so it reads as material
-// feeding through the rolls, not a panel resize. The open-unfurl itself is
-// unchanged (top pinned under the bar, bottom unrolls — a hung rotulus).
+// `modeFrac` drives the whole morph through the same pipeline as the open-unfurl:
+// the sheet's width and target height interpolate, the bottom roller travels, and
+// the two body layers slide and fade under the sheet's clip. Compact rises into
+// the top roll while the year unrolls beneath it, and the motion reverses on
+// re-roll. The open-unfurl pins the top under the bar and unrolls the bottom, a
+// hung rotulus.
 //
-// ── Sizing discipline (amended, deliberately) ───────────────────────────
-// implicitWidth/implicitHeight are constants WITHIN a mode — month/year
-// paging never resizes the window, and the open-unfurl animates painted
-// heights only. The compact↔expanded toggle is the one sanctioned window
-// resize, and it STEPS rather than animates the window while every visible
-// surface (sheet, rollers, content) animates as paint. SteleLayerPopout
-// tracks the stepped implicit sizes through its live bindings (body.width/
-// implicitHeight via WidgetSlot).
-//
-// khoa, 2026-08-16 — THE 300ms resizeGuard IS RETIRED, and the morph now
-// runs on the shared MorphState (same-dir helper). The guard was written against a
-// recorded Hyprland behaviour — an xdg_popup re-mapped on the first resize
-// of a visible popup, playing its popup animation (~0.25s vanish/fade) over
-// the remap. Two things have changed under it. This popout has not been an
-// xdg_popup since 2026-08-13 (it moved to its own layer surface for the
-// crisp day grid), and layer surfaces are anchored, not re-mapped. And the
-// behaviour itself no longer reproduces: burst-captured live at ~60ms/frame
-// on Hyprland 0.56.0, this scroll expanded and collapsed with the surface
-// never leaving `hyprctl layers`, its x/y pinned at 31,26 through a 298→621
-// step, and every frame fully painted; the same probe run on a real
-// xdg_popup (AudioColonnade) resized 8 times in 120 frames with ZERO absent
-// frames. See MorphState.qml's header for the full capture.
-// What survives the guard is the ORDER, and for a different reason —
-// window OUT first, window IN last keeps the surface ≥ the paint at every
-// instant, so the sheet's own border and cast shadow are never clipped
-// mid-morph. That order is now the primitive's stepOut/stepIn hooks; the
-// dead 300ms interval is gone, so expanding is that much quicker.
-//
-// khoa, 2026-08-13 (round one, retained): self-framed stele per StelePopout's
-// standing direction after live recon confirmed genuine double-framing under
-// GadgetFrame (two captions, two closures, glass losing the numerals over
-// dark windows). Fixed injected-prop contract: `livery` + `bridge` only
-// (bridge unused). Qt's Window.visible attached NEVER flips under
-// quickshell's proxy windows (verified); QsWindow.window.visible is the real
-// open/close edge. [2026-08-14: greek-grammar.md's §4 widget-by-widget map
-// was cut outright in a retcon pass — there's no longer a shared section to
-// carry the Composite/scroll row or the lunisolar expansion into; this
-// header is this widget's design record now. The Π dormancy this note
-// flagged is folded into greek-grammar.md §1 as part of that same pass.]
+// The window steps and never animates per frame. The morph runs on the shared
+// MorphState (a same-directory helper, whose header holds the capture). The window
+// goes OUT first on expand and IN last on collapse, so the surface is never smaller
+// than the paint, and the sheet's border and cast shadow are never clipped mid-morph.
+// No timed resize guard is needed: a layer surface is anchored, not re-mapped, so a
+// resize does not replay a popup animation.
 
 import QtQuick
 import Quickshell   // QsWindow attached — the open/close edge (see header)
@@ -311,8 +186,7 @@ Item {
 
     // ── Mode: compact month ↔ expanded lunisolar year ────────────────────
     // The state, the 0→1 clock and the ORDER around the window step all live
-    // in the shared MorphState (same-dir helper; see its header for the capture
-    // that retired this file's 300ms resizeGuard). What stays here is the one
+    // in the shared MorphState (same-dir helper; see its header for the capture). What stays here is the one
     // thing the primitive deliberately does not own: HOW this surface changes
     // size. The scroll steps its own winW/winH — window out first on expand,
     // window in last on collapse — so the painted sheet always has a surface
@@ -381,7 +255,7 @@ Item {
     }
 
     // ── Paging state — months are the unit; a year page is ±12 ───────────
-    // Paging UNSCROLLS (round-five note): page() grabs the body's current
+    // Paging unscrolls: page() grabs the body's current
     // face into pageGhost, swaps the data, then one pageShift slide moves
     // ghost and live layer together through bodyRegion's clip — forward
     // pulls new days up from the bottom roll, backward rolls them down
@@ -552,12 +426,9 @@ Item {
     }
 
     // ── Cast shadow — shared stele idiom; rides the reveal edge. Drawn as
-    // the visible L only (right + bottom strips), NOT the old full shifted
-    // rect: that rect underlapped the whole sheet, and now that the sheet
-    // carries a transparent window over the day grid, an underlapping
-    // shadow would tint the window's clear view of the desktop (khoa,
-    // 2026-08-13, the opacity correction pass). Union is pixel-identical
-    // to what the old rect showed around an opaque sheet ─────────────────
+    // the visible L only (right + bottom strips). A full shifted rect would
+    // underlap the whole sheet, and the window's clear area would show it
+    // through the transparent surroundings, tinting the desktop ───────────────
     Rectangle {   // right strip
         x: sheet.x + sheet.width
         y: sheet.y + 5
@@ -575,15 +446,7 @@ Item {
         color: root.withA(root.ink, 0.22)
     }
 
-    // ── The sheet — fully opaque papyrus again (khoa, 2026-08-13, second
-    // correction the same day: the transparent window over bodyRegion made
-    // the day-grid numerals compete with whatever sat behind the popup —
-    // live read was "the middle section where the numbers are should be
-    // opaque". Back to a flat paletteBg fill, matching every other stele in
-    // this family. The SteleLayerPopout hosting change (its own
-    // "aoide-calendar" layer namespace, escaping aoide-bar's blur_popups
-    // rule) stays — that was a real fix independent of this fill question,
-    // it just no longer has anything to prove through a hole) ────────────
+    // ── The sheet — fully opaque papyrus: a flat paletteBg fill, matching every other stele in this family (see the header, "Surface and host") ──────────────
     Rectangle {
         id: sheet
         x: root.protrusion
@@ -646,7 +509,7 @@ Item {
 
             // ── The answer line — AoidePanel's bilingual-inscription idiom
             // (AOIDE ⁄ ᾠδή): the carved Latin name answered in small Greek —
-            // and, since round seven, the MODE LINE: the inscription names
+            // and the MODE LINE: the inscription names
             // the sheet, the toggle names which sheet you are looking at ──
             Item {
                 width: parent.width
@@ -740,7 +603,7 @@ Item {
                 width: parent.width
                 height: 20
 
-                // The guillemets TURNED WITH THE MATERIAL (round-six note):
+                // The guillemets turn with the material:
                 // prev points UP the roll (earlier days wound in the top
                 // roller), next points DOWN. Rotated Texts ride wrapper
                 // Items — a rotated Text's layout box does not rotate.
@@ -894,7 +757,7 @@ Item {
 
                 // the outgoing sheet face — a one-frame grab that slides
                 // out in lockstep with the live layer sliding in, so the
-                // page turn reads as continuous material (round-five note)
+                // page turn reads as continuous material
                 Image {
                     id: pageGhost
                     x: 0
@@ -1150,14 +1013,7 @@ Item {
                                                             height: 16
                                                             radius: 0
                                                             color: isToday ? root.livery.paletteHot : "transparent"
-                                                            // numeral CENTERED — round four's
-                                                            // left-anchoring was forced by the old
-                                                            // 15×11 cell; at 22×16 with an 8px moon
-                                                            // this is the compact grid's proven
-                                                            // proportion (26×17 / 12 / 9), and
-                                                            // centering is what keeps a corner moon
-                                                            // nearer its OWN numeral than the next
-                                                            // one's (round-seven header note)
+                                                            // numeral CENTERED: at 22×16 with an 8px moon this is the compact grid's proportion (26×17 / 12 / 9), and centering keeps a corner moon nearer its OWN numeral than the next one's
                                                             Text {
                                                                 anchors.centerIn: parent
                                                                 text: parent.inMonth ? parent.dayN : ""
@@ -1205,10 +1061,7 @@ Item {
                         }
                     }
 
-                    // ── memento mori — two pieces, phrase answered by
-                    // counter across the year's last line (round-four
-                    // header note); lives in this body layer, so it can
-                    // only ever exist in the expanded year ──────────────
+                    // ── memento mori — two pieces, phrase answered by counter across the year's last line; lives in this body layer, so it can only ever exist in the expanded year ──────────────
                     Item {
                         width: 3 * 177 + 2 * 12  // the block rows' width — not
                                                  // parent.width (binding loop:

@@ -1,9 +1,11 @@
 # modules/dendrites/greeter.nix — the `greeter` slot's vibeos provider: the
 # display-manager greeter.
 #
-# It is the one vibeos provider that does not bring the vibeos runtime: it runs
-# in greetd, before any user session, on a store tree of its own, so it is
-# separable from the shell a session runs (`lyra/README.md`).
+# It is the one vibeos provider that does not bring the vibeos runtime. Every
+# other provider imports the runtime pair; this one runs in greetd before any
+# user session, as the greeter user under cage in its own process, on a store
+# tree of its own, so it cannot share the logged-in user's runtime import
+# (`lyra/README.md`).
 #
 # The login prompt, in one of two shapes chosen at build time by the DECLARED
 # song (`aoide.songbook.greeter`, the fact the selection hook derives):

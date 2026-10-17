@@ -79,9 +79,10 @@ one shell, one bridge, one deployed tree.
 | `wallpaper` | `../wallpaper/vibeos.nix` | `wallpaper` |
 | `greeter` | `../greeter.nix` | `greeter` |
 
-The greeter is separable: it runs in greetd, before any session, on a store
-tree of its own, so `greeter.nix` does NOT import the runtime and fills its
-slot on a host with no shell. A song with no greeter face gets `ly`.
+The greeter is the one exception to "a vibeos provider imports the runtime":
+it runs in greetd, before any session, as the greeter user under cage in its
+own process on a store tree of its own, so `greeter.nix` does NOT import the
+runtime and fills its slot on a host with no shell. A song with no greeter face gets `ly`.
 
 The surfaces no slot answers for — `osd`, `agentWidgets`, `sessionGraph` —
 stay the runtime's own. `runtime.nix` publishes the filled slots as
