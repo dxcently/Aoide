@@ -93,7 +93,11 @@ Glass is a frame, content is a plate, light comes from above.
   a chevron. The menu: header `Rice · <song> · <mode>`, songs with the
   current one ticked (staged / declared tags), `Back to declarative ·
   <declared>`, drafts of the current song, `+ New draft`, `Save current as
-  draft`.
+  draft`, `Declare`. Declare is greyed while a draft is staged or the staged
+  song is already the declared one; it asks in a Platinum alert (Cancel the
+  default, Return and Escape cancel) and then rewrites the host config's
+  declared-song line, for the next rebuild. Its balloon says Declared, Not
+  declared with the refusal, or No answer yet when the bridge timed out.
 - **Tray flyouts**: the Win7 narrow volume flyout (device, slider, percent,
   mute, `Mixer` footer), the network flyout from its tray icon, and the
   calendar flyout from the clock (month grid, today ringed, an analogue

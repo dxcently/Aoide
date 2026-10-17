@@ -1282,6 +1282,8 @@ Item {
         WlrLayershell.layer: WlrLayer.Top
         WlrLayershell.namespace: "aoide-bar"
 
+        Declare { id: declare; bridge: root.bridge; screen: win.screen; anchorItem: orb }
+
         property var model: ({ rows: [], drawers: [], lists: {} })
         property var lists: ({})
         property string sig: ""
@@ -2420,7 +2422,8 @@ Item {
                     readonly property var draftRows: sm.ricePending || !Rice.ready(sm.riceAnswer) ? [] : [{
                         head: "drafts" + (sm.riceAnswer.draftsSong ? " · " + sm.riceAnswer.draftsSong : ""),
                         label: "", mark: "", live: false, kind: "", name: "", here: false
-                    }].concat(Rice.draftRows(sm.riceAnswer), [Rice.newDraft(), Rice.saveDraft(root.livery.riceMode)])
+                    }].concat(Rice.draftRows(sm.riceAnswer), [Rice.newDraft(), Rice.saveDraft(root.livery.riceMode),
+                        Rice.declareRow(sm.riceAnswer, root.livery.riceMode, !!root.bridge && typeof root.bridge.riceDeclare === "function")])
                     function stage() {
                         sm.powerOpen = false
                         sm.ctxRow = null
@@ -2434,7 +2437,8 @@ Item {
                         root.bridge.riceMenu(function (a) { if (ask === sm.riceAsked) sm.riceAnswer = a })
                     }
                     function rice(row) {
-                        if (Rice.act(root.bridge, row)) sm.ricePending = true
+                        if (row.kind === "declare") declare.ask(row, sm.riceAnswer)
+                        else if (Rice.act(root.bridge, row)) sm.ricePending = true
                         root.flyout = ""
                     }
                     property var ctxRow: null
