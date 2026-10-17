@@ -2441,17 +2441,19 @@ the behaviour). It is a SYMLINK, and only its target changes:
   `lyraRice`): it points at the declared twin, below. Linked again on every
   activation only when it is absent or already names the twin, so a staged
   link survives a rebuild (house rule 10).
-- Retargeted by `rice stage` and its siblings (`rice mode stage`, `rice mode
-  declarative`, `lyra reload`) to the song's own runtime `hyprland.conf`, or to
-  `song/stage/empty-hyprland.conf` when that song ships none. Never removed
-  first: the retarget is a temp symlink renamed over the link, so Hyprland
-  reads the old target or the new, never no file.
+- Retargeted by `rice stage` and `rice mode stage`, and by `lyra reload` in
+  staging or draft, to the song's own runtime `hyprland.conf`, or to
+  `song/stage/empty-hyprland.conf` when that song ships none. `rice mode
+  declarative` retargets to the declared twin instead, and `lyra reload` in
+  declarative mode retargets nothing. Never removed first: the retarget is a
+  temp symlink renamed over the link, so Hyprland reads the old target or the
+  new, never no file.
 - `$HOME`, not `$XDG_STATE_HOME`: the Nix side hardcodes the path.
 
 Reader: Hyprland, at config load and on `hyprctl reload config-only`. The
-declarative reload arm (`lyra reload` in declarative mode) asks for that reload
-explicitly, because a retargeted link's new target is not guaranteed to be
-followed by Hyprland's own file watcher.
+reload arms (`lyra reload` in either mode) ask for that reload explicitly,
+because a retargeted link's new target is not guaranteed to be followed by
+Hyprland's own file watcher.
 
 ### `song/declared/rice.conf` — **v0** (the declared twin of the rice)
 
