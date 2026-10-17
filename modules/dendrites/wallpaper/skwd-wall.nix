@@ -97,8 +97,17 @@ let
   '';
 in
 {
+  # The shell's picker and its `aoide-wallpaper` layer stay: this provider
+  # brings the vibeos runtime by path, as the `vibeos` one does.
+  imports = [ ../lyra/runtime.nix ];
+
   config = lib.mkMerge [
-    { aoide.wallpaper.provider = lib.mkDefault "skwd-wall"; }
+    {
+      habit.home.imports = [ ../lyra/runtime-home.nix ];
+      aoide.components.wallpaper.provider = "skwd-wall";
+      aoide.surfaces.wallpaper.owner = "quickshell";
+      aoide.wallpaper.provider = lib.mkDefault "skwd-wall";
+    }
     (lib.mkIf (config.aoide.wallpaper.provider == "skwd-wall") {
 
       # ── The engine's packages ──────────────────────────────────────────────

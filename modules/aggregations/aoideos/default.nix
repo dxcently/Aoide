@@ -19,24 +19,43 @@
 # than reaching for a separate `dendrites.compositor.provider` line — and the
 # same for the WALLPAPER SETTER it paints picks with
 # (`aggregation.aoideos.wallpaper.provider = "skwd-wall"`), whose default here
-# is the shell's own layer. mkDefault: a host naming a provider still wins.
+# is the shell's own layer, and for every component slot: all ten are filled
+# by their `vibeos` provider, the Quickshell component on aoide's bridges.
+# mkDefault: a host naming a provider still wins.
 {
-  description = "The AoideOS desktop: compositor, greeter, theme, shell, wallpaper setter, and the committed songs.";
+  description = "The AoideOS desktop: compositor, theme, shell, its ten vibeos components (bar to greeter), and the committed songs.";
 
   system = {
     members = [
       "compositor"
-      "greeter"
       "hyprland"
       "quickshell"
       "lyra"
       "stylix"
+      "bar"
+      "launcher"
+      "powermenu"
+      "notifications"
       "wallpaper"
+      "dock"
+      "calendar"
+      "switcher"
+      "lock"
+      "greeter"
     ];
 
     providers = {
       compositor = "hyprland";
-      wallpaper = "quickshell";
+      bar = "vibeos";
+      launcher = "vibeos";
+      powermenu = "vibeos";
+      notifications = "vibeos";
+      wallpaper = "vibeos";
+      dock = "vibeos";
+      calendar = "vibeos";
+      switcher = "vibeos";
+      lock = "vibeos";
+      greeter = "vibeos";
     };
   };
 }

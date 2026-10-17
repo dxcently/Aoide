@@ -107,7 +107,10 @@ let
       enable = true;
       provider = "hyprland";
     };
-    habit.dendrites.greeter.enable = true;
+    habit.dendrites.greeter = {
+      enable = true;
+      provider = "vibeos";
+    };
 
     # The nucleus aggregation's core services, named one by one: the aggregation's
     # command-line members are trimmed with the rest of the desktop. The secrets

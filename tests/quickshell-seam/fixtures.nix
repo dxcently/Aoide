@@ -2,7 +2,7 @@
 # run.sh checks them against.
 #
 # Everything under test is read out of `${flake}`: the constructor, the
-# catalogue, nucleus and the three host modules all come from the ref's own
+# catalogue, nucleus and the four host modules all come from the ref's own
 # source, so a flakeref really freezes the tree. (A fixture imported from the
 # working directory would keep testing the tree you are standing in, whatever
 # ref was passed — a frozen ref has to name the commit whose files get read, or
@@ -32,28 +32,41 @@ let
     username = "khoa";
   };
 
-  host =
-    name:
-    (composition.mkNixosHost {
-      inherit (inputs) nixpkgs;
-      hostName = name;
-      registry = import (src + "/modules");
-      host = src + "/tests/quickshell-seam/hosts/${name}.nix";
-      homeManagerModule = inputs.home-manager.nixosModules.home-manager;
-      specialArgs = {
-        username = "khoa";
-      };
-      # `mkNixosHost` hands `system` to the modules but not to `nixosSystem`
-      # itself, so a constructor-built host states its platform in its own
-      # module; this harness supplies it here rather than inventing one in the
-      # fixtures.
-      extraModules = [
-        aoideos.nucleusModule
-        { nixpkgs.hostPlatform = system; }
-      ];
-      knownHosts = [ name ];
-      inherit system;
-    }).system;
+  # The module argument a real host's song hook hands in (`lib/aoideos.nix`'s
+  # `mkHost`), for the fixture whose lanes read one: the vibeos runtime reads
+  # the songbook it paints from. No song is selected, so the song facts keep
+  # their defaults and no `rice.nix` is imported.
+  songArgs = {
+    extraModulesFor = _: [ { _module.args.songbook = aoideos.songbookRoot; } ];
+  };
+
+  hostWith =
+    extra: name:
+    (composition.mkNixosHost (
+      {
+        inherit (inputs) nixpkgs;
+        hostName = name;
+        registry = import (src + "/modules");
+        host = src + "/tests/quickshell-seam/hosts/${name}.nix";
+        homeManagerModule = inputs.home-manager.nixosModules.home-manager;
+        specialArgs = {
+          username = "khoa";
+        };
+        # `mkNixosHost` hands `system` to the modules but not to `nixosSystem`
+        # itself, so a constructor-built host states its platform in its own
+        # module; this harness supplies it here rather than inventing one in the
+        # fixtures.
+        extraModules = [
+          aoideos.nucleusModule
+          { nixpkgs.hostPlatform = system; }
+        ];
+        knownHosts = [ name ];
+        inherit system;
+      }
+      // extra
+    )).system;
+
+  host = hostWith { };
 
   # What the seam is, in readings: which directory the shell runs, whether ONE
   # `aoide-quickshell` unit exists and what it says, and which of the things a
@@ -130,6 +143,33 @@ in
 {
   only = read "test-quickshell-only";
   bare = read "test-quickshell-bare";
+
+  # Two component slots, each bringing the vibeos runtime by path: what is read
+  # is that the runtime landed ONCE — one shell unit, one bridge, one home half
+  # (`aoide.lyra.home` declared by one file), an environment no second copy
+  # doubled — and that both components were recorded.
+  twoComponents =
+    let
+      two = hostWith songArgs "test-two-components";
+      cfg = two.config;
+      opts = two.options;
+      home = cfg.home-manager.users.${cfg.aoide.user};
+      userUnits = home.systemd.user.services or { };
+      env = userUnits.aoide-quickshell.Service.Environment or [ ];
+    in
+    {
+      shellUnits = builtins.length (
+        lib.filter (lib.hasInfix "quickshell") (builtins.attrNames userUnits)
+      );
+      bridgeUnits = builtins.length (
+        lib.filter (lib.hasInfix "shellbridge") (builtins.attrNames cfg.systemd.user.services)
+      );
+      envDuplicates = builtins.length env - builtins.length (lib.unique env);
+      homeDeclarations = builtins.length opts.aoide.lyra.home.declarations;
+      components = builtins.attrNames cfg.aoide.components;
+      lyra = cfg.aoide.lyra.enable;
+      quickshell = cfg.aoide.quickshell.enable;
+    };
 
   # The third eval — the one that must FAIL. Forcing the toplevel is what a
   # rebuild does, and `system.build.toplevel` is where nixpkgs runs the

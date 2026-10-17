@@ -27,7 +27,11 @@ aggregation is the part any host can.
   (`null` is the bare case: package installed, no shell service) — and
   `aoide.wallpaper.provider` (default `"quickshell"`), the one fact that names
   an ALTERNATIVE rather than a capability: which provider of the `wallpaper`
-  registry paints a song's wallpaper here. The dendrite that owns a fact sets it
+  registry paints a song's wallpaper here. Beside the facts it declares
+  `aoide.components` — `attrsOf { provider : str; actions : attrsOf (listOf
+  str) }`, keyed by component slot — which each slot's chosen provider writes
+  for itself; it is a contract option rather than the vibeos runtime's because
+  a consumer's own provider writes it on a host with no runtime. The dendrite that owns a fact sets it
   `true`. A host write that takes effect fails eval (`options.nix`'s `mkFact`:
   a plain or `mkForce` write, or any write with no owner selected); a
   `mkDefault` the owner outranks is dropped, not refused. Every reader — a member

@@ -25,8 +25,18 @@
     aoide-secrets = ./dendrites/aoide-secrets.nix;
     aoided = ./dendrites/aoided.nix;
     audio = ./dendrites/audio.nix;
+    # The component slots: a provider set written inline, one per component a
+    # desktop is made of. `vibeos` is the Quickshell component on aoide's
+    # bridges (`dendrites/lyra/README.md`); a consumer adds its own provider
+    # beside it. `greeter` and `wallpaper` below are slots too.
+    bar = {
+      providers.vibeos = ./dendrites/lyra/bar.nix;
+    };
     bash = ./dendrites/bash.nix;
     btop = ./dendrites/btop.nix;
+    calendar = {
+      providers.vibeos = ./dendrites/lyra/calendar.nix;
+    };
     claude-code = ./dendrites/claude-code.nix;
     cli = ./dendrites/cli.nix;
     clipboard = ./dendrites/clipboard.nix;
@@ -36,17 +46,28 @@
     # host-facing option.
     compositor = ./dendrites/compositor;
     devtools = ./dendrites/devtools.nix;
+    dock = {
+      providers.vibeos = ./dendrites/lyra/dock.nix;
+    };
     dunst = ./dendrites/dunst.nix;
     eidolon = ./dendrites/eidolon.nix;
     fastfetch = ./dendrites/fastfetch;
     firefox = ./dendrites/firefox.nix;
     fonts = ./dendrites/fonts.nix;
     git = ./dendrites/git.nix;
-    greeter = ./dendrites/greeter.nix;
+    greeter = {
+      providers.vibeos = ./dendrites/greeter.nix;
+    };
     hyprland = ./dendrites/compositor/hyprland/behaviour.nix;
     inference = ./dendrites/inference.nix;
     kimi-code = ./dendrites/kimi-code.nix;
     kitty = ./dendrites/kitty.nix;
+    launcher = {
+      providers.vibeos = ./dendrites/lyra/launcher.nix;
+    };
+    lock = {
+      providers.vibeos = ./dendrites/lyra/lock.nix;
+    };
     lyra = ./dendrites/lyra;
     mcfly = ./dendrites/mcfly.nix;
     melete = ./dendrites/melete.nix;
@@ -55,14 +76,23 @@
     neovim = ./dendrites/neovim.nix;
     networkmanager = ./dendrites/networkmanager.nix;
     nh = ./dendrites/nh.nix;
+    notifications = {
+      providers.vibeos = ./dendrites/lyra/notifications.nix;
+    };
     obsidian = ./dendrites/obsidian.nix;
     openai = ./dendrites/openai.nix;
     pi-coding-agent = ./dendrites/pi-coding-agent.nix;
+    powermenu = {
+      providers.vibeos = ./dendrites/lyra/powermenu.nix;
+    };
     qbittorrent = ./dendrites/qbittorrent.nix;
     quickshell = ./dendrites/quickshell;
     screenshot = ./dendrites/screenshot.nix;
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;
+    switcher = {
+      providers.vibeos = ./dendrites/lyra/switcher.nix;
+    };
     tailscale = ./dendrites/tailscale.nix;
     vision = ./dendrites/vision.nix;
     # The wallpaper capability: a provider registry, not a plain module. Its

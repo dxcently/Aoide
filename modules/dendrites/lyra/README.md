@@ -1,6 +1,7 @@
 # modules/dendrites/lyra
 
-The shell surface and the bridge that feeds it.
+The shell surface, the bridge that feeds it, and the `vibeos` component
+providers built on them.
 
 ```
 modules/dendrites/lyra/
@@ -10,7 +11,10 @@ modules/dendrites/lyra/
 │                      `aoide.lyra.home`
 ├── runtime-home.nix   the runtime's home half: the shell lane's home half
 │                      plus `aoide.lyra.home`, read through `osConfig`
-└── shellbridge.nix    the bidirectional bridge (socket + stage files)
+├── shellbridge.nix    the bidirectional bridge (socket + stage files)
+└── bar.nix  launcher.nix  powermenu.nix  notifications.nix
+    dock.nix calendar.nix  switcher.nix   lock.nix
+                       the `vibeos` provider of each component slot
 ```
 
 `default.nix` is `{ imports = [ ./runtime.nix ]; habit.home.imports =
@@ -18,17 +22,47 @@ modules/dendrites/lyra/
 key, so any lane that brings the runtime imports the same two paths and the
 host gets one of each (AGENTS.md).
 
+## The vibeos component providers
+
+A desktop is made of component slots, each a provider set in the catalogue
+(`bar = { providers.vibeos = ./dendrites/lyra/bar.nix; };`). The `vibeos`
+provider of a slot is that Quickshell component on the runtime's bridges: it
+imports the runtime pair by path, records itself in `aoide.components`, and
+declares the surface it owns. Two vibeos slots on one host share one runtime:
+one shell, one bridge, one deployed tree.
+
+| Slot | Provider file | `aoide.surfaces` owner it declares |
+|---|---|---|
+| `bar` | `bar.nix` | `bar` |
+| `launcher` | `launcher.nix` | `launcher` |
+| `powermenu` | `powermenu.nix` | — |
+| `notifications` | `notifications.nix` | `notifications` |
+| `dock` | `dock.nix` | — |
+| `calendar` | `calendar.nix` | — |
+| `switcher` | `switcher.nix` | — |
+| `lock` | `lock.nix` | `lockscreen`, plus the lockers and their PAM services (below) |
+| `wallpaper` | `../wallpaper/vibeos.nix` | `wallpaper` |
+| `greeter` | `../greeter.nix` | `greeter` |
+
+The greeter is separable: it runs in greetd, before any session, on a store
+tree of its own, so `greeter.nix` does NOT import the runtime and fills its
+slot on a host with no shell. A song with no greeter face gets `ly`.
+
+The surfaces no slot answers for — `osd`, `agentWidgets`, `sessionGraph` —
+stay the runtime's own. `runtime.nix` publishes the filled slots as
+`run/qml/components.json` (CONTRACTS.md §4), beside `shell.qml`.
+
 ## Named seams (what it exposes)
 
-- **`runtime.nix` — the paint lane.** Renders the complete Aoide shell surface
-  with Quickshell (bar, notifications, launcher, osd, lockscreen, wallpaper,
-  agentWidgets, sessionGraph), builds the config from `pkgs/lyra-shell`'s QML
+- **`runtime.nix` — the paint lane.** Renders the Aoide shell surface with
+  Quickshell, builds the config from `pkgs/lyra-shell`'s QML
   plus the widget bodies of the songs this host BUILT IN
   (`aoide.songbook.builtIn`, from its own record), and deploys it to
   `$AOIDE_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
   symlink tree: a deploy target the runtime writes into, never a source, so a
   switch reasserts the store over it). It declares
   the surfaces it owns in `aoide.surfaces` (stylix stands down for those),
+  publishes `aoide.components` as `components.json`,
   seeds the declared song into both stage twins, reasserts the paint on every
   activation, brings the staged or drafted song back (below), runs the
   healthcheck timer, and installs `pkgs.aoide.rice` — the lyra binary — as the
@@ -50,8 +84,8 @@ host gets one of each (AGENTS.md).
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Selecting the lane is the switch; it sets
   `aoide.lyra.enable` `true`.
-- **`runtime.nix` — the lock.** `lyra lock` is this lane's command, so the
-  lane installs both lockers it may run and their PAM services: `aoide-lock`
+- **`lock.nix` — the lock.** `lyra lock` runs one of two lockers, and the
+  `lock` slot's vibeos provider installs both and their PAM services: `aoide-lock`
   for the shell's `LockHost.qml` (a service of its own, not `login`'s
   session-and-tty stack, and a name a host can tune for the lock alone) and
   `hyprlock` for hyprlock, whose package goes in directly rather than through
@@ -124,7 +158,8 @@ fixtures; `pkgs/lyra-songbook` ships the built-in songs and their manifests.
 ## What it consumes
 
 Only the dress (`aoide.livery`), the structure (`aoide.arrangement`), the
-surface registry it declares into (`aoide.surfaces`), the core scalars
+surface registry it declares into (`aoide.surfaces`), the component slots it
+publishes (`aoide.components`), the core scalars
 (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
 `aoide.user`), the song
 selection (`aoide.song`), the derived fact
@@ -155,7 +190,7 @@ the dress; the kitty lane names only the path. The seed publishes
 `song/declared/hyprlock.conf` the same way: the declared song's lock-screen
 dress, rendered at build time by the lyra binary (`lyra livery emit hyprlock`)
 from the same venue-recoloured notes and the song's own `lockscreen.<ext>`,
-comments only when it ships none. hyprlock's config (the lock, above) sources it before
+comments only when it ships none. hyprlock's config (`lock.nix`, above) sources it before
 `song/stage/hyprlock.conf`, so a host that has never staged a song locks in the
 declared one.
 

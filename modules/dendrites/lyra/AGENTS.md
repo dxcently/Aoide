@@ -30,13 +30,26 @@ file covers only the lyra lane.
   imports `../quickshell/home.nix` beside `aoide.lyra.home`. `mkFact` accepts
   both facts because each is written from its owner's directory.
 
+- **A component provider writes only its own slot.** It sets
+  `aoide.components.<its slot>` and the surfaces that component owns, never
+  another slot's entry or a surface the runtime keeps (`osd`, `agentWidgets`,
+  `sessionGraph`). What the runtime always needs stays in `runtime.nix`: the
+  declared lock dress is staging data the seed writes atomically with the
+  rest, so it stays there while the lockers and PAM live in `lock.nix`.
+- **The greeter does not import the runtime.** It runs in greetd on its own
+  tree; importing the pair would put a session shell on a greeter-only host.
+
 ## Extension points
 
+- A new component is one provider file here plus one catalogue slot line
+  (`<slot> = { providers.vibeos = ./dendrites/lyra/<slot>.nix; };`), and the
+  file imports the runtime pair BY PATH, as above.
 - A new lane that needs the runtime imports the pair by path, as above.
 - A new unit or activation step of the runtime's home half goes in
   `aoide.lyra.home` in `runtime.nix`, not in a new `habit.home`.
 
 ## Docs in the same commit
 
-A change to what the runtime pair imports, sets or publishes updates this
-file, `README.md`, and CONTRACTS.md §0/§2 where they name it.
+A change to what the runtime pair imports, sets or publishes, or to which
+slot a provider here fills and what it owns, updates this file, `README.md`,
+and CONTRACTS.md §0/§2/§4 where they name it.

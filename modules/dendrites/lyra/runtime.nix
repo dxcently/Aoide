@@ -5,8 +5,9 @@
 # A plain module with no `habit` key, imported only BY PATH, with its home half
 # `runtime-home.nix` beside it (AGENTS.md): the home half is the internal
 # `aoide.lyra.home`, which that file imports into each user's home.
-# Surfaces owned: bar, notifications, launcher, osd, lockscreen, greeter,
-# wallpaper, agentWidgets, sessionGraph.
+# Surfaces owned: osd, agentWidgets, sessionGraph; each component provider
+# beside this file owns its own, and writes its `aoide.components` entry, which
+# this file publishes as `components.json` at the top of the deployed tree.
 #
 # Reading discipline (CONTRACTS.md §1): a paint dendrite reads the dress, the
 # structure, the surfaces and identity — nothing else (root AGENTS.md house
@@ -212,6 +213,16 @@ let
     }
   );
 
+  # ── The selected components, published ──────────────────────────────────
+  # `aoide.components` as the shell reads it: `{ "<slot>": { provider,
+  # actions } }`, one entry per component slot this host filled (CONTRACTS.md
+  # §4). It sits at the TOP of the deployed tree, beside `shell.qml`, because
+  # it is build data and not song data: staging syncs only under `songs/`
+  # (`song/src/widgets.rs`), so no stage ever changes it.
+  componentsJsonFile = pkgs.writeText "aoide-quickshell-components.json" (
+    builtins.toJSON config.aoide.components
+  );
+
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
   # Lays down the DECLARED song on every activation: the ACTIVE song's
   # committed livery, with the venue applied (`stageLivery`, above),
@@ -364,6 +375,8 @@ let
     # that declares none) and falls back to its previous behaviour.
     surfaces="$out/qml/songs/surfaces.json"
     jq . ${surfacesJsonFile} > "$surfaces"
+    # The selected components (`componentsJsonFile` above), top level.
+    jq . ${componentsJsonFile} > "$out/qml/components.json"
 
     # ── Carry over per-song flavor widgets ──────────────────────────────────
     # Copy the WHOLE widgets/ dir per song (bring any helper .qml/asset
@@ -496,24 +509,12 @@ in
     ];
 
     # ── Surface-ownership registry ──────────────────────────────────────────
-    # Declare every Quickshell-owned surface. Stylix reads this registry and
-    # stands down for these surfaces (concepts/Notes).
+    # The Quickshell-owned surfaces no component slot answers for; each
+    # component provider beside this file declares its own (README.md).
+    # Stylix reads this registry and stands down for these surfaces
+    # (concepts/Notes).
     aoide.surfaces = {
-      bar.owner = "quickshell";
-      # dunst owns notification DELIVERY — the bus name, history, stacking and
-      # the pause levels — but it draws NOTHING (`skip_display` on every rule;
-      # modules/dendrites/dunst.nix). Quickshell owns the SURFACE: the `herald`
-      # popup slot and the dock's `herald-center` ledger, both drawn from
-      # stage/herald.json. The stand-down below keys on "not stylix", so
-      # Stylix's dunst/mako targets stay disabled either way — which is still
-      # what we want, since a Stylix-generated dunstrc would fight the
-      # dendrite's.
-      notifications.owner = "quickshell";
-      launcher.owner = "quickshell";
       osd.owner = "quickshell";
-      lockscreen.owner = "quickshell";
-      greeter.owner = "quickshell";
-      wallpaper.owner = "quickshell";
       agentWidgets.owner = "quickshell";
       sessionGraph.owner = "quickshell";
     };
@@ -543,7 +544,6 @@ in
       [
         pkgs.pavucontrol
         pkgs.pulseaudio # for `pactl` only; pipewire-pulse remains the server
-        pkgs.hyprlock # `lyra lock` for a song with no face (the lock, below)
       ]
       # …plus what the built-in songs' own widgets declare. `composeSong`
       # reads each `_widgets/` record's `packages` (lib/song.nix); until this
@@ -551,94 +551,6 @@ in
       # there is no record to declare them in.
       ++ map (name: pkgs.${name}) (songbookLib.packagesFor builtIn)
     );
-
-    # ── The lock (`lyra lock`) ──────────────────────────────────────────────
-    # `lyra lock` is this lane's command, so the lane carries both lockers it
-    # may run and their PAM services. A song with a `lockscreen` face is
-    # locked by the shell's LockHost.qml, whose one PamContext authenticates
-    # through `aoide-lock`: a service of its own rather than `login`, whose
-    # stack carries session and tty modules (lastlog, motd, the greeter's
-    # own additions) that have no business in a re-authentication, and a
-    # name a host can tune for the lock alone (a fingerprint reader, a key).
-    # Every other song runs hyprlock through `hyprlock`, the service name it
-    # opens. The package goes in directly (systemPackages above), not through
-    # `programs.hyprlock.enable`, which would also switch on a config-less
-    # hypridle this lane does not want to own.
-    security.pam.services.aoide-lock = { };
-    security.pam.services.hyprlock = { };
-
-    # hyprlock's system-wide config (`$XDG_CONFIG_DIRS`, i.e. /etc/xdg), the
-    # one it reads when the user has no `~/.config/hypr/hyprlock.conf` of
-    # their own; a host that writes one keeps it. It defines the ten
-    # `$aoide_lock_*` variables with the plain look as their values, sources
-    # the declared and then the staged dress (CONTRACTS.md §4, the lock
-    # dress), and only then draws, so the staged song wins and a missing or
-    # broken fragment costs the dress and never the lock. A variable is read
-    # by a paint key only, never by a text key, which hyprlock can run as a
-    # command. The plain values are hyprlock 0.9.6's own field defaults.
-    environment.etc."xdg/hypr/hyprlock.conf".text = ''
-      general {
-          hide_cursor = false
-      }
-
-      $aoide_lock_color = rgba(20, 20, 30, 1.0)
-      $aoide_lock_image =
-      $aoide_lock_field_y = 0
-      $aoide_lock_field_outer = 0xFF111111
-      $aoide_lock_field_inner = 0xFFDDDDDD
-      $aoide_lock_field_font = 0xFF000000
-      $aoide_lock_field_check = 0xFF22CC88
-      $aoide_lock_field_fail = 0xFFCC2222
-      $aoide_lock_name_y = -200%
-      $aoide_lock_name_font = 0x00000000
-
-      source = ${config.aoide.root}/song/declared/hyprlock.conf
-      source = ${config.aoide.root}/song/stage/hyprlock.conf
-
-      background {
-          color = $aoide_lock_color
-          path = $aoide_lock_image
-      }
-
-      input-field {
-          size = 400, 60
-          position = 0, $aoide_lock_field_y
-          halign = center
-          valign = center
-          outline_thickness = 3
-          dots_size = 0.25
-          dots_spacing = 0.3
-          dots_center = true
-          fade_on_empty = false
-          placeholder_text = password
-          fail_text = failed ($ATTEMPTS)
-          outer_color = $aoide_lock_field_outer
-          inner_color = $aoide_lock_field_inner
-          font_color = $aoide_lock_field_font
-          check_color = $aoide_lock_field_check
-          fail_color = $aoide_lock_field_fail
-          capslock_color = rgb(220, 120, 60)
-          numlock_color = rgb(60, 160, 220)
-      }
-
-      label {
-          text = $LAYOUT
-          position = 0, -80
-          halign = center
-          valign = center
-          font_size = 16
-      }
-
-      label {
-          text = $USER
-          position = 0, $aoide_lock_name_y
-          color = $aoide_lock_name_font
-          halign = center
-          valign = center
-          font_size = 20
-          shadow_passes = 2
-      }
-    '';
 
     # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────
     # The config tree (bar/notif/launcher/OSD/lockscreen/greeter/wallpaper)

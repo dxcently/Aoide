@@ -218,7 +218,7 @@
       #
       # Each entry is its file's own function, still UNAPPLIED (so a consumer
       # applies it with its own `lib`), except `catalogue`, which is data: the
-      # same `name = <path>` record `nixosModules.<name>` spells one name at a
+      # same `name = <entry>` record `nixosModules.<name>` spells one name at a
       # time, for a consumer that wants all of them at once. `lib/options.nix`
       # is NOT here: it reads this tree's modules, which a consumer neither has
       # nor should name.
@@ -241,10 +241,11 @@
       # `melete-adapter`, `aoide-nix`, `aoide-packages` — and `aoide-secrets` and
       # `aoide-config` are catalogue entries a host selects by name; a consumer
       # selects from its own aggregation): one entry per catalogue
-      # name, each the PATH this flake's own registry holds for that capability
-      # (a plain module, or a provider set `{ providers.<p> = <path>; }`: what
-      # the constructor's `registry.catalogue` takes — the same value, spelled
-      # one name at a time), and `nucleus` the ONE module that sets
+      # name, each the entry this flake's own registry holds for that
+      # capability (the path of a plain module or of a provider-set directory,
+      # or an inline provider set `{ providers.<p> = <path>; }`, as the
+      # component slots are: what the constructor's `registry.catalogue` takes
+      # — the same value, spelled one name at a time), and `nucleus` the ONE module that sets
       # `_module.args.aoideInputs`, which is also what `mkHost` passes as an
       # extra module. A consumer's catalogue is that attrset minus `nucleus`.
       nixosModules = {

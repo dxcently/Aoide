@@ -1,15 +1,21 @@
 # modules/dendrites/wallpaper
 
-The wallpaper capability: one provider registry, and the two providers that
-answer it today — the shell's own layer, and the external engine.
+The wallpaper component slot: one provider registry, and the two providers
+that answer it today — the shell's own layer (`vibeos`), and the external
+engine.
 
 ```
 modules/dendrites/wallpaper/
-├── default.nix      { providers.quickshell = ./quickshell.nix;
-│                      providers.skwd-wall  = ./skwd-wall.nix; }   ← the registry
-├── quickshell.nix   the shell's own layer (the default)
+├── default.nix      { providers.vibeos    = ./vibeos.nix;
+│                      providers.skwd-wall = ./skwd-wall.nix; }   ← the registry
+├── vibeos.nix       the shell's own layer (the default)
 └── skwd-wall.nix    the external `skwd-wall` engine
 ```
+
+Both providers bring the vibeos runtime by path (`../lyra/README.md`): the
+shell's picker and its `aoide-wallpaper` layer stay mapped under either, so
+each declares `aoide.surfaces.wallpaper` and writes its own
+`aoide.components.wallpaper` entry (`vibeos` or `skwd-wall`).
 
 ## Named seams (what it exposes)
 
@@ -24,11 +30,14 @@ modules/dendrites/wallpaper/
   `mkDefault`, so a host may stand a provider's config down by overriding it
   without deselecting it. `lyra` publishes it to the runtime as
   `song/stage/wallpaper-provider`; the CLI and the QML read that one word, and
-  absent means `quickshell`.
-- **`quickshell.nix` — the shell's own layer.** Configures nothing: the
-  `aoide-wallpaper` layer is the `lyra` lane's, and this provider is the NAME of
-  that arrangement. It is also the option's default, so a host with no provider
-  selected at all behaves exactly as it always did.
+  absent means `quickshell`. The provider KEY and the fact's VALUE differ for
+  the shell's own layer: the slot's provider is `vibeos`, like every other
+  slot's, and the fact it writes stays `"quickshell"`, the word the runtime,
+  the CLI, the QML and the stage file already speak.
+- **`vibeos.nix` — the shell's own layer.** Configures nothing: the
+  `aoide-wallpaper` layer is the vibeos runtime's, and this provider is the
+  NAME of that arrangement. Its fact value is also the option's default, so a
+  host with no provider selected at all behaves exactly as it always did.
 - **`skwd-wall.nix` — the external engine.** The picker, the control daemon and
   the paper renderer from the flake input (`flake.nix`), one `skwd-walld` user
   service of this lane's own (never the upstream NixOS module, which installs

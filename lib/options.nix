@@ -49,18 +49,19 @@ let
   # declares, which `_module.check = false` below leaves unread, as it does the
   # rest of what a module sets outside `aoide.*`.
   #
-  # A capability with alternatives is a provider registry instead
-  # (`{ providers.<p> = <path>; }`, e.g. `compositor`), and each provider is a
-  # plain module of its own; the doc list needs every alternative's options, so
-  # every provider file is read. A catalogue entry that is a module and not a
-  # registry is told by the same test habit's `implOf` applies: an attrset
-  # with `providers`.
+  # A capability with alternatives is a provider set instead
+  # (`{ providers.<p> = <path>; }`), named by a directory's `default.nix` (e.g.
+  # `compositor`) or written inline in the catalogue (e.g. `bar`), and each
+  # provider is a plain module of its own; the doc list needs every
+  # alternative's options, so every provider file is read. A catalogue entry
+  # that is a module and not a provider set is told by the same test habit's
+  # `implOf` applies: an attrset with `providers`.
   modulesOf =
-    path:
+    e:
     let
-      entry = import path;
+      entry = if builtins.isPath e then import e else e;
     in
-    if lib.isAttrs entry && entry ? providers then lib.attrValues entry.providers else [ path ];
+    if lib.isAttrs entry && entry ? providers then lib.attrValues entry.providers else [ e ];
 
   dendrites = lib.concatMap modulesOf (lib.attrValues registry.catalogue);
 

@@ -11,7 +11,8 @@ a plugin).
 ## The catalogue names; one aggregate derives
 
 `modules/default.nix` is the catalogue — plain data, never a module.
-`catalogue` holds one `name = path;` line per dendrite, and that name is how a
+`catalogue` holds one line per dendrite — `name = path;`, or `name = {
+providers.<p> = path; };` for a component slot written inline — and that name is how a
 host, a user and an aggregation reach it. It is the ONE place a dendrite file is
 named. `aggregations` and `overrides` are the records read one level deep beside
 it — by their own directories' discovery files, names and paths only, never a

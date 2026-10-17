@@ -16,7 +16,9 @@ covers only what's specific to dendrites.
   declares. `quickshell`, `stylix` and `lyra` each set their fact
   `true`, from a file in their own directory (`mkFact` accepts any file under a
   directory entry); a `wallpaper` provider sets `aoide.wallpaper.provider` to its own name
-  (`mkDefault`). Never declare `aoide.<that name>.enable` a second time.
+  (`mkDefault`), and every component slot's provider writes its own
+  `aoide.components.<slot>` entry. Never declare `aoide.<that name>.enable` a
+  second time.
 - **A dependency rides the guard that needs it, never an unconditional
   `imports`.** `lib/options.nix` evaluates every dendrite in a bare
   `evalModules` to render `aoideOptions`, so a module that pulls in a

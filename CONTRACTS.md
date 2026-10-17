@@ -86,7 +86,8 @@ shell's own layer:
 | `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | its dendrite's runtime, `dendrites/lyra/runtime.nix`, which sets it `true` |
 | `aoide.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
 | `aoide.songbook.greeter` (`nullOr (attrsOf str)`, `null`) | the declared song's `greeter` slot record `{ owner, file }`; non-null switches the greeter lane from ly to greetd + the song's Quickshell face | the selection hook (`lib/aoideos.nix`, over `lib/songbook.nix`'s `greeter`), beside `aoide.songbook.builtIn`; never a host |
-| `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a song's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`), each to its own name |
+| `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a song's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`): `vibeos` writes `"quickshell"` (the shell's own layer), `skwd-wall` writes `"skwd-wall"` |
+| `aoide.components` (`attrsOf { provider; actions }`, `{ }`) | which component slots this host filled (`bar`, `launcher`, `powermenu`, `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter`, or a consumer's own) and by which provider | each slot's chosen provider, its own entry only; published as `run/qml/components.json` (§4) |
 
 The dendrite that owns a fact sets it `true`. The guard is `mkFact` in
 `modules/nucleus/options.nix`: it reads the winning definitions and refuses any
@@ -456,9 +457,14 @@ condition is forced and refuses under one: such a half states them in a
 Rules:
 
 - **No switch of its own.** Selection is the switch: a dendrite declares no `aoide.<name>.enable`, and its body is unconditional.
-- **A capability with alternatives is a provider registry** — a directory
-  whose file is `{ providers.<p> = <path>; }` — and its catalogue entry is the
-  directory, not a provider file.
+- **A capability with alternatives is a provider set**, `{ providers.<p> =
+  <path>; }` and nothing else, in one of two places: a directory whose
+  `default.nix` is the set (`compositor`, `wallpaper`), with the directory as
+  the catalogue entry, or the catalogue entry's own value, written inline
+  (the component slots: `bar = { providers.vibeos = ./dendrites/lyra/bar.nix;
+  };`). Either way a provider file is named once, by the set, and the host
+  picks one by name (`habit.dendrites.<slot>.provider`); a slot enabled with
+  no provider fails eval naming the ones it has.
 - **A dendrite never reads another module** — only `config.aoide.*` options it
   declares itself, plus stock NixOS options.
 - **Growth is additive**: a new dendrite is a new file plus one catalogue line,
@@ -472,8 +478,9 @@ Rules:
 - **A half another lane brings is a plain pair imported by path.** habit reads
   `habit.home` only on the selected module's top level, and applies a
   catalogue entry under its own key rather than its path, so a capability that
-  more than one lane brings (the shell: `quickshell`, and `lyra`'s runtime)
-  lives in two plain files with no `habit` key — a system half and a home half
+  more than one lane brings (the shell: `quickshell` and `lyra`'s runtime; the
+  vibeos runtime: `lyra` and every `vibeos` component provider) lives in two
+  plain files with no `habit` key — a system half and a home half
   (`dendrites/quickshell/{system,home}.nix`). The catalogue entry is a wrapper
   `{ imports = [ ./system.nix ]; habit.home.imports = [ ./home.nix ]; }`, and
   every lane that brings the capability writes the same two imports, so the
@@ -1996,6 +2003,28 @@ stage`/`declarative`, which route through it) and `rice back`; never from
 tier as the staged geometry's `hyprctl` call — and it is what the external
 provider's own unit runs in `ExecStartPost`, so a restarted provider re-asserts
 the staged state without a rebuild.
+
+### `run/qml/components.json` — **v0**
+
+The component slots this host filled: `aoide.components` (§0's facts table)
+as the shell reads it, one entry per slot, keyed by slot name.
+
+```json
+{ "bar":      { "provider": "vibeos", "actions": {} },
+  "launcher": { "provider": "rofi",   "actions": { "open": ["rofi", "-show", "drun"] } } }
+```
+
+`provider` is the provider's name in the slot's provider set; `actions` maps
+an action name to the argv a non-`vibeos` provider answers it with (empty
+for a `vibeos` one). Only a slot the host selected has an entry, so an absent
+key means "nobody fills this slot here".
+
+The vibeos runtime's build (`modules/dendrites/lyra/runtime.nix`) writes it
+at the TOP of the deployed tree, beside `shell.qml`, and the deploy carries
+it to `run/qml/components.json`. It is build data, not song data: staging
+syncs only under `run/qml/songs/`, so no stage, draft or back ever changes
+it, and house rule 10 (staging restores the staged song) does not cover it.
+A rebuild is the only writer.
 
 ### `song/declared/livery.json` — **v0**
 

@@ -7,11 +7,14 @@ mcfly, nh), agent and desktop AI tooling (claude-code, eidolon, kimi-code,
 pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
 (inference: Ollama + llama.cpp), system services (dunst, networkmanager,
 tailscale, audio), and **the paint lanes** — what makes a machine paint at all:
-`compositor` (with its `hyprland` provider), `greeter`, `stylix`, `quickshell`
+`compositor` (with its `hyprland` provider), `stylix`, `quickshell`
 (the shell runtime: the package and the one `aoide-quickshell` service), `lyra`
 (the Quickshell surface, its shellbridge, and the song-gated deploy half) and
-`wallpaper` (the capability that owns who paints a song's wallpaper, with the
-shell's own layer and the external engine as its two providers). A paint lane
+the ten component slots — `bar`, `launcher`, `powermenu`, `notifications`,
+`wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter` — each a
+provider set whose `vibeos` provider is that Quickshell component on the
+runtime's bridges (`lyra/README.md`; `wallpaper` also has the external engine,
+and `greeter` runs without the runtime). A paint lane
 reads only what root `AGENTS.md` house rule 5 lists; its
 config reads only the FACTS the nucleus contract declares, and a lane that is one sets its own fact `true`, so a consumer can ask "is there a shell here?" without reading the lane that made one.
 
@@ -43,7 +46,9 @@ A capability more than one lane brings is a plain pair imported by path
 `habit` key, the catalogue entry is the wrapper
 `{ imports = [ ./system.nix ]; habit.home.imports = [ ./home.nix ]; }`, and
 `lyra`'s runtime writes the same two imports, so a host with both lanes gets
-one shell.
+one shell. The vibeos runtime is the same kind of pair
+(`lyra/{runtime,runtime-home}.nix`), imported by every `vibeos` component
+provider, so two components on one host share one runtime.
 
 ## The shell lane (`quickshell/`) and the seam with `lyra`
 
@@ -85,10 +90,11 @@ provider registry, not a song's field:
 
 ```
 wallpaper/
-├── default.nix     { providers.quickshell = ./quickshell.nix;
-│                     providers.skwd-wall  = ./skwd-wall.nix; }   ← the registry
-├── quickshell.nix  the shell's own layer: the default. It configures NOTHING —
-│                   the layer is `lyra`'s — it NAMES the arrangement.
+├── default.nix     { providers.vibeos    = ./vibeos.nix;
+│                     providers.skwd-wall = ./skwd-wall.nix; }   ← the registry
+├── vibeos.nix      the shell's own layer: the default. It configures NOTHING —
+│                   the layer is the vibeos runtime's — it NAMES the
+│                   arrangement, with the fact value `"quickshell"`.
 └── skwd-wall.nix   the external engine: its three packages, the `skwd-walld`
                     user service, and the config merge that keeps the engine's
                     own theming off and its library inside `aoide.root`.
@@ -185,9 +191,11 @@ it selects them by name from its own aggregation.
   no enable flag: selection is the switch. A paint lane's cross-lane question is
   answered by the fact of the same name, declared once in
   `modules/nucleus/options.nix`.
-- A capability with ALTERNATIVES is a provider registry: a directory whose
-  `default.nix` is `{ providers.<p> = <path>; }`, each provider a plain
-  module of its own (see `compositor/README.md`). The catalogue names the directory.
+- A capability with ALTERNATIVES is a provider set `{ providers.<p> = <path>;
+  }`, each provider a plain module of its own: either a directory whose
+  `default.nix` is the set, which the catalogue names (see
+  `compositor/README.md`), or the set written inline as the catalogue entry's
+  value (the component slots).
 - `_example.nix` — the checked-in template: shelved by its `_` prefix
   (uncatalogued, so nothing imports it), showing the plain-module shape and the
   select-with-one-line convention.
@@ -208,8 +216,8 @@ no GPU override. Neither package needs `allowUnfree` (both MIT).
 `config.aoide.*` options it declares itself, plus stock NixOS/Home-Manager
 options. A dendrite reads no other module's internals — not even another
 dendrite's. A paint dendrite reads the dress (`aoide.livery`), the structure
-(`aoide.arrangement`), the surface registry (`aoide.surfaces`), the identity
-scalars and its own fact; nothing else (root `AGENTS.md` house rule 5).
+(`aoide.arrangement`), the surface registry (`aoide.surfaces`), the component
+slots (`aoide.components`), the identity scalars and its own fact; nothing else (root `AGENTS.md` house rule 5).
 
 ## How it composes
 
@@ -220,5 +228,6 @@ know nothing about hosts; hosts know dendrites. A tool graduates from a shared
 file (e.g. `devtools.nix`) into its own dendrite the moment a host needs to
 select it independently. The paint lanes with more than one file carry their own
 directories and charters (`compositor/README.md`, `lyra/README.md`,
-`quickshell/README.md`); the one-file lanes — `greeter.nix`, `stylix.nix` — are
+`quickshell/README.md`, `wallpaper/README.md`); the one-file lanes —
+`greeter.nix` (the `greeter` slot's `vibeos` provider), `stylix.nix` — are
 charted here, above.

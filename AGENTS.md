@@ -64,7 +64,8 @@ and the staging/declarative/draft modes:
    reach you as a command. Adapters wrap it as data.
 5. **Paint dendrites read only the dress, the structure, the surfaces, and
    identity.** A paint dendrite — `compositor` and its providers, `greeter`,
-   `stylix`, `quickshell`, `lyra`, `wallpaper` and its providers — reads only `aoide.livery` (the dress:
+   `stylix`, `quickshell`, `lyra`, `wallpaper` and its providers, and every
+   component slot's provider — reads only `aoide.livery` (the dress:
    palette · base16 · component tiers · geometry · fonts · cover),
    `aoide.arrangement` (the structure: which widget/surface TYPES a song
    brings into existence), `aoide.surfaces` (the render-surface ownership
@@ -74,8 +75,10 @@ and the staging/declarative/draft modes:
    `aoide.user`), the song
    selection (`aoide.song`, and the derived `aoide.songbook.builtIn` — what
    this host BUILT IN, from its own song selection — and
-   `aoide.songbook.greeter`, the declared song's greeter face), and its own
-   `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
+   `aoide.songbook.greeter`, the declared song's greeter face),
+   `aoide.components` (the component slots — bar, launcher, powermenu,
+   notifications, wallpaper, dock, calendar, switcher, lock, greeter — and
+   the provider that fills each), and its own `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
    stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`) are

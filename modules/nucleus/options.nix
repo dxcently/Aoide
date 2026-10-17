@@ -765,6 +765,40 @@ in
       '';
     };
 
+    # ── The component slots this host filled ───────────────────────────────
+    components = mkOption {
+      type = types.attrsOf (
+        types.submodule {
+          options = {
+            provider = mkOption {
+              type = types.str;
+              description = "The provider that fills this slot, by its name in the slot's provider set.";
+            };
+            actions = mkOption {
+              type = types.attrsOf (types.listOf types.str);
+              default = { };
+              description = ''
+                The commands, as argv lists, this provider answers a bridge
+                action with, by action name. Empty for a `vibeos` provider,
+                whose component the shell reaches itself.
+              '';
+            };
+          };
+        }
+      );
+      default = { };
+      example = literalExpression ''{ bar.provider = "vibeos"; launcher = { provider = "rofi"; actions.open = [ "rofi" "-show" "drun" ]; }; }'';
+      description = ''
+        The component slots (`bar`, `launcher`, `powermenu`, `notifications`,
+        `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter`, and
+        any a consumer adds) this host filled, keyed by slot. Each slot's
+        chosen provider writes its own entry, so the set is exactly what the
+        selection picked. A contract option rather than the runtime's: a
+        consumer's own provider writes it with no vibeos runtime present. The
+        runtime publishes it as `components.json` (CONTRACTS.md §4).
+      '';
+    };
+
     # ── Enable facts — the cross-lane seam ─────────────────────────────────
     # What a paint lane brings into existence, declared ONCE. No module reads
     # another module (root AGENTS.md house rule 5), so a cross-lane question —

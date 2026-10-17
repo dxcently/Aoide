@@ -5,7 +5,7 @@
 # `composition.mkNixosModules`, as lib/aoideos.nix does) over the fixture
 # songbook in `tests/lock-greeter/songbook/`, with the paint lanes selected
 # (compositor with its hyprland provider, the hyprland behaviour lane, greeter,
-# quickshell, lyra):
+# lock, quickshell, lyra):
 #
 #   face   declares `aubade`, which ships `widgets/greeter.qml`,
 #          `widgets/lockscreen.qml`, an uppercase helper type its greeter
@@ -62,7 +62,16 @@ let
     };
     # The behaviour lane: the SUPER+ESCAPE bind and the session-lock restore.
     habit.dendrites.hyprland.enable = true;
-    habit.dendrites.greeter.enable = true;
+    habit.dendrites.greeter = {
+      enable = true;
+      provider = "vibeos";
+    };
+    # The lock component: LockHost.qml, its `aoide-lock` PAM service and the
+    # hyprlock fallback a faceless song locks with.
+    habit.dendrites.lock = {
+      enable = true;
+      provider = "vibeos";
+    };
     habit.dendrites.quickshell.enable = true;
     habit.dendrites.lyra.enable = true;
 

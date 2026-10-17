@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# The quickshell/lyra seam, evaluated: three hosts, and what each one owes.
+# The quickshell/lyra seam, evaluated: four hosts, and what each one owes.
 #
 #   ./tests/quickshell-seam/run.sh                 # this checkout's working tree
 #   ./tests/quickshell-seam/run.sh path:/abs/dir      # some other checkout
 #   ./tests/quickshell-seam/run.sh git+file:///abs/dir?rev=<sha>   # a frozen commit
 #
 # The ref is the TREE under test, not just a source of inputs: `fixtures.nix`
-# reads the constructor, the catalogue, nucleus and the three host modules out
+# reads the constructor, the catalogue, nucleus and the four host modules out
 # of it, so a commit ref tests that commit. Every eval below carries the ref.
 #
 # `test-quickshell-only` — quickshell selected, `aoide.quickshell.config` = the
@@ -16,6 +16,11 @@
 # unit, no deploy activation).
 # `test-quickshell-bare` — the same selection with no config: package installed,
 # no service, no session anchor claimed.
+# `test-two-components` — the `bar` and `dock` slots filled by their vibeos
+# providers, no lyra and no quickshell dendrite: the runtime both import by path
+# lands once (one shell unit, one shellbridge unit, no doubled environment, one
+# declaration of its home half), both components are recorded, and both facts
+# the runtime sets are true.
 # `test-song-without-lyra` — a song and no performer: MUST fail, with the
 # platform assertion's own message.
 # `yomi-strix` — the positive control, from the same ref: the two absence
@@ -114,6 +119,22 @@ else
   check "bare: no lyra fact"                    "false" "$(b .lyra)"
   check "bare: no shellbridge unit"             "0" \
     "$(b '[.systemdUserServices[] | select(test("shellbridge"))] | length')"
+fi
+
+# ── test-two-components ──────────────────────────────────────────────────────
+if ! two=$(evalf twoComponents "$tmp/two.err"); then
+  printf '%-46s FAIL\n' "test-two-components evaluates"
+  grep -v '^ *$' "$tmp/two.err" | tail -12 | sed 's/^/    | /'
+  fail=$((fail+1))
+else
+  t() { printf '%s' "$two" | jq -r "$1"; }
+  check "two: exactly one shell unit"           "1" "$(t .shellUnits)"
+  check "two: exactly one shellbridge unit"     "1" "$(t .bridgeUnits)"
+  check "two: no duplicate shell environment"   "0" "$(t .envDuplicates)"
+  check "two: the home half is declared once"   "1" "$(t .homeDeclarations)"
+  check "two: both components recorded"         "bar,dock" "$(t '.components | join(",")')"
+  check "two: the lyra fact is set"             "true" "$(t .lyra)"
+  check "two: the quickshell fact is set"       "true" "$(t .quickshell)"
 fi
 
 # ── test-song-without-lyra: the eval that must fail ──────────────────────────

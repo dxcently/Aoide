@@ -1,4 +1,9 @@
-# modules/dendrites/greeter.nix — the display-manager greeter.
+# modules/dendrites/greeter.nix — the `greeter` slot's vibeos provider: the
+# display-manager greeter.
+#
+# It is the one vibeos provider that does not bring the vibeos runtime: it runs
+# in greetd, before any user session, on a store tree of its own, so it is
+# separable from the shell a session runs (`lyra/README.md`).
 #
 # The login prompt, in one of two shapes chosen at build time by the DECLARED
 # song (`aoide.songbook.greeter`, the fact the selection hook derives):
@@ -40,8 +45,8 @@
 # Either way logind classes the logged-in session `user`, because PAM
 # registers a real login for it.
 #
-# Selecting the dendrite is the switch: a host that does not select it boots
-# to the tty it lands on. Reads the dress (`aoide.livery`), the song selection
+# Filling the slot is the switch: a host that does not select it boots to the
+# tty it lands on. Reads the dress (`aoide.livery`), the song selection
 # (`aoide.song`, `aoide.songbook.greeter`), the session the display manager
 # registers (`services.displayManager.sessionData`, which ly reads too) and
 # the host's keyboard (`services.xserver.xkb`) — root AGENTS.md house rule 5.
@@ -143,6 +148,11 @@ let
 in
 {
   config = lib.mkMerge [
+    {
+      aoide.components.greeter.provider = "vibeos";
+      aoide.surfaces.greeter.owner = "quickshell";
+    }
+
     (lib.mkIf (face != null) {
       services.greetd = {
         enable = true;

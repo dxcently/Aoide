@@ -12,7 +12,8 @@ the catalogue that names what can be selected.
 
 - `modules/default.nix` — the catalogue. Plain data, not a module:
   `catalogue` names every dendrite once, by the name a host selects it with,
-  and points at the file (or directory) that answers it. It is the ONE place a
+  and points at the file (or directory) that answers it, or, for a component
+  slot, holds the provider set inline. It is the ONE place a
   dendrite file is named. `aggregations` and `overrides` are the sibling
   discovery records, read one level deep beside it — names and paths only, no
   body imported at catalogue time. Habit's composition
