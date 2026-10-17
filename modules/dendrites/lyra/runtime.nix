@@ -53,9 +53,9 @@ let
   # ── What this host BUILDS IN ────────────────────────────────────────────
   # `habit.song.declared ∪ habit.song.available` in its module, derived by the
   # constructor's hook into the fact `aoide.songbook.builtIn`. Everything below
-  # that used to run over every committed song runs over these names
-  # instead: the deployed manifest and registry, the widget bodies, the
-  # installed packages, the shipped templates and the machine-songbook seed.
+  # the deployed manifest and registry, the widget bodies, the installed
+  # packages, the shipped templates and the machine-songbook seed all run over
+  # these names, never over every committed song.
   #
   # A song that is NOT built in is still stageable from the machine's own
   # songbook (`aoide rice stage <n>`) — the runtime keeps a wider manifest
@@ -358,10 +358,8 @@ let
     # content — `builtins.toJSON` is compact and this pretty-prints it to
     # match the old jq-walk's formatting (2-space indent). `jq .` reorders
     # nothing it is handed; both files' key order is whatever nix's
-    # `toJSON` already produced (alphabetic per level — see the manifest
-    # comment above for why that's no longer load-bearing for either file's
-    # per-song contents, only their per-song top-level keys, which were
-    # already alphabetic before this commit too).
+    # `toJSON` already produced (alphabetic per level; consumers read keys,
+    # never their order).
     mkdir -p "$out/qml/songs"
     manifest="$out/qml/songs/manifest.json"
     jq . ${manifestJsonFile} > "$manifest"
@@ -675,11 +673,9 @@ in
 
             # ── Reassert the paint on EVERY activation ─────────────────────────────
             # A rebuild only restarts units whose definitions changed, so a
-            # long-running quickshell survives every no-diff switch — including one
-            # that has silently lost its Wayland outputs and moved the whole scene
-            # onto a placeholder screen (live incident 2026-08-28: "There are no
-            # outputs - creating placeholder screen"; unit active, desktop bare).
-            # House ruling: activation always brings the rice elements back up.
+            # long-running quickshell survives a no-diff switch even when it has
+            # lost its Wayland outputs and sits on a placeholder screen. Activation
+            # therefore always brings the rice elements back up.
             # try-restart bounces a running shell onto the freshly rsynced tree and
             # re-acquired outputs, no-ops when the unit is stopped (headless/
             # session-less activation must not start or fail anything), and never
