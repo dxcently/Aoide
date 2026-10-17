@@ -299,7 +299,7 @@ let
               lib.subtractLists [ "config" ] (builtins.attrNames raw)
             else
               lib.intersectLists [ "imports" "options" ] (builtins.attrNames raw);
-          leaves = leavesOf 100 [ ] (if raw ? config then raw.config else raw);
+          leaves = leavesOf 100 [ ] (raw.config or raw);
           shown = path: lib.concatStringsSep "." path;
           isSettings =
             l:
