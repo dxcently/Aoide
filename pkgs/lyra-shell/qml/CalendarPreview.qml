@@ -17,7 +17,7 @@ import Quickshell.Wayland
 // virtual qs:@ filesystem black-holes relative paths that escape the config
 // root, so from a repo checkout point CAL_WIDGET at the songbook file
 // (QS_STAGE precedent — previews honour env seams):
-//   CAL_WIDGET=file://$PWD/song/songbook/sonata/widgets/calendar.qml \
+//   CAL_WIDGET=file://$PWD/song/songbook/sonata/widgets/CalendarStele.qml \
 //     qs -p pkgs/lyra-shell/qml/CalendarPreview.qml
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
@@ -52,7 +52,7 @@ ShellRoot {
             anchors.horizontalCenter: parent.horizontalCenter
             Component.onCompleted: {
                 var src = Quickshell.env("CAL_WIDGET")
-                if (!src || src === "") src = "songs/sonata/calendar.qml"
+                if (!src || src === "") src = "songs/sonata/CalendarStele.qml"
                 setSource(src, { "livery": win.stub, "bridge": null })
             }
         }

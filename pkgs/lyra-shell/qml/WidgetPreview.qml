@@ -746,8 +746,6 @@ ShellRoot {
             "bridge": canvas.bridgeStub,
             "shared": canvas.sharedStub,
             "stagingEngine": canvas.stagingEngineReal,
-            "powermenu": null,
-            "dock": null,
             "clipboard": null,
             "ledger": null,
             "stagePath": canvas.aoideRoot + "/state/stage/sessions.json"

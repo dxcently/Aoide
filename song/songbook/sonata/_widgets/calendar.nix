@@ -1,13 +1,16 @@
-# sonata's `calendar` slot — the clock's popout body, hosted inside bar.qml's
-# own `WidgetSlot { slot: "calendar" }`. `kind` absent → null (shell-anchored,
-# via `bar`, not shell.qml directly — but never a declared registry entry).
+# sonata's `calendar` slot — the calendar surface, a window of its own that the
+# bar's clock opens through the bridge (`lyra component calendar toggle`).
+# `kind` absent → null (a shell-anchored surface, never a declared registry entry).
 #
-# `helpers`: calendar.qml instantiates `MorphState { ... }` (the shared
-# open/close morph state machine). AudioColonnade/GadgetFrame/SteleLayerPopout/
-# StelePopout are named only in header comments recounting design history
-# ("the 2026-07-31 standing direction"); none is actually instantiated.
+# `helpers`: calendar.qml is the window (SteleLayerPopout) and hosts the stele
+# body, CalendarStele.qml, which instantiates `MorphState { ... }` (the shared
+# open/close morph state machine).
 _: {
   file = "calendar.qml";
 
-  helpers = [ "MorphState.qml" ];
+  helpers = [
+    "CalendarStele.qml"
+    "MorphState.qml"
+    "SteleLayerPopout.qml"
+  ];
 }

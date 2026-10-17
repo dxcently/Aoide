@@ -9,10 +9,10 @@
 // `bind = SUPER, W, global, aoide:wallpaper`). Escape / a scrim click / a pick
 // dismisses it.
 //
-// The song's picker comes first: shell.qml hands in the launcher slot's live
-// item, and when that body exposes `openPictures()` (a launcher with its own
-// Desktop Pictures window) the shortcut calls it and this pane stays hidden.
-// A launcher without one leaves this plain picker as the floor.
+// The song's picker comes first: when the launcher exposes `openPictures()`
+// (a launcher with its own Desktop Pictures window, shell.qml's
+// `launcherHasPictures`), the shortcut asks the bridge to run it and this pane
+// stays hidden. A launcher without one leaves this plain picker as the floor.
 //
 // ── The write seam ──────────────────────────────────────────────────────────
 // QML has no file-write primitive and the shellbridge socket only speaks
@@ -51,7 +51,10 @@ PanelWindow {
 
     // ── Note dependency (injected by shell.qml) ────────────────────────────
     required property var livery
-    property var launcher: null
+    // The bridge: `component("launcher", "openPictures")` runs the launcher's own picker.
+    property var bridge: null
+    // Whether the launcher slot's body answers openPictures() (shell.qml's fact).
+    property bool launcherHasPictures: false
 
     // ── Visibility gate (mirrors AoideLauncher) ────────────────────────────
     property bool shown: false
@@ -60,10 +63,8 @@ PanelWindow {
     function hide()   { root.shown = false }
     function toggle() { if (root.shown) root.hide(); else root.show() }
     function summon() {
-        if (root.launcher && typeof root.launcher.openPictures === "function")
-            root.launcher.openPictures()
-        else
-            root.toggle()
+        if (root.launcherHasPictures) root.bridge.component("launcher", "openPictures")
+        else root.toggle()
     }
 
     // ── Layer-shell surface (Overlay, full-screen, transparent) ────────────

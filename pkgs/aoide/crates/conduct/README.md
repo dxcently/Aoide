@@ -992,6 +992,15 @@ stripping one, and a held spawn shows as its whole command.
   The other replying commands are the READS, `sessiontrace` and `ricemenu`,
   and the RICE menu's `ricedeclare` (all below); every other socket command,
   `ricemode` and `ricedraft` among them, stays fire-and-forget.
+  `{"cmd":"component","slot","verb","arg"?}` is a cross-component call,
+  fire-and-forget (`ShellBridge.qml`'s `component`). `slot` is `[a-z][a-z0-9-]*`,
+  `verb` is an ASCII letter then ASCII letters or digits (`openTab` is
+  camelCase), and `arg`, when present, is 1 to 64 of `[A-Za-z0-9._-]` and never
+  starts with `-`; a name outside those charsets is dropped. The bridge spells
+  one line, `lyra component <slot> <verb> [arg]`, and runs it through
+  `hyprctl dispatch exec`, as `power lock` does: a provider's action never
+  inherits this unit's NoNewPrivileges. The audit line is `component <slot>
+  <verb>: spawned` or the spawn error.
 - `commands` — this crate's CLI commands, registered from one `register()`
   call (`conduct/src/commands/graph.rs`, still that file's name
   post-cutover) — the `graph` family narrowed at task #101 R1 to the bare

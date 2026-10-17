@@ -270,7 +270,9 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    `send` injection, acknowledged session actions (the session-menu's
    `undying`/`project`/`kill`/`createproject`/`editproject` calls), the bar's
    `workspaceaction` bind and unbind, the read-only `sessiontrace` query
-   above, and the RICE menu's four verbs — the read `ricemenu`, the switch
+   above, the cross-component `component` call (`slot`, `verb`, an optional
+   `arg`: the bridge runs `lyra component`, which asks the provider that fills
+   the slot — the vibeos shell or its declared argv), and the RICE menu's four verbs — the read `ricemenu`, the switch
    `ricemode` (`stage <name>`/`declarative`), the gesture `ricedraft`
    (`enter`/`new`/`save`/`drop`) and the answered `ricedeclare <song>` (the
    host performs it on the next rebuild) — nothing else leaves QML. A new

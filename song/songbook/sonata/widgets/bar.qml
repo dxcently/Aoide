@@ -8,13 +8,14 @@
 // this file's `implicitHeight` back and binds the `PanelWindow`'s own
 // `implicitHeight`/`exclusiveZone` to it (see shell.qml), rather than the
 // shell pinning a fixed height. Extras this file needs beyond the universal
-// `livery`/`bridge`: `stagingEngine` (so its own embedded calendar
-// `WidgetSlot` can resolve), `powermenu` (the powermenu slot's live
-// `.item`, for the clef), `shared` (session state, optional).
+// `livery`/`bridge`: `stagingEngine` (its embedded ricemode `WidgetSlot` resolves
+// through it), `shared` (session state, optional). The clef and the dock cell
+// ask the bridge for the powermenu and the dock, and the clock opens the
+// calendar the same way.
 // `WorkspaceRow.qml` travels alongside this file as a helper component
 // (uppercase filename — carried by the build, never independently
 // resolvable as a slot), joined by `BarPopout`/`AudioColonnade` as of P1
-// and `StelePopout`/`SteleLayerPopout` as of P2. `WidgetSlot` alone stays
+// and `StelePopout` as of P2. `WidgetSlot` alone stays
 // in the shell as shared, reusable chrome — reached via the
 // `import "../.."` below.
 //
@@ -170,8 +171,8 @@ import Quickshell.Services.SystemTray
 import Quickshell.Networking
 // Reaches the shell's shared, reusable `WidgetSlot` — none of it is
 // bar-specific content, so it stays in the shell rather than moving here.
-// BarPopout and AudioColonnade moved to sonata/widgets/ in P1, StelePopout
-// and SteleLayerPopout in P2, and all four resolve same-dir now.
+// BarPopout and AudioColonnade moved to sonata/widgets/ in P1, and StelePopout
+// in P2; they resolve same-dir.
 // Deployed-tree relative path: this file lands at $out/qml/songs/sonata/
 // bar.qml, so two levels up ($out/qml/songs/ → $out/qml/) is the shell's
 // own qml/ root (the lyra lane's build walk, modules/dendrites/lyra/default.nix, fixes
@@ -473,29 +474,12 @@ component WorkspaceRow: Item {
     required property var livery
     required property var bridge
     // The staging engine (StagingEngine singleton, injected as an extra —
-    // it isn't part of WidgetSlot's universal livery/bridge contract) — the
-    // calendar popout below asks it whether the active song (or, through
-    // the baseline chain, sonata) dresses the "calendar" slot before
-    // opening, and the popout's own embedded WidgetSlot needs the same
-    // engine handle to resolve.
+    // it isn't part of WidgetSlot's universal livery/bridge contract). The
+    // embedded ricemode WidgetSlot resolves its song through the same handle.
     required property var stagingEngine
-    // The Exodos powermenu (AoideExodos instance, injected by shell.qml the
-    // same way the launcher receives the clipboard). The clef toggles it
-    // directly — the old `{ cmd: "powermenu" }` bridge line was a dead end
-    // (shellbridge never parsed that command).
-    required property var powermenu
-    // The center-left dock (`dockSlot.item` — sonata's own `dock.qml`,
-    // hosted by a `SurfaceSlot`), injected by shell.qml the SAME way —
-    // audit-report.md flagged the ✎N cell's `{ cmd: "dock", action: "toggle" }`
-    // as a silent no-op and suggested teaching shellbridge the command, but
-    // that goes against this file's own already-stated rule two lines up:
-    // ShellBridge is OUTBOUND-only by design (hazards.md §5, dock.qml's own
-    // header — "no inbound CLI command to toggle a surface"), and adding one
-    // here would be a second, inconsistent path to the exact toggle
-    // GlobalShortcut (SUPER+G → aoide:dock) already owns cleanly. Fixed the
-    // same way powermenu was: call .toggle() on the injected instance
-    // directly.
-    required property var dock
+    // The powermenu and the dock are not handed in. The clef and the dock cell
+    // ask the bridge (`bridge.component(...)`), and the bridge runs whichever
+    // component fills the slot, so this bar holds no other component's item.
     // Shared session state (shell.qml's QtObject). Threaded through so the
     // centre WorkspaceRow can read `shared.hoveredWorkspace` — the gadget-dock
     // hover-preview bridge (concepts/Terminal-Commander). Optional/null-safe so
@@ -1210,7 +1194,14 @@ component WorkspaceRow: Item {
     }
     readonly property bool audioShown: audioCellHover || cueRetain || audioOpen
     property bool battShown: false     // battery hover popout
-    property bool calShown: false      // calendar click popout (song widget slot)
+    // The calendar is its own surface: the clock measures its corner into
+    // shared.calendarAnchor (screen coordinates), then the bridge toggles it on
+    // this bar's screen.
+    readonly property string screenName: QsWindow.window && QsWindow.window.screen ? QsWindow.window.screen.name : ""
+    function toggleCalendar(cell) {
+        if (root.shared) root.shared.calendarAnchor = cell.mapToItem(null, 0, cell.height)
+        root.bridge.component("calendar", "toggle", root.screenName)
+    }
 
     // ── System tray (StatusNotifier) — popup ───────────────────────────────
     // The fermata toggle in the right stave opens/closes the tray popout (the
@@ -1337,11 +1328,7 @@ component WorkspaceRow: Item {
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            // Direct toggle on the injected AoideExodos instance — the same
-            // sibling-reference idiom as launcher↔clipboard. (The old
-            // `sendCommand({ cmd: "powermenu" })` went nowhere: shellbridge's
-            // parser never knew that command.)
-            onClicked: if (root.powermenu) root.powermenu.toggle()
+            onClicked: root.bridge.component("powermenu", "toggle")
         }
     }
 
@@ -1378,7 +1365,7 @@ component WorkspaceRow: Item {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: if (root.dock) root.dock.toggle()
+                onClicked: root.bridge.component("dock", "toggle")
             }
         }
 
@@ -1388,19 +1375,17 @@ component WorkspaceRow: Item {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
             text: Qt.formatDateTime(root.now, "hh:mm AP  ddd MMM dd")
-            color: root.calShown ? root.livery.paletteAccent : root.livery.paletteFg
+            color: root.shared && root.shared.calendarOpen ? root.livery.paletteAccent : root.livery.paletteFg
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
 
-            // Click opens the calendar popout — a per-song flavor-widget
-            // slot (WidgetSlot below). Nothing to click through to when the
-            // active song hasn't authored one; the popout itself gates on
-            // stagingEngine.has(...) so an unauthored calendar simply won't open.
+            // Click toggles the calendar surface. A song that authored no
+            // calendar has no surface to open, and the bridge's call finds none.
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.calShown = !root.calShown
+                onClicked: root.toggleCalendar(clockText)
             }
         }
         // The " / " separator — a slur between clock and title.
@@ -3419,44 +3404,6 @@ component WorkspaceRow: Item {
                     }
                 }
             }
-        }
-    }
-
-    // Calendar — a per-song flavor-widget slot (CONTRACTS.md §5). No shared
-    // fallback: the old song-blind CalendarGadget was retired, so a slot
-    // NEITHER the active song NOR the baseline (sonata) provide simply
-    // doesn't open (gated below on `resolveSong(...) !== ""`, not just
-    // calShown) rather than popping an empty frame. Gating on the resolved
-    // baseline chain — not the raw `has(activeSong, ...)` check this used
-    // before the widget-slot expansion — matters now: a song that doesn't
-    // author its own calendar.qml still gets sonata's via the WidgetSlot
-    // below, so the popout must open for that case too, not just when the
-    // active song directly authors it. Hosted BARE via StelePopout (khoa's
-    // 2026-07-31 standing
-    // direction, AudioColonnade precedent): the sonata calendar is now a
-    // self-framed papyrus stele drawing all its own chrome — wrapping it in
-    // BarPopout's GadgetFrame bay double-framed it (the Π order-mark goes
-    // dormant with the bay, like Α Β Γ Δ Θ Ω before it). The widget carries
-    // its own unfurl reveal off Window.visible; BarPopout's `reveal` seam
-    // stays behind for any frame-hosted popout that wants it.
-    // Hosted on SteleLayerPopout — the ONE bar popout on its own layer
-    // surface (namespace "aoide-calendar") instead of an xdg_popup of
-    // aoide-bar (khoa, 2026-08-13): the papyrus sheet cuts a transparent
-    // window over its day grid that must show the desktop CRISPLY, and
-    // aoide-bar's blur_popups layerrule frosts every xdg_popup with no
-    // per-popup opt-out (popups carry no namespace). The other popouts stay
-    // StelePopout/xdg_popup with their frost. Left-pinning comes free — the
-    // layer surface is anchored top-left and grows rightward on the
-    // compact↔expanded morph, the same twitch-free hang the old
-    // anchorEdges/anchorGravity override bought (see SteleLayerPopout.qml).
-    SteleLayerPopout {
-        cell: clockText
-        shown: root.calShown && root.stagingEngine.resolveSong(root.livery.songName, "calendar") !== ""
-        WidgetSlot {
-            livery: root.livery
-            bridge: root.bridge
-            stagingEngine: root.stagingEngine
-            slot: "calendar"
         }
     }
 }

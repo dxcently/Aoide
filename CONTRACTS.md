@@ -1093,7 +1093,7 @@ count.
   (`reason: "no-mesh-declared"`). `--json`'s `data.report` shape:
   `{"mesh", "rows": [{"node", "outcome", …}], "sameOperatorNote"?}`.
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
-  mode/cover/livery/quickshell/reload/screen/shellbridge/herald/take/
+  mode/cover/livery/quickshell/reload/screen/shellbridge/component/herald/take/
   element, the painted surface. `crates/lyra/src/registry.rs`'s golden test
   pins the authoritative command-path set; `lyra schema --json` is the live
   enumeration — `mcp.serve` must itself be a registered path for
@@ -2026,13 +2026,19 @@ syncs only under `run/qml/songs/`, so no stage, draft or back ever changes
 it, and house rule 10 (staging restores the staged song) does not cover it.
 A rebuild is the only writer.
 
-Two readers. `shell.qml` reads it once at load and instantiates a component
+Three readers. `shell.qml` reads it once at load and instantiates a component
 anchor only when its slot is a key; an absent or unreadable file is the empty
 set, so nothing is instantiated (`pkgs/lyra-shell/qml/slots.md`, "The
 component gate"). The healthcheck (`crates/song/src/health.rs`) intersects
 the surfaces `run/qml/songs/surfaces.json` declares (§5) with its keys, so a
 declared surface whose component the host did not select is never reported
-lost; there an absent or non-object file intersects nothing.
+lost; there an absent or non-object file intersects nothing. `lyra component
+<slot> <verb> [arg]` (`crates/lyra/src/commands/component.rs`) resolves a
+cross-component call against it: a `vibeos` provider is the shell's own `component`
+IPC target (`ipc call component act <slot> <verb> <arg>`, answering `true` or
+`false`); any other provider runs the argv its `actions.<verb>` declares, with
+the arg appended and no shell; an absent slot or an undeclared verb is a taught
+refusal, exit 1.
 
 ### `song/declared/livery.json` — **v0**
 

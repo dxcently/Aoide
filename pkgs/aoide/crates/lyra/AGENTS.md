@@ -428,3 +428,9 @@
   `IpcHandler { target: "preview" }` function signatures change — same
   no-shared-type boundary as the dialog contract above, Rust on one side
   and QML on the other.
+- **`component` answers a value, not a void.** `shell.qml`'s
+  `IpcHandler { target: "component" }` `act` returns `true` when the verb
+  ran and `false` otherwise, and `commands/component.rs` judges the words
+  of the answer. A void `act` would look the same whether the item ran
+  the verb or not. Change the verb set (`componentVerbs`) in the same
+  commit as the bridge's charset (`conduct/src/shellbridge.rs`).

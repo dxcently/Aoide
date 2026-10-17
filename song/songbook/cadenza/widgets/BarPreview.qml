@@ -43,9 +43,6 @@ Item {
     property var shared: null
     property var stagingEngine: null
     // the canvas hands every slot's extras; accepted here so none warns, and
-    // not forwarded (the bar gets powermenu/dock null, see barLoader)
-    property var dock: null
-    property var powermenu: null
     property var clipboard: null
     property var ledger: null
     property var stagePath: null
@@ -131,8 +128,6 @@ Item {
             bridge: harness.bridge,
             shared: harness.shared,
             stagingEngine: harness.stagingEngine,
-            powermenu: null,
-            dock: null,
             inlinePanes: true
         })
         onLoaded: Qt.callLater(harness.apply)

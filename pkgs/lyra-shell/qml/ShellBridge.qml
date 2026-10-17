@@ -280,6 +280,22 @@ QtObject {
              { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
     }
 
+    // ── Component call ──────────────────────────────────────────────────────
+    // A component asks the bridge to run one verb on the component that fills
+    // `slot` (`lyra component`, crates/lyra/src/commands/component.rs): the
+    // vibeos shell answers it, or the provider's declared argv does. Names the
+    // bridge cannot spell are refused there, so nothing here reaches another
+    // component's item.
+    //
+    // Usage:  bridge.component("powermenu", "show", "lock")
+    //         bridge.component("calendar", "toggle", screenName)
+    function component(slot, verb, arg) {
+        var wanted = { cmd: "component", slot: "" + slot, verb: "" + verb }
+        if (typeof arg === "string" && arg.length > 0)
+            wanted.arg = arg
+        sendCommand(wanted)
+    }
+
     function riceDraft(action, name) {
         var wanted = { cmd: "ricedraft", action: "" + action }
         if ((action === "enter" || action === "drop") && typeof name === "string" && name.length > 0)

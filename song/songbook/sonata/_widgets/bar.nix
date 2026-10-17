@@ -12,16 +12,16 @@
 # consumer can derive the install list from the widget instead of a
 # hand-synced comment.
 #
-# `dependsOn`: bar.qml embeds `WidgetSlot { slot: "calendar" }` itself
-# (its clock popout) and `WidgetSlot { slot: "ricemode" }` (the rice-mode
-# control leading its right stave), and declares `required property var
-# powermenu` / `required property var dock`, both of which it calls `.toggle()`
-# on (the clef and the agent-sessions cell).
+# `dependsOn`: `ricemode` ONLY. bar.qml embeds `WidgetSlot { slot: "ricemode" }`
+# (the rice-mode control leading its right stave). The clef (powermenu), the
+# agent-sessions cell (dock) and the clock (calendar) are not closure members:
+# bar.qml asks the bridge for each (`bridge.component(...)`), and the bridge runs
+# whichever component fills the slot, so nothing here is a QML dependency.
 #
 # `helpers`: the uppercase types bar.qml actually instantiates —
-# `AudioColonnade`, `BarPopout`, `SteleLayerPopout`, `StelePopout`.
-# `GadgetFrame` is mentioned only in comments explaining bar does NOT use it
-# (StelePopout hosts bare); it is not a real dependency.
+# `AudioColonnade`, `BarPopout`, `StelePopout`. `GadgetFrame` is mentioned only
+# in comments explaining bar does NOT use it (StelePopout hosts bare); it is not
+# a real dependency.
 _: {
   file = "bar.qml";
 
@@ -31,16 +31,12 @@ _: {
   ];
 
   dependsOn = [
-    "calendar"
     "ricemode"
-    "powermenu"
-    "dock"
   ];
 
   helpers = [
     "AudioColonnade.qml"
     "BarPopout.qml"
-    "SteleLayerPopout.qml"
     "StelePopout.qml"
   ];
 }

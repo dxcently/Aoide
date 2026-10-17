@@ -41,16 +41,14 @@ Item {
 
     // -- Injected props -- exactly what shell.qml's barSlot hands over ------
     // (shell.qml lines ~122-143: WidgetSlot { slot: "bar" } always carries
-    // livery + bridge, plus extraProps { shared, powermenu, dock,
-    // stagingEngine }). stagingEngine is handed on to the embedded `ricemode`
+    // livery + bridge, plus extraProps { shared, stagingEngine }).
+    // stagingEngine is handed on to the embedded `ricemode`
     // slot; shared is declared because it is unconditionally injected --
     // unused here, same precedent WidgetSlot.qml itself documents for bridge
     // on its own fallback path.
     required property var livery
     required property var bridge
     required property var shared
-    required property var powermenu
-    required property var dock
     required property var stagingEngine
 
     // WidgetSlot sizes ITSELF off this item's implicitWidth/Height (an
@@ -211,7 +209,7 @@ Item {
             value: "" + root.sessionCount
             urgent: root.anyBlocked
             interactive: true
-            onActivated: if (root.dock && root.dock.toggle) root.dock.toggle()
+            onActivated: root.bridge.component("dock", "toggle")
         }
         Cell {
             livery: root.livery
@@ -226,7 +224,7 @@ Item {
             ink: root.livery.barFg
             value: "[pwr]"
             interactive: true
-            onActivated: if (root.powermenu) root.powermenu.toggle()
+            onActivated: root.bridge.component("powermenu", "toggle")
         }
     }
 }

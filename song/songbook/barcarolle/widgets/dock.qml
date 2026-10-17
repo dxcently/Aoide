@@ -18,6 +18,15 @@ PanelWindow {
 
     property bool shown: false
     property var targetScreen: null
+    // The bar lights its dock cell and its flyouts off this state, read from
+    // `shared` and never from this item.
+    function publish() {
+        if (!root.shared) return
+        root.shared.dockShown = root.shown
+        root.shared.dockScreen = root.targetScreen
+    }
+    onShownChanged: root.publish()
+    onTargetScreenChanged: root.publish()
     property real hiddenAt: 0
     property var hiddenScreen: null
 
@@ -85,8 +94,15 @@ PanelWindow {
         for (var i = 0; i < s.length; i++) if (s[i].name === n) return s[i]
         return null
     }
-    function show(scr) {
-        var t = scr || root.focusedScreen()
+    // The bridge names a screen by its name (`lyra component dock toggle <name>`);
+    // a bare call lands on the focused one.
+    function screenNamed(name) {
+        var s = Quickshell.screens
+        for (var i = 0; i < s.length; i++) if (s[i].name === name) return s[i]
+        return null
+    }
+    function show(name) {
+        var t = root.screenNamed(name) || root.focusedScreen()
         root.tip = null
         if (root.shown && t === root.targetScreen) return
         if (root.shown) {
@@ -106,10 +122,11 @@ PanelWindow {
         root.tip = null
         root.shown = false
     }
-    function toggle(scr) {
+    function toggle(name) {
+        var scr = root.screenNamed(name)
         if (root.shown && (!scr || scr === root.targetScreen)) { root.hide(); return }
         if (!root.shown && Date.now() - root.hiddenAt < 250 && (!scr || scr === root.hiddenScreen)) return
-        root.show(scr)
+        root.show(name)
     }
 
     // ── data ─────────────────────────────────────────────────────────────

@@ -267,15 +267,23 @@ fn shell_lock(budget: Duration) -> Result<(), String> {
     }
 }
 
-/// `quickshell -p <run/qml/shell.qml> ipc call lock <function>`, killed at
-/// `deadline`. Quickshell exits 0 for a call that reached no handler, and
-/// prints why, so the caller judges the words, not the status.
-fn qs_call(function: &[&str], deadline: Instant) -> Result<String, String> {
-    let mut child = Command::new("quickshell")
-        .arg("-p")
-        .arg(aoide_storage::fs::run_qml_dir().join("shell.qml"))
-        .args(["ipc", "call", "lock"])
-        .args(function)
+/// `quickshell -p <shell_qml> ipc call <target> <function…>` as an argv: the
+/// one spelling of a shell IPC call. [`run_ipc`] spawns it, and `lyra
+/// component` builds its own calls with it too.
+pub(crate) fn ipc_argv(shell_qml: &Path, target: &str, function: &[&str]) -> Vec<String> {
+    let mut argv: Vec<String> = ["quickshell", "-p"].map(String::from).into();
+    argv.push(shell_qml.display().to_string());
+    argv.extend(["ipc", "call", target].map(String::from));
+    argv.extend(function.iter().map(|f| f.to_string()));
+    argv
+}
+
+/// Spawn an [`ipc_argv`], killed at `deadline`. Quickshell exits 0 for a call
+/// that reached no handler, and prints why, so the caller judges the words,
+/// not the status.
+pub(crate) fn run_ipc(argv: &[String], deadline: Instant) -> Result<String, String> {
+    let mut child = Command::new(&argv[0])
+        .args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -299,6 +307,11 @@ fn qs_call(function: &[&str], deadline: Instant) -> Result<String, String> {
     } else {
         Err(out)
     }
+}
+
+/// `lock`'s own target: `quickshell -p <run/qml/shell.qml> ipc call lock <function>`.
+fn qs_call(function: &[&str], deadline: Instant) -> Result<String, String> {
+    run_ipc(&ipc_argv(&aoide_storage::fs::run_qml_dir().join("shell.qml"), "lock", function), deadline)
 }
 
 /// The child's exit status, or `None` once `deadline` passes — the child is

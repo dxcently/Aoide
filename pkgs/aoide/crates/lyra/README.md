@@ -406,6 +406,17 @@ are core `aoide` identity, root `AGENTS.md`).
   `cliphist` on `PATH`. The bridge `AoideClipboard.qml`'s `deleteById`/`clear`
   run. docs/Aoide-Wiki/concepts/cli/Clipboard-Commands.md has the commands
   and their `data.reason` codes.
+- `commands::component` — `component <slot> <verb> [arg]`, the one door for a
+  cross-component call. The shellbridge's `component` command runs it, and a
+  terminal can too. It reads `run/qml/components.json` and resolves in this
+  order: a `vibeos` provider runs `quickshell -p run/qml/shell.qml ipc call
+  component act <slot> <verb> <arg>` (the shell answers `true` when the slot's
+  live item ran the verb, `false` when the item is not loaded or lacks it); a
+  provider whose `actions.<verb>` is an argv runs that argv with the arg
+  appended, detached, no shell; anything else is a taught refusal, exit 1 (`no
+  provider fills <slot>`, or `provider <p> declares no <verb>`). It shares
+  `lock`'s `ipc_argv` and `run_ipc`, so the shell's IPC spelling lives in one
+  place.
 - `commands::lock` — `lock` and `lock hint [yes|no]`, the one lock entry
   (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
   staged song whose OWN manifest entry carries `lockscreen` is locked by the

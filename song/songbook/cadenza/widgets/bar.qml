@@ -9,8 +9,9 @@
 //
 // WidgetSlot-hosted, root Item. The shell's PanelWindow reads `implicitHeight`
 // (28) back for its height and exclusiveZone; width follows the host.
-// Extras, all optional so the canvas (powermenu: null, dock: null) and a bare
-// load never error: `shared`, `powermenu`, `dock`, `stagingEngine`.
+// Extras, all optional so a bare load never errors: `shared`, `stagingEngine`.
+// The powermenu, the dock and the calendar are not handed in: the bar asks the
+// bridge for each (`bridge.component(...)`).
 //
 // ── What it reads (rule 7: it paints, it holds no fact of its own) ─────────
 //   Hyprland          workspaces (jack number, occupied, focused, urgent), active title
@@ -33,9 +34,10 @@
 // CPU and spend are not on the bar: they live on the board's SYS tab.
 //
 // ── What it does ───────────────────────────────────────────────────────────
-//   [⏻] → powermenu.toggle()          jack click → workspace.activate()
-//   AGT / NOTIF → dock.openTab("overview"|"notif"), falling back to
-//        dock.toggle() when the dock has no openTab
+//   [⏻] → bridge.component("powermenu", "toggle")
+//   jack click → workspace.activate()
+//   AGT / NOTIF → bridge.component("dock", "openTab", "overview"|"notif")
+//   the clock → the calendar surface, toggled through the bridge
 //   RICE → the `ricemode` slot (ricemode.qml, cadenza's own body): a click
 //        toggles staging and declarative, a right or middle click opens the
 //        draft picker
@@ -130,8 +132,6 @@ Item {
     required property var livery
     required property var bridge
     property var shared: null
-    property var powermenu: null
-    property var dock: null
     property var stagingEngine: null
 
     // ── preview knobs (BarPreview.qml sets these; the live path never does) ─
@@ -1237,8 +1237,7 @@ Item {
     }
     // ── actions ─────────────────────────────────────────────────────────────
     function openBoard(tab) {
-        if (root.dock && root.dock.openTab) root.dock.openTab(tab)
-        else if (root.dock && root.dock.toggle) root.dock.toggle()
+        root.bridge.component("dock", "openTab", "" + tab)
     }
     function launchBtop() {
         Quickshell.execDetached(["aoide", "spawn", "--windowed", "--agent", "btop", "--", "btop"])
@@ -1582,7 +1581,7 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: if (root.powermenu && root.powermenu.toggle) root.powermenu.toggle()
+            onClicked: root.bridge.component("powermenu", "toggle")
         }
     }
 
@@ -2316,29 +2315,27 @@ Item {
         }
     }
 
-    // ── CLOCK → the calendar slot (sonata's mechanism), else the date ──────
-    readonly property bool calendarReady: !!root.stagingEngine
-        && root.stagingEngine.resolveSong(root.livery.songName, "calendar") !== ""
-    // A calendar slot that resolves but fails to build (a helper type it
-    // cannot reach) leaves an empty WidgetSlot; the date pane stands in.
+    // ── CLOCK → the calendar surface, asked through the bridge ────────────
+    // The clock measures its cell into shared.calendarAnchor, then the bridge
+    // toggles the calendar on this bar's screen. A song with no calendar has no
+    // surface to open, and the bridge's call finds none.
+    readonly property string screenName: QsWindow.window && QsWindow.window.screen ? QsWindow.window.screen.name : ""
+    function toggleCalendar(cell) {
+        if (root.shared) root.shared.calendarAnchor = cell.mapToItem(null, 0, cell.height)
+        root.bridge.component("calendar", "toggle", root.screenName)
+    }
     Component {
         id: clockPane
         Item {
             id: cp
-            readonly property bool calUp: !!calLoader.item && calLoader.item.implicitHeight > 0
-            implicitWidth: calUp ? calLoader.implicitWidth : dateLoader.implicitWidth
-            implicitHeight: calUp ? calLoader.implicitHeight : dateLoader.implicitHeight
-            Loader { id: calLoader; active: root.calendarReady; visible: cp.calUp; sourceComponent: calSlot }
-            Loader { id: dateLoader; active: !cp.calUp; sourceComponent: datePane }
-        }
-    }
-    Component {
-        id: calSlot
-        WidgetSlot {
-            livery: root.livery
-            bridge: root.bridge
-            stagingEngine: root.stagingEngine
-            slot: "calendar"
+            implicitWidth: dateLoader.implicitWidth
+            implicitHeight: dateLoader.implicitHeight
+            Loader { id: dateLoader; sourceComponent: datePane }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleCalendar(cp)
+            }
         }
     }
     Component {

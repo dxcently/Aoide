@@ -19,8 +19,6 @@ Item {
     required property var livery
     required property var bridge
     property var shared: null
-    property var powermenu: null
-    property var dock: null
     property var stagingEngine: null
 
     readonly property var kit: Kit.make(root.livery)
@@ -232,6 +230,13 @@ Item {
     }
     Component.onCompleted: root.recountTray()
 
+    // The calendar is its own surface: the clock measures its cell into
+    // shared.calendarAnchor (screen coordinates), then the bridge toggles it on
+    // this bar's screen.
+    function toggleCalendar(cell) {
+        if (root.shared) root.shared.calendarAnchor = cell.mapToItem(null, 0, cell.height)
+        root.bridge.component("calendar", "toggle", win.screen ? win.screen.name : "")
+    }
     function toggleFlyout(name) {
         if (root.flyout === name) { root.flyout = ""; return }
         if (root.flyoutGone === name && Date.now() - root.flyoutGoneAt <= 250) return
@@ -246,7 +251,7 @@ Item {
         win.hotId = -1
         win.hotBtn = null
         if (root.flyout === "start") sm.reset()
-        if (root.dock && typeof root.dock.hide === "function") root.dock.hide()
+        if (root.shared && root.shared.dockShown) root.bridge.component("dock", "hide")
         var menu = riceSlot._item
         if (menu && menu.open) menu.open = false
         root.claimFlyouts()
@@ -283,16 +288,16 @@ Item {
             }
         }
     }
-    readonly property bool flyoutOpen: root.flyout !== "" || (!!root.dock && !!root.dock.shown && root.dock.targetScreen === win.screen)
+    readonly property bool flyoutOpen: root.flyout !== "" || (!!root.shared && root.shared.dockShown && root.shared.dockScreen === win.screen)
     onFlyoutOpenChanged: {
         if (!win.screen) return
         Kit.hub.open = Kit.hub.open || {}
         Kit.hub.open[win.screen.name] = root.flyoutOpen
     }
     Connections {
-        target: root.dock
+        target: root.shared
         ignoreUnknownSignals: true
-        function onShownChanged() { if (root.dock && root.dock.shown) root.flyout = "" }
+        function onDockShownChanged() { if (root.shared && root.shared.dockShown) root.flyout = "" }
     }
     Connections {
         target: riceSlot._item
@@ -1737,8 +1742,8 @@ Item {
             id: clock
             anchors.right: sliver.left
             width: 76
-            lit: root.flyout === "calendar"
-            onClicked: root.toggleFlyout("calendar")
+            lit: !!root.shared && root.shared.calendarOpen
+            onClicked: root.toggleCalendar(clock)
             Column {
                 anchors.centerIn: parent
                 ShadowText { width: 76; horizontalAlignment: Text.AlignHCenter; text: Qt.formatTime(root.now, "h:mm AP"); font: Kit.bodyFont(12) }
@@ -1779,8 +1784,8 @@ Item {
         Cell {
             id: agents
             anchors.right: flag.left
-            lit: !!root.dock && !!root.dock.shown && root.dock.targetScreen === win.screen
-            onClicked: if (root.dock && root.dock.toggle) root.dock.toggle(win.screen)
+            lit: !!root.shared && root.shared.dockShown && root.shared.dockScreen === win.screen
+            onClicked: root.bridge.component("dock", "toggle", win.screen ? win.screen.name : "")
             Icon { x: 4; y: 12; width: 16; height: 16; src: root.trayDir + "tray-agents.svg" }
             Dot {
                 visible: root.awaitingCount > 0
@@ -1927,29 +1932,6 @@ Item {
                         font: Kit.bodyFont(11)
                         textFormat: Text.PlainText
                     }
-                }
-            }
-        }
-
-        Flyout {
-            name: "calendar"
-            cell: clock
-            flushRight: true
-            gate: !!root.stagingEngine && root.stagingEngine.resolveSong(root.livery.songName, "calendar") !== ""
-            implicitWidth: calRim.width
-            implicitHeight: calRim.height + 6
-            Rim {
-                id: calRim
-                width: calBody.implicitWidth + 14
-                height: calBody.implicitHeight + 14
-                WidgetSlot {
-                    id: calBody
-                    x: 7
-                    y: 7
-                    livery: root.livery
-                    bridge: root.bridge
-                    stagingEngine: root.stagingEngine
-                    slot: "calendar"
                 }
             }
         }
@@ -2408,7 +2390,7 @@ Item {
                     }
                     function shutdownDialog(action) {
                         root.flyout = ""
-                        if (root.powermenu) root.powermenu.show(action)
+                        root.bridge.component("powermenu", "show", action)
                     }
 
                     property bool stageOpen: false

@@ -86,6 +86,26 @@ ShellRoot {
     readonly property var powermenuItem: powermenuGate.item ? powermenuGate.item.item : null
     readonly property var dockItem: dockGate.item ? dockGate.item.body : null
     readonly property var launcherItem: launcherGate.item ? launcherGate.item.item : null
+    readonly property var calendarItem: calendarGate.item ? calendarGate.item.body : null
+    readonly property var switcherItem: switcherGate.item ? switcherGate.item.body : null
+
+    // What the `component` IPC target runs a verb on, by slot. Components never
+    // reach each other's items: a caller asks the bridge (`bridge.component`),
+    // and the bridge arrives here as `act`.
+    function componentItem(slot) {
+        switch (slot) {
+        case "powermenu": return shellRoot.powermenuItem
+        case "dock": return shellRoot.dockItem
+        case "launcher": return shellRoot.launcherItem
+        case "calendar": return shellRoot.calendarItem
+        case "switcher": return shellRoot.switcherItem
+        default: return null
+        }
+    }
+    readonly property var componentVerbs: ["toggle", "show", "hide", "openTab", "openPictures"]
+    // The launcher's own Desktop Pictures window, as a fact: the wallpaper
+    // picker asks the bridge for it only when the launcher can answer.
+    readonly property bool launcherHasPictures: !!shellRoot.launcherItem && typeof shellRoot.launcherItem.openPictures === "function"
 
     // ── Shared singletons (one instance for the whole session) ─────────────
     LiveryState { id: livery }
@@ -93,6 +113,20 @@ ShellRoot {
     // `lyra reload`'s IPC target (crates/song/src/ipc.rs) — no
     // properties, wired for its side effect (Quickshell.reload) alone.
     AoideIpc { id: ipc }
+    // The `component` IPC target: `lyra component <slot> <verb> [arg]` through
+    // the bridge. It runs one closed verb on the slot's live item and answers
+    // `true` when it ran, `false` when the item is not loaded or lacks the verb.
+    // A void answer could not tell those apart, so this one returns a value.
+    IpcHandler {
+        target: "component"
+        function act(slot: string, verb: string, arg: string): bool {
+            var item = shellRoot.componentItem(slot)
+            if (!item || shellRoot.componentVerbs.indexOf(verb) < 0 || typeof item[verb] !== "function")
+                return false
+            if (arg === "") item[verb](); else item[verb](arg)
+            return true
+        }
+    }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
     // the lyra lane's build carries into $AOIDE_ROOT/run/qml/songs/, resolves
     // WidgetSlot's "does the active song dress this slot" / "where's its QML".
@@ -125,6 +159,15 @@ ShellRoot {
         // highlight from its own id instead of losing it — the fix for the
         // "highlight flickers then vanishes while still hovering" bug. "" = none.
         property string hoveredSessionId: ""
+
+        // The calendar's anchor (screen coordinates, measured by the bar's clock
+        // before it asks the bridge to toggle the calendar) and its open state
+        // (published by the calendar surface, read by the clock's lit state).
+        property point calendarAnchor: Qt.point(0, 0)
+        property bool calendarOpen: false
+        // The dock's state, published by the dock surface for the bar's lit cells.
+        property bool dockShown: false
+        property var dockScreen: null
 
         // Cascading seed position so successive tear-offs don't stack exactly.
         function floatGadget(kind) {
@@ -236,13 +279,11 @@ ShellRoot {
                 // stagingEngine is ALSO threaded as an extra (beyond the
                 // anchor's own required stagingEngine above) because the loaded
                 // bar widget needs its own handle to resolve its embedded
-                // calendar WidgetSlot — two separate reads of the same
-                // singleton, not a conflict. `powermenu` and `dock` are those
-                // slots' live items, null when the component is not selected.
+                // ricemode WidgetSlot — two separate reads of the same
+                // singleton, not a conflict. The bar takes no other component's
+                // item: it asks the bridge (`bridge.component(...)`).
                 extraProps: ({
                     shared: shared,
-                    powermenu: shellRoot.powermenuItem,
-                    dock: shellRoot.dockItem,
                     stagingEngine: shellRoot.stagingRef
                 })
             }
@@ -356,6 +397,35 @@ ShellRoot {
     // herald: the notification popup (see the overlay-surfaces note above),
     // the `notifications` component — the slot's PanelWindow watches
     // state/stage/herald.json and stays dormant while the ledger is empty.
+    // The calendar: a window-owning surface, asked for by the bar's clock
+    // through the bridge. Its body anchors under the clock and publishes its
+    // open state on `shared`.
+    LazyLoader {
+        id: calendarGate
+        active: shellRoot.has("calendar")
+
+        Scope {
+            readonly property var body: calendarSlot.item
+
+            SurfaceSlot {
+                id: calendarSlot
+                slot: "calendar"
+                livery: shellRoot.liveryRef
+                bridge: shellRoot.bridgeRef
+                stagingEngine: shellRoot.stagingRef
+                extraProps: ({ shared: shared })
+            }
+            GlobalShortcut {
+                appid: "aoide"
+                name: "calendar"
+                description: "Summon the Aoide calendar"
+                onPressed: {
+                    var item = calendarSlot.item
+                    if (item && item.toggle) item.toggle()
+                }
+            }
+        }
+    }
     LazyLoader {
         active: shellRoot.has("notifications")
 
@@ -384,7 +454,8 @@ ShellRoot {
 
         AoideWallpaperPicker {
             livery: shellRoot.liveryRef
-            launcher: shellRoot.launcherItem
+            bridge: shellRoot.bridgeRef
+            launcherHasPictures: shellRoot.launcherHasPictures
         }
     }
 
@@ -406,9 +477,12 @@ ShellRoot {
     // sonata's, else the plain AoideSwitcher below (the floor). Not bound
     // here: the venue binds a combo to it.
     LazyLoader {
+        id: switcherGate
         active: shellRoot.has("switcher")
 
         Scope {
+            readonly property var body: switcherSlot.item
+
             SurfaceSlot {
                 id: switcherSlot
                 slot: "switcher"

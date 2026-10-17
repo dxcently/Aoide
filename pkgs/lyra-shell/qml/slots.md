@@ -126,14 +126,14 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 - **Declares any slot-specific extras as `required property`** — e.g. the
   bar slot's `shared` (see table). Extras are per-slot, not
   universal; check the table for what a given slot's anchor passes.
-  Under a `WidgetSlot` an extra can change after creation (the bar's
-  `powermenu` and `dock` are another slot's live `.item`, null while that
-  slot rebuilds): the anchor assigns the new value onto the live widget
-  instead of rebuilding it, so a widget reads an extra at use time, never
-  once at creation. A value that does not fit the extra's declared type
-  logs `[aoide/widgetslot]` and skips that key alone, so declare an extra
-  that holds another slot's item as `var`. A `SurfaceSlot` rebuilds its
-  surface on a changed extra.
+  Under a `WidgetSlot` an extra can change after creation: the anchor
+  assigns the new value onto the live widget instead of rebuilding it, so a
+  widget reads an extra at use time, never once at creation. A value that
+  does not fit the extra's declared type logs `[aoide/widgetslot]` and
+  skips that key alone. A `SurfaceSlot` rebuilds its surface on a changed
+  extra. No component holds another component's item: a body asks the bridge
+  (`bridge.component(slot, verb, arg)`), and the bridge runs whichever
+  provider fills that slot (CONTRACTS.md §4, `lyra component`).
 - **Sizes itself via `implicitWidth`/`implicitHeight`** — the host
   positions the `WidgetSlot`, not the widget; the widget only needs to
   report its own footprint.
@@ -159,6 +159,7 @@ is instantiated only when it holds:
 | `bar` | the per-screen bar `Variants` (its model is empty) |
 | `dock` | the `dock` `SurfaceSlot` and its `aoide:dock` `GlobalShortcut` |
 | `powermenu`, `launcher` | their `SurfaceSlot` |
+| `calendar` | the `calendar` `SurfaceSlot` and its `aoide:calendar` `GlobalShortcut` |
 | `switcher` | the `switcher` `SurfaceSlot` and its `aoide:switcher` `GlobalShortcut` |
 | `notifications` | the `herald` `SurfaceSlot` |
 | `lock` | `LockHost`, so the `lock` IPC target too |
@@ -166,34 +167,36 @@ is instantiated only when it holds:
 An absent or unreadable `components.json` is the empty set: nothing above is
 instantiated (fail closed). The infrastructure is never gated: `LiveryState`,
 `ShellBridge`, `StagingEngine`, `AoideIpc`, `AoideClipboard`,
-`GrimoireLedger` and `SongSurfaces` exist in every session. A reference
-across components is null while its target is not instantiated (the bar's
-`powermenu`/`dock` extras, the picker's `launcher`), so a body guards every
-call on one. Each gated anchor sits inside a `LazyLoader`, a separate
-component scope, so it reads the root singletons through `shellRoot`'s
-handles, as a `Variants` delegate does. `calendar` and `greeter` have no
-gate here: the calendar is embedded in the bar, and the greeter runs its own
-shell (`GreeterHost.qml`). The healthcheck reads the same file and expects a
+`GrimoireLedger` and `SongSurfaces` exist in every session. The `component` IPC target
+(`ipc call component act <slot> <verb> <arg>`, run by `lyra component` through
+the bridge) reaches a slot's live item by name, and only for the closed verbs
+`toggle`, `show`, `hide`, `openTab` and `openPictures`; it answers `true` when
+the verb ran and `false` when the item is not loaded. The picker's
+`openPictures` is asked through the bridge only when the launcher reports the
+verb (`launcherHasPictures`). Each gated anchor sits inside a `LazyLoader`, a
+separate component scope, so it reads the root singletons through `shellRoot`'s
+handles, as a `Variants` delegate does. `greeter` has no gate here: the
+greeter runs its own shell (`GreeterHost.qml`). The healthcheck reads the same file and expects a
 declared surface only when its component is selected.
 
 ## Wired slots
 
 | slot | anchor kind | host anchor | extras | fallback |
 | --- | --- | --- | --- | --- |
-| `calendar` | `WidgetSlot` | `bar.qml` (sonata) — the clock's calendar popout (`WidgetSlot { slot: "calendar" }`) | none | none — an unauthored `calendar` slot renders nothing (the popout itself gates on `stagingEngine.has(...)` before opening) |
+| `calendar` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "calendar" }`, behind the `calendar` component; the bar's clock measures its cell into `shared.calendarAnchor` and asks the bridge to toggle it on the bar's screen; the lane's `aoide:calendar` `GlobalShortcut` calls `.item.toggle()` | `shared` (session-state QtObject: the anchor in, `calendarOpen` out) | none — an unauthored `calendar` slot renders nothing (the surface has no body to show) |
 | `notifications` | retired 2026-08-16 — the Quickshell `NotificationServer` surface (AoideNotifications.qml) is gone; dunst owns `org.freedesktop.Notifications`. Superseded by `herald` below, which draws the popup WITHOUT owning the bus name | — | — |
 | `herald` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "herald" }`, behind the `notifications` component; the notification popup, drawn from `state/stage/herald.json` (dunst draws nothing — see `modules/dendrites/dunst.nix`) | none | none — sonata's `widgets/herald.qml` is the floor |
-| `dock` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "dock" }`, behind the `dock` component; the bar's ✎N cell and the `aoide:dock` (SUPER+G) `GlobalShortcut`, both in the lane, call `.item.toggle()` | `shared` (session-state QtObject), `stagingEngine` (so the dock's own embedded gadget `WidgetSlot`s can resolve) | none — sonata's `widgets/dock.qml` is the floor |
+| `dock` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "dock" }`, behind the `dock` component; the bar's cells ask the bridge (`bridge.component("dock", "toggle")`), and the `aoide:dock` (SUPER+G) `GlobalShortcut` calls `.item.toggle()` | `shared` (session-state QtObject; a dock that publishes `dockShown`/`dockScreen` lights the bar's cell), `stagingEngine` (so the dock's own embedded gadget `WidgetSlot`s can resolve) | none — sonata's `widgets/dock.qml` is the floor |
 | `conductor` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "conductor" }`) | `shared` | none — sonata's own `widgets/conductor.qml` IS the baseline floor |
 | `terminals` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "terminals" }`) | `shared` | none — sonata's own `widgets/terminals.qml` IS the baseline floor |
 | `usage` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "usage" }`), visible only once it reports nonzero `implicitHeight` | none | none — sonata's own `widgets/usage.qml` IS the baseline floor |
 | `meters` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "meters" }`) | none | none — sonata's own `widgets/meters.qml` IS the baseline floor |
 | `power` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "power" }`) | none | none — sonata's own `widgets/power.qml` IS the baseline floor |
 | `herald-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no lane-side Component fallback is wired |
-| `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`, behind the `powermenu` component; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
-| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; its live `.item` (null without it) is also handed to `AoideWallpaperPicker`, whose `aoide:wallpaper` shortcut calls `.item.openPictures()` when the body has one (else the plain cover picker opens) | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
+| `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`, behind the `powermenu` component; the bar's clef asks the bridge (`bridge.component("powermenu", "toggle")`) | none | none — sonata's `widgets/powermenu.qml` is the floor |
+| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; `AoideWallpaperPicker`'s `aoide:wallpaper` shortcut asks the bridge for `openPictures` when the launcher reports that verb (`launcherHasPictures`), else the plain cover picker opens | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
 | `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `AoideSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A song dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
-| `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }`, behind the `bar` component | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`, null without the `powermenu` component), `dock` (the dock slot's live `.item`, null without the `dock` component), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
+| `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }`, behind the `bar` component | `shared` (session-state QtObject: the calendar's anchor, the dock's state), `stagingEngine` (so the bar's embedded ricemode `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 | `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime songbook's songs, back to declarative, then the draft rows, which a song's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a song may dress it with its own body (cadenza and fugue do) |
 | `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml` behind the `lock` component; `lyra lock` locks through it (`ipc call lock lock`) when the staged song's own manifest entry has this slot, else runs hyprlock | `livery`, `bridge` (null: no shellbridge, so no power or other bridge action, behind a locked screen), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()`; the face sets `ready` to `true` once up, within 3 s | the host's floor password field (also for a face not ready in time): no baseline song is ever borrowed, so a song without a face is a hyprlock song |
 | `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED song ships this slot (`aoide.songbook.greeter`); a song that ships none logs in through ly | `livery`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
@@ -205,6 +208,7 @@ declared surface only when its component is selected.
 | --- | --- | --- |
 | `dock` | `aoide-dock` | Overlay |
 | `powermenu` | `aoide-powermenu` | Overlay |
+| `calendar` | `aoide-calendar` | Overlay |
 | `launcher` | `aoide-launcher` | Overlay |
 | `switcher` | `aoide-switcher` | Overlay |
 
@@ -217,7 +221,7 @@ A namespace in this table is a **mapped layer surface** — and a song declares
 which of those it expects to be persistently mapped, by namespace, in
 `aoide.arrangement.surfaces` (`CONTRACTS.md` §5, published as
 `run/qml/songs/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
-Surfaces summoned on demand — `powermenu`/`launcher`/`switcher` here, plus the OSD
+Surfaces summoned on demand — `powermenu`/`launcher`/`switcher`/`calendar` here, plus the OSD
 and `*Preview` surfaces — are deliberately **not** declared. The lock screen is no
 layer surface at all: it is a session-lock surface the session-lock host owns,
 and the greeter runs before any session, in its own compositor.

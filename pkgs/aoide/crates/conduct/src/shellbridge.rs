@@ -94,6 +94,13 @@ pub enum BridgeCommand {
     /// shells out; this command is the gate through which the six endings reach
     /// lyra lock / hyprctl / systemctl.
     Power { action: PowerAction },
+    /// `{ "cmd": "component", "slot": "…", "verb": "…", "arg": "…"? }` — a
+    /// cross-component call (ShellBridge.qml's `component`): the component that
+    /// fills `slot` does `verb`, with `arg` when it takes one. Fire-and-forget,
+    /// like [`Self::Power`]; the names are held to the closed charsets of
+    /// [`component_slot`], [`component_verb`] and [`component_arg`], and the
+    /// spelling is [`component_command`].
+    Component { slot: String, verb: String, arg: Option<String> },
     /// `{ "cmd": "ricemode", "action": "stage|declarative", "name": "…" }` — a
     /// row of the bar's RICE menu: switch the stage to the named runtime song,
     /// or lock back to declarative. Fire-and-forget like [`Self::RiceDraft`]:
@@ -513,6 +520,16 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
                 .to_string();
             PowerAction::from_wire(&action).map(|action| BridgeCommand::Power { action })
         }
+        "component" => {
+            let slot = v.get("slot")?.as_str()?;
+            let verb = v.get("verb")?.as_str()?;
+            let arg = match v.get("arg") {
+                None => None,
+                Some(a) => Some(a.as_str().filter(|s| component_arg(s))?.to_string()),
+            };
+            (component_slot(slot) && component_verb(verb))
+                .then(|| BridgeCommand::Component { slot: slot.to_string(), verb: verb.to_string(), arg })
+        }
         "ricemode" => RiceModeAction::from_wire(&v).map(|action| BridgeCommand::RiceMode { action }),
         "ricemenu" => Some(BridgeCommand::RiceMenu),
         "ricedraft" => RiceDraftAction::from_wire(&v).map(|action| BridgeCommand::RiceDraft { action }),
@@ -607,11 +624,54 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
 /// can take down the accept loop.
 fn dispatch_power(action: PowerAction) -> std::io::Result<()> {
     let (prog, args) = action.command();
-    let mut child = std::process::Command::new(prog).args(args).spawn()?;
+    spawn_detached(prog, args)
+}
+
+/// Spawn `prog args` and return at once: a detached reaper collects the
+/// child's status, so it never lingers as a zombie. Never waits — the caller
+/// may be an action that kills or freezes what would be waiting.
+fn spawn_detached<S: AsRef<str>>(prog: &str, args: &[S]) -> std::io::Result<()> {
+    let mut child = std::process::Command::new(prog).args(args.iter().map(|a| a.as_ref())).spawn()?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// A component slot name: lowercase start, then lowercase, digits or `-`.
+fn component_slot(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// A component verb: an ASCII letter start, then ASCII letters or digits
+/// (`openTab` is camelCase by contract).
+fn component_verb(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic()) && chars.all(|c| c.is_ascii_alphanumeric())
+}
+
+/// A component verb's one argument: 1 to 64 characters of ASCII letters,
+/// digits, `.`, `_` or `-`, never a leading `-` (a flag to the provider).
+fn component_arg(s: &str) -> bool {
+    (1..=64).contains(&s.len())
+        && !s.starts_with('-')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// The program and argv that run `lyra component <slot> <verb> [arg]`. It goes
+/// through the compositor (`hyprctl dispatch exec`), as `PowerAction::Lock`
+/// does, and never as this unit's child: NoNewPrivileges is inherited, and a
+/// provider's action may reach a setuid helper. The charsets above make the one
+/// spelled line safe for the compositor's shell.
+fn component_command(slot: &str, verb: &str, arg: Option<&str>) -> (&'static str, Vec<String>) {
+    let mut line = format!("lyra component {slot} {verb}");
+    if let Some(arg) = arg {
+        line.push(' ');
+        line.push_str(arg);
+    }
+    ("hyprctl", vec!["dispatch".to_string(), "exec".to_string(), line])
 }
 
 /// Dispatch ONE `ricemode` action: `lyra rice mode stage <name>` or a bare
@@ -2567,6 +2627,21 @@ fn handle_conn(stream: UnixStream) {
                     );
                 }
             },
+            Some(BridgeCommand::Component { slot, verb, arg }) => {
+                let (prog, args) = component_command(&slot, &verb, arg.as_deref());
+                let (event, outcome) = match spawn_detached(prog, &args) {
+                    Ok(()) => ("component", "spawned".to_string()),
+                    Err(e) => ("component-failed", format!("{e}")),
+                };
+                let _ = daemon::audit(
+                    &daemon::default_audit_log(),
+                    daemon::Door::Daemon,
+                    daemon::EventClass::Audit,
+                    "shellbridge",
+                    event,
+                    &format!("{slot} {verb}: {outcome}"),
+                );
+            }
             // Fire-and-forget: the outcome is a toast, never a reply. The audit
             // line names the action and its outcome and nothing else — never a
             // song, which the toast alone carries.
@@ -2986,6 +3061,64 @@ mod tests {
             Some(BridgeCommand::Power {
                 action: PowerAction::Lock
             })
+        );
+    }
+
+    #[test]
+    fn parse_command_accepts_a_component_call_with_and_without_an_arg() {
+        assert_eq!(
+            parse_command(r#"{"cmd":"component","slot":"powermenu","verb":"show","arg":"lock"}"#),
+            Some(BridgeCommand::Component {
+                slot: "powermenu".into(),
+                verb: "show".into(),
+                arg: Some("lock".into()),
+            })
+        );
+        assert_eq!(
+            parse_command(r#"{"cmd":"component","slot":"dock","verb":"openTab"}"#),
+            Some(BridgeCommand::Component { slot: "dock".into(), verb: "openTab".into(), arg: None })
+        );
+        assert_eq!(
+            parse_command(r#"{"cmd":"component","slot":"calendar","verb":"toggle","arg":"DP-1"}"#),
+            Some(BridgeCommand::Component {
+                slot: "calendar".into(),
+                verb: "toggle".into(),
+                arg: Some("DP-1".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_command_rejects_a_component_name_outside_its_charset() {
+        let refused = [
+            r#"{"cmd":"component","slot":"pow;rm -rf ~","verb":"toggle"}"#,
+            r#"{"cmd":"component","slot":"Powermenu","verb":"toggle"}"#,
+            r#"{"cmd":"component","slot":"","verb":"toggle"}"#,
+            r#"{"cmd":"component","slot":"dock","verb":"to ggle"}"#,
+            r#"{"cmd":"component","slot":"dock","verb":"9toggle"}"#,
+            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":"DP-1 && x"}"#,
+            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":"--evil"}"#,
+            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":""}"#,
+            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":7}"#,
+            r#"{"cmd":"component","verb":"toggle"}"#,
+            r#"{"cmd":"component","slot":"dock"}"#,
+        ];
+        for line in refused {
+            assert_eq!(parse_command(line), None, "must refuse {line}");
+        }
+        let too_long = format!(r#"{{"cmd":"component","slot":"dock","verb":"toggle","arg":"{}"}}"#, "a".repeat(65));
+        assert_eq!(parse_command(&too_long), None, "an arg over 64 characters is refused");
+    }
+
+    #[test]
+    fn a_component_call_is_spelled_as_one_line_through_the_compositor() {
+        assert_eq!(
+            component_command("powermenu", "show", Some("lock")),
+            ("hyprctl", vec!["dispatch".into(), "exec".into(), "lyra component powermenu show lock".into()])
+        );
+        assert_eq!(
+            component_command("dock", "toggle", None),
+            ("hyprctl", vec!["dispatch".into(), "exec".into(), "lyra component dock toggle".into()])
         );
     }
 

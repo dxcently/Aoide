@@ -54,6 +54,7 @@
 //! (`pkgs/aoide/crates/AGENTS.md`, "Golden discipline").
 pub mod apps;
 pub mod clipboard;
+pub mod component;
 pub mod dialog_qml;
 pub mod icon;
 pub mod infra;
@@ -108,7 +109,7 @@ const LAYOUT: Layout = Layout {
             ],
         ),
         ("Agent interfaces", &[("mcp", ""), ("schema", "")]),
-        ("System", &[("shellbridge", ""), ("quickshell", "")]),
+        ("System", &[("shellbridge", ""), ("quickshell", ""), ("component", "")]),
     ],
 };
 
@@ -140,6 +141,7 @@ pub fn all() -> Registry {
     apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, song/stage/apps.json
     clipboard::register(&mut r); // clipboard delete/clear — remove cliphist history entries and their cached thumbnails
     lock::register(&mut r); // lock + lock.hint — the one lock entry (the shell's LockHost for a song with a face, else hyprlock) and logind's LockedHint
+    component::register(&mut r); // component — a cross-component call: the slot's provider answers the verb (vibeos shell, or its declared argv)
 
     r.arrange(LAYOUT);
     r

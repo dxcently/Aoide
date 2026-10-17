@@ -15,15 +15,13 @@
 // rules, nothing else.
 //
 // Positioning: a layer surface cannot anchor to a bar cell the way an
-// xdg_popup can, so this pins to the screen's top-left and computes its
-// margins from the cell's scene position at each open (mapToItem is not
-// dependency-tracked, so a live binding would go stale anyway; the bar's
-// layout is static while a popout is up). The bar layer sits at the
-// screen's top-left, so bar-scene coords ARE screen coords. Left-pinned by
-// construction — the surface grows rightward/downward on resize, which is
-// exactly the anchor override the calendar needed from StelePopout (its
-// compact↔expanded morph steps the window size; a layer surface also
-// sidesteps the xdg_popup resize-remap flicker entirely).
+// xdg_popup can, so this pins to the screen's top-left and takes its top-left
+// corner from `anchor` (screen coordinates). The caller measures the cell it
+// hangs under and sets `anchor` before it shows. Left-pinned by construction —
+// the surface grows rightward/downward on resize, which is exactly the anchor
+// override the calendar needed from StelePopout (its compact↔expanded morph
+// steps the window size; a layer surface also sidesteps the xdg_popup
+// resize-remap flicker entirely).
 //
 // Contract otherwise identical to StelePopout: the child is a self-framed
 // stele that sets its own width + implicitHeight; the surface is sized to
@@ -36,7 +34,8 @@ import Quickshell.Wayland
 PanelWindow {
     id: root
 
-    required property Item cell        // the bar cell this popout hangs under
+    // The popout's top-left corner in screen coordinates.
+    property point anchor: Qt.point(0, 0)
     property bool shown: false
     // Own namespace = own compositor identity (the whole point — see header).
     property string layerNamespace: "aoide-calendar"
@@ -53,16 +52,8 @@ PanelWindow {
 
     anchors { top: true; left: true }
 
-    // The cell's bottom-left corner in screen space, taken at each open —
-    // the popup's top-left lands there, exactly StelePopout's left-pinned
-    // hang (anchor Bottom|Left, gravity Bottom|Right).
-    property point cellBase: Qt.point(0, 0)
-    function reanchor() { if (cell) cellBase = cell.mapToItem(null, 0, cell.height) }
-    onShownChanged: if (shown) reanchor()
-    Component.onCompleted: if (shown) reanchor()
-
-    margins.left: Math.round(cellBase.x)
-    margins.top: Math.round(cellBase.y)
+    margins.left: Math.round(root.anchor.x)
+    margins.top: Math.round(root.anchor.y)
 
     // Sized to the hosted stele (its first child), plus room for the stele's own
     // cast-shadow overhang (4px right / the child's implicitHeight already carries

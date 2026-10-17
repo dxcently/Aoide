@@ -141,6 +141,7 @@ mod tests {
             "apps.show",
             "clipboard.clear",
             "clipboard.delete",
+            "component",
             "cover.set",
             "cover.sync",
             "element.seed",
