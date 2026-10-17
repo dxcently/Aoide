@@ -262,11 +262,11 @@ fn hash_file(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
-/// True when the machine copy of `song` carries a `livery.json` or a
-/// `widgets/` file whose hash differs from the shipped copy's, or a file the
-/// other side lacks — the edits a declare does not carry, because a rebuild
-/// builds the songbook version. A song with no machine copy differs in
-/// nothing. Symlinks on either side are not compared.
+/// True when the machine copy of `song` carries a `livery.json`, `rice.nix`,
+/// `hyprland.conf` or `widgets/` file whose hash differs from the shipped
+/// copy's, or a file the other side lacks — the edits a declare does not carry,
+/// because a rebuild builds the songbook version. A song with no machine copy
+/// differs in nothing. Symlinks on either side are not compared.
 pub(crate) fn staged_differs(song: &str, templates: &Path) -> Result<bool, String> {
     let machine = shellbridge::songbook_dir(song);
     if !machine.is_dir() {
@@ -274,7 +274,10 @@ pub(crate) fn staged_differs(song: &str, templates: &Path) -> Result<bool, Strin
     }
     let dressed = |tree: BTreeMap<String, PathBuf>| -> BTreeMap<String, PathBuf> {
         tree.into_iter()
-            .filter(|(rel, _)| rel == "livery.json" || rel.starts_with("widgets/"))
+            .filter(|(rel, _)| {
+                matches!(rel.as_str(), "livery.json" | "rice.nix" | "hyprland.conf")
+                    || rel.starts_with("widgets/")
+            })
             .collect()
     };
     let shipped = dressed(walk(&templates.join(song), false)?);
@@ -593,6 +596,18 @@ mod tests {
             .unwrap_or_else(|| panic!("{rel} not reported: {:?}", out.data))
             .clone();
         (f["state"].as_str().unwrap().into(), f["action"].as_str().unwrap().into())
+    }
+
+    #[test]
+    fn staged_differs_sees_a_hand_edited_hyprland_conf() {
+        let fx = Fx::new("staged-differs-hyprland");
+        fx.store("livery.json", "{}");
+        fx.store("hyprland.conf", "bind = SUPER, Q, killactive,\n");
+        fx.machine("livery.json", "{}");
+        fx.machine("hyprland.conf", "bind = SUPER, Q, killactive,\n");
+        assert_eq!(staged_differs("sonata", &fx.templates), Ok(false));
+        fx.machine("hyprland.conf", "bind = SUPER, Q, exec, true\n");
+        assert_eq!(staged_differs("sonata", &fx.templates), Ok(true));
     }
 
     fn mode(path: &Path) -> u32 {
