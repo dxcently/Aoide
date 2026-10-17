@@ -1116,15 +1116,16 @@ stripping one, and a held spawn shows as its whole command.
   neither a draft nor a song name.
   `{"cmd":"ricedeclare","name":"<song>"}` is the Declare row, ANSWERED on its
   own connection and thread like `ricemenu` because the surface paints the
-  outcome as a balloon: `name` is one argv token (anything else is dropped
-  with no reply), and `dispatch_rice_declare` runs `lyra rice declare <name>
+  outcome as a balloon: `name` is a song name (lowercase letters, digits,
+  hyphens; anything else is dropped with no reply), and `dispatch_rice_declare` runs `lyra rice declare <name>
   --host --json`, unbounded like every mutation, which rewrites the host
   config's `habit.song.declared` line and never rebuilds. `rice_declare_reply`
   answers `{ok:true, message, name, host, changed, stagedDiffers}` or
   `{ok:false, reason, message}`, the message carrying the refusal's what and
   why, `reason` the CLI's own (`not-built-in`, `staged-draft`,
-  `host-line-count`, …) or `cli-failed`. The audit line is `ricedeclare action
-  host: <ok|failed>`, never a song.
+  `host-line-count`, …) or `cli-failed`. The audit line names the song and
+  whether the host file changed: `ricedeclare action <song>: <ok changed|ok
+  unchanged|failed>`.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE
   shared call both `session_store.rs::do_session_end_inner` (a clean

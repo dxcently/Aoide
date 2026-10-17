@@ -783,10 +783,12 @@ in the message.
   refusal and never an empty list, and a failed `rice list` starts no second
   child. `ricemode` takes `stage` + one argv-token `name` or a bare
   `declarative` (the CLI resolves the declared twin — never an env song here).
-  `ricedeclare` takes one argv-token `name` and nothing else: which song a host
-  may declare, and the host file it rewrites, are the CLI's (`lyra rice
-  declare --host`), never checked here. No audit line of any of the four verbs
-  carries a draft or a song name.
+  `ricedeclare` takes one song-shaped `name` (`song_name`) and nothing else:
+  which song a host may declare, and the host file it rewrites, are the CLI's
+  (`lyra rice declare --host`), never checked here. No audit line of the other
+  three verbs carries a draft or a song name; `ricedeclare`'s names the song
+  it declared (`rice_declare_audit`: `ok changed`, `ok unchanged`, `failed`),
+  which is why its parse holds the name to the song shape.
 
 - **`session bind` assigns continuity, never authority.** Keep the operation
   daemon-owned and local-only; no missing-daemon fallback. It does not load

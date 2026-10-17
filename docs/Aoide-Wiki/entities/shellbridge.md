@@ -154,8 +154,10 @@ one such line is its refusal. The answer is `{ok:true, message, name, host,
 changed, stagedDiffers}` (`changed` false when the host already declared it,
 `stagedDiffers` true when the staged copy holds edits the rebuild will not
 carry) or `{ok:false, reason, message}`, the message carrying the refusal's
-what and why. The audit line is `ricedeclare action host: <ok|failed>`, never
-a song. The `ricemenu` answer carries the machine's `host` name for the row's
+what and why. `name` must be a song name (lowercase letters, digits, hyphens),
+and the audit line names it: `ricedeclare action <song>: <ok changed|ok
+unchanged|failed>`. The bridge's own timeout answers `reason: "no-reply"`,
+which never means refused: the declare may still land. The `ricemenu` answer carries the machine's `host` name for the row's
 alert to speak.
 
 **`hyprctl` must be on the service PATH, or every click fails silently.**

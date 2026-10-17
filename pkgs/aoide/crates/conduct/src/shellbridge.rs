@@ -205,9 +205,11 @@ pub enum BridgeCommand {
     /// `{ "cmd": "ricedeclare", "name": "<song>" }` — the menu's Declare row:
     /// make `name` the song this host performs on its next rebuild. Answered
     /// on this connection like [`Self::RiceMenu`], because the outcome is a
-    /// balloon the surface paints, never a toast. The name rules are
-    /// [`Self::RiceDraft`]'s `enter`; every rule about WHICH song may be
-    /// declared is the CLI's. See [`dispatch_rice_declare`].
+    /// balloon the surface paints, never a toast. `name` must be a song name
+    /// ([`song_name`]: lowercase letters, digits, hyphens, no leading hyphen),
+    /// so it is one argv token and safe to name in the audit line; every rule
+    /// about WHICH song may be declared is the CLI's. See
+    /// [`dispatch_rice_declare`].
     RiceDeclare { name: String },
 }
 
@@ -516,7 +518,7 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
         "ricedraft" => RiceDraftAction::from_wire(&v).map(|action| BridgeCommand::RiceDraft { action }),
         "ricedeclare" => {
             let name = v.get("name")?.as_str()?;
-            safe_session_id(name).then(|| BridgeCommand::RiceDeclare { name: name.to_string() })
+            song_name(name).then(|| BridgeCommand::RiceDeclare { name: name.to_string() })
         }
         "refreshusage" => Some(BridgeCommand::RefreshUsage),
         "rechecksessions" => Some(BridgeCommand::RecheckSessions),
@@ -764,6 +766,29 @@ fn dispatch_rice_declare(name: &str) -> Value {
     let argv: Vec<String> = ["rice", "declare", name, "--host"].iter().map(|w| w.to_string()).collect();
     let (ok, message, data) = run_rice_step(&argv);
     rice_declare_reply(ok, message, data)
+}
+
+/// The song-name shape (`aoide_song::compose::valid_song_name`, restated
+/// because conduct does not depend on the song crate): a lowercase letter or
+/// digit, then lowercase letters, digits and hyphens.
+fn song_name(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Pure: the audit event and outcome a `ricedeclare` answer is logged as, in
+/// [`audit_bridge_action`]'s `<noun> action <action>: <outcome>` vocabulary
+/// with the song as the action: `ok changed` / `ok unchanged` (the host
+/// already declared it) or `failed`.
+fn rice_declare_audit(answer: &Value) -> (&'static str, &'static str) {
+    if answer.get("ok").and_then(Value::as_bool) != Some(true) {
+        return ("ricedeclare-failed", "failed");
+    }
+    match answer.get("changed").and_then(Value::as_bool) {
+        Some(false) => ("ricedeclare", "ok unchanged"),
+        _ => ("ricedeclare", "ok changed"),
+    }
 }
 
 /// Pure: the one line a `ricedeclare` answers with. Success carries the CLI's
@@ -2579,8 +2604,8 @@ fn handle_conn(stream: UnixStream) {
             }
             // The Declare row: answered on this connection and run on its OWN
             // thread like the menu's read, because the surface paints the
-            // answer. A gesture, so every outcome is audited — naming the
-            // outcome and nothing else, never the song.
+            // answer. A gesture, so every outcome is audited, naming the song
+            // (a validated song name) and whether the host file changed.
             Some(BridgeCommand::RiceDeclare { name }) => {
                 let Some(mut reply) = reply.take() else {
                     let _ = daemon::audit(
@@ -2596,12 +2621,8 @@ fn handle_conn(stream: UnixStream) {
                 std::thread::spawn(move || {
                     use std::io::Write;
                     let answer = dispatch_rice_declare(&name);
-                    let (event, outcome) = if answer.get("ok").and_then(Value::as_bool) == Some(true) {
-                        ("ricedeclare", "ok")
-                    } else {
-                        ("ricedeclare-failed", "failed")
-                    };
-                    audit_bridge_action("ricedeclare", "host", event, outcome);
+                    let (event, outcome) = rice_declare_audit(&answer);
+                    audit_bridge_action("ricedeclare", &name, event, outcome);
                     let _ = writeln!(reply, "{answer}");
                 });
                 return;
@@ -3801,9 +3822,21 @@ esac
             r#"{"cmd":"ricedeclare","name":"-x"}"#,
             r#"{"cmd":"ricedeclare","name":"a b"}"#,
             r#"{"cmd":"ricedeclare","name":7}"#,
+            r#"{"cmd":"ricedeclare","name":"Barcarolle"}"#,
+            r#"{"cmd":"ricedeclare","name":"a_b"}"#,
+            r#"{"cmd":"ricedeclare","name":"../x"}"#,
+            r#"{"cmd":"ricedeclare","name":"a:b"}"#,
         ] {
             assert_eq!(parse_command(line), None, "{line}");
         }
+    }
+
+    #[test]
+    fn a_declare_is_audited_by_song_and_whether_it_changed() {
+        assert_eq!(rice_declare_audit(&json!({ "ok": true, "changed": true })), ("ricedeclare", "ok changed"));
+        assert_eq!(rice_declare_audit(&json!({ "ok": true, "changed": false })), ("ricedeclare", "ok unchanged"));
+        assert_eq!(rice_declare_audit(&json!({ "ok": false, "reason": "not-built-in" })), ("ricedeclare-failed", "failed"));
+        assert_eq!(rice_declare_audit(&json!({})), ("ricedeclare-failed", "failed"));
     }
 
     /// GATED on Unix with its reason (see [`stub_rice_bin`]).
