@@ -86,6 +86,15 @@ what those checks actually test.
   Aoide's own `sonata` through the `songbookRoot` export, and its lyra lane is
   handed that same directory. The contract it exercises is PACKAGE-LAYOUT's
   "The root flake — AoideOS's export surface".
+  The value-slot proof: the consumer's own `bar`, `dock` and `lock` slots each
+  name a provider of its own beside Aoide's `parts`. The `stubbed` host mixes
+  its `bar` (a stub that brings no runtime) with Aoide's `dock`, and must give
+  exactly two components, one shell unit and one bridge. `stub-dock.nix` and
+  `stub-lock.nix` throw on read, and no host selects them, so every host
+  evaluating is the proof they are never read (a mutation that selects one
+  fails the consumer eval). The `front` checks read `parts` (ten, each a file),
+  `rices`, and prove that a rice merged into its own hook is refused as a
+  collision.
 
 `selection/`, `templates/` and `quickshell-seam/` shell out to `nix eval` (and
 `getFlake` a nixpkgs rev), so they run where an evaluation can: a developer's

@@ -557,6 +557,13 @@ flake.nix
 ├── songbookRoot              Aoide's own songbook DIRECTORY (`song/songbook`),
 │                             the value `lib/aoideos.nix` builds this flake's
 │                             hosts from — a PATH, not a function
+├── parts.<component>         the `vibeos` PROVIDER module of each component slot
+│                             (bar, launcher, powermenu, notifications, wallpaper,
+│                             dock, calendar, switcher, lock, greeter), a bare
+│                             PATH; a consumer's own slot names one beside its own
+├── rices.<song>              every committed song with a `rice.nix`, name → that
+│                             file, the aggregation body the song hook registers
+├── inventory / nixosConfigurations   (a consumer builds its own; see below)
 └── overlays.default          every `pkgs/<name>` this tree discovers plus
                               `aoide` (never `lyra`: nixpkgs owns that name)
 ```
@@ -621,6 +628,43 @@ evaluation, not a style choice:
   home half `imports = [ aoideInputs.nvf… ]` needs. An outer `_module.args` does not cross
   into that evaluation; `home-manager.sharedModules` puts the name back into
   `config` and meets the same wall as the `imports` door.
+
+### Parts and rices, from a consumer's side
+
+A component slot is a catalogue entry with providers (CONTRACTS.md §2), so a
+consumer does not take a slot from Aoide. It takes the PROVIDER that is
+Aoide's part and names it beside its own:
+
+```nix
+slots.bar.providers = {
+  mine = ./mine-bar.nix;             # the consumer's provider
+  vibeos = aoide.parts.bar;          # Aoide's, a bare path
+};
+registry.catalogue = removeAttrs aoide.lib.catalogue [ "bar" ] // slots;
+```
+
+- **Not Aoide's catalogue for those names.** `aoide.lib.catalogue` is taken
+  for every other name. The same slot name from two catalogues is a collision,
+  so the consumer removes the names it names itself.
+- **A part is not standalone.** `aoide.parts.<component>` is one provider file
+  and nothing else: it brings the vibeos runtime by path, and it reads the
+  constructor's own facts. A host that selects one passes `nixosModules.nucleus`
+  in its `extraModules`, applies `overlays.default`, and gets the hook's
+  `_module.args` (`song`, `borrow`, `songbook`) from `lib.songbook.hook`'s
+  `extraModulesFor`.
+- **Value slots need habit >= 0.4.0.** A provider set written inline in a
+  catalogue entry is what habit's value-slot support reads.
+- **A rice is registered by the hook, not merged.** `aoide.rices` names each
+  committed song's aggregation body. The hook over the SAME songbook already
+  registers those bodies under their names. Merging `aoide.rices` into the
+  registry a second time is a name collision, and the hook refuses it.
+- **Which part answered.** habit's inventory names a value slot's source as the
+  slot itself (`<value 'dock'>`), not the file. The part that answered is read
+  from the record its file writes: `aoide.components.<slot>.provider`.
+
+The proof is `tests/consumer/` (`front` checks in `run.sh`): a host mixes a
+consumer's `bar` with Aoide's `dock`, and two throw-on-read stubs are never
+read.
 
 ### Songs, from a consumer's side
 

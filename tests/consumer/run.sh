@@ -97,6 +97,44 @@ expr="
     home = cfg.home-manager.users.\${cfg.aoide.user};
     envOf = units: unit: let u = units.\${unit} or { }; in u.serviceConfig.Environment or u.Service.Environment or [ ];
     aoideSongs = out.nixosConfigurations.aoide-songs.config;
+    # ── The front door (CONTRACTS.md §2, PACKAGE-LAYOUT) ──────────────────────
+    # The stubbed host mixes value slots: the consumer's own bar and Aoide's dock
+    # part. Its shell is read from the home it is built into, and its components
+    # and the source of each filled slot from the record and the inventory.
+    stubbedCfg = out.nixosConfigurations.stubbed.config;
+    stubbedHome = stubbedCfg.home-manager.users.\${stubbedCfg.aoide.user};
+    consumerCfg = out.nixosConfigurations.consumer.config;
+    stubbed = {
+      drv = stubbedCfg.system.build.toplevel.drvPath;
+      components = builtins.mapAttrs (_: c: c.provider) stubbedCfg.aoide.components;
+      shellUnits = builtins.length (
+        builtins.filter (n: n == \"aoide-quickshell\") (builtins.attrNames (stubbedHome.systemd.user.services or { }))
+      );
+      bridgeUnits = builtins.length (
+        builtins.filter (n: n == \"shellbridge\") (builtins.attrNames stubbedCfg.systemd.user.services)
+      );
+      aggregations = out.inventory.stubbed.aggregation;
+    };
+    consumerComponents = builtins.mapAttrs (_: c: c.provider) consumerCfg.aoide.components;
+    # The parts are the ten vibeos providers, each a file that exists; the rices
+    # are the committed songs with a rice.nix.
+    parts = {
+      names = builtins.attrNames flake.parts;
+      allFiles = builtins.all builtins.pathExists (builtins.attrValues flake.parts);
+    };
+    rices = builtins.attrNames flake.rices;
+    # Merging Aoide's rices into a registry the hook over the SAME songbook
+    # already registers is a name collision the hook refuses. The hook is handed
+    # a registry that holds the rices, and a bare registry is the control.
+    hookOver = registry:
+      (flake.lib.songbook {
+        lib = flake.inputs.nixpkgs.lib;
+        songbook = flake.songbookRoot;
+      }).hook { inherit registry; users = [ ]; };
+    collision = {
+      merged = (builtins.tryEval (hookOver { aggregations = flake.rices; }).registry).success;
+      bare = (builtins.tryEval (hookOver { aggregations = { }; }).registry).success;
+    };
   in {
     aoideSongs = {
       drv = aoideSongs.system.build.toplevel.drvPath;
@@ -120,6 +158,9 @@ expr="
       builtins.filter (e: builtins.match \"AOIDE_SONG_TEMPLATES=.*\" e != null)
         (envOf cfg.systemd.user.services \"aoided\" ++ envOf cfg.systemd.user.services \"shellbridge\")
     );
+    front = {
+      inherit stubbed consumerComponents parts rices collision;
+    };
   }
 "
 
@@ -152,6 +193,23 @@ check "the bridge's unit is there"            "1" \
 check "the units carry the templates"         "2" "$(o '.templates | length')"
 check "…and both name one directory"          "true" \
   "$(o '(.templates | unique | length) == 1 and (.templates[0] | endswith("-lyra-songbook-templates/share/lyra/songbook"))')"
+
+check "front: the stubbed host fills bar and dock"  '{"bar":"stub","dock":"vibeos"}' \
+  "$(o '.front.stubbed.components | tojson')"
+check "front: its shell is one unit"                 "1" "$(o .front.stubbed.shellUnits)"
+check "front: its bridge is one unit"                "1" "$(o .front.stubbed.bridgeUnits)"
+check "front: the stubbed host selects its aggregation" "nucleus,stubbed" \
+  "$(o '.front.stubbed.aggregations | join(",")')"
+check "front: the consumer fills ten slots, all vibeos" "10 vibeos" \
+  "$(o '"\(.front.consumerComponents | length) \(.front.consumerComponents | [.[]] | unique | join(","))"')"
+check "front: parts name the ten components"         \
+  "bar,calendar,dock,greeter,launcher,lock,notifications,powermenu,switcher,wallpaper" \
+  "$(o '.front.parts.names | join(",")')"
+check "front: every part is a file"                  "true" "$(o .front.parts.allFiles)"
+check "front: rices name the committed rice songs"   "true" \
+  "$(o '.front.rices | index("sonata") != null')"
+check "front: a rice merged into its own hook clashes" "false" "$(o .front.collision.merged)"
+check "front: the same hook with no rice merged holds" "true" "$(o .front.collision.bare)"
 
 printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
 

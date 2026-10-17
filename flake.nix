@@ -269,6 +269,46 @@
       # `_module.args.songbook`.
       inherit (aoideos) songbookRoot;
 
+      # ── The front door: parts and rices (CONTRACTS.md §2, §5) ───────────────
+      # `parts.<component>` is the PROVIDER module of a component slot's
+      # `vibeos` provider, as a bare path: the file that answers the slot, never
+      # the catalogue's slot value (`{ providers = …; }`), which habit would
+      # pass to the provider check and then fail on as an unknown option. A
+      # consumer names its own slot's provider with it, beside its own:
+      #   bar = { providers = { <own> = ./own-bar.nix; vibeos = aoide.parts.bar; }; };
+      # Read out of the catalogue, never named a second time: a module file is
+      # named once (AGENTS.md house rule 7), and the catalogue is where that is.
+      parts =
+        lib.genAttrs
+          [
+            "bar"
+            "launcher"
+            "powermenu"
+            "notifications"
+            "wallpaper"
+            "dock"
+            "calendar"
+            "switcher"
+            "lock"
+            "greeter"
+          ]
+          (
+            # A slot's provider set is its catalogue value written inline, or the
+            # `default.nix` of the directory it names (`wallpaper`).
+            name:
+            let
+              entry = registry.catalogue.${name};
+              set = if builtins.isAttrs entry then entry else import entry;
+            in
+            set.providers.vibeos
+          );
+
+      # Every committed song with a `rice.nix`, name → that file: the aggregation
+      # body the song hook registers for it (`lib/songbook.nix`'s `rices`, the
+      # one discovery). A consumer performs one of them through its own hook over
+      # `songbookRoot`; the parts above are the components those bodies pick.
+      inherit (songbookLib) rices;
+
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no lane declares surface owners yet) and become real as

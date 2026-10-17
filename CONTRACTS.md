@@ -491,6 +491,16 @@ Rules:
   option that the system half sets and the home half imports through
   `osConfig` (`aoide.quickshell.home`, `aoide.lyra.home`).
 
+- **The front door is provider modules and rice bodies, never a slot.** A
+  consumer takes `parts.<component>` (each component slot's `vibeos` provider,
+  a bare path) and `rices` (the committed songs' bodies) from the root flake,
+  and names its own slot's providers beside them. It never takes Aoide's
+  catalogue wholesale for a slot name it defines itself, because one name from
+  two catalogues is a collision. A part needs the nucleus module, the overlay
+  and the song hook's `song`/`borrow`/`songbook` arguments, and value slots need
+  habit >= 0.4.0 (PACKAGE-LAYOUT's "Parts and rices, from a consumer's side").
+  Additive: no version bump.
+
 A paint dendrite is a plain module like any other, and the ones whose fact
 another lane reads set that fact `true`. A lane reads the FACT
 `modules/nucleus` declares (`aoide.<name>.enable`), not an option another lane

@@ -43,13 +43,35 @@
       # the consumer's lib, not on Aoide's) and the songbook a host performs from.
       composition = aoide.lib.composition { inherit lib; };
 
+      # The consumer's own slots. `bar`, `dock` and `lock` are named HERE, each
+      # with a provider of the consumer's own beside Aoide's vibeos part
+      # (`aoide.parts`, the front door's bare provider paths). Aoide's catalogue
+      # is taken for every other name, and NOT for these three: the same slot
+      # name from two catalogues is a collision the registry refuses, not a
+      # choice the consumer makes. `stub-dock` and `stub-lock` throw on read
+      # (see those files), so an unselected provider is proved never read.
+      slots = {
+        bar.providers = {
+          stub = ./stub-bar.nix;
+          vibeos = aoide.parts.bar;
+        };
+        dock.providers = {
+          stub = ./stub-dock.nix;
+          vibeos = aoide.parts.dock;
+        };
+        lock.providers = {
+          stub = ./stub-lock.nix;
+          vibeos = aoide.parts.lock;
+        };
+      };
+
       registry = {
         # `lib.catalogue` is the bulk view of the same paths
         # `aoide.nixosModules.<name>` spells one name at a time; `nucleus` is
         # not a catalogue entry and is passed below as an extra module: the
         # option contract, with the services left to the consumer's own
         # `nucleus` aggregation.
-        catalogue = aoide.lib.catalogue;
+        catalogue = removeAttrs aoide.lib.catalogue (builtins.attrNames slots) // slots;
         aggregations = import ./aggregations;
         overrides = { };
       };
@@ -83,11 +105,18 @@
             username = "fixture";
           };
         };
+
+      # Each host's constructor result: `system` is the evaluated NixOS config,
+      # `inventory` what the host resolved and from which file (the sources the
+      # fixture names the parts through).
+      hosts = {
+        consumer = mkHost "consumer" ./songs;
+        aoide-songs = mkHost "aoide-songs" aoide.songbookRoot;
+        stubbed = mkHost "stubbed" ./songs;
+      };
     in
     {
-      nixosConfigurations = {
-        consumer = (mkHost "consumer" ./songs).system;
-        aoide-songs = (mkHost "aoide-songs" aoide.songbookRoot).system;
-      };
+      nixosConfigurations = lib.mapAttrs (_: h: h.system) hosts;
+      inventory = lib.mapAttrs (_: h: h.inventory) hosts;
     };
 }

@@ -50,6 +50,13 @@ let
   songs = discover songbook;
   songNames = builtins.attrNames songs;
 
+  # ── The rices: a song with a `rice.nix` is an aggregation body ──────────────
+  # The same one discovery as `songs`, named once here so the hook below and
+  # the flake's `rices` export read the same map. A song without a `rice.nix` is
+  # a folder of widgets only (built in, never performed).
+  riceNames = lib.filter (name: builtins.pathExists (songbook + "/${name}/rice.nix")) songNames;
+  rices = lib.genAttrs riceNames (name: songbook + "/${name}/rice.nix");
+
   # ── The two arguments every song is handed ──────────────────────────────────
   # §7.4 constraint 1: a song is a SELF-CONTAINED folder. Where a `rice.nix` or a
   # shelf used to reach out of itself — `../../../lib/song.nix`, or another
@@ -327,8 +334,6 @@ let
     { registry, users }:
     let
       songbookDir = songbook;
-      riceNames = lib.filter (name: builtins.pathExists (songbook + "/${name}/rice.nix")) songNames;
-      rices = lib.genAttrs riceNames (name: songbook + "/${name}/rice.nix");
 
       clashing = lib.intersectLists riceNames (builtins.attrNames registry.aggregations);
 
@@ -511,6 +516,8 @@ in
     discover
     songs
     songNames
+    riceNames
+    rices
     songMeta
     strayNixFiles
     escapingNixFiles
