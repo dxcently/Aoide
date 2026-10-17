@@ -96,8 +96,8 @@ onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only the
 staging paths read it and only `lyra` links them, so it rides the units that
 exec or spawn `lyra` —
 `modules/dendrites/lyra/shellbridge.nix`'s main `shellbridge` service,
-`modules/dendrites/quickshell.nix`'s `aoide-quickshell` unit (the QML it
-starts execs `lyra`), `modules/dendrites/lyra/default.nix`'s
+`modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` unit (the QML it
+starts execs `lyra`), `modules/dendrites/lyra/runtime.nix`'s
 `aoide-rice-reload` unit (it runs `lyra reload`) — and
 `modules/dendrites/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
 `aoide.lyra.enable`, never the core-only units that exec plain
@@ -147,7 +147,7 @@ else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
 fallbacks yourself.
 
 ```nix
-# modules/dendrites/lyra/default.nix — a paint lane is a plain module: it
+# modules/dendrites/lyra/runtime.nix — a paint lane is a plain module: it
 # declares, sets the fact on selection, and renders the rest.
 { config, lib, ... }:
 let

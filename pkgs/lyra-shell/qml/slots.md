@@ -97,7 +97,7 @@ for the shell to draw.
 ## The universal widget contract
 
 Any `song/songbook/<name>/widgets/<slot>.qml` file that a song drops is
-carried by the build (`modules/dendrites/lyra/default.nix`) and becomes
+carried by the build (`modules/dendrites/lyra/runtime.nix`) and becomes
 resolvable by name — the build imposes no fixed slot enum. But **being
 carried is not being rendered**: nothing shows on screen until a host
 surface embeds a `WidgetSlot` anchor for that exact slot name (see the
@@ -204,7 +204,7 @@ A widget that needs its own helper components (e.g. `bar.qml` needs a
 workspace-row component) drops them alongside it under the same song's
 `widgets/` dir, with an **uppercase** filename — QML's own type-file
 convention marks these as helper components, not slots. The build
-(`modules/dendrites/lyra/default.nix`) copies the WHOLE `widgets/` dir
+(`modules/dendrites/lyra/runtime.nix`) copies the WHOLE `widgets/` dir
 per song (helper files, asset subdirs, all of it) but only manifests
 top-level **lowercase-kebab** `.qml` files as slots; `.gitkeep` is always
 skipped. A helper file is carried to disk but never independently

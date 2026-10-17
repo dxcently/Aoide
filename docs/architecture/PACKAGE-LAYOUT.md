@@ -491,7 +491,7 @@ The stability contract — what a consumer may rely on staying true:
   (`lib/aoideos.nix`'s `nucleusModule`), which is also what `tests/vm-boot.nix`
   takes — so the constructor and the VM read one import site rather than each
   carrying their own copy of the injection lambda. And
-  `modules/dendrites/quickshell.nix` sets `aoide.sessionTarget` to
+  `modules/dendrites/quickshell/system.nix` sets `aoide.sessionTarget` to
   `graphical-session.target` when it has a shell config to run. Editing
   `module/` never rebuilds the binaries: `pkgs/aoide/default.nix`'s
   `src` filter drops the top-level `module/` directory, so the

@@ -7,7 +7,7 @@
 #     `selectionModule` puts `habit.song.declared` / `habit.song.available`
 #     on the host module, and `songModules` / `builtIn` turn that selection into the
 #     platform's modules and facts.
-#   - `modules/dendrites/lyra/default.nix`'s `quickshellConfig` derivation
+#   - `modules/dendrites/lyra/runtime.nix`'s `quickshellConfig` derivation
 #     imports this at BUILD time to emit `manifest.json`/`registry.json` into
 #     the deployed QML tree — over the host's BUILT-IN songs only.
 #   - The `songbookManifest` flake output (flake.nix) wraps this so
@@ -107,7 +107,7 @@ let
   # nocturne today) — synthesize straight from the scan: owner is always the
   # song itself, `file` is always "<slot>.qml"; the registry falls back to
   # `livery.json`'s `.widgets // {}`, unjudged. See
-  # `modules/dendrites/lyra/default.nix`'s original comment (git history,
+  # `modules/dendrites/lyra/runtime.nix`'s original comment (git history,
   # W3a/W3b) for the full reasoning; this file keeps only what the
   # computation itself needs.
   #

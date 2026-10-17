@@ -79,9 +79,11 @@ and the staging/declarative/draft modes:
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
    stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`) are
-   declared once in `modules/nucleus`. An enable fact is set only by its owner:
-   the one dendrite that owns it sets it `true`, it is true exactly when that
-   dendrite is selected, and a host write that takes effect fails eval
+   declared once in `modules/nucleus`. An enable fact is set only from its owner's
+   directory: a file of the one dendrite that owns it sets it `true`, it is
+   true exactly when that file is in the host (the dendrite is selected, or a
+   lane imports the owner's files by path), and a host write that takes effect
+   fails eval
    (`modules/nucleus/options.nix`'s `mkFact`). A host's `mkDefault` that the
    owner outranks is dropped without error and cannot change the value;
    `aoide.sessionTarget` is the same seam declared in the core module

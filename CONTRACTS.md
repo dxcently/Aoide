@@ -72,23 +72,26 @@ that can be deleted.
 A lane cannot be read (first rule above), so the one question every layer has
 to ask — *is there a shell / a session on this host?* — is answered by a FACT
 that nucleus declares once, in `modules/nucleus/options.nix`. Each `enable`
-fact is set only by its owner: `false` unless its dendrite is selected, and that
-dendrite sets it `true`. `aoide.quickshell.config` defaults `null`, and
+fact is set only from its owner's directory: `false` unless the owner's module
+is in the host, and a file of that dendrite sets it `true`. The module gets
+there by selecting the dendrite or by a lane importing the owner's files by
+path (`lyra`'s runtime imports `quickshell/system.nix`). `aoide.quickshell.config` defaults `null`, and
 `aoide.wallpaper.provider` names the active alternative by defaulting to the
 shell's own layer:
 
 | Fact | What it means | Set by |
 |---|---|---|
-| `aoide.quickshell.enable` | a Quickshell shell surface exists here | its dendrite, `dendrites/quickshell.nix` (the package and the `aoide-quickshell` service), which sets it `true` |
+| `aoide.quickshell.enable` | a Quickshell shell surface exists here | its dendrite's system half, `dendrites/quickshell/system.nix` (the package and the `aoide-quickshell` service), which sets it `true` |
 | `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
-| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | its dendrite, `dendrites/lyra`, which sets it `true` |
+| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | its dendrite's runtime, `dendrites/lyra/runtime.nix`, which sets it `true` |
 | `aoide.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
 | `aoide.songbook.greeter` (`nullOr (attrsOf str)`, `null`) | the declared song's `greeter` slot record `{ owner, file }`; non-null switches the greeter lane from ly to greetd + the song's Quickshell face | the selection hook (`lib/aoideos.nix`, over `lib/songbook.nix`'s `greeter`), beside `aoide.songbook.builtIn`; never a host |
 | `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a song's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`), each to its own name |
 
 The dendrite that owns a fact sets it `true`. The guard is `mkFact` in
 `modules/nucleus/options.nix`: it reads the winning definitions and refuses any
-whose file is neither the owner nor the nucleus default, and refuses a tie
+whose file is neither the owner (the catalogue's file, or any file under the
+catalogue's directory) nor the nucleus default, and refuses a tie
 between the owner and a host write. So a host write that takes effect fails
 eval, whether or not a dendrite is selected (a plain or `mkForce` write, or any
 write while the owner is unselected). A host `mkDefault` that the owner outranks
@@ -466,6 +469,20 @@ Rules:
   being deleted. Any path containing `/_` is skipped.
 - Subfolders under `modules/dendrites/` are grouping only; a file inside one
   still needs its own catalogue line to be selectable.
+- **A half another lane brings is a plain pair imported by path.** habit reads
+  `habit.home` only on the selected module's top level, and applies a
+  catalogue entry under its own key rather than its path, so a capability that
+  more than one lane brings (the shell: `quickshell`, and `lyra`'s runtime)
+  lives in two plain files with no `habit` key — a system half and a home half
+  (`dendrites/quickshell/{system,home}.nix`). The catalogue entry is a wrapper
+  `{ imports = [ ./system.nix ]; habit.home.imports = [ ./home.nix ]; }`, and
+  every lane that brings the capability writes the same two imports, so the
+  module system lands each half once. The home import is always a list in
+  `habit.home.imports`, never `habit.home = ./home.nix`: habit unifies a bare
+  path into a module with no key, and two lanes would apply it twice. The home
+  half closes over the system config through an internal `deferredModule`
+  option that the system half sets and the home half imports through
+  `osConfig` (`aoide.quickshell.home`, `aoide.lyra.home`).
 
 A paint dendrite is a plain module like any other, and the ones whose fact
 another lane reads set that fact `true`. A lane reads the FACT
@@ -533,7 +550,7 @@ suites that take them — runtime-only, absent from disk today), `log`
 (content-pipeline + audit runtime, newline-
 delimited JSON — a **file**, not a directory), `state/` (account/usage runtime,
 e.g. `state/usage.json`), and `run/` (the deployed Quickshell tree rsynced from
-the store by home-manager, `modules/dendrites/lyra/default.nix`). All are
+the store by home-manager, `modules/dendrites/lyra/runtime.nix`). All are
 disposable and never committed. `.gitignore` also reserves `catalog/` and
 `index/` for the same content-pipeline runtime; neither exists on disk today.
 
@@ -1304,9 +1321,9 @@ where it can be READ: `AOIDE_SONG_TEMPLATES` is paint data (only
 `aoide-song` reads it, only `lyra` links `aoide-song`), so it is wired ONLY
 onto units whose process execs or spawns `lyra` —
 `modules/dendrites/lyra/shellbridge.nix`'s
-main `shellbridge` service, `modules/dendrites/quickshell.nix`'s
+main `shellbridge` service, `modules/dendrites/quickshell/system.nix`'s
 `aoide-quickshell` unit (the QML it starts execs `lyra`) and
-`modules/dendrites/lyra/default.nix`'s `aoide-rice-reload` unit (it runs `lyra
+`modules/dendrites/lyra/runtime.nix`'s `aoide-rice-reload` unit (it runs `lyra
 reload`) — plus
 `modules/dendrites/aoided.nix`'s
 `environment.sessionVariables` (an operator's own interactive `lyra rice
@@ -1759,7 +1776,7 @@ Beyond `lyra rice stage <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes, with the
 venue's `aoide.livery.override` applied and the host's geometry laid over the
 song's own, on every activation**
-(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`,
+(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/runtime.nix`,
 via `lib/livery.nix`'s `stagePatch`) — so a host that boots without ever
 running `rice stage` still has a correct, recoloured live stage twin from
 boot. The seed is declared truth, written whatever the mode: when
@@ -1988,7 +2005,7 @@ non-null fields of `aoide.livery.geometry`) laid over the song's own
 (`lib/livery.nix`'s `stagePatch`, §1's override and geometry tiers), its
 top-level `song` field set to that song's name, keys sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
 the SAME activation seed that writes `song/stage/livery.json` above
-(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`) —
+(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/runtime.nix`) —
 one `jq` run, two destinations. In `staging` and `draft` mode the session's
 `lyra reload` (the `aoide-rice-reload` unit) then re-stages the stage twin
 from the staged or drafted song, and the declared twin stays as the seed wrote
@@ -2029,7 +2046,7 @@ active song's committed `livery.json`; `geometry`'s is the fields the host's
 document — so a slot or field the venue leaves alone is not in it, and the file
 is `{}` when the host sets neither. Written by the SAME activation seed as the
 twin above (`home.activation.aoideSeedStage`,
-`modules/dendrites/lyra/default.nix`): a temp file made in `song/declared/` and
+`modules/dendrites/lyra/runtime.nix`): a temp file made in `song/declared/` and
 renamed over the target, so a reader never sees a torn file. The rules stay in
 nix (§1's override and geometry tiers, guarded by `checks.livery-fanout`); no
 Rust crate computes it or writes this file.
@@ -2074,7 +2091,7 @@ One line, `background_opacity <n>` (`n` in [0, 1]), in kitty's own config
 syntax — the DECLARED song's terminal opacity, and nothing else.
 
 Writer: `home.activation.aoideSeedStage`'s seed script
-(`modules/dendrites/lyra/default.nix`), the same run that publishes the two
+(`modules/dendrites/lyra/runtime.nix`), the same run that publishes the two
 `livery.json` twins above and below. It writes the active song's
 `aoide.livery.geometry.terminalOpacity` (§1), and **deletes the file when that
 is `null`** — an absent file is what makes kitty fall through to the host's
@@ -2340,7 +2357,7 @@ The DECLARED song's lock-screen dress, in the format of
 lock picture (§5), the ten variables.
 
 Writer: `home.activation.aoideSeedStage`'s seed script
-(`modules/dendrites/lyra/default.nix`), the run that publishes the other
+(`modules/dendrites/lyra/runtime.nix`), the run that publishes the other
 declared files. The content is rendered at BUILD time by the lyra binary, `lyra
 livery emit hyprlock <notes> --song-dir <song folder>`, over the same
 venue-recoloured notes the declared `livery.json` twin carries (`stageLivery`,
@@ -7031,7 +7048,7 @@ set of "flavor" surfaces — committed files, not nix options:
   once an anchor is actually wired (same "what IS built" discipline as this
   section).
 - **Build:** the lyra lane's derivation
-  (`modules/dendrites/lyra/default.nix`) walks every committed song's
+  (`modules/dendrites/lyra/runtime.nix`) walks every committed song's
   `widgets/*.qml` files to `$out/qml/songs/<name>/<slot>.qml`, plus a
   generated `$out/qml/songs/manifest.json` recording which songs authored
   which slots — ALL songs' bodies land on disk at once (home-manager
@@ -7188,7 +7205,7 @@ serving a different purpose — NOT merged into it. `manifest.json` answers
 `widgets/`); `registry.json` answers "which slots did a song **register as
 a widget-TYPE declaration**" (a rarer, smaller set — most songs declare
 none). The lyra lane's build
-(`modules/dendrites/lyra/default.nix`) walks every committed song's
+(`modules/dendrites/lyra/runtime.nix`) walks every committed song's
 `livery.json` `.widgets // {}` into `$out/qml/songs/registry.json`, shaped
 `{ "<song>": { "<slot>": {…declaration…} } }` — every committed song gets an
 entry, `{}` when absent, never an error, never a skipped song. `rice
@@ -7255,7 +7272,7 @@ likewise declared by nobody, which is the point: the expectation is the
 song's statement, not a hardcoded list.
 
 **The generated artifact:** the lyra lane's build
-(`modules/dendrites/lyra/default.nix`) emits
+(`modules/dendrites/lyra/runtime.nix`) emits
 `$out/qml/songs/surfaces.json`, deployed with the rest of the tree to
 `run/qml/songs/surfaces.json`. It is deliberately NOT keyed by song, unlike
 `manifest.json`/`registry.json` beside it: those describe the whole

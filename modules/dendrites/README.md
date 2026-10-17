@@ -35,15 +35,22 @@ dendrite carries its OWN dependencies in its body: `stylix` imports the
 Stylix NixOS module only when it is present, so no other file has to know the
 dendrite exists. A condition does not cover a home half's `imports` or
 `options` (habit refuses one that does): `neovim.nix` states its `imports` in an
-unconditional `habit.home`, and `lyra/default.nix` writes its home half as
+unconditional `habit.home`, and `lyra/runtime.nix` writes its home half as
 `config`.
 
-## The shell lane (`quickshell.nix`) and the seam with `lyra`
+A capability more than one lane brings is a plain pair imported by path
+(CONTRACTS.md §2): `quickshell/system.nix` and `quickshell/home.nix` carry no
+`habit` key, the catalogue entry is the wrapper
+`{ imports = [ ./system.nix ]; habit.home.imports = [ ./home.nix ]; }`, and
+`lyra`'s runtime writes the same two imports, so a host with both lanes gets
+one shell.
 
-The shell runtime is two files, split by what each one knows:
+## The shell lane (`quickshell/`) and the seam with `lyra`
+
+The shell runtime is two lanes, split by what each one knows:
 
 ```
-quickshell.nix    the PACKAGE, and the one `aoide-quickshell` user service.
+quickshell/       the PACKAGE, and the one `aoide-quickshell` user service.
                   Knows no song, deploys nothing: it starts a shell on the
                   directory `aoide.quickshell.config` names and stops there.
 lyra/             the SURFACE. Builds the QML tree from `pkgs/lyra-shell` plus
@@ -52,10 +59,11 @@ lyra/             the SURFACE. Builds the QML tree from `pkgs/lyra-shell` plus
                   and the `aoide.surfaces` registry.
 ```
 
-They never name each other. `lyra` sets the fact `aoide.quickshell.config` to
-its deployed runtime root (`$AOIDE_ROOT/run/qml`); the shell lane reads that
-fact, owns `aoide.quickshell.enable` and starts the service. Each side is
-removable without a trace on the other, and the shell keeps running the day a
+They meet on one fact. `lyra` sets `aoide.quickshell.config` to its deployed
+runtime root (`$AOIDE_ROOT/run/qml`); the shell lane reads that fact, owns
+`aoide.quickshell.enable` and starts the service. `lyra` brings the shell with
+it by importing the shell lane's two plain halves by path, and names nothing
+else of it; the shell lane never names `lyra`, and keeps running the day a
 different lane (or a host) supplies the directory instead.
 
 **The two allowed shapes of Quickshell without lyra** — no song, no QML tree,
@@ -211,6 +219,6 @@ aggregation's `members` once the constructor assembles the host. Dendrites
 know nothing about hosts; hosts know dendrites. A tool graduates from a shared
 file (e.g. `devtools.nix`) into its own dendrite the moment a host needs to
 select it independently. The paint lanes with more than one file carry their own
-directories and charters (`compositor/README.md`, `lyra/README.md`); the
-one-file lanes — `greeter.nix`, `stylix.nix`, `quickshell.nix` — are charted
-here, above.
+directories and charters (`compositor/README.md`, `lyra/README.md`,
+`quickshell/README.md`); the one-file lanes — `greeter.nix`, `stylix.nix` — are
+charted here, above.

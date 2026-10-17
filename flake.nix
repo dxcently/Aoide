@@ -165,7 +165,7 @@
       );
 
       # ── Songbook manifest/registry (C4/W3) ──────────────────────────────────
-      # The SAME generator `modules/dendrites/lyra/default.nix`'s
+      # The SAME generator `modules/dendrites/lyra/runtime.nix`'s
       # `quickshellConfig` derivation uses at build time
       # (`lib/songbook.nix`), exposed as a lean flake output so
       # `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval

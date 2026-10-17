@@ -4,13 +4,23 @@ The shell surface and the bridge that feeds it.
 
 ```
 modules/dendrites/lyra/
-├── default.nix        the lane: builds the QML tree, deploys it, watches it
+├── default.nix        the catalogue entry: imports the runtime pair below
+├── runtime.nix        the vibeos runtime, system half: builds the QML tree,
+│                      deploys it, watches it; publishes its home half as
+│                      `aoide.lyra.home`
+├── runtime-home.nix   the runtime's home half: the shell lane's home half
+│                      plus `aoide.lyra.home`, read through `osConfig`
 └── shellbridge.nix    the bidirectional bridge (socket + stage files)
 ```
 
+`default.nix` is `{ imports = [ ./runtime.nix ]; habit.home.imports =
+[ ./runtime-home.nix ]; }`. The runtime pair is plain modules with no `habit`
+key, so any lane that brings the runtime imports the same two paths and the
+host gets one of each (AGENTS.md).
+
 ## Named seams (what it exposes)
 
-- **`default.nix` — the paint lane.** Renders the complete Aoide shell surface
+- **`runtime.nix` — the paint lane.** Renders the complete Aoide shell surface
   with Quickshell (bar, notifications, launcher, osd, lockscreen, wallpaper,
   agentWidgets, sessionGraph), builds the config from `pkgs/lyra-shell`'s QML
   plus the widget bodies of the songs this host BUILT IN
@@ -40,7 +50,7 @@ modules/dendrites/lyra/
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Selecting the lane is the switch; it sets
   `aoide.lyra.enable` `true`.
-- **`default.nix` — the lock.** `lyra lock` is this lane's command, so the
+- **`runtime.nix` — the lock.** `lyra lock` is this lane's command, so the
   lane installs both lockers it may run and their PAM services: `aoide-lock`
   for the shell's `LockHost.qml` (a service of its own, not `login`'s
   session-and-tty stack, and a name a host can tune for the lock alone) and
@@ -56,7 +66,7 @@ modules/dendrites/lyra/
   speaks an agent protocol). Gated on `aoide.enable && aoide.lyra.enable`:
   lyra owns the bridge, and its `ExecStart` execs lyra out of `pkgs.aoide.rice`,
   a separate droppable output.
-- **`default.nix` — `aoide-rice-reload`, the staged song comes back.** Declared truth is laid
+- **`runtime.nix` — `aoide-rice-reload`, the staged song comes back.** Declared truth is laid
   down first, exactly as the activation always does (the rsync into `run/qml`
   and the seed into both stage twins), and nix never reads `stage/mode.json`.
   Then one user unit runs `lyra reload`, which re-stages whatever the mode names:
@@ -77,11 +87,15 @@ modules/dendrites/lyra/
 
 ## The seam with `quickshell`
 
-The shell RUNTIME is not this lane's: `modules/dendrites/quickshell.nix` holds
-the quickshell package and the one `aoide-quickshell` user service. What this
-lane holds is the surface — what gets painted, from which song, deployed where.
+The shell PROCESS is not this lane's: `modules/dendrites/quickshell/` holds the
+quickshell package and the one `aoide-quickshell` user service. What this lane
+holds is the surface — what gets painted, from which song, deployed where. The
+runtime brings the shell with it by importing the shell lane's plain halves by
+path (`../quickshell/system.nix` from `runtime.nix`, `../quickshell/home.nix`
+from `runtime-home.nix`), so selecting `lyra` alone runs a shell, and a host
+that selects both lanes gets the one module of each.
 
-The two meet on one fact and never name each other:
+Beyond those imports the two meet on one fact:
 
 ```
 lyra      sets  aoide.quickshell.config = "$AOIDE_ROOT/run/qml"   (this lane's deploy target)

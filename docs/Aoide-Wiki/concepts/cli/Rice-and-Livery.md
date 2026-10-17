@@ -161,8 +161,8 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
   takes `composeSong` in the nix evaluator, which the templates fallback
   cannot run. `$AOIDE_SONG_TEMPLATES` is wired only onto lyra-execing units
   (`modules/dendrites/lyra/shellbridge.nix`'s shellbridge service,
-  `modules/dendrites/quickshell.nix`'s `aoide-quickshell` and
-  `modules/dendrites/lyra/default.nix`'s `aoide-rice-reload`) plus
+  `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` and
+  `modules/dendrites/lyra/runtime.nix`'s `aoide-rice-reload`) plus
   `modules/dendrites/aoided.nix`'s `environment.sessionVariables` (gated on
   `aoide.lyra.enable`) — core-only units don't carry it.
 

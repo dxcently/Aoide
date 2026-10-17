@@ -276,7 +276,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
   song's committed
   `song/songbook/<song>/livery.json` on every activation by
-  `home.activation.aoideSeedStage` in `modules/dendrites/lyra/default.nix`
+  `home.activation.aoideSeedStage` in `modules/dendrites/lyra/runtime.nix`
   — a write-temp-then-rename script that injects the same `"song"` field
   `rice stage` writes, so a host that boots without ever staging still
   carries a correct live stage twin from the baked default; when `mode.json`

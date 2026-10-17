@@ -17,7 +17,7 @@
 //! running instance by itself (confirmed live: it looks for a "default"
 //! config directory and fails otherwise) — the instance here was launched
 //! with `-p <run_qml_dir>/shell.qml` (the `quickshell` lane's service,
-//! `modules/dendrites/quickshell.nix`; lyra — the lane that deploys the tree —
+//! `modules/dendrites/quickshell/system.nix`; lyra — the lane that deploys the tree —
 //! names that directory as `aoide.quickshell.config`),
 //! so the same `-p` has to prefix the `ipc call` invocation to target it.
 //!

@@ -152,7 +152,7 @@ frame label.
 ## The registry — nine declared, five with a live body
 
 The lyra lane declares nine `owner = "quickshell"` surfaces
-(`modules/dendrites/lyra/default.nix`: bar, notifications, launcher, osd,
+(`modules/dendrites/lyra/runtime.nix`: bar, notifications, launcher, osd,
 lockscreen, greeter, wallpaper, agentWidgets, sessionGraph). Five have a
 live QML body today: **bar** (song `bar.qml` via `WidgetSlot`),
 **notifications** (dunst as daemon, the `herald`/`herald-center` popup and
@@ -218,7 +218,7 @@ and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
 ## Session service & resilience
 
 The shell surface is started by the **`aoide-quickshell`** systemd *user*
-service, defined in `modules/dendrites/quickshell.nix`. The service is
+service, defined in `modules/dendrites/quickshell/system.nix`. The service is
 the session-assembly seam: it orders after `graphical-session.target` (so
 Quickshell inherits a valid Wayland env), logs to journald (`journalctl
 --user -u aoide-quickshell`), and respawns on any exit, a clean one included. Three layers keep one
@@ -263,7 +263,7 @@ bound to `Quickshell.screens` or to the focused monitor re-homes by itself
 when the screen list comes back, and only an unbound singleton stays lost.
 
 **`aoide-quickshell-healthcheck.timer`**
-(`modules/dendrites/lyra/default.nix`, gated on `aoide.lyra.enable`) is
+(`modules/dendrites/lyra/runtime.nix`, gated on `aoide.lyra.enable`) is
 the live watchdog: a oneshot `systemd.user.service` running `lyra quickshell
 healthcheck` (`pkgs/aoide/crates/song/src/health.rs`, [[Meta-and-Upkeep]])
 20s after the session comes up and every 15s thereafter.

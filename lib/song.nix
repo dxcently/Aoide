@@ -16,7 +16,7 @@
 # WHY A PLAIN FUNCTION AND NOT A MODULE FRAGMENT. A fragment is only reachable
 # through the merged config, and a song's `rice.nix` self-gates on
 # `aoide.song == "<name>"`. The quickshell derivation walks EVERY song in the
-# songbook (see modules/dendrites/lyra/default.nix's songs loop and its note
+# songbook (see modules/dendrites/lyra/runtime.nix's songs loop and its note
 # on why the registry cannot come from `config`), so a fragment-based record
 # would be invisible for every song the host is not currently performing —
 # nine songs out of ten, silently. A plain function is importable by the

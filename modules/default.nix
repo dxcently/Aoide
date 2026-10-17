@@ -59,7 +59,7 @@
     openai = ./dendrites/openai.nix;
     pi-coding-agent = ./dendrites/pi-coding-agent.nix;
     qbittorrent = ./dendrites/qbittorrent.nix;
-    quickshell = ./dendrites/quickshell.nix;
+    quickshell = ./dendrites/quickshell;
     screenshot = ./dendrites/screenshot.nix;
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;

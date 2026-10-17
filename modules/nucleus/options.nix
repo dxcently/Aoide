@@ -29,11 +29,11 @@ let
   # authoritative validator (the native livery engine, pkgs/aoide).
   hexColor = types.strMatching "#?[0-9a-fA-F]{6}";
 
-  # ── Enable facts: set only by the dendrite that owns them ─────────────────
+  # ── Enable facts: set only from the directory of the dendrite that owns them
   # NixOS's `readOnly` cannot carry the `default` a fact needs (the default
   # counts as a second definition and fails the owner's own `true`), so the
   # guard is the merge. The merge sees only the winning definitions: the
-  # priority filter runs first. A winner from any file but the owner or this
+  # priority filter runs first. A winner from any file but the owner's or this
   # declaration's default is refused, and so is a tie between the owner and a
   # write at its priority. A host write the owner outranks (a `mkDefault`
   # against the owner's plain `true`) never reaches the merge: it is dropped and
@@ -49,11 +49,14 @@ let
       merge =
         loc: defs:
         let
-          # The owner is the file the catalogue names for `name`; an entry may be
-          # a directory (`lyra = ./dendrites/lyra;`), answered by its `default.nix`.
+          # The owner is the file the catalogue names for `name`, or any file
+          # under it when the entry is a directory (`lyra = ./dendrites/lyra;`):
+          # a lane may import the owner's files by path, and the fact it sets
+          # is still written from the owner's directory.
           fromOwnerOrDecl =
             d:
-            lib.removeSuffix "/default.nix" (toString d.file) == owner
+            toString d.file == owner
+            || lib.hasPrefix (owner + "/") (toString d.file)
             || lib.hasSuffix "/modules/nucleus/options.nix" (toString d.file);
         in
         if lib.length defs == 1 && fromOwnerOrDecl (lib.head defs) then
@@ -766,9 +769,10 @@ in
     # What a paint lane brings into existence, declared ONCE. No module reads
     # another module (root AGENTS.md house rule 5), so a cross-lane question —
     # "does this host paint", "is there a shell here" — is never answered by
-    # reading the lane's own option. Each fact is true exactly when its dendrite
-    # is selected, and that dendrite sets it to plain `true`; `mkFact` refuses any
-    # other write that takes effect. Each defaults to `false`: a host with no
+    # reading the lane's own option. Each fact is true exactly when its dendrite's
+    # module is in the host (selected, or imported by path by a lane that brings
+    # it), and a file in that dendrite's directory sets it to plain `true`;
+    # `mkFact` refuses any other write that takes effect. Each defaults to `false`: a host with no
     # paint lane is headless. `aoide.lyra.enable` below, declared beside the
     # package it installs, is the third fact in this family.
     quickshell = {
@@ -777,9 +781,11 @@ in
         default = false;
         description = ''
           A fact: a Quickshell shell surface exists on this host. True exactly
-          when the `quickshell` dendrite is selected (`dendrites/quickshell.nix`,
-          the package and the `aoide-quickshell` service), which sets it. Set
-          only by that dendrite; read it, never set it. A host whose shell is
+          when the `quickshell` dendrite's system half is imported
+          (`dendrites/quickshell/system.nix`, the package and the
+          `aoide-quickshell` service), which sets it: by selecting the
+          dendrite, or by a lane that brings the shell (`lyra`). Set only from
+          that dendrite's directory; read it, never set it. A host whose shell is
           painted by something else leaves the dendrite unselected and this
           false, while still having a graphical session.
         '';
@@ -848,8 +854,9 @@ in
           A fact: the `lyra` paint/rice binary is installed — `pkgs.aoide.rice`,
           the separate output P-A8 split off the combined aoide/aoided/lyra
           derivation so a headless closure never has to carry it. True exactly
-          when the `lyra` dendrite is selected, which sets it. Set only by that
-          dendrite; read it, never set it. Every unit that execs `lyra`
+          when the `lyra` dendrite's runtime (`dendrites/lyra/runtime.nix`) is
+          imported, which sets it. Set only from that dendrite's directory;
+          read it, never set it. Every unit that execs `lyra`
           (shellbridge, the dunst herald feed) gates on this fact too, so a host
           without the dendrite never has a unit pointed at a missing binary.
         '';

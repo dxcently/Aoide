@@ -1,19 +1,25 @@
-# modules/dendrites/quickshell.nix — the shell lane (the Quickshell runtime and
-# its one service).
+# modules/dendrites/quickshell/system.nix — the shell lane's system half (the
+# Quickshell runtime and its one service).
 #
 # Two things and nothing else: the quickshell PACKAGE, and the
 # `aoide-quickshell` user service, started from the config directory a host (or
 # another lane) has named. This lane renders no QML, deploys nothing, and knows
 # no song: it starts the shell on whatever `aoide.quickshell.config` points at.
 #
+# A plain module with no `habit` key, imported only BY PATH: by this
+# directory's `default.nix` (the catalogue entry) and by any lane that brings
+# the shell with it, so every importer lands on the one module. Its home half
+# is the internal `aoide.quickshell.home`, which `home.nix` beside it imports
+# into each user's home (README.md).
+#
 # The seam (CONTRACTS.md §0). Facts, never lanes — no module reads another
 # module (root AGENTS.md house rule 5):
 #   - SET here: `aoide.quickshell.enable` — "a shell surface exists on this
-#     host", a read-only fact true exactly when this dendrite is selected.
+#     host", a read-only fact true exactly when this file is imported.
 #   - READ here: `aoide.quickshell.config : nullOr str` — the directory the
 #     shell runs — which the `lyra` lane sets to its deployed runtime root
 #     (`$AOIDE_ROOT/run/qml`) and a host may set to any config directory of its
-#     own. lyra sets it, this lane reads it; neither file names the other.
+#     own. lyra sets it, this lane reads it; neither names the other's option.
 #
 # The two allowed shapes of quickshell WITHOUT lyra:
 #   * own config — a host that brings its own directory sets
@@ -50,6 +56,15 @@ let
   shellEntry = "${configDir}/shell.qml";
 in
 {
+  # The home half, as a module of the system config: it closes over the values
+  # above, and `home.nix` imports it through `osConfig`.
+  options.aoide.quickshell.home = lib.mkOption {
+    type = lib.types.deferredModule;
+    internal = true;
+    default = { };
+    description = "The quickshell lane's home half, imported into each user's home by `home.nix`.";
+  };
+
   config = {
     aoide.quickshell.enable = true;
 
@@ -107,7 +122,7 @@ in
     # host's own config has no song and starts exactly the same way. The
     # song-gated half (deploy the tree, seed the stage, restart the rice)
     # is the `lyra` lane's, which is also the lane that sets this config.
-    habit.home =
+    aoide.quickshell.home =
       { lib, ... }:
       lib.optionalAttrs (configDir != null) {
         systemd.user.services.aoide-quickshell = {

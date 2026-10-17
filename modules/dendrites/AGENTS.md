@@ -14,7 +14,8 @@ covers only what's specific to dendrites.
 - **A paint dendrite reads and sets FACTS, not options of its own.** Paint
   lanes read each other only through the facts `modules/nucleus/options.nix`
   declares. `quickshell`, `stylix` and `lyra` each set their fact
-  `true`; a `wallpaper` provider sets `aoide.wallpaper.provider` to its own name
+  `true`, from a file in their own directory (`mkFact` accepts any file under a
+  directory entry); a `wallpaper` provider sets `aoide.wallpaper.provider` to its own name
   (`mkDefault`). Never declare `aoide.<that name>.enable` a second time.
 - **A dependency rides the guard that needs it, never an unconditional
   `imports`.** `lib/options.nix` evaluates every dendrite in a bare
@@ -27,7 +28,18 @@ covers only what's specific to dendrites.
   reads those before any condition is forced, and refuses a condition over a
   `habit.home` that carries either. Put a home half's `imports` in a
   `habit.home` of its own beside the one that sets the rest (`neovim.nix`), or write them
-  as `config` (`lyra/default.nix`).
+  as `config` (`lyra/runtime.nix`).
+- **A half another lane brings is imported by PATH, and has no `habit` key.**
+  habit reads `habit.home` only on a selected module's top level, and applies a
+  catalogue entry under its catalogue key, not its path: a catalogue file
+  imported again by path is applied twice, and a file a module imports that
+  writes `habit.home` fails. So a shared capability is a plain system/home
+  pair (`quickshell/{system,home}.nix`, `lyra/{runtime,runtime-home}.nix`),
+  never a catalogue entry itself, never an inline value or a let-bound
+  attrset (two copies declare their options twice). The home half goes in as
+  `habit.home.imports = [ ./home.nix ]`, never `habit.home = ./home.nix`
+  (habit unifies a bare path into a module with no key, so it would not
+  dedup). CONTRACTS.md §2.
 - **No enable toggle.** A dendrite declares no `aoide.<name>.enable`: selection
   is the switch, and a host that does not select it has none of its options.
 - **Carries its own dependencies; reads no other module.** Not another
