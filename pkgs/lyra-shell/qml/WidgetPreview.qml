@@ -252,7 +252,8 @@ ShellRoot {
         // the same reason sessionAction is) so the menu's pending state
         // renders. The mode is the canvas livery's own and the songbook is the
         // canvas song alone; the control file's `drafts` key replaces the one
-        // canned draft, so a canvas run can pin an empty list or a long one.
+        // canned draft, so a canvas run can pin an empty list or a long one,
+        // and its `hostConfig` key the canned host file a late balloon names.
         function riceMenu(callback) {
             canvas.log("bridge.riceMenu {}")
             if (!callback) return
@@ -264,6 +265,7 @@ ShellRoot {
                            stagingSong: canvas.songName,
                            declared: null,
                            host: "preview",
+                           hostConfig: canvas.controlDoc.hostConfig || "/preview/hosts/preview/default.nix",
                            songs: [{ name: canvas.songName, ok: true }],
                            draftsSong: canvas.songName,
                            drafts: canvas.controlDoc.drafts

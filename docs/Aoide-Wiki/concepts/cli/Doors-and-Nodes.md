@@ -169,7 +169,8 @@ lyra shellbridge [--run] [--json]
   list --json`, then `lyra rice draft list <song> --json` when the mode names a
   song, under one 4 s budget, and answers one line, the list's `{mode, song,
   draft, stagingSong, declared, songs}` plus `{draftsSong, drafts: [{name,
-  savedAt, current}]}` and this machine's `host`, or `{ok:false, reason, message}`; it takes no fields, so
+  savedAt, current}]}` and this machine's `host` and `hostConfig` (the file
+  the declare rewrites), or `{ok:false, reason, message}`; it takes no fields, so
   it has no gate to fail), `ricedeclare` (the menu's Declare row, ANSWERED on
   its connection: `name` is a song name, it re-execs `lyra rice declare
   <name> --host --json` — which rewrites the host config's declared-song line

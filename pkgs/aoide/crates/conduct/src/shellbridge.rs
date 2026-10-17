@@ -861,7 +861,9 @@ fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Result<Value, V
 /// Dispatch ONE read-only menu query: `lyra rice list --json` under
 /// [`RICE_MENU_TIMEOUT`], its `data` (`mode`, `song`, `draft`, `stagingSong`,
 /// `declared`, `songs`) passed through verbatim with this machine's `host`
-/// name beside it (the name the Declare row's alert speaks), then — when
+/// name beside it (the name the Declare row's alert speaks) and `hostConfig`,
+/// the file `lyra rice declare --host` would rewrite
+/// ([`aoide_storage::fs::host_config`], null when none resolves), then — when
 /// [`drafts_song`] names a song for the marker — `lyra rice draft list <song>
 /// --json` with the budget the first child left, projected to `draftsSong`
 /// and `drafts: [{name, savedAt, current}]`. No song means `drafts: []` and
@@ -900,6 +902,7 @@ fn dispatch_rice_menu() -> Value {
     }
     answer.insert("ok".to_string(), Value::Bool(true));
     answer.insert("host".to_string(), json!(aoide_storage::display::os_hostname()));
+    answer.insert("hostConfig".to_string(), json!(aoide_storage::fs::host_config()));
     answer.insert("draftsSong".to_string(), json!(song));
     answer.insert("drafts".to_string(), Value::Array(drafts));
     Value::Object(answer)
@@ -3661,7 +3664,7 @@ esac
         .unwrap();
         std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         std::fs::write(root.join("mode.json"), marker).unwrap();
-        let env = aoide_test_support::EnvSaver::capture(&["AOIDE_RICE_BIN", "AOIDE_STAGE_DIR"]);
+        let env = aoide_test_support::EnvSaver::capture(&["AOIDE_RICE_BIN", "AOIDE_STAGE_DIR", "AOIDE_HOST_CONFIG"]);
         std::env::set_var("AOIDE_RICE_BIN", &stub);
         std::env::set_var("AOIDE_STAGE_DIR", &root);
         (env, root)
@@ -3780,6 +3783,7 @@ esac
             "shellbridge-menu-list",
             r#"{"mode":"declarative","song":"sonata","stagingSong":"cadenza"}"#,
         );
+        std::env::set_var("AOIDE_HOST_CONFIG", "/home/u/dxflake/hosts/box/default.nix");
         assert_eq!(
             dispatch_rice_menu(),
             json!({
@@ -3791,6 +3795,7 @@ esac
                 "declared": "sonata",
                 "songs": [{ "name": "cadenza", "ok": true }, { "name": "sonata", "ok": true }],
                 "host": aoide_storage::display::os_hostname(),
+                "hostConfig": "/home/u/dxflake/hosts/box/default.nix",
                 "draftsSong": "cadenza",
                 "drafts": [
                     { "name": "draft-1", "savedAt": "2026-01-01T00:00:00Z", "current": false },

@@ -97,7 +97,8 @@ Glass is a frame, content is a plate, light comes from above.
   song is already the declared one; it asks in a Platinum alert (Cancel the
   default, Return and Escape cancel) and then rewrites the host config's
   declared-song line, for the next rebuild. Its balloon says Declared, Not
-  declared with the refusal, or No answer yet when the bridge timed out.
+  declared with the refusal, or No answer yet when the bridge timed out,
+  naming the host file to check (the menu's `hostConfig`).
 - **Tray flyouts**: the Win7 narrow volume flyout (device, slider, percent,
   mute, `Mixer` footer), the network flyout from its tray icon, and the
   calendar flyout from the clock (month grid, today ringed, an analogue

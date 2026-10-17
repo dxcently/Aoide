@@ -225,9 +225,13 @@ QtObject {
     // reason? }], draftsSong, drafts: [{ name, savedAt, current }] } — `song`,
     // `draft`, `stagingSong`, `declared` and `draftsSong` null when unset, and
     // `drafts` empty when no song is named — or { ok: false, reason, message }
-    // with `reason` cli-failed / no-answer / no-client. An empty list with
-    // ok:true is "none yet"; a refusal is "nobody answered", and the menu must
-    // not paint the second as the first.
+    // with `reason` cli-failed / no-answer / no-client / no-reply (no-reply:
+    // nothing answered within replyTimeoutMs, which every answered verb can
+    // return). A socket error or an unreadable line answers { ok: false,
+    // message } with no `reason`: the request never ran, or its answer cannot
+    // be read, so there is no outcome to name. An empty list with ok:true is
+    // "none yet"; a refusal is "nobody answered", and the menu must not paint
+    // the second as the first.
     //
     // `riceMode` and `riceDraft` are fire-and-forget through sendCommand: no
     // reply, and the outcome is a toast the daemon fires (a command sent while
@@ -242,7 +246,8 @@ QtObject {
     // the CLI's refusal, toasted. Only `enter` and `drop` take a name.
     //
     // The menu's answer also carries `host`, this machine's name, for the
-    // Declare row to speak. `riceDeclare` answers like riceMenu, `cb` EXACTLY
+    // Declare row to speak, and `hostConfig`, the file the declare rewrites
+    // (null when none resolves), for a late answer to name. `riceDeclare` answers like riceMenu, `cb` EXACTLY
     // ONCE: the daemon runs `lyra rice declare <name> --host`, which rewrites the
     // host config's `habit.song.declared` line and never rebuilds. The answer
     // is { ok: true, message, name, host, changed, stagedDiffers } — `changed`
@@ -332,6 +337,8 @@ QtObject {
                 }
             }
 
+            // No `reason`: the connection failed before anything was
+            // executed, so there is no outcome to name.
             onError: function (err) {
                 conn.finish({ ok: false, message: "shellbridge unreachable" })
             }

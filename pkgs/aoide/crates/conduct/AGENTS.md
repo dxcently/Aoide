@@ -779,7 +779,9 @@ in the message.
   is the declared song — change one and the other moves with it. `ricemenu` is a
   READ: it answers on its own connection with both children under the one
   `RICE_MENU_TIMEOUT` budget (below the client's 5 s reply timeout), the
-  `rice list` data passes through verbatim, a child that did not answer is a
+  `rice list` data passes through verbatim with `host` and `hostConfig` beside
+  it (`hostConfig` from `aoide_storage::fs::host_config`, the resolver the
+  CLI's declare uses, never respelled here), a child that did not answer is a
   refusal and never an empty list, and a failed `rice list` starts no second
   child. `ricemode` takes `stage` + one argv-token `name` or a bare
   `declarative` (the CLI resolves the declared twin — never an env song here).

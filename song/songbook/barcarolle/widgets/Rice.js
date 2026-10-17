@@ -63,14 +63,16 @@ function declareQuestion(answer, row) {
 // cb gets the balloon: { ok, title, text }
 function declare(bridge, row, answer, cb) {
     var host = ready(answer) && answer.host ? "" + answer.host : ""
-    bridge.riceDeclare(row.name, function (reply) { cb(declared(reply, host)) })
+    var file = ready(answer) && answer.hostConfig ? "" + answer.hostConfig : ""
+    bridge.riceDeclare(row.name, function (reply) { cb(declared(reply, host, file)) })
 }
 
-// a reply that never came (reason "no-reply") is not a refusal: the declare may still land
-function declared(reply, host) {
+// a reply that never came (reason "no-reply") is not a refusal: the declare may still land.
+// `file` is the menu's hostConfig, the file the declare rewrites; without it, the default path
+function declared(reply, host, file) {
     if (reply && reply.ok !== true && reply.reason === "no-reply")
         return { ok: false, title: "No answer yet",
-                 text: "The declare may still land. Check hosts/" + (host || "<host>") + "/default.nix before declaring again." }
+                 text: "The declare may still land. Check " + (file || "hosts/" + (host || "<host>") + "/default.nix") + " before declaring again." }
     if (!reply || reply.ok !== true)
         return { ok: false, title: "Not declared", text: "" + ((reply && reply.message) || "No answer from the shell bridge.") }
     var text = reply.changed === false

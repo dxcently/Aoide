@@ -1078,7 +1078,9 @@ stripping one, and a held spawn shows as its whole command.
   thread like `sessiontrace`: `dispatch_rice_menu` runs `rice list --json`
   under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and
   passes its `data` through (`mode`, `song`, `draft`, `stagingSong`,
-  `declared`, `songs`) with this machine's `host` name beside it; then, when `drafts_song` names a song from the mode
+  `declared`, `songs`) with this machine's `host` name and `hostConfig` (the
+  file `rice declare --host` rewrites, from `aoide_storage::fs::host_config`,
+  null when none resolves) beside it; then, when `drafts_song` names a song from the mode
   marker (`stagingSong` first while declarative is locked, since an unlock
   lands there; `song` first otherwise), runs `rice draft list <song> --json`
   with the budget left. The answer adds `draftsSong` and `drafts:

@@ -158,7 +158,9 @@ what and why. `name` must be a song name (lowercase letters, digits, hyphens),
 and the audit line names it: `ricedeclare action <song>: <ok changed|ok
 unchanged|failed>`. The bridge's own timeout answers `reason: "no-reply"`,
 which never means refused: the declare may still land. The `ricemenu` answer carries the machine's `host` name for the row's
-alert to speak.
+alert to speak, and `hostConfig`, the file the declare rewrites (resolved as
+`AOIDE_HOST_CONFIG`, else `<checkout>/hosts/<host>/default.nix`; null when
+neither resolves), for a late balloon to name.
 
 **`hyprctl` must be on the service PATH, or every click fails silently.**
 The socket handler's `focus_window` shells out to `hyprctl`; the
