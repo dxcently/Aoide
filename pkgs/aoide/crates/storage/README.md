@@ -136,6 +136,12 @@ by decision — no embedded database yet
   before the split; `conducting_stage_dir`'s own no-override fallback is
   `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
 
+  The rice's three files (CONTRACTS.md §4) are resolved here too:
+  `rice_conf_link` (`$HOME/.local/state/lyra/rice.conf`, the one path outside
+  `$AOIDE_ROOT`), `declared_rice_conf` (`root()`'s `song/declared/rice.conf`)
+  and `empty_rice_conf` (`stage_dir()`'s `empty-hyprland.conf`).
+  `atomic_symlink` is the retarget: a temp link renamed over the link.
+
   **The host split inside `fs`.** Two places, and both are seams rather than
   branches at the call sites: the private-write primitives keep their Windows
   spellings in `fs_windows.rs`, beside `fs.rs` the way

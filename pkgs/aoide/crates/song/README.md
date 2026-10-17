@@ -31,6 +31,11 @@ a config file). Paint-side — ships in `lyra`, not core.
   renders the staged song's hyprlock dress, and
   `commands::rice::stage_lockscreen` writes `stage/hyprlock.conf` beside the
   terminal file, for a song that ships a `lockscreen.<ext>` (`cover`).
+  The rice state link (`~/.local/state/lyra/rice.conf`, CONTRACTS.md §4) is
+  retargeted by `commands::rice::stage_rice_conf` before the live apply: to the
+  song's own `hyprland.conf`, or to the empty staging file when it has none.
+  The declarative arm of `lyra reload` (`reload.rs`) reloads the compositor's
+  config through `live::reload_config`, and no rice file otherwise.
 - `compose` — the pure `rice compose` scaffolding/rendering engine.
 - `cover` — cover-art derivation + resolution, and `stage/cover.json`'s
   writers, which stamp the staged song into every file they write

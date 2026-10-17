@@ -854,6 +854,62 @@ pub fn declared_venue() -> std::path::PathBuf {
     song_dir().join("declared").join("venue.json")
 }
 
+/// The state link the compositor sources for the rice:
+/// `$HOME/.local/state/lyra/rice.conf` (CONTRACTS.md §4). The one writer
+/// outside `$AOIDE_ROOT` in this module: `$HOME`, not `$XDG_STATE_HOME`,
+/// because the renderer's Nix activation hardcodes that path, so the two
+/// halves name one file. Its target is the declared twin
+/// ([`declared_rice_conf`]) or a staged `hyprland.conf` (`rice stage`).
+pub fn rice_conf_link() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .unwrap_or_else(aoide_protocol::aoide_home)
+        .join(".local")
+        .join("state")
+        .join("lyra")
+        .join("rice.conf")
+}
+
+/// The declared twin of the rice: `<root>/song/declared/rice.conf`, the file
+/// the renderer's own Nix output is linked to. Off [`root`], not [`song_dir`]:
+/// the renderer writes under `aoide.root` and never sees `$AOIDE_STAGE_DIR`.
+pub fn declared_rice_conf() -> std::path::PathBuf {
+    root().join("song").join("declared").join("rice.conf")
+}
+
+/// The staging-owned empty rice, `<stage>/empty-hyprland.conf`: the target a
+/// stage links to when its song ships no `hyprland.conf`, so the link never
+/// keeps the previous song's binds.
+pub fn empty_rice_conf() -> std::path::PathBuf {
+    stage_dir().join("empty-hyprland.conf")
+}
+
+/// Point `link` at `target` in one step: a symlink is made at a temp name in
+/// the same directory and renamed over `link`, so a reader sees the old
+/// target or the new one, never no link. Replaces a regular file or a symlink
+/// at `link`. Unix only; elsewhere it is `Unsupported`.
+pub fn atomic_symlink(target: &std::path::Path, link: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let dir = link.parent().unwrap_or_else(|| std::path::Path::new("."));
+        std::fs::create_dir_all(dir)?;
+        let name = link.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+        std::os::unix::fs::symlink(target, &tmp)?;
+        std::fs::rename(&tmp, link).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            e
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (target, link);
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "symlinks are unix-only here"))
+    }
+}
+
 /// A committed song's drafts root: `<song>/songbook/<name>/drafts/` —
 /// durable scratch for `rice draft save`, gitignored and outside `stage/` (a
 /// draft is NOT the live stage, and NOT committed truth; that distinction is
@@ -4630,5 +4686,64 @@ mod tests {
         let taken = blocked.join().unwrap();
         let _ = std::fs::remove_dir_all(&home);
         assert!(taken, "the interrupted wait retries and takes the lock");
+    }
+
+    #[test]
+    fn rice_conf_seams_name_home_for_the_link_and_the_root_for_the_twin() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["HOME", "AOIDE_ROOT", "AOIDE_STAGE_DIR"]);
+        let home = scratch("aoide-test-rice-home");
+        let root = scratch("aoide-test-rice-root");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::remove_var("AOIDE_STAGE_DIR");
+
+        assert_eq!(
+            rice_conf_link(),
+            std::path::PathBuf::from(&home).join(".local/state/lyra/rice.conf"),
+        );
+        assert_eq!(
+            declared_rice_conf(),
+            std::path::PathBuf::from(&root).join("song/declared/rice.conf"),
+        );
+        assert_eq!(
+            empty_rice_conf(),
+            std::path::PathBuf::from(&root).join("song/stage/empty-hyprland.conf"),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_symlink_repoints_in_place_and_replaces_a_regular_file() {
+        let dir = std::path::PathBuf::from(scratch("aoide-test-atomic-symlink"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("first.conf");
+        let second = dir.join("second.conf");
+        std::fs::write(&first, "a").unwrap();
+        std::fs::write(&second, "b").unwrap();
+        let link = dir.join("rice.conf");
+
+        // A regular file at the link is replaced, not followed.
+        std::fs::write(&link, "stale").unwrap();
+        atomic_symlink(&first, &link).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), first);
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "a");
+
+        // Repointing moves the link; repeating the same call is the same state.
+        atomic_symlink(&second, &link).unwrap();
+        atomic_symlink(&second, &link).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), second);
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "b");
+
+        // No temp name is left behind beside the link.
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp links left behind: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

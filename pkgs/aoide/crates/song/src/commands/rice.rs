@@ -473,6 +473,7 @@ pub(crate) struct StagePlan {
     lock_image: Option<std::path::PathBuf>,
     lock_conf: Result<String, String>,
     songbook: crate::widgets::StageSongbook,
+    rice_target: std::path::PathBuf,
 }
 
 /// The read-only half of a stage: the name guard, the notes, the venue overlay
@@ -588,12 +589,29 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
         }
     };
 
-    Ok(StagePlan { name, repin, staged, hypr_keywords, terminal_conf, lock_image, lock_conf, songbook })
+    let rice_target = rice_target_for(&name, repin);
+
+    Ok(StagePlan { name, repin, staged, hypr_keywords, terminal_conf, lock_image, lock_conf, songbook, rice_target })
+}
+
+/// The file the rice state link points at for `name`, read-only (CONTRACTS.md
+/// §4). A stage links the song's own runtime `hyprland.conf`; a re-pin
+/// (`repin`, `rice mode declarative`) links the declared twin. Either falls
+/// back to the staging-owned empty file when its song ships no `hyprland.conf`,
+/// so a stage never leaves the previous song's binds standing.
+pub(crate) fn rice_target_for(name: &str, repin: bool) -> std::path::PathBuf {
+    let own = if repin {
+        shellbridge::declared_rice_conf()
+    } else {
+        shellbridge::songbook_dir(name).join("hyprland.conf")
+    };
+    if own.is_file() { own } else { shellbridge::empty_rice_conf() }
 }
 
 /// The writing half of a stage, from a [`plan_rice_stage`] plan.
 pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
-    let StagePlan { name, repin, staged, hypr_keywords, terminal_conf, lock_image, lock_conf, songbook } = plan;
+    let StagePlan { name, repin, staged, hypr_keywords, terminal_conf, lock_image, lock_conf, songbook, rice_target } =
+        plan;
     let stage = shellbridge::stage_dir();
     let notes_dst = stage.join("livery.json");
     if let Err(e) = shellbridge::atomic_write(&notes_dst, &staged) {
@@ -601,6 +619,12 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
             .with_data(json!({ "reason": "stage-write-failed", "target": notes_dst.to_string_lossy() }));
     }
     let mut changed: Vec<String> = vec![notes_dst.to_string_lossy().into_owned()];
+
+    // The rice link lands BEFORE the live apply, so the compositor's reload
+    // (`apply_live`'s own `hyprctl reload config-only`) reads the new rice.
+    // Best-effort, reported in the envelope (`stage_rice_conf`).
+    let (rice_changed, rice_data) = stage_rice_conf(&rice_target);
+    changed.extend(rice_changed);
 
     // Live-apply geometry + border colours on the compositor side (best-effort,
     // guarded, non-fatal). The stage-file write above is already the source of
@@ -733,6 +757,7 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
         "hyprctl": hyprctl_status,
         "terminal": terminal_data,
         "lockScreen": lock_data,
+        "riceConf": rice_data,
         "widgets": widget_sync.note,
         "slots": widget_sync.slots,
         "registry": registry_sync.note,
@@ -789,6 +814,61 @@ pub(crate) fn stage_terminal_colors(conf: Option<&str>) -> (Vec<String>, Value) 
     let mut data = json!({ "status": "skipped", "message": "test build: no push to live kitty" });
     data["file"] = json!(path.to_string_lossy());
     (vec![path.to_string_lossy().into_owned()], data)
+}
+
+/// Point the rice state link (`~/.local/state/lyra/rice.conf`,
+/// [`shellbridge::rice_conf_link`]) at `target`, the file [`rice_target_for`]
+/// chose. The renderer's Nix side sources that link from Hyprland, so this is
+/// the one writer that makes a staged song's binds and layout take effect.
+///
+/// Mirrors [`stage_lockscreen`]: never fatal (`stage/livery.json` is already
+/// written), reported in the envelope, and idempotent — a link already naming
+/// `target` is left alone. The empty staging-owned file is created when absent,
+/// so the empty target always exists. The link is repointed atomically
+/// ([`shellbridge::atomic_symlink`]), never removed first.
+///
+/// A test build writes only a link under the system temp dir: a test that does
+/// not isolate `HOME` is skipped here rather than repointing the operator's
+/// own `~/.local/state/lyra/rice.conf` (the same guard `apply_live` keeps).
+pub(crate) fn stage_rice_conf(target: &std::path::Path) -> (Vec<String>, Value) {
+    let link = shellbridge::rice_conf_link();
+    #[cfg(test)]
+    {
+        if !link.starts_with(std::env::temp_dir()) {
+            return (
+                Vec::new(),
+                json!({ "status": "skipped", "message": "test build: HOME is not isolated; rice link left alone" }),
+            );
+        }
+    }
+    let empty = shellbridge::empty_rice_conf();
+    if !empty.is_file() {
+        if let Err(e) = shellbridge::atomic_write(&empty, "") {
+            return (
+                Vec::new(),
+                json!({ "status": "write-failed", "message": format!("failed to write {}: {e}", empty.display()) }),
+            );
+        }
+    }
+    if std::fs::read_link(&link).is_ok_and(|to| to == target) {
+        return (
+            Vec::new(),
+            json!({ "status": "unchanged", "file": link.to_string_lossy(), "target": target.to_string_lossy() }),
+        );
+    }
+    if let Err(e) = shellbridge::atomic_symlink(target, &link) {
+        return (
+            Vec::new(),
+            json!({
+                "status": "write-failed",
+                "message": format!("failed to link {} to {}: {e}", link.display(), target.display()),
+            }),
+        );
+    }
+    (
+        vec![link.to_string_lossy().into_owned()],
+        json!({ "status": "linked", "file": link.to_string_lossy(), "target": target.to_string_lossy() }),
+    )
 }
 
 /// Write the staged lock-screen dress (`<stage>/hyprlock.conf`,
@@ -3905,6 +3985,146 @@ mod tests {
         });
         assert_eq!(out2.status, Status::Ok, "{:?}", out2.data);
         assert!(target.join("rice.nix").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod rice_link_tests {
+    //! The rice state link (`~/.local/state/lyra/rice.conf`): what a stage
+    //! points it at, that a refused stage writes nothing, and that the writer
+    //! runs and repoints idempotently. Each test isolates `HOME` and
+    //! `AOIDE_ROOT` under the temp dir; a test that did not would hit the
+    //! guard in [`super::stage_rice_conf`] and be skipped, never leak.
+    use super::*;
+    use aoide_protocol::output::Status;
+    use aoide_test_support::*;
+
+    const NOTES: &str = r##"{"schemaVersion":"0","palette":{"bg":"#000000"}}"##;
+
+    /// A runtime root with a stage dir, a fake `$HOME`, and a songbook seam
+    /// that admits any name (the gate is not what these tests are about).
+    fn rig(tag: &str) -> (std::path::PathBuf, EnvSaver) {
+        let saver = EnvSaver::capture(&[
+            "HOME",
+            "AOIDE_ROOT",
+            "AOIDE_STAGE_DIR",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        let root = unique_tmp(tag);
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(root.join("aoide").join("song").join("stage")).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("AOIDE_ROOT", root.join("aoide"));
+        std::env::remove_var("AOIDE_STAGE_DIR");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        (root, saver)
+    }
+
+    fn songbook_song(name: &str, hyprland: Option<&str>) {
+        let dir = shellbridge::songbook_dir(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("livery.json"), NOTES).unwrap();
+        if let Some(conf) = hyprland {
+            std::fs::write(dir.join("hyprland.conf"), conf).unwrap();
+        }
+    }
+
+    fn stage(name: &str) -> Outcome {
+        handle_rice_stage(&aoide_test_support::inv(&["rice", "stage"], &[name]))
+    }
+
+    #[test]
+    fn a_stage_links_the_song_conf_and_falls_back_to_the_empty_file_never_the_last_song() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = rig("rice-link-song-then-empty");
+        songbook_song("moonlight", Some("bind = SUPER, Q, killactive\n"));
+        songbook_song("dusk", None);
+        let link = shellbridge::rice_conf_link();
+        let empty = shellbridge::empty_rice_conf();
+
+        let out = stage("moonlight");
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(std::fs::read_link(&link).unwrap(), shellbridge::songbook_dir("moonlight").join("hyprland.conf"));
+        assert_eq!(out.data.as_ref().unwrap()["riceConf"]["status"], "linked");
+
+        // The next song has no hyprland.conf: the link moves to the empty
+        // staging-owned file, so moonlight's binds stop applying.
+        let out = stage("dusk");
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(std::fs::read_link(&link).unwrap(), empty);
+        assert_eq!(std::fs::read_to_string(&empty).unwrap(), "");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refused_stage_writes_no_rice_link() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = rig("rice-link-refused");
+        let link = shellbridge::rice_conf_link();
+
+        let out = stage("../escape");
+        assert_eq!(out.status, Status::Error, "{:?}", out.data);
+        assert!(std::fs::symlink_metadata(&link).is_err(), "a refused stage left a link behind");
+        assert!(!shellbridge::empty_rice_conf().exists(), "a refused stage created the empty file");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_repin_names_the_declared_twin_and_falls_back_to_the_empty_file() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = rig("rice-link-repin");
+        songbook_song("moonlight", Some("bind = SUPER, Q, killactive\n"));
+
+        assert_eq!(rice_target_for("moonlight", true), shellbridge::empty_rice_conf());
+        let twin = shellbridge::declared_rice_conf();
+        std::fs::create_dir_all(twin.parent().unwrap()).unwrap();
+        std::fs::write(&twin, "bind = SUPER, T, exec, foot\n").unwrap();
+        assert_eq!(rice_target_for("moonlight", true), twin);
+        // A stage ignores the twin and takes the song's own file.
+        assert_eq!(
+            rice_target_for("moonlight", false),
+            shellbridge::songbook_dir("moonlight").join("hyprland.conf"),
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_writer_repoints_atomically_and_is_idempotent() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = rig("rice-link-repoint");
+        let a = root.join("a.conf");
+        let b = root.join("b.conf");
+        std::fs::write(&a, "").unwrap();
+        std::fs::write(&b, "").unwrap();
+        let link = shellbridge::rice_conf_link();
+
+        let (changed, data) = stage_rice_conf(&a);
+        assert_eq!(data["status"], "linked");
+        assert_eq!(changed.len(), 1);
+        assert_eq!(std::fs::read_link(&link).unwrap(), a);
+
+        let (changed, data) = stage_rice_conf(&a);
+        assert_eq!(data["status"], "unchanged");
+        assert!(changed.is_empty());
+
+        let (_, data) = stage_rice_conf(&b);
+        assert_eq!(data["status"], "linked");
+        assert_eq!(std::fs::read_link(&link).unwrap(), b);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_writer_leaves_an_unisolated_home_alone() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = rig("rice-link-unisolated");
+        // A HOME outside the temp dir is the operator's own: the guard skips.
+        std::env::set_var("HOME", "/nonexistent-operator-home");
+        let (changed, data) = stage_rice_conf(&root.join("a.conf"));
+        assert!(changed.is_empty());
+        assert_eq!(data["status"], "skipped");
+        assert!(!std::path::Path::new("/nonexistent-operator-home").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -148,10 +148,7 @@ pub fn batch_command(keywords: &[String]) -> String {
 /// borders, gaps and blur share — and its refusal cannot be read as a
 /// core-keyword failure. Off-Hyprland, all of it is skipped together.
 pub fn apply_live(keywords: &[String]) -> &'static str {
-    let on_hyprland = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false);
-    if !on_hyprland {
+    if !on_hyprland() {
         return "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)";
     }
     // `cfg!(test)` is evaluated when THIS CRATE is compiled, so it protects
@@ -174,6 +171,32 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
         }
     }
     live_status(reload, core, glass)
+}
+
+/// Whether this process runs inside a Hyprland session: the compositor's own
+/// instance signature is set and non-empty. Off-Hyprland every live call here
+/// is skipped together.
+fn on_hyprland() -> bool {
+    std::env::var("HYPRLAND_INSTANCE_SIGNATURE").map(|v| !v.is_empty()).unwrap_or(false)
+}
+
+/// `hyprctl reload config-only`, alone: the compositor re-reads the rice link it
+/// sources. A retargeted link's new target is not guaranteed to be followed by
+/// Hyprland's own file watcher, so the declarative arm of `lyra reload`
+/// (`commands/reload.rs`) asks for it. Guarded and inert exactly as
+/// [`apply_live`] is, and reports the same way.
+pub fn reload_config() -> &'static str {
+    if !on_hyprland() {
+        return "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)";
+    }
+    if cfg!(test) {
+        return "skipped (this crate's own test build: no live hyprctl)";
+    }
+    match run_hyprctl(&["reload".to_string(), "config-only".to_string()]) {
+        Batch::Applied => "reloaded",
+        Batch::Failed => "best-effort: hyprctl reported an error",
+        Batch::Unavailable => "best-effort: hyprctl unavailable",
+    }
 }
 
 /// The `hyprctl` calls one [`apply_live`] makes, IN ORDER, each with its role

@@ -151,6 +151,23 @@
   caller needing the widget-sync/hyprctl-apply tail reuses THAT, or the bare
   `crate::live`/`crate::widgets` primitives directly, never
   `handle_rice_stage`.
+- **`commands::rice::stage_rice_conf` is the ONE writer of the rice state
+  link, and it runs before `apply_live`.** The compositor's reload reads the
+  link, so the link must already name the new target when the reload fires.
+  The target is `rice_target_for`: read-only, decided in `plan_rice_stage`, so a
+  refused plan links nothing. A stage links the song's own runtime
+  `hyprland.conf`; a re-pin (`rice mode declarative`) links the declared twin;
+  either falls back to the empty file. `sync_draft_in_place` calls it too, with
+  the song's own target, never the draft's. Never fatal, reported as
+  `riceConf` in the envelope, and idempotent: an already-correct link is
+  `unchanged`. Tests cannot observe the order against `apply_live` (inert under
+  `cfg!(test)`); the order is the code's position, and a change that moves
+  `stage_rice_conf` after `apply_live` breaks the reload's view of the rice.
+- **`reload.rs`'s declarative arm reloads the compositor's config, and
+  nothing else of the rice.** `live::reload_config` runs `hyprctl reload
+  config-only`, guarded on `HYPRLAND_INSTANCE_SIGNATURE` and inert under
+  `cfg!(test)` like `apply_live`. It exists because a retargeted link's new
+  target is not guaranteed to be followed by Hyprland's own watcher.
 - **`commands::rice::stage_terminal_colors` is the ONE writer of
   `stage/terminal-colors.conf`, and every path that rewrites the staged
   livery calls it.** Today: `handle_rice_stage` (so `rice stage`, `rice mode

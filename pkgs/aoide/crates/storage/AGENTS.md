@@ -195,6 +195,17 @@
   `stage_dir` for convenience — that is exactly the coupling the split
   exists to remove (root `AGENTS.md`'s core-vs-lyra boundary, applied to the
   stage tree itself).
+- **`fs::rice_conf_link` is the first writer outside `$AOIDE_ROOT`.** It names
+  `$HOME/.local/state/lyra/rice.conf`, because the renderer's Nix activation
+  hardcodes that path and the two halves must name one file. A test that
+  exercises it sets `HOME` under the temp dir (`EnvSaver` captures it); the
+  song crate's writer skips a test build whose `HOME` is not isolated, so an
+  unisolated test cannot repoint the operator's link. The one way to retarget a
+  link here is `fs::atomic_symlink` (a temp link renamed over it), never
+  remove-then-link: a reader must see the old target or the new one.
+- **`fs::declared_rice_conf` is off `root()`, not `song_dir()`.** The renderer
+  writes under `aoide.root` and never sees `$AOIDE_STAGE_DIR`, so the twin
+  must not follow that override. `fs::empty_rice_conf` is under `stage_dir()`.
 - **`fs::migrate_conducting_stage` is a ONE-SHOT, Once-guarded move, not a
   sync.** It runs at most once per process, only from
   `conducting_stage_dir`'s no-override fallback branch (an `$AOIDE_STAGE_DIR`

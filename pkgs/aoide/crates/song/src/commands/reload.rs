@@ -3,10 +3,12 @@
 //! look, no separate save, no separate sync, no tree-direction trap). Reads
 //! `stage/mode.json` (the authority) and dispatches:
 //!
-//! - **declarative** — SHELL RELOAD ONLY, byte-for-byte the old `quickshell
-//!   reload` command ([`shell_reload_only`]), which this command absorbs
-//!   outright — hard cutover, no alias, the `node invite` precedent. Nothing
-//!   is unlocked, so there is nothing to snapshot or sync.
+//! - **declarative** — RELOAD ONLY, no sync ([`shell_reload_only`]): the
+//!   compositor re-reads its rice (`hyprctl reload config-only`, so a rice
+//!   link retargeted to the declared twin is honoured), then the shell's IPC
+//!   reload, which this command absorbed from the old `quickshell reload` —
+//!   hard cutover, no alias, the `node invite` precedent. Nothing is
+//!   unlocked, so there is nothing to snapshot or sync.
 //! - **staging** — 1. sync via [`super::rice::handle_rice_stage`]'s own body
 //!   (the existing seam, never a copy: re-derives `stage/livery.json` from
 //!   the committed songbook, syncs widget bodies + the widget-type registry
@@ -67,7 +69,7 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["reload"],
-        summary: "The one mode-aware iteration command: reads the rice mode and reloads accordingly. Declarative shell-reloads only (byte for byte the old `quickshell reload`, which this absorbed). Staging/draft snapshot the current rice — deduped against the head take, so an unchanged reload mints nothing — sync it (`rice stage`'s own body), then shell-reload. Snapshot-before-reload makes every dress iteration revertible via `rice back` for free (widget bodies are captured in the take but revert via git, their own substrate).",
+        summary: "The one mode-aware iteration command: reads the rice mode and reloads accordingly. Declarative reloads only: the compositor's rice (`hyprctl reload config-only`) and the shell, nothing synced (the old `quickshell reload`, absorbed). Staging/draft snapshot the current rice — deduped against the head take, so an unchanged reload mints nothing — sync it (`rice stage`'s own body), then shell-reload. Snapshot-before-reload makes every dress iteration revertible via `rice back` for free (widget bodies are captured in the take but revert via git, their own substrate).",
         args: [],
         flags: [],
         gated: false,
@@ -86,14 +88,16 @@ fn handle_reload(inv: &Invocation) -> Outcome {
     }
 }
 
-/// The declarative arm — byte-for-byte [`crate::commands::quickshell`]'s old
-/// `handle_quickshell_reload`: best-effort, always `Outcome::ok` regardless
-/// of whether the IPC call actually reached a live instance. Nothing is
-/// unlocked to save in this mode, so this is the WHOLE arm — no sync, no
-/// snapshot (the measure is closed).
+/// The declarative arm: the compositor re-reads its rice (`hyprctl reload
+/// config-only`, [`crate::live::reload_config`], guarded and inert off
+/// Hyprland and under this crate's tests), then the shell's IPC reload, best
+/// effort and always `Outcome::ok` regardless of whether either reached a
+/// live instance. Nothing is unlocked to save in this mode, so this is the
+/// WHOLE arm — no sync, no snapshot (the measure is closed).
 fn shell_reload_only() -> Outcome {
+    let hyprctl = crate::live::reload_config();
     let status = crate::ipc::quickshell_ipc_reload();
-    Outcome::ok("reload", status.message()).with_data(json!({ "status": status.tag() }))
+    Outcome::ok("reload", status.message()).with_data(json!({ "status": status.tag(), "hyprctl": hyprctl }))
 }
 
 /// The staging/draft arm: sync → snapshot (deduped) → shell reload — see
@@ -230,7 +234,8 @@ fn route_to_marked_draft(song: &str, draft: &str) -> Result<bool, Outcome> {
         .map_err(|e| Outcome::error("reload", e).with_data(json!({ "reason": "symlink-setup-failed" })))
 }
 
-/// Draft mode's own "sync" beat: apply hyprctl geometry/border keywords, the
+/// Draft mode's own "sync" beat: point the rice link at the song's own runtime
+/// `hyprland.conf` ([`super::rice::rice_target_for`]), apply hyprctl geometry/border keywords, the
 /// terminal colours and the lock-screen dress (all derived from the CURRENT staged livery —
 /// already the draft's own content via its routing symlink) and sync
 /// widget bodies + the widget-type registry into `run/qml` — the SAME primitives
@@ -260,6 +265,10 @@ fn sync_draft_in_place(song: &str) -> Outcome {
         }
     };
 
+    // The rice link follows the song's own runtime `hyprland.conf` (never the
+    // draft's livery), before the live apply that reloads the compositor.
+    let (rice_changed, rice_data) =
+        super::rice::stage_rice_conf(&super::rice::rice_target_for(song, false));
     let hyprctl_status = crate::live::apply_live(&crate::live::geometry_keywords(&parsed));
     let (terminal_changed, terminal_data) =
         super::rice::stage_terminal_colors(crate::live::terminal_colors(&parsed).as_deref());
@@ -298,7 +307,8 @@ fn sync_draft_in_place(song: &str) -> Outcome {
         lock_image.as_deref(),
     );
 
-    let mut changed = terminal_changed;
+    let mut changed = rice_changed;
+    changed.extend(terminal_changed);
     changed.extend(lock_changed);
     changed.extend(widget_sync.changed.clone());
     changed.extend(registry_sync.changed.clone());
@@ -307,6 +317,7 @@ fn sync_draft_in_place(song: &str) -> Outcome {
         .changed(changed)
         .with_data(json!({
             "hyprctl": hyprctl_status,
+            "riceConf": rice_data,
             "terminal": terminal_data,
             "lockScreen": lock_data,
             "widgets": widget_sync.note,
@@ -826,5 +837,10 @@ mod tests {
         assert!(lock.lines().any(|l| l == format!("$aoide_lock_image = {}", picture.display())), "{lock}");
         assert_eq!(out.data.unwrap()["sync"]["lockScreen"]["status"], "written");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_declarative_arm_never_reloads_a_live_compositor_under_test() {
+        assert!(crate::live::reload_config().starts_with("skipped"));
     }
 }
