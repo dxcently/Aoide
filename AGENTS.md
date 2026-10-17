@@ -78,7 +78,11 @@ and the staging/declarative/draft modes:
    `aoide.songbook.greeter`, the declared song's greeter face),
    `aoide.components` (the component slots — bar, launcher, powermenu,
    notifications, wallpaper, dock, calendar, switcher, lock, greeter — and
-   the provider that fills each), and its own `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
+   the provider that fills each), and its own `aoide.<name>.*`. The renderer
+   (`lyra`, `modules/dendrites/lyra/default.nix`) also reads `rice.*`, the
+   options a rice sets, and Home Manager's `wayland.windowManager.hyprland`
+   state (`enable`, `finalPackage`, `configType`, `importantPrefixes`,
+   `sourceFirst`). The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
    stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`) are

@@ -1,11 +1,14 @@
 # modules/dendrites/lyra
 
-The shell surface, the bridge that feeds it, and the `vibeos` component
-providers built on them.
+Two roles in one directory. The catalogue entry `lyra` is the RICE RENDERER:
+it writes the song's Hyprland rice to the state link the compositor sources.
+The vibeos runtime is the shell surface, the bridge that feeds it, and the
+`vibeos` component providers built on them; it is reached only through those
+providers, never through the `lyra` entry.
 
 ```
 modules/dendrites/lyra/
-├── default.nix        the catalogue entry: imports the runtime pair below
+├── default.nix        the catalogue entry: the rice renderer (below)
 ├── runtime.nix        the vibeos runtime, system half: builds the QML tree,
 │                      deploys it, watches it; publishes its home half as
 │                      `aoide.lyra.home`
@@ -17,10 +20,42 @@ modules/dendrites/lyra/
                        the `vibeos` provider of each component slot
 ```
 
-`default.nix` is `{ imports = [ ./runtime.nix ]; habit.home.imports =
-[ ./runtime-home.nix ]; }`. The runtime pair is plain modules with no `habit`
-key, so any lane that brings the runtime imports the same two paths and the
-host gets one of each (AGENTS.md).
+The runtime pair is plain modules with no `habit` key, so any lane that brings
+the runtime imports the same two paths and the host gets one of each
+(AGENTS.md). `default.nix` imports neither.
+
+## The rice renderer (`default.nix`)
+
+Selecting `lyra` gives a host the rice seams and the state link, and nothing
+that paints. `wayland.windowManager.hyprland.extraConfig` gets one line at
+`mkAfter`: `source = ~/.local/state/lyra/rice.conf`, plus the host's override
+file when it sets one. The renderer owns six options under `rice.hyprland`:
+`settings` and `conf` (the song's, `hostConf` and `host` the host's), and the
+two read-only rendered files `file` and `hostFile`.
+
+Render order, fixed (AGENTS.md):
+
+```
+rice-hyprland.conf  =  song hyprland.conf   (rice.hyprland.conf, binds and layout)
+                    +  toHyprconf settings  (rice.hyprland.settings, Nix, LAST)
+
+~/.local/state/lyra/rice.conf   ->  <root>/song/declared/rice.conf  (the declared twin)
+                                    ->  the rendered file above       (the build's rice)
+```
+
+A stage repoints the state link without a rebuild: at the song's own runtime
+`hyprland.conf`, or at the empty staging-owned file when the song has none
+(`rice stage`, `rice mode declarative`, `lyra reload`; CONTRACTS.md §4). The
+renderer's activation relinks the state link only when it is absent or already
+names the twin, so a staged link survives a rebuild. The reload
+(`hyprctl reload config-only`) runs when the twin's target changed and the link
+names it.
+
+Under `package = null` (the compositor lane's setting) the renderer runs no
+`hyprctl` itself on hosts where Home Manager has no Hyprland package; the
+compositor's own file watcher is then the only reload, and it is unverified on a
+retargeted symlink (the declarative arm of `lyra reload` asks for the reload
+explicitly).
 
 ## The vibeos component providers
 

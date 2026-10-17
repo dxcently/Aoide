@@ -83,7 +83,7 @@ shell's own layer:
 |---|---|---|
 | `aoide.quickshell.enable` | a Quickshell shell surface exists here | its dendrite's system half, `dendrites/quickshell/system.nix` (the package and the `aoide-quickshell` service), which sets it `true` |
 | `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
-| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | its dendrite's runtime, `dendrites/lyra/runtime.nix`, which sets it `true` |
+| `aoide.lyra.enable` | the vibeos runtime is present: the paint/rice binary is installed (`pkgs.aoide.rice`) and the shell is wired | `dendrites/lyra/runtime.nix`, which every `vibeos` component provider imports by path, and which sets it `true` (the renderer `dendrites/lyra/default.nix` does not) |
 | `aoide.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
 | `aoide.songbook.greeter` (`nullOr (attrsOf str)`, `null`) | the declared song's `greeter` slot record `{ owner, file }`; non-null switches the greeter lane from ly to greetd + the song's Quickshell face | the selection hook (`lib/aoideos.nix`, over `lib/songbook.nix`'s `greeter`), beside `aoide.songbook.builtIn`; never a host |
 | `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a song's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`): `vibeos` writes `"quickshell"` (the shell's own layer), `skwd-wall` writes `"skwd-wall"` |
@@ -2420,6 +2420,52 @@ Reader: hyprlock's config (above), which sources it BEFORE
 file dresses the lock of a host that has never staged anything, and a stage
 overrides it the moment one runs. A missing file is a logged config error and
 the lane's defaults stand.
+
+### `~/.local/state/lyra/rice.conf` — **v0** (the rice state link)
+
+The one file Hyprland sources for the rice: `source = ~/.local/state/lyra/rice.conf`,
+the last line of `hyprland.conf` (the renderer's `mkAfter`, after the look and
+the behaviour). It is a SYMLINK, and only its target changes:
+
+- Built by the renderer's activation (`modules/dendrites/lyra/default.nix`,
+  `lyraRice`): it points at the declared twin, below. Linked again on every
+  activation only when it is absent or already names the twin, so a staged
+  link survives a rebuild (house rule 10).
+- Retargeted by `rice stage` and its siblings (`rice mode stage`, `rice mode
+  declarative`, `lyra reload`) to the song's own runtime `hyprland.conf`, or to
+  `song/stage/empty-hyprland.conf` when that song ships none. Never removed
+  first: the retarget is a temp symlink renamed over the link, so Hyprland
+  reads the old target or the new, never no file.
+- `$HOME`, not `$XDG_STATE_HOME`: the Nix side hardcodes the path.
+
+Reader: Hyprland, at config load and on `hyprctl reload config-only`. The
+declarative reload arm (`lyra reload` in declarative mode) asks for that reload
+explicitly, because a retargeted link's new target is not guaranteed to be
+followed by Hyprland's own file watcher.
+
+### `song/declared/rice.conf` — **v0** (the declared twin of the rice)
+
+The DECLARED song's rice as the renderer builds it, in that order: the song's
+`hyprland.conf` first (binds, unbinds, layout, animations only), then the
+rendered `rice.hyprland.settings` LAST, so a Nix-built setting wins where both
+name a key. A host's `rice.hyprland.host` overrides are sourced after this file
+by their own line in `hyprland.conf`.
+
+Writer: the renderer's activation (`lyraRice`), the same run that links the
+state link to it. Read-only for everyone else; a stage never writes it. Absent
+on a host that never activated the renderer, in which case the re-pin falls back
+to the empty file below.
+
+Staging carries the song's `hyprland.conf` but never `rice.hyprland.settings`,
+so `rice stage <declared>` differs from the build whenever a rice sets
+settings: the build's rice is the declared twin, the stage's is the file alone.
+A rice that wants its Nix settings in a stage must put them in `hyprland.conf`.
+
+### `song/stage/empty-hyprland.conf` — **v0** (the empty rice)
+
+Zero bytes, owned by the staging engine. A stage links the state link to it when
+the song has no `hyprland.conf`, so a song with no binds never keeps the previous
+song's binds standing. Created on first use if absent; never written otherwise.
 
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 

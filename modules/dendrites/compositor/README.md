@@ -68,3 +68,9 @@ keeps both bodies in the tree (the aggregate imports every `body`) and both
 guards false; a host assembled by the constructor imports only the lanes it
 selected. Enabling the behaviour without the look is harmless: home-manager
 only writes `hyprland.conf` when its own hyprland module is enabled.
+
+`hyprland.conf` has three writers, in order: the look (mkBefore, 500), the
+behaviour and screenshot binds (1000), and the lyra renderer (mkAfter, 1500),
+whose one `source = ~/.local/state/lyra/rice.conf` line makes the song's rice
+the last word. The renderer is the only writer that names a file outside Nix's
+own output: the state link is retargeted by `lyra rice stage` without a rebuild.

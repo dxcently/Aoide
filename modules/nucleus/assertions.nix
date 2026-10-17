@@ -31,7 +31,7 @@
     # to change is which lane the host takes.
     {
       assertion = config.aoide.song == null || config.aoide.lyra.enable;
-      message = "aoide.song = \"${config.aoide.song}\" needs the lyra dendrite: select habit.aggregation.aoideos (or habit.dendrites.lyra) on this host";
+      message = "aoide.song = \"${config.aoide.song}\" needs the vibeos runtime: pick a vibeos component provider (habit.aggregation.aoideos names all ten) on this host";
     }
 
     # The three paint facts are set only by their owners (options.nix's mkFact).

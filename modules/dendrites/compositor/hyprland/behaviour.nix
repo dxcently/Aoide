@@ -37,10 +37,11 @@
 #   500  mkBefore  the compositor look — livery values first
 #   1000 (default) THIS FILE           — behaviour
 #   1000 (default) screenshot dendrite — its own SUPER+S binds
+#   1500 mkAfter   the lyra renderer   — one `source` line, last
 # Plain (unordered) is deliberate: the livery block must land first so these
-# behaviour keys are never overwritten by it. (The lyra lane is NOT a writer
-# here — it autostarts the shell as a systemd user service, not an exec-once,
-# so nothing of its lands in hyprland.conf.)
+# behaviour keys are never overwritten by it. The lyra renderer's line sources
+# the rice (`~/.local/state/lyra/rice.conf`) after everything else, so a song's
+# binds and layout override the defaults above (lyra/AGENTS.md).
 #
 # Enabling this without the compositor is harmless: home-manager only writes
 # hyprland.conf when its own hyprland module is enabled, so the text below is

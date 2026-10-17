@@ -68,6 +68,8 @@
     lock = {
       providers.vibeos = ./dendrites/lyra/lock.nix;
     };
+    # The rice renderer: writes the song's rice to the state link. The runtime
+    # comes only through the component providers above (`dendrites/lyra/README.md`).
     lyra = ./dendrites/lyra;
     mcfly = ./dendrites/mcfly.nix;
     melete = ./dendrites/melete.nix;

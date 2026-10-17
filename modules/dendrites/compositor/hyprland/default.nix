@@ -310,9 +310,8 @@ in
         # Bake the livery fragment into hyprland.conf. mkBefore (order 500) so
         # livery defaults land first; the hyprland behaviour lane's block
         # and the screenshot dendrite's binds follow at the default order
-        # (1000). One `lines` option, several writers. (The lyra lane
-        # writes nothing here — it autostarts the shell as a systemd user
-        # service, not an exec-once.)
+        # (1000). The lyra renderer appends its one `source` line at mkAfter
+        # (1500), so the rice reads last. One `lines` option, several writers.
         extraConfig = lib.mkBefore hyprNoteConfig;
       };
 

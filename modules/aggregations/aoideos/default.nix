@@ -10,9 +10,10 @@
 # (`habit.song.declared` / `habit.song.available`), because whether a `rice.nix`
 # is imported is decided in the constructor's selection pass — before any
 # aggregation body is read — and only the host module's `habit.*` keys are
-# available that early. `lyra` rides here
-# because a host performing a song without a performer is refused (with a
-# message naming this aggregation as the fix).
+# available that early. `lyra` rides here as the rice renderer; the paint
+# itself comes from the ten vibeos providers below, which bring the runtime,
+# so a host performing a song without a performer is refused with a message
+# naming the fix.
 #
 # The provider choice is the aggregation's, so a host says which compositor it
 # runs in one place (`aggregation.aoideos.compositor.provider = "…"`) rather
