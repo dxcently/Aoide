@@ -586,7 +586,8 @@ lyra rice declare <name> --host [--json]
   `$AOIDE_ROOT/song/songbook/<name>/` against `<templates>/<name>/`.
 - **Writes:** only the string between the quotes of the host file's one
   `habit.song.declared = "<v>";` line, through a temp file in the same
-  directory renamed over the file, its mode kept, the directory synced after
+  directory created with the file's mode and renamed over it, the directory
+  synced after
   (`pkgs/aoide/crates/song/src/host_declare.rs`). No git, no rebuild.
 - **Output:** `"declared `<name>` as <host>'s song in <file> (was `<v>`);
   takes effect on the next rebuild."`, or `"`<name>` is already <host>'s
@@ -609,8 +610,10 @@ lyra rice declare <name> --host [--json]
   for the rebuild; without shipped templates the build's song list is
   unknown); `no-rice-nix` (built in only as a lender, with no `rice.nix` of
   its own in the templates); `builtin-unreadable`; `host-config-changed` (the
-  file's size, mtime or inode moved between the read and the rename: nothing
-  is written, the other edit is kept, try again); `write-failed`.
+  file's size, mtime or inode moved between the read and the last re-stat
+  before the rename: nothing is written, the other edit is kept, try again;
+  an edit landing in the microseconds between that re-stat and the rename is
+  not caught); `write-failed`.
 
 ### lyra rice transpose
 

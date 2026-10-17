@@ -6800,10 +6800,12 @@ default when the variable is unset). The rules:
   `lib/songbook.nix` will not declare a song without one; so is a staged draft
   (`staged-draft`), which is not a song.
 - Only the bytes between the quotes change, written to a temp file in the same
-  directory and renamed over the file with its mode kept, then the directory
-  synced. A file whose size, mtime or inode moved between the read and the
-  rename is refused (`host-config-changed`) and the other edit kept; run the
-  declare again. No git, no rebuild (house rule 2); a host that already
+  directory, created with the file's mode, and renamed over the file, then the
+  directory synced. A file whose size, mtime or inode moved between the read
+  and the last re-stat before the rename is refused (`host-config-changed`)
+  and the other edit kept; run the declare again. The check narrows the window
+  for overwriting a concurrent edit to the gap between that re-stat and the
+  rename; it does not close it. No git, no rebuild (house rule 2); a host that already
   declares `<song>` is a no-op success (`changed: false`).
 - `data.stagedDiffers` is true when the machine copy's `livery.json` or
   `widgets/` differ by hash from the shipped copy: the rebuild builds the

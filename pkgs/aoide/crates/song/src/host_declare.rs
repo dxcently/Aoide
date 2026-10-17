@@ -21,10 +21,11 @@
 //! a staged draft: a draft is not a song.
 //!
 //! Only the bytes between the quotes change, written to a temp file in the
-//! file's own directory and renamed over it, with the file's mode kept and
+//! file's own directory, created with the file's mode, and renamed over it,
 //! the directory synced after. A file whose size, mtime or inode moved between
-//! the read and the rename is refused (`host-config-changed`), never
-//! overwritten: someone else's edit is never lost to a declare. No
+//! the read and the final re-stat is refused (`host-config-changed`), not
+//! overwritten. That narrows the window for losing someone else's edit to the
+//! microseconds between the re-stat and the rename; it does not close it. No
 //! git, no rebuild (house rule 2): the answer says it takes effect on the next
 //! rebuild, and `stagedDiffers` says when the machine copy of the song carries
 //! livery or widget edits the build's copy lacks, since the rebuild builds the
@@ -342,7 +343,15 @@ impl Stamp {
     }
 }
 
-/// Write `bytes` to a temp file beside `path`, give it `path`'s mode, and
+/// Create `tmp` carrying `mode` from the open on, so a 0600 file is never
+/// readable under its temp name. The umask may narrow it; the caller sets the
+/// exact mode after.
+fn create_temp(tmp: &Path, mode: &std::fs::Permissions) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(mode.mode() & 0o7777).open(tmp)
+}
+
+/// Write `bytes` to a temp file beside `path`, created with `path`'s mode, and
 /// rename it over `path`, then sync the directory so the rename is durable.
 /// `path` re-stated as anything but `seen` just before the rename is a
 /// `WouldBlock` error and nothing is renamed. A failed directory sync after
@@ -353,10 +362,10 @@ fn write_keeping_mode(path: &Path, bytes: &[u8], seen: &Stamp, before_rename: &d
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = path.with_file_name(format!(".{name}.aoide-declare.{}", std::process::id()));
     let written = (|| {
-        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut f = create_temp(&tmp, &mode)?;
+        f.set_permissions(mode)?;
         f.write_all(bytes)?;
         f.sync_all()?;
-        std::fs::set_permissions(&tmp, mode)?;
         before_rename();
         if Stamp::of(&std::fs::metadata(path)?) != *seen {
             return Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "host config changed"));
@@ -548,6 +557,31 @@ mod tests {
         std::fs::set_permissions(&r.host, std::fs::Permissions::from_mode(0o640)).unwrap();
         assert_eq!(r.run("barcarolle").status, Status::Ok);
         assert_eq!(std::fs::metadata(&r.host).unwrap().permissions().mode() & 0o777, 0o640);
+    }
+
+    #[test]
+    fn a_0600_file_is_never_wider_under_its_temp_name() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let r = rig("hd-0600", HOST, &["sonata", "barcarolle"]);
+        std::fs::set_permissions(&r.host, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let dir = r.host.parent().unwrap().to_path_buf();
+        let seen = std::cell::Cell::new(None);
+        let out = declare_racing("barcarolle", Some(r.host.clone()), Some(r.templates.clone()), &|| {
+            let tmp = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).find(|p| p != &r.host).unwrap();
+            seen.set(Some(std::fs::metadata(tmp).unwrap().permissions().mode() & 0o777));
+        });
+        assert_eq!(out.status, Status::Ok, "{out:?}");
+        assert_eq!(seen.get(), Some(0o600), "the temp before the rename");
+        assert_eq!(std::fs::metadata(&r.host).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn the_temp_is_created_with_the_mode_not_chmodded_to_it() {
+        let root = unique_tmp("hd-create");
+        std::fs::create_dir_all(&root).unwrap();
+        let f = create_temp(&root.join(".t"), &std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(f.metadata().unwrap().permissions().mode() & 0o777, 0o600, "straight from the open");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
