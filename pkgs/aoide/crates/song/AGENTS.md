@@ -20,12 +20,16 @@
   `flake_root()` check, never a `#<flake output>` argv. `$AOIDE_FLAKE_ROOT`
   survives for `rice declare`'s commit-in step, and for `host_config()`'s
   default under `rice declare --host`, only.
-- **`host_declare` rewrites one string and never guesses.** Exactly one line
-  in nixfmt's shapes (`value_in`), or a refusal naming the file and the count;
-  the bytes between the quotes and nothing else; a temp in the file's own
-  directory renamed over it with the mode kept; no git, no rebuild. The
-  declarable set is `read_builtin`'s `songs` and nothing wider — the
-  machine's songbook is not the build's. A new refusal keeps a `reason` in
+- **`host_declare` rewrites one string and never guesses.** Exactly one live
+  line in nixfmt's shapes (`value_in`, on a line `Lexer` says starts in code,
+  not in a `/* */` comment or a string), or a refusal naming the file and the
+  count; the bytes between the quotes and nothing else; a temp in the file's
+  own directory renamed over it with the mode kept, refused instead
+  (`host-config-changed`) when the file's `Stamp` moved since the read, and
+  the directory synced after; no git, no rebuild. The `Lexer` is a lexer, not
+  a parser: widening it toward Nix semantics belongs in `nix eval`, not here.
+  The declarable set is `read_builtin`'s `songs` whose `rice.nix` ships in the
+  templates, and nothing wider — the machine's songbook is not the build's. A new refusal keeps a `reason` in
   `data` beside the taught refusal, because the shellbridge's `ricedeclare`
   and the bar's balloon read it. The `--host` flag stays CLI-door-only
   (lyra's registration) unless the user opens it.

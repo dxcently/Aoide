@@ -6,16 +6,25 @@
 //! The line must occur EXACTLY once, in the shape nixfmt writes it: leading
 //! indentation, blanks around `=` and before `;`, nothing after the `;`. Zero
 //! or several such lines is a refusal naming the file and the count; the
-//! command never guesses which line a host means.
+//! command never guesses which line a host means. The matcher is line-based
+//! and parses no Nix: it only skips lines that start inside a `/* … */`
+//! comment or a `''…''` / `"…"` string, so a dead line counts as no line.
+//! It cannot see an override set elsewhere (an `mkForce` in another module),
+//! so what the next rebuild performs is the rebuild's answer, not this one's.
 //!
 //! A song can be declared only when the songbook the host builds from carries
-//! it: the build's built-in set, `builtin.json`'s `songs` in the shipped
-//! templates (`declared ∪ available`, closed under borrows). A song that is
-//! only in the machine's runtime songbook is refused, and so is a staged
-//! draft: a draft is not a song.
+//! it as a performer: the build's built-in set, `builtin.json`'s `songs` in
+//! the shipped templates (`declared ∪ available`, closed under borrows), with
+//! the song's own `rice.nix` shipped beside it (`lib/songbook.nix` refuses to
+//! declare a song without one, so a lending-only song is refused here first).
+//! A song that is only in the machine's runtime songbook is refused, and so is
+//! a staged draft: a draft is not a song.
 //!
 //! Only the bytes between the quotes change, written to a temp file in the
-//! file's own directory and renamed over it, with the file's mode kept. No
+//! file's own directory and renamed over it, with the file's mode kept and
+//! the directory synced after. A file whose size, mtime or inode moved between
+//! the read and the rename is refused (`host-config-changed`), never
+//! overwritten: someone else's edit is never lost to a declare. No
 //! git, no rebuild (house rule 2): the answer says it takes effect on the next
 //! rebuild, and `stagedDiffers` says when the machine copy of the song carries
 //! livery or widget edits the build's copy lacks, since the rebuild builds the
@@ -43,6 +52,17 @@ fn refuse(kind: Kind, reason: &str, what: String, why: String, fix: Fix) -> Outc
 }
 
 fn declare(name: &str, host_file: Option<PathBuf>, templates: Option<PathBuf>) -> Outcome {
+    declare_racing(name, host_file, templates, &|| {})
+}
+
+/// [`declare`], with `before_rename` run between the read and the re-stat:
+/// the seam the tests edit the file through.
+fn declare_racing(
+    name: &str,
+    host_file: Option<PathBuf>,
+    templates: Option<PathBuf>,
+    before_rename: &dyn Fn(),
+) -> Outcome {
     if !crate::compose::valid_song_name(name) {
         return refuse(
             Kind::Usage,
@@ -77,8 +97,9 @@ fn declare(name: &str, host_file: Option<PathBuf>, templates: Option<PathBuf>) -
         );
     };
     let file = std::fs::canonicalize(&file).unwrap_or(file);
-    let text = match std::fs::read_to_string(&file) {
-        Ok(text) => text,
+    let read = std::fs::metadata(&file).and_then(|m| Ok((Stamp::of(&m), std::fs::read_to_string(&file)?)));
+    let (seen, text) = match read {
+        Ok(read) => read,
         Err(e) => {
             let cause = io_cause("read", &file, &e);
             return refuse(
@@ -154,18 +175,31 @@ fn declare(name: &str, host_file: Option<PathBuf>, templates: Option<PathBuf>) -
         None => Vec::new(),
     };
     if !built_in.iter().any(|s| s == name) {
-        let carried = if built_in.is_empty() { "none".to_string() } else { built_in.join(", ") };
+        let carried = match templates {
+            None => "the build's song list is unknown (no shipped templates)".to_string(),
+            Some(_) if built_in.is_empty() => "this build carries no song".to_string(),
+            Some(_) => format!("this build carries {}", built_in.join(", ")),
+        };
         return refuse(
             Kind::Refused,
             "not-built-in",
             format!("`{name}` is not in the songbook {host} builds from"),
-            format!(
-                "this build carries {carried}; a song staged only from the machine's songbook does not exist for the rebuild"
-            ),
+            format!("{carried}; a song staged only from the machine's songbook does not exist for the rebuild"),
             Fix::Set(format!(
                 "`habit.song.available` to include \"{name}\" in `{}`, rebuild, then declare",
                 file.display()
             )),
+        )
+        .with_fields(json!({ "builtIn": built_in }));
+    }
+    let shipped = templates.as_deref().map(|t| t.join(name).join("rice.nix"));
+    if !shipped.as_deref().is_some_and(Path::is_file) {
+        return refuse(
+            Kind::Refused,
+            "no-rice-nix",
+            format!("`{name}` ships no rice.nix in this build"),
+            "the build carries it only as a lender of widgets; a declared song needs its own rice.nix to perform".into(),
+            Fix::Set(format!("a `song/songbook/{name}/rice.nix`, rebuild, then declare")),
         )
         .with_fields(json!({ "builtIn": built_in }));
     }
@@ -174,7 +208,17 @@ fn declare(name: &str, host_file: Option<PathBuf>, templates: Option<PathBuf>) -
     rewritten.push_str(&text[..range.start]);
     rewritten.push_str(name);
     rewritten.push_str(&text[range.end..]);
-    if let Err(e) = write_keeping_mode(&file, rewritten.as_bytes()) {
+    if let Err(e) = write_keeping_mode(&file, rewritten.as_bytes(), &seen, before_rename) {
+        if e.kind() == std::io::ErrorKind::WouldBlock {
+            return refuse(
+                Kind::Refused,
+                "host-config-changed",
+                format!("`{}` was edited while declaring", file.display()),
+                "the file moved between the read and the write, and that edit is kept, not overwritten; try again".into(),
+                Fix::Run(format!("lyra rice declare {name} --host")),
+            )
+            .with_fields(json!({ "hostConfig": file.to_string_lossy() }));
+        }
         let cause = io_cause("write", &file, &e);
         return refuse(
             Kind::Failed,
@@ -198,18 +242,71 @@ fn declare(name: &str, host_file: Option<PathBuf>, templates: Option<PathBuf>) -
     .with_data(data(true))
 }
 
-/// The byte range of the quoted value on every line that is exactly one
-/// `habit.song.declared = "<value>";` statement, whitespace aside.
+/// The byte range of the quoted value on every live line that is exactly one
+/// `habit.song.declared = "<value>";` statement, whitespace aside. A line is
+/// live when it starts outside a comment or string ([`Lexer`]).
 fn declared_values(text: &str) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let mut at = 0;
+    let mut lexer = Lexer::Code;
     for line in text.split_inclusive('\n') {
-        if let Some(r) = value_in(line) {
-            out.push(at + r.start..at + r.end);
+        if lexer == Lexer::Code {
+            if let Some(r) = value_in(line) {
+                out.push(at + r.start..at + r.end);
+            }
         }
+        lexer = lexer.through(line);
         at += line.len();
     }
     out
+}
+
+/// Where a line ends, lexically: just enough of Nix to tell code from a
+/// `/* … */` comment, a `''…''` string or a `"…"` string that spans lines.
+/// Not a parser: `${ … }` inside a string is read as string.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Lexer {
+    Code,
+    Block,
+    Indented,
+    Quoted,
+}
+
+impl Lexer {
+    fn through(mut self, line: &str) -> Lexer {
+        let b = line.as_bytes();
+        let at = |i: usize| b.get(i).copied();
+        let mut i = 0;
+        while i < b.len() {
+            match self {
+                Lexer::Code => match (b[i], at(i + 1)) {
+                    (b'#', _) => return self,
+                    (b'/', Some(b'*')) => (self, i) = (Lexer::Block, i + 1),
+                    (b'\'', Some(b'\'')) => (self, i) = (Lexer::Indented, i + 1),
+                    (b'"', _) => self = Lexer::Quoted,
+                    _ => {}
+                },
+                Lexer::Block => {
+                    if (b[i], at(i + 1)) == (b'*', Some(b'/')) {
+                        (self, i) = (Lexer::Code, i + 1);
+                    }
+                }
+                Lexer::Indented => match (b[i], at(i + 1), at(i + 2)) {
+                    (b'\'', Some(b'\''), Some(b'\'' | b'$')) => i += 2,
+                    (b'\'', Some(b'\''), Some(b'\\')) => i += 3,
+                    (b'\'', Some(b'\''), _) => (self, i) = (Lexer::Code, i + 1),
+                    _ => {}
+                },
+                Lexer::Quoted => match b[i] {
+                    b'\\' => i += 1,
+                    b'"' => self = Lexer::Code,
+                    _ => {}
+                },
+            }
+            i += 1;
+        }
+        self
+    }
 }
 
 fn value_in(line: &str) -> Option<Range<usize>> {
@@ -229,9 +326,28 @@ fn value_in(line: &str) -> Option<Range<usize>> {
     Some(start..start + close)
 }
 
+/// What the read saw of the host file: a later stat that differs means
+/// someone else wrote it in between.
+#[derive(PartialEq)]
+struct Stamp {
+    len: u64,
+    mtime: Option<std::time::SystemTime>,
+    ino: u64,
+}
+
+impl Stamp {
+    fn of(m: &std::fs::Metadata) -> Stamp {
+        use std::os::unix::fs::MetadataExt;
+        Stamp { len: m.len(), mtime: m.modified().ok(), ino: m.ino() }
+    }
+}
+
 /// Write `bytes` to a temp file beside `path`, give it `path`'s mode, and
-/// rename it over `path`.
-fn write_keeping_mode(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// rename it over `path`, then sync the directory so the rename is durable.
+/// `path` re-stated as anything but `seen` just before the rename is a
+/// `WouldBlock` error and nothing is renamed. A failed directory sync after
+/// the rename is not an error: the new file is already in place.
+fn write_keeping_mode(path: &Path, bytes: &[u8], seen: &Stamp, before_rename: &dyn Fn()) -> std::io::Result<()> {
     use std::io::Write;
     let mode = std::fs::metadata(path)?.permissions();
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -241,12 +357,20 @@ fn write_keeping_mode(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         f.write_all(bytes)?;
         f.sync_all()?;
         std::fs::set_permissions(&tmp, mode)?;
+        before_rename();
+        if Stamp::of(&std::fs::metadata(path)?) != *seen {
+            return Err(std::io::Error::new(std::io::ErrorKind::WouldBlock, "host config changed"));
+        }
         std::fs::rename(&tmp, path)
     })();
     if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
+        return written;
     }
-    written
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -280,6 +404,7 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(templates.join(song).join("livery.json"), format!("{{\"song\":\"{song}\"}}")).unwrap();
             std::fs::write(dir.join("bar.qml"), "Item {}\n").unwrap();
+            std::fs::write(templates.join(song).join("rice.nix"), "{ ... }: { }\n").unwrap();
         }
         std::fs::create_dir_all(&templates).unwrap();
         std::fs::write(
@@ -483,5 +608,74 @@ mod tests {
         let out = declare("sonata", Some(r.root.join("nope.nix")), Some(r.templates.clone()));
         assert_eq!(Rig::reason(&out), "host-config-unreadable");
         assert_eq!(Rig::reason(&declare("sonata", None, None)), "no-host-config");
+    }
+
+    #[test]
+    fn a_line_inside_a_block_comment_counts_as_none() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let text = "{\n  /* old:\n  habit.song.declared = \"sonata\";\n  */\n}\n";
+        let r = rig("hd-block", text, &["sonata", "barcarolle"]);
+        let out = r.run("barcarolle");
+        assert_eq!(Rig::reason(&out), "host-line-count");
+        assert_eq!(out.data.as_ref().unwrap()["count"], 0);
+        assert_eq!(r.host_text(), text);
+
+        let live = "{\n  /* a note */\n  habit.song.declared = \"sonata\";\n}\n";
+        assert_eq!(declared_values(live).len(), 1, "a closed comment leaves the next line live");
+    }
+
+    #[test]
+    fn a_line_inside_an_indented_string_counts_as_none() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let text = "{\n  environment.etc.x.text = ''\n  habit.song.declared = \"sonata\";\n  it's ''' and ''${x}\n  '';\n}\n";
+        let r = rig("hd-indented", text, &["sonata", "barcarolle"]);
+        let out = r.run("barcarolle");
+        assert_eq!(Rig::reason(&out), "host-line-count");
+        assert_eq!(out.data.as_ref().unwrap()["count"], 0);
+        assert_eq!(r.host_text(), text);
+
+        let after = format!("{text}  habit.song.declared = \"sonata\";\n");
+        assert_eq!(declared_values(&after).len(), 1, "the string's close leaves the next line live");
+        let quoted = "{\n  x = \"a\n  habit.song.declared = \\\"sonata\\\";\n  b\";\n}\n";
+        assert_eq!(declared_values(quoted).len(), 0, "a multi-line \"…\" string is not code either");
+        assert_eq!(declared_values("# x /* not a comment opener\nhabit.song.declared = \"s\";\n").len(), 1);
+    }
+
+    #[test]
+    fn a_file_edited_while_declaring_is_refused_and_the_edit_kept() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let r = rig("hd-race", HOST, &["sonata", "barcarolle"]);
+        let edited = format!("{HOST}# someone else's edit\n");
+        let host = r.host.clone();
+        let out = declare_racing("barcarolle", Some(r.host.clone()), Some(r.templates.clone()), &|| {
+            std::fs::write(&host, &edited).unwrap()
+        });
+        assert_eq!(out.status, Status::Error, "{out:?}");
+        assert_eq!(Rig::reason(&out), "host-config-changed");
+        assert!(out.message.contains("edited while declaring"), "{}", out.message);
+        assert_eq!(r.host_text(), edited, "the other edit survives");
+        assert_eq!(std::fs::read_dir(r.host.parent().unwrap()).unwrap().count(), 1, "no temp left");
+    }
+
+    #[test]
+    fn a_song_without_its_own_rice_nix_is_refused() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let r = rig("hd-lender", HOST, &["sonata", "lender"]);
+        std::fs::remove_file(r.templates.join("lender").join("rice.nix")).unwrap();
+        let out = r.run("lender");
+        assert_eq!(out.status, Status::Error);
+        assert_eq!(Rig::reason(&out), "no-rice-nix");
+        assert_eq!(r.host_text(), HOST);
+    }
+
+    #[test]
+    fn no_templates_says_the_song_list_is_unknown() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let r = rig("hd-notemplates", HOST, &["sonata"]);
+        let out = declare("barcarolle", Some(r.host.clone()), None);
+        assert_eq!(Rig::reason(&out), "not-built-in");
+        let why = out.data.as_ref().unwrap().pointer("/refusal/why").and_then(Value::as_str).unwrap_or("").to_string();
+        assert!(why.contains("the build's song list is unknown"), "{why}");
+        assert!(!why.contains("carries none"), "{why}");
     }
 }

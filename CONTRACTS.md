@@ -6785,15 +6785,26 @@ default when the variable is unset). The rules:
 - The line occurs EXACTLY once, as nixfmt writes it: indentation, blanks around
   `=` and before `;`, nothing after the `;`. Zero or several is a refusal
   (`host-line-count`) naming the file and the count; a commented-out line, a
+  line that starts inside a `/* … */` comment or a `''…''` / `"…"` string, a
   `lib.mkDefault`, an attrset form or a trailing comment is not the line.
+- The matcher is line-based and parses no Nix. It cannot see an override set
+  elsewhere — an `mkForce` in another module, a second file the host imports —
+  so a success says what the host file now names, not what the next rebuild
+  performs; check the rebuild (`nix eval` of the host's `habit.song.declared`)
+  when the host composes its song from more than this one line.
 - `<song>` is in this build's `builtin.json` `songs` — the songbook the host
-  builds from. A song only in the machine's songbook is refused
-  (`not-built-in`), with the fix of adding it to `habit.song.available` and
-  rebuilding first; so is a staged draft (`staged-draft`), which is not a song.
+  builds from — and its own `rice.nix` ships beside it in the templates. A song
+  only in the machine's songbook is refused (`not-built-in`), with the fix of
+  adding it to `habit.song.available` and rebuilding first; a song the build
+  carries only as a lender of widgets is refused (`no-rice-nix`), since
+  `lib/songbook.nix` will not declare a song without one; so is a staged draft
+  (`staged-draft`), which is not a song.
 - Only the bytes between the quotes change, written to a temp file in the same
-  directory and renamed over the file with its mode kept. No git, no rebuild
-  (house rule 2); a host that already declares `<song>` is a no-op success
-  (`changed: false`).
+  directory and renamed over the file with its mode kept, then the directory
+  synced. A file whose size, mtime or inode moved between the read and the
+  rename is refused (`host-config-changed`) and the other edit kept; run the
+  declare again. No git, no rebuild (house rule 2); a host that already
+  declares `<song>` is a no-op success (`changed: false`).
 - `data.stagedDiffers` is true when the machine copy's `livery.json` or
   `widgets/` differ by hash from the shipped copy: the rebuild builds the
   songbook version, not the live edits. Null when the shipped copy cannot be

@@ -111,9 +111,11 @@ a config file). Paint-side — ships in `lyra`, not core.
   data out); only `published_surfaces` touches the filesystem.
 - `host_declare` — `lyra rice declare <song> --host`'s engine
   (`declare_on_host`, called from lyra's `rice declare` handler): rewrites the
-  one `habit.song.declared` line in `aoide_storage::fs::host_config()` to a
-  song this build's `builtin.json` carries, refusing a draft, an unknown song,
-  and zero or several lines, and reports `stagedDiffers` through
+  one live `habit.song.declared` line in `aoide_storage::fs::host_config()`
+  to a song this build's `builtin.json` carries with its own shipped
+  `rice.nix`, refusing a draft, an unknown or lending-only song, zero or
+  several lines, and a file edited between the read and the rename, and
+  reports `stagedDiffers` through
   `commands::refresh::staged_differs` (the machine copy's livery and widgets
   hashed against the shipped copy's). CONTRACTS.md, "Declaring a song from
   the machine", is the contract.

@@ -188,6 +188,7 @@ mod tests {
         std::env::set_var("AOIDE_HOST_CONFIG", &host);
         let templates = root.join("templates");
         std::fs::create_dir_all(templates.join("dusk")).unwrap();
+        std::fs::write(templates.join("dusk").join("rice.nix"), "{ ... }: { }\n").unwrap();
         std::fs::write(templates.join("builtin.json"), r#"{"declared":"sonata","songs":["sonata","dusk"],"packages":[]}"#).unwrap();
         std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
 
