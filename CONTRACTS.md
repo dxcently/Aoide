@@ -479,8 +479,9 @@ Rules:
   `habit.home` only on the selected module's top level, and applies a
   catalogue entry under its own key rather than its path, so a capability that
   more than one lane brings (the shell: `quickshell` and `lyra`'s runtime; the
-  vibeos runtime: `lyra` and every `vibeos` component provider) lives in two
-  plain files with no `habit` key — a system half and a home half
+  vibeos runtime: `lyra` and every `vibeos` component provider, except the
+  greeter's, which runs before login and so brings none) lives in two plain
+  files with no `habit` key — a system half and a home half
   (`dendrites/quickshell/{system,home}.nix`). The catalogue entry is a wrapper
   `{ imports = [ ./system.nix ]; habit.home.imports = [ ./home.nix ]; }`, and
   every lane that brings the capability writes the same two imports, so the
@@ -6854,7 +6855,11 @@ and the choice of who plays each part.**
 
 A host names its songs in its own module, under two `habit.song` keys. The
 constructor reads them in the gate pass, before any module graph exists, and
-`lib/songbook.nix`'s `hook` answers habit's three song hooks from them:
+`lib/songbook.nix`'s `hook` answers habit's three song hooks from them. The
+flake exports that file as `lib.songbook`, a function of `{ lib, songbook }`, and
+a consumer takes its hook: `(lib.songbook { inherit lib; songbook = dir; }).hook
+{ registry }`. The earlier exports `selectionModule`, `check` and `songModules`
+are gone with no compatibility shim.
 
 ```
 hosts/<host>/default.nix                      lib/songbook.nix  hook { registry }
@@ -6957,7 +6962,9 @@ as data and imports only what it selects. Its shape:
   `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock` and
   `greeter`. Each is filled by its `vibeos` provider: the Quickshell component
   on Aoide's bridges, which brings the vibeos runtime by path
-  (`modules/dendrites/lyra/README.md`). A consumer names another provider for
+  (`modules/dendrites/lyra/README.md`). The greeter's is the one exception: it
+  runs before any session, as the greeter user under cage in its own process,
+  so it brings no runtime (`modules/dendrites/greeter.nix`). A consumer names another provider for
   a slot in its own selection (a plain write outranks the body's default,
   `habit.dendrites.wallpaper.provider = "skwd-wall"`).
 - **Providers say WHO; `aoide.arrangement` says WHAT.** A body's arrangement
@@ -6976,6 +6983,16 @@ as data and imports only what it selects. Its shape:
 deliberately does **not** list `song/songbook/`: committed songs there are
 versioned score, legitimately read at eval. Reading the songbook never trips
 the check.
+
+**No archive.** Git history is the archive, so nothing copies over an
+uncommitted song. `lyra rice declare <song>` (the copy into the checkout's
+`song/songbook/<song>/`) refuses while `git status --porcelain` shows anything
+under that folder, tracked edits and untracked files alike, and names the
+folder. It also refuses when `git` is not on `PATH` or the checkout is not a
+git repository, each with a taught reason. `lyra rice declare <song> --host`
+never refuses for git: it declares, and adds a `warning` field and an
+`uncommitted` list when the folder is dirty, since the rebuild builds the
+committed songbook.
 
 ### Enforcement
 

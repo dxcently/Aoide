@@ -48,7 +48,10 @@
   and passes `&[]` down; a song's own `widgets/takes/` is content, never
   scratch. `lyra rice declare` is the second consumer: the checkout carries
   the song, not the machine's undo history and scratch, so it copies through
-  `copy_tree_atomic` with the list and keeps no tree copy of its own. A name
+  `copy_tree_atomic` with the list and keeps no tree copy of its own. The copy
+  runs only after `checkout_gate::check_folder` finds git clean under that
+  song folder; a new copy path takes the same gate, and `--host` takes
+  `dirty_lines` for its warning and never a refusal. A name
   added to the list changes both §7.5's comparison and what a declare leaves
   behind.
 - **A staged song's LENDERS come with it.** `widget_owners` reads the owners its

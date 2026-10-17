@@ -30,7 +30,7 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
 pub fn register_rice_late(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "declare"],
-        summary: "Copy a composed song from $AOIDE_ROOT/song/songbook/<name> into the checkout's song/songbook/<name>, so it can be committed, less the machine's top-level takes/ and drafts/. With --host, instead rewrite the one `habit.song.declared = \"…\";` line in this host's config (aoide.hostConfig) to <name>, a song this host's build carries; it takes effect on the next rebuild. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
+        summary: "Copy a composed song from $AOIDE_ROOT/song/songbook/<name> into the checkout's song/songbook/<name>, so it can be committed, less the machine's top-level takes/ and drafts/. Refuses while git shows uncommitted changes in that folder, or when the checkout is not a git repository: git history is the archive. With --host, instead rewrite the one `habit.song.declared = \"…\";` line in this host's config (aoide.hostConfig) to <name>, a song this host's build carries; it takes effect on the next rebuild, and warns when the checkout's song folder is dirty. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
         args: [arg!("name", "string", true, "Rice/song name to declare.")],
         flags: [flag!("host", "bool", "Rewrite this host's declared-song line to <name> instead of copying the song into the checkout. CLI-only: it changes what the next rebuild performs.", doors: &[Door::Cli])],
         gated: true,
@@ -67,9 +67,11 @@ pub fn register_rice_late(r: &mut Registry) {
 /// whose bytes actually differ (never touches a byte-identical destination
 /// file), so a repeat declare with nothing new is a true no-op.
 ///
-/// `--host` is the other declare step, `aoide_song::host_declare`: it points
-/// the host's `habit.song.declared` line at `<name>` instead of copying any
-/// song, and it too stops short of git and the rebuild.
+/// The copy refuses while git shows uncommitted work in the folder, and names
+/// it (`aoide_song::checkout_gate`). `--host` is the other declare step,
+/// `aoide_song::host_declare`: it points the host's `habit.song.declared` line
+/// at `<name>` instead of copying any song, never refuses for git, and warns
+/// when the folder is dirty. It too stops short of git and the rebuild.
 fn handle_rice_declare(inv: &Invocation) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
@@ -124,6 +126,13 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
             ),
         )
         .with_data(json!({ "reason": "no-checkout", "expected": checkout.to_string_lossy() }));
+    }
+
+    // The no-archive gate: the copy below overwrites the folder's bytes, so
+    // git must show nothing uncommitted there first (checkout_gate's header).
+    let folder = format!("song/songbook/{name}");
+    if let Err(blocked) = aoide_song::checkout_gate::check_folder(&checkout, &folder) {
+        return blocked.into_outcome("rice.declare", &checkout, &folder);
     }
 
     let dst = checkout.join("song").join("songbook").join(&name);
@@ -202,6 +211,78 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// `--host` declares a dirty song folder anyway and says so in a warning
+    /// field, naming the folder: it never refuses for git.
+    #[test]
+    fn host_flag_warns_about_a_dirty_song_folder_and_still_declares() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "AOIDE_SONG_TEMPLATES"]);
+        let root = unique_tmp("declare-host-warn");
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("song").join("stage"));
+        let checkout = root.join("checkout");
+        std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
+        let folder = checkout.join("song").join("songbook").join("dusk");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("livery.json"), "{}").unwrap();
+        aoide_test_support::git_in(&checkout, &["init", "-q"]);
+        aoide_test_support::git_in(&checkout, &["add", "-A"]);
+        aoide_test_support::git_in(&checkout, &["commit", "-qm", "dusk"]);
+        std::fs::write(folder.join("livery.json"), "{\"a\":1}").unwrap();
+
+        let host = root.join("default.nix");
+        std::fs::write(&host, "{\n  habit.song.declared = \"sonata\";\n}\n").unwrap();
+        std::env::set_var("AOIDE_HOST_CONFIG", &host);
+        let templates = root.join("templates");
+        std::fs::create_dir_all(templates.join("dusk")).unwrap();
+        std::fs::write(templates.join("dusk").join("rice.nix"), "{ ... }: { }\n").unwrap();
+        std::fs::write(templates.join("builtin.json"), r#"{"declared":"sonata","songs":["sonata","dusk"],"packages":[]}"#).unwrap();
+        std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
+
+        let mut i = inv(&["dusk"]);
+        i.flags.insert("host".into(), "true".into());
+        let out = handle_rice_declare(&i);
+        assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
+        assert_eq!(std::fs::read_to_string(&host).unwrap(), "{\n  habit.song.declared = \"dusk\";\n}\n");
+        let data = out.data.expect("the declare carries data");
+        assert!(data["warning"].as_str().unwrap().contains("song/songbook/dusk"));
+        assert_eq!(data["uncommitted"][0], " M song/songbook/dusk/livery.json");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The copy refuses while git shows uncommitted work in the folder, names
+    /// the folder, and leaves the bytes it would have overwritten alone.
+    #[test]
+    fn copy_refuses_a_dirty_song_folder_and_leaves_it_alone() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let stage_root = unique_tmp("declare-dirty");
+        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
+        let songbook = stage_root.join("song").join("songbook").join("dusk");
+        std::fs::create_dir_all(&songbook).unwrap();
+        std::fs::write(songbook.join("livery.json"), "{\"runtime\":true}").unwrap();
+
+        let checkout = unique_tmp("declare-dirty-checkout");
+        std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
+        let folder = checkout.join("song").join("songbook").join("dusk");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("livery.json"), "{\"committed\":true}").unwrap();
+        aoide_test_support::git_in(&checkout, &["init", "-q"]);
+        aoide_test_support::git_in(&checkout, &["add", "-A"]);
+        aoide_test_support::git_in(&checkout, &["commit", "-qm", "dusk"]);
+        std::fs::write(folder.join("livery.json"), "{\"hand-edit\":true}").unwrap();
+
+        let out = handle_rice_declare(&inv(&["dusk"]));
+        assert_eq!(out.status, crate::output::Status::Error, "{out:?}");
+        let data = out.data.expect("a refusal carries data");
+        assert_eq!(data["reason"], "dirty-folder");
+        assert!(out.message.contains("song/songbook/dusk"), "{}", out.message);
+        assert_eq!(std::fs::read_to_string(folder.join("livery.json")).unwrap(), "{\"hand-edit\":true}");
+
+        let _ = std::fs::remove_dir_all(&stage_root);
+        let _ = std::fs::remove_dir_all(&checkout);
+    }
+
     #[test]
     fn the_host_flag_is_cli_only() {
         let mut r = Registry::new();
@@ -277,6 +358,7 @@ mod tests {
         std::fs::write(songbook.join("widgets").join(".gitkeep"), "").unwrap();
 
         let checkout = unique_tmp("declare-copy-checkout");
+        aoide_test_support::git_in(&checkout, &["init", "-q"]);
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
 
         let out = handle_rice_declare(&inv(&["dusk"]));
@@ -287,8 +369,10 @@ mod tests {
         assert!(dst.join("widgets").join(".gitkeep").exists());
         assert_eq!(out.changed.len(), 2);
 
-        // Re-declaring with nothing new copies nothing — byte-identical
-        // files are left untouched.
+        // Re-declaring copies nothing once the copy is committed: byte-identical
+        // files are left untouched, and nothing uncommitted stands in the way.
+        aoide_test_support::git_in(&checkout, &["add", "-A"]);
+        aoide_test_support::git_in(&checkout, &["commit", "-qm", "dusk"]);
         let out2 = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out2.status, crate::output::Status::Ok);
         assert!(out2.changed.is_empty(), "byte-identical re-declare copies nothing");
@@ -315,6 +399,7 @@ mod tests {
         std::fs::write(songbook.join("elements").join("x").join("element.json"), "{}").unwrap();
 
         let checkout = unique_tmp("declare-scratch-checkout");
+        aoide_test_support::git_in(&checkout, &["init", "-q"]);
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
 
         let out = handle_rice_declare(&inv(&["dusk"]));
@@ -351,6 +436,7 @@ mod tests {
         std::os::unix::fs::symlink(&elsewhere, songbook.join("takes")).unwrap();
 
         let checkout = unique_tmp("declare-takes-link-checkout");
+        aoide_test_support::git_in(&checkout, &["init", "-q"]);
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
 
         let out = handle_rice_declare(&inv(&["dusk"]));

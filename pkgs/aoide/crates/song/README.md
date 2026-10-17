@@ -120,6 +120,11 @@ a config file). Paint-side — ships in `lyra`, not core.
   declared set cannot exist on a host where another shell owns a surface,
   so both predicates stay. The judgement functions are pure (`&Value` in,
   data out); only `published_surfaces` touches the filesystem.
+- `checkout_gate` — the no-archive gate of `lyra rice declare <song>`:
+  `check_folder` answers git-missing, not-a-repo, or dirty (the `git status
+  --porcelain` lines under the song folder), and `dirty_lines` is the warning
+  `--host` reads. Git history is the archive, so a copy over an uncommitted
+  edit is refused, and the refusal names the folder.
 - `host_declare` — `lyra rice declare <song> --host`'s engine
   (`declare_on_host`, called from lyra's `rice declare` handler): rewrites the
   one live `habit.song.declared` line in `aoide_storage::fs::host_config()`

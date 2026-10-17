@@ -31,9 +31,10 @@
 //! livery or widget edits the build's copy lacks, since the rebuild builds the
 //! songbook version.
 
+use crate::checkout_gate;
 use crate::commands::refresh::staged_differs;
 use crate::widgets::read_builtin;
-use aoide_protocol::output::{io_cause, Fix, Kind, Outcome};
+use aoide_protocol::output::{io_cause, Fix, Kind, Outcome, Status};
 use aoide_storage::fs as shellbridge;
 use aoide_storage::mode::{load_mode_marker, RiceMode};
 use serde_json::{json, Value};
@@ -43,9 +44,27 @@ use std::path::{Path, PathBuf};
 const CMD: &str = "rice.declare";
 const KEY: &str = "habit.song.declared";
 
-/// Run the declare against this machine's host file and shipped templates.
+/// Run the declare against this machine's host file and shipped templates. A
+/// declared song whose checkout folder holds uncommitted changes is still
+/// declared (this path never refuses for git), with a warning field: the
+/// rebuild builds the committed songbook, so those edits are not in it.
 pub fn declare_on_host(name: &str) -> Outcome {
-    declare(name, shellbridge::host_config(), shellbridge::song_templates_dir())
+    let out = declare(name, shellbridge::host_config(), shellbridge::song_templates_dir());
+    if out.status != Status::Ok {
+        return out;
+    }
+    let folder = format!("song/songbook/{name}");
+    let dirty = checkout_gate::dirty_lines(&shellbridge::flake_root(), &folder);
+    if dirty.is_empty() {
+        out
+    } else {
+        out.with_fields(json!({
+            "warning": format!(
+                "`{folder}` has uncommitted changes; the rebuild builds the committed songbook, not these edits"
+            ),
+            "uncommitted": dirty,
+        }))
+    }
 }
 
 fn refuse(kind: Kind, reason: &str, what: String, why: String, fix: Fix) -> Outcome {

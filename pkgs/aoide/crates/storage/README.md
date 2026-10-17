@@ -920,9 +920,11 @@ by decision — no embedded database yet
   Leaving it unbounded would hand one JSON array of whole envelopes to a
   client that refuses any response over 20 MiB (`MAX_RESPONSE_BYTES`): a
   stall no retry could clear, since nothing at the hub would change.
-- `git` — the git seam (`src/git.rs`). Five subprocess operations: `toplevel`
-  finds a repo, and four (`hash_object_write`, `hash_object`, `cat_file_blob`,
-  `anchor`) name a pre-image by blob sha under `refs/aoide/`. `common_dir(path)`
+- `git` — the git seam (`src/git.rs`). Seven subprocess operations: `installed`
+  (`--version`), `toplevel` finds a repo, `status_under` lists a path's
+  uncommitted lines (`status --porcelain`, read-only), and four
+  (`hash_object_write`, `hash_object`, `cat_file_blob`, `anchor`) name a
+  pre-image by blob sha under `refs/aoide/`. `common_dir(path)`
   is the one pure read: the git common directory of the repo `path` sits in,
   found by walking up to the nearest `.git` and following a file's `gitdir:`
   through its `commondir`. Every linked worktree of one repo answers the same

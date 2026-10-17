@@ -20,12 +20,13 @@
 //!
 //! **The whole-module invariant, load-bearing:** this module never stages
 //! anything (no `git add`), never commits, never moves `HEAD`, and writes
-//! only under `refs/aoide/`. Five operations shell out, and each is one of:
-//! `rev-parse --show-toplevel` (is this a repo / where), `hash-object -w`
-//! (store a pre-image), `hash-object` (fingerprint the current file),
-//! `cat-file blob` (read a pre-image back), `update-ref` under `refs/aoide/`
-//! (anchor). The sixth, [`common_dir`], runs no process and only reads `.git`
-//! files, so it answers with `git` absent from `PATH`. Nothing here can touch
+//! only under `refs/aoide/`. Seven operations shell out, and each is one of:
+//! `--version` (is git installed), `rev-parse --show-toplevel` (is this a
+//! repo / where), `status --porcelain` (a read-only listing, `--no-optional-locks`
+//! so it writes no index), `hash-object -w` (store a pre-image), `hash-object`
+//! (fingerprint the current file), `cat-file blob` (read a pre-image back),
+//! `update-ref` under `refs/aoide/` (anchor). [`common_dir`] runs no process
+//! and only reads `.git` files, so it answers with `git` absent from `PATH`. Nothing here can touch
 //! the User's branch, index, stash, or history — a revert built on this module
 //! is a working-tree restore, never a git-history operation.
 //!
@@ -110,6 +111,21 @@ pub fn toplevel(dir: &Path) -> Result<PathBuf, String> {
         ));
     }
     Ok(PathBuf::from(text))
+}
+
+/// Whether a `git` binary runs at all. Separate from [`toplevel`] because a
+/// caller that refuses on "not a repo" must not say so when git is missing.
+pub fn installed() -> bool {
+    Command::new("git").arg("--version").output().is_ok()
+}
+
+/// `git status --porcelain -- <rel>` in `repo`: one line per path under `rel`
+/// that differs from HEAD or is untracked and not ignored, as git prints it.
+/// Empty when `rel` is clean. The whole of what `rice declare` needs to know
+/// about uncommitted work in a song folder.
+pub fn status_under(repo: &Path, rel: &str) -> Result<Vec<String>, String> {
+    let out = run_git(Some(repo), &["--no-optional-locks", "status", "--porcelain", "--", rel])?;
+    Ok(String::from_utf8_lossy(&out).lines().filter(|l| !l.trim().is_empty()).map(str::to_string).collect())
 }
 
 /// `git hash-object -w --` — write `file`'s CURRENT content into its

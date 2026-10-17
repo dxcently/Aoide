@@ -11,6 +11,7 @@
 //! resolution) land in Phase 5b with a `aoide-storage` dependency
 //! (`aoide_storage::fs::song_dir`).
 
+pub mod checkout_gate;
 pub mod commands;
 pub mod compose;
 pub mod cover;

@@ -291,6 +291,22 @@ pub fn built_aoide_bin() -> PathBuf {
     bin
 }
 
+/// Run `git -C <dir> <args>` with a fixed identity, for a scratch repository a
+/// test builds (`git init`, `add`, `commit`). Panics when git refuses, so a
+/// test's setup never passes on a repository that was not made.
+pub fn git_in(dir: &std::path::Path, args: &[&str]) {
+    let ok = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=aoide-test", "-c", "user.email=test@aoide.invalid"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .status()
+        .expect("git on PATH")
+        .success();
+    assert!(ok, "git {args:?} in {} failed", dir.display());
+}
+
 pub fn unique_tmp(tag: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(
