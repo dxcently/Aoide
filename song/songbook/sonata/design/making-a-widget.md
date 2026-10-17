@@ -3,12 +3,11 @@
 **Song:** sonata
 **Read before:** writing any new `widgets/*.qml`, or redesigning an existing one.
 
-> `widgets/notifications.qml` (the per-popup card cited throughout as the stele
-> exemplar) is retired: dunst owns notification delivery, and the herald lives
-> on as `widgets/herald-center.qml`, the dock's notification center, which
-> carries the SAME grammar (Tuscan stele, ❧ crown, rust signature). Read
+> This song has no per-popup notification card: dunst owns notification
+> delivery. The notification center is `widgets/herald-center.qml`, the dock's,
+> which carries the SAME grammar (Tuscan stele, ❧ crown, rust signature). Read
 > `herald-center.qml` wherever this file says `notifications.qml`; the grammar
-> analysis below stands unchanged.
+> analysis below applies to it unchanged.
 
 The other three files in this folder tell you what is *available*
 (`greek-grammar.md`), how the machinery *works* (`widget-structure.md`), and
@@ -121,8 +120,9 @@ ROLE doing a job once — aegean for an information layer, murex for one stele's
 signature, terracotta for one urgent state.
 
 `bar.qml` is the deliberate exception: its accent count nearly matches its ink
-count because the window title and volume cell are primary-hue ink by direction. That is a documented direction in the file's own header, not a licence to
-spread colour elsewhere.
+count because the window title and volume cell are primary-hue ink by direction.
+That is a documented direction in the file's own header, not a licence to spread
+colour elsewhere.
 
 **The rule to author by:** decide up front which single element is the live/
 selected one, give it laurel, and let everything else rest in ink at a
@@ -205,9 +205,8 @@ tied to a live read — never free decoration (`kaomojiFor()` in
 
 ## 6. The two ways this goes wrong
 
-Both are documented failures, on this desktop, in one sitting: three separate
-redesigns of ONE bar popout (the system tray) were each rejected on sight, and the popout body was then removed from `bar.qml`
-entirely, leaving only the toggle and a comment. The three misses were not
+Both are documented failures on this desktop: three separate redesigns of ONE
+bar popout (the system tray) were each rejected on sight. The misses were not
 random — they were two failure modes, one of them twice.
 
 ### Failure mode A — OVER-CONCEPTUALIZING
@@ -234,7 +233,8 @@ frieze is two flat rules 4px apart.
   tell is that every one of them settles something and says what it cost —
   ORDER (no ornament frieze, and why that is the identity), SIGNATURE (the one
   accentSpread slot no other surface claims), CROWN (a stand-in where no clef
-  fits), NO ICONS (the icon row was dropped, with what replaced it). None of it argues
+  fits), NO ICONS (no icon row; the header names what carries the meaning
+  instead). None of it argues
   that the concept is legitimate.
 - Never invent a second layout system. There is one: `Column`/`Row`/`Item`
   with explicit `width: parent.width` and anchors between siblings.

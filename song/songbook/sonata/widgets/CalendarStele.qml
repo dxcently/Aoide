@@ -18,7 +18,7 @@
 // ("meton N of 19 · 12/13 months"). The compact grid carries the same noumenia
 // box on its big cells.
 //   Moon arithmetic is mean-lunation (Meeus: JDE 2451550.09766 + 29.530588861k):
-//   day-level, within ±1 day of the true phase (11 of 12 lunations of 2026 exact).
+//   day-level, within ±1 day of the true phase.
 //   A rice widget, not an ephemeris. The solstice is approximated as June 21, and
 //   noumeniai are dated in UTC.
 //   The toggle is the ἔτος ⌄ / μήν ⌃ chip beside the answer line, or the bottom
