@@ -128,6 +128,11 @@ are core `aoide` identity, root `AGENTS.md`).
   so the outbound leg moved onto `pair ask` above, and the confirm
   surface's only remaining job became showing the approver's reply code
   back, which is what `pair show` now is.
+- `commands::stubs` — `rice declare`'s handler (and the `rice transpose`
+  stub): `rice declare <name>` copies the composed song into the checkout,
+  `rice declare <name> --host` (CLI door only) hands the name to
+  `aoide_song::host_declare`, which rewrites the host config's declared-song
+  line for the next rebuild.
 - `commands::preview` (P1, then a same-lane follow-up) — **`lyra preview
   [<widget>]`** builds an ISOLATED preview root (default
   `$XDG_RUNTIME_DIR/aoide-preview`, chosen deliberately as a SIBLING of the

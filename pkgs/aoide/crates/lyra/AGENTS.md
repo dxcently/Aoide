@@ -75,6 +75,12 @@
   validated against the
   same shape as a song name (`valid_song_name`) before it is ever joined
   into a path — an unvalidated slot is exactly the same class of escape.
+- **`rice declare --host` is CLI-door-only and lives in `aoide-song`.** The
+  flag's `doors: &[Door::Cli]` is the registration's own (it changes what the
+  next rebuild performs, so MCP and the daemon socket do not reach it; the
+  shellbridge re-execs the CLI); `the_host_flag_is_cli_only` pins it. The
+  handler only routes `--host` to `aoide_song::host_declare::declare_on_host`
+  and keeps the copy mode byte-identical; no host-file logic belongs here.
 - **`commands::all()`'s order is byte-stable**, same discipline as `cli`'s —
   append, never reorder (see `pkgs/aoide/crates/AGENTS.md`).
 - **Every `run/qml/` entry under EVERY preview root is a COPY of a

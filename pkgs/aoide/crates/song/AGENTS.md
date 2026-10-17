@@ -18,7 +18,17 @@
   MACHINE's songbook (`fs::songbook_root`), and the spawn's
   `ErrorKind::NotFound` IS the no-nix answer — never a `which` probe, never a
   `flake_root()` check, never a `#<flake output>` argv. `$AOIDE_FLAKE_ROOT`
-  survives for `rice declare`'s commit-in step only.
+  survives for `rice declare`'s commit-in step, and for `host_config()`'s
+  default under `rice declare --host`, only.
+- **`host_declare` rewrites one string and never guesses.** Exactly one line
+  in nixfmt's shapes (`value_in`), or a refusal naming the file and the count;
+  the bytes between the quotes and nothing else; a temp in the file's own
+  directory renamed over it with the mode kept; no git, no rebuild. The
+  declarable set is `read_builtin`'s `songs` and nothing wider — the
+  machine's songbook is not the build's. A new refusal keeps a `reason` in
+  `data` beside the taught refusal, because the shellbridge's `ricedeclare`
+  and the bar's balloon read it. The `--host` flag stays CLI-door-only
+  (lyra's registration) unless the user opens it.
 - **§7.5's three cases, in order, and case 1 must stay nix-free.** Built in
   with no DIFFERING machine copy (absent counts, and so does a match over what
   the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own top-level

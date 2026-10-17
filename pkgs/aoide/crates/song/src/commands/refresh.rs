@@ -262,6 +262,34 @@ fn hash_file(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
+/// True when the machine copy of `song` carries a `livery.json` or a
+/// `widgets/` file whose hash differs from the shipped copy's, or a file the
+/// other side lacks — the edits a declare does not carry, because a rebuild
+/// builds the songbook version. A song with no machine copy differs in
+/// nothing. Symlinks on either side are not compared.
+pub(crate) fn staged_differs(song: &str, templates: &Path) -> Result<bool, String> {
+    let machine = shellbridge::songbook_dir(song);
+    if !machine.is_dir() {
+        return Ok(false);
+    }
+    let dressed = |tree: BTreeMap<String, PathBuf>| -> BTreeMap<String, PathBuf> {
+        tree.into_iter()
+            .filter(|(rel, _)| rel == "livery.json" || rel.starts_with("widgets/"))
+            .collect()
+    };
+    let shipped = dressed(walk(&templates.join(song), false)?);
+    let staged = dressed(walk(&machine, false)?);
+    if !shipped.keys().eq(staged.keys()) {
+        return Ok(true);
+    }
+    for (rel, path) in &shipped {
+        if hash_file(path)? != hash_file(&staged[rel])? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// True when no component from `root` down to `path`'s parent is a symlink (a
 /// missing component is fine: nothing there to follow).
 fn path_is_clean(root: &Path, path: &Path) -> bool {

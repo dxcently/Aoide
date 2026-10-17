@@ -14,7 +14,7 @@
 
 use crate::dispatch::Invocation;
 use crate::output::Outcome;
-use crate::registry::{arg, cmd, Registry};
+use crate::registry::{arg, cmd, flag, Registry};
 use serde_json::json;
 use aoide_protocol::Door;
 
@@ -30,13 +30,13 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
 pub fn register_rice_late(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "declare"],
-        summary: "Copy a composed song from $AOIDE_ROOT/song/songbook/<name> into the checkout's song/songbook/<name>, so it can be committed, less the machine's top-level takes/ and drafts/. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
+        summary: "Copy a composed song from $AOIDE_ROOT/song/songbook/<name> into the checkout's song/songbook/<name>, so it can be committed, less the machine's top-level takes/ and drafts/. With --host, instead rewrite the one `habit.song.declared = \"…\";` line in this host's config (aoide.hostConfig) to <name>, a song this host's build carries; it takes effect on the next rebuild. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
         args: [arg!("name", "string", true, "Rice/song name to declare.")],
-        flags: [],
+        flags: [flag!("host", "bool", "Rewrite this host's declared-song line to <name> instead of copying the song into the checkout. CLI-only: it changes what the next rebuild performs.", doors: &[Door::Cli])],
         gated: true,
         implemented: true,
         handler: handle_rice_declare,
-        examples: ["rice declare moonlight"],
+        examples: ["rice declare moonlight", "rice declare barcarolle --host"],
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
     ));
     r.insert(cmd!(
@@ -66,6 +66,10 @@ pub fn register_rice_late(r: &mut Registry) {
 /// — those stay the user's own git/rebuild-gate steps. Overwrites only files
 /// whose bytes actually differ (never touches a byte-identical destination
 /// file), so a repeat declare with nothing new is a true no-op.
+///
+/// `--host` is the other declare step, `aoide_song::host_declare`: it points
+/// the host's `habit.song.declared` line at `<name>` instead of copying any
+/// song, and it too stops short of git and the rebuild.
 fn handle_rice_declare(inv: &Invocation) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
@@ -74,6 +78,10 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
                 .with_data(json!({ "reason": "missing-name" }));
         }
     };
+
+    if inv.flag_present("host") {
+        return aoide_song::host_declare::declare_on_host(&name);
+    }
 
     // `name` is joined unsanitized into both `songbook_dir` (the runtime
     // root) and the checkout's `song/songbook/` below — without this check a
@@ -162,6 +170,44 @@ mod tests {
             flags: Default::default(),
             door: aoide_protocol::Door::Cli,
         }
+    }
+
+    /// `--host` takes the other road: the host file is rewritten and the
+    /// checkout's songbook is never touched (the engine's own cases live in
+    /// `aoide_song::host_declare`).
+    #[test]
+    fn host_flag_rewrites_the_host_line_and_copies_nothing() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "AOIDE_SONG_TEMPLATES"]);
+        let root = unique_tmp("declare-host");
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("song").join("stage"));
+        let checkout = root.join("checkout");
+        std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
+        let host = root.join("default.nix");
+        std::fs::write(&host, "{\n  habit.song.declared = \"sonata\";\n}\n").unwrap();
+        std::env::set_var("AOIDE_HOST_CONFIG", &host);
+        let templates = root.join("templates");
+        std::fs::create_dir_all(templates.join("dusk")).unwrap();
+        std::fs::write(templates.join("builtin.json"), r#"{"declared":"sonata","songs":["sonata","dusk"],"packages":[]}"#).unwrap();
+        std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
+
+        let mut i = inv(&["dusk"]);
+        i.flags.insert("host".into(), "true".into());
+        let out = handle_rice_declare(&i);
+        assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
+        assert_eq!(std::fs::read_to_string(&host).unwrap(), "{\n  habit.song.declared = \"dusk\";\n}\n");
+        assert!(!checkout.exists(), "--host copies no song into the checkout");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_host_flag_is_cli_only() {
+        let mut r = Registry::new();
+        register_rice_late(&mut r);
+        let declare = r.commands().find(|c| c.path == ["rice", "declare"]).expect("rice declare");
+        let host = declare.flags.iter().find(|f| f.name == "host").expect("--host");
+        assert_eq!(host.doors, &[Door::Cli]);
     }
 
     #[test]

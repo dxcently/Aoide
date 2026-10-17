@@ -572,6 +572,38 @@ lyra rice declare <name> [--json]
   at `$AOIDE_FLAKE_ROOT`), `copy-failed` (the message names the path that
   failed).
 
+### lyra rice declare --host
+
+```
+lyra rice declare <name> --host [--json]
+```
+
+- **Reads:** the host config at `aoide_storage::fs::host_config()`
+  (`$AOIDE_HOST_CONFIG` absolute override — the nix option `aoide.hostConfig`
+  — default `<flake_root>/hosts/<hostname>/default.nix`), symlinks resolved;
+  the shipped templates' `builtin.json` (`fs::song_templates_dir()`); the mode
+  marker; and, for the staged-edits note, the machine copy
+  `$AOIDE_ROOT/song/songbook/<name>/` against `<templates>/<name>/`.
+- **Writes:** only the string between the quotes of the host file's one
+  `habit.song.declared = "<v>";` line, through a temp file in the same
+  directory renamed over the file, its mode kept
+  (`pkgs/aoide/crates/song/src/host_declare.rs`). No git, no rebuild.
+- **Output:** `"declared `<name>` as <host>'s song in <file> (was `<v>`);
+  takes effect on the next rebuild."`, or `"`<name>` is already <host>'s
+  declared song in <file>."` when nothing changes; either adds the
+  staged-edits sentence when `stagedDiffers` is true. Data `{name, host,
+  hostConfig, previous, changed, stagedDiffers}` (`stagedDiffers` null when
+  the shipped copy cannot be read); `changed` on the envelope names the file.
+- **Notes:** CLI door only (the flag's `doors`), since it changes what the
+  next rebuild performs. The line is matched in nixfmt's shapes only —
+  indentation and blanks around `=`/`;`, nothing after the `;`. Refusals
+  (`data.reason`): `invalid-name` (usage, exit 2); `staged-draft` (the stage
+  holds a draft of `<name>`, or `<name>` is that draft); `no-host-config`;
+  `host-config-unreadable`; `host-line-count` (zero or several lines, with
+  `hostConfig` and `count`); `not-built-in` (with `builtIn`, the songs this
+  build carries; a song staged only from the machine's songbook does not exist
+  for the rebuild); `builtin-unreadable`; `write-failed`.
+
 ### lyra rice transpose
 
 ```

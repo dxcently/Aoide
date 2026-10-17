@@ -109,6 +109,14 @@ a config file). Paint-side — ships in `lyra`, not core.
   declared set cannot exist on a host where another shell owns a surface,
   so both predicates stay. The judgement functions are pure (`&Value` in,
   data out); only `published_surfaces` touches the filesystem.
+- `host_declare` — `lyra rice declare <song> --host`'s engine
+  (`declare_on_host`, called from lyra's `rice declare` handler): rewrites the
+  one `habit.song.declared` line in `aoide_storage::fs::host_config()` to a
+  song this build's `builtin.json` carries, refusing a draft, an unknown song,
+  and zero or several lines, and reports `stagedDiffers` through
+  `commands::refresh::staged_differs` (the machine copy's livery and widgets
+  hashed against the shipped copy's). CONTRACTS.md, "Declaring a song from
+  the machine", is the contract.
 - `commands` — this crate's CLI commands: `rice *`, `livery *`, `cover set`,
   `cover sync`, `element seed`, `rice take`/`take.*`/`rice back`,
   `quickshell healthcheck`,

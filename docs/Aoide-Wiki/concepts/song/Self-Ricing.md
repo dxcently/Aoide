@@ -42,8 +42,22 @@ lyra rice mode declarative                  (real — tears the routing down, re
 lyra rice declare <name>                    (real — copies the song, less its
     ↓                                          takes/ and drafts/, into the
     ↓                                          checkout's song/songbook/<name>/)
+lyra rice declare <name> --host             (real — rewrites the host config's one
+    ↓                                          habit.song.declared line to <name>;
+    ↓                                          the RICE menu's Declare row runs it)
     ↓  gated rebuild (the user runs it herself)
 ```
+
+The two declare steps are the two halves of "make this the declarative truth":
+the first puts the song's files where the build reads them, the second points
+the host at it. `--host` takes a song this build already carries
+(`builtin.json`'s `songs` — the declared and available songs), never a draft,
+and only a host file holding exactly one `habit.song.declared = "<name>";`
+line; it rewrites the string between the quotes and nothing else, so the next
+rebuild performs that song. It says so in its answer, and says too when the
+staged copy holds livery or widget edits the build's copy lacks
+(`stagedDiffers`): the rebuild builds the songbook version, not the live
+edits, so those reach the build through the first step and a commit.
 
 Staging is the sketch — a live compositor call, no rebuild; `aoide.song` selecting a song and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the song's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are declare-only, accepted by design.
 
@@ -418,7 +432,7 @@ itself being both the shipped baseline and actively iterated. What protects
 a song from being clobbered is that nothing in this system overwrites
 silently: `rice compose` without `--force` refuses to touch a song that
 already exists, no generator writes into a song unprompted, and
-`rice declare` is gated by design — the rebuild that follows it is the
+`rice declare` (either step) is gated by design — the rebuild that follows it is the
 user's own step.
 
 ## Songbook Discipline — the "Self" in Self-Ricing

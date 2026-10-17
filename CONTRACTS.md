@@ -6773,6 +6773,36 @@ git-recoverable history, not deleted knowledge). No shape change, no version
 bump: every "shipped baseline" reference in this section simply names
 `sonata` now. Full dated entry: `docs/Aoide-Wiki/ingest/log.md`.
 
+### Declaring a song from the machine
+
+`lyra rice declare <song> --host` is how a running machine names the song its
+next rebuild performs, without anyone opening the host file. It rewrites the
+one `habit.song.declared = "<name>";` line in the file `aoide.hostConfig` names
+(default `<aoide.checkout>/hosts/<networking.hostName>/default.nix`, exported
+as `AOIDE_HOST_CONFIG` beside `AOIDE_FLAKE_ROOT`; core code spells the same
+default when the variable is unset). The rules:
+
+- The line occurs EXACTLY once, as nixfmt writes it: indentation, blanks around
+  `=` and before `;`, nothing after the `;`. Zero or several is a refusal
+  (`host-line-count`) naming the file and the count; a commented-out line, a
+  `lib.mkDefault`, an attrset form or a trailing comment is not the line.
+- `<song>` is in this build's `builtin.json` `songs` — the songbook the host
+  builds from. A song only in the machine's songbook is refused
+  (`not-built-in`), with the fix of adding it to `habit.song.available` and
+  rebuilding first; so is a staged draft (`staged-draft`), which is not a song.
+- Only the bytes between the quotes change, written to a temp file in the same
+  directory and renamed over the file with its mode kept. No git, no rebuild
+  (house rule 2); a host that already declares `<song>` is a no-op success
+  (`changed: false`).
+- `data.stagedDiffers` is true when the machine copy's `livery.json` or
+  `widgets/` differ by hash from the shipped copy: the rebuild builds the
+  songbook version, not the live edits. Null when the shipped copy cannot be
+  read.
+
+The `--host` flag opens the CLI door only, since it changes what the next
+rebuild performs; the bar's Declare row reaches it through the shellbridge's
+`ricedeclare`, which re-execs the CLI.
+
 ### The songbook belongs to the machine
 
 `~/.aoide/song/songbook` is the MACHINE's own: its built-in songs plus whatever

@@ -16,6 +16,7 @@ pub mod compose;
 pub mod cover;
 pub mod elements;
 pub mod health;
+pub mod host_declare;
 pub mod ipc;
 pub mod live;
 pub mod livery;
