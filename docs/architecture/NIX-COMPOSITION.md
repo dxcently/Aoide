@@ -2,8 +2,8 @@
 
 This is the architecture for dxflake and AoideOS. It specifies the configuration
 interface and the implementation plan. Both implement the interface below:
-`lib/composition.nix` of habit (`github:dxcently/habit`, pinned at its `v2`
-branch and consumed here as `inputs.habit`) is the constructor, their hosts
+`lib/composition.nix` of habit (`github:dxcently/habit`, pinned at the release
+tag `v0.4.0` and consumed here as `inputs.habit`) is the constructor, their hosts
 select through it, and habit's selection suite and this tree's selection and
 template suites test it.
 
