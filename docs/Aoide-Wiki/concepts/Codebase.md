@@ -174,7 +174,9 @@ no behaviour, so an empty config evaluates. The surface:
   host `song/songbook/`, the audit log. `aoide.checkout` (default `~/Aoide`,
   exported as `AOIDE_FLAKE_ROOT`) — the dev git checkout: `soundcheck`'s scan
   root, `rice declare`'s commit-in target, the songbook `nix eval` registry
-  regen.
+  regen. `aoide.hostConfig` (default `<checkout>/hosts/<hostName>/default.nix`,
+  exported as `AOIDE_HOST_CONFIG`) — the host file whose one
+  `habit.song.declared` line `rice declare --host` rewrites.
 - `aoide.song` (`nullOr str`, default `null`) — which song this host performs.
   Null performs no song: the paint lanes read the null and deploy nothing (no
   QML tree, no shell service). Set once in `hosts/<host>/default.nix` (and

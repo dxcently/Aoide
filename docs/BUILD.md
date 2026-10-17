@@ -81,6 +81,7 @@ no fact.
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `song/stage/`, `song/declared/`, `state/`, `run/qml/`, composed `songbook/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the songbook `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
+| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.song.declared` line `lyra rice declare <song> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
 | `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
 | `aoide.livery.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |

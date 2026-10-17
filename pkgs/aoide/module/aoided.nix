@@ -57,8 +57,8 @@ lib.mkIf config.aoide.enable {
     AOIDE_TERMINAL = config.aoide.terminal;
   };
 
-  # The runtime root and checkout are `aoide.user`'s, so only that user's login
-  # shells get them. A system-wide export would hand khoa's `~/.aoide` to every
+  # The runtime root, checkout and host config are `aoide.user`'s, so only
+  # that user's login shells get them. A system-wide export would hand khoa's `~/.aoide` to every
   # login shell, root's included: root's `aoide` would then write into khoa's
   # home (the vm-boot failure), and AOIDE_ROOT beats HOME, so no HOME fallback
   # could stop it. Non-default values only need to WORK; the defaults already
@@ -68,6 +68,7 @@ lib.mkIf config.aoide.enable {
     if [ "$(id -un)" = ${lib.escapeShellArg config.aoide.user} ]; then
       export AOIDE_ROOT=${lib.escapeShellArg config.aoide.root}
       export AOIDE_FLAKE_ROOT=${lib.escapeShellArg config.aoide.checkout}
+      export AOIDE_HOST_CONFIG=${lib.escapeShellArg config.aoide.hostConfig}
     fi
   '';
 
@@ -161,6 +162,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+        "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
       ]
       # Quoted as one assignment per systemd.exec(5)'s own `Environment=`
       # syntax (`Environment="VAR=word1 word2"`): the template carries

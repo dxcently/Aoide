@@ -668,6 +668,28 @@ pub fn flake_root() -> std::path::PathBuf {
     aoide_protocol::aoide_home().join("Aoide")
 }
 
+/// The host's own config file — the NixOS module holding this machine's
+/// `habit.song.declared` line, which `lyra rice declare <song> --host`
+/// rewrites. `$AOIDE_HOST_CONFIG` (the core option `aoide.hostConfig`,
+/// exported beside `$AOIDE_FLAKE_ROOT` on the same units and login shells) when
+/// it is absolute; otherwise the option's own default spelled in code,
+/// `<flake_root>/hosts/<hostname>/default.nix`, so unset == set-to-default.
+/// `None` when neither names a file: no override and no usable hostname (one
+/// carrying a `/` or spelling `.`/`..` is never joined into a path).
+pub fn host_config() -> Option<std::path::PathBuf> {
+    if let Ok(file) = std::env::var("AOIDE_HOST_CONFIG") {
+        let p = std::path::PathBuf::from(&file);
+        if p.is_absolute() {
+            return Some(p);
+        }
+    }
+    let host = crate::display::os_hostname()?;
+    if host.contains('/') || host == "." || host == ".." {
+        return None;
+    }
+    Some(flake_root().join("hosts").join(host).join("default.nix"))
+}
+
 /// The lyra shell SOURCE, as a path relative to [`flake_root`]: the QML tree,
 /// the resolved icons and the preview fixture sets a checkout carries — the
 /// same directory `pkgs/lyra-shell` builds its `share/lyra/{qml,icons,
@@ -2436,6 +2458,40 @@ mod tests {
         match saved_flake {
             Some(v) => std::env::set_var("AOIDE_FLAKE_ROOT", v),
             None => std::env::remove_var("AOIDE_FLAKE_ROOT"),
+        }
+    }
+
+    #[test]
+    fn host_config_honors_its_override_and_defaults_under_the_flake_root() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_host = std::env::var("AOIDE_HOST_CONFIG").ok();
+        let saved_flake = std::env::var("AOIDE_FLAKE_ROOT").ok();
+
+        std::env::set_var("AOIDE_FLAKE_ROOT", scratch("aoide-host-config-test/flake"));
+        std::env::set_var("AOIDE_HOST_CONFIG", "relative/default.nix");
+        if let Some(host) = crate::display::os_hostname() {
+            assert_eq!(
+                host_config(),
+                Some(
+                    std::path::PathBuf::from(scratch("aoide-host-config-test/flake"))
+                        .join("hosts")
+                        .join(host)
+                        .join("default.nix")
+                ),
+                "a relative override is ignored and the default stands"
+            );
+        }
+        std::env::set_var("AOIDE_HOST_CONFIG", scratch("aoide-host-config-test/elsewhere.nix"));
+        assert_eq!(
+            host_config(),
+            Some(std::path::PathBuf::from(scratch("aoide-host-config-test/elsewhere.nix")))
+        );
+
+        for (key, saved) in [("AOIDE_HOST_CONFIG", saved_host), ("AOIDE_FLAKE_ROOT", saved_flake)] {
+            match saved {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
         }
     }
 

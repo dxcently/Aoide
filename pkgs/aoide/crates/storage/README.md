@@ -194,6 +194,9 @@ by decision — no embedded database yet
   dir, where the offline generator (`nix/manifest.nix`) and
   `aoide-options.json` (`lyra onboard`) sit — and `fs::songbook_root` is the
   machine's `<song>/songbook/`, the argument that generator is pointed at.
+  `fs::host_config` is the host's own config file (`$AOIDE_HOST_CONFIG`, the
+  nix option `aoide.hostConfig`, default `<flake_root>/hosts/<hostname>/
+  default.nix`), the one `lyra rice declare --host` rewrites.
   Two tiers — `$AOIDE_SONG_TEMPLATES` (absolute-wins, same
   discipline as every override above), else a sibling of `current_exe()`'s
   directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory

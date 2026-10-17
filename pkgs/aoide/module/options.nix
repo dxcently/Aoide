@@ -55,6 +55,22 @@ in
       '';
     };
 
+    hostConfig = mkOption {
+      type = types.str;
+      default = "${config.aoide.checkout}/hosts/${config.networking.hostName}/default.nix";
+      defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
+      description = ''
+        This machine's host config file — the module holding its one
+        `habit.song.declared = "<song>";` line, which `lyra rice declare
+        <song> --host` rewrites so the next rebuild performs that song.
+        Exported as `AOIDE_HOST_CONFIG` on the same units, and in
+        `aoide.user`'s own login shells, as `aoide.checkout` is. A consumer
+        whose hosts live elsewhere sets its own path. Core code default,
+        matching this option's own default exactly:
+        `<checkout>/hosts/<hostname>/default.nix`.
+      '';
+    };
+
     auditLog = mkOption {
       type = types.str;
       default = "${config.aoide.root}/log";
