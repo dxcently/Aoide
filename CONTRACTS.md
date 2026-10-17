@@ -6863,6 +6863,16 @@ a consumer takes its hook: `(lib.songbook { inherit lib; songbook = dir; }).hook
 { registry }`. The earlier exports `selectionModule`, `check` and `songModules`
 are gone with no compatibility shim.
 
+A host whose songs come from SEVERAL directories — Aoide's and its own — takes
+them as one: `lib.songbookMerge { inherit lib pkgs; books = [ aoide.songbookRoot
+./songs ]; }` returns `lib.songbook`'s record over the merged directory, plus
+`dir`, the merged directory as a store path. One call answers both, so the
+directory the hook, the built-in set and the lyra lane read and the registry
+over it cannot disagree. Merge runs before borrow resolution: a song may borrow
+a slot from a song in another book. A song name that two books define throws,
+naming the song and every book that defines it
+(`'<n>' is in <book> and <book>`); rename one, or drop it from a book.
+
 ```
 hosts/<host>/default.nix                      lib/songbook.nix  hook { registry }
 ─────────────────────────────                 ───────────────────────────────────

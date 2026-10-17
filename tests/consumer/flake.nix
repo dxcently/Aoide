@@ -37,6 +37,7 @@
     let
       system = "x86_64-linux";
       inherit (nixpkgs) lib;
+      pkgs = nixpkgs.legacyPackages.${system};
 
       # The exported library values are each their file's own function, still
       # unapplied: a consumer applies them with ITS lib (the constructor runs on
@@ -82,11 +83,19 @@
       # is handed.
       mkHost =
         name: songbookDir:
-        let
-          songs = aoide.lib.songbook {
+        mkHostOver name (
+          aoide.lib.songbook {
             inherit lib;
             songbook = songbookDir;
-          };
+          }
+        );
+
+      # The same host over a songbook RECORD: one already built, such as the
+      # merge of several books (`aoide.lib.songbookMerge`), whose `dir` is the
+      # directory the hook and the lyra lane read.
+      mkHostOver =
+        name: songs:
+        let
           song = songs.hook { inherit registry; };
         in
         composition.mkNixosHost {
@@ -110,6 +119,18 @@
         consumer = mkHost "consumer" ./songs;
         aoide-songs = mkHost "aoide-songs" aoide.songbookRoot;
         stubbed = mkHost "stubbed" ./songs;
+        # Aoide's songbook and the consumer's own, merged into one directory
+        # before anything reads it: `encore` (the consumer's) borrows `sonata`
+        # (Aoide's) across the two.
+        merged = mkHostOver "merged" (
+          aoide.lib.songbookMerge {
+            inherit lib pkgs;
+            books = [
+              aoide.songbookRoot
+              ./songs-merge
+            ];
+          }
+        );
       };
     in
     {

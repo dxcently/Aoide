@@ -552,6 +552,9 @@ flake.nix
 ├── lib.livery                the venue-recolour resolver, a function of `{ lib }`
 ├── lib.songbook              discovery, selection and the songs' module list,
 │                             a function of `{ lib, songbook ? … }`
+├── lib.songbookMerge         several songbook DIRECTORIES as one, a function of
+│                             `{ lib, pkgs, books }`: the merged `dir` and the
+│                             `lib.songbook` record over it, from one call
 ├── lib.catalogue             the whole catalogue as DATA — the bulk form of
 │                             `nixosModules.<name>`
 ├── songbookRoot              Aoide's own songbook DIRECTORY (`song/songbook`),
@@ -680,9 +683,13 @@ its module — never `inputs.aoide + "/song/songbook/…"`. A host says what it
 performs (`habit.song.declared`) and what it merely builds in (`habit.song.available`), with
 the borrow closure and the machine-owned songbook unchanged from §5.
 
-Discovery, selection and `borrow` all read that one directory, so a host's songs
-come from Aoide's songbook or from the consumer's, not from both: there is no
-union of two songbooks, and a `borrow` across them has nothing to resolve.
+Discovery, selection and `borrow` all read that one directory. A host whose
+songs come from both Aoide's songbook and the consumer's takes them through
+`lib.songbookMerge { inherit lib pkgs; books = [ aoide.songbookRoot ./songs ]; }`:
+the books are copied into ONE directory before anything reads them, so a
+`borrow` resolves across them, and the call returns that directory (`dir`) and the
+songbook record over it together. A song name two books define is refused,
+naming the song and both books.
 
 **Stylix.** A consumer must NOT import the stylix module itself once it selects
 the `stylix` dendrite: the dendrite's module comes from Aoide's own inputs, and two

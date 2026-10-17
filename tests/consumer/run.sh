@@ -135,6 +135,17 @@ expr="
       merged = (builtins.tryEval (hookOver { aggregations = flake.rices; }).registry).success;
       bare = (builtins.tryEval (hookOver { aggregations = { }; }).registry).success;
     };
+    # Aoide's songbook and the consumer's own, merged BEFORE anything reads them:
+    # one call answers the directory and the registry over it.
+    mergedSongs = flake.lib.songbookMerge {
+      lib = flake.inputs.nixpkgs.lib;
+      pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      books = [
+        flake.songbookRoot
+        ./songs-merge
+      ];
+    };
+    mergedCfg = out.nixosConfigurations.merged.config;
   in {
     aoideSongs = {
       drv = aoideSongs.system.build.toplevel.drvPath;
@@ -142,6 +153,14 @@ expr="
       builtIn = aoideSongs.aoide.songbook.builtIn;
       bg = aoideSongs.aoide.livery.palette.bg;
       songbookIsExport = toString out.nixosConfigurations.aoide-songs._module.args.songbook == toString flake.songbookRoot;
+    };
+    merged = {
+      drv = mergedCfg.system.build.toplevel.drvPath;
+      song = mergedCfg.aoide.song;
+      builtIn = mergedCfg.aoide.songbook.builtIn;
+      bg = mergedCfg.aoide.livery.palette.bg;
+      borrowed = mergedSongs.songMeta.encore.manifest == mergedSongs.songMeta.sonata.manifest && mergedSongs.songMeta.encore.manifest != { };
+      names = mergedSongs.songNames;
     };
     drv = out.nixosConfigurations.consumer.config.system.build.toplevel.drvPath;
     song = cfg.aoide.song;
@@ -211,6 +230,42 @@ check "front: rices name the committed rice songs"   "true" \
 check "front: a rice merged into its own hook clashes" "false" "$(o .front.collision.merged)"
 check "front: the same hook with no rice merged holds" "true" "$(o .front.collision.bare)"
 
+# ── 3. The merged songbook ──────────────────────────────────────────────────
+# One call gives the directory and the registry over it; a host performs a
+# consumer song that borrows an Aoide song across the two books.
+check "merged: performs the consumer's encore"       "encore" "$(o .merged.song)"
+check "merged: builds in the Aoide song it borrows"  "encore sonata" "$(o '.merged.builtIn | join(" ")')"
+check "merged: encore wears its own livery"          "#1a1424" "$(o .merged.bg)"
+check "merged: encore's widgets are sonata's"        "true" "$(o .merged.borrowed)"
+check "merged: the registry names both books' songs" "true" \
+  "$(o '.merged.names | (index("sonata") != null) and (index("encore") != null) and (index("barcarolle") != null)')"
+
+# A name two books define is refused, and the refusal names the song and both
+# books. Run on its own: a throw cannot be read out of the JSON above.
+clash_expr="
+  let
+    flake = builtins.getFlake \"$ref\";
+  in
+    (flake.lib.songbookMerge {
+      lib = flake.inputs.nixpkgs.lib;
+      pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      books = [ flake.songbookRoot ./songs-clash ];
+    }).dir
+"
+if clash_out=$(nix eval --impure --raw --expr "$clash_expr" 2>"$tmp/clash.err"); then
+  clash_rc=0
+else
+  clash_rc=$?
+fi
+clash_msg=$(cat "$tmp/clash.err")
+check "merged: a song two books define is refused"   "1" "$([ "$clash_rc" -ne 0 ] && echo 1 || echo 0)"
+check "merged: the refusal names the song"           "true" \
+  "$(printf '%s' "$clash_msg" | grep -q "'sonata' is in" && echo true || echo false)"
+check "merged: the refusal names Aoide's book"        "true" \
+  "$(printf '%s' "$clash_msg" | grep -q 'song/songbook' && echo true || echo false)"
+check "merged: the refusal names the consumer's book" "true" \
+  "$(printf '%s' "$clash_msg" | grep -q 'songs-clash' && echo true || echo false)"
+
 printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
 
 check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.song)"
@@ -219,6 +274,7 @@ check "…and wears sonata's livery"                  "#f2ebde" "$(o .aoideSongs
 check "…its lyra lane reads the exported songbook"  "true" "$(o .aoideSongs.songbookIsExport)"
 
 printf '%-52s %s\n' "aoide-songs toplevel drvPath" "$(o .aoideSongs.drv)"
+printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"
 
 printf '%s\n' "--------------------------------------------------------------------"
 printf '%d passed, %d failed\n' "$pass" "$fail"

@@ -226,6 +226,9 @@
         composition = inputs.habit.lib.composition;
         livery = import ./lib/livery.nix;
         songbook = import ./lib/songbook.nix;
+        # Several songbook directories as one (lib/songbook-merge.nix): the
+        # merged `dir`, and the songbook record over it, from one call.
+        songbookMerge = import ./lib/songbook-merge.nix;
         inherit (registry) catalogue;
       };
 
