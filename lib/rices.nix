@@ -428,7 +428,7 @@ let
                 inherit borrow;
                 rice = riceLib;
                 ricesRoot = ricesDir;
-                riceDirs = riceDirs;
+                inherit riceDirs;
               };
               aoide.rice = sel.rice.declared;
               aoide.rices.builtIn = builtIn sel.rice;

@@ -519,7 +519,7 @@ in
             packages = ricesLib.packagesFor builtIn;
           };
           inherit aoideOptions ricesRoot;
-          riceDirs = ricesLib.riceDirs;
+          inherit (ricesLib) riceDirs;
         };
       })
     ];
